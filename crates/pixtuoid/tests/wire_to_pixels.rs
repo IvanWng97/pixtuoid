@@ -315,7 +315,7 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "omp",
             source: "omp",
-            fixture: "omp/tool-run/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001.jsonl",
+            fixture: "omp/tool-run/2026-07-10T08-00-00-000Z_01990000-0000-7000-8000-000000000002.jsonl",
             decode: DecodeKind::Transcript,
             transport: Transport::Jsonl,
             // The session header line carries its own SessionStart.

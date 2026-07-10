@@ -87,3 +87,22 @@ CC's hook `transcript_path` == its transcript via `{{TRANSCRIPT_PATH}}`).
   `tests/proof_fixture_disjointness.rs` (STATUSLINE-COLLISION handoff,
   `docs/superpowers/plans/2026-07-05-wb-4-proof.md`) — the two are
   agent-narration surfaces sharing one viewport at 4F.
+- **`omp/tool-run/`** — captured from a live **omp 16.4.0** `omp -p` run
+  (2026-07-10, the #517 byte-real anchor for `verified_version`), sanitized:
+  the fixed-width `type:"title"` slot, the v3 `session` header,
+  `model_change`/`thinking_level_change` (not sprite-visible), a `bash`
+  toolCall/toolResult round, the duplicate `tool_execution_start` custom
+  entry (deliberately NOT decoded — same tool_use_id would double-count),
+  and the `session_exit` teardown marker (`reason:"dispose"` — the real `-p`
+  teardown reason, vs `"exit command"` interactively).
+- **`omp/ask-round/`** — a real interactive `ask` round (captured 2026-07-05,
+  sanitized; #519): the `ask` toolCall decodes to ActivityStart **then**
+  Waiting (the ellipsize-capped question text), and the answering
+  toolResult's ActivityEnd resolves the Wait via the `gated_before_waiting`
+  binding — the order is the load-bearing contract.
+- **`omp/2026-07-10T18-00-00-000Z_…000001/`** — a real `task`-subagent CHILD
+  transcript (16.4.0): the scenario dir is named as the PARENT session stem
+  because the parent link IS the path nesting (`<parent-stem>/<taskId>.jsonl`)
+  — `omp_id_from_path` keys the chain and the header decode emits a parented
+  SessionStart. Also pins that `session_init` / `developer`-role /
+  `thinking`-block entries decode to nothing.

@@ -7,9 +7,12 @@
 //! Sources panel shows `om·` as a no-target flag-flip row.
 //!
 //! Grounded in the upstream source @ v16.3.12 (`can1357/oh-my-pi`, commit
-//! ff1fe5f, 2026-07-09) — pin comments below cite the upstream files. No
-//! byte-real live capture yet, so the registry row's `verified_version` stays
-//! `"unknown"`.
+//! ff1fe5f, 2026-07-09) — pin comments below cite the upstream files —
+//! and byte-real anchored against a live omp 16.4.0 install (2026-07-10):
+//! the conformance fixtures under `tests/sources/fixtures/omp/` are
+//! sanitized captures (a real `omp -p` run and a real `task`-subagent child
+//! file at 16.4.0; a real interactive ask round captured 2026-07-05), and
+//! the registry row's `verified_version` is that install's `omp --version`.
 //!
 //! Wire shape (upstream `packages/coding-agent/src/session/`):
 //! - **File**: `${fileSafeTimestamp}_${uuidv7}.jsonl` (`session-manager.ts`),
@@ -50,13 +53,17 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::{first_present_str, generic_tool_display};
+use crate::source::decoder::{
+    ellipsize, first_present_str, generic_tool_display, MAX_DECODED_FIELD_CHARS,
+};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
-// The runtime half (`OmpSource` + its watcher wiring + the first-sight
-// session-ended checker) — ONE gate for the whole `native` layer of this
-// source; the re-export keeps `source::omp::OmpSource` public.
+// The runtime half (`OmpSource` + its watcher wiring, the first-sight
+// session-ended checker, and the open-write-fd liveness probe) — ONE gate for
+// the whole `native` layer of this source; the re-export keeps
+// `source::omp::OmpSource` public. The probe fn stays module-private (no
+// focus point-query consumer — see its doc comment).
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
@@ -199,32 +206,52 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
             };
             match msg.get("role").and_then(|r| r.as_str()) {
                 // Assistant content blocks carry the tool CALLS.
-                Some("assistant") => msg
-                    .get("content")
-                    .and_then(|c| c.as_array())
-                    .map(|blocks| {
-                        blocks
-                            .iter()
-                            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("toolCall"))
-                            .filter_map(|b| {
-                                // Un-keyable calls are dropped (can't be closed).
-                                let id = b.get("id").and_then(|i| i.as_str())?;
-                                let name =
-                                    b.get("name").and_then(|n| n.as_str()).unwrap_or_else(|| {
-                                        crate::source::drift::missing_field(
-                                            source, "toolCall", "name",
-                                        );
-                                        ""
-                                    });
-                                Some(AgentEvent::ActivityStart {
-                                    agent_id: acting,
-                                    tool_use_id: Some(id.to_string()),
-                                    detail: Some(omp_tool_detail(name, b.get("arguments"))),
-                                })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                Some("assistant") => {
+                    let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else {
+                        return Ok(vec![]);
+                    };
+                    let mut out = Vec::new();
+                    // `ask` (the built-in user-question tool) BLOCKS on human
+                    // input: its Start is followed by a Waiting so the session
+                    // renders waiting, not active. The Start binds the
+                    // reducer's `gated_before_waiting` gate to the ask's own
+                    // tool_use_id, so the answer's toolResult (ActivityEnd,
+                    // same id) resolves the Wait — no separate clearing event.
+                    // Ask pairs are collected separately and appended LAST:
+                    // when an ask is batched with parallel toolCalls, a
+                    // sibling's later ActivityStart would flip the slot back
+                    // to Active and drop the gate, so the answered ask could
+                    // never resolve the Wait.
+                    let mut asks = Vec::new();
+                    for b in blocks
+                        .iter()
+                        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("toolCall"))
+                    {
+                        // Un-keyable calls are dropped (can't be closed).
+                        let Some(id) = b.get("id").and_then(|i| i.as_str()) else {
+                            continue;
+                        };
+                        let name = b.get("name").and_then(|n| n.as_str()).unwrap_or_else(|| {
+                            crate::source::drift::missing_field(source, "toolCall", "name");
+                            ""
+                        });
+                        let is_ask = name == "ask";
+                        let dst = if is_ask { &mut asks } else { &mut out };
+                        dst.push(AgentEvent::ActivityStart {
+                            agent_id: acting,
+                            tool_use_id: Some(id.to_string()),
+                            detail: Some(omp_tool_detail(name, b.get("arguments"))),
+                        });
+                        if is_ask {
+                            asks.push(AgentEvent::Waiting {
+                                agent_id: acting,
+                                reason: omp_ask_reason(b.get("arguments")),
+                            });
+                        }
+                    }
+                    out.extend(asks);
+                    out
+                }
                 // A tool result closes its call.
                 Some("toolResult") => {
                     let Some(tool_call_id) = msg.get("toolCallId").and_then(|i| i.as_str()) else {
@@ -267,6 +294,25 @@ fn omp_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     const KEYS: &[&str] = &["command", "path", "pattern", "query"];
     let target = args.and_then(|a| first_present_str(a, KEYS));
     generic_tool_display(tool, target)
+}
+
+/// The Waiting reason for an `ask` round: the first question's text
+/// (`arguments.questions[0].question` — the ask schema requires one), falling
+/// back to the call's intent (`arguments.i`), then the bare tool name. Capped
+/// at the decode boundary like every other content-derived Waiting reason
+/// (copilot/opencode/reasonix) — the text is model-authored wire content and
+/// persists in the slot + headless summary.
+fn omp_ask_reason(args: Option<&Value>) -> String {
+    args.and_then(|a| {
+        a.get("questions")
+            .and_then(|q| q.as_array())
+            .and_then(|q| q.first())
+            .and_then(|q| q.get("question"))
+            .and_then(|q| q.as_str())
+            .or_else(|| a.get("i").and_then(|i| i.as_str()))
+    })
+    .map(|t| ellipsize(t, MAX_DECODED_FIELD_CHARS))
+    .unwrap_or_else(|| "ask".to_string())
 }
 
 #[cfg(test)]
@@ -512,6 +558,90 @@ mod tests {
                 "a spoofed subagent_type arg must stay Generic, got {d:?}"
             ),
             other => panic!("expected Generic ActivityStart, got {other:?}"),
+        }
+    }
+
+    // ── ask (user-question gate) ──
+
+    #[test]
+    fn ask_call_starts_activity_then_waits_on_the_question() {
+        // Byte-real shape (captured omp ask round): arguments carry an intent
+        // `i` + a `questions` array. The ORDER is load-bearing: the Start
+        // (applied first) makes the slot Active on the ask's tool_use_id, so
+        // the reducer's `gated_before_waiting` binds to it and the answer's
+        // toolResult (ActivityEnd, same id) resolves the Wait.
+        let line = r#"{"type":"message","id":"m7","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK1","name":"ask","arguments":{"i":"Resolving packages/ui collision","questions":[{"id":"ui_collision","question":"packages/ui already exists. What should happen?","options":[{"label":"Replace"},{"label":"Merge"}]}]}}],"timestamp":1}}"#;
+        match &decode(line)[..] {
+            [AgentEvent::ActivityStart {
+                agent_id,
+                tool_use_id,
+                ..
+            }, AgentEvent::Waiting {
+                agent_id: wid,
+                reason,
+            }] => {
+                assert_eq!(*agent_id, root());
+                assert_eq!(*wid, root());
+                assert_eq!(tool_use_id.as_deref(), Some("tool_ASK1"));
+                assert!(
+                    reason.contains("packages/ui already exists"),
+                    "reason carries the question text, got {reason:?}"
+                );
+            }
+            other => panic!("expected ActivityStart then Waiting, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ask_reason_falls_back_to_intent_then_bare_name() {
+        // No questions array → the call's intent `i`.
+        let intent = r#"{"type":"message","id":"m8","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK2","name":"ask","arguments":{"i":"Confirming scope"}}],"timestamp":1}}"#;
+        match &decode(intent)[..] {
+            [_, AgentEvent::Waiting { reason, .. }] => assert_eq!(reason, "Confirming scope"),
+            other => panic!("expected Start+Waiting, got {other:?}"),
+        }
+        // No arguments at all → the bare tool name.
+        let bare = r#"{"type":"message","id":"m9","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK3","name":"ask"}],"timestamp":1}}"#;
+        match &decode(bare)[..] {
+            [_, AgentEvent::Waiting { reason, .. }] => assert_eq!(reason, "ask"),
+            other => panic!("expected Start+Waiting, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ask_batched_with_parallel_tool_calls_decodes_last() {
+        // An ask batched BEFORE a sibling toolCall must still decode after
+        // it: a sibling's later ActivityStart would flip the slot back to
+        // Active and drop the `gated_before_waiting` gate, so the answered
+        // ask could never resolve the Wait.
+        let line = r#"{"type":"message","id":"mB","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK5","name":"ask","arguments":{"i":"Confirming scope"}},{"type":"toolCall","id":"t7","name":"bash","arguments":{"command":"cargo check"}}],"timestamp":1}}"#;
+        match &decode(line)[..] {
+            [AgentEvent::ActivityStart {
+                tool_use_id: bash, ..
+            }, AgentEvent::ActivityStart {
+                tool_use_id: ask, ..
+            }, AgentEvent::Waiting { .. }] => {
+                assert_eq!(bash.as_deref(), Some("t7"));
+                assert_eq!(ask.as_deref(), Some("tool_ASK5"));
+            }
+            other => panic!("expected bash Start, then ask Start+Waiting, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ask_reason_is_capped_at_the_decode_boundary() {
+        // The question is model-authored wire content and persists in the
+        // slot — cap where it enters, like every content-derived reason.
+        let long = "q".repeat(MAX_DECODED_FIELD_CHARS * 10);
+        let line = format!(
+            r#"{{"type":"message","id":"mA","parentId":null,"timestamp":"t","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"tool_ASK4","name":"ask","arguments":{{"questions":[{{"id":"x","question":"{long}"}}]}}}}],"timestamp":1}}}}"#
+        );
+        match &decode(&line)[..] {
+            [_, AgentEvent::Waiting { reason, .. }] => {
+                assert_eq!(reason.chars().count(), MAX_DECODED_FIELD_CHARS + 1);
+                assert!(reason.ends_with('…'));
+            }
+            other => panic!("expected Start+Waiting, got {other:?}"),
         }
     }
 

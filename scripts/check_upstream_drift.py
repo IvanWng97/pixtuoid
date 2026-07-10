@@ -425,6 +425,17 @@ OMP_AI_TYPES_URL = (
 )
 OMP_MESSAGE_LITERALS = {"assistant", "toolResult", "toolCall"}
 OMP_MESSAGE_FIELDS = {"toolCallId", "arguments"}
+# The ask tool (#519): its toolCall NAME is STATE-bearing — decode_omp_line
+# maps an assistant `ask` block to Waiting — and the first question's text
+# feeds the Waiting reason. Checked against the tool's own source (`readonly
+# name = "ask"` + the arkType schema property keys). `arguments.i` (the
+# intent fallback) is the harness-wide tool-call intent key, NOT defined in
+# ask.ts — its loss only degrades the reason label, so it is deliberately
+# unwatched.
+OMP_ASK_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/tools/ask.ts"
+)
+OMP_ASK_FIELDS = {"questions", "question"}
 
 
 def fetch(url: str) -> str:
@@ -1106,6 +1117,21 @@ def run_checks(
                         f"omp message field `{field}` (read by decode_omp_line) is "
                         f"GONE from pi-ai types.ts property keys — renamed; tool "
                         f"rounds lose their key/target."
+                    )
+        ask = try_fetch(OMP_ASK_URL, "omp ask tool", breaking, errors)
+        if ask is not None:
+            if '"ask"' not in ask:
+                breaking.append(
+                    "omp tool name `ask` (drives the ask→Waiting decode) is GONE "
+                    "from tools/ask.ts — renamed; a session parked on a user "
+                    "question renders active instead of waiting."
+                )
+            for field in sorted(OMP_ASK_FIELDS):
+                if not re.search(rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", ask):
+                    breaking.append(
+                        f"omp ask field `{field}` (feeds the Waiting reason) is GONE "
+                        f"from tools/ask.ts property keys — renamed; the Waiting "
+                        f"reason degrades to the intent/bare-name fallback."
                     )
 
     # --- Cursor hook events (only the FETCH is transient) ------------------

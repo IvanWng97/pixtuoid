@@ -488,15 +488,21 @@ mod tests {
         let theme = &crate::theme::NORMAL;
         let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
         // 07:00 → East-wall spot. Weather varies by day at a fixed hour, so
-        // search days for each weather (TZ-independent).
+        // search days for each weather. Real calendar arithmetic (NaiveDate +
+        // Days), NOT `with_ymd_and_hms(2026, 1, day, …)` — a raw day > 31 is
+        // an invalid date (LocalResult::None), so the old form panicked in
+        // any timezone whose day-hash sequence lacked a wanted weather within
+        // January (TZ shifts which UTC days the local mornings map to).
         let morning = |day: u32| -> SystemTime {
+            let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid base date")
+                + chrono::Days::new(u64::from(day));
             chrono::Local
-                .with_ymd_and_hms(2026, 1, day, 7, 0, 0)
+                .from_local_datetime(&date.and_hms_opt(7, 0, 0).expect("valid time"))
                 .single()
-                .unwrap()
+                .expect("unambiguous local 07:00")
                 .into()
         };
-        let find = |want: Weather| (1..=60u32).map(morning).find(|t| weather_state(*t) == want);
+        let find = |want: Weather| (0..60u32).map(morning).find(|t| weather_state(*t) == want);
         let clear_t = find(Weather::Clear).expect("a clear morning");
         let snow_t = find(Weather::Snow).expect("a snow morning");
         let rain_t = find(Weather::Rain).expect("a rain morning");

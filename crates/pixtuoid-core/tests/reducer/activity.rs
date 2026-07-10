@@ -644,3 +644,66 @@ fn copilot_denied_permission_clears_waiting_through_the_reducer() {
         "a DENIED permission must clear Waiting (else the sprite hangs 60 min)"
     );
 }
+
+// omp ask gate, decoder → reducer (cross-layer, #519): the `ask` toolCall's
+// Start+Waiting pair must bind `gated_before_waiting` to the ask's OWN
+// tool_use_id, so the answer's toolResult (ActivityEnd, same id) resolves the
+// Wait — the decoder unit test only proves the pair is emitted, not that the
+// answer clears it. Line shapes follow a captured omp 16.4.0 ask round,
+// sanitized.
+#[test]
+fn omp_ask_round_waits_then_answer_clears_through_the_reducer() {
+    use pixtuoid_core::source::omp::decode_omp_line;
+    use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let path =
+        "/h/.omp/agent/sessions/-p/2026-07-05T20-37-08-710Z_01000000-0000-7000-8000-000000000001.jsonl";
+    let id = AgentId::from_parts(
+        "omp",
+        "2026-07-05T20-37-08-710Z_01000000-0000-7000-8000-000000000001",
+    );
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let feed = |r: &mut Reducer, scene: &mut SceneState, line: &str, at: SystemTime| {
+        for ev in decode_omp_line(path, "omp", serde_json::from_str(line).unwrap()).unwrap() {
+            r.apply(scene, ev, at, Transport::Jsonl);
+        }
+    };
+    feed(
+        &mut r,
+        &mut scene,
+        r#"{"type":"session","version":3,"id":"01000000-0000-7000-8000-000000000001","timestamp":"2026-07-05T20:37:08.710Z","cwd":"/repo"}"#,
+        t0,
+    );
+    feed(
+        &mut r,
+        &mut scene,
+        r#"{"type":"message","id":"f689ad6b","parentId":"71a1e3cb","timestamp":"2026-07-05T20:39:46.078Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu_01ASKASKASKASKASKASKASKA","name":"ask","arguments":{"i":"Resolving packages/ui collision","questions":[{"id":"ui_collision","question":"packages/ui already exists. What should happen?","options":[{"label":"Replace"},{"label":"Merge"}],"recommended":1}]}}],"stopReason":"toolUse","timestamp":1783283963575}}"#,
+        t0 + Duration::from_millis(100),
+    );
+    assert!(
+        matches!(
+            scene.agents.get(&id).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "the ask toolCall should park the slot Waiting"
+    );
+    // The user answers: the ask's toolResult (same toolCallId) arrives.
+    feed(
+        &mut r,
+        &mut scene,
+        r#"{"type":"message","id":"4a4176db","parentId":"98404700","timestamp":"2026-07-05T20:40:39.589Z","message":{"role":"toolResult","toolCallId":"toolu_01ASKASKASKASKASKASKASKA","toolName":"ask","content":[{"type":"text","text":"User selected: Merge"}],"isError":false,"timestamp":1783284039588}}"#,
+        t0 + Duration::from_millis(500),
+    );
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_millis(500) + ACTIVE_GRACE_WINDOW + Duration::from_millis(100),
+    );
+    assert!(
+        !matches!(
+            scene.agents.get(&id).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "the answered ask must clear Waiting (else the sprite hangs 60 min)"
+    );
+}

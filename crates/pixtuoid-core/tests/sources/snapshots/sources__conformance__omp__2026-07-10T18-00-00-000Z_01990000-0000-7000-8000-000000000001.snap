@@ -1,0 +1,28 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 15994559954055168040
+    source: omp
+    session_id: 2026-07-10T18-00-00-000Z_01990000-0000-7000-8000-000000000001/FixtureCaptureChild
+    cwd: /home/user/demo-project
+    parent_id: 10340979680718815602
+- ActivityStart:
+    agent_id: 15994559954055168040
+    tool_use_id: tool_AAAAAAAAAAAAAAAAAAAAAAAA
+    detail:
+      Generic:
+        display: "read: Cargo.toml"
+- ActivityEnd:
+    agent_id: 15994559954055168040
+    tool_use_id: tool_AAAAAAAAAAAAAAAAAAAAAAAA
+- ActivityStart:
+    agent_id: 15994559954055168040
+    tool_use_id: tool_BBBBBBBBBBBBBBBBBBBBBBBB
+    detail:
+      Generic:
+        display: yield
+- ActivityEnd:
+    agent_id: 15994559954055168040
+    tool_use_id: tool_BBBBBBBBBBBBBBBBBBBBBBBB

@@ -1,0 +1,25 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 13129151737719962286
+    source: omp
+    session_id: 2026-07-10T09-00-00-000Z_01990000-0000-7000-8000-000000000003
+    cwd: /home/user/demo-project
+    parent_id: ~
+- ActivityStart:
+    agent_id: 13129151737719962286
+    tool_use_id: toolu_01CCCCCCCCCCCCCCCCCCCCCC
+    detail:
+      Generic:
+        display: ask
+- Waiting:
+    agent_id: 13129151737719962286
+    reason: packages/ui already exists (used by the web app). What should happen with the un…
+- ActivityEnd:
+    agent_id: 13129151737719962286
+    tool_use_id: toolu_01CCCCCCCCCCCCCCCCCCCCCC
+- SessionEnd:
+    agent_id: 13129151737719962286
+    as_child: false

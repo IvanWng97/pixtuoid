@@ -686,8 +686,9 @@ const HERMES: SourceDescriptor = SourceDescriptor {
 const OMP: SourceDescriptor = SourceDescriptor {
     name: omp::SOURCE_NAME,
     label_prefix: "om",
-    // Repo-derived (v16.3.12, commit ff1fe5f) — no byte-real live capture yet.
-    verified_version: "unknown",
+    // Byte-real capture anchor (2026-07-10): `omp/16.4.0` (`omp --version`);
+    // the omp fixtures are sanitized captures from that install.
+    verified_version: "16.4.0",
     version_probe: Some(&["omp", "--version"]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
@@ -715,6 +716,11 @@ const OMP: SourceDescriptor = SourceDescriptor {
             // (liveness flows up), so a delegation is not hook-silent.
             delegations_are_hook_silent: false,
         },
+        // Transcript-only: no shim to stamp a pid, and no click-time
+        // transcript probe wired in the binary (the #518 fd probe binds
+        // pid_of for LIVENESS; promoting it to a focus point-query is a
+        // separate seam). Matches Copilot/Antigravity.
+        focus: FocusChannel::Unsupported,
     },
 };
 
