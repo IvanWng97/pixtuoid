@@ -19,7 +19,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer, Sprite};
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::{AgentSlot, SceneState};
 
@@ -28,7 +28,7 @@ use crate::floor::LightingState;
 use crate::frame_cache::FrameCache;
 use crate::layout::{
     z_sort_row, Anchor, Layout, PlantItem, PodDecorItem, Point, Size, WallDecorItem, WallSegment,
-    DESK_H, DESK_W, ELEVATOR_H, ELEVATOR_W,
+    DESK_W, ELEVATOR_H, ELEVATOR_W,
 };
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
@@ -760,6 +760,15 @@ fn enqueue_room_walls_h<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>
     }
 }
 
+/// The frame to paint for `idx`, clamped into range: a custom `--pack-dir`
+/// animation whose sprite has fewer frames than the shared cycle's `frame_idx`
+/// would otherwise yield `None` and vanish the sprite, so fall back to the
+/// first frame. `None` only for a genuinely empty animation (the caller skips).
+/// The ONE spelling of this out-of-range guard — was open-coded at four sites.
+pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
+    anim.frames.get(idx).or_else(|| anim.frames.first())
+}
+
 /// Desk cubicles — each carries its divider + cabinet + bin + screen glow.
 /// The desk sprite (16×8) sorts at `desk.y + footprint_h + DESK_FRONT_OVERHANG`
 /// (front-lip overhang past the blocked footprint), just past the seated
@@ -775,15 +784,13 @@ fn enqueue_desk_cubicles<'a>(
 ) {
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let local = FloorLocalDeskIndex(i);
-        let Size {
+        let Some(Size {
             w: desk_fp_w,
             h: desk_fp_h,
-        } = crate::layout::desk_furniture_def()
-            .footprint
-            .unwrap_or(Size {
-                w: DESK_W,
-                h: DESK_H,
-            });
+        }) = crate::layout::desk_furniture_def().footprint
+        else {
+            continue;
+        };
         let is_last_col = desk.x + desk_fp_w + DESK_W
             >= ctx.layout.cubicle_band.x + ctx.layout.cubicle_band.width;
         let occupant = agents

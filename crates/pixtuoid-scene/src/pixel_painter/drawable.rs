@@ -28,6 +28,7 @@ use super::effects::{
     paint_walking_dust,
 };
 use super::epoch_ms;
+use super::frame_at;
 use super::furniture::{
     paint_area_rug, paint_meeting_table, paint_pantry_chair, paint_pantry_table, paint_side_table,
 };
@@ -808,10 +809,7 @@ pub(super) fn paint_drawable(
             }
         }
         DrawableKind::Door { pos, frame_idx } => {
-            if let Some(f) = pack
-                .animation("door")
-                .and_then(|a| a.frames.get(*frame_idx).or_else(|| a.frames.first()))
-            {
+            if let Some(f) = pack.animation("door").and_then(|a| frame_at(a, *frame_idx)) {
                 blit_frame(f, pos.x, pos.y, buf);
             }
         }
@@ -902,7 +900,7 @@ pub(super) fn paint_drawable(
             let Some(anim) = pack.animation(anim_name) else {
                 return;
             };
-            let Some(frame) = anim.frames.get(*frame_idx).or(anim.frames.first()) else {
+            let Some(frame) = frame_at(anim, *frame_idx) else {
                 return;
             };
             let final_frame = if *flip {
@@ -929,7 +927,7 @@ pub(super) fn paint_drawable(
             let Some(anim) = pack.animation(anim_name) else {
                 return;
             };
-            let Some(frame) = anim.frames.get(*frame_idx).or(anim.frames.first()) else {
+            let Some(frame) = frame_at(anim, *frame_idx) else {
                 return;
             };
             let px = pos.x.saturating_sub(frame.width() / 2);

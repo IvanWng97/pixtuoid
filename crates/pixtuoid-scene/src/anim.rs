@@ -63,10 +63,7 @@ pub fn eased_progress(
     easing: Easing,
     now: SystemTime,
 ) -> f32 {
-    let elapsed = now
-        .duration_since(started_at)
-        .unwrap_or(Duration::ZERO)
-        .as_millis() as f32;
+    let elapsed = elapsed_ms(now, started_at) as f32;
     let raw = if duration_ms == 0 {
         1.0
     } else {

@@ -25,7 +25,7 @@ pub(super) fn paint_character_at(
     let Some(anim) = pack.animation(anim_name) else {
         return;
     };
-    let Some(frame) = anim.frames.get(frame_idx).or_else(|| anim.frames.first()) else {
+    let Some(frame) = frame_at(anim, frame_idx) else {
         return;
     };
     // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the

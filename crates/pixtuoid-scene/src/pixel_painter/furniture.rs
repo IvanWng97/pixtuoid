@@ -82,9 +82,12 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
     let mag_trim = theme.furniture.magazine_trim;
     // Sprite dimensions from the one furniture table (== the mask footprint for
     // the side table) so the painted block can't drift from the blocked ground.
-    let (w, h) = crate::layout::furniture_def(crate::layout::Furniture::LoungeSideTable)
-        .footprint
-        .map_or((7, 4), |s| (s.w as i32, s.h as i32));
+    let Some(fp) =
+        crate::layout::furniture_def(crate::layout::Furniture::LoungeSideTable).footprint
+    else {
+        return;
+    };
+    let (w, h) = (fp.w as i32, fp.h as i32);
     for dy in 0..h {
         for dx in 0..w {
             let px = cx as i32 - w / 2 + dx;
@@ -124,9 +127,11 @@ pub(super) fn paint_pantry_table(
 ) {
     let top = theme.furniture.wood_top;
     let trim = theme.furniture.wood_trim;
-    let (w, h) = crate::layout::furniture_def(crate::layout::Furniture::PantryTable)
-        .footprint
-        .map_or((7, 4), |s| (s.w as i32, s.h as i32));
+    let Some(fp) = crate::layout::furniture_def(crate::layout::Furniture::PantryTable).footprint
+    else {
+        return;
+    };
+    let (w, h) = (fp.w as i32, fp.h as i32);
     for dy in 0..h {
         for dx in 0..w {
             let on_corner = (dx == 0 || dx == w - 1) && (dy == 0 || dy == h - 1);

@@ -715,7 +715,6 @@ pub fn num_floors(scene: &SceneState) -> usize {
         .map(|a| a.floor_idx + 1)
         .max()
         .unwrap_or(1)
-        .max(1)
 }
 
 /// One agent projected onto a floor by [`build_floor_scene`]: the slot — its

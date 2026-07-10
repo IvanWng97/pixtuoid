@@ -206,6 +206,16 @@ pub(super) struct Correlation {
     pub(super) gated_before_waiting: HashMap<AgentId, Arc<str>>,
 }
 
+/// Freshness under a TTL, clock-regression-safe: `SystemTime::duration_since`
+/// returns `Err` when `ts` is in the future (the wall clock went backwards),
+/// which folds to NOT-fresh — a future timestamp is stale either way. The ONE
+/// spelling of the `elapsed < ttl` policy every correlation map and predicate
+/// routes through, so the strict-`<` boundary can't drift across the sites
+/// (pinned by the exact-TTL tests below).
+fn is_fresh(now: SystemTime, ts: SystemTime, ttl: Duration) -> bool {
+    now.duration_since(ts).is_ok_and(|d| d < ttl)
+}
+
 impl Correlation {
     /// Whether a hook `SessionEnd` for `id` (which had no slot) is still inside
     /// its [`HOOK_SESSION_END_TOMBSTONE_TTL`]: a trailing hook event delivered
@@ -213,10 +223,9 @@ impl Correlation {
     /// [`Reducer::synthesize_hook_registration`], the `Identity` arm, and the
     /// `SessionStart` arm's child-registration gate (#242).
     pub(super) fn hook_session_end_tombstoned(&self, id: AgentId, now: SystemTime) -> bool {
-        self.recent_hook_session_ends.get(&id).is_some_and(|ts| {
-            now.duration_since(*ts)
-                .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
-        })
+        self.recent_hook_session_ends
+            .get(&id)
+            .is_some_and(|ts| is_fresh(now, *ts, HOOK_SESSION_END_TOMBSTONE_TTL))
     }
 
     /// Whether the child ledger records `id` as ENDED within
@@ -225,36 +234,26 @@ impl Correlation {
     /// safe like the `gc` retains (a future timestamp is not fresh).
     pub(super) fn child_recently_ended(&self, id: AgentId, now: SystemTime) -> bool {
         self.child_ledger.get(&id).is_some_and(|e| {
-            e.ended_at.is_some_and(|ts| {
-                now.duration_since(ts)
-                    .is_ok_and(|d| d < CHILD_END_LEDGER_TTL)
-            })
+            e.ended_at
+                .is_some_and(|ts| is_fresh(now, ts, CHILD_END_LEDGER_TTL))
         })
     }
 
     pub(super) fn gc(&mut self, now: SystemTime) {
-        // SystemTime::duration_since returns Err when `ts` is in the future
-        // (clock went backwards). Drop those — stale entries either way.
         self.recent_hook_tool_uses
-            .retain(|_, (ts, _)| now.duration_since(*ts).is_ok_and(|d| d < HOOK_WINS_WINDOW));
-        self.recent_hook_session_ends.retain(|_, ts| {
-            now.duration_since(*ts)
-                .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
-        });
+            .retain(|_, (ts, _)| is_fresh(now, *ts, HOOK_WINS_WINDOW));
+        self.recent_hook_session_ends
+            .retain(|_, ts| is_fresh(now, *ts, HOOK_SESSION_END_TOMBSTONE_TTL));
         self.recent_proof_of_life
-            .retain(|_, ts| now.duration_since(*ts).is_ok_and(|d| d < PROOF_OF_LIFE_TTL));
-        self.recent_task_drains.retain(|_, ts| {
-            now.duration_since(*ts)
-                .is_ok_and(|d| d < DRAINED_TASK_TOMBSTONE_TTL)
-        });
+            .retain(|_, ts| is_fresh(now, *ts, PROOF_OF_LIFE_TTL));
+        self.recent_task_drains
+            .retain(|_, ts| is_fresh(now, *ts, DRAINED_TASK_TOMBSTONE_TTL));
         // Not-yet-ended entries ride until their end/sweep stamps ended_at
         // (every slot removal goes through sweep_exited, which stamps it), so
         // the map is bounded by live children + the TTL's trailing window.
         self.child_ledger.retain(|_, e| match e.ended_at {
             None => true,
-            Some(ts) => now
-                .duration_since(ts)
-                .is_ok_and(|d| d < CHILD_END_LEDGER_TTL),
+            Some(ts) => is_fresh(now, ts, CHILD_END_LEDGER_TTL),
         });
     }
 
@@ -266,7 +265,7 @@ impl Correlation {
     pub(super) fn vouch_fresh(&self, id: &AgentId, now: SystemTime) -> bool {
         self.recent_proof_of_life
             .get(id)
-            .is_some_and(|t| now.duration_since(*t).is_ok_and(|d| d < PROOF_OF_LIFE_TTL))
+            .is_some_and(|t| is_fresh(now, *t, PROOF_OF_LIFE_TTL))
     }
 }
 

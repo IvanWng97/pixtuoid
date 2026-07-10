@@ -62,11 +62,11 @@ pub fn copilot_home() -> PathBuf {
 /// The session id = the **parent directory name** of `events.jsonl`
 /// (`…/session-state/<sessionId>/events.jsonl`). The filename stem is the
 /// constant `events`, so — unlike CC/Codex — the id is the containing dir.
-/// Falls back to the stem if there is no parent (defensive).
+/// A parentless path (never produced by the directory-walking watcher) yields
+/// an empty key, not the colliding constant stem `events`.
 pub fn copilot_id_from_path(path: &Path) -> String {
     path.parent()
         .and_then(|p| p.file_name())
-        .or_else(|| path.file_stem())
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string()
@@ -78,6 +78,15 @@ pub fn derive_copilot_label(_path: &Path, source: &str, cwd: &Path) -> String {
 
 fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(|x| x.as_str())
+}
+
+/// The subagent child key for a `subagent.*` envelope: the top-level `agentId`
+/// (== the spawning `task` tool's `data.toolCallId`), falling back to
+/// `data.toolCallId`. One spelling shared by the started/completed/failed arms.
+fn copilot_child_key<'a>(v: &'a Value, data: Option<&'a Value>) -> Option<&'a str> {
+    str_at(v, "agentId")
+        .filter(|s| !s.is_empty())
+        .or_else(|| data.and_then(|d| str_at(d, "toolCallId")))
 }
 
 /// First-sight cwd extractor (the walker's head scan, dispatched via the
@@ -202,10 +211,7 @@ pub fn decode_copilot_line(
         "subagent.started" => {
             // The child id is the envelope `agentId` (== data.toolCallId). Register
             // it as a child of the root session, then name it from the display name.
-            let Some(child_key) = str_at(&v, "agentId")
-                .filter(|s| !s.is_empty())
-                .or_else(|| data.and_then(|d| str_at(d, "toolCallId")))
-            else {
+            let Some(child_key) = copilot_child_key(&v, data) else {
                 return Ok(vec![]);
             };
             let child = AgentId::from_parts(source, child_key);
@@ -233,10 +239,7 @@ pub fn decode_copilot_line(
             evs
         }
         "subagent.completed" | "subagent.failed" => {
-            let Some(child_key) = str_at(&v, "agentId")
-                .filter(|s| !s.is_empty())
-                .or_else(|| data.and_then(|d| str_at(d, "toolCallId")))
-            else {
+            let Some(child_key) = copilot_child_key(&v, data) else {
                 return Ok(vec![]);
             };
             vec![AgentEvent::SessionEnd {

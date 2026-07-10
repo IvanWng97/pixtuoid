@@ -84,7 +84,22 @@ given change/tree, say so, don't skip it.
   dedicated fix-round review; `just arch` had zero CI reach until #273).
 - **(B) Design-debt** — duplication/DRY (N implementations of one concept —
   weight by DIVERGENCE risk, not line count); god-object / oversized module with
-  a clean split; dead code / legacy remnant; leaky or missing abstraction;
+  a clean split; dead code / legacy remnant; **unnecessary fallback / dead
+  default** — a defensive arm (`unwrap_or`/`map_or`/catch-all `_ =>`/`.or_else`/
+  retry) whose trigger CANNOT occur, or that DUPLICATES — worse, CONTRADICTS — a
+  source of truth, is debt not safety: fallback only when a REAL failure mode
+  needs it. The INVERSE of negative-space rule 2 (which forbids demanding
+  defense-in-depth where a primary defense exists) — here, don't ADD or LEAVE a
+  guard for a state that can't arise. The 0.13 slimming audit found a
+  `Furniture::Desk` footprint `unwrap_or(Size{DESK_W,DESK_H})` both dead (the
+  const table is always `Some`) AND WRONG (`decor.rs` is `DESK_W+4`, so a
+  hypothetical None mis-placed the sprite), plus the `(7,4)` table footprint
+  re-hardcoded inline in three painters — read the authority (`if let Some(..) =
+  furniture_def(x).footprint`), never re-copy its fallback. The test is "can the
+  trigger fire, and does the arm duplicate/contradict an authority", NOT "does it
+  look defensive": load-bearing defense STAYS (documented sharp edges, liveness
+  ladders, the shim exit-0 contract, clock-regression `duration_since` folds,
+  config-never-wipe); leaky or missing abstraction;
   correlated-state bundling — N fields that ALWAYS change together (a phase + its
   clock + its profile; a liveness axis + its run-set; a decoder + the extractor it
   pairs with) belong in ONE struct/newtype so an illegal combination is

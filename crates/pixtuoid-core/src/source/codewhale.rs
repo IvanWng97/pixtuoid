@@ -249,21 +249,18 @@ pub(crate) fn decode_cw_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
 /// carry no `subagent_type`, so the shared semantic detection can't see it),
 /// everything else gets a `"name: target"` display. `tool_args` arrives as the
 /// raw `DEEPSEEK_TOOL_ARGS` JSON STRING (e.g. `{"command":"ls -la","cwd":"…"}`,
-/// captured live), so it is parsed here before the target key lookup; an object
-/// is also accepted defensively. Target keys, in priority order, match the
-/// args CodeWhale's builtin tools emit: `exec_shell`→`command`, the file tools→
+/// captured live), so it is parsed here before the target key lookup. Target
+/// keys, in priority order, match the args CodeWhale's builtin tools emit:
+/// `exec_shell`→`command`, the file tools→
 /// `file_path`/`path`, search→`pattern`, fetch→`url`.
 fn cw_tool_detail(tool: &str, raw_args: Option<&Value>) -> ToolDetail {
     if SUBAGENT_TOOLS.contains(&tool) {
         return ToolDetail::Task;
     }
-    // `tool_args` is a JSON string in the shim envelope; parse it. Accept a
-    // bare object too (defensive — a future caller might embed it directly).
-    let parsed: Option<Value> = match raw_args {
-        Some(Value::String(s)) => serde_json::from_str(s).ok(),
-        Some(v @ Value::Object(_)) => Some(v.clone()),
-        _ => None,
-    };
+    // `tool_args` is a JSON string in the shim envelope; parse it.
+    let parsed: Option<Value> = raw_args
+        .and_then(Value::as_str)
+        .and_then(|s| serde_json::from_str(s).ok());
     // Per-source target vocabulary; the shared scan lives in the decoder, the
     // last-mile assembly (name + `: target` with the matching caps) in
     // `generic_tool_display`.
@@ -346,22 +343,6 @@ mod tests {
             }
             other => panic!("expected ActivityStart, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn tool_args_object_form_is_also_accepted() {
-        // Defensive: a future caller embedding tool_args as an object (not a
-        // JSON string) must still resolve the target.
-        let ev = decode(json!({
-            "event": "tool_call_before",
-            "cwd": "/repo",
-            "tool": "read_file",
-            "tool_args": {"path": "src/main.rs"}
-        }));
-        assert!(
-            matches!(ev, AgentEvent::ActivityStart { detail: Some(d), .. }
-            if d.display() == "read_file: src/main.rs")
-        );
     }
 
     #[test]

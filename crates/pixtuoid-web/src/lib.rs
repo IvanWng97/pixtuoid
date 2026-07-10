@@ -217,7 +217,9 @@ impl Office {
     /// page-relative clock pins the scene at 1970 — permanently 00:00,
     /// defeating the browser-timezone support entirely).
     pub fn step(&mut self, now_ms: f64, w: u32, h: u32) {
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms.max(0.0) as u64);
+        // `f64 as u64` saturates (negatives/NaN → 0) since Rust 1.45, so the
+        // contract's "epoch ms" pre-clamp is already the cast's behavior.
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
         self.last_now = Some(now);
         let buf_w = w.clamp(1, u16::MAX as u32) as u16;
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
