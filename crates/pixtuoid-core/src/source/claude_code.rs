@@ -25,6 +25,8 @@ pub const SOURCE_NAME: &str = "claude-code";
 /// flame instantly), and NOT for display: `pixtuoid_scene::burn::fresh_effort`
 /// suppresses it so the internal sentinel never reaches the dossier. ONE
 /// shared const so the synthesize side and the suppress side can't drift.
+/// In-workspace decoder↔painter contract token, not a stable API.
+#[doc(hidden)]
 pub const ULTRA_EXIT_LABEL: &str = "ultra_exit";
 
 /// CC's session/agent id = the transcript filename stem, which is

@@ -70,7 +70,11 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 ├── burn.rs         burn tier (model gate × effort split, USER-PINNED): TOP_MODELS prefix table
 │                   (claude-fable/claude-mythos/gpt-5.6-sol — source-verified slugs) × MAX_EFFORTS
 │                   ({ultra,ultrathink,xhigh,max}) → BurnTier{Normal,Premium,Top}; fresh_effort =
-│                   the ONE EFFORT_TTL freshness rule (tier + dossier share it). Interpretation
+│                   the ONE EFFORT_TTL freshness rule (tier + dossier share it), and it ALSO drops
+│                   CC's decoder-synthesized ultra_exit exit-sentinel so the internal token never
+│                   reaches the dossier — the one source-specific special-case in this otherwise
+│                   source-agnostic table (string = core-owned claude_code::ULTRA_EXIT_LABEL,
+│                   referenced not re-hardcoded). Interpretation
 │                   lives HERE; the RAW strings live on AgentSlot (core). Consumed by
 │                   pixel_painter's paint_character_at (ember 'H' recolor + Top flame crown) and
 │                   the binary's tooltip. Unknown model → Normal (fail-quiet, never flames).
