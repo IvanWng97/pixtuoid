@@ -125,10 +125,17 @@ so the binary's click re-reads the marker and REFUSES a recycled/dead pid
 (#527; markerless stamps skip the check, additive).
 The reducer caches it on `AgentSlot.pid` (fill at registration, refresh per
 Identity, `Some` never downgraded), serde-skipped so the scene golden doesn't
-churn. Transcript-family sources stay `pid: None` — STRUCTURALLY:
-`patch_identity_pids` skips any source with a `line_decoder` (their getppid is
-the hook-command parent, never recycle-guarded, and a stamped stale pid would
-shadow the probe in `resolve_pid`). Their channel is the
+churn. WHICH channel a source rides is the registry's **`FocusChannel`
+capability** (`ShimStamp`/`PluginStamp`/`TranscriptProbe`/`Unsupported`, a
+field of `SourceKind::Agent` so daemons structurally can't carry one) — the
+ONE data-driven truth shared by the stamp gate (`patch_identity_pids` stamps
+iff `accepts_stamp()`), the click-time probe dispatch (`focus::resolve_pid`),
+and the doctor report. It is DATA-only on purpose: the const table compiles
+to wasm, so the native-only probe FNS stay in the binary, pinned to the enum
+by the `transcript_probe_sources_all_have_a_resolve_arm` lockstep test.
+`TranscriptProbe` (CC/Codex) is never stamped — their getppid is the
+hook-command parent, never recycle-guarded, and a stamped stale pid would
+shadow the probe in `resolve_pid`. Their channel is the
 recycle-guarded probes, exposed as the two pub point-query seams
 `source::cc_pid_for_session` (projects root → sibling sessions registry) and
 `source::codex_pid_for_session` (rollout UUID). On Windows the SHIM sends no
@@ -136,9 +143,11 @@ pid (the hook runs under `cmd /C`, so getppid would name a transient cmd.exe —
 the documented `parent_pid` trap), so shim-dependent sources focus-no-op there;
 a plugin-stamped pid (opencode's `process.pid`) still flows — the peek doesn't
 need the exit-watch, whose backend is also absent on Windows/pre-5.3 Linux. On
-those no-watch platforms an abrupt exit can't set `exiting_at`, but the #527
-start-marker check still refuses the recycled pid at click time wherever a
-marker was readable at stamp time (everywhere except non-mac/linux daemons).
+those no-watch platforms an abrupt exit can't set `exiting_at`; the #527
+start-marker check still refuses the recycled pid at click time on pre-5.3
+LINUX (marker readable at stamp time), but `pid_start_marker` is None on every
+non-mac/linux OS — Windows hook-family stamps are markerless, so the guard is
+inert there and the wide staleness window REMAINS a Windows sharp edge (#528).
 
 ## Known sharp edges (don't be surprised by these)
 

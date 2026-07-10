@@ -10,6 +10,12 @@
 //! is a SILENT no-op with a `tracing::debug!` breadcrumb. Success = the
 //! window comes forward; failure = nothing happens.
 //!
+//! KNOWN common miss (#538): an agent inside a terminal MULTIPLEXER
+//! (tmux/screen/zellij). The multiplexer SERVER is daemonized (parent =
+//! launchd/init) and owns no GUI surface, so the walk dead-ends at pid 1 —
+//! live-verified. The fix (walk the CLIENT's chain via e.g.
+//! `tmux display -p '#{client_pid}'`) is backlog #538.
+//!
 //! Lives in the BINARY (invariant #1: core/scene stay window-free). The
 //! walker is PURE over an injected [`ProcessTable`], so the logic is unit
 //! tested on mock tables; the per-OS glue (`macos`/`windows`/`linux`) is
@@ -29,7 +35,11 @@ mod windows;
 
 /// The process-tree view `ancestor_walk` needs — injected so the walk is a
 /// pure function (mock tables in tests; the real per-OS impls query the
-/// kernel).
+/// kernel). Deliberately BUNDLES kernel reads (`ppid`/`start_time`) with the
+/// window-ownership probe (`focusable`): one trait = one mock across 3 OSes.
+/// Split it (ProcessTree vs WindowBackend, with `activate` moving onto the
+/// window half) only when tab-precision lands and forces a terminal
+/// classifier — not before (YAGNI).
 pub(crate) trait ProcessTable {
     /// Parent pid, `None` when the process is gone / unreadable.
     fn ppid(&self, pid: i32) -> Option<i32>;
@@ -102,8 +112,19 @@ pub(crate) fn resolve_pid(
         }
         return Some(cached.pid);
     }
-    // The registry consts, not literals — a source rename must not silently
-    // drop these arms to `_ => None`.
+    // The registry's FocusChannel capability decides WHETHER a probe applies;
+    // the probe FNS themselves stay here in the binary (deliberate: the
+    // registry const table compiles to wasm, a native-only fn pointer can't
+    // live in it). The name match uses the registry consts, not literals — a
+    // source rename must not silently drop an arm to `_ => None` — and the
+    // `transcript_probe_sources_all_have_a_resolve_arm` lockstep test pins
+    // that every `TranscriptProbe` row has an arm below.
+    use pixtuoid_core::source::registry::FocusChannel;
+    let channel = pixtuoid_core::source::registry::descriptor_for(&slot.source)
+        .map_or(FocusChannel::Unsupported, |d| d.focus_channel());
+    if channel != FocusChannel::TranscriptProbe {
+        return None;
+    }
     match slot.source.as_ref() {
         s if s == pixtuoid_core::source::claude_code::SOURCE_NAME => paths
             .cc_projects_root
@@ -113,6 +134,23 @@ pub(crate) fn resolve_pid(
             .and_then(|d| pixtuoid_core::source::codex_pid_for_session(d, &slot.session_id)),
         _ => None,
     }
+}
+
+/// The painter-agnostic focus dispatch — ANY painter's trigger (the TUI's
+/// sprite click and dashboard `f` today; the floating window's future
+/// trigger) resolves + walks + activates through this ONE entry with the
+/// real OS table. `roots` = (CC projects root, Codex sessions root), the
+/// clone `runtime/driver.rs` takes BEFORE `build_source_set` consumes the
+/// originals.
+pub(crate) fn focus_slot(
+    slot: &AgentSlot,
+    roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+) {
+    let paths = FocusPaths {
+        cc_projects_root: roots.0.as_deref(),
+        codex_sessions_root: roots.1.as_deref(),
+    };
+    focus_agent(slot, &paths, &OsProcessTable, activate_os);
 }
 
 /// The orchestration entry — the ONE caller of the per-OS glue. `activate`
@@ -236,7 +274,7 @@ mod tests {
     }
 
     fn pid_id(pid: i32, started: Option<u64>) -> pixtuoid_core::source::PidIdentity {
-        pixtuoid_core::source::PidIdentity { pid, started }
+        pixtuoid_core::source::PidIdentity::new(pid, started)
     }
 
     fn slot(
@@ -334,6 +372,33 @@ mod tests {
         // Unknown/remote source likewise.
         let r = slot("some-remote", "ses_c", None);
         assert_eq!(resolve_pid(&r, &NO_PATHS, &empty_table()), None);
+        // FocusChannel::Unsupported (transcript-only, no probe) likewise.
+        let a = slot("antigravity", "ses_d", None);
+        assert_eq!(resolve_pid(&a, &NO_PATHS, &empty_table()), None);
+    }
+
+    #[test]
+    fn transcript_probe_sources_all_have_a_resolve_arm() {
+        // The registry's FocusChannel is DATA; the probe fns live here in the
+        // binary. This is the lockstep pin: marking a new source
+        // `TranscriptProbe` in the registry REQUIRES wiring a probe arm in
+        // `resolve_pid` — extend BOTH, then add its name here.
+        use pixtuoid_core::source::registry::FocusChannel;
+        let wired = [
+            pixtuoid_core::source::claude_code::SOURCE_NAME,
+            pixtuoid_core::source::codex::SOURCE_NAME,
+        ];
+        for &src in pixtuoid_core::source::REGISTERED_SOURCES {
+            let Some(d) = pixtuoid_core::source::registry::descriptor_for(src) else {
+                continue;
+            };
+            if d.focus_channel() == FocusChannel::TranscriptProbe {
+                assert!(
+                    wired.contains(&src),
+                    "{src} is TranscriptProbe but resolve_pid has no probe arm for it"
+                );
+            }
+        }
     }
 
     #[test]

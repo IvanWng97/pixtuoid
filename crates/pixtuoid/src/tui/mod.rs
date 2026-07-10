@@ -155,27 +155,8 @@ fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static
         .cached_layout()
         .and_then(|layout| renderer::hit_test_from_tui(&floor_scene, layout, col, row));
     if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
-        focus_slot(slot, focus_roots);
+        crate::focus::focus_slot(slot, focus_roots);
     }
-}
-
-/// The shared focus dispatch (sprite click + dashboard `f`): resolve the
-/// slot's pid, walk to its terminal app, activate — all through the
-/// `crate::focus` orchestration entry with the real OS table.
-fn focus_slot(
-    slot: &pixtuoid_core::AgentSlot,
-    focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
-) {
-    let paths = crate::focus::FocusPaths {
-        cc_projects_root: focus_roots.0.as_deref(),
-        codex_sessions_root: focus_roots.1.as_deref(),
-    };
-    crate::focus::focus_agent(
-        slot,
-        &paths,
-        &crate::focus::OsProcessTable,
-        crate::focus::activate_os,
-    );
 }
 
 /// Connect a source from the panel: delegate the persist + install + rollback to
@@ -732,7 +713,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 if let Some(slot) =
                                     ui.dashboard_focus().and_then(|id| snapshot.agents.get(&id))
                                 {
-                                    focus_slot(slot, &focus_roots);
+                                    crate::focus::focus_slot(slot, &focus_roots);
                                 }
                             }
                             KeyAction::ToggleConnection => {

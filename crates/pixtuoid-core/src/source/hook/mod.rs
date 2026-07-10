@@ -193,22 +193,30 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
 /// point IS the whole wiring. `None` leaves events untouched (the reducer
 /// never downgrades a cached pid either — belt and braces).
 ///
-/// The TRANSCRIPT family (any source with a `line_decoder`) is skipped: the
-/// shim's `getppid` is their hook-command parent (possibly a transient shell,
-/// never recycle-guarded), while their real focus channel is the liveness
-/// probes (`cc_pid_for_session`/`codex_pid_for_session`). A stamped stale pid
-/// would shadow the probe's recycle guard in `resolve_pid`.
+/// The gate is the registry's [`FocusChannel`] capability — ONE data-driven
+/// source of truth shared with `focus::resolve_pid` and the doctor report.
+/// `TranscriptProbe` sources (CC/Codex) are skipped: the shim's `getppid` is
+/// their hook-command parent (possibly a transient shell, never
+/// recycle-guarded), and a stamped stale pid would shadow the probe's recycle
+/// guard in `resolve_pid`.
 ///
-/// The stamp is a [`PidIdentity`] — pid PLUS the kernel start marker read at
-/// peek time — so the click-time guard can refuse a recycled pid (#527).
-fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<crate::source::PidIdentity>) {
+/// The stamp is a [`PidIdentity`] — pid PLUS the kernel start marker — so the
+/// click-time guard can refuse a recycled pid (#527). The marker is read
+/// LAZILY on the first accepting Identity: the highest-volume sources
+/// (CC/Codex) never accept, so their per-event syscall is skipped entirely.
+fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<i32>) {
+    use crate::source::registry::FocusChannel;
     let Some(pid) = pid else { return };
+    let mut stamp: Option<crate::source::PidIdentity> = None;
     for ev in evs {
         if let AgentEvent::Identity { source, pid: p, .. } = ev {
-            let transcript_bearing = crate::source::registry::descriptor_for(source)
-                .is_some_and(|d| d.line_decoder().is_some());
-            if !transcript_bearing {
-                *p = Some(pid);
+            let channel = crate::source::registry::descriptor_for(source)
+                .map_or(FocusChannel::Unsupported, |d| d.focus_channel());
+            if channel.accepts_stamp() {
+                *p = Some(*stamp.get_or_insert_with(|| crate::source::PidIdentity {
+                    pid,
+                    started: crate::source::pid_start_marker(pid),
+                }));
             }
         }
     }
@@ -305,20 +313,11 @@ pub(crate) async fn handle_conn(
                             }
                         }
                         // Second consumer of the SAME peeked `_pid`: the
-                        // focus-jump cache (see `patch_identity_pids`). The
-                        // start marker is read HERE — the closest moment to
-                        // the hook event itself — so a later click can refuse
-                        // a recycled pid (#527). Marker unreadable (pid died
-                        // between hook and peek, non-unix) → `None` → the
-                        // click-time identity check is skipped, not failed.
+                        // focus-jump cache (see `patch_identity_pids`, which
+                        // also reads the #527 recycle marker — lazily, so the
+                        // transcript family costs no syscall).
                         let mut evs = evs;
-                        patch_identity_pids(
-                            &mut evs,
-                            pid.map(|p| crate::source::PidIdentity {
-                                pid: p,
-                                started: crate::source::pid_start_marker(p),
-                            }),
-                        );
+                        patch_identity_pids(&mut evs, pid);
                         let mut undelivered = UndeliveredEvents::new(&evs);
                         for ev in evs {
                             debug!("hook event: {ev:?}");
@@ -348,13 +347,6 @@ mod tests {
     use crate::AgentId;
     use tokio::io::AsyncWriteExt;
 
-    fn pid77() -> crate::source::PidIdentity {
-        crate::source::PidIdentity {
-            pid: 77,
-            started: Some(1_000),
-        }
-    }
-
     #[test]
     fn patch_identity_pids_stamps_only_identity_events() {
         let id = AgentId::from_parts("opencode", "ses_x");
@@ -372,14 +364,16 @@ mod tests {
                 detail: None,
             },
         ];
-        patch_identity_pids(&mut evs, Some(pid77()));
+        patch_identity_pids(&mut evs, Some(i32::MAX));
         assert!(
-            matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p == pid77()),
+            matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p.pid == i32::MAX && p.started.is_none()),
             "Identity stamped"
         );
         // None leaves the batch untouched.
         patch_identity_pids(&mut evs, None);
-        assert!(matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p == pid77()));
+        assert!(
+            matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p.pid == i32::MAX && p.started.is_none())
+        );
     }
 
     #[test]
@@ -395,7 +389,7 @@ mod tests {
                 cwd: None,
                 pid: None,
             }];
-            patch_identity_pids(&mut evs, Some(pid77()));
+            patch_identity_pids(&mut evs, Some(i32::MAX));
             assert!(
                 matches!(evs[0], AgentEvent::Identity { pid: None, .. }),
                 "{source} Identity must stay pid: None"
@@ -410,9 +404,9 @@ mod tests {
                 cwd: None,
                 pid: None,
             }];
-            patch_identity_pids(&mut evs, Some(pid77()));
+            patch_identity_pids(&mut evs, Some(i32::MAX));
             assert!(
-                matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p == pid77()),
+                matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p.pid == i32::MAX && p.started.is_none()),
                 "{source} Identity must be stamped"
             );
         }
@@ -797,8 +791,14 @@ mod tests {
         let (mut client, server) = tokio::io::duplex(4096);
         let task = tokio::spawn(handle_conn(server, tx, None, None));
         // CodeWhale tool_call_before decodes to [Identity, ActivityStart].
-        let line = "{\"_pixtuoid_source\":\"codewhale\",\"event\":\"tool_call_before\",\
-                    \"cwd\":\"/repo\",\"tool\":\"exec_shell\",\"_pid\":4242}\n";
+        // i32::MAX as the pid: the stamp path does a REAL kernel marker read,
+        // and an allocatable pid (4242…) can be a live process on a busy CI
+        // host — an unallocatable one guarantees `started: None`.
+        let line = format!(
+            "{{\"_pixtuoid_source\":\"codewhale\",\"event\":\"tool_call_before\",\
+             \"cwd\":\"/repo\",\"tool\":\"exec_shell\",\"_pid\":{}}}\n",
+            i32::MAX
+        );
         client.write_all(line.as_bytes()).await.unwrap();
         drop(client);
         task.await.unwrap();
@@ -809,7 +809,7 @@ mod tests {
             .expect("the Identity ahead of the tool event");
         assert!(
             matches!(&ev, AgentEvent::Identity { source, pid: Some(p), .. }
-                if source == "codewhale" && p.pid == 4242 && p.started.is_none()),
+                if source == "codewhale" && p.pid == i32::MAX && p.started.is_none()),
             "hook-family Identity must carry the peeked pid without a watch \
              (and no start marker for a pid that does not exist), got {ev:?}"
         );

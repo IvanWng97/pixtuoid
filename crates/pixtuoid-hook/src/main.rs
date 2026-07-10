@@ -141,6 +141,10 @@ fn env_payload(event: &str) -> serde_json::Map<String, Value> {
 /// (the WRONG pid, and it exits right after spawning the shim → a false
 /// exit / a recycled-pid focus), so we send no pid there: CodeWhale falls
 /// back to `session_end` + the stale-sweep, focus to a silent no-op.
+/// Container caveat: with a bind-mounted socket this pid is a CONTAINER-
+/// namespace pid the host-side daemon can't translate — the walk then hits
+/// an unrelated host process (usually surface-less → no-op). Gated behind
+/// deliberate socket sharing; default containers never reach the socket.
 #[cfg(unix)]
 fn parent_pid() -> Option<u32> {
     // getppid() is always safe (no args, infallible) and gives the hook's

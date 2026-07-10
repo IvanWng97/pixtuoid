@@ -1314,10 +1314,7 @@ fn hook_identity_pid_fills_refreshes_and_never_downgrades_slot_pid() {
     let mut r = Reducer::new();
     let id = AgentId::from_parts("opencode", "ses_pid");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    let pid_id = |pid: i32| pixtuoid_core::source::PidIdentity {
-        pid,
-        started: Some(1_000),
-    };
+    let pid_id = |pid: i32| pixtuoid_core::source::PidIdentity::new(pid, Some(1_000));
     let identity = |pid: Option<pixtuoid_core::source::PidIdentity>| AgentEvent::Identity {
         agent_id: id,
         source: "opencode".into(),

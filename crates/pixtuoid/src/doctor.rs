@@ -558,6 +558,7 @@ fn activation_backend() -> String {
         linux_activation_backend(
             std::env::var_os("SWAYSOCK").is_some(),
             std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some(),
+            std::env::var_os("WAYLAND_DISPLAY").is_some(),
             std::env::var_os("DISPLAY").is_some(),
         )
         .to_string()
@@ -573,19 +574,27 @@ fn activation_backend() -> String {
 }
 
 /// Pure so every arm is unit-tested on any host: mirrors `focus/linux.rs`'s
-/// ONE-channel-per-env order (sway IPC → hyprland IPC → X11 EWMH → nothing).
-/// Only the linux `activation_backend` arm calls it in prod — on other hosts
-/// the tests are the (deliberate) only caller.
+/// ONE-channel-per-env order (sway IPC → hyprland IPC → X11 EWMH → nothing) —
+/// EXCEPT that a Wayland session without a pid-addressable IPC must NOT be
+/// reported as "X11 EWMH ✓": XWayland sets $DISPLAY, but a native-Wayland
+/// terminal never appears in XWayland's client list and mutter/kwin block
+/// focus-steal anyway, so the ✓ would mislead exactly the users focus fails
+/// for. Only the linux `activation_backend` arm calls this in prod — on
+/// other hosts the tests are the (deliberate) only caller.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn linux_activation_backend(sway: bool, hyprland: bool, x11: bool) -> &'static str {
+fn linux_activation_backend(sway: bool, hyprland: bool, wayland: bool, x11: bool) -> &'static str {
     if sway {
         "sway IPC (swaymsg) ✓"
     } else if hyprland {
         "hyprland IPC (hyprctl) ✓"
+    } else if wayland {
+        "✗ Wayland compositor without a pid-addressable focus channel (GNOME/KDE \
+         forbid focus-steal; xdg-activation unimplemented) — focus will silently \
+         no-op for native-Wayland terminals"
     } else if x11 {
         "X11 EWMH ($DISPLAY) ✓"
     } else {
-        "✗ none detected — focus will silently no-op (GNOME Wayland forbids focus-steal)"
+        "✗ none detected — focus will silently no-op"
     }
 }
 
@@ -594,7 +603,7 @@ fn linux_activation_backend(sway: bool, hyprland: bool, x11: bool) -> &'static s
 /// roots checked on disk. Pure over the probed facts; the family buckets come
 /// straight from the registry (a new source lands in the right bucket with no
 /// edit here).
-pub fn focus_section(
+pub(crate) fn focus_section(
     backend: &str,
     cc_registry: Option<(&std::path::Path, bool)>,
     codex_sessions: (&std::path::Path, bool),
@@ -604,25 +613,25 @@ pub fn focus_section(
             .map(|d| d.label_prefix)
             .unwrap_or("??")
     };
-    let mut hook_family = Vec::new();
+    use registry::FocusChannel;
+    let mut shim_stamp = Vec::new();
+    let mut plugin_stamp = Vec::new();
     let mut no_channel = Vec::new();
     for &src in REGISTERED_SOURCES {
         let Some(d) = registry::descriptor_for(src) else {
             continue;
         };
-        // Daemons (the lobster) aren't click-focusable agents; CC/Codex get
-        // their own probe rows below.
-        if d.is_daemon()
-            || src == pixtuoid_core::source::claude_code::SOURCE_NAME
-            || src == pixtuoid_core::source::codex::SOURCE_NAME
-        {
+        // Daemons (the lobster) aren't click-focusable agents; the
+        // TranscriptProbe sources (CC/Codex) get their own rows below.
+        if d.is_daemon() || d.focus_channel() == FocusChannel::TranscriptProbe {
             continue;
         }
         let tag = format!("{}\u{b7}{}", d.label_prefix, src);
-        if d.line_decoder().is_some() {
-            no_channel.push(tag);
-        } else {
-            hook_family.push(tag);
+        match d.focus_channel() {
+            FocusChannel::ShimStamp => shim_stamp.push(tag),
+            FocusChannel::PluginStamp => plugin_stamp.push(tag),
+            FocusChannel::Unsupported => no_channel.push(tag),
+            FocusChannel::TranscriptProbe => unreachable!("skipped above"),
         }
     }
     let mut out = String::from("focus-jump (click a sprite → its terminal comes forward):\n");
@@ -652,10 +661,16 @@ pub fn focus_section(
             "✗ missing (focus no-ops until codex writes it)"
         }
     ));
-    if !hook_family.is_empty() {
+    if !shim_stamp.is_empty() {
         out.push_str(&format!(
-            "  {} — shim/plugin `_pid` rides each hook event\n",
-            hook_family.join(", ")
+            "  {} — shim `_pid` (getppid) rides each hook event (unix; absent on Windows)\n",
+            shim_stamp.join(", ")
+        ));
+    }
+    if !plugin_stamp.is_empty() {
+        out.push_str(&format!(
+            "  {} — plugin-stamped `_pid` rides each hook event (all platforms)\n",
+            plugin_stamp.join(", ")
         ));
     }
     if !no_channel.is_empty() {
@@ -817,10 +832,13 @@ mod tests {
 
     #[test]
     fn linux_activation_backend_covers_every_channel_in_priority_order() {
-        assert!(linux_activation_backend(true, true, true).contains("sway"));
-        assert!(linux_activation_backend(false, true, true).contains("hyprland"));
-        assert!(linux_activation_backend(false, false, true).contains("EWMH"));
-        assert!(linux_activation_backend(false, false, false).contains("✗ none"));
+        assert!(linux_activation_backend(true, true, true, true).contains("sway"));
+        assert!(linux_activation_backend(false, true, true, true).contains("hyprland"));
+        // A Wayland session without sway/hyprland must be an HONEST ✗ even
+        // when XWayland set $DISPLAY — never "X11 EWMH ✓" (the F2 fix).
+        assert!(linux_activation_backend(false, false, true, true).contains("✗ Wayland"));
+        assert!(linux_activation_backend(false, false, false, true).contains("EWMH"));
+        assert!(linux_activation_backend(false, false, false, false).contains("✗ none"));
     }
 
     #[test]
@@ -835,8 +853,12 @@ mod tests {
         // sources have no channel — both buckets are REGISTRY-derived, so a
         // new source lands correctly with no doctor edit.
         assert!(
-            s.contains("opencode") && s.contains("_pid"),
-            "hook family listed: {s}"
+            s.contains("opencode") && s.contains("plugin-stamped"),
+            "plugin stampers listed separately: {s}"
+        );
+        assert!(
+            s.contains("cursor") && s.contains("shim `_pid`"),
+            "shim stampers listed separately: {s}"
         );
         let no_channel_line = s
             .lines()

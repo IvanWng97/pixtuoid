@@ -247,15 +247,26 @@ pub enum AgentEvent {
 /// mismatch (or a dead pid) means this is not the process the hook came from.
 /// `started: None` = no marker was readable at stamp time (non-unix daemon,
 /// EPERM); the click-time guard then skips the identity check (additive, the
-/// #220 posture). Field name `pid` everywhere keeps the `pid: None`
-/// construction sites stable across the `Option<i32>` → `Option<PidIdentity>`
-/// migration.
+/// #220 posture) — so on no-exit-watch platforms a markerless cache retains
+/// the pre-#527 recycled-pid residual until the stale sweep (compound-rare;
+/// documented, not guarded). Field name `pid` everywhere keeps the
+/// `pid: None` construction sites stable across the `Option<i32>` →
+/// `Option<PidIdentity>` migration. `non_exhaustive` so a future identity
+/// component (a boot id, a Windows session id) is a non-breaking add —
+/// cross-crate construction goes through [`PidIdentity::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct PidIdentity {
     /// The agent CLI's OS pid (`pid_t`; matches `DaemonPresence.current_pid`).
     pub pid: i32,
     /// Opaque per-OS start marker — equality-only, see [`pid_start_marker`].
     pub started: Option<u64>,
+}
+
+impl PidIdentity {
+    pub fn new(pid: i32, started: Option<u64>) -> Self {
+        Self { pid, started }
+    }
 }
 
 impl AgentEvent {
