@@ -18,7 +18,11 @@ use std::time::SystemTime;
 use pixtuoid_core::AgentSlot;
 
 /// Model prefixes that gate the color tiers — most-specific-first, first
-/// match wins. Source-verified 2026-07-10: `gpt-5.6-sol` is the flagship slug
+/// match wins. PREFIX matching is deliberate (version-independent:
+/// `claude-fable` covers `claude-fable-5` and its successors) — the tradeoff
+/// is that a future CHEAPER variant sharing a prefix (a hypothetical
+/// `gpt-5.6-sol-mini`) would wrongly burn until a Normal-override row is
+/// added ABOVE its family line. No such slug exists today. Source-verified 2026-07-10: `gpt-5.6-sol` is the flagship slug
 /// in openai/codex `models-manager/models.json` (terra/luna miss the prefix
 /// naturally); fable/mythos are Anthropic's Mythos-class ids on CC's wire.
 const TOP_MODELS: &[&str] = &["claude-fable", "claude-mythos", "gpt-5.6-sol"];
@@ -34,7 +38,7 @@ const MAX_EFFORTS: &[&str] = &["ultra", "ultrathink", "xhigh", "max"];
 /// ACTIVE max-effort agent refreshes far inside this window; once the user
 /// drops out (or the agent idles — honest either way: an idle agent isn't
 /// burning), the flame decays back to ember hair.
-pub const EFFORT_TTL_SECS: u64 = 600;
+pub(crate) const EFFORT_TTL_SECS: u64 = 600;
 
 /// The three visual tiers. Ordering matters (`Top > Premium > Normal`) only
 /// for readability; consumers match exhaustively.
@@ -50,7 +54,7 @@ pub enum BurnTier {
 
 /// The pure tier judgment over raw wire strings. `effort_fresh` must already
 /// be freshness-filtered by the caller (see [`slot_burn_tier`]).
-pub fn burn_tier(model: Option<&str>, effort_fresh: Option<&str>) -> BurnTier {
+pub(crate) fn burn_tier(model: Option<&str>, effort_fresh: Option<&str>) -> BurnTier {
     let top = model.is_some_and(|m| TOP_MODELS.iter().any(|p| m.starts_with(p)));
     if !top {
         return BurnTier::Normal;

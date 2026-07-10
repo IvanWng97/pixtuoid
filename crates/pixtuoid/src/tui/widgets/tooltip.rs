@@ -111,7 +111,9 @@ fn short_cwd(cwd: &std::path::Path) -> String {
 /// pinned. One coherent card: `[xx]` source badge + label + `·id4` (L1), a dim
 /// separator, the `{glyph} {Word}` state line (+ the current tool in its glow
 /// hue), the detail / waiting-reason, the `↳ under {parent}` lineage (subagents
-/// only), the cwd, and the `◷` stats (with the active-% meter folded in). Uses
+/// only), the cwd, the `★ {model} · {effort}` burn row (when the wire told
+/// us; effort only while fresh), and the `◷` stats (with the active-% meter
+/// folded in). Uses
 /// the SHARED vocabulary (`StateKind`) + badge (`source_badge_span`) so it can't
 /// drift from the footer/board/dashboard. Dim rows use `tooltip_dim`, NOT the
 /// live `label_exiting` (C6). Positioned to avoid the cursor + screen edges.

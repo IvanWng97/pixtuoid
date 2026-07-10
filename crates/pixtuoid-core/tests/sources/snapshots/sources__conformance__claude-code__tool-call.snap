@@ -11,6 +11,14 @@ expression: events
     detail:
       Generic:
         display: "Glob: crates/**/*.rs"
+- ModelInfo:
+    agent_id: 17402456248370490010
+    model: ~
+    effort: ultra
+- ModelInfo:
+    agent_id: 17402456248370490010
+    model: claude-fable-5
+    effort: ~
 - ActivityEnd:
     agent_id: 17402456248370490010
     tool_use_id: toolu_demo0000000000000001

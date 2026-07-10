@@ -412,36 +412,35 @@ fn main() -> Result<()> {
     } else if args.dashboard {
         dashboard_scene(now)
     } else {
-        {
-            let mut scene = sample_scene(now, args.max_desks, args.agents);
-            if let Some(label) = &args.flame {
-                let hit = scene
-                    .agents
-                    .values_mut()
-                    .find(|a| a.label.as_ref() == label.as_str());
-                match hit {
-                    Some(a) => {
-                        a.model = Some("claude-fable-5".into());
-                        a.effort = Some(pixtuoid_core::state::EffortObservation::new(
-                            "ultra".into(),
-                            now,
-                        ));
-                    }
-                    None => {
-                        let labels: Vec<_> =
-                            scene.agents.values().map(|a| a.label.to_string()).collect();
-                        anyhow::bail!("--flame {label:?} not found in scene; labels: {labels:?}");
-                    }
-                }
-            }
-            scene
-        }
+        sample_scene(now, args.max_desks, args.agents)
     };
     if let Some(secs) = args.warmup_secs {
         skip_ms = (secs * 1000.0) as u64;
         eprintln!("WARMUP pre-roll = {skip_ms}ms (explicit --warmup-secs)");
     }
     let mut scene = scene;
+    // --flame applies to WHATEVER scene the mode above produced (sample, anim,
+    // meeting, dashboard, live capture) — the burn-tier visual-iteration knob
+    // shouldn't silently vanish in the pose-preview modes.
+    if let Some(label) = &args.flame {
+        let hit = scene
+            .agents
+            .values_mut()
+            .find(|a| a.label.as_ref() == label.as_str());
+        match hit {
+            Some(a) => {
+                a.model = Some("claude-fable-5".into());
+                a.effort = Some(pixtuoid_core::state::EffortObservation::new(
+                    "ultra".into(),
+                    now,
+                ));
+            }
+            None => {
+                let labels: Vec<_> = scene.agents.values().map(|a| a.label.to_string()).collect();
+                anyhow::bail!("--flame {label:?} not found in scene; labels: {labels:?}");
+            }
+        }
+    }
     if let Some(state) = args.openclaw.as_deref() {
         inject_openclaw_presence(&mut scene, state, now)?;
     }
