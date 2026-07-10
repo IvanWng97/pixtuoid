@@ -33,8 +33,8 @@ import { asset, DIM_RESTING } from '../consts';
        The canvas renders a ~180px buffer that CSS upscales with
        image-rendering: pixelated, so baked AA text would nearest-neighbor blow
        up blocky. Instead the engine exports the name-badge labels + neon
-       wall-board as a model (Office.overlay_json) and these DOM spans (JetBrains
-       Mono, var(--font-mono)) are positioned over the canvas at DISPLAY
+       wall-board as a model (Office.overlay_json) and these DOM spans (Monaspace
+       Neon, var(--font-mono)) are positioned over the canvas at DISPLAY
        resolution via the object-fit:cover mapping — sharp at any zoom. Hidden
        until the office rolls in (is-on), and entirely off under reduced motion
        (the still poster shows, no live office to caption). */
@@ -161,7 +161,7 @@ import { asset, DIM_RESTING } from '../consts';
     top: 0;
     white-space: nowrap;
     font-size: var(--ov-label-px);
-    font-weight: 500;
+    font-weight: 600;
     line-height: 1;
     letter-spacing: -0.01em;
     text-shadow:
@@ -408,7 +408,7 @@ import { asset, DIM_RESTING } from '../consts';
     }
 
     // ── The AA caption overlay ─────────────────────────────────────────────
-    // Crisp DOM text (JetBrains Mono) laid over the pixel canvas: the engine
+    // Crisp DOM text (Monaspace Neon) laid over the pixel canvas: the engine
     // exports name badges + the neon board as a model (Office.overlay_json), and
     // these pooled spans are positioned at DISPLAY resolution via the canvas's
     // object-fit:cover geometry — sharp at any zoom, where baked AA text would

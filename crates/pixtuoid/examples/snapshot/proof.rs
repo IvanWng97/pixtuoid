@@ -1,6 +1,6 @@
 //! `--proof`: the §3 split-screen causal-proof renderer. ONE committed CC session
 //! fixture drives BOTH sides of every frame: the left panel types the session
-//! (terminal chrome, an anti-aliased JetBrains Mono face — see `fonts/`), the
+//! (terminal chrome, an anti-aliased Monaspace Neon face — see `fonts/`), the
 //! right side is the REAL draw_scene pass replaying the SAME decoded AgentEvent
 //! stream through the real Reducer — the two sides structurally cannot desync.
 //! The coral office annotations + connector dot render in the SAME AA face as
@@ -50,7 +50,7 @@ const PREAMBLE_MS: u64 = 6000; // "$ claude" + session start precede the first f
 // affected, low enough to meaningfully shorten the one outlier.
 const ANNOTATION_MAX_HOLD_MS: u64 = 4200;
 
-// the PANEL's own text (Font C, user-picked): anti-aliased JetBrains Mono
+// the PANEL's own text (Font C, user-picked): anti-aliased Monaspace Neon
 // (OFL 1.1, `fonts/`) — the title, the typed body lines, and the coda strip.
 // Sizes target the retired 8×8 font's 16px line metrics so LINE_H/wrap math
 // stays proportioned; a pure-Rust rasterizer (ab_glyph) composites its
@@ -133,7 +133,7 @@ fn wrap_text(text: &str, max_width: i32, width_fn: impl Fn(&str) -> i32) -> Vec<
 }
 
 /// Sum of the AA font's per-glyph pixel-scaled advances — `wrap_text`'s width
-/// function for the panel/coda (both AA now). JetBrains Mono is monospace, but
+/// function for the panel/coda (both AA now). Monaspace Neon is monospace, but
 /// summing real advances (rather than `chars * one_advance`) stays correct
 /// even for a future proportional face.
 fn aa_text_width_at(s: &str, px: f32) -> i32 {

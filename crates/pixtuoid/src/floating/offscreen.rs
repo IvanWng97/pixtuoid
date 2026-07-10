@@ -243,8 +243,8 @@ fn draw_badge_text(
 
 /// Paint name badges into the upscaled `u32` surface (`0x00RRGGBB`). Each label's `anchor_px`
 /// is office-buffer space → multiply by `scale` for screen space; the badge is centered
-/// horizontally over the anchor and sits just above the head. Crisp anti-aliased JetBrains
-/// Mono (drawn at native surface res, not upscaled) keeps it a sharp caption over the chunky
+/// horizontally over the anchor and sits just above the head. Crisp anti-aliased Monaspace
+/// Neon (drawn at native surface res, not upscaled) keeps it a sharp caption over the chunky
 /// sprites. Shared by the live window (`window::redraw`) and the `floating_snapshot` verify
 /// example, so both blit identically.
 pub fn paint_labels_into_surface(

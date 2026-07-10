@@ -2,7 +2,7 @@
    pixtuoid — "Cozy Terminal" skin
    Claude warmth (paper #faf9f5 · ink #141413 · coral #d97757) kept as the base,
    pushed toward terminal/pixel character:
-   Display: Jersey 10  ·  UI/code: JetBrains Mono  ·  Body: Lora
+   Display: Jersey 10  ·  UI/code: Monaspace Neon  ·  Body: Lora
    coral→amber accent gradient · blinking cursor · ASCII dividers · CRT scanlines
    ============================================================ */
 
@@ -78,7 +78,7 @@
      font-display:swap on the text-heavy docs pages is shift-free (was ~0.12 CLS
      from the Lora swap reflowing .prose). */
   --font-body: 'Lora', 'Lora Fallback', Georgia, 'Times New Roman', serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-mono: 'Monaspace Neon', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
   /* Scale */
   --maxw: 1120px;

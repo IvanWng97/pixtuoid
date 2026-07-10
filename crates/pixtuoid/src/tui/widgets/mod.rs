@@ -110,7 +110,9 @@ impl StateKind {
 
     /// A distinct geometric glyph per state — all East-Asian *ambiguous* width
     /// (1 cell in a non-CJK terminal): `●` active, `◐` waiting, `○` idle, `◌`
-    /// exiting.
+    /// exiting. The fill gradient IS the language: full=working, half=paused
+    /// on you, empty=idle, dotted=leaving. (Every glyph is Monaspace-Neon-native
+    /// — the single-face vocabulary gate in `aa_text`.)
     pub(crate) fn glyph(self) -> char {
         match self {
             StateKind::Active => '\u{25cf}',

@@ -50,7 +50,7 @@ fn pinned_agent_renders_stats_tooltip() {
     let after = frame_text(r.frame_buffer());
     assert!(
         after.contains("calls"),
-        "pinned tooltip should show the agent ⏱ stat line"
+        "pinned tooltip should show the agent duration·calls stat line"
     );
 }
 

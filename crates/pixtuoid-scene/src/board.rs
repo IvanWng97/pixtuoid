@@ -192,6 +192,10 @@ pub fn board_brand() -> String {
 /// TUI's `star_hit_rect` measures, so the clickable target can't drift.
 pub const BOARD_STAR: &str = "\u{2605} Star";
 
+/// The gateway chip's GLYPH — one definition for the footer chip AND the board
+/// context row (`⬢gw ok`), so the two surfaces can't drift.
+pub const GATEWAY_GLYPH: char = '\u{2b22}';
+
 /// The `⬢gw` chip's terse liveness word.
 pub fn gateway_label(state: DaemonState) -> &'static str {
     match state {
@@ -286,7 +290,7 @@ pub fn build_board(
     }
     if let Some(state) = gateway {
         context.push(BoardSegment::new(
-            format!("  \u{2b22}gw {}", gateway_label(state)),
+            format!("  {GATEWAY_GLYPH}gw {}", gateway_label(state)),
             gateway_tone(state),
         ));
     }

@@ -192,7 +192,7 @@ impl FloatingApp {
             }
         }
         // Name badges + the neon wall board, drawn POST-upscale at native surface res
-        // (crisp anti-aliased JetBrains Mono) using the same layout/route state the office
+        // (crisp anti-aliased Monaspace Neon) using the same layout/route state the office
         // pass just used. Badges are a fixed caption height; the board scales with the panel.
         let labels = self.renderer.labels(&scene, SystemTime::now());
         super::offscreen::paint_labels_into_surface(

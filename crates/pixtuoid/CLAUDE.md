@@ -166,18 +166,27 @@ src/
 ├── aa_text.rs          THE anti-aliased text rasterizer — every rasterized text surface rides it: the floating
 │                       window's badges/board AND the snapshot example's terminal-cell text + --proof panel
 │                       (the old 8×8 `pixtuoid_scene::font` + its font8x8 dep were DELETED — no bitmap stand-in
-│                       anywhere). TWO faces behind one seam: `fonts/JetBrainsMono-Regular.ttf` primary +
-│                       `fonts/PixtuoidSymbols.ttf` fallback (a renamed JuliaMono symbol-block subset — JBM has
-│                       NO glyph for ★ ◐ ⬢ ▮ ▯ ⏱ ↳, and neither does JetBrainsMono NERD Font, whose patches all
-│                       live in the Private Use Area; a real terminal shows those via system-font fallback,
-│                       which the second face replicates). Exposes has_glyph / text_width / line_height /
-│                       draw_text_at(s, x, top_y, px, put(x,y,coverage)) — a surface-agnostic coverage callback
-│                       the caller blends (offscreen.rs `blend_xrgb`, snapshot `blend_px`/`mix_rgb`); per-char
-│                       face resolution, one shared baseline (the primary's ascent). Binary-only (ab_glyph is a
-│                       runtime dep of THIS crate, not pixtuoid-scene — the engine stays font-impl-free); the
-│                       wasm/site painter does its own AA via DOM spans, not this.
-├── fonts/              JetBrainsMono-Regular.ttf (OFL.txt) + PixtuoidSymbols.ttf (OFL-JuliaMono.txt; RFN-renamed
-│                       JuliaMono subset — regen instructions in fonts/README.md)
+│                       anywhere). ONE face BY DESIGN: **Monaspace Neon** (GitHub Next, OFL) — the brand mono
+│                       across the whole project (the site's `--font-mono` is the same family via
+│                       @fontsource/monaspace-neon). Chosen over JetBrains Mono because it natively covers the
+│                       office's FULL symbol vocabulary `★ ◐ ⬢ ▮ ▯ ↳ ◷ ▤` — JBM lacks all of those (verified;
+│                       JetBrainsMono NERD Font does NOT help: its patches are all Private Use Area, a real
+│                       terminal shows such symbols via system-font fallback), which had forced an interim
+│                       JuliaMono-subset fallback face, then an interim JBM-native vocabulary (`✶ ◔ ◆ █ ░ └`)
+│                       — both retired the same day Monaspace landed. `◷`/`▤` replaced the emoji-only `⏱`/`📁`
+│                       tooltip prefixes. The `office_symbol_vocabulary_is_fully_covered` test is the gate: a
+│                       NEW render glyph must be Monaspace-covered or the vocabulary changes — never a second
+│                       face. Exposes has_glyph / text_width / line_height / blend_channel (the ONE
+│                       coverage-blend curve all three surfaces wrap) / draw_text_at(s, x, top_y, px,
+│                       put(x,y,coverage)) — a surface-agnostic coverage callback the caller blends
+│                       (offscreen.rs `blend_xrgb`, snapshot `blend_px`/`mix_rgb`). Binary-only (ab_glyph is a
+│                       runtime dep of THIS crate, not pixtuoid-scene — the engine stays font-impl-free; the
+│                       OTF/CFF outlines rasterize fine through ab_glyph). The wasm/site painter does its own
+│                       AA via DOM spans, not this. Snapshot cell text renders at CELL_FONT_PX=14.7 (Monaspace
+│                       advance 7.96 ≤ the 8px cell; line_height rounds to the 16px cell — test-pinned).
+├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM
+│                       from githubnext/monaspace v1.400 static — unmodified, so the OFL Reserved-Font-Name
+│                       clause is never triggered)
 ├── install/            multi-target (Claude + Codex + Reasonix + CodeWhale + opencode + Cursor + Hermes + OpenClaw) hook install via the `Target` registry:
 │                       mod.rs (install_target/uninstall_target = structured core → InstallReport/UninstallReport,
 │                         driven SOLELY by the in-TUI Sources panel's connect/disconnect (no CLI orchestration —
@@ -246,7 +255,7 @@ src/
 │                       render_floor seam (#423; eviction is structural — render() runs it); moved here from tui/ as it's floating-only; the testable unit;
 │                       also OfficeRenderer::{labels + paint_labels_into_surface, board + paint_wall_board_into_surface}
 │                       — agent name badges from the shared pixtuoid_scene::overlay model AND the neon wall board
-│                       from pixtuoid_scene::board, both rendered as anti-aliased JetBrains Mono via crate::aa_text
+│                       from pixtuoid_scene::board, both rendered as anti-aliased Monaspace Neon via crate::aa_text
 │                       (NOT the old 8px pixtuoid_scene::font — that pixelated), blitted at NATIVE surface res
 │                       POST-upscale with a near-black drop-shadow so the crisp caption reads over the chunky office),
 │                       window.rs (FloatingApp ApplicationHandler: renders the office at a DOWNSCALED buffer

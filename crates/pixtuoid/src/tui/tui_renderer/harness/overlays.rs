@@ -371,7 +371,7 @@ fn pinned_active_agent_tooltip_shows_state_and_detail() {
     // remaining args (`src/lib.rs`) the indented detail line below.
     assert!(text.contains("Edit"), "tool name on the state line: {text}");
     assert!(text.contains("src/lib.rs"), "detail line args: {text}");
-    // Active ≥5s folds a numeric meter into the ⏱ line (no `--%` anymore). Teeth
+    // Active ≥5s folds a numeric meter into the stats line (no `--%` anymore). Teeth
     // on BOTH computations: 120s/600s ⇒ 20%, and 20% ⇒ 1 filled + 4 empty cells
     // (`filled = (20*5).div_ceil(100).min(5) = 1`).
     assert!(text.contains("20%"), "exact active percent: {text}");

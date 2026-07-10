@@ -2,15 +2,16 @@
 // Self-hosted fonts (@fontsource): bundled into the build + served same-origin,
 // so no Google Fonts round-trip on load — faster LCP, a CSP with no external
 // font origins, no third-party tracking, and they actually load behind the GFW.
-// Family names ('Jersey 10' / 'JetBrains Mono' / 'Lora') match global.css as-is.
+// Family names ('Jersey 10' / 'Monaspace Neon' / 'Lora') match global.css as-is.
 import '@fontsource/jersey-10/400.css';
 // The hero/statement display face, preloaded (below): resolve the LATIN subset
 // woff2 through Vite (?url) so the <link> carries the same hashed asset URL the
 // @fontsource CSS resolves to — rebuild-proof, no hardcoded hash.
 import jerseyLatinWoff2 from '@fontsource/jersey-10/files/jersey-10-latin-400-normal.woff2?url';
-import '@fontsource/jetbrains-mono/400.css';
-import '@fontsource/jetbrains-mono/500.css';
-import '@fontsource/jetbrains-mono/700.css';
+import '@fontsource/monaspace-neon/400.css';
+import '@fontsource/monaspace-neon/500.css';
+import '@fontsource/monaspace-neon/600.css';
+import '@fontsource/monaspace-neon/700.css';
 import '@fontsource/lora/400.css';
 // 600 (SemiBold), not 500: the run-in step titles / docs links / tools CLI-name
 // column declare `font-weight: 600` on Lora — with only 400/500 loaded the 600

@@ -315,7 +315,7 @@ test('crisp AA captions overlay the live office (name badges + neon board)', asy
   // The office canvas is a ~180px buffer CSS-upscaled with image-rendering:
   // pixelated, so text baked into it pixelates. Instead the engine exports the
   // name badges + neon wall-board (Office.overlay_json) and OfficeBackdrop lays
-  // crisp JetBrains Mono DOM spans over the canvas at display resolution. Pin
+  // crisp Monaspace Neon DOM spans over the canvas at display resolution. Pin
   // that the layer comes up, carries real text, and is actually the mono face.
   const errors = watchErrors(page);
   await gotoLive(page);
@@ -323,16 +323,16 @@ test('crisp AA captions overlay the live office (name badges + neon board)', asy
   // the FINAL sprite positions), so wait on is-on — not merely is-live.
   await expect(page.locator('#office-overlay.is-on')).toBeAttached({ timeout: 10_000 });
   // At least one name badge, laid over a seated/walking-in agent, non-empty and
-  // in JetBrains Mono (10s covers the cast's staggered walk-in at loop start).
+  // in Monaspace Neon (10s covers the cast's staggered walk-in at loop start).
   const label = page.locator('#office-overlay .ov-label').first();
   await expect(label).toHaveText(/\S/, { timeout: 10_000 });
   const labelFont = await label.evaluate((el) => getComputedStyle(el).fontFamily);
-  expect(labelFont).toContain('JetBrains Mono');
+  expect(labelFont).toContain('Monaspace Neon');
   // The neon wall board renders its brand row (● / ★) from the same model.
   const brand = page.locator('#office-overlay .ov-board .ov-brow--top span').first();
   await expect(brand).toHaveText(/\S/, { timeout: 10_000 });
   const brandFont = await brand.evaluate((el) => getComputedStyle(el).fontFamily);
-  expect(brandFont).toContain('JetBrains Mono');
+  expect(brandFont).toContain('Monaspace Neon');
   expect(errors()).toEqual([]);
 });
 

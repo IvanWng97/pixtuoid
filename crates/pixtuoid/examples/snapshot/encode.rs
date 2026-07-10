@@ -286,7 +286,7 @@ pub(crate) fn save_backend_as_png(
 
             // For the half-block character "▀", the cell is split: top half = fg, bottom half = bg.
             // Other characters are rasterized as real anti-aliased text via `pixtuoid::aa_text`
-            // (JetBrains Mono + symbol fallback — what a real terminal shows, not a bitmap
+            // (Monaspace Neon — what a real terminal shows, not a bitmap
             // stand-in); a glyph neither face covers falls back to a centered fg block.
             let x0 = x as u32 * CELL_W;
             let y0 = y as u32 * CELL_H;
@@ -533,12 +533,12 @@ fn fill_rect(img: &mut RgbImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u
     fill_rect_px(img, x, y, w, h, color);
 }
 
-// Size chosen so the face fits the cell: line_height(16) == CELL_H and the JBM
-// advance (7px) ≤ CELL_W — both pinned by `cell_font_px_fits_the_cell` below.
-const CELL_FONT_PX: f32 = 16.0;
+// Size chosen so the face fits the cell: line_height(14.7) rounds to CELL_H and
+// the Monaspace advance (7.96px) ≤ CELL_W — both pinned by `cell_font_px_fits_the_cell`.
+const CELL_FONT_PX: f32 = 14.7;
 
 /// Anti-aliased cell text at the terminal grid: one char per 8×16 cell, drawn
-/// in `pixtuoid::aa_text` (JetBrains Mono + symbol fallback) at CELL_FONT_PX,
+/// in `pixtuoid::aa_text` (Monaspace Neon) at CELL_FONT_PX,
 /// horizontally centered on the cell's advance and CLIPPED to the cell rect so
 /// a wide fallback glyph can't bleed into a neighbor. Per-cell origins (never a
 /// running cursor) keep the raster locked to the terminal grid.
@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn draw_cell_text_stays_inside_its_cell_and_lights_ink() {
         // Every emitted pixel must land INSIDE the 8×16 cell at the given origin
-        // (the clip is what keeps a wide fallback glyph — ★ is wider than the
+        // (the clip is what keeps a wide glyph — ★ ink can exceed the
         // JBM advance — from bleeding into the neighbor cell), with coverage in
         // [0,1], and a real glyph must light SOME ink.
         for (ch, ox, oy) in [('M', 0u32, 0u32), ('g', 8, 16), ('\u{2605}', 24, 32)] {

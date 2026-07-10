@@ -146,7 +146,7 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   `Office.overlay_json()` (the SAME `pixtuoid_scene::overlay` + `pixtuoid_scene::board`
   the TUI/floating painters use) → `{ labels:[{x,y,text,color}], board:{rect,brand,
   star,mood,context} }`, coords in OFFICE-BUFFER px, colors resolved against the
-  current theme. `OfficeBackdrop.astro` lays pooled JetBrains Mono (`var(--font-mono)`)
+  current theme. `OfficeBackdrop.astro` lays pooled Monaspace Neon (`var(--font-mono)`)
   DOM `<span>`s over the canvas at DISPLAY resolution, positioned by the canvas's
   `object-fit: cover` geometry (`scale = max(disp/buf)`, buffer centered — the
   same math the cover-crop uses), so they stay sharp at any zoom. Load-bearing:

@@ -93,7 +93,7 @@ gates can't see. CI runs it in `site.yml` after the build step.
 
 ## Design
 
-- **Layout/type** — "Cozy Terminal": Jersey 10 (pixel display) · JetBrains Mono
+- **Layout/type** — "Cozy Terminal": Jersey 10 (pixel display) · Monaspace Neon
   (UI/code) · Lora (body); ASCII dividers, blinking cursor, CRT scanlines.
 - **Palette** — warm "Coworking" (cream lifted from the office carpet + Claude
   coral). Day = cream, night = after-hours. Until the visitor picks a theme the

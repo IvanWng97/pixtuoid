@@ -111,7 +111,7 @@ fn short_cwd(cwd: &std::path::Path) -> String {
 /// pinned. One coherent card: `[xx]` source badge + label + `·id4` (L1), a dim
 /// separator, the `{glyph} {Word}` state line (+ the current tool in its glow
 /// hue), the detail / waiting-reason, the `↳ under {parent}` lineage (subagents
-/// only), the cwd, and the `⏱` stats (with the active-% meter folded in). Uses
+/// only), the cwd, and the `◷` stats (with the active-% meter folded in). Uses
 /// the SHARED vocabulary (`StateKind`) + badge (`source_badge_span`) so it can't
 /// drift from the footer/board/dashboard. Dim rows use `tooltip_dim`, NOT the
 /// live `label_exiting` (C6). Positioned to avoid the cursor + screen edges.
@@ -199,7 +199,7 @@ pub(crate) fn paint_hover_tooltip(
         )));
     }
     body.push(Line::from(Span::styled(
-        format!("\u{1f4c1} {}", short_cwd(&agent.cwd)),
+        format!("\u{25a4} {}", short_cwd(&agent.cwd)),
         dim,
     )));
 
@@ -208,11 +208,11 @@ pub(crate) fn paint_hover_tooltip(
         .unwrap_or_default()
         .as_secs();
     let mut stats = format!(
-        "\u{23f1} {} \u{b7} {} calls",
+        "\u{25f7} {} \u{b7} {} calls",
         compact_hms(session_secs),
         agent.tool_call_count
     );
-    // Active-% meter folded into the ⏱ line (height budget). Fresh agents show no
+    // Active-% meter folded into the stats line (height budget). Fresh agents show no
     // meter (the % is noise before ~5s of accounting); an exiting agent shows none
     // either (keyed off the exiting-first `kind`, matching the tool suppression).
     if matches!(kind, StateKind::Active) && session_secs >= 5 {
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn hover_tooltip_idle_shows_no_meter_and_casts_a_drop_shadow() {
         // An Idle agent's dossier carries NO active-% meter (the meter is folded
-        // into the ⏱ line for Active≥5s only). This is also the ONLY coverage for
+        // into the stats line for Active≥5s only). This is also the ONLY coverage for
         // `paint_hover_tooltip`'s backing: it routes through the shared
         // `paint_card_backing`, so a pre-filled bright office must come back
         // dimmed in the drop-shadow band (the other backing caller,

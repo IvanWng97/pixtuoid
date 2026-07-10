@@ -340,7 +340,11 @@ fn status_segments(
         if let Some(g) = stats.gateway {
             segs.push((" · ".to_string(), SegRole::Neutral));
             segs.push((
-                format!("\u{2b22}gw {}", pixtuoid_scene::board::gateway_label(g)),
+                format!(
+                    "{}gw {}",
+                    pixtuoid_scene::board::GATEWAY_GLYPH,
+                    pixtuoid_scene::board::gateway_label(g)
+                ),
                 SegRole::Gateway(g),
             ));
         }
