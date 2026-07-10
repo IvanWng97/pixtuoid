@@ -133,7 +133,7 @@ The process layer's collective form is **a path every change must walk**,
 each gate a versioned file with an automatic reader:
 
 | gate | artifact | automatic reader |
-|---|---|
+|---|---|---|
 | plan | [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) — 7 sections every non-trivial plan must answer (data-shape identity, named consumers, sibling paths, untrusted-input boundaries, tests-first + negative branches, sharp-edge + ledger sweep, blocking verification) | routed from the workspace context file; the plan lands in the PR body |
 | implement | the 6 recurring pitfalls + the PR template checkbox pointing at them | the template is forced on every author |
 | review | [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md) — two differentiated lenses, five hard requirements, escalation triggers, sharp-edge routing | copied verbatim into reviewer prompts; the bot loads its own rules file |
