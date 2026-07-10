@@ -688,9 +688,14 @@ impl Reducer {
                 // Pure observation cache — updates an EXISTING slot only (a
                 // model line must never register a session; unknown id =
                 // no-op). Legitimate on BOTH transports: model/effort are
-                // wire data, not liveness (the watcher seeds at EOF, so a
-                // historical file can't replay stale values into a live
-                // slot). `model` writes only on change (Arc churn); `effort`
+                // wire data, not liveness. Known bounded residual: the
+                // watcher reads RECENT/LIVE-probed files from the TOP, so a
+                // first-sight replay can stamp a HISTORICAL effort marker
+                // with apply-time `now` — a session that used max effort
+                // earlier (but no longer) flames for up to the scene's
+                // EFFORT_TTL (10 min) after attach, then self-heals. Purely
+                // cosmetic; model is immune (last-seen-wins, no freshness).
+                // `model` writes only on change (Arc churn); `effort`
                 // re-stamps `now` per sighting — the freshness the scene
                 // layer's TTL reads.
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {

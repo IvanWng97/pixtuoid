@@ -361,14 +361,11 @@ pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
     }
 }
 
-/// Burn-tier ember hair (`BurnTier::Premium`+) — the flame palette's DEEP,
-/// deliberately saturated past every natural `HAIR_PRESETS` entry so a
-/// premium head never reads as "just auburn".
-const EMBER_HAIR: Rgb = Rgb {
-    r: 0xc2,
-    g: 0x28,
-    b: 0x12,
-};
+/// Burn-tier ember hair (`BurnTier::Premium`+) — THE flame gradient's deep
+/// base (one shared const, so a gradient tweak can't desync hair from
+/// crown), deliberately saturated past every natural `HAIR_PRESETS` entry so
+/// a premium head never reads as "just auburn".
+const EMBER_HAIR: Rgb = super::effects::FLAME_DEEP;
 
 pub(super) fn agent_palette(
     base: &Palette,

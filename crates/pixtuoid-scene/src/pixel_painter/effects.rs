@@ -208,18 +208,23 @@ pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &T
 /// the hair top so the flame never collides with the name-badge row; the
 /// asymmetric two-frame flicker is what reads as fire, not a hat. INTEGER
 /// phase division before any float (the epoch-ms-as-f32 freeze sharp edge).
+/// The flame gradient's deep-ember base — ONE literal shared with the
+/// Premium ember-hair recolor (`palette::agent_palette`), so a gradient
+/// tweak can't desync the hair from the crown.
+pub(super) const FLAME_DEEP: Rgb = Rgb {
+    r: 0xc2,
+    g: 0x28,
+    b: 0x12,
+};
+
 pub(super) fn paint_flame_crown(
     buf: &mut RgbBuffer,
     anchor: Point,
     sprite_w: u16,
     now: SystemTime,
 ) {
-    // Ratified flame palette (deep ember → orange → yellow tip → hot core).
-    const DEEP: Rgb = Rgb {
-        r: 0xc2,
-        g: 0x28,
-        b: 0x12,
-    };
+    // Ratified flame palette (deep ember → orange → yellow tip → hot core);
+    // the deep base is the shared FLAME_DEEP (also the Premium hair recolor).
     const MID: Rgb = Rgb {
         r: 0xe8,
         g: 0x64,
@@ -245,7 +250,7 @@ pub(super) fn paint_flame_crown(
         // crown row over the hair top
         (-2, 0, MID),
         (-1, 0, MID),
-        (0, 0, DEEP),
+        (0, 0, FLAME_DEEP),
         (1, 0, MID),
         // first rise
         (-2, 1, MID),
@@ -258,7 +263,7 @@ pub(super) fn paint_flame_crown(
     ];
     let frame_b: &[(i32, u16, Rgb)] = &[
         (-2, 0, MID),
-        (-1, 0, DEEP),
+        (-1, 0, FLAME_DEEP),
         (0, 0, MID),
         (1, 0, MID),
         (-2, 1, TIP),
