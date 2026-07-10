@@ -53,6 +53,16 @@ fn face_for(ch: char) -> &'static FontRef<'static> {
     }
 }
 
+/// Linear per-channel coverage blend of `fg` over `bg` — THE one blend curve
+/// every AA-text surface composites with (snapshot PNG `mix_rgb`, proof-panel
+/// `blend_px`, floating `blend_xrgb` all wrap this per their pixel type), so a
+/// future curve change (e.g. gamma-correct blending) lands once, never drifts.
+/// `cov` is clamped here so callers don't each re-clamp.
+pub fn blend_channel(bg: u8, fg: u8, cov: f32) -> u8 {
+    let a = cov.clamp(0.0, 1.0);
+    (bg as f32 + (fg as f32 - bg as f32) * a).round() as u8
+}
+
 /// Whether EITHER bundled face covers `ch` with a real glyph (not `.notdef`).
 /// Callers with a non-text fallback (the snapshot cell rasterizer's centered
 /// block) gate on this so an uncovered decorative symbol renders as the

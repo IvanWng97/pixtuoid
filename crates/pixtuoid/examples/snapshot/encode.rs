@@ -563,9 +563,10 @@ fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)
     );
 }
 
-/// Linear per-channel mix of `fg` over `bg` by AA coverage.
+/// Per-channel mix of `fg` over `bg` by AA coverage — wraps the ONE blend
+/// curve (`aa_text::blend_channel`) for the `ImgRgb` pixel type.
 fn mix_rgb(bg: ImgRgb<u8>, fg: ImgRgb<u8>, cov: f32) -> ImgRgb<u8> {
-    let mix = |b: u8, f: u8| (b as f32 + (f as f32 - b as f32) * cov).round() as u8;
+    let mix = |b: u8, f: u8| pixtuoid::aa_text::blend_channel(b, f, cov);
     ImgRgb([mix(bg[0], fg[0]), mix(bg[1], fg[1]), mix(bg[2], fg[2])])
 }
 

@@ -213,13 +213,11 @@ fn blend_xrgb(
     }
     let idx = y as usize * win_w + x as usize;
     let bg = sb[idx];
-    let a = coverage.clamp(0.0, 1.0);
-    let mix = |fg: u32, bg: u32| ((fg as f32) * a + (bg as f32) * (1.0 - a)).round() as u32;
-    let chan = |v: u32, sh: u32| (v >> sh) & 0xff;
-    let r = mix(chan(color, 16), chan(bg, 16));
-    let g = mix(chan(color, 8), chan(bg, 8));
-    let b = mix(chan(color, 0), chan(bg, 0));
-    sb[idx] = (r << 16) | (g << 8) | b;
+    // the ONE blend curve — see aa_text::blend_channel
+    let chan = |v: u32, sh: u32| ((v >> sh) & 0xff) as u8;
+    let mix =
+        |sh: u32| crate::aa_text::blend_channel(chan(bg, sh), chan(color, sh), coverage) as u32;
+    sb[idx] = (mix(16) << 16) | (mix(8) << 8) | mix(0);
 }
 
 /// Rasterize `text` at `(x, top_y)` in the shared AA face, `color` over a 1px

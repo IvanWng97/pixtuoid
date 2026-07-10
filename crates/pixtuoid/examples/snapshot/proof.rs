@@ -167,8 +167,8 @@ fn blend_px(img: &mut RgbaImage, x: i32, y: i32, color: Rgba<u8>, coverage: f32)
         return;
     }
     let bg = *img.get_pixel(x as u32, y as u32);
-    let a = coverage.clamp(0.0, 1.0);
-    let mix = |fg: u8, bg: u8| (fg as f32 * a + bg as f32 * (1.0 - a)).round() as u8;
+    // the ONE blend curve — see aa_text::blend_channel
+    let mix = |fg: u8, bg: u8| pixtuoid::aa_text::blend_channel(bg, fg, coverage);
     img.put_pixel(
         x as u32,
         y as u32,
