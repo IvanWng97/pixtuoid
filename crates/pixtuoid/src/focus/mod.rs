@@ -264,3 +264,24 @@ mod tests {
         assert!(!called, "silent no-op without a pid");
     }
 }
+
+/// Live dogfood (manual, `cargo test -p pixtuoid --lib focus -- --ignored`):
+/// walks THIS test process's own ancestor chain with the real OS table and
+/// activates the found terminal app — the exact path a sprite click runs.
+/// Ignored in CI: needs a real GUI session, and it yanks a window forward.
+#[cfg(all(test, target_os = "macos"))]
+mod live_dogfood {
+    use super::*;
+
+    #[test]
+    #[ignore = "live: activates the real terminal hosting this test run"]
+    fn walk_own_chain_and_activate_the_terminal() {
+        let me = std::process::id() as i32;
+        let app = ancestor_walk(&OsProcessTable, me)
+            .expect("a GUI ancestor (terminal app) above this test process");
+        assert!(
+            activate_os(app),
+            "macOS accepted the activation for pid {app}"
+        );
+    }
+}
