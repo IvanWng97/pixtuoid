@@ -302,9 +302,13 @@ async fn omp_source_run_links_a_nested_subagent_to_its_root() {
 
     // Collect until the CHILD's parented SessionStart shows (root + child both
     // also arrive via first-sight; only the header-decoded child carries the
-    // parent link).
-    let root_id = AgentId::from_parts("omp", ROOT_STEM);
-    let child_id = AgentId::from_parts("omp", &format!("{ROOT_STEM}/Alpha"));
+    // parent link). Expected ids go through the SAME deriver the watcher and
+    // decoder share — a raw-case literal here passes on Unix and fails ONLY
+    // on windows-test, where the id-space is normalize_path_key-folded (the
+    // path-fold expectation-literal class).
+    use pixtuoid_core::source::omp::omp_id_from_path;
+    let root_id = AgentId::from_parts("omp", &omp_id_from_path(&root_transcript));
+    let child_id = AgentId::from_parts("omp", &omp_id_from_path(&child_transcript));
     let mut child_linked = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline && !child_linked {
