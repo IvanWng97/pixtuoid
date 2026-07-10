@@ -20,6 +20,13 @@ pub use native::{live_cc_session_ids, ClaudeCodeSource};
 
 pub const SOURCE_NAME: &str = "claude-code";
 
+/// The label the attachment decoder synthesizes for the `ultra_effort_exit`
+/// marker — deliberately NOT a real effort word (last-seen-wins kills the
+/// flame instantly), and NOT for display: `pixtuoid_scene::burn::fresh_effort`
+/// suppresses it so the internal sentinel never reaches the dossier. ONE
+/// shared const so the synthesize side and the suppress side can't drift.
+pub const ULTRA_EXIT_LABEL: &str = "ultra_exit";
+
 /// CC's session/agent id = the transcript filename stem, which is
 /// cwd-independent (the cwd-derived project-dir is the *parent* dir, not the
 /// stem): `<uuid>.jsonl` → `<uuid>` for a root, `agent-<id>.jsonl` →
@@ -201,7 +208,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 // that is NOT in the scene's MAX_EFFORTS set, so
                 // last-seen-wins drops the boost IMMEDIATELY instead of
                 // waiting out the freshness TTL.
-                "ultra_effort_exit" => Some("ultra_exit"),
+                "ultra_effort_exit" => Some(ULTRA_EXIT_LABEL),
                 _ => None,
             };
             if let Some(effort) = effort {

@@ -1439,16 +1439,9 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     let has = |buf: &RgbBuffer, c: Rgb| {
         (0..buf.height()).any(|y| (0..buf.width()).any(|x| buf.get(x, y) == c))
     };
-    const EMBER: Rgb = Rgb {
-        r: 0xc2,
-        g: 0x28,
-        b: 0x12,
-    };
-    const TIP: Rgb = Rgb {
-        r: 0xff,
-        g: 0xd2,
-        b: 0x4a,
-    };
+    // The painter's own constants — not re-hardcoded copies.
+    const EMBER: Rgb = super::effects::FLAME_DEEP;
+    const TIP: Rgb = super::effects::FLAME_TIP;
 
     // Normal (no model): natural hair, no flame colors anywhere.
     let plain = render(&slot);

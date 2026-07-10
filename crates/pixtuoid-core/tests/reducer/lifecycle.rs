@@ -1321,25 +1321,28 @@ fn model_info_caches_model_and_effort_on_an_existing_slot() {
 
 #[test]
 fn model_info_for_an_unknown_agent_never_registers() {
-    // A transcript model line must never mint a slot (unlike hook Identity,
-    // which is proof of life).
+    // A model line must never mint a slot (unlike hook Identity, which is
+    // proof of life) — on EITHER transport: the hook side additionally pins
+    // that ModelInfo stays out of synthesize_hook_registration's match set.
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let ghost = AgentId::from_parts("claude-code", "ses_ghost");
-    r.apply(
-        &mut scene,
-        AgentEvent::ModelInfo {
-            agent_id: ghost,
-            model: Some("claude-fable-5".into()),
-            effort: Some("ultra".into()),
-        },
-        SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000),
-        Transport::Jsonl,
-    );
-    assert!(
-        scene.agents.is_empty(),
-        "ModelInfo must not synthesize a slot"
-    );
+    for transport in [Transport::Jsonl, Transport::Hook] {
+        r.apply(
+            &mut scene,
+            AgentEvent::ModelInfo {
+                agent_id: ghost,
+                model: Some("claude-fable-5".into()),
+                effort: Some("ultra".into()),
+            },
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000),
+            transport,
+        );
+        assert!(
+            scene.agents.is_empty(),
+            "ModelInfo must not synthesize a slot ({transport:?})"
+        );
+    }
 }
 
 #[test]

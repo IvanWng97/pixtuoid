@@ -720,6 +720,29 @@ def upstream_codewhale_hooks(text: str) -> set[str] | None:
     return snake or None
 
 
+def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
+    # Both marker directions over an already-fetched hooks.md text, as a pure
+    # function so the selftest can exercise the DETECTION (not just the
+    # parsers): depended markers alarm on VANISH, surface markers on
+    # APPEARANCE.
+    review: list[str] = []
+    for marker, what in sorted(CC_DEPENDED_DOC_MARKERS.items()):
+        if marker not in hooks_doc:
+            review.append(
+                f"CC hooks.md no longer mentions `{marker}` — {what} may have "
+                f"moved/renamed; re-verify the burn-tier hook decode."
+            )
+    for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
+        if marker in hooks_doc:
+            review.append(
+                f"CC hooks doc now mentions `{marker}` — {what} may have "
+                f"landed upstream. Adopt it (a durable end signal for the "
+                f"JSONL transport / the liveness-probe registry) and "
+                f"update this watch."
+            )
+    return review
+
+
 def run_checks(
     codex_ours: set[str] | None,
     codex_rollout: tuple[set[str], set[str]] | None,
@@ -1104,20 +1127,7 @@ def run_checks(
                         f"install/claude.rs EVENTS, or add it to "
                         f"CC_KNOWN_OMITTED)."
                     )
-        for marker, what in sorted(CC_DEPENDED_DOC_MARKERS.items()):
-            if marker not in hooks_doc:
-                review.append(
-                    f"CC hooks.md no longer mentions `{marker}` — {what} may have "
-                    f"moved/renamed; re-verify the burn-tier hook decode."
-                )
-        for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
-            if marker in hooks_doc:
-                review.append(
-                    f"CC hooks doc now mentions `{marker}` — {what} may have "
-                    f"landed upstream. Adopt it (a durable end signal for the "
-                    f"JSONL transport / the liveness-probe registry) and "
-                    f"update this watch."
-                )
+        review.extend(cc_doc_marker_findings(hooks_doc))
 
 
 

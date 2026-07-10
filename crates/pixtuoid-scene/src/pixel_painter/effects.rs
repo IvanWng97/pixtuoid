@@ -211,10 +211,18 @@ pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &T
 /// The flame gradient's deep-ember base — ONE literal shared with the
 /// Premium ember-hair recolor (`palette::agent_palette`), so a gradient
 /// tweak can't desync the hair from the crown.
-pub(super) const FLAME_DEEP: Rgb = Rgb {
+pub(crate) const FLAME_DEEP: Rgb = Rgb {
     r: 0xc2,
     g: 0x28,
     b: 0x12,
+};
+
+/// The flame gradient's yellow tip. `pub(crate)` alongside [`FLAME_DEEP`] so
+/// render tests assert the REAL painted colors instead of re-hardcoding them.
+pub(crate) const FLAME_TIP: Rgb = Rgb {
+    r: 0xff,
+    g: 0xd2,
+    b: 0x4a,
 };
 
 pub(super) fn paint_flame_crown(
@@ -230,11 +238,7 @@ pub(super) fn paint_flame_crown(
         g: 0x64,
         b: 0x1f,
     };
-    const TIP: Rgb = Rgb {
-        r: 0xff,
-        g: 0xd2,
-        b: 0x4a,
-    };
+    const TIP: Rgb = FLAME_TIP;
     const CORE: Rgb = Rgb {
         r: 0xff,
         g: 0xf3,

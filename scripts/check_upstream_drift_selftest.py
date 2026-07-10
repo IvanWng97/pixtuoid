@@ -9,6 +9,9 @@ the weekly job either alarms on junk or watches nothing). This pins:
   2. The `read_*_events` source parsers still find a non-empty, well-shaped set
      (catches "the regex broke" / "it grabbed the wrong block").
   3. The `upstream_*` parsers extract names from a representative snippet.
+  4. The CC doc-marker DETECTION (`cc_doc_marker_findings`) fires in BOTH
+     directions — depended markers on VANISH, surface markers on APPEARANCE
+     (the #541 burn-tier watches ship with teeth, not just parsers).
 
 Run: `python3 scripts/check_upstream_drift_selftest.py` (exit 0 = pass).
 No pytest dependency on purpose — the repo has no Python test harness.
@@ -211,11 +214,28 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     )
 
 
+def test_cc_doc_marker_detection_fires_both_directions() -> None:
+    # A doc carrying every depended marker and no surface marker is quiet.
+    quiet = "\n".join(d.CC_DEPENDED_DOC_MARKERS)
+    got = d.cc_doc_marker_findings(quiet)
+    check(got == [], f"quiet doc -> no findings: {got!r}")
+
+    # VANISH direction: drop the effort surface → exactly its finding.
+    missing = "\n".join(m for m in d.CC_DEPENDED_DOC_MARKERS if m != "CLAUDE_EFFORT")
+    got = d.cc_doc_marker_findings(missing)
+    check(len(got) == 1 and "CLAUDE_EFFORT" in got[0], f"vanish fires: {got!r}")
+
+    # APPEARANCE direction: an ultra marker shows up in the docs → its finding.
+    got = d.cc_doc_marker_findings(quiet + "\nultra_effort_exit\n")
+    check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
+
+
 def main() -> int:
     for t in (
         test_try_fetch_classifies_permanent_vs_transient,
         test_source_parsers_find_nonempty_well_shaped_sets,
         test_upstream_parsers_extract_from_a_snippet,
+        test_cc_doc_marker_detection_fires_both_directions,
     ):
         t()
     if FAILS:

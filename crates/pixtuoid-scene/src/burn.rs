@@ -3,7 +3,7 @@
 //! The model is the GATE, effort is the SPLIT (user-pinned 2026-07-10): only
 //! the [`TOP_MODELS`] ever color at all — at ordinary/unknown effort they get
 //! ember-red hair ([`BurnTier::Premium`]); with a FRESH max-class effort
-//! ([`MAX_EFFORTS`], within [`EFFORT_TTL`]) the hair catches fire
+//! ([`MAX_EFFORTS`], within [`EFFORT_TTL_SECS`]) the hair catches fire
 //! ([`BurnTier::Top`], the flame crown). Everything else — including
 //! opus/gpt-5.5-class flagships — stays [`BurnTier::Normal`].
 //!
@@ -72,6 +72,11 @@ pub(crate) fn burn_tier(model: Option<&str>, effort_fresh: Option<&str>) -> Burn
 /// decayed past.
 pub fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
     slot.effort.as_ref().and_then(|obs| {
+        // The CC decoder's exit sentinel exists ONLY to kill the flame via
+        // last-seen-wins — it is not an effort; the dossier must never show it.
+        if &*obs.value == pixtuoid_core::source::claude_code::ULTRA_EXIT_LABEL {
+            return None;
+        }
         let fresh = now
             .duration_since(obs.seen_at)
             .map(|d| d.as_secs() <= EFFORT_TTL_SECS)
@@ -164,6 +169,23 @@ mod tests {
             model: None,
             effort: None,
         }
+    }
+
+    #[test]
+    fn the_exit_sentinel_never_reaches_the_dossier() {
+        use pixtuoid_core::source::claude_code::ULTRA_EXIT_LABEL;
+        use pixtuoid_core::state::EffortObservation;
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let mut slot = slot();
+        slot.model = Some("claude-fable-5".into());
+        slot.effort = Some(EffortObservation::new(ULTRA_EXIT_LABEL.into(), t0));
+        // Fresh by timestamp, but a sentinel: suppressed from the dossier,
+        // and the flame stays dead (Premium, not Top).
+        assert_eq!(fresh_effort(&slot, t0), None);
+        assert_eq!(slot_burn_tier(&slot, t0), BurnTier::Premium);
+        // A REAL effort still surfaces.
+        slot.effort = Some(EffortObservation::new("ultra".into(), t0));
+        assert_eq!(fresh_effort(&slot, t0), Some("ultra"));
     }
 
     #[test]

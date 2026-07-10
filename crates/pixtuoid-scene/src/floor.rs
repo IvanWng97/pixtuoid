@@ -1407,16 +1407,9 @@ mod tests {
             },
         )
         .expect("layout");
-        let ember = pixtuoid_core::sprite::Rgb {
-            r: 0xc2,
-            g: 0x28,
-            b: 0x12,
-        };
-        let tip = pixtuoid_core::sprite::Rgb {
-            r: 0xff,
-            g: 0xd2,
-            b: 0x4a,
-        };
+        // The painter's own constants — not re-hardcoded copies.
+        let ember = crate::pixel_painter::FLAME_DEEP;
+        let tip = crate::pixel_painter::FLAME_TIP;
         let count = |c| {
             (0..buf.height())
                 .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))

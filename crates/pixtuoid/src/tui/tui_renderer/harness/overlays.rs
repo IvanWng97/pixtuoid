@@ -428,6 +428,75 @@ fn hovered_burning_agent_tooltip_shows_model_and_fresh_effort() {
 }
 
 #[test]
+fn stale_effort_drops_off_the_dossier() {
+    // Past the burn TTL the flame is out — the ★ row must drop the `· effort`
+    // suffix too (fresh_effort is the ONE rule both read). An hour-old stamp
+    // is comfortably past any sane freshness window (authority:
+    // pixtuoid_scene::burn::EFFORT_TTL_SECS = 600, crate-private).
+    use pixtuoid_core::state::EffortObservation;
+    let mut a = active(
+        "/burn/2.jsonl",
+        0,
+        "Read src/main.rs",
+        t0() - Duration::from_secs(30),
+    );
+    a.source = std::sync::Arc::from("claude-code");
+    a.model = Some("claude-fable-5".into());
+    a.effort = Some(EffortObservation::new(
+        "ultra".into(),
+        t0() - Duration::from_secs(3600),
+    ));
+    let id = a.agent_id;
+    let scene = scene_with(vec![a], 16);
+    let mut r = build(120, 44, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, id, 120, 44);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("\u{2605} claude-fable-5"),
+        "model row stays: {text}"
+    );
+    assert!(
+        !text.contains("\u{b7} ultra"),
+        "stale effort suffix must be suppressed: {text}"
+    );
+}
+
+#[test]
+fn the_exit_sentinel_never_renders_in_the_dossier() {
+    // The CC decoder's synthesized `ultra_exit` kills the flame via
+    // last-seen-wins, but it is an internal token, not an effort — the ★ row
+    // shows the bare model, never the sentinel.
+    use pixtuoid_core::source::claude_code::ULTRA_EXIT_LABEL;
+    use pixtuoid_core::state::EffortObservation;
+    let mut a = active(
+        "/burn/3.jsonl",
+        0,
+        "Read src/main.rs",
+        t0() - Duration::from_secs(30),
+    );
+    a.source = std::sync::Arc::from("claude-code");
+    a.model = Some("claude-fable-5".into());
+    a.effort = Some(EffortObservation::new(ULTRA_EXIT_LABEL.into(), t0()));
+    let id = a.agent_id;
+    let scene = scene_with(vec![a], 16);
+    let mut r = build(120, 44, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, id, 120, 44);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("\u{2605} claude-fable-5"),
+        "model row stays: {text}"
+    );
+    assert!(
+        !text.contains(ULTRA_EXIT_LABEL),
+        "the internal sentinel must never render: {text}"
+    );
+}
+
+#[test]
 fn hovered_agent_tooltip_shows_source_badge() {
     // The dossier leads with the shared `[xx]` source badge (same builder as the
     // dashboard/Sources panel) so the tooltip can't drift from them.
