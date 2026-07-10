@@ -849,7 +849,11 @@ test('first visit: splash displays 4-line log with per-line dwell (~390ms)', asy
   await expect(page.locator('#boot .boot__log')).toContainText('pixtuoid');
   await expect(page.locator('#boot .boot__log')).toContainText('booting office');
   await expect(page.locator('#boot .boot__log')).toContainText('loading themes');
-  await expect(page.locator('#boot .boot__log')).toContainText('10 CLIs connected');
+  // Count derived from the SAME manifest Base.astro's CLI_COUNT reads, so a
+  // new source can't drift this literal (the PR-520 lesson).
+  await expect(page.locator('#boot .boot__log')).toContainText(
+    `${sourcesData.length} CLIs connected`
+  );
   // Splash clears data-booting in ~1.7s (4×390ms line dwell) + 460ms fade ≈ 2.1s — the
   // §1 budget (user decision 2026-07-06: retimed from ~450ms/line, which measured
   // ~2.5s end-to-end here — noticeably slower than production's felt pace).
