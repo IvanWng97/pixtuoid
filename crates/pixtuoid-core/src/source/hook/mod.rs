@@ -236,8 +236,6 @@ pub(crate) async fn handle_conn(
                 if line.trim().is_empty() {
                     continue;
                 }
-                // TEMP wire probe (not for commit): dump the raw payload.
-                tracing::warn!("RAW_HOOK_PROBE: {line}");
                 let v: serde_json::Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
                     Err(e) => {
