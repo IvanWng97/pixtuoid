@@ -142,7 +142,13 @@ fn session_ids_from_paths(
             continue;
         }
         tracing::debug!("omp probe: pid {pid} holds {} open", path.display());
-        let id = omp_id_from_path(&path);
+        // The watcher's id-space is normalize_path_key-folded at the seam
+        // (walk.rs `id_path`); fold the kernel-reported path the same way or
+        // probe ids miss the first-sight gate on Windows (the CC probe folds
+        // identically in `live_cc_session_ids`).
+        let id = omp_id_from_path(Path::new(&crate::id::normalize_path_key(
+            &path.to_string_lossy(),
+        )));
         // Two live processes holding ONE transcript open (a resume overlap)
         // must not bind id→pid by proc-enumeration order — the same
         // determinism rule as the codex probe (#252): larger pid wins,
@@ -258,9 +264,19 @@ mod tests {
         let got = snap_of(root, vec![session, child]);
         let mut ids: Vec<_> = got.ids().cloned().collect();
         ids.sort();
-        assert_eq!(ids, vec![STEM.to_string(), format!("{STEM}/Alpha")]);
+        // Expected ids go through the SAME fold the probe applies (identity
+        // on Unix, lowercased on Windows) — a raw-case literal here fails
+        // ONLY on windows-test (the path-fold expectation-literal class).
+        let stem_key = crate::id::normalize_path_key(STEM);
+        assert_eq!(
+            ids,
+            vec![
+                stem_key.clone(),
+                crate::id::normalize_path_key(&format!("{STEM}/Alpha"))
+            ]
+        );
         // The snapshot binds each id to the OWNING pid (the exit-watch half).
-        assert_eq!(got.pid_of.get(STEM), Some(&42));
+        assert_eq!(got.pid_of.get(&stem_key), Some(&42));
     }
 
     #[test]
@@ -270,14 +286,15 @@ mod tests {
         // presentation orders, never last-writer-wins.
         let root = Path::new("/home/u/.omp/agent/sessions");
         let path = root.join(format!("-dev-proj/{STEM}.jsonl"));
+        let stem_key = crate::id::normalize_path_key(STEM);
         for pids in [[100, 200], [200, 100]] {
             let got = session_ids_from_paths(root, pids.into_iter().map(|p| (p, path.clone())));
             assert_eq!(
                 got.ids().cloned().collect::<Vec<_>>(),
-                vec![STEM.to_string()]
+                vec![stem_key.clone()]
             );
             assert_eq!(
-                got.pid_of.get(STEM),
+                got.pid_of.get(&stem_key),
                 Some(&200),
                 "the larger pid must win in both enumeration orders"
             );

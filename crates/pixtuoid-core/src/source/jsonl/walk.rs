@@ -29,6 +29,19 @@ pub(super) const MAX_PENDING_BYTES: u64 = 1 << 20;
 /// the gate here (rather than only in the old `initial_seed_walk`) is the #85
 /// fix: the post-startup rescan used to bypass it and resurrect a missed
 /// ended/stale session as a phantom live sprite.
+/// The path form EVERY id derivation runs on: the same `normalize_path_key`
+/// fold the per-line decoders receive (`transcript_path_str` below), so the
+/// first-sight / session-end / park lanes and the decoder lane mint ONE id
+/// per file on Windows. CC/Codex are invariant to the fold (lowercase-hex
+/// ids — pinned by `cc_id_from_path_is_stable_across_path_separators` and
+/// its codex twin) and antigravity's default deriver folds internally; omp's
+/// case-carrying stem chains (`…T…Z_<uuid>/Alpha`) are why the fold must
+/// live HERE at the seam, not inside each deriver — a pure deriver keeps the
+/// fixture-fed conformance goldens platform-invariant. Identity on Unix.
+fn id_path(path: &Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(crate::id::normalize_path_key(&path.to_string_lossy()))
+}
+
 async fn should_seed_at_eof(
     meta: &std::fs::Metadata,
     window: Duration,
@@ -232,7 +245,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             // purpose: the ended arm un-claims `seen` below, so a trailing
             // "not ended" conjunct on the scan would be redundant — an
             // untestable equivalent under mutation.)
-            let id = AgentId::from_parts(source, &(decoders.id_derive)(path));
+            let id = AgentId::from_parts(source, &(decoders.id_derive)(&id_path(path)));
             let _ = tx
                 .send((
                     Transport::Jsonl,
@@ -342,7 +355,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // Used below to recognize a decoded SessionEnd for THIS transcript (the
     // decoder keys events the same way `id_derive` does — pinned by the
     // hook↔watcher coalesce tests).
-    let path_agent_id = AgentId::from_parts(source, &(decoders.id_derive)(path));
+    let path_agent_id = AgentId::from_parts(source, &(decoders.id_derive)(&id_path(path)));
     let mut session_ended = false;
     for line in new_bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
@@ -456,7 +469,7 @@ async fn emit_first_sight(
     // disagreeing with its hook-created twin (a Codex stem is
     // `rollout-<ts>-<uuid>`: every tooltip disambiguator suffix became the
     // constant `roll`).
-    let session_id = (decoders.id_derive)(path);
+    let session_id = (decoders.id_derive)(&id_path(path));
     let id = AgentId::from_parts(source, &session_id);
     let cwd = cwd.unwrap_or_default();
     let parent_id = detect_parent_id(path, source);

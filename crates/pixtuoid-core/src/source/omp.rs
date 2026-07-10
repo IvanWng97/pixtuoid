@@ -111,16 +111,15 @@ fn looks_like_session_stem(s: &str) -> bool {
 /// `["<ts>_<uuid>", "Alpha", "Child"]` for a nested subagent file
 /// `…/<ts>_<uuid>/Alpha/Child.jsonl`. A root transcript is `[stem]`.
 ///
-/// The input is folded through `normalize_path_key` FIRST: the watcher's
-/// first-sight lane hands the id-deriver a raw `&Path` while the per-line
-/// decoder receives the already-normalized string (walk.rs) — without one
-/// fold point the two lanes mint DIFFERENT ids for the same file on Windows
-/// (case-folded vs raw), splitting one session into two sprites — the exact
-/// class `cc_id_from_path_is_stable_across_path_separators` pins for CC.
-/// Identity on Unix, so Unix ids/goldens are untouched.
+/// PURE and case-preserving: raw in → raw out on every platform (fixture-fed
+/// conformance goldens stay platform-invariant). The Windows case-fold
+/// happens at the WATCHER seam instead — walk.rs normalizes the path before
+/// BOTH the id-deriver and the per-line decoder, and the probe folds at its
+/// own boundary — so all runtime lanes mint ONE (folded) id per file there
+/// while this fn stays deterministic over whatever form it is given. The
+/// only fold-awareness HERE is `looks_like_session_stem`'s case-insensitive
+/// `T`, so an already-folded path still parses as a chain.
 fn stem_chain(path: &Path) -> Vec<String> {
-    let normalized = crate::id::normalize_path_key(&path.to_string_lossy());
-    let path = Path::new(&normalized);
     let own = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -391,16 +390,11 @@ mod tests {
         );
     }
 
-    /// The Windows path fold: the watcher's per-line decoder receives the
-    /// `normalize_path_key`'d path (LOWERCASED, forward-slashed) while the
-    /// first-sight id-deriver gets the raw `&Path` — both must yield ONE key
-    /// per file or a session splits into two sprites (the CC
-    /// `…is_stable_across_path_separators` class). Pure string code, so the
-    /// Windows arm is pinned on every platform: the folded form must still
-    /// parse as a stem chain (lowercase `t` in the timestamp) AND match what
-    /// the raw form derives after the internal fold. On Unix the fold is
-    /// identity, so raw == folded is only meaningful for the pre-folded
-    /// literal below.
+    /// The Windows decoder lane: walk.rs hands every derivation the
+    /// `normalize_path_key`'d path (LOWERCASED, forward-slashed there). The
+    /// deriver is pure, so the folded form must still parse as a stem chain
+    /// (the case-insensitive `T`) — pure string code, so the Windows arm is
+    /// pinned on every platform.
     #[test]
     fn stem_chain_survives_the_windows_case_fold() {
         // The decoder-lane shape on Windows: already lowercased.
