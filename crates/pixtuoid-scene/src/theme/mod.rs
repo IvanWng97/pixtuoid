@@ -442,4 +442,25 @@ mod tests {
              new source's field to SourceColors + all() (and a hue in every theme file)"
         );
     }
+
+    // `by_prefix`'s match arms are a hand-kept copy of the registry's
+    // authoritative `SourceDescriptor::label_prefix` strings. The count guard
+    // above and the distinctness guard pin the HUES, not the prefix STRINGS —
+    // those were only pinned transitively, via the site-manifest chain and only
+    // for `status == "supported"` rows. A registry prefix RENAME that misses the
+    // matching `by_prefix` arm silently drops that source's badge to the idle
+    // fallback (`by_prefix(tag).unwrap_or(ui.label_idle)` in the painters). Pin
+    // the string mapping directly to the registry so the rename fails loudly HERE.
+    #[test]
+    fn by_prefix_accepts_every_registered_label_prefix() {
+        for d in pixtuoid_core::source::registry::REGISTRY {
+            assert!(
+                NORMAL.source.by_prefix(d.label_prefix).is_some(),
+                "theme::by_prefix has no arm for source {:?} label_prefix {:?} — its badge \
+                 would fall back to idle; add the arm (or align it with the registry rename)",
+                d.name,
+                d.label_prefix
+            );
+        }
+    }
 }
