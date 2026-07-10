@@ -228,17 +228,34 @@ pub enum AgentEvent {
         /// Codex PermissionRequest) — the registration is then label-ordinal
         /// but still reap-exempt, exactly like the blank synthesis path.
         cwd: Option<PathBuf>,
-        /// The agent process's pid, from the shim/plugin `_pid` stamp — the
-        /// focus-jump channel for hook-only sources. Transcript-family
-        /// sources resolve pid via their liveness probes instead and always
-        /// carry `None` here (structural: `patch_identity_pids` skips any
-        /// source with a `line_decoder`). Hook-transport Identity recurs
-        /// ahead of every activity, so the slot's cached pid stays fresh.
-        /// serde-skipped so the conformance/scene goldens don't churn on
-        /// `None`.
+        /// The agent process's pid (+ recycle marker), from the shim/plugin
+        /// `_pid` stamp — the focus-jump channel for hook-only sources.
+        /// Transcript-family sources resolve pid via their liveness probes
+        /// instead and always carry `None` here (structural:
+        /// `patch_identity_pids` skips any source with a `line_decoder`).
+        /// Hook-transport Identity recurs ahead of every activity, so the
+        /// slot's cached pid stays fresh. serde-skipped so the
+        /// conformance/scene goldens don't churn on `None`.
         #[serde(skip_serializing_if = "Option::is_none", default)]
-        pid: Option<i32>,
+        pid: Option<PidIdentity>,
     },
+}
+
+/// A cached agent pid PLUS the kernel start marker read when it was stamped
+/// ([`pid_start_marker`]) — together they name ONE process incarnation, so a
+/// focus click can refuse a RECYCLED pid (#527): re-read the marker, and a
+/// mismatch (or a dead pid) means this is not the process the hook came from.
+/// `started: None` = no marker was readable at stamp time (non-unix daemon,
+/// EPERM); the click-time guard then skips the identity check (additive, the
+/// #220 posture). Field name `pid` everywhere keeps the `pid: None`
+/// construction sites stable across the `Option<i32>` → `Option<PidIdentity>`
+/// migration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PidIdentity {
+    /// The agent CLI's OS pid (`pid_t`; matches `DaemonPresence.current_pid`).
+    pub pid: i32,
+    /// Opaque per-OS start marker — equality-only, see [`pid_start_marker`].
+    pub started: Option<u64>,
 }
 
 impl AgentEvent {
@@ -269,6 +286,15 @@ pub fn cc_pid_for_session(projects_root: &std::path::Path, session_id: &str) -> 
         .pid_of
         .get(session_id)
         .copied()
+}
+
+/// The CC sessions-registry dir the pid queries consult — the SAME
+/// standard-layout gate the probe applies (a `--projects-root /tmp/fixture`
+/// replay yields `None`). Exposed so `doctor` can report the focus channel's
+/// on-disk state without re-deriving the sibling layout (#526).
+#[cfg(feature = "native")]
+pub fn cc_registry_dir(projects_root: &std::path::Path) -> Option<std::path::PathBuf> {
+    cc_probe::cc_sessions_dir(projects_root)
 }
 
 /// Codex twin of [`cc_pid_for_session`], keyed by the rollout UUID (the
@@ -322,6 +348,13 @@ mod native;
 pub use native::{DynSource, Source, TaggedReceiver, TaggedSender};
 pub mod openclaw;
 pub mod opencode;
+// The kernel start-marker read shared by the hook stamp and the binary's
+// click-time recycle guard (#527); the fn is the pub seam, the platform
+// impls stay private.
+#[cfg(feature = "native")]
+mod proc_start;
+#[cfg(feature = "native")]
+pub use proc_start::pid_start_marker;
 pub mod reasonix;
 // `doc(hidden)`: the registry is an internal fact table, `pub` ONLY so the
 // integration-test crates (sources::conformance) can read it. Hiding it keeps it

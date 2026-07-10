@@ -356,14 +356,16 @@ pub struct AgentSlot {
     pub active_ms: u64,
     pub unknown_cwd: bool,
     pub parent_id: Option<AgentId>,
-    /// The agent process's pid — the focus-jump channel for hook-only sources
-    /// (filled from the shim/plugin `_pid` riding each hook-transport
-    /// `Identity`; refreshed per event, never downgraded to `None`).
-    /// Transcript-family sources stay `None` here — their pid channel is the
-    /// liveness probe, queried at click time. serde-skipped so the scene
-    /// serialization golden doesn't churn on `None`.
+    /// The agent process's pid + recycle marker — the focus-jump channel for
+    /// hook-only sources (filled from the shim/plugin `_pid` riding each
+    /// hook-transport `Identity`; refreshed per event, never downgraded to
+    /// `None`). The click-time guard re-reads the marker and refuses a
+    /// recycled pid (#527). Transcript-family sources stay `None` here —
+    /// their pid channel is the liveness probe, queried at click time.
+    /// serde-skipped so the scene serialization golden doesn't churn on
+    /// `None`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub pid: Option<i32>,
+    pub pid: Option<crate::source::PidIdentity>,
 }
 
 /// Liveness of a daemon-style source (the OpenClaw gateway). Drives the

@@ -1314,7 +1314,11 @@ fn hook_identity_pid_fills_refreshes_and_never_downgrades_slot_pid() {
     let mut r = Reducer::new();
     let id = AgentId::from_parts("opencode", "ses_pid");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    let identity = |pid: Option<i32>| AgentEvent::Identity {
+    let pid_id = |pid: i32| pixtuoid_core::source::PidIdentity {
+        pid,
+        started: Some(1_000),
+    };
+    let identity = |pid: Option<pixtuoid_core::source::PidIdentity>| AgentEvent::Identity {
         agent_id: id,
         source: "opencode".into(),
         session_id: "ses_pid".into(),
@@ -1323,16 +1327,28 @@ fn hook_identity_pid_fills_refreshes_and_never_downgrades_slot_pid() {
     };
 
     // Registration fills the cache.
-    r.apply(&mut scene, identity(Some(41)), t0, Transport::Hook);
-    assert_eq!(scene.agents[&id].pid, Some(41), "registration fills pid");
+    r.apply(&mut scene, identity(Some(pid_id(41))), t0, Transport::Hook);
+    assert_eq!(
+        scene.agents[&id].pid,
+        Some(pid_id(41)),
+        "registration fills pid"
+    );
 
     // A later Identity refreshes it (restart under a new pid).
-    r.apply(&mut scene, identity(Some(42)), t0, Transport::Hook);
-    assert_eq!(scene.agents[&id].pid, Some(42), "backfill refreshes pid");
+    r.apply(&mut scene, identity(Some(pid_id(42))), t0, Transport::Hook);
+    assert_eq!(
+        scene.agents[&id].pid,
+        Some(pid_id(42)),
+        "backfill refreshes pid"
+    );
 
     // A pid-less Identity keeps the cached value.
     r.apply(&mut scene, identity(None), t0, Transport::Hook);
-    assert_eq!(scene.agents[&id].pid, Some(42), "None never downgrades");
+    assert_eq!(
+        scene.agents[&id].pid,
+        Some(pid_id(42)),
+        "None never downgrades"
+    );
 }
 
 #[test]

@@ -272,31 +272,15 @@ const PID_START_TOLERANCE_SECS: u64 = 10;
 /// failure (pid gone mid-probe, EPERM) — never an error: the check is additive.
 #[cfg(target_os = "macos")]
 fn pid_start_time_secs(pid: i32) -> Option<u64> {
-    // SAFETY: all-zero bytes are a valid value for this repr(C) plain-old-data
-    // struct (integers + byte arrays only).
-    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-    // SAFETY: the buffer is exactly `size` bytes of a repr(C) struct matching
-    // the macOS SDK's proc_bsdinfo layout (proc_info.h, ABI-stable since
-    // 10.5), so the kernel fills only memory we own. PROC_PIDTBSDINFO returns
-    // the full struct or <= 0 on failure.
-    let n = unsafe {
-        libc::proc_pidinfo(
-            pid,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            &mut info as *mut _ as *mut std::ffi::c_void,
-            size,
-        )
-    };
-    if n != size {
-        return None;
-    }
-    Some(info.pbi_start_tvsec)
+    // On macOS the shared start MARKER (`proc_start`) is exactly epoch
+    // seconds (pbi_start_tvsec), so this wall-clock check can ride it.
+    super::proc_start::pid_start_marker(pid)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn pid_start_time_secs(_pid: i32) -> Option<u64> {
+    // The Linux MARKER is ticks-since-boot — NOT epoch — so this wall-clock
+    // comparison must not ride it; epoch conversion stays deferred (#220).
     None
 }
 

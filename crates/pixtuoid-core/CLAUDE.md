@@ -117,7 +117,12 @@ their own, which win; the daemon's `handle_conn` peeks `_pid` UNCONDITIONALLY
 (an exit-watch backend failing to init — pre-5.3 Linux — must not take the
 focus pid cache down with it; only the `HookPidWatch` BIND needs the watch)
 and stamps it onto the batch's `Identity` events (`patch_identity_pids` — the
-per-source decoders never see the key).
+per-source decoders never see the key). The stamp is a `PidIdentity` — pid +
+the kernel start MARKER read at peek time (`source::pid_start_marker`: macOS
+`pbi_start_tvsec`, Linux `/proc` stat field-22 raw ticks — EQUALITY-only, no
+epoch conversion, which is why #220's macOS-only limitation doesn't apply) —
+so the binary's click re-reads the marker and REFUSES a recycled/dead pid
+(#527; markerless stamps skip the check, additive).
 The reducer caches it on `AgentSlot.pid` (fill at registration, refresh per
 Identity, `Some` never downgraded), serde-skipped so the scene golden doesn't
 churn. Transcript-family sources stay `pid: None` — STRUCTURALLY:
@@ -131,8 +136,9 @@ pid (the hook runs under `cmd /C`, so getppid would name a transient cmd.exe —
 the documented `parent_pid` trap), so shim-dependent sources focus-no-op there;
 a plugin-stamped pid (opencode's `process.pid`) still flows — the peek doesn't
 need the exit-watch, whose backend is also absent on Windows/pre-5.3 Linux. On
-those no-watch platforms an abrupt exit can't set `exiting_at`, so the
-click-time pid-staleness window is wider (the documented v1 sharp edge).
+those no-watch platforms an abrupt exit can't set `exiting_at`, but the #527
+start-marker check still refuses the recycled pid at click time wherever a
+marker was readable at stamp time (everywhere except non-mac/linux daemons).
 
 ## Known sharp edges (don't be surprised by these)
 

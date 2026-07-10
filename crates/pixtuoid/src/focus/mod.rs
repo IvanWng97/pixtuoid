@@ -36,6 +36,13 @@ pub(crate) trait ProcessTable {
     /// Whether this pid owns a focusable surface (a regular GUI app on macOS,
     /// a top-level window on Windows/X11).
     fn focusable(&self, pid: i32) -> bool;
+    /// Kernel start marker for `pid` — the identity half of the recycle guard
+    /// (#527). The default rides the shared core read (the SAME source the
+    /// hook stamp used, so equality means "same incarnation"); mock tables
+    /// override it.
+    fn start_time(&self, pid: i32) -> Option<u64> {
+        pixtuoid_core::source::pid_start_marker(pid)
+    }
 }
 
 /// Walk `ppid` upward from `start` until the first focusable ancestor.
@@ -66,17 +73,34 @@ pub(crate) struct FocusPaths<'a> {
 /// Resolve the agent's OS pid. Precedence: the slot's cached pid (hook-family
 /// sources — filled from the shim/plugin `_pid` riding each Identity) → the
 /// transcript-family point queries (CC registry / Codex fd probe, both
-/// recycle-guarded) → None. An EXITING slot refuses resolution outright: its
-/// process is going or gone, and a recycled pid would focus a random app (the
-/// cheap v1 answer to click-time pid staleness; the residual window is a
-/// documented sharp edge).
-pub(crate) fn resolve_pid(slot: &AgentSlot, paths: &FocusPaths<'_>) -> Option<i32> {
+/// recycle-guarded) → None. Two click-time recycle guards on the cached path:
+/// an EXITING slot refuses outright (its process is going or gone), and a
+/// cached start marker must match the kernel's CURRENT marker for that pid
+/// (#527) — a mismatch means the pid was recycled by an unrelated process
+/// after an abrupt death, and a missing current read means the process is
+/// gone. A cache stamped WITHOUT a marker (non-unix daemon) skips the
+/// identity check — additive, the #220 posture.
+pub(crate) fn resolve_pid(
+    slot: &AgentSlot,
+    paths: &FocusPaths<'_>,
+    table: &impl ProcessTable,
+) -> Option<i32> {
     if slot.exiting_at.is_some() {
         tracing::debug!(agent = %slot.label, "focus: refused — agent is exiting");
         return None;
     }
-    if let Some(pid) = slot.pid {
-        return Some(pid);
+    if let Some(cached) = slot.pid {
+        if let Some(stamped) = cached.started {
+            if table.start_time(cached.pid) != Some(stamped) {
+                tracing::debug!(
+                    agent = %slot.label,
+                    pid = cached.pid,
+                    "focus: refused — cached pid gone or recycled (start marker mismatch)"
+                );
+                return None;
+            }
+        }
+        return Some(cached.pid);
     }
     // The registry consts, not literals — a source rename must not silently
     // drop these arms to `_ => None`.
@@ -100,7 +124,7 @@ pub(crate) fn focus_agent(
     table: &impl ProcessTable,
     activate: impl FnOnce(i32) -> bool,
 ) {
-    let Some(pid) = resolve_pid(slot, paths) else {
+    let Some(pid) = resolve_pid(slot, paths, table) else {
         tracing::debug!(agent = %slot.label, "focus: no pid resolved");
         return;
     };
@@ -129,6 +153,10 @@ mod tests {
     struct MockTable {
         parents: HashMap<i32, i32>,
         focusable: Vec<i32>,
+        /// pid → current kernel start marker; empty = "every pid reads None"
+        /// (gone), which the default-marker tests below never hit because a
+        /// markerless cache skips the check.
+        started: HashMap<i32, u64>,
     }
     impl ProcessTable for MockTable {
         fn ppid(&self, pid: i32) -> Option<i32> {
@@ -136,6 +164,9 @@ mod tests {
         }
         fn focusable(&self, pid: i32) -> bool {
             self.focusable.contains(&pid)
+        }
+        fn start_time(&self, pid: i32) -> Option<u64> {
+            self.started.get(&pid).copied()
         }
     }
 
@@ -145,6 +176,7 @@ mod tests {
         let t = MockTable {
             parents: HashMap::from([(300, 200), (200, 100), (100, 1)]),
             focusable: vec![100],
+            started: HashMap::new(),
         };
         assert_eq!(ancestor_walk(&t, 300), Some(100));
     }
@@ -155,6 +187,7 @@ mod tests {
         let t = MockTable {
             parents: HashMap::from([(300, 200), (200, 1)]),
             focusable: vec![],
+            started: HashMap::new(),
         };
         assert_eq!(ancestor_walk(&t, 300), None);
     }
@@ -165,12 +198,14 @@ mod tests {
         let t = MockTable {
             parents: HashMap::from([(300, 200), (200, 300)]),
             focusable: vec![],
+            started: HashMap::new(),
         };
         assert_eq!(ancestor_walk(&t, 300), None);
         // And the degenerate self-parent.
         let t2 = MockTable {
             parents: HashMap::from([(300, 300)]),
             focusable: vec![],
+            started: HashMap::new(),
         };
         assert_eq!(ancestor_walk(&t2, 300), None);
     }
@@ -183,6 +218,7 @@ mod tests {
         let t = MockTable {
             parents: HashMap::new(),
             focusable: vec![],
+            started: HashMap::new(),
         };
         assert_eq!(ancestor_walk(&t, 4242), None);
     }
@@ -194,11 +230,20 @@ mod tests {
         let t = MockTable {
             parents: HashMap::new(),
             focusable: vec![300],
+            started: HashMap::new(),
         };
         assert_eq!(ancestor_walk(&t, 300), Some(300));
     }
 
-    fn slot(source: &str, session_id: &str, pid: Option<i32>) -> AgentSlot {
+    fn pid_id(pid: i32, started: Option<u64>) -> pixtuoid_core::source::PidIdentity {
+        pixtuoid_core::source::PidIdentity { pid, started }
+    }
+
+    fn slot(
+        source: &str,
+        session_id: &str,
+        pid: Option<pixtuoid_core::source::PidIdentity>,
+    ) -> AgentSlot {
         use pixtuoid_core::state::ActivityState;
         use std::sync::Arc;
         use std::time::SystemTime;
@@ -230,19 +275,54 @@ mod tests {
         codex_sessions_root: None,
     };
 
+    fn empty_table() -> MockTable {
+        MockTable {
+            parents: HashMap::new(),
+            focusable: vec![],
+            started: HashMap::new(),
+        }
+    }
+
     #[test]
     fn resolve_pid_prefers_the_slot_cache() {
-        let s = slot("opencode", "ses_a", Some(4242));
-        assert_eq!(resolve_pid(&s, &NO_PATHS), Some(4242));
+        // Markerless cache (stamped where no marker was readable): the
+        // identity check is skipped — additive, the #220 posture.
+        let s = slot("opencode", "ses_a", Some(pid_id(4242, None)));
+        assert_eq!(resolve_pid(&s, &NO_PATHS, &empty_table()), Some(4242));
+    }
+
+    #[test]
+    fn resolve_pid_verifies_the_start_marker_when_stamped() {
+        let s = slot("opencode", "ses_a", Some(pid_id(4242, Some(1_000))));
+        // Same incarnation: current marker matches the stamp.
+        let mut t = empty_table();
+        t.started.insert(4242, 1_000);
+        assert_eq!(resolve_pid(&s, &NO_PATHS, &t), Some(4242));
+    }
+
+    #[test]
+    fn resolve_pid_refuses_a_recycled_or_dead_pid() {
+        // #527: an abruptly-dead agent's pid got recycled — the kernel's
+        // CURRENT start marker differs from the stamped one → refuse.
+        let s = slot("opencode", "ses_a", Some(pid_id(4242, Some(1_000))));
+        let mut t = empty_table();
+        t.started.insert(4242, 2_000);
+        assert_eq!(resolve_pid(&s, &NO_PATHS, &t), None, "recycled → refuse");
+        // Process gone entirely (marker unreadable) → refuse too.
+        assert_eq!(
+            resolve_pid(&s, &NO_PATHS, &empty_table()),
+            None,
+            "dead → refuse"
+        );
     }
 
     #[test]
     fn resolve_pid_refuses_an_exiting_slot() {
-        // The cheap click-time pid-recycle guard: an exiting agent's process
-        // is going or gone — a recycled pid would focus a random app.
-        let mut s = slot("opencode", "ses_a", Some(4242));
+        // The first click-time guard: an exiting agent's process is going or
+        // gone — a recycled pid would focus a random app.
+        let mut s = slot("opencode", "ses_a", Some(pid_id(4242, None)));
         s.exiting_at = Some(std::time::SystemTime::UNIX_EPOCH);
-        assert_eq!(resolve_pid(&s, &NO_PATHS), None);
+        assert_eq!(resolve_pid(&s, &NO_PATHS, &empty_table()), None);
     }
 
     #[test]
@@ -250,10 +330,10 @@ mod tests {
         // Hook-family slot without a cached pid and no probe roots → None
         // (the ONE failure rule: silent).
         let s = slot("cursor", "ses_b", None);
-        assert_eq!(resolve_pid(&s, &NO_PATHS), None);
+        assert_eq!(resolve_pid(&s, &NO_PATHS, &empty_table()), None);
         // Unknown/remote source likewise.
         let r = slot("some-remote", "ses_c", None);
-        assert_eq!(resolve_pid(&r, &NO_PATHS), None);
+        assert_eq!(resolve_pid(&r, &NO_PATHS, &empty_table()), None);
     }
 
     #[test]
@@ -261,12 +341,18 @@ mod tests {
         let t = MockTable {
             parents: HashMap::from([(4242, 100)]),
             focusable: vec![100],
+            started: HashMap::new(),
         };
         let mut activated = None;
-        focus_agent(&slot("opencode", "s", Some(4242)), &NO_PATHS, &t, |p| {
-            activated = Some(p);
-            true
-        });
+        focus_agent(
+            &slot("opencode", "s", Some(pid_id(4242, None))),
+            &NO_PATHS,
+            &t,
+            |p| {
+                activated = Some(p);
+                true
+            },
+        );
         assert_eq!(activated, Some(100), "the terminal app pid is activated");
 
         // No pid → the activate seam is never reached.

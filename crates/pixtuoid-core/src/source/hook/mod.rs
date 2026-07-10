@@ -198,7 +198,10 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
 /// never recycle-guarded), while their real focus channel is the liveness
 /// probes (`cc_pid_for_session`/`codex_pid_for_session`). A stamped stale pid
 /// would shadow the probe's recycle guard in `resolve_pid`.
-fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<i32>) {
+///
+/// The stamp is a [`PidIdentity`] — pid PLUS the kernel start marker read at
+/// peek time — so the click-time guard can refuse a recycled pid (#527).
+fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<crate::source::PidIdentity>) {
     let Some(pid) = pid else { return };
     for ev in evs {
         if let AgentEvent::Identity { source, pid: p, .. } = ev {
@@ -302,9 +305,20 @@ pub(crate) async fn handle_conn(
                             }
                         }
                         // Second consumer of the SAME peeked `_pid`: the
-                        // focus-jump cache (see `patch_identity_pids`).
+                        // focus-jump cache (see `patch_identity_pids`). The
+                        // start marker is read HERE — the closest moment to
+                        // the hook event itself — so a later click can refuse
+                        // a recycled pid (#527). Marker unreadable (pid died
+                        // between hook and peek, non-unix) → `None` → the
+                        // click-time identity check is skipped, not failed.
                         let mut evs = evs;
-                        patch_identity_pids(&mut evs, pid);
+                        patch_identity_pids(
+                            &mut evs,
+                            pid.map(|p| crate::source::PidIdentity {
+                                pid: p,
+                                started: crate::source::pid_start_marker(p),
+                            }),
+                        );
                         let mut undelivered = UndeliveredEvents::new(&evs);
                         for ev in evs {
                             debug!("hook event: {ev:?}");
@@ -334,6 +348,13 @@ mod tests {
     use crate::AgentId;
     use tokio::io::AsyncWriteExt;
 
+    fn pid77() -> crate::source::PidIdentity {
+        crate::source::PidIdentity {
+            pid: 77,
+            started: Some(1_000),
+        }
+    }
+
     #[test]
     fn patch_identity_pids_stamps_only_identity_events() {
         let id = AgentId::from_parts("opencode", "ses_x");
@@ -351,14 +372,14 @@ mod tests {
                 detail: None,
             },
         ];
-        patch_identity_pids(&mut evs, Some(77));
+        patch_identity_pids(&mut evs, Some(pid77()));
         assert!(
-            matches!(evs[0], AgentEvent::Identity { pid: Some(77), .. }),
+            matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p == pid77()),
             "Identity stamped"
         );
         // None leaves the batch untouched.
         patch_identity_pids(&mut evs, None);
-        assert!(matches!(evs[0], AgentEvent::Identity { pid: Some(77), .. }));
+        assert!(matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p == pid77()));
     }
 
     #[test]
@@ -374,7 +395,7 @@ mod tests {
                 cwd: None,
                 pid: None,
             }];
-            patch_identity_pids(&mut evs, Some(77));
+            patch_identity_pids(&mut evs, Some(pid77()));
             assert!(
                 matches!(evs[0], AgentEvent::Identity { pid: None, .. }),
                 "{source} Identity must stay pid: None"
@@ -389,9 +410,9 @@ mod tests {
                 cwd: None,
                 pid: None,
             }];
-            patch_identity_pids(&mut evs, Some(77));
+            patch_identity_pids(&mut evs, Some(pid77()));
             assert!(
-                matches!(evs[0], AgentEvent::Identity { pid: Some(77), .. }),
+                matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p == pid77()),
                 "{source} Identity must be stamped"
             );
         }
@@ -787,8 +808,10 @@ mod tests {
             .await
             .expect("the Identity ahead of the tool event");
         assert!(
-            matches!(&ev, AgentEvent::Identity { source, pid: Some(4242), .. } if source == "codewhale"),
-            "hook-family Identity must carry the peeked pid without a watch, got {ev:?}"
+            matches!(&ev, AgentEvent::Identity { source, pid: Some(p), .. }
+                if source == "codewhale" && p.pid == 4242 && p.started.is_none()),
+            "hook-family Identity must carry the peeked pid without a watch \
+             (and no start marker for a pid that does not exist), got {ev:?}"
         );
     }
 
