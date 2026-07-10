@@ -74,6 +74,10 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   lives HERE; the RAW strings live on AgentSlot (core). Consumed by
 │                   pixel_painter's paint_character_at (ember 'H' recolor + Top flame crown) and
 │                   the binary's tooltip. Unknown model → Normal (fail-quiet, never flames).
+│                   BACK-VIEW ember slab is DELIBERATE (user-ratified): walking_back/back_couch
+│                   sprites are ~6 rows of 'H', so Premium+ reads as a solid red back — accepted
+│                   (transient pose; spotting an expensive agent from behind is the point). Don't
+│                   "fix" with per-row recolor.
 ├── board.rs        backend-agnostic NEON WALL-BOARD model + shared scene-stats — the sibling of overlay.rs for
 │                   the wall panel (brand+★ / mood pulse / uptime·floor·gateway). Owns StateCounts + scene_stats/
 │                   bucket_slot/per_floor_counts/gateway_rollup/compact_hms (relocated from the binary's tui
