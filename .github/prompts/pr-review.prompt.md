@@ -94,7 +94,7 @@ given change/tree, say so, don't skip it.
   `Furniture::Desk` footprint `unwrap_or(Size{DESK_W,DESK_H})` both dead (the
   const table is always `Some`) AND WRONG (`decor.rs` is `DESK_W+4`, so a
   hypothetical None mis-placed the sprite), plus the `(7,4)` table footprint
-  re-hardcoded inline in three painters — read the authority (`if let Some(..) =
+  re-hardcoded inline in two more painters — read the authority (`if let Some(..) =
   furniture_def(x).footprint`), never re-copy its fallback. The test is "can the
   trigger fire, and does the arm duplicate/contradict an authority", NOT "does it
   look defensive": load-bearing defense STAYS (documented sharp edges, liveness
