@@ -631,8 +631,8 @@ pub(crate) fn walking_position(from: Point, to: Point, t_x1000: u16) -> Point {
     // animation interpolation overshoots, and a bare `as u16` cast wraps
     // silently to ~65k, blitting the sprite off-screen invisibly.
     Point {
-        x: (from.x as i32 + dx * t / 1000).max(0).min(u16::MAX as i32) as u16,
-        y: (from.y as i32 + dy * t / 1000).max(0).min(u16::MAX as i32) as u16,
+        x: (from.x as i32 + dx * t / 1000).clamp(0, u16::MAX as i32) as u16,
+        y: (from.y as i32 + dy * t / 1000).clamp(0, u16::MAX as i32) as u16,
     }
 }
 
