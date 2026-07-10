@@ -600,8 +600,8 @@ mod tests {
     #[test]
     fn draw_cell_text_stays_inside_its_cell_and_lights_ink() {
         // Every emitted pixel must land INSIDE the 8×16 cell at the given origin
-        // (the clip is what keeps a wide glyph — ★ ink can exceed the
-        // JBM advance — from bleeding into the neighbor cell), with coverage in
+        // (the clip is what keeps a wide glyph — ★ ink can exceed the face's
+        // advance — from bleeding into the neighbor cell), with coverage in
         // [0,1], and a real glyph must light SOME ink.
         for (ch, ox, oy) in [('M', 0u32, 0u32), ('g', 8, 16), ('\u{2605}', 24, 32)] {
             let mut lit = 0usize;
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn cell_font_px_fits_the_cell() {
-        // The WHY behind CELL_FONT_PX=16: the face's line height must fill the
+        // The WHY behind CELL_FONT_PX (14.7): the face's line height must fill the
         // 8×16 cell exactly and its monospace advance must fit the cell width —
         // a face/metric drift would silently clip descenders (the cell clip
         // masks it visually), so pin both halves of the claim.
