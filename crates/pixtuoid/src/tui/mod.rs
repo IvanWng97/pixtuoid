@@ -103,6 +103,8 @@ enum KeyAction {
     DashboardFoldAll,
     /// `Enter`: jump to the selected agent's floor + close.
     DashboardJump,
+    /// `f`: bring the selected agent's terminal app to the foreground.
+    DashboardFocus,
     /// `Esc`/`Tab`: close without jumping.
     DashboardClose,
     /// Open/close the Sources panel (`s`, from the normal scene; `s`/Esc closes).
@@ -131,30 +133,49 @@ enum KeyAction {
     OnboardingSkip,
 }
 
-/// Left-click pin toggle: if an agent is pinned, clear it; otherwise hit-test
-/// the click against the desk layout and pin whatever it lands on. Identical
+/// Left-click focus-jump: hit-test the click against the desk layout and bring
+/// the clicked agent's terminal APP to the foreground (the click-to-pin
+/// tooltip this replaced is gone — hover still shows the dossier). Identical
 /// in both the pet-present and pet-absent click branches, so it lives here.
-fn toggle_pin<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+/// Every miss is a silent no-op (`focus`'s ONE failure rule).
+fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     scene_rx: &SceneRx,
+    focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     col: u16,
     row: u16,
 ) {
-    let pinned = renderer.pinned_agent();
-    if pinned.is_some() {
-        renderer.set_pinned_agent(None);
-    } else {
-        let snap = scene_rx.borrow().clone();
-        // Project to the VISIBLE floor first: `hit_test_from_tui` requires a
-        // single-floor scene matching `cached_layout` (a raw multi-floor
-        // snapshot would test other floors' agents against this floor's
-        // desks — the global/local desk-index confusion, see its doc).
-        let floor_scene = floor::project_floor_scene(&snap, renderer.current_floor());
-        let hit = renderer
-            .cached_layout()
-            .and_then(|layout| renderer::hit_test_from_tui(&floor_scene, layout, col, row));
-        renderer.set_pinned_agent(hit);
+    let snap = scene_rx.borrow().clone();
+    // Project to the VISIBLE floor first: `hit_test_from_tui` requires a
+    // single-floor scene matching `cached_layout` (a raw multi-floor
+    // snapshot would test other floors' agents against this floor's
+    // desks — the global/local desk-index confusion, see its doc).
+    let floor_scene = floor::project_floor_scene(&snap, renderer.current_floor());
+    let hit = renderer
+        .cached_layout()
+        .and_then(|layout| renderer::hit_test_from_tui(&floor_scene, layout, col, row));
+    if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
+        focus_slot(slot, focus_roots);
     }
+}
+
+/// The shared focus dispatch (sprite click + dashboard `f`): resolve the
+/// slot's pid, walk to its terminal app, activate — all through the
+/// `crate::focus` orchestration entry with the real OS table.
+fn focus_slot(
+    slot: &pixtuoid_core::AgentSlot,
+    focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+) {
+    let paths = crate::focus::FocusPaths {
+        cc_projects_root: focus_roots.0.as_deref(),
+        codex_sessions_root: focus_roots.1.as_deref(),
+    };
+    crate::focus::focus_agent(
+        slot,
+        &paths,
+        &crate::focus::OsProcessTable,
+        crate::focus::activate_os,
+    );
 }
 
 /// Connect a source from the panel: delegate the persist + install + rollback to
@@ -348,6 +369,7 @@ fn dispatch_key(
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
             (KeyCode::Esc, _) | (KeyCode::Tab, _) => KeyAction::DashboardClose,
             (KeyCode::Enter, _) => KeyAction::DashboardJump,
+            (KeyCode::Char('f'), _) => KeyAction::DashboardFocus,
             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::DashboardUp,
             (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::DashboardDown,
             (KeyCode::Left, _) | (KeyCode::Char('h'), _) => KeyAction::DashboardFoldLeft,
@@ -506,6 +528,10 @@ pub(crate) struct TuiSession {
     /// The warn-floor log path — throttle-scanned for decode-drift breadcrumbs to
     /// drive the footer nudge (`main` owns the resolution; `None` = no surfacing).
     pub log_path: Option<std::path::PathBuf>,
+    /// Focus-jump pid point-query roots: (CC projects root, Codex sessions
+    /// root) — threaded from RunConfig so a sprite click can resolve a
+    /// transcript-family agent's pid at click time.
+    pub focus_roots: (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     /// First launch ever → seed the one-time onboarding overlay open.
     pub first_run: bool,
 }
@@ -523,6 +549,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         socket_path,
         connected,
         log_path,
+        focus_roots,
         first_run,
     } = session;
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
@@ -699,6 +726,13 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             KeyAction::DashboardJump => {
                                 if let Some(floor) = ui.dashboard_jump(&snapshot) {
                                     renderer.navigate_floor(floor, now);
+                                }
+                            }
+                            KeyAction::DashboardFocus => {
+                                if let Some(slot) =
+                                    ui.dashboard_focus().and_then(|id| snapshot.agents.get(&id))
+                                {
+                                    focus_slot(slot, &focus_roots);
                                 }
                             }
                             KeyAction::ToggleConnection => {
@@ -979,10 +1013,22 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                         floor_idx: renderer.current_floor(),
                                     }));
                                 } else {
-                                    toggle_pin(&mut renderer, &scene_rx, m.column, m.row);
+                                    focus_clicked_agent(
+                                        &mut renderer,
+                                        &scene_rx,
+                                        &focus_roots,
+                                        m.column,
+                                        m.row,
+                                    );
                                 }
                             } else {
-                                toggle_pin(&mut renderer, &scene_rx, m.column, m.row);
+                                focus_clicked_agent(
+                                    &mut renderer,
+                                    &scene_rx,
+                                    &focus_roots,
+                                    m.column,
+                                    m.row,
+                                );
                             }
                         }
                         _ => {}
@@ -1411,6 +1457,11 @@ mod dispatch_tests {
         assert_eq!(
             dispatch_key(KeyCode::Enter, NONE, d, nav()),
             KeyAction::DashboardJump
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('f'), NONE, d, nav()),
+            KeyAction::DashboardFocus,
+            "f focuses the selected agent's terminal"
         );
         assert_eq!(
             dispatch_key(KeyCode::Esc, NONE, d, nav()),

@@ -143,25 +143,6 @@ fn navigation_blocked_during_active_transition() {
 }
 
 #[test]
-fn navigate_floor_clears_pinned_agent() {
-    let cap = 16;
-    let a = AgentId::from_transcript_path("/pin/0.jsonl");
-    let scene = scene_with(
-        vec![
-            slot(a, 0, 0, t0()),
-            slot(AgentId::from_transcript_path("/pin/1.jsonl"), 1, cap, t0()),
-        ],
-        cap,
-    );
-    let mut r = build(100, 40, vec![]);
-    let now = t0();
-    r.render(&scene, &pack(), now).unwrap();
-    r.set_pinned_agent(Some(a));
-    r.navigate_floor(1, now);
-    assert!(r.pinned_agent().is_none(), "navigation unpins the agent");
-}
-
-#[test]
 fn transition_cancelled_when_target_floor_disappears() {
     let cap = 16;
     let f1 = slot(AgentId::from_transcript_path("/c/1.jsonl"), 1, cap, t0());

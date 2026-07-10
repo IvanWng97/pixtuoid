@@ -688,7 +688,6 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             buf: &mut buf,
             store: &mut store,
             mouse_pos: None,
-            pinned_agent: None,
             debug_walkable: false,
             theme: job.theme,
             theme_picker: None,

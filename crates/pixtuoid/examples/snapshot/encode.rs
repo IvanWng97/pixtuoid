@@ -465,7 +465,6 @@ pub(crate) fn save_as_gif(
             buf,
             store,
             mouse_pos: None,
-            pinned_agent: None,
             debug_walkable,
             theme,
             theme_picker: None,

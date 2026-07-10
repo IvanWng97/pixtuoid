@@ -688,7 +688,6 @@ fn main() -> Result<()> {
             let (x, y) = s.split_once(',')?;
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
         }),
-        pinned_agent: None,
         // `--debug-walkable` drives BOTH the live `w` pixel overlay (mask +
         // approach-point/seat markers + A* routes, painted into the RgbBuffer
         // here) AND the cell-level red wash + BFS connectivity report below.

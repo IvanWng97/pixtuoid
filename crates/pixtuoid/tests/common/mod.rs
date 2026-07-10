@@ -30,7 +30,6 @@ macro_rules! make_draw_ctx {
             buf: &mut _buf,
             store: &mut _store,
             mouse_pos: None,
-            pinned_agent: None,
             debug_walkable: false,
             theme: _theme,
             theme_picker: None,

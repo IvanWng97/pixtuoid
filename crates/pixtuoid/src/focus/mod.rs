@@ -56,8 +56,9 @@ pub(crate) fn ancestor_walk(table: &impl ProcessTable, start: i32) -> Option<i32
 /// The per-source pid lookup roots the click-time resolution needs — built by
 /// the trigger site from its existing config (None disables that family).
 pub(crate) struct FocusPaths<'a> {
-    /// CC's `~/.claude/sessions` pid registry dir.
-    pub cc_sessions_dir: Option<&'a Path>,
+    /// CC's projects root (`~/.claude/projects`); the sibling `sessions` pid
+    /// registry is derived inside the core seam (standard-layout-gated).
+    pub cc_projects_root: Option<&'a Path>,
     /// Codex's sessions root (rollout tree) for the fd probe.
     pub codex_sessions_root: Option<&'a Path>,
 }
@@ -79,7 +80,7 @@ pub(crate) fn resolve_pid(slot: &AgentSlot, paths: &FocusPaths<'_>) -> Option<i3
     }
     match slot.source.as_ref() {
         "claude-code" => paths
-            .cc_sessions_dir
+            .cc_projects_root
             .and_then(|d| pixtuoid_core::source::cc_pid_for_session(d, &slot.session_id)),
         "codex" => paths
             .codex_sessions_root
@@ -211,7 +212,7 @@ mod tests {
     }
 
     const NO_PATHS: FocusPaths<'static> = FocusPaths {
-        cc_sessions_dir: None,
+        cc_projects_root: None,
         codex_sessions_root: None,
     };
 

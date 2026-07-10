@@ -52,7 +52,7 @@ crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pix
 │                    frame_cache.rs anim.rs overlay.rs board.rs embedded_pack.rs (default pack at
 │                    sprites/default/, own build.rs); depends on pixtuoid-core (forwards `native`)
 ├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene
-│                    cli.rs config.rs runtime/ install/ tui/ floating/ (two thin painters over the
+│                    cli.rs config.rs runtime/ install/ focus/ (click-to-focus: pid→ancestor→activate) tui/ floating/ (two thin painters over the
 │                    pixtuoid-scene crate; neither depends on the other) sprites/ (skeleton embedded via
 │                    include_str!, robot --pack-dir-loadable)
 ├── pixtuoid-web/    the THIRD painter — wasm-bindgen `<canvas>` painter over pixtuoid-scene

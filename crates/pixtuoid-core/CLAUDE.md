@@ -111,6 +111,20 @@ src/
 └── tests/              one integration test per concern
 ```
 
+**Focus-jump plumbing (#focus-jump):** the shim fills `_pid` (getppid) into the
+hook envelope WHEN ABSENT — opencode's plugin and CodeWhale's env-mode supply
+their own, which win; the daemon's `handle_conn` already peeked `_pid` for the
+`HookPidWatch` exit-watch, and now ALSO stamps it onto the batch's `Identity`
+events (`patch_identity_pids` — the per-source decoders never see the key).
+The reducer caches it on `AgentSlot.pid` (fill at registration, refresh per
+Identity, `Some` never downgraded), serde-skipped so the scene golden doesn't
+churn. Transcript-family sources stay `pid: None` — their channel is the
+recycle-guarded probes, exposed as the two pub point-query seams
+`source::cc_pid_for_session` (projects root → sibling sessions registry) and
+`source::codex_pid_for_session` (rollout UUID). Windows hook-family pids are
+effectively absent by design: the hook runs under `cmd /C`, so getppid names a
+transient cmd.exe (the documented `parent_pid` trap) — focus silently no-ops.
+
 ## Known sharp edges (don't be surprised by these)
 
 - **`render/` is now just the `test-renderer` fixture home — the legacy `Renderer` trait was RETIRED (#483).** The pre-scene-split render layer was swept in 0.12.0 (blit helpers `blit_frame_outlined`/`draw_line`/`draw_dotted_hline`/`half_block_cells`/`HalfCell`, `sprite/animator`) — only `blit_frame` stays (the scene painter's primitive). The `Renderer` trait's two impls rode it non-polymorphically (`TuiRenderer` prod flush + `TestRenderer` e2e), so #483 inlined both to inherent `render` methods and deleted the trait + its `lib.rs` re-export. New render targets go through `pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer` (workspace invariant #1) — do NOT reintroduce a core render trait.

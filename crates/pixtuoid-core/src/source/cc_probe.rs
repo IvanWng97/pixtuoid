@@ -321,7 +321,7 @@ fn pid_alive(pid: i32) -> bool {
 /// a custom `--projects-root /tmp/fixture` replay points at an arbitrary dir
 /// whose parent could hold an unrelated `sessions/`, so those runs get no
 /// probe and keep the pure-mtime gate.
-pub(super) fn cc_sessions_dir(projects_root: &Path) -> Option<PathBuf> {
+pub(crate) fn cc_sessions_dir(projects_root: &Path) -> Option<PathBuf> {
     if projects_root.file_name().and_then(|n| n.to_str()) != Some("projects") {
         return None;
     }

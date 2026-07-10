@@ -72,7 +72,6 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     current_floor: usize,
     transition: Option<FloorTransition>,
     mouse_pos: Option<(u16, u16)>,
-    pinned_agent: Option<pixtuoid_core::AgentId>,
     theme: &'static pixtuoid_scene::theme::Theme,
     theme_picker: Option<usize>,
     cached_layout: Option<Layout>,
@@ -127,7 +126,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             current_floor: 0,
             transition: None,
             mouse_pos: None,
-            pinned_agent: None,
             theme,
             theme_picker: None,
             cached_layout: None,
@@ -280,7 +278,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         if target == self.current_floor || self.transition.is_some() {
             return;
         }
-        self.set_pinned_agent(None);
         self.transition = Some(FloorTransition::new(self.current_floor, target, now));
     }
 
@@ -296,14 +293,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     pub fn set_mouse_pos(&mut self, pos: Option<(u16, u16)>) {
         self.mouse_pos = pos;
-    }
-
-    pub fn pinned_agent(&self) -> Option<pixtuoid_core::AgentId> {
-        self.pinned_agent
-    }
-
-    pub fn set_pinned_agent(&mut self, id: Option<pixtuoid_core::AgentId>) {
-        self.pinned_agent = id;
     }
 
     pub fn buf(&self) -> &RgbBuffer {
@@ -747,7 +736,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             buf: &mut pf.buf,
             store: &mut pf.ctx,
             mouse_pos: self.mouse_pos,
-            pinned_agent: self.pinned_agent,
             debug_walkable: self.debug_walkable,
             theme: self.theme,
             theme_picker: self.theme_picker,

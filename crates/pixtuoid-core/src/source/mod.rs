@@ -261,8 +261,9 @@ impl AgentEvent {
 /// transcript-family pids are NEVER taken from the shim parent. Native/unix
 /// backed — a non-unix build resolves nothing (focus silently no-ops).
 #[cfg(feature = "native")]
-pub fn cc_pid_for_session(sessions_dir: &std::path::Path, session_id: &str) -> Option<i32> {
-    cc_probe::live_cc_session_ids(sessions_dir)?
+pub fn cc_pid_for_session(projects_root: &std::path::Path, session_id: &str) -> Option<i32> {
+    let sessions_dir = cc_probe::cc_sessions_dir(projects_root)?;
+    cc_probe::live_cc_session_ids(&sessions_dir)?
         .pid_of
         .get(session_id)
         .copied()
@@ -335,10 +336,16 @@ mod focus_pid_tests {
 
     #[test]
     fn cc_pid_for_session_hits_misses_and_tolerates_garbage() {
-        let dir = tempfile::tempdir().unwrap();
+        // The seam takes the PROJECTS root and derives the sibling sessions
+        // registry (the standard <claude_home>/{projects,sessions} layout).
+        let home = tempfile::tempdir().unwrap();
+        let projects = home.path().join("projects");
+        let sessions = home.path().join("sessions");
+        std::fs::create_dir_all(&projects).unwrap();
+        std::fs::create_dir_all(&sessions).unwrap();
         // A live entry (our own pid is alive by construction) + garbage.
         std::fs::write(
-            dir.path().join("self.json"),
+            sessions.join("self.json"),
             serde_json::json!({
                 "pid": std::process::id(),
                 "sessionId": "focus-sess",
@@ -347,18 +354,21 @@ mod focus_pid_tests {
             .to_string(),
         )
         .unwrap();
-        std::fs::write(dir.path().join("junk.json"), "not json {{{").unwrap();
+        std::fs::write(sessions.join("junk.json"), "not json {{{").unwrap();
 
         assert_eq!(
-            cc_pid_for_session(dir.path(), "focus-sess"),
+            cc_pid_for_session(&projects, "focus-sess"),
             Some(std::process::id() as i32),
             "hit: the session's live registry pid"
         );
         assert_eq!(
-            cc_pid_for_session(dir.path(), "unknown-sess"),
+            cc_pid_for_session(&projects, "unknown-sess"),
             None,
             "miss: unknown session resolves nothing"
         );
+        // A NON-standard projects root (file_name != "projects") derives no
+        // registry — the custom --projects-root replay case resolves nothing.
+        assert_eq!(cc_pid_for_session(home.path(), "focus-sess"), None);
     }
 
     #[test]

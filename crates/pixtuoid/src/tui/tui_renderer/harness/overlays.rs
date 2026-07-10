@@ -363,7 +363,8 @@ fn pinned_active_agent_tooltip_shows_state_and_detail() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Active"), "active state word: {text}");
@@ -397,7 +398,8 @@ fn pinned_agent_tooltip_shows_source_badge() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     // claude-code → the `[cc]` badge prefix.
@@ -433,7 +435,8 @@ fn pinned_subagent_tooltip_shows_lineage() {
     let child_id = child.agent_id;
     let scene = scene_with(vec![parent, child], 16);
     let mut r = build(120, 44, vec![]);
-    r.set_pinned_agent(Some(child_id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, child_id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -451,7 +454,8 @@ fn pinned_waiting_agent_tooltip_shows_reason() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Waiting"), "waiting state arm: {text}");
@@ -479,7 +483,8 @@ fn pinned_exiting_agent_tooltip_suppresses_meter() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Exiting"), "exiting state word: {text}");
@@ -501,7 +506,8 @@ fn pinned_exiting_agent_tooltip_suppresses_waiting_reason() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Exiting"), "exiting state word: {text}");
@@ -532,15 +538,18 @@ fn exiting_agent_label_uses_exiting_color() {
 }
 
 #[test]
-fn pinned_then_removed_agent_is_a_safe_noop() {
-    // paint_hover_tooltip's early return when the pinned id is gone from scene.
+fn hovered_then_removed_agent_is_a_safe_noop() {
+    // The hover hit re-resolves per frame: with the agent removed from the
+    // scene the same parked mouse resolves nothing (or another surface) —
+    // the render must not panic. (The pinned-id variant of this test died
+    // with click-to-pin; hover is re-evaluated each frame by construction.)
     let id = AgentId::from_transcript_path("/ttGone/0.jsonl");
     let scene = scene_with(vec![slot(id, 0, 0, t0())], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    r.set_pinned_agent(Some(id));
-    // Re-render with the agent removed → tooltip paint hits the get()=None bail.
+    super::hover_agent(&mut r, &scene, id, 120, 44);
+    // Re-render with the agent removed → the hover resolves None, no tooltip.
     let empty = SceneState::uniform(16);
     r.render(&empty, &pack(), t0() + Duration::from_millis(33))
-        .expect("render must not panic when the pinned agent vanished");
+        .expect("render must not panic when the hovered agent vanished");
 }
