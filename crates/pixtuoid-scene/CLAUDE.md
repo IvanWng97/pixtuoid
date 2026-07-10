@@ -117,7 +117,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   re-host into the uniform single-floor scene, so single_floor_local identity reads
 │                   stay honest; see its doc comment + core's GlobalDeskIndex/FloorLocalDeskIndex docs
 │                   in state/mod.rs)
-├── frame_cache.rs  FrameCache — per-agent recolored-sprite cache keyed (agent_id, anim, frame_idx, flip_x);
+├── frame_cache.rs  FrameCache — per-agent recolored-sprite cache keyed (agent_id, anim, frame_idx, flip_x, glow_tint — the theme-derived per-tool monitor-glow color, so each glow variant caches + self-invalidates on theme change separately);
 │                   owned per-FloorCtx, flushed on theme change (set_theme) so recolors update immediately;
 │                   per-agent entries also drop when the outfit seed changes (note_outfit_seed —
 │                   a cwd backfill retints the outfit mid-life, the stale-outfit class)

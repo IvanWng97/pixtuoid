@@ -159,6 +159,16 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
 mod tests {
     use super::*;
 
+    /// Every shipped version, for the `release_notes_present_for_every_shipped_version`
+    /// teeth. `just bump` prepends the new version at the marker below — the twin of
+    /// the `[bump-inject-here]` match-arm injection — so this list can't silently
+    /// drift out of sync with the arms the way the old hand-maintained array did.
+    const SHIPPED_VERSIONS: &[&str] = &[
+        // [bump-version-list-here]
+        "0.13.0", "0.12.0", "0.11.1", "0.11.0", "0.10.0", "0.9.0", "0.8.0", "0.7.0", "0.6.1",
+        "0.6.0", "0.5.0", "0.4.1", "0.4.0",
+    ];
+
     #[test]
     fn newer_version_detected() {
         assert!(is_newer_version("0.2.0", "0.1.0"));
@@ -224,9 +234,7 @@ mod tests {
     /// (No exact-prose assertions — that would be brittle to copy edits.)
     #[test]
     fn release_notes_present_for_every_shipped_version() {
-        for v in [
-            "0.4.1", "0.5.0", "0.6.0", "0.6.1", "0.7.0", "0.8.0", "0.9.0", "0.10.0", "0.11.0",
-        ] {
+        for v in SHIPPED_VERSIONS {
             let notes =
                 release_notes(v).unwrap_or_else(|| panic!("missing release_notes arm for {v}"));
             assert!(!notes.is_empty(), "empty release_notes for {v}");

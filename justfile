@@ -562,6 +562,8 @@ bump version:
     # the one un-guarded step in an otherwise heavily-guarded recipe.
     if ! grep -q '\[bump-inject-here\]' crates/pixtuoid/src/version.rs; then
         echo "error: version.rs is missing the [bump-inject-here] marker — release-notes injection would silently no-op" >&2; exit 1; fi
+    if ! grep -q '\[bump-version-list-here\]' crates/pixtuoid/src/version.rs; then
+        echo "error: version.rs is missing the [bump-version-list-here] marker — the SHIPPED_VERSIONS injection would silently no-op" >&2; exit 1; fi
 
     # releases come from main; forking release/v$ver off anything else is usually wrong
     cur_branch="$(git symbolic-ref --short -q HEAD || echo detached)"
@@ -602,8 +604,9 @@ bump version:
             | sed 's/\\/\\\\/g; s/"/\\"/g; s/^/            "/; s/$/",/'
         printf '\n        ]),\n'
     } > "$notes"
-    awk -v f="$notes" '
+    awk -v f="$notes" -v ver="$ver" '
         /\[bump-inject-here\]/ { print; while ((getline l < f) > 0) print l; next }
+        /\[bump-version-list-here\]/ { print; printf "        \"%s\",\n", ver; next }
         { print }
     ' crates/pixtuoid/src/version.rs > "$notes.rs" && mv "$notes.rs" crates/pixtuoid/src/version.rs
     rm -f "$notes"

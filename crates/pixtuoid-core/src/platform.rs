@@ -56,7 +56,7 @@ pub(crate) fn codex_home() -> PathBuf {
 /// whitespace-only path is never a valid home/config dir. The ONE spelling of
 /// that "empty env == unset" rule, shared by every resolver below (the module's
 /// "one trim semantics"), so the four call sites can't drift.
-fn nonempty(v: Option<String>) -> Option<String> {
+pub(crate) fn nonempty(v: Option<String>) -> Option<String> {
     v.filter(|s| !s.trim().is_empty())
 }
 
@@ -189,6 +189,18 @@ mod tests {
 
     fn s(v: &str) -> Option<String> {
         Some(v.to_string())
+    }
+
+    #[test]
+    fn nonempty_treats_empty_and_whitespace_as_unset() {
+        // The ONE trim authority CLAUDE_CONFIG_DIR / COPILOT_HOME / codex_home
+        // all route through — a whitespace-only value must resolve to None, not a
+        // relative "  /…" path.
+        assert_eq!(nonempty(None), None);
+        assert_eq!(nonempty(s("")), None);
+        assert_eq!(nonempty(s("   ")), None);
+        assert_eq!(nonempty(s("\t \n")), None);
+        assert_eq!(nonempty(s(" /home/u ")).as_deref(), Some(" /home/u "));
     }
 
     #[test]
