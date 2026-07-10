@@ -10,7 +10,7 @@
 //! `floating/` and the example share.
 //!
 //! TWO faces, one seam: JetBrains Mono is the face, but it has NO glyph for part
-//! of the office's symbol vocabulary (`★ ◐ ⬢ ▮ ▯ ⏱ ↳ ❚` — the board's star CTA,
+//! of the office's symbol vocabulary (`★ ◐ ⬢ ▮ ▯ ⏱ ↳` — the board's star CTA,
 //! the waiting dot, the gateway chip, the tooltip meter/stopwatch…), so every
 //! per-character operation resolves the char to a face first: JetBrains Mono if
 //! it covers it, else the bundled `fonts/PixtuoidSymbols.ttf` (a renamed
@@ -165,6 +165,10 @@ mod tests {
         // board, tooltip, dashboard) must resolve to a REAL glyph in one of the
         // two faces — a new vocabulary glyph that's covered by neither would
         // rasterize as the snapshot fallback block (and as tofu in floating).
+        // HAND-MAINTAINED allowlist (no single machine-readable source of the
+        // render vocabulary exists to derive from): adding a glyph to hud.rs /
+        // board.rs / overlay.rs / tooltip.rs / dashboard.rs means ADDING IT
+        // HERE — the test can only guard chars it knows about.
         for ch in [
             '●', '○', '◐', '◌', '▲', '▸', '▾', '★', '⬢', '▮', '▯', '⏱', '↳', '↑', '↓', '·', '×',
             '⚠', '…', '⋮', '─', '│', '█', '▀',

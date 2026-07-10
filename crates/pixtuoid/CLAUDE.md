@@ -168,7 +168,7 @@ src/
 │                       (the old 8×8 `pixtuoid_scene::font` + its font8x8 dep were DELETED — no bitmap stand-in
 │                       anywhere). TWO faces behind one seam: `fonts/JetBrainsMono-Regular.ttf` primary +
 │                       `fonts/PixtuoidSymbols.ttf` fallback (a renamed JuliaMono symbol-block subset — JBM has
-│                       NO glyph for ★ ◐ ⬢ ▮ ▯ ⏱ ↳ ❚, and so does JetBrainsMono NERD Font, whose patches all
+│                       NO glyph for ★ ◐ ⬢ ▮ ▯ ⏱ ↳, and neither does JetBrainsMono NERD Font, whose patches all
 │                       live in the Private Use Area; a real terminal shows those via system-font fallback,
 │                       which the second face replicates). Exposes has_glyph / text_width / line_height /
 │                       draw_text_at(s, x, top_y, px, put(x,y,coverage)) — a surface-agnostic coverage callback

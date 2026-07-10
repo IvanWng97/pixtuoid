@@ -50,11 +50,11 @@ const PREAMBLE_MS: u64 = 6000; // "$ claude" + session start precede the first f
 // affected, low enough to meaningfully shorten the one outlier.
 const ANNOTATION_MAX_HOLD_MS: u64 = 4200;
 
-// the PANEL's own text (Font C, user-picked): an anti-aliased JetBrains Mono
-// (OFL 1.1, `fonts/`) rather than the office's blocky 8x8 pixel font — the
-// title, the typed body lines, and the coda strip. Sizes target the OLD 16px
-// line metrics so LINE_H/wrap math stays proportioned; a pure-Rust rasterizer
-// (ab_glyph) composites its grayscale coverage onto the panel's dark ground.
+// the PANEL's own text (Font C, user-picked): anti-aliased JetBrains Mono
+// (OFL 1.1, `fonts/`) — the title, the typed body lines, and the coda strip.
+// Sizes target the retired 8×8 font's 16px line metrics so LINE_H/wrap math
+// stays proportioned; a pure-Rust rasterizer (ab_glyph) composites its
+// grayscale coverage onto the panel's dark ground.
 const PROOF_FONT_PX: f32 = 16.0;
 const CODA_FONT_PX: f32 = 12.0;
 
@@ -433,12 +433,13 @@ fn dashed_h(img: &mut RgbaImage, x0: i32, x1: i32, y: i32, c: Rgba<u8>) {
 const DOT_RED: Rgba<u8> = Rgba([255, 95, 86, 255]);
 const DOT_YELLOW: Rgba<u8> = Rgba([255, 189, 46, 255]);
 const DOT_GREEN: Rgba<u8> = Rgba([39, 201, 63, 255]);
-const DOT_PITCH: i32 = 9; // scale-1 dot glyphs are ~8px wide; 9 keeps a 1px gap
+const CHROME_DOT_PX: f32 = 8.0; // traffic-light diameter (the ● glyph at this size)
+const DOT_PITCH: i32 = CHROME_DOT_PX as i32 + 1; // dot advance + a 1px gap
 const DOT_GAP_AFTER: i32 = 6; // clearance between the 3rd dot and the title
 
-/// `is_panel` gates BOTH the traffic-light dots and the AA title font — only
-/// the left "captured..." panel is a typed terminal (Font C); the "pixtuoid"
-/// office chrome stays the office's own 8x8 pixel font.
+/// `is_panel` gates the traffic-light dots + the title size — only the left
+/// "captured..." panel is a typed terminal window; the "pixtuoid" office chrome
+/// renders the SAME AA face at the annotation size, without the dots.
 fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str, is_panel: bool) {
     fill(img, x, y, w, HEADER_H, CHROME_BG);
     fill(img, x, y + HEADER_H - 1, w, 1, EDGE);
@@ -446,7 +447,7 @@ fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str, is_panel: bo
         let cy = (y + HEADER_H / 2) as i32;
         let mut cx = x as i32 + PAD as i32 + 4;
         for c in [DOT_RED, DOT_YELLOW, DOT_GREEN] {
-            dot(img, cx, cy, 8.0, c);
+            dot(img, cx, cy, CHROME_DOT_PX, c);
             cx += DOT_PITCH;
         }
         let title_x = cx + DOT_GAP_AFTER;

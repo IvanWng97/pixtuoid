@@ -533,15 +533,15 @@ fn fill_rect(img: &mut RgbImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u
     fill_rect_px(img, x, y, w, h, color);
 }
 
-/// Blit an 8x8 glyph into one 8x16 cell, doubled vertically (1px → 2px tall) so
-/// it fills the cell. `put` paints one foreground pixel (bg is pre-filled).
+// Size chosen so the face fits the cell: line_height(16) == CELL_H and the JBM
+// advance (7px) ≤ CELL_W — both pinned by `cell_font_px_fits_the_cell` below.
+const CELL_FONT_PX: f32 = 16.0;
+
 /// Anti-aliased cell text at the terminal grid: one char per 8×16 cell, drawn
 /// in `pixtuoid::aa_text` (JetBrains Mono + symbol fallback) at CELL_FONT_PX,
 /// horizontally centered on the cell's advance and CLIPPED to the cell rect so
 /// a wide fallback glyph can't bleed into a neighbor. Per-cell origins (never a
 /// running cursor) keep the raster locked to the terminal grid.
-const CELL_FONT_PX: f32 = 16.0; // line_height(16) == CELL_H; JBM advance 7 ≤ CELL_W
-
 fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)) {
     let s = ch.to_string();
     let adv = pixtuoid::aa_text::text_width(&s, CELL_FONT_PX);
@@ -614,6 +614,23 @@ mod tests {
             });
             assert!(lit > 0, "{ch:?} lit no pixels");
         }
+    }
+
+    #[test]
+    fn cell_font_px_fits_the_cell() {
+        // The WHY behind CELL_FONT_PX=16: the face's line height must fill the
+        // 8×16 cell exactly and its monospace advance must fit the cell width —
+        // a face/metric drift would silently clip descenders (the cell clip
+        // masks it visually), so pin both halves of the claim.
+        assert_eq!(
+            pixtuoid::aa_text::line_height(CELL_FONT_PX),
+            CELL_H as i32,
+            "line height fills the cell"
+        );
+        assert!(
+            pixtuoid::aa_text::text_width("M", CELL_FONT_PX) <= CELL_W as i32,
+            "the primary face's advance fits the cell width"
+        );
     }
 
     #[test]
