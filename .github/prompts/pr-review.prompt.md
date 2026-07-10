@@ -204,13 +204,11 @@ Both briefs MUST carry, verbatim or equivalent:
    registry IN THIS SESSION, or write "unverified" instead of asserting.
    A registry 404 observed now IS a finding; a recollection is not — reviews
    insisted a 12-day-old tap "doesn't exist" for 4 rounds (#112; the twin
-   `checkout@v6` case: docs/review-metrics/mining-2026-06.md). Both existed.
+   `checkout@v6` case). Both existed.
 3. **Integer confidence 0–100 + `file:line`** on every finding.
 4. **Sharp-edge check** — match familiar-smelling claims against the
    per-crate `CLAUDE.md` "Known sharp edges" (the live, maintained record of
    deliberate-design refutations; premise-anchored: same seam ≠ same claim).
-   `docs/REVIEW-LEDGER.md` is a frozen archive you may skim for older
-   adjudications, but it is no longer required reading.
 5. **Verdict** — exactly one of APPROVE / APPROVE-WITH-NITS / REQUEST-CHANGES.
 
 ---
@@ -285,7 +283,7 @@ Judge as a demanding critic:
    merely concerns the same entity (render caches, interaction state, scalar
    keys with disjoint key-spaces) — consolidate shared IDENTITY, not shared
    TOPIC. (The `[pet-names]` lesson, PR #86 — backtest-validated, controls
-   included: docs/review-metrics/mining-2026-06.md.) Same item, the JOIN
+   included.) Same item, the JOIN
    direction: when the diff looks one existing collection's id up in
    another's key-space (registry→install-target, manifest→registry), verify
    the join key against the REAL production constants — never the tests'
@@ -458,8 +456,8 @@ state IN THE PR THREAD — FIXED, REFUTED-with-trace (if it's deliberate
 design, cite or ADD the relevant per-crate `CLAUDE.md` sharp edge), or
 ISSUE-FILED (no-deferral rule applies: only big/refactor work defers).
 "Acknowledged, no action" is not a state: #40's ignored migration finding
-became a 0.4.1 release-blocker (#46); two more drop cases:
-docs/review-metrics/mining-2026-06.md. Commit skew cuts both ways: run the
+became a 0.4.1 release-blocker (#46); two more drop
+cases were logged. Commit skew cuts both ways: run the
 sweep against the FULL online thread at the FINAL merge head, not the commit
 the local lenses ran on — a bot finding that lands on a later commit after
 the sweep is the silent-drop class (#283's blocking-executor MEDIUM,
