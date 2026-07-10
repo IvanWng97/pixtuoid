@@ -167,6 +167,7 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
     # the surface — a review ping to re-verify our synthesized labels/shape.
     "ultra_effort_enter": "the ultra-effort transcript attachment marker",
     "ultrathink_effort": "the ultrathink transcript attachment marker",
+    "ultra_effort_exit": "the ultra-effort EXIT attachment marker (instant flame-off)",
 }
 
 # Codex hook events we DELIBERATELY do not register — they are not agent
