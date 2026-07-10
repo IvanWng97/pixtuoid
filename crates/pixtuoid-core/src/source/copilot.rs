@@ -62,11 +62,11 @@ pub fn copilot_home() -> PathBuf {
 /// The session id = the **parent directory name** of `events.jsonl`
 /// (`…/session-state/<sessionId>/events.jsonl`). The filename stem is the
 /// constant `events`, so — unlike CC/Codex — the id is the containing dir.
-/// Falls back to the stem if there is no parent (defensive).
+/// A parentless path (never produced by the directory-walking watcher) yields
+/// an empty key, not the colliding constant stem `events`.
 pub fn copilot_id_from_path(path: &Path) -> String {
     path.parent()
         .and_then(|p| p.file_name())
-        .or_else(|| path.file_stem())
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string()
@@ -78,6 +78,15 @@ pub fn derive_copilot_label(_path: &Path, source: &str, cwd: &Path) -> String {
 
 fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(|x| x.as_str())
+}
+
+/// The subagent child key for a `subagent.*` envelope: the top-level `agentId`
+/// (== the spawning `task` tool's `data.toolCallId`), falling back to
+/// `data.toolCallId`. One spelling shared by the started/completed/failed arms.
+fn copilot_child_key<'a>(v: &'a Value, data: Option<&'a Value>) -> Option<&'a str> {
+    str_at(v, "agentId")
+        .filter(|s| !s.is_empty())
+        .or_else(|| data.and_then(|d| str_at(d, "toolCallId")))
 }
 
 /// First-sight cwd extractor (the walker's head scan, dispatched via the
@@ -157,10 +166,23 @@ pub fn decode_copilot_line(
             let Some(tool_call_id) = str_at(d, "toolCallId") else {
                 return Ok(vec![]);
             };
-            vec![AgentEvent::ActivityEnd {
+            let mut out = vec![AgentEvent::ActivityEnd {
                 agent_id: acting,
                 tool_use_id: Some(tool_call_id.to_string()),
-            }]
+            }];
+            // Burn-tier observation: copilot stamps the model PER TOOL
+            // (data.model — it can differ mid-session, e.g. a haiku-class
+            // side tool under a sonnet session; capture-verified 1.0.62).
+            // Attributed to the ACTING agent so a subagent's tool doesn't
+            // repaint the root.
+            if let Some(model) = str_at(d, "model").filter(|m| !m.is_empty()) {
+                out.push(AgentEvent::ModelInfo {
+                    agent_id: acting,
+                    model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+                    effort: None,
+                });
+            }
+            out
         }
         "permission.requested" => {
             // permissionRequest.kind (write/shell/read/…) names the gate; fall
@@ -202,10 +224,7 @@ pub fn decode_copilot_line(
         "subagent.started" => {
             // The child id is the envelope `agentId` (== data.toolCallId). Register
             // it as a child of the root session, then name it from the display name.
-            let Some(child_key) = str_at(&v, "agentId")
-                .filter(|s| !s.is_empty())
-                .or_else(|| data.and_then(|d| str_at(d, "toolCallId")))
-            else {
+            let Some(child_key) = copilot_child_key(&v, data) else {
                 return Ok(vec![]);
             };
             let child = AgentId::from_parts(source, child_key);
@@ -233,10 +252,7 @@ pub fn decode_copilot_line(
             evs
         }
         "subagent.completed" | "subagent.failed" => {
-            let Some(child_key) = str_at(&v, "agentId")
-                .filter(|s| !s.is_empty())
-                .or_else(|| data.and_then(|d| str_at(d, "toolCallId")))
-            else {
+            let Some(child_key) = copilot_child_key(&v, data) else {
                 return Ok(vec![]);
             };
             vec![AgentEvent::SessionEnd {
@@ -286,6 +302,38 @@ fn copilot_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- burn-tier observations (ModelInfo) ----
+
+    #[test]
+    fn execution_complete_surfaces_the_per_tool_model() {
+        // Byte-real shape (capture 2026-05-22): data.model rides every
+        // tool.execution_complete.
+        let line = r#"{"type":"tool.execution_complete","data":{"toolCallId":"t1","model":"claude-haiku-4.5","success":true},"id":"e1","timestamp":"ts","parentId":null}"#;
+        let evs = decode_copilot_line(
+            "/p/11111111-2222-3333-4444-555555555555/events.jsonl",
+            "copilot",
+            serde_json::from_str(line).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: None, .. } if m == "claude-haiku-4.5")),
+            "per-tool model must surface, got {evs:?}"
+        );
+        // Model-less completion: just the ActivityEnd, no phantom ModelInfo.
+        let line = r#"{"type":"tool.execution_complete","data":{"toolCallId":"t2","success":true},"id":"e2","timestamp":"ts","parentId":null}"#;
+        let evs = decode_copilot_line(
+            "/p/11111111-2222-3333-4444-555555555555/events.jsonl",
+            "copilot",
+            serde_json::from_str(line).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, AgentEvent::ModelInfo { .. })),
+            "got {evs:?}"
+        );
+    }
     use serde_json::json;
 
     // Real on-disk session-state path → id is the PARENT DIR uuid, not "events".
@@ -395,14 +443,14 @@ mod tests {
             [AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id,
-            }] => {
+            }, ..] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(
                     tool_use_id.as_deref(),
                     Some("tooluse_9CoqZL2lZlJUsz7TjJsSUk")
                 );
             }
-            other => panic!("expected ActivityEnd, got {other:?}"),
+            other => panic!("expected ActivityEnd first, got {other:?}"),
         }
     }
 

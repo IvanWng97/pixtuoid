@@ -5,7 +5,7 @@ const home = asset('');
 // `floating` = the OPEN FLOOR index treatment (corner chrome over the live
 // office, scrolls away — the statusline is that page's persistent chrome).
 // The default is the sticky bar: Docs/404 have no backdrop and no statusline,
-// so they keep persistent nav, the 60px layout reservation, and section links.
+// so they keep persistent nav, the --nav-h layout reservation, and section links.
 const { floating = false } = Astro.props;
 ---
 
@@ -204,7 +204,7 @@ const { floating = false } = Astro.props;
     display: flex;
     align-items: center;
     gap: 1rem;
-    height: 60px;
+    height: var(--nav-h); /* single-sourced in global.css — Hero reserves the same */
   }
   .nav__logo {
     display: flex;

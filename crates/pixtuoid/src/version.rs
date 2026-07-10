@@ -59,7 +59,9 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.14.0" => Some(&[
-            "New agent supported — Oh My Pi (omp) sessions now show up as animated pixel-art coworkers in the office: pixtuoid tails omp's session transcripts, so tool runs, task subagents (as linked child sprites), and clean exits all animate live, with an om· lime badge",
+            "Click an agent, land in its terminal — clicking a sprite (or pressing f on the dashboard's selected agent) brings the terminal app hosting that session to the foreground, on macOS, Windows and Linux; if the terminal can't be found, nothing happens — no popups, no errors",
+            "Works across the fleet — hook-connected CLIs are located through the session's own process, Claude Code and Codex through their recycle-guarded liveness registries, so a stale or reused pid never yanks the wrong window forward",
+            "The old click-to-pin tooltip is retired in its favor — hovering a sprite still shows the full dossier, one click now means \"take me there\"",
         ]),
         "0.13.0" => Some(&[
             "New agent supported — Hermes Agent (Nous Research) sessions now show up as animated pixel-art coworkers in the office, wired in like every other CLI",
@@ -229,6 +231,7 @@ mod tests {
     fn release_notes_present_for_every_shipped_version() {
         for v in [
             "0.4.1", "0.5.0", "0.6.0", "0.6.1", "0.7.0", "0.8.0", "0.9.0", "0.10.0", "0.11.0",
+            "0.11.1", "0.12.0", "0.13.0",
         ] {
             let notes =
                 release_notes(v).unwrap_or_else(|| panic!("missing release_notes arm for {v}"));

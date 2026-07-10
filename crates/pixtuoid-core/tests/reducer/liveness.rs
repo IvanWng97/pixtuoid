@@ -6,7 +6,7 @@ use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
 
-use crate::delegating_pair;
+use crate::{act_end, act_start, delegating_pair, proof_of_life, sess_end, waiting};
 
 // --- stale-agent sweep ---------------------------------------------------
 
@@ -104,15 +104,7 @@ fn exit_gc_spares_a_slot_at_exactly_the_grace_window() {
         t0,
         Transport::Hook,
     );
-    reducer.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut reducer, &mut scene, id, false, t0, Transport::Hook);
     assert!(scene.agents.get(&id).unwrap().exiting_at.is_some());
     reducer.tick(&mut scene, t0 + EXIT_GRACE_WINDOW);
     assert!(
@@ -150,13 +142,12 @@ fn stale_active_agent_uses_shorter_timeout_than_idle() {
         t0,
         Transport::Hook,
     );
-    reducer.apply(
+    act_start(
+        &mut reducer,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t".into()),
-            detail: None,
-        },
+        id,
+        Some("t"),
+        None,
         t0,
         Transport::Hook,
     );
@@ -251,26 +242,12 @@ fn proof_of_life_exempts_active_slot_from_stale_sweep() {
         t0,
         Transport::Hook,
     );
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t".into()),
-            detail: None,
-        },
-        t0,
-        Transport::Hook,
-    );
+    act_start(&mut r, &mut scene, id, Some("t"), None, t0, Transport::Hook);
 
     // The watcher re-vouches every ~60s, so by the time the slot crosses the
     // Active threshold a fresh ProofOfLife has landed well inside the TTL.
     let vouch_at = t0 + STALE_ACTIVE_TIMEOUT;
-    r.apply(
-        &mut scene,
-        AgentEvent::ProofOfLife { agent_id: id },
-        vouch_at,
-        Transport::Jsonl,
-    );
+    proof_of_life(&mut r, &mut scene, id, vouch_at, Transport::Jsonl);
 
     // Past the Active threshold (measured from last_event_at = t0) but inside
     // the vouch TTL: without the exemption this sweep reaps the slot (pinned
@@ -304,25 +281,11 @@ fn proof_of_life_lapse_restores_normal_sweep() {
         t0,
         Transport::Hook,
     );
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t".into()),
-            detail: None,
-        },
-        t0,
-        Transport::Hook,
-    );
+    act_start(&mut r, &mut scene, id, Some("t"), None, t0, Transport::Hook);
 
     // Last vouch lands mid-window (the process then exits: emissions stop).
     let vouch_at = t0 + STALE_ACTIVE_TIMEOUT - Duration::from_secs(100);
-    r.apply(
-        &mut scene,
-        AgentEvent::ProofOfLife { agent_id: id },
-        vouch_at,
-        Transport::Jsonl,
-    );
+    proof_of_life(&mut r, &mut scene, id, vouch_at, Transport::Jsonl);
 
     // Inside the TTL the slot is exempt — also pins that ProofOfLife did NOT
     // refresh last_event_at (the slot is past the Active threshold here).
@@ -349,12 +312,7 @@ fn proof_of_life_for_unknown_id_is_a_no_op() {
     let mut r = Reducer::new();
     let id = AgentId::from_transcript_path("/p/pol-unknown.jsonl");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    r.apply(
-        &mut scene,
-        AgentEvent::ProofOfLife { agent_id: id },
-        t0,
-        Transport::Jsonl,
-    );
+    proof_of_life(&mut r, &mut scene, id, t0, Transport::Jsonl);
     assert!(
         scene.agents.is_empty(),
         "ProofOfLife must never create a slot — only hook tool/permission events synthesize"
@@ -379,31 +337,23 @@ fn proof_of_life_does_not_touch_activity_state() {
         t0,
         Transport::Hook,
     );
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: Some("Edit: foo.rs".into()),
-        },
+        id,
+        Some("t1"),
+        Some("Edit: foo.rs"),
         t0,
         Transport::Hook,
     );
     // Arm the idle debounce — ProofOfLife must not cancel or re-arm it.
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-        },
-        t0,
-        Transport::Hook,
-    );
+    act_end(&mut r, &mut scene, id, Some("t1"), t0, Transport::Hook);
     let before = scene.agents.get(&id).unwrap().clone();
 
-    r.apply(
+    proof_of_life(
+        &mut r,
         &mut scene,
-        AgentEvent::ProofOfLife { agent_id: id },
+        id,
         t0 + Duration::from_millis(100),
         Transport::Jsonl,
     );
@@ -441,20 +391,14 @@ fn proof_of_life_does_not_block_session_end() {
         t0,
         Transport::Hook,
     );
-    r.apply(
-        &mut scene,
-        AgentEvent::ProofOfLife { agent_id: id },
-        t0,
-        Transport::Jsonl,
-    );
+    proof_of_life(&mut r, &mut scene, id, t0, Transport::Jsonl);
     // A real exit still removes promptly: SessionEnd marks exiting despite the
     // fresh vouch, and the grace GC reclaims the slot on schedule.
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
+        id,
+        false,
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
@@ -499,12 +443,7 @@ fn codex_vouched_idle_slot_outlives_short_idle_reap() {
         );
     }
     let vouch_at = t0 + STALE_SHORT_IDLE_TIMEOUT - Duration::from_secs(100);
-    r.apply(
-        &mut scene,
-        AgentEvent::ProofOfLife { agent_id: vouched },
-        vouch_at,
-        Transport::Jsonl,
-    );
+    proof_of_life(&mut r, &mut scene, vouched, vouch_at, Transport::Jsonl);
 
     let sweep_at = t0 + STALE_SHORT_IDLE_TIMEOUT + Duration::from_secs(1);
     assert!(sweep_at.duration_since(vouch_at).unwrap() < PROOF_OF_LIFE_TTL);
@@ -551,35 +490,32 @@ fn proof_of_life_on_delegating_parent_shields_its_active_subtree() {
         Transport::Jsonl,
     );
     // Parent dispatches a Task → active_tasks[parent] non-empty (delegating).
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
     // Child + grandchild go Active via their own JSONL, then fall silent
     // (blocked behind the parent's permission prompt).
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: child,
-            tool_use_id: Some("c1".into()),
-            detail: Some("Read: /x".into()),
-        },
+        child,
+        Some("c1"),
+        Some("Read: /x"),
         t0 + Duration::from_secs(2),
         Transport::Jsonl,
     );
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: grandchild,
-            tool_use_id: Some("g1".into()),
-            detail: Some("Read: /y".into()),
-        },
+        grandchild,
+        Some("g1"),
+        Some("Read: /y"),
         t0 + Duration::from_secs(3),
         Transport::Jsonl,
     );
@@ -587,12 +523,7 @@ fn proof_of_life_on_delegating_parent_shields_its_active_subtree() {
     // The probe re-vouches the PARENT only, well past the subtree's Active
     // threshold (the watcher re-emits every ~60s, so the vouch is fresh).
     let vouch_at = t0 + STALE_ACTIVE_TIMEOUT + Duration::from_secs(60);
-    r.apply(
-        &mut scene,
-        AgentEvent::ProofOfLife { agent_id: parent },
-        vouch_at,
-        Transport::Jsonl,
-    );
+    proof_of_life(&mut r, &mut scene, parent, vouch_at, Transport::Jsonl);
 
     let sweep_at = vouch_at + Duration::from_secs(1);
     assert!(sweep_at.duration_since(vouch_at).unwrap() < PROOF_OF_LIFE_TTL);
@@ -621,35 +552,28 @@ fn vouch_lapse_restores_subtree_sweep() {
     let mut r = Reducer::new();
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let (parent, child) = delegating_pair(&mut r, &mut scene, "pol-lapse-tree", t0);
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: child,
-            tool_use_id: Some("c1".into()),
-            detail: Some("Read: /x".into()),
-        },
+        child,
+        Some("c1"),
+        Some("Read: /x"),
         t0 + Duration::from_secs(2),
         Transport::Jsonl,
     );
 
     // Last vouch lands mid-window; the process then exits — emissions stop.
     let vouch_at = t0 + STALE_ACTIVE_TIMEOUT - Duration::from_secs(100);
-    r.apply(
-        &mut scene,
-        AgentEvent::ProofOfLife { agent_id: parent },
-        vouch_at,
-        Transport::Jsonl,
-    );
+    proof_of_life(&mut r, &mut scene, parent, vouch_at, Transport::Jsonl);
 
     let lapsed_at = vouch_at + PROOF_OF_LIFE_TTL + Duration::from_secs(1);
     r.tick(&mut scene, lapsed_at);
@@ -677,12 +601,7 @@ fn vouched_idle_parent_without_tasks_does_not_shield_idle_child() {
     // NO Task dispatch: active_tasks[parent] stays empty; both slots sit Idle.
 
     let vouch_at = t0 + STALE_IDLE_TIMEOUT + Duration::from_secs(60);
-    r.apply(
-        &mut scene,
-        AgentEvent::ProofOfLife { agent_id: parent },
-        vouch_at,
-        Transport::Jsonl,
-    );
+    proof_of_life(&mut r, &mut scene, parent, vouch_at, Transport::Jsonl);
 
     let sweep_at = vouch_at + Duration::from_secs(1);
     assert!(sweep_at.duration_since(vouch_at).unwrap() < PROOF_OF_LIFE_TTL);
@@ -719,12 +638,11 @@ fn fresh_event_resets_stale_timer() {
 
     // At 29 min (just before 30 min idle threshold), send a new event.
     let almost = t0 + STALE_IDLE_TIMEOUT - Duration::from_secs(60);
-    reducer.apply(
+    waiting(
+        &mut reducer,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "perm".into(),
-        },
+        id,
+        "perm",
         almost,
         Transport::Hook,
     );
@@ -868,12 +786,11 @@ fn session_end_cascades_to_children() {
     );
     assert!(scene.agents.get(&child).unwrap().exiting_at.is_none());
 
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: parent,
-            as_child: false,
-        },
+        parent,
+        false,
         t0 + Duration::from_secs(10),
         Transport::Hook,
     );
@@ -933,12 +850,11 @@ fn session_end_cascades_to_grandchildren() {
         Transport::Jsonl,
     );
 
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: grandparent,
-            as_child: false,
-        },
+        grandparent,
+        false,
         t0 + Duration::from_secs(10),
         Transport::Hook,
     );
@@ -999,12 +915,11 @@ fn session_end_cascade_marks_all_descendants_exiting() {
     assert!(scene.agents.get(&child_a).unwrap().exiting_at.is_none());
     assert!(scene.agents.get(&child_b).unwrap().exiting_at.is_none());
 
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: parent,
-            as_child: false,
-        },
+        parent,
+        false,
         t0 + Duration::from_secs(5),
         Transport::Hook,
     );
@@ -1356,13 +1271,12 @@ fn long_delegation_keeps_parent_and_live_subagent_alive() {
 
     // Parent delegates one long Task → Active{Delegating}. The Task-start arm
     // does NOT bump last_event_at, so the parent's liveness is frozen at t0.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
@@ -1370,13 +1284,12 @@ fn long_delegation_keeps_parent_and_live_subagent_alive() {
     // The subagent works for ~9 min; each tool call is a hook event CC
     // misattributes to the parent's AgentId, so the reducer suppresses it.
     for (mins, tuid) in [(5u64, "sub-R1"), (9u64, "sub-R2")] {
-        r.apply(
+        act_start(
+            &mut r,
             &mut scene,
-            AgentEvent::ActivityStart {
-                agent_id: parent,
-                tool_use_id: Some(tuid.into()),
-                detail: Some("Read: /x".into()),
-            },
+            parent,
+            Some(tuid),
+            Some("Read: /x"),
             t0 + Duration::from_secs(mins * 60),
             Transport::Hook,
         );
@@ -1440,23 +1353,21 @@ fn stale_sweep_spares_subagent_blocked_under_a_waiting_parent() {
         Transport::Jsonl,
     );
     // Subagent runs a tool → Active (10-min stale timeout).
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: child,
-            tool_use_id: Some("c-tool".into()),
-            detail: Some("WebFetch: /x".into()),
-        },
+        child,
+        Some("c-tool"),
+        Some("WebFetch: /x"),
         t0 + Duration::from_secs(1),
         Transport::Jsonl,
     );
     // That tool needs permission → CC's Notification hook lands on the PARENT.
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: parent,
-            reason: "permission?".into(),
-        },
+        parent,
+        "permission?",
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
@@ -1527,23 +1438,21 @@ fn stale_sweep_spares_grandchild_under_a_waiting_ancestor() {
     );
     // Middle + leaf are Active (10-min); grandparent holds the permission gate.
     for id in [parent, child] {
-        r.apply(
+        act_start(
+            &mut r,
             &mut scene,
-            AgentEvent::ActivityStart {
-                agent_id: id,
-                tool_use_id: Some("t".into()),
-                detail: Some("WebFetch: /x".into()),
-            },
+            id,
+            Some("t"),
+            Some("WebFetch: /x"),
             t0 + Duration::from_secs(1),
             Transport::Jsonl,
         );
     }
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: gp,
-            reason: "permission?".into(),
-        },
+        gp,
+        "permission?",
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
@@ -1601,26 +1510,24 @@ fn active_subagent_keeps_parent_alive_via_jsonl_events() {
     );
     // Parent delegates → Active{Delegating} (10-min threshold); its OWN last
     // event is now frozen at t0+1s.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
     // Subagent works for >10 min, emitting ONLY JSONL events (no hooks reach the
     // parent). Each keeps the parent's lineage alive.
     for mins in [4u64, 8, 12] {
-        r.apply(
+        act_start(
+            &mut r,
             &mut scene,
-            AgentEvent::ActivityStart {
-                agent_id: child,
-                tool_use_id: Some("c".into()),
-                detail: Some("Read: /x".into()),
-            },
+            child,
+            Some("c"),
+            Some("Read: /x"),
             t0 + Duration::from_secs(mins * 60),
             Transport::Jsonl,
         );
@@ -1743,15 +1650,7 @@ fn waiting_parent_cycle_is_still_reaped_by_the_stale_sweep() {
     );
     // One member parks on a permission prompt → Waiting (its resolution
     // never arrives — the slots are malformed input, not a real session).
-    r.apply(
-        &mut scene,
-        AgentEvent::Waiting {
-            agent_id: b,
-            reason: "permission".into(),
-        },
-        t0,
-        Transport::Hook,
-    );
+    waiting(&mut r, &mut scene, b, "permission", t0, Transport::Hook);
 
     // Even the most generous threshold elapsing must reap the whole cycle:
     // the Waiting member is collected on STALE_WAITING_TIMEOUT (it is NOT
@@ -1830,15 +1729,7 @@ fn mutual_waiting_parent_cycle_is_refused_at_the_link_seam_and_reaped() {
     );
     // Both members park Waiting — pre-fix this pair was immortal.
     for id in [a, b] {
-        r.apply(
-            &mut scene,
-            AgentEvent::Waiting {
-                agent_id: id,
-                reason: "permission".into(),
-            },
-            t0,
-            Transport::Hook,
-        );
+        waiting(&mut r, &mut scene, id, "permission", t0, Transport::Hook);
     }
 
     r.tick(

@@ -58,7 +58,13 @@ const badges = sources.filter((s) => s.status === 'supported');
     display: flex;
     align-items: flex-end;
     overflow: hidden;
-    padding-block: 0 clamp(3.5rem, 8vh, 6rem);
+    /* Top: reserve the floating nav's row (--nav-h + a breath) — the copy is
+       bottom-anchored, so whenever it outgrows the viewport (narrow phones,
+       iOS text inflation) its TOP is what gives way, and with no reservation
+       the eyebrow slid under the absolute nav's logo (mobile overlap bug).
+       Desktop is unaffected: the copy is short, so flex-end keeps it at the
+       bottom and the padding is dead space it never reaches. */
+    padding-block: calc(var(--nav-h) + 0.75rem) clamp(3.5rem, 8vh, 6rem);
   }
   .dust {
     position: absolute;

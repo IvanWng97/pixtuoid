@@ -111,6 +111,69 @@ src/
 └── tests/              one integration test per concern
 ```
 
+**Burn-tier plumbing (model flame):** `AgentEvent::ModelInfo { model, effort }`
+carries RAW wire strings (interpret-at-paint — the tier tables live in
+`pixtuoid-scene::burn`): CC assistant lines' `message.model` (per turn, filters
+`<synthetic>`) + TWO CC effort channels — the HOOK payloads' documented
+`effort.level` (low..max verbatim, on every tool-context hook; ultracode
+reports as `xhigh` — the PRIMARY channel, decoded in the shared arms) and the
+transcript's periodic `ultra_effort_enter`/`ultrathink_effort` attachment
+markers (no wire value → decoder-synthesized "ultra"/"ultrathink"; the
+`ultra_effort_exit` twin synthesizes the NON-max `ULTRA_EXIT_LABEL`
+("ultra_exit"), so last-seen-wins kills the flame instantly, the TTL only
+backstops a missed exit; the sentinel is display-suppressed by
+`burn::fresh_effort`, so the dossier never renders it) — plus the SessionStart
+hook's optional `model` field;
+Codex `turn_context` model+effort verbatim; copilot per-tool `data.model`
+(attributed to the ACTING agent); opencode `session.created` `info.model.id`.
+The reducer caches `slot.model` (last-seen-wins — a mid-session `/model`
+switch tracks) + `slot.effort: EffortObservation{value, seen_at}` (re-stamped
+per sighting; the scene's EFFORT_TTL turns Codex's per-turn field and CC's
+periodic marker into ONE freshness semantic). Unknown id = no-op (a model
+line never registers a session); legitimate on BOTH transports (wire data,
+not liveness). Bounded residual: recent/live-probed files replay from the
+TOP on first sight, so a historical effort marker reads fresh for up to
+EFFORT_TTL (10 min) after attach before decaying — cosmetic, accepted.
+Both fields serde-skipped.
+
+**Focus-jump plumbing (#focus-jump):** the shim fills `_pid` (getppid) into the
+hook envelope WHEN ABSENT — opencode's plugin and CodeWhale's env-mode supply
+their own, which win; the daemon's `handle_conn` peeks `_pid` UNCONDITIONALLY
+(an exit-watch backend failing to init — pre-5.3 Linux — must not take the
+focus pid cache down with it; only the `HookPidWatch` BIND needs the watch)
+and stamps it onto the batch's `Identity` events (`patch_identity_pids` — the
+per-source decoders never see the key). The stamp is a `PidIdentity` — pid +
+the kernel start MARKER read at peek time (`source::pid_start_marker`: macOS
+`pbi_start_tvsec`, Linux `/proc` stat field-22 raw ticks — EQUALITY-only, no
+epoch conversion, which is why #220's macOS-only limitation doesn't apply) —
+so the binary's click re-reads the marker and REFUSES a recycled/dead pid
+(#527; markerless stamps skip the check, additive).
+The reducer caches it on `AgentSlot.pid` (fill at registration, refresh per
+Identity, `Some` never downgraded), serde-skipped so the scene golden doesn't
+churn. WHICH channel a source rides is the registry's **`FocusChannel`
+capability** (`ShimStamp`/`PluginStamp`/`TranscriptProbe`/`Unsupported`, a
+field of `SourceKind::Agent` so daemons structurally can't carry one) — the
+ONE data-driven truth shared by the stamp gate (`patch_identity_pids` stamps
+iff `accepts_stamp()`), the click-time probe dispatch (`focus::resolve_pid`),
+and the doctor report. It is DATA-only on purpose: the const table compiles
+to wasm, so the native-only probe FNS stay in the binary, pinned to the enum
+by the `transcript_probe_sources_all_have_a_resolve_arm` lockstep test.
+`TranscriptProbe` (CC/Codex) is never stamped — their getppid is the
+hook-command parent, never recycle-guarded, and a stamped stale pid would
+shadow the probe in `resolve_pid`. Their channel is the
+recycle-guarded probes, exposed as the two pub point-query seams
+`source::cc_pid_for_session` (projects root → sibling sessions registry) and
+`source::codex_pid_for_session` (rollout UUID). On Windows the SHIM sends no
+pid (the hook runs under `cmd /C`, so getppid would name a transient cmd.exe —
+the documented `parent_pid` trap), so shim-dependent sources focus-no-op there;
+a plugin-stamped pid (opencode's `process.pid`) still flows — the peek doesn't
+need the exit-watch, whose backend is also absent on Windows/pre-5.3 Linux. On
+those no-watch platforms an abrupt exit can't set `exiting_at`; the #527
+start-marker check still refuses the recycled pid at click time on pre-5.3
+LINUX (marker readable at stamp time), but `pid_start_marker` is None on every
+non-mac/linux OS — Windows hook-family stamps are markerless, so the guard is
+inert there and the wide staleness window REMAINS a Windows sharp edge (#528).
+
 ## Known sharp edges (don't be surprised by these)
 
 - **`render/` is now just the `test-renderer` fixture home — the legacy `Renderer` trait was RETIRED (#483).** The pre-scene-split render layer was swept in 0.12.0 (blit helpers `blit_frame_outlined`/`draw_line`/`draw_dotted_hline`/`half_block_cells`/`HalfCell`, `sprite/animator`) — only `blit_frame` stays (the scene painter's primitive). The `Renderer` trait's two impls rode it non-polymorphically (`TuiRenderer` prod flush + `TestRenderer` e2e), so #483 inlined both to inherent `render` methods and deleted the trait + its `lib.rs` re-export. New render targets go through `pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer` (workspace invariant #1) — do NOT reintroduce a core render trait.

@@ -124,7 +124,36 @@ src/
 │                       (main.rs), AND `run` (the CLI report) all read — surfaces can't drift apart. Version
 │                       skew stays report-ONLY (the <cli> --version probe is too costly for the interactive
 │                       panel-open; advisory). doctor=health PROVIDER, ConnState=connection lifecycle it
-│                       ANNOTATES (sub-state, not overlap)
+│                       ANNOTATES (sub-state, not overlap). + the #526 focus-jump block (`focus_section`,
+│                       pure + registry-bucketed: activation backend per OS — linux via the pure
+│                       `linux_activation_backend` over the SAME env markers focus/linux.rs keys on —
+│                       + CC/Codex probe-root presence via `source::cc_registry_dir` / codex
+│                       default_paths; report-only, NO TUI notice — user-cut)
+├── focus/              FOCUS-JUMP (click a sprite / dashboard `f` → the agent's terminal APP comes to the
+│                       foreground; spec docs/superpowers/specs/2026-07-10). mod.rs: focus_slot (the ONE
+│                       painter-agnostic dispatch entry — tui click/`f` today, the floating trigger later) →
+│                       resolve_pid (slot.pid for stamp-channel sources — a `PidIdentity` (pid + kernel start
+│                       marker) riding each hook Identity — else the registry `FocusChannel::TranscriptProbe`
+│                       gate + the CC/Codex point queries `source::{cc,codex}_pid_for_session`, recycle-guarded;
+│                       probe fns stay HERE, lockstep-tested against the registry enum — wasm const-table
+│                       boundary; TWO click-time guards on the cached path: an EXITING slot is REFUSED,
+│                       and the start marker is re-read via ProcessTable::start_time — mismatch/gone = recycled
+│                       pid, refused, #527) + ancestor_walk (PURE over an
+│                       injected ProcessTable, cycle-guarded, stops at pid≤1 — mock-table unit tests; KNOWN
+│                       common miss #538: tmux/screen/zellij servers are daemonized → walk dead-ends at pid 1) +
+│                       focus_agent (the ONE orchestration entry; activation injected so dispatch tests never
+│                       touch the OS). Per-OS glue (codecov-ignored, winit-class): macos.rs `/bin/ps -o ppid=`
+│                       per hop (NOT proc_pidinfo — it EPERMs at the setuid-root `login` in terminal chains;
+│                       live-dogfood-caught) + NSRunningApplication activate (objc2-app-kit pinned to winit's
+│                       stack, zero TCC); windows.rs Toolhelp32 + EnumWindows/SetForegroundWindow
+│                       (foreground-lock denial = silent no-op); linux.rs /proc walk + ONE channel per env:
+│                       sway/hyprland IPC by env marker (focusable asks the compositor tree for pid ownership,
+│                       so the walk surfaces the terminal, not the agent) else EWMH _NET_ACTIVE_WINDOW via
+│                       x11rb — i3 rides EWMH, NOT swaymsg (GNOME Wayland fails closed). ONE failure rule: every
+│                       miss = tracing::debug + silent no-op — no fallback tiers, no info UI (user-directed).
+│                       App-level only in v1 (no tab/pane precision — backlog). On Windows the SHIM sends no
+│                       pid (transient cmd.exe parent — see pixtuoid-hook), but a plugin-stamped pid
+│                       (opencode's process.pid) still flows: the `_pid` peek doesn't need the exit-watch.
 ├── config.rs           AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
 ├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize — all unit-tested;
 │                       ConnectedSources = the live `Arc<Mutex<HashSet<String>>>` connected-set,
@@ -163,6 +192,30 @@ src/
 │                       embed ESC/OSC via \u escapes), so every printed line routes through
 │                       strip_control_chars (same egress rule as the headless summary + doctor)
 ├── version.rs          pure version-popup boot logic
+├── aa_text.rs          THE anti-aliased text rasterizer — every rasterized text surface rides it: the floating
+│                       window's badges/board AND the snapshot example's terminal-cell text + --proof panel
+│                       (the old 8×8 `pixtuoid_scene::font` + its font8x8 dep were DELETED — no bitmap stand-in
+│                       anywhere). ONE face BY DESIGN: **Monaspace Neon** (GitHub Next, OFL) — the brand mono
+│                       across the whole project (the site's `--font-mono` is the same family via
+│                       @fontsource/monaspace-neon). Chosen over JetBrains Mono because it natively covers the
+│                       office's FULL symbol vocabulary `★ ◐ ⬢ ▮ ▯ ↳ ◷ ▤` — JBM lacks all of those (verified;
+│                       JetBrainsMono NERD Font does NOT help: its patches are all Private Use Area, a real
+│                       terminal shows such symbols via system-font fallback), which had forced an interim
+│                       JuliaMono-subset fallback face, then an interim JBM-native vocabulary (`✶ ◔ ◆ █ ░ └`)
+│                       — both retired the same day Monaspace landed. `◷`/`▤` replaced the emoji-only `⏱`/`📁`
+│                       tooltip prefixes. The `office_symbol_vocabulary_is_fully_covered` test is the gate: a
+│                       NEW render glyph must be Monaspace-covered or the vocabulary changes — never a second
+│                       face. Exposes has_glyph / text_width / line_height / blend_channel (the ONE
+│                       coverage-blend curve all three surfaces wrap) / draw_text_at(s, x, top_y, px,
+│                       put(x,y,coverage)) — a surface-agnostic coverage callback the caller blends
+│                       (offscreen.rs `blend_xrgb`, snapshot `blend_px`/`mix_rgb`). Binary-only (ab_glyph is a
+│                       runtime dep of THIS crate, not pixtuoid-scene — the engine stays font-impl-free; the
+│                       OTF/CFF outlines rasterize fine through ab_glyph). The wasm/site painter does its own
+│                       AA via DOM spans, not this. Snapshot cell text renders at CELL_FONT_PX=14.7 (Monaspace
+│                       advance 7.96 ≤ the 8px cell; line_height rounds to the 16px cell — test-pinned).
+├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM
+│                       from githubnext/monaspace v1.400 static — unmodified, so the OFL Reserved-Font-Name
+│                       clause is never triggered)
 ├── install/            multi-target (Claude + Codex + Reasonix + CodeWhale + opencode + Cursor + Hermes + OpenClaw) hook install via the `Target` registry:
 │                       mod.rs (install_target/uninstall_target = structured core → InstallReport/UninstallReport,
 │                         driven SOLELY by the in-TUI Sources panel's connect/disconnect (no CLI orchestration —
@@ -229,8 +282,11 @@ src/
 │                       scene changes → redraw), offscreen.rs (OfficeRenderer — owns one
 │                       pixtuoid_scene::floor::FloorSession, the scene-owned painter session over the shared
 │                       render_floor seam (#423; eviction is structural — render() runs it); moved here from tui/ as it's floating-only; the testable unit;
-│                       also OfficeRenderer::labels + paint_labels_into_surface — agent name badges from the
-│                       shared pixtuoid_scene::overlay model, 8px pixtuoid_scene::font glyphs blitted POST-upscale with a shadow),
+│                       also OfficeRenderer::{labels + paint_labels_into_surface, board + paint_wall_board_into_surface}
+│                       — agent name badges from the shared pixtuoid_scene::overlay model AND the neon wall board
+│                       from pixtuoid_scene::board, both rendered as anti-aliased Monaspace Neon via crate::aa_text
+│                       (NOT the old 8px pixtuoid_scene::font — that pixelated), blitted at NATIVE surface res
+│                       POST-upscale with a near-black drop-shadow so the crisp caption reads over the chunky office),
 │                       window.rs (FloatingApp ApplicationHandler: renders the office at a DOWNSCALED buffer
 │                       [~window/SCALE, OFFICE_TARGET_H≈180] then nearest-neighbor UPSCALES into the surface —
 │                       a 1:1 blit renders 8×12 sprites unreadably tiny; ~30fps tick WHILE agents OR a live gateway

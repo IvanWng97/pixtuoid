@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 use super::{compact_hms, display_width, source_badge_span, to_color, StateKind};
 use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_scene::layout::{Layout, DESK_W};
-use pixtuoid_scene::overlay::{disambig_suffix, LabelTone};
+use pixtuoid_scene::overlay::disambig_suffix;
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::tool_glow_for_kind;
 use pixtuoid_scene::pose;
@@ -62,12 +62,9 @@ pub(crate) fn paint_label_widgets(
         let label_color = if el.hovered {
             Color::White
         } else {
-            match el.tone {
-                LabelTone::Exiting => to_color(theme.ui.label_exiting),
-                LabelTone::Active => to_color(theme.ui.label_active),
-                LabelTone::Waiting => to_color(theme.ui.label_waiting),
-                LabelTone::Idle => to_color(theme.ui.label_idle),
-            }
+            // Tone→role map is single-sourced in `scene::overlay`; this painter
+            // only converts the resolved `Rgb` to ratatui `Color`.
+            to_color(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme))
         };
         let text = if el.hovered {
             format!("▸{}", el.text)
@@ -114,7 +111,9 @@ fn short_cwd(cwd: &std::path::Path) -> String {
 /// pinned. One coherent card: `[xx]` source badge + label + `·id4` (L1), a dim
 /// separator, the `{glyph} {Word}` state line (+ the current tool in its glow
 /// hue), the detail / waiting-reason, the `↳ under {parent}` lineage (subagents
-/// only), the cwd, and the `⏱` stats (with the active-% meter folded in). Uses
+/// only), the cwd, the `★ {model} · {effort}` burn row (when the wire told
+/// us; effort only while fresh), and the `◷` stats (with the active-% meter
+/// folded in). Uses
 /// the SHARED vocabulary (`StateKind`) + badge (`source_badge_span`) so it can't
 /// drift from the footer/board/dashboard. Dim rows use `tooltip_dim`, NOT the
 /// live `label_exiting` (C6). Positioned to avoid the cursor + screen edges.
@@ -202,20 +201,31 @@ pub(crate) fn paint_hover_tooltip(
         )));
     }
     body.push(Line::from(Span::styled(
-        format!("\u{1f4c1} {}", short_cwd(&agent.cwd)),
+        format!("\u{25a4} {}", short_cwd(&agent.cwd)),
         dim,
     )));
+    // The LLM brain, when the wire told us (CC/Codex/copilot/opencode) — RAW
+    // model string, with the effort suffixed only while FRESH (the same
+    // burn-TTL the flame reads, so the text can't outlive the fire). Sources
+    // without a model channel simply skip the row.
+    if let Some(model) = agent.model.as_deref() {
+        let mut row = format!("\u{2605} {model}");
+        if let Some(effort) = pixtuoid_scene::burn::fresh_effort(agent, now) {
+            row.push_str(&format!(" \u{b7} {effort}"));
+        }
+        body.push(Line::from(Span::styled(row, dim)));
+    }
 
     let session_secs = now
         .duration_since(agent.created_at)
         .unwrap_or_default()
         .as_secs();
     let mut stats = format!(
-        "\u{23f1} {} \u{b7} {} calls",
+        "\u{25f7} {} \u{b7} {} calls",
         compact_hms(session_secs),
         agent.tool_call_count
     );
-    // Active-% meter folded into the ⏱ line (height budget). Fresh agents show no
+    // Active-% meter folded into the stats line (height budget). Fresh agents show no
     // meter (the % is noise before ~5s of accounting); an exiting agent shows none
     // either (keyed off the exiting-first `kind`, matching the tool suppression).
     if matches!(kind, StateKind::Active) && session_secs >= 5 {
@@ -582,7 +592,7 @@ mod tests {
     #[test]
     fn hover_tooltip_idle_shows_no_meter_and_casts_a_drop_shadow() {
         // An Idle agent's dossier carries NO active-% meter (the meter is folded
-        // into the ⏱ line for Active≥5s only). This is also the ONLY coverage for
+        // into the stats line for Active≥5s only). This is also the ONLY coverage for
         // `paint_hover_tooltip`'s backing: it routes through the shared
         // `paint_card_backing`, so a pre-filled bright office must come back
         // dimmed in the drop-shadow band (the other backing caller,
@@ -615,6 +625,9 @@ mod tests {
             active_ms: 0,
             unknown_cwd: false,
             parent_id: None,
+            pid: None,
+            model: None,
+            effort: None,
         };
         let mut scene = SceneState::uniform(12);
         scene.agents.insert(id, slot);

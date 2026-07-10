@@ -2,10 +2,12 @@
 //! examples and integration tests can import them. The `main.rs` binary is
 //! the primary entry point.
 
+pub mod aa_text;
 pub mod cli;
 pub mod config;
 pub mod doctor;
 pub mod floating;
+pub(crate) mod focus;
 pub mod init_pack;
 pub mod install;
 pub mod runtime;

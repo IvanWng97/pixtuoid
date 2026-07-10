@@ -84,7 +84,22 @@ given change/tree, say so, don't skip it.
   dedicated fix-round review; `just arch` had zero CI reach until #273).
 - **(B) Design-debt** — duplication/DRY (N implementations of one concept —
   weight by DIVERGENCE risk, not line count); god-object / oversized module with
-  a clean split; dead code / legacy remnant; leaky or missing abstraction;
+  a clean split; dead code / legacy remnant; **unnecessary fallback / dead
+  default** — a defensive arm (`unwrap_or`/`map_or`/catch-all `_ =>`/`.or_else`/
+  retry) whose trigger CANNOT occur, or that DUPLICATES — worse, CONTRADICTS — a
+  source of truth, is debt not safety: fallback only when a REAL failure mode
+  needs it. The INVERSE of negative-space rule 2 (which forbids demanding
+  defense-in-depth where a primary defense exists) — here, don't ADD or LEAVE a
+  guard for a state that can't arise. The 0.13 slimming audit found a
+  `Furniture::Desk` footprint `unwrap_or(Size{DESK_W,DESK_H})` both dead (the
+  const table is always `Some`) AND WRONG (`decor.rs` is `DESK_W+4`, so a
+  hypothetical None mis-placed the sprite), plus the `(7,4)` table footprint
+  re-hardcoded inline in two more painters — read the authority (`if let Some(..) =
+  furniture_def(x).footprint`), never re-copy its fallback. The test is "can the
+  trigger fire, and does the arm duplicate/contradict an authority", NOT "does it
+  look defensive": load-bearing defense STAYS (documented sharp edges, liveness
+  ladders, the shim exit-0 contract, clock-regression `duration_since` folds,
+  config-never-wipe); leaky or missing abstraction;
   correlated-state bundling — N fields that ALWAYS change together (a phase + its
   clock + its profile; a liveness axis + its run-set; a decoder + the extractor it
   pairs with) belong in ONE struct/newtype so an illegal combination is
@@ -189,13 +204,11 @@ Both briefs MUST carry, verbatim or equivalent:
    registry IN THIS SESSION, or write "unverified" instead of asserting.
    A registry 404 observed now IS a finding; a recollection is not — reviews
    insisted a 12-day-old tap "doesn't exist" for 4 rounds (#112; the twin
-   `checkout@v6` case: docs/review-metrics/mining-2026-06.md). Both existed.
+   `checkout@v6` case). Both existed.
 3. **Integer confidence 0–100 + `file:line`** on every finding.
 4. **Sharp-edge check** — match familiar-smelling claims against the
    per-crate `CLAUDE.md` "Known sharp edges" (the live, maintained record of
    deliberate-design refutations; premise-anchored: same seam ≠ same claim).
-   `docs/REVIEW-LEDGER.md` is a frozen archive you may skim for older
-   adjudications, but it is no longer required reading.
 5. **Verdict** — exactly one of APPROVE / APPROVE-WITH-NITS / REQUEST-CHANGES.
 
 ---
@@ -270,7 +283,7 @@ Judge as a demanding critic:
    merely concerns the same entity (render caches, interaction state, scalar
    keys with disjoint key-spaces) — consolidate shared IDENTITY, not shared
    TOPIC. (The `[pet-names]` lesson, PR #86 — backtest-validated, controls
-   included: docs/review-metrics/mining-2026-06.md.) Same item, the JOIN
+   included.) Same item, the JOIN
    direction: when the diff looks one existing collection's id up in
    another's key-space (registry→install-target, manifest→registry), verify
    the join key against the REAL production constants — never the tests'
@@ -443,8 +456,8 @@ state IN THE PR THREAD — FIXED, REFUTED-with-trace (if it's deliberate
 design, cite or ADD the relevant per-crate `CLAUDE.md` sharp edge), or
 ISSUE-FILED (no-deferral rule applies: only big/refactor work defers).
 "Acknowledged, no action" is not a state: #40's ignored migration finding
-became a 0.4.1 release-blocker (#46); two more drop cases:
-docs/review-metrics/mining-2026-06.md. Commit skew cuts both ways: run the
+became a 0.4.1 release-blocker (#46); two more drop
+cases were logged. Commit skew cuts both ways: run the
 sweep against the FULL online thread at the FINAL merge head, not the commit
 the local lenses ran on — a bot finding that lands on a later commit after
 the sweep is the silent-drop class (#283's blocking-executor MEDIUM,

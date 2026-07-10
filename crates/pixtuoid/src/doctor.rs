@@ -545,6 +545,143 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
     first_sanitized_line(&output.stdout).or_else(|| first_sanitized_line(&output.stderr))
 }
 
+/// The desktop activation backend focus-jump would use on THIS host — the
+/// per-OS half of the #526 focus diagnostic. Linux detection is the pure
+/// [`linux_activation_backend`] over the env markers `focus/linux.rs` keys on.
+fn activation_backend() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "NSRunningApplication (macOS) ✓".to_string()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux_activation_backend(
+            std::env::var_os("SWAYSOCK").is_some(),
+            std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some(),
+            std::env::var_os("WAYLAND_DISPLAY").is_some(),
+            std::env::var_os("DISPLAY").is_some(),
+        )
+        .to_string()
+    }
+    #[cfg(windows)]
+    {
+        "SetForegroundWindow (Windows) ✓ — the foreground lock may still deny".to_string()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    {
+        "none — focus-jump is unsupported on this OS".to_string()
+    }
+}
+
+/// Pure so every arm is unit-tested on any host: mirrors `focus/linux.rs`'s
+/// ONE-channel-per-env order (sway IPC → hyprland IPC → X11 EWMH → nothing) —
+/// EXCEPT that a Wayland session without a pid-addressable IPC must NOT be
+/// reported as "X11 EWMH ✓": XWayland sets $DISPLAY, but a native-Wayland
+/// terminal never appears in XWayland's client list and mutter/kwin block
+/// focus-steal anyway, so the ✓ would mislead exactly the users focus fails
+/// for. Only the linux `activation_backend` arm calls this in prod — on
+/// other hosts the tests are the (deliberate) only caller.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn linux_activation_backend(sway: bool, hyprland: bool, wayland: bool, x11: bool) -> &'static str {
+    if sway {
+        "sway IPC (swaymsg) ✓"
+    } else if hyprland {
+        "hyprland IPC (hyprctl) ✓"
+    } else if wayland {
+        "✗ Wayland compositor without a pid-addressable focus channel (GNOME/KDE \
+         forbid focus-steal; xdg-activation unimplemented) — focus will silently \
+         no-op for native-Wayland terminals"
+    } else if x11 {
+        "X11 EWMH ($DISPLAY) ✓"
+    } else {
+        "✗ none detected — focus will silently no-op"
+    }
+}
+
+/// The focus-jump block of the report (#526): the activation backend + which
+/// pid channel each source family rides, with the transcript-family probe
+/// roots checked on disk. Pure over the probed facts; the family buckets come
+/// straight from the registry (a new source lands in the right bucket with no
+/// edit here).
+pub(crate) fn focus_section(
+    backend: &str,
+    cc_registry: Option<(&std::path::Path, bool)>,
+    codex_sessions: (&std::path::Path, bool),
+) -> String {
+    let prefix_of = |src: &str| {
+        registry::descriptor_for(src)
+            .map(|d| d.label_prefix)
+            .unwrap_or("??")
+    };
+    use registry::FocusChannel;
+    let mut shim_stamp = Vec::new();
+    let mut plugin_stamp = Vec::new();
+    let mut no_channel = Vec::new();
+    for &src in REGISTERED_SOURCES {
+        let Some(d) = registry::descriptor_for(src) else {
+            continue;
+        };
+        // Daemons (the lobster) aren't click-focusable agents; the
+        // TranscriptProbe sources (CC/Codex) get their own rows below.
+        if d.is_daemon() || d.focus_channel() == FocusChannel::TranscriptProbe {
+            continue;
+        }
+        let tag = format!("{}\u{b7}{}", d.label_prefix, src);
+        match d.focus_channel() {
+            FocusChannel::ShimStamp => shim_stamp.push(tag),
+            FocusChannel::PluginStamp => plugin_stamp.push(tag),
+            FocusChannel::Unsupported => no_channel.push(tag),
+            FocusChannel::TranscriptProbe => unreachable!("skipped above"),
+        }
+    }
+    let mut out = String::from("focus-jump (click a sprite → its terminal comes forward):\n");
+    out.push_str(&format!("  backend: {backend}\n"));
+    let cc_prefix = prefix_of(pixtuoid_core::source::claude_code::SOURCE_NAME);
+    match cc_registry {
+        Some((dir, true)) => out.push_str(&format!(
+            "  {cc_prefix}\u{b7}claude-code — registry probe: {} ✓\n",
+            dir.display()
+        )),
+        Some((dir, false)) => out.push_str(&format!(
+            "  {cc_prefix}\u{b7}claude-code — registry probe: {} ✗ missing (focus no-ops until CC writes it)\n",
+            dir.display()
+        )),
+        None => out.push_str(&format!(
+            "  {cc_prefix}\u{b7}claude-code — registry probe disabled (non-standard projects root) — focus no-ops\n"
+        )),
+    }
+    let cx_prefix = prefix_of(pixtuoid_core::source::codex::SOURCE_NAME);
+    let (codex_dir, codex_present) = codex_sessions;
+    out.push_str(&format!(
+        "  {cx_prefix}\u{b7}codex — rollout fd probe: {} {}\n",
+        codex_dir.display(),
+        if codex_present {
+            "✓"
+        } else {
+            "✗ missing (focus no-ops until codex writes it)"
+        }
+    ));
+    if !shim_stamp.is_empty() {
+        out.push_str(&format!(
+            "  {} — shim `_pid` (getppid) rides each hook event (unix; absent on Windows)\n",
+            shim_stamp.join(", ")
+        ));
+    }
+    if !plugin_stamp.is_empty() {
+        out.push_str(&format!(
+            "  {} — plugin-stamped `_pid` rides each hook event (all platforms)\n",
+            plugin_stamp.join(", ")
+        ));
+    }
+    if !no_channel.is_empty() {
+        out.push_str(&format!(
+            "  {} — no focus channel (click no-ops)\n",
+            no_channel.join(", ")
+        ));
+    }
+    out
+}
+
 /// Run the diagnosis: read config + install-state + the log, probe installed CLI
 /// versions, print a per-source health table. Read-only. `log_path` is injected
 /// by `main` (it owns the log-path resolution, which lives in the bin, not lib).
@@ -660,6 +797,20 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     } else {
         out.push_str(" · ✓ no decode drift\n");
     }
+    // The #526 focus diagnostic — probe roots come from the SAME default
+    // resolution the runtime seeds its watchers with (a --projects-root /
+    // --codex-sessions-root override changes the RUNNING app, and doctor
+    // diagnoses the default setup — noted so the mismatch can't surprise).
+    let cc_projects =
+        pixtuoid_core::source::claude_code::ClaudeCodeSource::default_paths().projects_root;
+    let cc_registry = pixtuoid_core::source::cc_registry_dir(&cc_projects);
+    let codex_sessions = pixtuoid_core::source::codex::CodexSource::default_paths().sessions_root;
+    out.push('\n');
+    out.push_str(&focus_section(
+        &activation_backend(),
+        cc_registry.as_deref().map(|d| (d, d.is_dir())),
+        (&codex_sessions, codex_sessions.is_dir()),
+    ));
     // Windows safety net: a HOME≠USERPROFILE shell is the one host condition under
     // which a CLI's home-resolution could land hooks where pixtuoid didn't write.
     if let Some(adv) = home_split_advisory(
@@ -678,6 +829,59 @@ mod tests {
     use std::io::Write;
     use std::sync::{Arc, Mutex};
     use tracing_subscriber::fmt::MakeWriter;
+
+    #[test]
+    fn linux_activation_backend_covers_every_channel_in_priority_order() {
+        assert!(linux_activation_backend(true, true, true, true).contains("sway"));
+        assert!(linux_activation_backend(false, true, true, true).contains("hyprland"));
+        // A Wayland session without sway/hyprland must be an HONEST ✗ even
+        // when XWayland set $DISPLAY — never "X11 EWMH ✓" (the F2 fix).
+        assert!(linux_activation_backend(false, false, true, true).contains("✗ Wayland"));
+        assert!(linux_activation_backend(false, false, false, true).contains("EWMH"));
+        assert!(linux_activation_backend(false, false, false, false).contains("✗ none"));
+    }
+
+    #[test]
+    fn focus_section_buckets_sources_from_the_registry() {
+        let cc = std::path::Path::new("/home/u/.claude/sessions");
+        let cx = std::path::Path::new("/home/u/.codex/sessions");
+        let s = focus_section("test-backend ✓", Some((cc, true)), (cx, true));
+        assert!(s.contains("backend: test-backend ✓"));
+        assert!(s.contains("claude-code — registry probe") && s.contains("✓"));
+        assert!(s.contains("codex — rollout fd probe"));
+        // Hook-only sources ride the _pid stamp; transcript-only non-probe
+        // sources have no channel — both buckets are REGISTRY-derived, so a
+        // new source lands correctly with no doctor edit.
+        assert!(
+            s.contains("opencode") && s.contains("plugin-stamped"),
+            "plugin stampers listed separately: {s}"
+        );
+        assert!(
+            s.contains("cursor") && s.contains("shim `_pid`"),
+            "shim stampers listed separately: {s}"
+        );
+        let no_channel_line = s
+            .lines()
+            .find(|l| l.contains("no focus channel"))
+            .expect("a no-channel line");
+        assert!(
+            no_channel_line.contains("antigravity") && no_channel_line.contains("copilot"),
+            "transcript-only sources listed: {no_channel_line}"
+        );
+        // The daemon (lobster) is not a click-focusable agent.
+        assert!(!s.contains("openclaw"), "daemons are excluded: {s}");
+    }
+
+    #[test]
+    fn focus_section_reports_missing_and_disabled_probe_roots() {
+        let cc = std::path::Path::new("/home/u/.claude/sessions");
+        let cx = std::path::Path::new("/home/u/.codex/sessions");
+        let missing = focus_section("b", Some((cc, false)), (cx, false));
+        assert!(missing.contains("✗ missing (focus no-ops until CC writes it)"));
+        assert!(missing.contains("✗ missing (focus no-ops until codex writes it)"));
+        let disabled = focus_section("b", None, (cx, true));
+        assert!(disabled.contains("registry probe disabled (non-standard projects root)"));
+    }
 
     #[test]
     fn run_renders_the_structural_report_headers() {

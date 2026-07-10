@@ -21,13 +21,18 @@
 // painter plumbing, not a stable engine API.
 #[doc(hidden)]
 pub mod anim;
+// The neon wall-board MODEL + shared scene-stats tally the three in-workspace
+// painters consume — their shared single source of truth, not a stable engine API.
+#[doc(hidden)]
+pub mod board;
+// Burn-tier interpretation (model/effort → hair color, dossier effort row)
+// the in-workspace painters + the binary's tooltip consume — shared single
+// source of truth, not a stable engine API.
+#[doc(hidden)]
+pub mod burn;
 pub mod chitchat;
 pub mod embedded_pack;
 pub mod floor;
-// The 8×8 badge font the floating painter + snapshot example rasterize with —
-// in-workspace painter plumbing, not a stable engine API.
-#[doc(hidden)]
-pub mod font;
 // Per-agent recolored-sprite cache owned by each painter's `FloorCtx` — an
 // in-workspace render internal, not a stable engine API.
 #[doc(hidden)]

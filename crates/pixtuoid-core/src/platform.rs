@@ -52,13 +52,21 @@ pub(crate) fn codex_home() -> PathBuf {
     resolve_codex_home(std::env::var("CODEX_HOME").ok(), user_home())
 }
 
+/// An env var value counts as UNSET when it's empty or whitespace-only — a
+/// whitespace-only path is never a valid home/config dir. The ONE spelling of
+/// that "empty env == unset" rule, shared by every resolver below (the module's
+/// "one trim semantics"), so the four call sites can't drift.
+fn nonempty(v: Option<String>) -> Option<String> {
+    v.filter(|s| !s.trim().is_empty())
+}
+
 /// Pure precedence core, separated so it's unit-testable without env mutation.
 /// (`is_dir` still touches the filesystem.) On a set-but-absent `CODEX_HOME`,
 /// upstream codex returns a FATAL error; we deliberately fall back to `~/.codex`
 /// instead — benign for a visualizer, since codex itself won't run (and writes
 /// no rollouts under that path) when its own home dir is missing.
 fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
-    if let Some(p) = codex_home_env.filter(|s| !s.trim().is_empty()) {
+    if let Some(p) = nonempty(codex_home_env) {
         let pb = PathBuf::from(p);
         if pb.is_dir() {
             return pb;
@@ -108,7 +116,6 @@ fn resolve_home_first(
     home: Option<String>,
     userprofile: Option<String>,
 ) -> Option<String> {
-    let nonempty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
     nonempty(home).or_else(|| if windows { nonempty(userprofile) } else { None })
 }
 
@@ -128,7 +135,6 @@ pub fn resolve_user_config_dir(
     xdg: Option<String>,
     home: &Path,
 ) -> PathBuf {
-    let nonempty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
     match os {
         "macos" => home.join("Library/Application Support"),
         "windows" => nonempty(appdata)
@@ -169,7 +175,6 @@ pub fn resolve_user_home_opt(
     userprofile: Option<String>,
     home: Option<String>,
 ) -> Option<String> {
-    let nonempty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
     if windows {
         // USERPROFILE is effectively always set on Windows; a lone HOME here
         // was set deliberately (MSYS users exporting a real Windows path).

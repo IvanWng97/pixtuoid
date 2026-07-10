@@ -34,7 +34,6 @@ whole-codebase review dispatched 110 verifiers against 3 finders).
 Consecutive reviews re-adjudicated overlapping claims — re-refuting the same
 `/tmp`-socket and EMFILE candidates two days apart. Paying repeatedly for
 knowledge the project already had is the cost this whole system attacks.
-Full data: [`baseline-2026-06.md`](review-metrics/baseline-2026-06.md).
 
 ## The model: storage and the conveyor
 
@@ -79,12 +78,9 @@ while raising cost ~20%; the converged practice is a ~100–300 line **map,
 not a manual**. **Counter:** size budgets, citation tracking (a sharp edge
 no review has cited across **two consecutive censuses** is a demotion
 candidate — counted against the **full** `CLAUDE.md` sharp-edge set so a
-topic-concentrated review window can't manufacture false staleness; the canonical
-set is the committed
-[`sharp-edge-inventory.md`](review-metrics/sharp-edge-inventory.md) — each edge
-has a stable slug the ledger cites as `[edge:<slug>]`, and `just
-sharp-edge-inventory` keeps it in lockstep with the guides + harvests citations
-mechanically, so the census leg is a script run, not a hand-count, #386), periodic
+topic-concentrated review window can't manufacture false staleness; each edge
+had a stable slug the ledger cited as `[edge:<slug>]`, kept in lockstep with
+the guides mechanically so the census leg was a script run, not a hand-count (#386)), periodic
 audits.
 
 ### Retrieval (knowledge computed on demand, never stored)
@@ -115,7 +111,7 @@ audit also sweeps recent session memories for promote-to-repo candidates.
 
 ### The review ledger (adjudications as institutional memory)
 
-[`REVIEW-LEDGER.md`](REVIEW-LEDGER.md) records every adjudicated review
+The review ledger recorded every adjudicated review
 finding: seam, claim, verdict, and — critically — the **anchor**: the
 mechanism (file + sharp edge + HEAD) that justified it. Future reviews match
 candidates against it before spending verifier tokens.
@@ -142,7 +138,7 @@ each gate a versioned file with an automatic reader:
 | implement | the 6 recurring pitfalls + the PR template checkbox pointing at them | the template is forced on every author |
 | review | [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md) — two differentiated lenses, five hard requirements, escalation triggers, sharp-edge routing | copied verbatim into reviewer prompts; the bot loads its own rules file |
 | merge | the disposition sweep — every finding ends FIXED / REFUTED-with-trace / ISSUE-FILED / ACCEPTED-residual; plan-misses become `plan-miss:` commit lines | the orchestrator's process notes; commit messages become the data channel |
-| periodic | the history census — each census run files its own successor as a `census` issue at +~50 merged PRs (the #388 pattern; the cadence rides the issue backlog, not a scheduled workflow), ledger-blind calibration + the frozen `docs/review-metrics/` report archive | the issue backlog |
+| periodic | the history census — each census run files its own successor as a `census` issue at +~50 merged PRs (the #388 pattern; the cadence rides the issue backlog, not a scheduled workflow), ledger-blind calibration + a frozen report archive | the issue backlog |
 
 Three properties make this a system rather than a document set:
 
@@ -165,13 +161,13 @@ Three properties make this a system rather than a document set:
 
 ## What we measured (the honest results)
 
-| experiment | result | report |
-|---|---|---|
-| Ledger A/B — routed vs full verification, same candidate set | **0 false suppressions**; 61% saving per routed candidate; ±0 overall at a 10% route rate — the payoff scales with re-tread density, and the demote path is not yet exercised | [`phase2-ab-2026-06.md`](review-metrics/phase2-ab-2026-06.md) |
-| Review-history census — 185 merged PRs + 50 post-merge fixes | 7 adjudicated escape classes (~4% of PRs) → 7 verified guideline changes; the design-class lens **backtested 0/3 → 3/3** on the original missed diff, 0/4 over-fires on controls | [`mining-2026-06.md`](review-metrics/mining-2026-06.md) |
-| Review-history census #2 — 45 merged PRs #262–#328 | escape leg **FAILS** zero-recurrence: 3 of the 7 named classes recurred (rate ~4.4% by escape-classified fix commits ≈ the prior 3.78%, so severity held — rules aimed right, adherence at review- not author-stage); stale-external-fact rounds **0**; 3 disposition drops (vs 4); arch-drift **PASS** (6 invariants verified at HEAD, 4 cross-PR seams logged); sharp-edge citation baseline 3/27 | [`mining-2026-06-262-328.md`](review-metrics/mining-2026-06-262-328.md) |
-| Review-history census #3 — 42 merged PRs #329–#383 | escape leg **PASSES** at 0/42 (cleanest of three — the 3 census-#2 recurrences all back to zero); stale-external rounds **0**; **0 disposition drops** (vs 3) though the #335 channel was built-but-unadopted (marker used 1/42 PRs; #384 tracks flipping the CI to a live advisory audit); arch-drift **PASS** (6 invariants hold through the 2→4-crate split + the compiler-enforced `pixtuoid-scene` boundary); sharp-edge citation 1/27 vs the frozen subset → **inventory widened, 0 demotions fired** (#386) | [`mining-2026-06-329-383.md`](review-metrics/mining-2026-06-329-383.md) |
-| Onboarding proxy — with/without KB, 2 tasks × 2 arms | **Null on first-pass quality** — arms indistinguishable, consistent with the load-bearing lessons already being in the code; the KB's prescribed process duties executed at +19% token overhead (n=2, contamination caveats in the report) | [`phase3-onboarding-2026-06.md`](review-metrics/phase3-onboarding-2026-06.md) |
+| experiment | result |
+|---|---|
+| Ledger A/B — routed vs full verification, same candidate set | **0 false suppressions**; 61% saving per routed candidate; ±0 overall at a 10% route rate — the payoff scales with re-tread density, and the demote path is not yet exercised |
+| Review-history census — 185 merged PRs + 50 post-merge fixes | 7 adjudicated escape classes (~4% of PRs) → 7 verified guideline changes; the design-class lens **backtested 0/3 → 3/3** on the original missed diff, 0/4 over-fires on controls |
+| Review-history census #2 — 45 merged PRs #262–#328 | escape leg **FAILS** zero-recurrence: 3 of the 7 named classes recurred (rate ~4.4% by escape-classified fix commits ≈ the prior 3.78%, so severity held — rules aimed right, adherence at review- not author-stage); stale-external-fact rounds **0**; 3 disposition drops (vs 4); arch-drift **PASS** (6 invariants verified at HEAD, 4 cross-PR seams logged); sharp-edge citation baseline 3/27 |
+| Review-history census #3 — 42 merged PRs #329–#383 | escape leg **PASSES** at 0/42 (cleanest of three — the 3 census-#2 recurrences all back to zero); stale-external rounds **0**; **0 disposition drops** (vs 3) though the #335 channel was built-but-unadopted (marker used 1/42 PRs; #384 tracks flipping the CI to a live advisory audit); arch-drift **PASS** (6 invariants hold through the 2→4-crate split + the compiler-enforced `pixtuoid-scene` boundary); sharp-edge citation 1/27 vs the frozen subset → **inventory widened, 0 demotions fired** (#386) |
+| Onboarding proxy — with/without KB, 2 tasks × 2 arms | **Null on first-pass quality** — arms indistinguishable, consistent with the load-bearing lessons already being in the code; the KB's prescribed process duties executed at +19% token overhead (n=2, contamination caveats in the report) |
 
 The null is the most instructive row: it is what the conveyor *succeeding*
 looks like. Once a lesson reaches the code, the prose that carried it becomes

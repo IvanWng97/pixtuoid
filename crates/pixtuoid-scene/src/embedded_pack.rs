@@ -133,105 +133,68 @@ pub(crate) fn test_default_pack() -> Pack {
 }
 
 fn load_embedded_pack() -> Result<Pack> {
-    let pack_toml = include_str!("../sprites/default/pack.toml");
-    let seated = include_str!("../sprites/default/seated.sprite");
-    let typing_0 = include_str!("../sprites/default/typing_0.sprite");
-    let typing_1 = include_str!("../sprites/default/typing_1.sprite");
-    let standing = include_str!("../sprites/default/standing.sprite");
-    let walking_0 = include_str!("../sprites/default/walking_0.sprite");
-    let walking_1 = include_str!("../sprites/default/walking_1.sprite");
-    let walking_back_0 = include_str!("../sprites/default/walking_back_0.sprite");
-    let walking_back_1 = include_str!("../sprites/default/walking_back_1.sprite");
-    let walking_coffee_0 = include_str!("../sprites/default/walking_coffee_0.sprite");
-    let walking_coffee_1 = include_str!("../sprites/default/walking_coffee_1.sprite");
-    let desk = include_str!("../sprites/default/desk.sprite");
-    let plant = include_str!("../sprites/default/plant.sprite");
-    let plant_tall = include_str!("../sprites/default/plant_tall.sprite");
-    let plant_fl = include_str!("../sprites/default/plant_flower.sprite");
-    let plant_suc = include_str!("../sprites/default/plant_succulent.sprite");
-    let floor_lamp = include_str!("../sprites/default/floor_lamp.sprite");
-    let trash_bin = include_str!("../sprites/default/trash_bin.sprite");
-    let door = include_str!("../sprites/default/door.sprite");
-    let door_half = include_str!("../sprites/default/door_half.sprite");
-    let door_open = include_str!("../sprites/default/door_open.sprite");
-    let bulletin = include_str!("../sprites/default/bulletin_board.sprite");
-    let exit_sign = include_str!("../sprites/default/exit_sign.sprite");
-    let filing = include_str!("../sprites/default/filing_cabinet.sprite");
-    let cat_0 = include_str!("../sprites/default/cat_walk_0.sprite");
-    let cat_1 = include_str!("../sprites/default/cat_walk_1.sprite");
-    let cat_sit = include_str!("../sprites/default/cat_sit.sprite");
-    let cat_sleep = include_str!("../sprites/default/cat_sleep.sprite");
-    let dog_0 = include_str!("../sprites/default/dog_walk_0.sprite");
-    let dog_1 = include_str!("../sprites/default/dog_walk_1.sprite");
-    let dog_sit = include_str!("../sprites/default/dog_sit.sprite");
-    let dog_sleep = include_str!("../sprites/default/dog_sleep.sprite");
-    let lobster_0 = include_str!("../sprites/default/lobster_walk_0.sprite");
-    let lobster_1 = include_str!("../sprites/default/lobster_walk_1.sprite");
-    let lobster_rest = include_str!("../sprites/default/lobster_rest.sprite");
-    let meeting_sofa = include_str!("../sprites/default/meeting_sofa.sprite");
-    let meeting_screen = include_str!("../sprites/default/meeting_screen.sprite");
-    let back_couch = include_str!("../sprites/default/back_couch.sprite");
-    let sleeping_seat = include_str!("../sprites/default/seated_sleeping.sprite");
-    let sleeping_alt = include_str!("../sprites/default/seated_sleeping_alt.sprite");
-    let holding = include_str!("../sprites/default/holding_coffee.sprite");
-    let pantry = include_str!("../sprites/default/pantry.sprite");
-    let pantry_small = include_str!("../sprites/default/pantry_small.sprite");
-    let whiteboard = include_str!("../sprites/default/whiteboard.sprite");
-    let bookshelf = include_str!("../sprites/default/bookshelf.sprite");
-    let tv_stand = include_str!("../sprites/default/tv_stand.sprite");
-    let phone_booth = include_str!("../sprites/default/phone_booth.sprite");
-    let standing_desk = include_str!("../sprites/default/standing_desk.sprite");
+    // Embed each default sprite ONCE by filename. The macro expands every entry
+    // to `("<name>", include_str!(concat!("../sprites/default/", "<name>")))`, so
+    // a new sprite is a SINGLE line here — not a `let`-binding AND a matching
+    // tuple entry that can silently drift out of sync. Byte-identical to the
+    // hand-listed form (`concat!` folds to the same path literal at compile
+    // time); `build.rs` still emits the per-file `rerun-if-changed`.
+    macro_rules! embedded_sprites {
+        ($($name:literal),+ $(,)?) => {
+            &[$(($name, include_str!(concat!("../sprites/default/", $name)))),+]
+        };
+    }
 
     load_pack_from_strings(
-        pack_toml,
-        &[
-            ("seated.sprite", seated),
-            ("typing_0.sprite", typing_0),
-            ("typing_1.sprite", typing_1),
-            ("standing.sprite", standing),
-            ("walking_0.sprite", walking_0),
-            ("walking_1.sprite", walking_1),
-            ("walking_back_0.sprite", walking_back_0),
-            ("walking_back_1.sprite", walking_back_1),
-            ("walking_coffee_0.sprite", walking_coffee_0),
-            ("walking_coffee_1.sprite", walking_coffee_1),
-            ("desk.sprite", desk),
-            ("plant.sprite", plant),
-            ("plant_tall.sprite", plant_tall),
-            ("plant_flower.sprite", plant_fl),
-            ("plant_succulent.sprite", plant_suc),
-            ("floor_lamp.sprite", floor_lamp),
-            ("trash_bin.sprite", trash_bin),
-            ("door.sprite", door),
-            ("door_half.sprite", door_half),
-            ("door_open.sprite", door_open),
-            ("bulletin_board.sprite", bulletin),
-            ("exit_sign.sprite", exit_sign),
-            ("filing_cabinet.sprite", filing),
-            ("cat_walk_0.sprite", cat_0),
-            ("cat_walk_1.sprite", cat_1),
-            ("cat_sit.sprite", cat_sit),
-            ("cat_sleep.sprite", cat_sleep),
-            ("dog_walk_0.sprite", dog_0),
-            ("dog_walk_1.sprite", dog_1),
-            ("dog_sit.sprite", dog_sit),
-            ("dog_sleep.sprite", dog_sleep),
-            ("lobster_walk_0.sprite", lobster_0),
-            ("lobster_walk_1.sprite", lobster_1),
-            ("lobster_rest.sprite", lobster_rest),
-            ("meeting_sofa.sprite", meeting_sofa),
-            ("meeting_screen.sprite", meeting_screen),
-            ("back_couch.sprite", back_couch),
-            ("seated_sleeping.sprite", sleeping_seat),
-            ("seated_sleeping_alt.sprite", sleeping_alt),
-            ("holding_coffee.sprite", holding),
-            ("pantry.sprite", pantry),
-            ("pantry_small.sprite", pantry_small),
-            ("whiteboard.sprite", whiteboard),
-            ("bookshelf.sprite", bookshelf),
-            ("tv_stand.sprite", tv_stand),
-            ("phone_booth.sprite", phone_booth),
-            ("standing_desk.sprite", standing_desk),
+        include_str!("../sprites/default/pack.toml"),
+        embedded_sprites![
+            "seated.sprite",
+            "typing_0.sprite",
+            "typing_1.sprite",
+            "standing.sprite",
+            "walking_0.sprite",
+            "walking_1.sprite",
+            "walking_back_0.sprite",
+            "walking_back_1.sprite",
+            "walking_coffee_0.sprite",
+            "walking_coffee_1.sprite",
+            "desk.sprite",
+            "plant.sprite",
+            "plant_tall.sprite",
+            "plant_flower.sprite",
+            "plant_succulent.sprite",
+            "floor_lamp.sprite",
+            "trash_bin.sprite",
+            "door.sprite",
+            "door_half.sprite",
+            "door_open.sprite",
+            "bulletin_board.sprite",
+            "exit_sign.sprite",
+            "filing_cabinet.sprite",
+            "cat_walk_0.sprite",
+            "cat_walk_1.sprite",
+            "cat_sit.sprite",
+            "cat_sleep.sprite",
+            "dog_walk_0.sprite",
+            "dog_walk_1.sprite",
+            "dog_sit.sprite",
+            "dog_sleep.sprite",
+            "lobster_walk_0.sprite",
+            "lobster_walk_1.sprite",
+            "lobster_rest.sprite",
+            "meeting_sofa.sprite",
+            "meeting_screen.sprite",
+            "back_couch.sprite",
+            "seated_sleeping.sprite",
+            "seated_sleeping_alt.sprite",
+            "holding_coffee.sprite",
+            "pantry.sprite",
+            "pantry_small.sprite",
+            "whiteboard.sprite",
+            "bookshelf.sprite",
+            "tv_stand.sprite",
+            "phone_booth.sprite",
+            "standing_desk.sprite",
         ],
     )
 }

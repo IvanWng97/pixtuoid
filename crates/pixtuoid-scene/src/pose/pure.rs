@@ -359,13 +359,16 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
         width: layout.cubicle_band.width,
         height: 10,
     };
+    // The corridor zone (its cubicle-aisle fallback) is used twice — the wander
+    // zone table and the fallback midline scan below — so bind it once.
+    let corridor_zone = layout.corridor.unwrap_or(layout.cubicle_aisle);
     let zones: [(Bounds, u16); 5] = [
         // Stretch + look-at-the-view at the top of the cubicle band.
         (window_strip, 30),
         // Pantry interior — snack break, coffee, chat.
         (layout.pantry_room.unwrap_or(window_strip), 25),
         // Main corridor — incidental traffic.
-        (layout.corridor.unwrap_or(layout.cubicle_aisle), 20),
+        (corridor_zone, 20),
         // Cubicle band (pod aisles) — within own area, stretching.
         (layout.cubicle_band, 15),
         // Meeting room — occasional drift-in.
@@ -404,7 +407,7 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
     // nearest walkable midline cell — everywhere else this function's
     // contract is "returns a walkable pixel". Bounded by the corridor width
     // and purely (layout, seed)-deterministic, like the probes above.
-    let c = layout.corridor.unwrap_or(layout.cubicle_aisle);
+    let c = corridor_zone;
     let x_jitter = (seed as u16) % c.width.max(1);
     let base_x = c.x + x_jitter;
     let mid_y = c.y + c.height / 2;

@@ -6,7 +6,7 @@ use pixtuoid_core::state::reducer::{Reducer, B1_CASCADE_GRACE};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, SceneState};
 use pixtuoid_core::AgentId;
 
-use crate::{delegating_pair, start};
+use crate::{act_end, act_start, delegating_pair, sess_end, start, waiting};
 
 #[test]
 fn session_start_creates_idle_slot_at_first_free_desk() {
@@ -47,15 +47,7 @@ fn session_end_marks_slot_exiting_then_tick_removes_it_after_grace() {
     start(&mut r, &mut scene, b);
 
     let t0 = SystemTime::now();
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: a,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, a, false, t0, Transport::Hook);
 
     let slot = scene
         .agents
@@ -172,15 +164,7 @@ fn session_start_on_exiting_slot_resurrects_in_place() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     start(&mut r, &mut scene, id);
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, id, false, t0, Transport::Hook);
     assert!(scene.agents.get(&id).unwrap().exiting_at.is_some());
 
     // The rotation's SessionStart lands ms later (same cwd → same id).
@@ -202,13 +186,12 @@ fn session_start_on_exiting_slot_resurrects_in_place() {
     );
 
     // The new session's first turn works — and survives past the old grace.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: None,
-            detail: None,
-        },
+        id,
+        None,
+        None,
         t0 + Duration::from_millis(500),
         Transport::Hook,
     );
@@ -233,25 +216,8 @@ fn resurrect_in_place_folds_the_active_span_into_active_ms() {
     start(&mut r, &mut scene, id);
     // Go Active and hold the span open across the exit (mark_exiting leaves the
     // slot Active; no tick settles it).
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: None,
-            detail: None,
-        },
-        t0,
-        Transport::Hook,
-    );
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    act_start(&mut r, &mut scene, id, None, None, t0, Transport::Hook);
+    sess_end(&mut r, &mut scene, id, false, t0, Transport::Hook);
     assert_eq!(
         scene.agents.get(&id).unwrap().active_ms,
         0,
@@ -319,12 +285,11 @@ fn session_start_on_exiting_subagent_does_not_resurrect() {
     );
 
     // Parent ends → cascade marks the child exiting.
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: parent,
-            as_child: false,
-        },
+        parent,
+        false,
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
@@ -391,13 +356,12 @@ fn duplicate_root_session_start_does_not_resurrect_a_live_session() {
         Transport::Hook,
     );
     // Drive it Active — a live, in-flight session that is NEVER exiting.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: root,
-            tool_use_id: Some("t1".into()),
-            detail: Some("Edit: foo.rs".into()),
-        },
+        root,
+        Some("t1"),
+        Some("Edit: foo.rs"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
@@ -456,22 +420,20 @@ fn resurrect_in_place_clears_stale_active_tasks_so_fresh_session_hooks_apply() {
         Transport::Hook,
     );
     // The old life dispatches a Task… and dies before it drains.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("task-stale".into()),
-            detail: Some("Agent".into()),
-        },
+        id,
+        Some("task-stale"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
+        id,
+        false,
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
@@ -495,13 +457,12 @@ fn resurrect_in_place_clears_stale_active_tasks_so_fresh_session_hooks_apply() {
 
     // The fresh life's first hook tool: with the stale tuid still tracked it
     // would be suppressed as a subagent leak and the slot would stay Idle.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t-new".into()),
-            detail: Some("Read: /x".into()),
-        },
+        id,
+        Some("t-new"),
+        Some("Read: /x"),
         t0 + Duration::from_secs(3),
         Transport::Hook,
     );
@@ -543,33 +504,30 @@ fn resurrect_in_place_cancels_stale_pending_b1_cascade() {
         Transport::Hook,
     );
     // Old life: a Task dispatch drains → the deferred b1 cascade is armed.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-old".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-old"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-old".into()),
-        },
+        parent,
+        Some("task-old"),
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
     // The old life ends and the next session resurrects in place, all inside
     // the armed cascade's grace.
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: parent,
-            as_child: false,
-        },
+        parent,
+        false,
         t0 + Duration::from_millis(2_200),
         Transport::Hook,
     );
@@ -735,15 +693,7 @@ fn codex_subagent_cascades_with_parent_on_session_end() {
     codex_session_start(&mut r, &mut scene, parent, None, Transport::Hook);
     codex_session_start(&mut r, &mut scene, child, Some(parent), Transport::Hook);
 
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: parent,
-            as_child: false,
-        },
-        now,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, parent, false, now, Transport::Hook);
     assert!(
         scene.agents.get(&parent).unwrap().exiting_at.is_some(),
         "parent should be exiting"
@@ -770,13 +720,12 @@ fn hook_activity_start_for_unknown_id_synthesizes_slot_and_goes_active() {
     let id = AgentId::from_parts("claude-code", "gated-sess");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: Some("Edit: foo.rs".into()),
-        },
+        id,
+        Some("t1"),
+        Some("Edit: foo.rs"),
         t0,
         Transport::Hook,
     );
@@ -806,15 +755,7 @@ fn hook_waiting_for_unknown_id_synthesizes_slot_in_waiting_state() {
     let id = AgentId::from_parts("claude-code", "parked-sess");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
-        &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
-        t0,
-        Transport::Hook,
-    );
+    waiting(&mut r, &mut scene, id, "permission", t0, Transport::Hook);
 
     let slot = scene
         .agents
@@ -836,25 +777,16 @@ fn jsonl_event_for_unknown_id_stays_a_no_op() {
     let id = AgentId::from_parts("claude-code", "replayed-sess");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Jsonl,
     );
-    r.apply(
-        &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "perm".into(),
-        },
-        t0,
-        Transport::Jsonl,
-    );
+    waiting(&mut r, &mut scene, id, "perm", t0, Transport::Jsonl);
 
     assert!(
         scene.agents.is_empty(),
@@ -871,15 +803,7 @@ fn hook_session_end_for_unknown_id_does_not_create_slot() {
     let id = AgentId::from_parts("claude-code", "already-gone");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, id, false, t0, Transport::Hook);
 
     assert!(scene.agents.is_empty(), "SessionEnd must not synthesize");
 }
@@ -894,13 +818,12 @@ fn jsonl_session_start_after_hook_synthesis_coalesces_into_same_slot() {
     let id = AgentId::from_parts("claude-code", "revived-sess");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
@@ -941,15 +864,7 @@ fn hook_synthesized_slot_is_exempt_from_unknown_cwd_reap() {
     let id = AgentId::from_parts("claude-code", "parked-sess");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
-        &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
-        t0,
-        Transport::Hook,
-    );
+    waiting(&mut r, &mut scene, id, "permission", t0, Transport::Hook);
     assert!(
         !scene.agents.get(&id).expect("synthesized").unknown_cwd,
         "process-proven slot must not carry the startup-ghost flag"
@@ -997,27 +912,18 @@ fn refused_hook_registration_does_not_poison_dedup_for_the_later_jsonl_copy() {
         t0,
         Transport::Hook,
     );
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: occupant,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, occupant, false, t0, Transport::Hook);
 
     // Hook ActivityStart for an unknown session while the desk is still held:
     // synthesis is refused. Sanity: no slot was created.
     let id = AgentId::from_parts("claude-code", "gated-sess");
     let th = t0 + EXIT_GRACE_WINDOW - Duration::from_millis(100);
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t9".into()),
-            detail: None,
-        },
+        id,
+        Some("t9"),
+        None,
         th,
         Transport::Hook,
     );
@@ -1041,13 +947,12 @@ fn refused_hook_registration_does_not_poison_dedup_for_the_later_jsonl_copy() {
         tj,
         Transport::Jsonl,
     );
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t9".into()),
-            detail: None,
-        },
+        id,
+        Some("t9"),
+        None,
         tj,
         Transport::Jsonl,
     );
@@ -1076,13 +981,12 @@ fn duplicate_session_start_backfills_hook_synthesized_slot() {
     let id = AgentId::from_parts("claude-code", "gated-sess");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
@@ -1198,13 +1102,12 @@ fn backfill_does_not_clobber_a_renamed_label() {
     let id = AgentId::from_parts("claude-code", "gated-sess");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
@@ -1251,15 +1154,7 @@ fn two_step_backfill_source_first_then_cwd_still_upgrades_the_label() {
     let id = AgentId::from_parts("claude-code", "gated-sess");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
-        &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
-        t0,
-        Transport::Hook,
-    );
+    waiting(&mut r, &mut scene, id, "permission", t0, Transport::Hook);
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {
@@ -1305,6 +1200,152 @@ fn two_step_backfill_source_first_then_cwd_still_upgrades_the_label() {
 // `last_event_at` stay owned by the activity/SessionStart paths.
 
 #[test]
+fn hook_identity_pid_fills_refreshes_and_never_downgrades_slot_pid() {
+    // The focus-jump cache: `_pid` rides each hook-transport Identity (patched
+    // in by handle_conn's envelope peek). Registration fills it, a later
+    // Identity with a new pid refreshes it, and a pid-less Identity (e.g. an
+    // opencode plugin event without the stamp) never DOWNGRADES Some -> None.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("opencode", "ses_pid");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let pid_id = |pid: i32| pixtuoid_core::source::PidIdentity::new(pid, Some(1_000));
+    let identity = |pid: Option<pixtuoid_core::source::PidIdentity>| AgentEvent::Identity {
+        agent_id: id,
+        source: "opencode".into(),
+        session_id: "ses_pid".into(),
+        cwd: Some(PathBuf::from("/w")),
+        pid,
+    };
+
+    // Registration fills the cache.
+    r.apply(&mut scene, identity(Some(pid_id(41))), t0, Transport::Hook);
+    assert_eq!(
+        scene.agents[&id].pid,
+        Some(pid_id(41)),
+        "registration fills pid"
+    );
+
+    // A later Identity refreshes it (restart under a new pid).
+    r.apply(&mut scene, identity(Some(pid_id(42))), t0, Transport::Hook);
+    assert_eq!(
+        scene.agents[&id].pid,
+        Some(pid_id(42)),
+        "backfill refreshes pid"
+    );
+
+    // A pid-less Identity keeps the cached value.
+    r.apply(&mut scene, identity(None), t0, Transport::Hook);
+    assert_eq!(
+        scene.agents[&id].pid,
+        Some(pid_id(42)),
+        "None never downgrades"
+    );
+}
+
+#[test]
+fn session_start_registration_leaves_pid_unset() {
+    // Transcript-family sources resolve pid via their liveness probes at
+    // click time — their SessionStart registration must not invent one.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_transcript_path("/t/pidless.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "pidless".into(),
+            cwd: PathBuf::from("/t"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert_eq!(scene.agents[&id].pid, None);
+}
+
+#[test]
+fn model_info_caches_model_and_effort_on_an_existing_slot() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "ses_m");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "ses_m".into(),
+            cwd: PathBuf::from("/w"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Jsonl,
+    );
+    let info = |model: Option<&str>, effort: Option<&str>| AgentEvent::ModelInfo {
+        agent_id: id,
+        model: model.map(String::from),
+        effort: effort.map(String::from),
+    };
+
+    // Model observation caches; a later one refreshes (mid-session /model switch).
+    r.apply(
+        &mut scene,
+        info(Some("claude-opus-4-8"), None),
+        t0,
+        Transport::Jsonl,
+    );
+    assert_eq!(scene.agents[&id].model.as_deref(), Some("claude-opus-4-8"));
+    r.apply(
+        &mut scene,
+        info(Some("claude-fable-5"), None),
+        t0,
+        Transport::Jsonl,
+    );
+    assert_eq!(scene.agents[&id].model.as_deref(), Some("claude-fable-5"));
+    // A model-less observation never downgrades the cached model.
+    let t1 = t0 + Duration::from_secs(60);
+    r.apply(&mut scene, info(None, Some("ultra")), t1, Transport::Jsonl);
+    assert_eq!(scene.agents[&id].model.as_deref(), Some("claude-fable-5"));
+    // Effort observation carries its sighting time (the scene TTL's input),
+    // and a re-sighting re-stamps it.
+    let eff = scene.agents[&id].effort.clone().expect("effort cached");
+    assert_eq!(&*eff.value, "ultra");
+    assert_eq!(eff.seen_at, t1);
+    let t2 = t1 + Duration::from_secs(120);
+    r.apply(&mut scene, info(None, Some("ultra")), t2, Transport::Jsonl);
+    assert_eq!(scene.agents[&id].effort.clone().unwrap().seen_at, t2);
+}
+
+#[test]
+fn model_info_for_an_unknown_agent_never_registers() {
+    // A model line must never mint a slot (unlike hook Identity, which is
+    // proof of life) — on EITHER transport: the hook side additionally pins
+    // that ModelInfo stays out of synthesize_hook_registration's match set.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let ghost = AgentId::from_parts("claude-code", "ses_ghost");
+    for transport in [Transport::Jsonl, Transport::Hook] {
+        r.apply(
+            &mut scene,
+            AgentEvent::ModelInfo {
+                agent_id: ghost,
+                model: Some("claude-fable-5".into()),
+                effort: Some("ultra".into()),
+            },
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000),
+            transport,
+        );
+        assert!(
+            scene.agents.is_empty(),
+            "ModelInfo must not synthesize a slot ({transport:?})"
+        );
+    }
+}
+
+#[test]
 fn hook_identity_registers_unknown_id_with_real_identity() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -1318,6 +1359,7 @@ fn hook_identity_registers_unknown_id_with_real_identity() {
             source: "claude-code".into(),
             session_id: "gated-sess".into(),
             cwd: Some(PathBuf::from("/Users/me/repo")),
+            pid: None,
         },
         t0,
         Transport::Hook,
@@ -1366,6 +1408,7 @@ fn hook_identity_without_cwd_registers_reap_exempt_blank_cwd() {
             source: "codex".into(),
             session_id: "cx-sess".into(),
             cwd: None,
+            pid: None,
         },
         t0,
         Transport::Hook,
@@ -1431,16 +1474,16 @@ fn hook_identity_on_existing_unknown_cwd_slot_clears_ghost_reap() {
             source: "codex".into(),
             session_id: "cx-revive".into(),
             cwd: None,
+            pid: None,
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
+        id,
+        "permission",
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
@@ -1473,15 +1516,7 @@ fn hook_identity_backfills_blank_synthesized_slot() {
     let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: None,
-        },
-        t0,
-        Transport::Hook,
-    );
+    act_end(&mut r, &mut scene, id, None, t0, Transport::Hook);
     assert_eq!(&*scene.agents.get(&id).unwrap().label, "#1", "blank slot");
 
     r.apply(
@@ -1491,6 +1526,7 @@ fn hook_identity_backfills_blank_synthesized_slot() {
             source: "reasonix".into(),
             session_id: "/Users/dev/proj".into(),
             cwd: Some(PathBuf::from("/Users/dev/proj")),
+            pid: None,
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1535,6 +1571,7 @@ fn hook_identity_does_not_clobber_existing_identity() {
             source: "codex".into(),
             session_id: "other-sess".into(),
             cwd: Some(PathBuf::from("/Users/me/repo-b")),
+            pid: None,
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1557,15 +1594,7 @@ fn hook_identity_respects_session_end_tombstone() {
     let id = AgentId::from_parts("claude-code", "exited-invisible");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, id, false, t0, Transport::Hook);
     r.apply(
         &mut scene,
         AgentEvent::Identity {
@@ -1573,6 +1602,7 @@ fn hook_identity_respects_session_end_tombstone() {
             source: "claude-code".into(),
             session_id: "exited-invisible".into(),
             cwd: Some(PathBuf::from("/Users/me/repo")),
+            pid: None,
         },
         t0 + Duration::from_millis(50),
         Transport::Hook,
@@ -1600,6 +1630,7 @@ fn jsonl_identity_is_a_no_op() {
             source: "claude-code".into(),
             session_id: "replayed-sess".into(),
             cwd: Some(PathBuf::from("/Users/me/repo")),
+            pid: None,
         },
         t0,
         Transport::Jsonl,
@@ -1629,6 +1660,7 @@ fn hook_identity_desk_refusal_is_quiet() {
             source: "claude-code".into(),
             session_id: "gated-sess".into(),
             cwd: Some(PathBuf::from("/Users/me/repo")),
+            pid: None,
         },
         t0,
         Transport::Hook,
@@ -1717,13 +1749,12 @@ fn reconcile_connected_evicts_a_blank_source_gate_slipper() {
     let blank = AgentId::from_transcript_path("/p/blank.jsonl");
 
     // An identity-less Hook ActivityStart for an unknown id → blank-source slot.
-    reducer.apply(
+    act_start(
+        &mut reducer,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: blank,
-            tool_use_id: None,
-            detail: None,
-        },
+        blank,
+        None,
+        None,
         now,
         Transport::Hook,
     );

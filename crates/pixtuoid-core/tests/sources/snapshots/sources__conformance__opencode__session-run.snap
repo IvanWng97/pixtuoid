@@ -8,6 +8,10 @@ expression: events
     session_id: ses_demo
     cwd: /Users/dev/ocproj
     parent_id: ~
+- ModelInfo:
+    agent_id: 15020910450894780276
+    model: deepseek-v4-flash-free
+    effort: ~
 - Identity:
     agent_id: 15020910450894780276
     source: opencode

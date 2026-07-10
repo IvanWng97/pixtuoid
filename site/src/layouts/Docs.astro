@@ -198,16 +198,16 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     justify-content: center;
     align-items: start;
   }
-  /* rails: sticky below the 60px sticky nav */
-  /* anchored headings clear the 60px sticky nav (same offset the rails use) —
+  /* rails: sticky below the --nav-h sticky nav (+ 1.5rem breath) */
+  /* anchored headings clear the sticky nav (same offset the rails use) —
      also parks clicked headings nearer the scrollspy band */
   .docs :global(.prose h2),
   .docs :global(.prose h3) {
-    scroll-margin-top: 84px;
+    scroll-margin-top: calc(var(--nav-h) + 1.5rem);
   }
   .docs__rail {
     position: sticky;
-    top: 84px;
+    top: calc(var(--nav-h) + 1.5rem);
     font-family: var(--font-mono);
     font-size: 0.84rem;
   }

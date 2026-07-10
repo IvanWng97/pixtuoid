@@ -86,6 +86,9 @@ fn populate_demo_agents(scene: &mut SceneState, now: SystemTime, n: usize) {
                 active_ms: 0,
                 unknown_cwd: false,
                 parent_id: None,
+                pid: None,
+                model: None,
+                effort: None,
             },
         );
     }
@@ -163,6 +166,15 @@ fn main() -> Result<()> {
     }
     let labels = renderer.labels(&scene, now);
     paint_labels_into_surface(&mut sb, ww, wh, &labels, scale as i32, theme);
+    let board = renderer.board(&scene, now);
+    pixtuoid::floating::offscreen::paint_wall_board_into_surface(
+        &mut sb,
+        ww,
+        wh,
+        &board,
+        scale as i32,
+        theme,
+    );
 
     let mut img = RgbImage::new(win_w, win_h);
     for wy in 0..win_h {

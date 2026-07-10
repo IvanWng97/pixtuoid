@@ -31,7 +31,11 @@ and compares against the live upstream:
   * CodeWhale hooks    -> `CODEWHALE_EVENTS` in crates/pixtuoid/src/install/codewhale.rs
                           vs the snake_case `HookEvent` enum in
                           Hmbown/CodeWhale crates/tui/src/hooks.rs
-  * opencode events    -> the EventV2 `type`s the decoder maps (the `match event`
+  * burn-tier fields   -> codex turn_context.{model,effort} (TurnContextItem,
+                        protocol.rs) + copilot data.model (schema) + opencode
+                        info.model (session.ts) + CC ultra attachment markers
+                        (docs appearance watch) — see #541
+* opencode events    -> the EventV2 `type`s the decoder maps (the `match event`
                           block in crates/pixtuoid-core/src/source/opencode.rs)
                           vs the `EventV2.define` type literals in
                           anomalyco/opencode packages/schema/src/v1/session.ts +
@@ -141,10 +145,29 @@ CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
 # review-class drift (something new to adopt), never breaking. `session_end`
 # is snake_case on purpose: the SessionEnd HOOK name appears throughout
 # hooks.md and must not match.
+# CC hook-payload surfaces we DEPEND on that are DOCUMENTED (hooks.md) — the
+# inverse direction of the appearance markers below: these strings VANISHING
+# from hooks.md is review-class drift (the docs moved/renamed a surface the
+# burn-tier decoder reads). `CLAUDE_EFFORT` pins the effort row (the decoder
+# reads `effort.level` off tool-context payloads; ultracode reports as xhigh);
+# the model sentence pins SessionStart's optional `model` field.
+CC_DEPENDED_DOC_MARKERS = {
+    "CLAUDE_EFFORT": "the hook-payload effort surface (effort.level, burn tier)",
+    "receive a `model` field": "SessionStart's optional model field (burn tier)",
+}
+
 CC_LIFECYCLE_SURFACE_MARKERS = {
     "session_end": 'a structural transcript end record (subtype:"session_end")',
     ".claude/sessions/": "the ~/.claude/sessions/<pid>.json session registry",
     "procStart": "the sessions-registry procStart field",
+    # burn tier (#541): the periodic ultra-effort attachment markers the CC
+    # decoder synthesizes effort labels from (undocumented wire, verified live
+    # 2026-07-10). CC is a closed binary, so like the registry above this is an
+    # APPEARANCE watch: the docs mentioning them = upstream started documenting
+    # the surface — a review ping to re-verify our synthesized labels/shape.
+    "ultra_effort_enter": "the ultra-effort transcript attachment marker",
+    "ultrathink_effort": "the ultrathink transcript attachment marker",
+    "ultra_effort_exit": "the ultra-effort EXIT attachment marker (instant flame-off)",
 }
 
 # Codex hook events we DELIBERATELY do not register — they are not agent
@@ -267,6 +290,10 @@ OPENCODE_TOLERATED = {"permission.asked"}
 OPENCODE_PAYLOAD_FIELDS = {
     "info", "id", "parentID", "directory",
     "part", "sessionID", "callID", "tool", "state", "status", "input",
+    # burn tier (#541): session.created carries `info.model.{id, providerID}`
+    # (SessionInfo.model → SessionModel in session.ts); the decoder reads
+    # `model.id` — `id` is watched above, this watches the wrapper.
+    "model",
 }
 
 # Copilot CLI publishes a session-events JSON schema; unpkg serves the file
@@ -306,6 +333,9 @@ COPILOT_PAYLOAD_FIELDS = {
     "agentId", "sessionId", "context", "cwd",
     "toolCallId", "toolName", "arguments", "agentDisplayName",
     "permissionRequest", "result", "kind",
+    # burn tier (#541): the per-tool model (ToolExecutionCompleteData.model,
+    # schema-verified 2026-07-10) — a rename silently darkens the cp· badge.
+    "model",
 }
 
 # Cursor CLI (`cursor-agent`) is HOOK-ONLY; the events we register/decode are
@@ -549,6 +579,18 @@ def codex_function_call_fields(text: str) -> set[str] | None:
     return set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*:", m.group(1)))
 
 
+def codex_turn_context_fields(text: str) -> set[str] | None:
+    """The field idents of the `TurnContextItem` struct (protocol.rs) — the
+    burn-tier feature reads `model` + `effort` off every `turn_context`
+    rollout line (source/codex.rs). Same graceful-skip contract as
+    `codex_function_call_fields`: None = the struct moved/changed shape, the
+    caller alarms on that separately."""
+    m = re.search(r"pub struct TurnContextItem\s*\{([^}]*)\}", text)
+    if not m:
+        return None
+    return set(re.findall(r"\bpub ([a-z_][a-z0-9_]*)\s*:", m.group(1)))
+
+
 def upstream_cc_hook_events(text: str) -> set[str] | None:
     """The hook-event summary table near the top of hooks.md ("| Event | When
     it fires |") is the canonical event list — parse only its rows (other
@@ -726,6 +768,29 @@ def upstream_codewhale_hooks(text: str) -> set[str] | None:
     return snake or None
 
 
+def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
+    # Both marker directions over an already-fetched hooks.md text, as a pure
+    # function so the selftest can exercise the DETECTION (not just the
+    # parsers): depended markers alarm on VANISH, surface markers on
+    # APPEARANCE.
+    review: list[str] = []
+    for marker, what in sorted(CC_DEPENDED_DOC_MARKERS.items()):
+        if marker not in hooks_doc:
+            review.append(
+                f"CC hooks.md no longer mentions `{marker}` — {what} may have "
+                f"moved/renamed; re-verify the burn-tier hook decode."
+            )
+    for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
+        if marker in hooks_doc:
+            review.append(
+                f"CC hooks doc now mentions `{marker}` — {what} may have "
+                f"landed upstream. Adopt it (a durable end signal for the "
+                f"JSONL transport / the liveness-probe registry) and "
+                f"update this watch."
+            )
+    return review
+
+
 def run_checks(
     codex_ours: set[str] | None,
     codex_rollout: tuple[set[str], set[str]] | None,
@@ -798,6 +863,27 @@ def run_checks(
                             f"source/codex.rs) is GONE from upstream `EventMsg` — "
                             f"renamed; the transcript decoder drops it SILENTLY "
                             f"(`_ => vec![]`, no drift breadcrumb)."
+                        )
+        # `turn_context` FIELD survival (burn tier, #541): the transcript
+        # decoder reads `model` + `effort` off every turn_context line
+        # (source/codex.rs) — a rename silently kills the model badge/flame
+        # (fail-quiet by design, so this watch is the only alarm).
+        if text is not None:
+            tc_fields = codex_turn_context_fields(text)
+            if tc_fields is None:
+                breaking.append(
+                    "Codex `TurnContextItem` struct not found in protocol.rs — "
+                    "upstream moved it; update the parser (burn-tier model/effort "
+                    "watch is blind)."
+                )
+            else:
+                for f in ("model", "effort"):
+                    if f not in tc_fields:
+                        breaking.append(
+                            f"Codex turn_context field `{f}` is GONE from "
+                            f"TurnContextItem in protocol.rs — renamed; the "
+                            f"burn-tier decoder reads None (model badge/flame "
+                            f"silently dark for codex agents)."
                         )
         # Rollout `response_item` types → the ResponseItem enum in models.rs.
         if codex_rollout is not None:
@@ -1139,14 +1225,7 @@ def run_checks(
                         f"install/claude.rs EVENTS, or add it to "
                         f"CC_KNOWN_OMITTED)."
                     )
-        for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
-            if marker in hooks_doc:
-                review.append(
-                    f"CC hooks doc now mentions `{marker}` — {what} may have "
-                    f"landed upstream. Adopt it (a durable end signal for the "
-                    f"JSONL transport / the liveness-probe registry) and "
-                    f"update this watch."
-                )
+        review.extend(cc_doc_marker_findings(hooks_doc))
 
 
 

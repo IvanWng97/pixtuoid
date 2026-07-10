@@ -616,6 +616,7 @@ impl Reducer {
                 source,
                 session_id,
                 cwd,
+                pid,
             } => {
                 // Boundary (1) made structural: JSONL must never synthesize —
                 // a transcript line can be a historical replay. No in-tree
@@ -633,6 +634,13 @@ impl Reducer {
                 };
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
                     backfill_identity(slot, ctx);
+                    // Focus-jump pid cache: hook-transport Identity recurs
+                    // ahead of every activity, so this stays fresh. A pid-less
+                    // Identity never DOWNGRADES a cached Some (e.g. an
+                    // opencode plugin event following a shim-stamped one).
+                    if pid.is_some() {
+                        slot.pid = pid;
+                    }
                     // The same reap exemption the registration branch below
                     // honors, mirrored: Identity is hook-only (transport
                     // guard above), so the owning process is alive — a
@@ -665,6 +673,42 @@ impl Reducer {
                     // poisoned (boundary 3 untouched).
                     if let Some(slot) = scene.agents.get_mut(&agent_id) {
                         slot.unknown_cwd = false;
+                        // Focus-jump pid cache, same rule as the backfill branch.
+                        if pid.is_some() {
+                            slot.pid = pid;
+                        }
+                    }
+                }
+            }
+            AgentEvent::ModelInfo {
+                agent_id,
+                model,
+                effort,
+            } => {
+                // Pure observation cache — updates an EXISTING slot only (a
+                // model line must never register a session; unknown id =
+                // no-op). Legitimate on BOTH transports: model/effort are
+                // wire data, not liveness. Known bounded residual: the
+                // watcher reads RECENT/LIVE-probed files from the TOP, so a
+                // first-sight replay can stamp a HISTORICAL effort marker
+                // with apply-time `now` — a session that used max effort
+                // earlier (but no longer) flames for up to the scene's
+                // EFFORT_TTL (10 min) after attach, then self-heals. Purely
+                // cosmetic; model is immune (last-seen-wins, no freshness).
+                // `model` writes only on change (Arc churn); `effort`
+                // re-stamps `now` per sighting — the freshness the scene
+                // layer's TTL reads.
+                if let Some(slot) = scene.agents.get_mut(&agent_id) {
+                    if let Some(m) = model {
+                        if slot.model.as_deref() != Some(m.as_str()) {
+                            slot.model = Some(std::sync::Arc::from(m.as_str()));
+                        }
+                    }
+                    if let Some(e) = effort {
+                        slot.effort = Some(crate::state::EffortObservation::new(
+                            std::sync::Arc::from(e.as_str()),
+                            now,
+                        ));
                     }
                 }
             }
@@ -1084,6 +1128,9 @@ impl Reducer {
                 // cwd-bearing event is swept while alive.
                 unknown_cwd: !has_cwd && parent_id.is_none(),
                 parent_id,
+                pid: None,
+                model: None,
+                effort: None,
             },
         );
         true

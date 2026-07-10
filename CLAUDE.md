@@ -49,10 +49,10 @@ crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pix
 │                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)
 │                    pixel_painter/ (render_to_rgb_buffer) layout/ physics.rs pose/ (pure + routed,
 │                    file-level split) motion/ pathfind.rs floor.rs theme/ pet.rs chitchat.rs
-│                    frame_cache.rs anim.rs overlay.rs font.rs embedded_pack.rs (default pack at
+│                    frame_cache.rs anim.rs overlay.rs board.rs burn.rs embedded_pack.rs (default pack at
 │                    sprites/default/, own build.rs); depends on pixtuoid-core (forwards `native`)
 ├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene
-│                    cli.rs config.rs runtime/ install/ tui/ floating/ (two thin painters over the
+│                    cli.rs config.rs runtime/ install/ focus/ (click-to-focus: pid→ancestor→activate) tui/ floating/ (two thin painters over the
 │                    pixtuoid-scene crate; neither depends on the other) sprites/ (skeleton embedded via
 │                    include_str!, robot --pack-dir-loadable)
 ├── pixtuoid-web/    the THIRD painter — wasm-bindgen `<canvas>` painter over pixtuoid-scene
@@ -184,7 +184,7 @@ and stays a human step. See
 - **No scan-the-history logic.** Keep persistent state (a set, a map, a bool) updated as events arrive; never derive state by scanning backward through time.
 - **Match the surrounding shell** (zsh interactive / POSIX sh); `shellcheck` + `shfmt` any `.sh` you touch — run `just shfmt-fix` to format (both gated by `just lint` + the CI `hygiene` job). **macOS first**: BSD CLI, brew, launchd.
 - **Keep docs current.** A change that alters module structure, architecture, workflow, or public API updates the relevant `CLAUDE.md` + `README.md` in the same commit.
-- **A refuted finding cites (or adds) a sharp edge.** When you reject a review finding as "deliberate design," point at the relevant per-crate `CLAUDE.md` "Known sharp edges" entry — or add one in the same change. That keeps the context accurate for the next agent (the real payoff). (`docs/REVIEW-LEDGER.md` + `docs/review-metrics/` are a frozen historical archive of past adjudications, kept for reference — no longer a required-update log.)
+- **A refuted finding cites (or adds) a sharp edge.** When you reject a review finding as "deliberate design," point at the relevant per-crate `CLAUDE.md` "Known sharp edges" entry — or add one in the same change. That keeps the context accurate for the next agent (the real payoff).
 - **Track every deferred finding as a GitHub issue** BEFORE moving on — problem, why deferred, fix sketch. A deferred finding with no issue is a silently-dropped finding. (Verify it's real first — see "Don't blindly accept reviewer findings".)
 - **Sprite changes require visual verification** — render, crop, read the PNG, self-critique until it reads at half-block scale; commit messages carry the iteration history. Full checklist: `.claude/skills/beautify-decoration/SKILL.md`.
 - **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (the memory layer of [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md)).

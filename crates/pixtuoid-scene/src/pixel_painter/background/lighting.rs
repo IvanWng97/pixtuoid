@@ -261,18 +261,20 @@ pub(in crate::pixel_painter) fn paint_clock(
 /// Quantize a fractional turn (0.0..1.0, 0.0 = north) to one of 8 octant
 /// (dx, dy) unit offsets.
 fn octant_offset(turn: f32) -> (i32, i32) {
+    // rem_euclid(8) maps every i32 (incl. a NaN turn's 0 cast) into 0..=7, so
+    // the table is total — a match would need a dead wildcard arm.
+    const OCTANTS: [(i32, i32); 8] = [
+        (0, -1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
+        (0, 1),
+        (-1, 1),
+        (-1, 0),
+        (-1, -1),
+    ];
     let oct = ((turn * 8.0).round() as i32).rem_euclid(8);
-    match oct {
-        0 => (0, -1),
-        1 => (1, -1),
-        2 => (1, 0),
-        3 => (1, 1),
-        4 => (0, 1),
-        5 => (-1, 1),
-        6 => (-1, 0),
-        7 => (-1, -1),
-        _ => (0, 0),
-    }
+    OCTANTS[oct as usize]
 }
 
 /// Office corridor runner — a darker wood strip with subtle lighter stripes,

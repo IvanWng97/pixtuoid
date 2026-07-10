@@ -5,7 +5,7 @@ protocol catches the repo's known failure classes after the code exists; this
 brief front-loads the same classes while each costs one plan line instead of
 a finding plus a fix round. Census grounding: at least 4 of the 7 post-merge
 escapes and the one design-class miss (PR #86's parallel config structure)
-were plan-preventable — `docs/review-metrics/mining-2026-06.md`.
+were plan-preventable.
 
 **When to use:** new feature, new config key / CLI flag, new seam or module,
 any change touching a documented sharp edge, or any change you expect to

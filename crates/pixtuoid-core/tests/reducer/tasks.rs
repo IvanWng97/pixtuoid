@@ -10,7 +10,7 @@ use pixtuoid_core::state::{ActivityState, SceneState};
 use pixtuoid_core::AgentId;
 use serde_json::json;
 
-use crate::{delegating_pair, start};
+use crate::{act_end, act_start, delegating_pair, start, waiting};
 
 /// Assert the slot renders Active("Delegating") — `ToolDetail::Task`'s
 /// display, set by `fsm::enter_delegating`.
@@ -32,24 +32,22 @@ fn jsonl_duplicate_of_recent_hook_is_dropped() {
     start(&mut r, &mut scene, id);
 
     let t0 = SystemTime::now();
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t-1".into()),
-            detail: None,
-        },
+        id,
+        Some("t-1"),
+        None,
         t0,
         Transport::Hook,
     );
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t-1".into()),
-            detail: Some("FROM_JSONL".into()),
-        },
+        id,
+        Some("t-1"),
+        Some("FROM_JSONL"),
         t0 + Duration::from_millis(100),
         Transport::Jsonl,
     );
@@ -83,26 +81,24 @@ fn hook_activity_during_active_task_is_suppressed() {
     let t0 = SystemTime::now();
 
     // Parent enters Task tool — hook fires first, carrying the tool_use_id.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0,
         Transport::Hook,
     );
 
     // Subagent fires a Read hook. CC reports it on parent's transcript_path,
     // so it lands on parent's AgentId — we must drop it.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("subagent-R".into()),
-            detail: Some("Read: /foo".into()),
-        },
+        parent,
+        Some("subagent-R"),
+        Some("Read: /foo"),
         t0 + Duration::from_millis(50),
         Transport::Hook,
     );
@@ -118,12 +114,11 @@ fn hook_activity_during_active_task_is_suppressed() {
     }
 
     // Subagent's PostToolUse hook for Read also lands on parent — drop it.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("subagent-R".into()),
-        },
+        parent,
+        Some("subagent-R"),
         t0 + Duration::from_millis(60),
         Transport::Hook,
     );
@@ -148,12 +143,11 @@ fn hook_activity_during_active_task_is_suppressed() {
     // hook IS allowed through. With the Active-grace debounce, the
     // transition to Idle is deferred — `pending_idle_at` arms now,
     // `reducer.tick` past ACTIVE_GRACE_WINDOW (1500ms) realizes it.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-        },
+        parent,
+        Some("task-T"),
         t0 + Duration::from_millis(200),
         Transport::Hook,
     );
@@ -181,24 +175,22 @@ fn subagent_jsonl_activity_is_unaffected_by_parent_task_suppression() {
 
     let t0 = SystemTime::now();
     // Parent enters a Task.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0,
         Transport::Hook,
     );
     // Subagent's JSONL activity targets ITS OWN AgentId — must apply normally.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: subagent,
-            tool_use_id: Some("sub-R".into()),
-            detail: Some("Read: /bar".into()),
-        },
+        subagent,
+        Some("sub-R"),
+        Some("Read: /bar"),
         t0 + Duration::from_millis(120),
         Transport::Jsonl,
     );
@@ -218,13 +210,12 @@ fn hook_activity_without_active_task_applies_normally() {
     let id = AgentId::from_transcript_path("/p/a.jsonl");
     start(&mut r, &mut scene, id);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t".into()),
-            detail: Some("Bash: ls".into()),
-        },
+        id,
+        Some("t"),
+        Some("Bash: ls"),
         SystemTime::now(),
         Transport::Hook,
     );
@@ -252,15 +243,7 @@ fn active_tasks_drained_by_jsonl_end_even_if_hook_end_arrived_first() {
     let t0 = SystemTime::now();
 
     // Hook PostToolUse arrives first (active_tasks empty — Pre was missed).
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("task-X".into()),
-        },
-        t0,
-        Transport::Hook,
-    );
+    act_end(&mut r, &mut scene, id, Some("task-X"), t0, Transport::Hook);
 
     // JSONL ActivityStart for the same Task arrives after the hook dedup
     // window has expired — passes through and populates active_tasks.
@@ -276,24 +259,22 @@ fn active_tasks_drained_by_jsonl_end_even_if_hook_end_arrived_first() {
     );
 
     // JSONL ActivityEnd from the same transcript drains active_tasks.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("task-X".into()),
-        },
+        id,
+        Some("task-X"),
         t0 + Duration::from_millis(800),
         Transport::Jsonl,
     );
 
     // Subsequent hook activity must apply normally — proves active_tasks drained.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("other".into()),
-            detail: Some("Bash: ls".into()),
-        },
+        id,
+        Some("other"),
+        Some("Bash: ls"),
         t0 + Duration::from_millis(900),
         Transport::Hook,
     );
@@ -318,13 +299,12 @@ fn jsonl_event_after_dedup_window_is_applied() {
     start(&mut r, &mut scene, id);
 
     let t0 = SystemTime::now();
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t-1".into()),
-            detail: Some("hook-side".into()),
-        },
+        id,
+        Some("t-1"),
+        Some("hook-side"),
         t0,
         Transport::Hook,
     );
@@ -334,13 +314,12 @@ fn jsonl_event_after_dedup_window_is_applied() {
     // is the discriminator: a vacuous `Active { .. }` check passes even if the
     // event were wrongly suppressed (the hook already made it Active), so
     // assert the slot reflects the JSONL event's detail specifically.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t-1".into()),
-            detail: Some("jsonl-side".into()),
-        },
+        id,
+        Some("t-1"),
+        Some("jsonl-side"),
         t0 + Duration::from_millis(600),
         Transport::Jsonl,
     );
@@ -368,26 +347,24 @@ fn hook_wins_dedup_drops_jsonl_duplicate_within_window() {
     let t0 = SystemTime::now();
 
     // Hook event first — establishes the tool_use_id in the dedup map.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("dedup-1".into()),
-            detail: Some("Edit: hook.rs".into()),
-        },
+        id,
+        Some("dedup-1"),
+        Some("Edit: hook.rs"),
         t0,
         Transport::Hook,
     );
     assert_eq!(scene.agents.get(&id).unwrap().tool_call_count, 1);
 
     // JSONL event with same tool_use_id within 500ms — must be dropped.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("dedup-1".into()),
-            detail: Some("Edit: jsonl.rs".into()),
-        },
+        id,
+        Some("dedup-1"),
+        Some("Edit: jsonl.rs"),
         t0 + Duration::from_millis(200),
         Transport::Jsonl,
     );
@@ -447,34 +424,31 @@ fn subagent_is_removed_promptly_when_its_parent_task_completes() {
         Transport::Jsonl,
     );
     // Parent delegates a Task → Active{Delegating}, active_tasks[parent]={task-T}.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
     // Subagent does some work.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: child,
-            tool_use_id: Some("c1".into()),
-            detail: Some("Read: /x".into()),
-        },
+        child,
+        Some("c1"),
+        Some("Read: /x"),
         t0 + Duration::from_secs(2),
         Transport::Jsonl,
     );
     // The Task returns to the parent → drains active_tasks → subagent completed.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-        },
+        parent,
+        Some("task-T"),
         t0 + Duration::from_secs(10),
         Transport::Hook,
     );
@@ -540,13 +514,12 @@ fn oversized_attach_synthesized_task_start_restores_suppression_and_b1() {
     );
 
     // The synthesized Task start (Jsonl, no prior hook record at attach).
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("tu_task".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("tu_task"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Jsonl,
     );
@@ -559,13 +532,12 @@ fn oversized_attach_synthesized_task_start_restores_suppression_and_b1() {
     // The subagent's next tool fires a hook misattributed to the PARENT
     // (CC hook transcript_path is always the parent's). With active_tasks
     // seeded, it must be suppressed — parent stays Delegating.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("sub-R".into()),
-            detail: Some("Read: /foo".into()),
-        },
+        parent,
+        Some("sub-R"),
+        Some("Read: /foo"),
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
@@ -574,12 +546,11 @@ fn oversized_attach_synthesized_task_start_restores_suppression_and_b1() {
         parent,
         "the misattributed subagent hook must be suppressed, not animated on the parent",
     );
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("sub-R".into()),
-        },
+        parent,
+        Some("sub-R"),
         t0 + Duration::from_secs(3),
         Transport::Hook,
     );
@@ -592,12 +563,11 @@ fn oversized_attach_synthesized_task_start_restores_suppression_and_b1() {
     // transcript) drains the seeded task and arms the grace-deferred b1
     // cascade — the completed subagent leaves promptly instead of lingering
     // to the 30-min idle sweep.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("tu_task".into()),
-        },
+        parent,
+        Some("tu_task"),
         t0 + Duration::from_secs(10),
         Transport::Jsonl,
     );
@@ -636,35 +606,32 @@ fn late_jsonl_dispatch_copy_inside_grace_cancels_premature_cascade() {
     let t1 = t0 + Duration::from_secs(1);
 
     // First Task dispatch — applies normally, active_tasks = {task-1}.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-1".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-1"),
+        Some("Agent"),
         t1,
         Transport::Hook,
     );
     // Parallel SECOND dispatch via hook — suppressed (leg 1: not recorded).
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-2".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-2"),
+        Some("Agent"),
         t1 + Duration::from_millis(50),
         Transport::Hook,
     );
     // First Task's END drains the set BEFORE the second dispatch's JSONL
     // copy has been delivered (watcher latency) — the #151A race.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-1".into()),
-        },
+        parent,
+        Some("task-1"),
         t1 + Duration::from_millis(200),
         Transport::Hook,
     );
@@ -675,13 +642,12 @@ fn late_jsonl_dispatch_copy_inside_grace_cancels_premature_cascade() {
 
     // The JSONL copy lands inside the grace → tracks task-2 + cancels the
     // pending cascade.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-2".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-2"),
+        Some("Agent"),
         t1 + Duration::from_secs(1),
         Transport::Jsonl,
     );
@@ -697,12 +663,11 @@ fn late_jsonl_dispatch_copy_inside_grace_cancels_premature_cascade() {
 
     // Teeth: the second Task's drain re-arms, and with nothing arriving the
     // cascade fires after the grace.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-2".into()),
-        },
+        parent,
+        Some("task-2"),
         t1 + Duration::from_secs(5),
         Transport::Jsonl,
     );
@@ -732,43 +697,39 @@ fn second_drain_inside_grace_restarts_the_cascade_clock() {
     let (parent, child) = delegating_pair(&mut r, &mut scene, "orch-rearm", t0);
     let t1 = t0 + Duration::from_secs(1);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-1".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-1"),
+        Some("Agent"),
         t1,
         Transport::Hook,
     );
     // First drain arms the pending cascade.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-1".into()),
-        },
+        parent,
+        Some("task-1"),
         t1 + Duration::from_millis(200),
         Transport::Hook,
     );
     // A second Task lands and drains again, all inside the first grace.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-2".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-2"),
+        Some("Agent"),
         t1 + Duration::from_secs(1),
         Transport::Jsonl,
     );
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-2".into()),
-        },
+        parent,
+        Some("task-2"),
         t1 + Duration::from_secs(2),
         Transport::Jsonl,
     );
@@ -810,45 +771,41 @@ fn late_jsonl_replay_of_drained_task_end_does_not_false_resolve_waiting() {
     let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-152", t0);
     let t1 = t0 + Duration::from_secs(1);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t1,
         Transport::Hook,
     );
     // The parent's own permission prompt fires while Delegating → the gate
     // records the Task's tuid.
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: parent,
-            reason: "permission".into(),
-        },
+        parent,
+        "permission",
         t1 + Duration::from_millis(100),
         Transport::Hook,
     );
     // Task self-END drains via tracking; the parent must stay Waiting
     // (pinned elsewhere) and the gate's tuid is now history.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-        },
+        parent,
+        Some("task-T"),
         t1 + Duration::from_secs(1),
         Transport::Hook,
     );
     // Late JSONL replay of the same END, outside the dedup window.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-        },
+        parent,
+        Some("task-T"),
         t1 + Duration::from_secs(1) + HOOK_WINS_WINDOW + Duration::from_millis(100),
         Transport::Jsonl,
     );
@@ -885,54 +842,49 @@ fn task_drain_keeps_parallel_ordinary_tool_gate() {
     let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-keep", t0);
     let t1 = t0 + Duration::from_secs(1);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t1,
         Transport::Hook,
     );
     // Parent's own ordinary tool via JSONL while delegating.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("bash-1".into()),
-            detail: Some("Bash: ls".into()),
-        },
+        parent,
+        Some("bash-1"),
+        Some("Bash: ls"),
         t1 + Duration::from_millis(100),
         Transport::Jsonl,
     );
     // Permission prompt fires mid-bash → gate records bash-1.
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: parent,
-            reason: "permission".into(),
-        },
+        parent,
+        "permission",
         t1 + Duration::from_millis(200),
         Transport::Hook,
     );
     // The Task drains — must not touch bash-1's gate.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-        },
+        parent,
+        Some("task-T"),
         t1 + Duration::from_secs(1),
         Transport::Hook,
     );
     // bash-1's END resolves the Waiting through the kept gate.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("bash-1".into()),
-        },
+        parent,
+        Some("bash-1"),
         t1 + Duration::from_secs(2),
         Transport::Jsonl,
     );
@@ -965,47 +917,43 @@ fn suppressed_child_event_keeps_parents_own_parallel_tool_gate() {
     let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-own-gate", t0);
     let t1 = t0 + Duration::from_secs(1);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t1,
         Transport::Hook,
     );
     // Parent's own ordinary tool via JSONL while delegating.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("bash-1".into()),
-            detail: Some("Bash: ls".into()),
-        },
+        parent,
+        Some("bash-1"),
+        Some("Bash: ls"),
         t1 + Duration::from_millis(100),
         Transport::Jsonl,
     );
     // Permission prompt fires mid-bash → gate records bash-1 (∉ active_tasks).
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: parent,
-            reason: "permission".into(),
-        },
+        parent,
+        "permission",
         t1 + Duration::from_millis(200),
         Transport::Hook,
     );
     // The subagent keeps working on its independent loop — its next
     // misattributed hook event is suppressed (parent in-Task). It must not
     // clobber the parent's OWN still-pending prompt.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("sub-R".into()),
-            detail: Some("Read: /foo".into()),
-        },
+        parent,
+        Some("sub-R"),
+        Some("Read: /foo"),
         t1 + Duration::from_millis(300),
         Transport::Hook,
     );
@@ -1017,12 +965,11 @@ fn suppressed_child_event_keeps_parents_own_parallel_tool_gate() {
         "a suppressed child event must not hide the parent's own still-pending permission Waiting"
     );
     // …and the kept gate still resolves: bash-1's END clears the Waiting.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("bash-1".into()),
-        },
+        parent,
+        Some("bash-1"),
         t1 + Duration::from_secs(1),
         Transport::Jsonl,
     );
@@ -1053,34 +1000,31 @@ fn own_parallel_tool_end_mid_delegation_returns_parent_to_delegating() {
     let (parent, child) = delegating_pair(&mut r, &mut scene, "orch-own-end", t0);
     let t1 = t0 + Duration::from_secs(1);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t1,
         Transport::Hook,
     );
     // The parent's own quick tool overwrites Delegating with Active(Bash)…
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("bash-1".into()),
-            detail: Some("Bash: ls".into()),
-        },
+        parent,
+        Some("bash-1"),
+        Some("Bash: ls"),
         t1 + Duration::from_millis(100),
         Transport::Jsonl,
     );
     // …and its END arrives while task-T is still in flight.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("bash-1".into()),
-        },
+        parent,
+        Some("bash-1"),
         t1 + Duration::from_millis(500),
         Transport::Jsonl,
     );
@@ -1117,22 +1061,20 @@ fn late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     // Fast tool: both hooks deliver.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t-fast".into()),
-            detail: Some("Read: /x".into()),
-        },
+        id,
+        Some("t-fast"),
+        Some("Read: /x"),
         t0,
         Transport::Hook,
     );
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t-fast".into()),
-        },
+        id,
+        Some("t-fast"),
         t0 + HOOK_WINS_WINDOW / 10,
         Transport::Hook,
     );
@@ -1147,22 +1089,20 @@ fn late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped() {
     // now, so only the END record's both-kinds dominance can drop the stale
     // START. Mutation-validated against BOTH rejected shapes (symmetric
     // value matching AND a (id, tuid, kind) key).
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t-fast".into()),
-            detail: Some("Read: /x".into()),
-        },
+        id,
+        Some("t-fast"),
+        Some("Read: /x"),
         t0 + HOOK_WINS_WINDOW + HOOK_WINS_WINDOW / 20,
         Transport::Jsonl,
     );
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t-fast".into()),
-        },
+        id,
+        Some("t-fast"),
         t0 + HOOK_WINS_WINDOW + HOOK_WINS_WINDOW / 20,
         Transport::Jsonl,
     );
@@ -1194,35 +1134,32 @@ fn jsonl_task_start_duplicate_does_not_clobber_waiting_parent() {
     let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-wait", t0);
 
     // Hook Task dispatch — records the Start in the dedup map + active_tasks.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
     // The parent's own permission Notification fires mid-dispatch.
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: parent,
-            reason: "permission".into(),
-        },
+        parent,
+        "permission",
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 50,
         Transport::Hook,
     );
     // The dispatch's JSONL copy, inside the window — must be dedup-dropped
     // before it can re-enter Delegating over the live Waiting.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 5,
         Transport::Jsonl,
     );
@@ -1251,36 +1188,33 @@ fn jsonl_task_start_replay_outside_dedup_window_does_not_clobber_waiting_parent(
     let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-wait-late", t0);
 
     // Hook Task dispatch — records the Start in the dedup map + active_tasks.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
     // The parent's own permission Notification fires mid-dispatch.
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: parent,
-            reason: "permission".into(),
-        },
+        parent,
+        "permission",
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 50,
         Transport::Hook,
     );
     // The dispatch's JSONL copy lands at 2× the dedup window — the record is
     // GC'd, so it reaches the tracker. Its insert is a duplicate (the tuid is
     // still in flight), which must NOT re-enter Delegating.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW * 2,
         Transport::Jsonl,
     );
@@ -1311,33 +1245,30 @@ fn lagged_jsonl_task_pair_after_drain_does_not_clobber_waiting_parent() {
     let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-drained", t0);
 
     // Fast Task: both hooks deliver — the Start tracks, the End DRAINS.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-        },
+        parent,
+        Some("task-T"),
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
 
     // The parent's own permission prompt fires in the gap → Waiting.
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: parent,
-            reason: "permission".into(),
-        },
+        parent,
+        "permission",
         t0 + Duration::from_secs(3),
         Transport::Hook,
     );
@@ -1345,13 +1276,12 @@ fn lagged_jsonl_task_pair_after_drain_does_not_clobber_waiting_parent() {
     // The batched JSONL pair lands at real skew — far outside
     // HOOK_WINS_WINDOW, so no dedup record is left and the set is empty.
     let replay_at = t0 + Duration::from_secs(2) + B1_CASCADE_GRACE + Duration::from_millis(100);
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         replay_at,
         Transport::Jsonl,
     );
@@ -1364,12 +1294,11 @@ fn lagged_jsonl_task_pair_after_drain_does_not_clobber_waiting_parent() {
     );
 
     // ...and the replayed End must not arm an idle-resolve on the prompt.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-        },
+        parent,
+        Some("task-T"),
         replay_at,
         Transport::Jsonl,
     );
@@ -1400,24 +1329,22 @@ fn jsonl_ordinary_tool_end_drains_when_hook_end_drops() {
     start(&mut r, &mut scene, id);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t-1".into()),
-            detail: Some("Read: /x".into()),
-        },
+        id,
+        Some("t-1"),
+        Some("Read: /x"),
         t0,
         Transport::Hook,
     );
     // PostToolUse hook DROPS. The JSONL END inside HOOK_WINS_WINDOW of the
     // hook START's record must apply and arm the idle debounce.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t-1".into()),
-        },
+        id,
+        Some("t-1"),
         t0 + HOOK_WINS_WINDOW / 5,
         Transport::Jsonl,
     );
@@ -1445,25 +1372,23 @@ fn suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks() {
     let (parent, child) = delegating_pair(&mut r, &mut scene, "orch-par", t0);
 
     // First Task dispatch — applies normally, active_tasks = {task-1}.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-1".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-1"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
     // Parallel SECOND Task dispatch via hook while task-1 is in flight —
     // suppressed as a leak (and must NOT record "task-2" in the dedup map).
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-2".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-2"),
+        Some("Agent"),
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 10,
         Transport::Hook,
     );
@@ -1471,24 +1396,22 @@ fn suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks() {
     // suppressed hook copy (so a wrongly-recorded "task-2" would dedup-drop
     // it). It must survive dedup — it is the only transport left to track
     // task-2.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-2".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-2"),
+        Some("Agent"),
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 10 + HOOK_WINS_WINDOW / 5,
         Transport::Jsonl,
     );
     // First Task's own PostToolUse drains task-1. task-2 must still be in
     // flight, so the subtree must NOT cascade-exit yet.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-1".into()),
-        },
+        parent,
+        Some("task-1"),
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW * 2 / 5,
         Transport::Hook,
     );
@@ -1518,12 +1441,11 @@ fn suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks() {
     // Teeth: draining the SECOND Task must fire the cascade after the grace
     // — proves the child is wired to the parent and the earlier no-cascade
     // assertion wasn't vacuous.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-2".into()),
-        },
+        parent,
+        Some("task-2"),
         t0 + Duration::from_secs(5),
         Transport::Jsonl,
     );
@@ -1553,25 +1475,23 @@ fn jsonl_task_self_end_drains_when_hook_end_drops() {
     let (parent, child) = delegating_pair(&mut r, &mut scene, "orch-drop", t0);
 
     // Hook Task dispatch — records "task-T" in the dedup map + active_tasks.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
     // The Task fails fast; its PostToolUse hook DROPS (never applied). The
     // JSONL END arrives inside HOOK_WINS_WINDOW of the hook START's record —
     // it is the only completion signal the reducer will ever get.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-        },
+        parent,
+        Some("task-T"),
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 5,
         Transport::Jsonl,
     );
@@ -1589,13 +1509,12 @@ fn jsonl_task_self_end_drains_when_hook_end_drops() {
     );
     // The parent must not be stuck Delegating: a later ordinary hook event
     // applies normally instead of being suppressed as a subagent leak.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("b-1".into()),
-            detail: Some("Bash: ls".into()),
-        },
+        parent,
+        Some("b-1"),
+        Some("Bash: ls"),
         t0 + Duration::from_secs(5),
         Transport::Hook,
     );
@@ -1649,23 +1568,21 @@ fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_resumes() {
         Transport::Jsonl,
     );
     // Parent delegates → Active{Delegating}, active_tasks[parent]={task-T}.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
     // Subagent's permission prompt → Notification misattributed to the parent.
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: parent,
-            reason: "permission?".into(),
-        },
+        parent,
+        "permission?",
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
@@ -1679,13 +1596,12 @@ fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_resumes() {
 
     // User grants; the subagent resumes a tool → a misattributed child hook,
     // suppressed because the parent is in-Task.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("sub-bash".into()),
-            detail: Some("Bash: ls".into()),
-        },
+        parent,
+        Some("sub-bash"),
+        Some("Bash: ls"),
         t0 + Duration::from_secs(3),
         Transport::Hook,
     );
@@ -1737,23 +1653,21 @@ fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_ends_a_tool(
         Transport::Jsonl,
     );
     // Parent delegates → Active(Delegating), active_tasks[parent] = {task-T}.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: parent,
-            tool_use_id: Some("task-T".into()),
-            detail: Some("Agent".into()),
-        },
+        parent,
+        Some("task-T"),
+        Some("Agent"),
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
     // Subagent's permission prompt → Notification misattributed to the parent.
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: parent,
-            reason: "permission?".into(),
-        },
+        parent,
+        "permission?",
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
@@ -1767,12 +1681,11 @@ fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_ends_a_tool(
     // Subagent resumes by ENDING a tool → a misattributed child hook END (a
     // different tuid, so not the Task's self-end): suppressed, and the
     // suppression restores Active(Delegating).
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: parent,
-            tool_use_id: Some("sub-bash".into()),
-        },
+        parent,
+        Some("sub-bash"),
         t0 + Duration::from_secs(3),
         Transport::Hook,
     );
@@ -1812,12 +1725,11 @@ fn task_drain_while_parent_waiting_keeps_waiting() {
         Transport::Hook,
     );
     // A permission prompt fires while delegating → Waiting.
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
+        id,
+        "permission",
         t0 + Duration::from_millis(500),
         Transport::Hook,
     );
@@ -1828,12 +1740,11 @@ fn task_drain_while_parent_waiting_keeps_waiting() {
 
     // The Task's own PostToolUse drains active_tasks — must NOT arm an idle
     // resolve on the Waiting parent (permission still pending).
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("task-T".into()),
-        },
+        id,
+        Some("task-T"),
         t0 + Duration::from_millis(1000),
         Transport::Hook,
     );

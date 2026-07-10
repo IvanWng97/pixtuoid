@@ -229,7 +229,63 @@ pub enum AgentEvent {
         /// Codex PermissionRequest) — the registration is then label-ordinal
         /// but still reap-exempt, exactly like the blank synthesis path.
         cwd: Option<PathBuf>,
+        /// The agent process's pid (+ recycle marker), from the shim/plugin
+        /// `_pid` stamp — the focus-jump channel for hook-only sources.
+        /// Transcript-family sources resolve pid via their liveness probes
+        /// instead and always carry `None` here (structural:
+        /// `patch_identity_pids` skips any source with a `line_decoder`).
+        /// Hook-transport Identity recurs ahead of every activity, so the
+        /// slot's cached pid stays fresh. serde-skipped so the
+        /// conformance/scene goldens don't churn on `None`.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        pid: Option<PidIdentity>,
     },
+    /// An LLM model/effort OBSERVATION from a source's wire (the burn-tier
+    /// feature): CC assistant lines carry `message.model` per turn, Codex
+    /// `turn_context` carries `model` + `effort`, copilot per-tool `model`,
+    /// opencode `session.created`. Both fields are RAW wire strings (the
+    /// house RAW-store/interpret-at-paint posture — the burn-tier tables in
+    /// `pixtuoid-scene` do the reading); CC's periodic ultra-effort marker
+    /// carries no wire value, so its arm synthesizes `"ultra"`/`"ultrathink"`.
+    /// The reducer updates an EXISTING slot only (unknown id = no-op — a
+    /// model line never registers a session) and dedups per field; decoders
+    /// may emit per sighting.
+    ModelInfo {
+        agent_id: AgentId,
+        /// `Some` = a model observation (e.g. `"claude-fable-5"`).
+        model: Option<String>,
+        /// `Some` = an effort observation (Codex `"xhigh"` verbatim; CC's
+        /// synthesized `"ultra"`/`"ultrathink"` marker labels).
+        effort: Option<String>,
+    },
+}
+
+/// A cached agent pid PLUS the kernel start marker read when it was stamped
+/// ([`pid_start_marker`]) — together they name ONE process incarnation, so a
+/// focus click can refuse a RECYCLED pid (#527): re-read the marker, and a
+/// mismatch (or a dead pid) means this is not the process the hook came from.
+/// `started: None` = no marker was readable at stamp time (non-unix daemon,
+/// EPERM); the click-time guard then skips the identity check (additive, the
+/// #220 posture) — so on no-exit-watch platforms a markerless cache retains
+/// the pre-#527 recycled-pid residual until the stale sweep (compound-rare;
+/// documented, not guarded). Field name `pid` everywhere keeps the
+/// `pid: None` construction sites stable across the `Option<i32>` →
+/// `Option<PidIdentity>` migration. `non_exhaustive` so a future identity
+/// component (a boot id, a Windows session id) is a non-breaking add —
+/// cross-crate construction goes through [`PidIdentity::new`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct PidIdentity {
+    /// The agent CLI's OS pid (`pid_t`; matches `DaemonPresence.current_pid`).
+    pub pid: i32,
+    /// Opaque per-OS start marker — equality-only, see [`pid_start_marker`].
+    pub started: Option<u64>,
+}
+
+impl PidIdentity {
+    pub fn new(pid: i32, started: Option<u64>) -> Self {
+        Self { pid, started }
+    }
 }
 
 impl AgentEvent {
@@ -243,8 +299,44 @@ impl AgentEvent {
             AgentEvent::SessionEnd { agent_id, .. } => *agent_id,
             AgentEvent::ProofOfLife { agent_id, .. } => *agent_id,
             AgentEvent::Identity { agent_id, .. } => *agent_id,
+            AgentEvent::ModelInfo { agent_id, .. } => *agent_id,
         }
     }
+}
+
+/// Focus-jump pid point-queries for the transcript family — the ONE public
+/// seam the binary's `focus` module consumes (probe internals stay
+/// `pub(crate)`). Point queries against the live registries, never a
+/// transcript scan; both ride the recycle-guarded probes (#220), the reason
+/// transcript-family pids are NEVER taken from the shim parent. Native/unix
+/// backed — a non-unix build resolves nothing (focus silently no-ops).
+#[cfg(feature = "native")]
+pub fn cc_pid_for_session(projects_root: &std::path::Path, session_id: &str) -> Option<i32> {
+    let sessions_dir = cc_probe::cc_sessions_dir(projects_root)?;
+    cc_probe::live_cc_session_ids(&sessions_dir)?
+        .pid_of
+        .get(session_id)
+        .copied()
+}
+
+/// The CC sessions-registry dir the pid queries consult — the SAME
+/// standard-layout gate the probe applies (a `--projects-root /tmp/fixture`
+/// replay yields `None`). Exposed so `doctor` can report the focus channel's
+/// on-disk state without re-deriving the sibling layout (#526).
+#[cfg(feature = "native")]
+pub fn cc_registry_dir(projects_root: &std::path::Path) -> Option<std::path::PathBuf> {
+    cc_probe::cc_sessions_dir(projects_root)
+}
+
+/// Codex twin of [`cc_pid_for_session`], keyed by the rollout UUID (the
+/// slot's `session_id`) — NOT the rollout path, which comes back
+/// kernel-canonicalized from the fd probe and is deliberately not matched on.
+#[cfg(feature = "native")]
+pub fn codex_pid_for_session(sessions_root: &std::path::Path, uuid: &str) -> Option<i32> {
+    codex::live_codex_rollout_ids(sessions_root)?
+        .pid_of
+        .get(uuid)
+        .copied()
 }
 
 pub mod antigravity;
@@ -288,6 +380,13 @@ pub use native::{DynSource, Source, TaggedReceiver, TaggedSender};
 pub mod omp;
 pub mod openclaw;
 pub mod opencode;
+// The kernel start-marker read shared by the hook stamp and the binary's
+// click-time recycle guard (#527); the fn is the pub seam, the platform
+// impls stay private.
+#[cfg(feature = "native")]
+mod proc_start;
+#[cfg(feature = "native")]
+pub use proc_start::pid_start_marker;
 pub mod reasonix;
 // `doc(hidden)`: the registry is an internal fact table, `pub` ONLY so the
 // integration-test crates (sources::conformance) can read it. Hiding it keeps it
@@ -296,3 +395,55 @@ pub mod reasonix;
 // breaking-version bump. Same treatment as `jsonl`'s test-only seam.
 #[doc(hidden)]
 pub mod registry;
+
+#[cfg(all(test, unix, feature = "native"))]
+mod focus_pid_tests {
+    // The two focus-jump point-query seams, over real tempdir registries.
+    use super::*;
+
+    #[test]
+    fn cc_pid_for_session_hits_misses_and_tolerates_garbage() {
+        // The seam takes the PROJECTS root and derives the sibling sessions
+        // registry (the standard <claude_home>/{projects,sessions} layout).
+        let home = tempfile::tempdir().unwrap();
+        let projects = home.path().join("projects");
+        let sessions = home.path().join("sessions");
+        std::fs::create_dir_all(&projects).unwrap();
+        std::fs::create_dir_all(&sessions).unwrap();
+        // A live entry (our own pid is alive by construction) + garbage.
+        std::fs::write(
+            sessions.join("self.json"),
+            serde_json::json!({
+                "pid": std::process::id(),
+                "sessionId": "focus-sess",
+                "status": "idle"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(sessions.join("junk.json"), "not json {{{").unwrap();
+
+        assert_eq!(
+            cc_pid_for_session(&projects, "focus-sess"),
+            Some(std::process::id() as i32),
+            "hit: the session's live registry pid"
+        );
+        assert_eq!(
+            cc_pid_for_session(&projects, "unknown-sess"),
+            None,
+            "miss: unknown session resolves nothing"
+        );
+        // A NON-standard projects root (file_name != "projects") derives no
+        // registry — the custom --projects-root replay case resolves nothing.
+        assert_eq!(cc_pid_for_session(home.path(), "focus-sess"), None);
+    }
+
+    #[test]
+    fn codex_pid_for_session_misses_on_unknown_uuid() {
+        // No codex processes hold fds under a fresh tempdir → an empty (but
+        // healthy) snapshot → any uuid misses. The hit side rides the probe's
+        // own fd-matching tests (codex/native.rs).
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(codex_pid_for_session(root.path(), "0000-none"), None);
+    }
+}

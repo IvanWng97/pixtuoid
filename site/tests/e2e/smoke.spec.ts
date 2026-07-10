@@ -311,6 +311,46 @@ test('the hero pause switch freezes the office and resumes it seamlessly', async
   expect(errors()).toEqual([]);
 });
 
+test('crisp AA captions overlay the live office (name badges + neon board)', async ({ page }) => {
+  // The office canvas is a ~180px buffer CSS-upscaled with image-rendering:
+  // pixelated, so text baked into it pixelates. Instead the engine exports the
+  // name badges + neon wall-board (Office.overlay_json) and OfficeBackdrop lays
+  // crisp Monaspace Neon DOM spans over the canvas at display resolution. Pin
+  // that the layer comes up, carries real text, and is actually the mono face.
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  // The caption layer fades in only AFTER the reveal roll settles (labels track
+  // the FINAL sprite positions), so wait on is-on — not merely is-live.
+  await expect(page.locator('#office-overlay.is-on')).toBeAttached({ timeout: 10_000 });
+  // At least one name badge, laid over a seated/walking-in agent, non-empty and
+  // in Monaspace Neon (10s covers the cast's staggered walk-in at loop start).
+  const label = page.locator('#office-overlay .ov-label').first();
+  await expect(label).toHaveText(/\S/, { timeout: 10_000 });
+  const labelFont = await label.evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(labelFont).toContain('Monaspace Neon');
+  // The neon wall board renders its brand row (● / ★) from the same model.
+  const brand = page.locator('#office-overlay .ov-board .ov-brow--top span').first();
+  await expect(brand).toHaveText(/\S/, { timeout: 10_000 });
+  const brandFont = await brand.evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(brandFont).toContain('Monaspace Neon');
+  expect(errors()).toEqual([]);
+});
+
+test('reduced motion hides the caption overlay (still poster, no captions)', async ({
+  browser,
+}) => {
+  // Reduced motion is the still-poster design: no live office, so no captions.
+  // The overlay is display:none there — assert it never becomes visible.
+  const context = await browser.newContext({ reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
+  await expect(page.locator('#office-overlay.is-on')).not.toBeAttached();
+  await expect(page.locator('#office-overlay')).toBeHidden();
+  await context.close();
+});
+
 test('the install Copy click hires without breaking the page', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
@@ -1228,6 +1268,46 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
       innerW,
       `${path} at ${width}px: window.innerWidth expanded to ${innerW}px (${innerW - width}px past the device width — over-wide content grew the emulated viewport)`
     ).toBeLessThanOrEqual(width);
+    await context.close();
+  }
+});
+
+test('the hero copy clears the floating nav at phone viewports (vertical overlap guard)', async ({
+  browser,
+}) => {
+  // The hero is min-height:100svh with the copy BOTTOM-anchored (flex-end), so
+  // when the copy outgrows the viewport (narrow phones; iOS text metrics), its
+  // TOP is what gives way — with no top reservation the eyebrow slid to page
+  // y=0, straight under the index's floating (absolute) nav logo (measured
+  // pre-fix: eyebrow.top 0 vs nav bottom 60 at 402×700; a 1206×2622 iPhone
+  // field report). The fix reserves --nav-h + a breath as .hero padding-top.
+  // The pan guard above is width-only — this is the VERTICAL twin. 402×700 ≈
+  // iOS Safari's visible viewport on a 874pt phone; 360×640 = small Android.
+  // reducedMotion pins the copy's `rise` entry animation (translateY 22px →
+  // none) to its SETTLED position — the steady-state clearance is only ~12px,
+  // so a mid-animation read could mask a partial regression (false green).
+  for (const [width, height] of [
+    [402, 700],
+    [360, 640],
+    [402, 874],
+  ] as const) {
+    const context = await browser.newContext({
+      viewport: { width, height },
+      isMobile: true,
+      hasTouch: true,
+      reducedMotion: 'reduce',
+    });
+    const page = await context.newPage();
+    await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+    await page.goto('./');
+    const { navBottom, eyebrowTop } = await page.evaluate(() => ({
+      navBottom: document.querySelector('.nav .nav__inner')!.getBoundingClientRect().bottom,
+      eyebrowTop: document.querySelector('.hero__copy .eyebrow')!.getBoundingClientRect().top,
+    }));
+    expect(
+      eyebrowTop,
+      `at ${width}x${height} the hero eyebrow (top ${eyebrowTop}px) sits under the floating nav (bottom ${navBottom}px)`
+    ).toBeGreaterThanOrEqual(navBottom);
     await context.close();
   }
 });

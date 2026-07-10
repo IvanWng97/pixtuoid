@@ -59,6 +59,10 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         log_path,
         first_run,
     } = cfg;
+    // Focus-jump pid point-query roots (cloned: build_source_set consumes the
+    // originals). CC = projects root (sessions registry derived in-core);
+    // Codex = the rollout tree the fd probe walks.
+    let focus_roots = (projects_root.clone(), codex_sessions_root.clone());
     // The live, shared connected-source set: the reducer-task gate reads it, the
     // Sources panel mutates it. Seeded from the resolved boot flags.
     let connected = ConnectedSources::new(connected);
@@ -139,6 +143,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             connected,
             log_path,
             first_run,
+            focus_roots,
         })
         .await
     }
@@ -491,6 +496,7 @@ mod tests {
             source: "codex".into(),
             session_id: "s".into(),
             cwd: None,
+            pid: None,
         };
         assert_eq!(event_source(&scene, &idy), Some("codex"));
 
@@ -513,6 +519,7 @@ mod tests {
             source: String::new(),
             session_id: "s".into(),
             cwd: None,
+            pid: None,
         };
         assert_eq!(event_source(&scene, &empty), Some("claude-code"));
     }

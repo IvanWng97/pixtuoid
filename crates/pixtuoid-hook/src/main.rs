@@ -105,7 +105,7 @@ fn main() -> Result<()> {
         // resolves source via the env-prefix arm, its Windows install via `--source`;
         // `--event` never implies a source.
         let source = source_from_argv(&args).or_else(|| std::env::var("PIXTUOID_SOURCE").ok());
-        enrich_payload(map, source, now_ms());
+        enrich_payload(map, source, now_ms(), parent_pid());
     }
 
     // Best-effort send, hard-bounded so a stuck daemon can never block CC's
@@ -129,27 +129,30 @@ fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     let cwd_fallback = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
-    env_payload_from(event, cwd_fallback, cw_parent_pid(), |k| {
-        std::env::var(k).ok()
-    })
+    env_payload_from(event, cwd_fallback, parent_pid(), |k| std::env::var(k).ok())
 }
 
-/// CodeWhale's pid, for the daemon's liveness watch — stamped as `_pid` so an
-/// abrupt CodeWhale exit (kill/crash/terminal-close, which fires no
-/// `session_end`) ends the sprite promptly instead of ghosting until the
-/// stale-sweep. `sh -c` EXEC's the hook (verified: the hook's getppid() ==
-/// CodeWhale's pid), so the shim's parent IS CodeWhale — on UNIX. On Windows the
-/// hook runs under `cmd /C`, so the parent is `cmd.exe` (the WRONG pid, and it
-/// exits right after spawning the shim → a false exit), so we send no pid there
-/// and CodeWhale falls back to `session_end` + the stale-sweep.
+/// The spawning CLI's pid — the shim's parent. Two consumers: CodeWhale's
+/// env-mode `_pid` (the daemon's liveness watch: an abrupt exit that fires no
+/// `session_end` ends the sprite promptly) and the generic fill-if-absent
+/// `_pid` stamp (the TUI's focus-jump). `sh -c` EXEC's the hook (verified: the
+/// hook's getppid() == the CLI's pid), so the shim's parent IS the CLI — on
+/// UNIX. On Windows the hook runs under `cmd /C`, so the parent is `cmd.exe`
+/// (the WRONG pid, and it exits right after spawning the shim → a false
+/// exit / a recycled-pid focus), so we send no pid there: CodeWhale falls
+/// back to `session_end` + the stale-sweep, focus to a silent no-op.
+/// Container caveat: with a bind-mounted socket this pid is a CONTAINER-
+/// namespace pid the host-side daemon can't translate — the walk then hits
+/// an unrelated host process (usually surface-less → no-op). Gated behind
+/// deliberate socket sharing; default containers never reach the socket.
 #[cfg(unix)]
-fn cw_parent_pid() -> Option<u32> {
+fn parent_pid() -> Option<u32> {
     // getppid() is always safe (no args, infallible) and gives the hook's
-    // parent — CodeWhale, since `sh -c` exec's the hook (verified).
+    // parent — the spawning CLI, since `sh -c` exec's the hook (verified).
     u32::try_from(unsafe { libc::getppid() }).ok()
 }
 #[cfg(not(unix))]
-fn cw_parent_pid() -> Option<u32> {
+fn parent_pid() -> Option<u32> {
     None
 }
 
@@ -274,13 +277,29 @@ fn source_from_argv(args: &[String]) -> Option<String> {
 /// before stamping; the daemon never sees a value the shim didn't write.
 /// Absent any source (bare `pixtuoid-hook`, i.e. CC), no key is stamped and
 /// the decoder defaults to claude-code.
-fn enrich_payload(map: &mut serde_json::Map<String, Value>, source: Option<String>, ts_ms: u64) {
+fn enrich_payload(
+    map: &mut serde_json::Map<String, Value>,
+    source: Option<String>,
+    ts_ms: u64,
+    ppid: Option<u32>,
+) {
     map.remove("_pixtuoid_source");
     map.insert("_shim_ts_ms".into(), Value::from(ts_ms));
     if let Some(src) = source {
         if !src.is_empty() {
             map.insert("_pixtuoid_source".into(), Value::from(src));
         }
+    }
+    // The agent process's pid under the EXISTING `_pid` key (the daemon's
+    // envelope peek in hook/mod.rs already consumes it for the abrupt-exit
+    // watch, and now for the TUI's focus-jump). Deliberately NOT shim-owned:
+    // opencode's plugin and CodeWhale's env-mode supply their own `_pid`
+    // (the plugin's value is more authoritative than our getppid), so an
+    // inbound value is KEPT and the shim only fills the gap for the CLIs
+    // that exec it directly. None (Windows cmd /C wrapper — see parent_pid)
+    // fills nothing; focus degrades to a silent no-op there.
+    if let Some(ppid) = ppid {
+        map.entry("_pid").or_insert_with(|| Value::from(ppid));
     }
 }
 
@@ -304,7 +323,7 @@ mod tests {
         // Worst realistic stamps: a 20-digit u64::MAX timestamp + a source
         // name far longer than any registered CLI name (claude-code / codex /
         // reasonix / antigravity are all ≤ 11 chars; allow 64 for custom ones).
-        enrich_payload(map, Some("x".repeat(64)), u64::MAX);
+        enrich_payload(map, Some("x".repeat(64)), u64::MAX, Some(u32::MAX));
         let stamped = serde_json::to_vec(&p).unwrap();
         // minus the bare `{}` baseline, plus the trailing '\n' main appends.
         let overhead = (stamped.len() - 2 + 1) as u64;
@@ -312,6 +331,25 @@ mod tests {
             overhead <= STAMP_HEADROOM,
             "stamps ({overhead}B) must fit within STAMP_HEADROOM ({STAMP_HEADROOM}B)"
         );
+    }
+
+    #[test]
+    fn stamps_parent_pid_under_pid_when_absent() {
+        let mut p = json!({ "hook_event_name": "Stop" });
+        let map = p.as_object_mut().unwrap();
+        enrich_payload(map, Some("hermes".into()), 1, Some(4242));
+        assert_eq!(map["_pid"], json!(4242u32));
+    }
+
+    #[test]
+    fn an_upstream_pid_is_kept_never_overwritten() {
+        // opencode's plugin / CodeWhale's env-mode supply their own `_pid` —
+        // more authoritative than the shim's getppid (which under a plugin
+        // runtime may be an intermediary). The shim only fills the gap.
+        let mut p = json!({ "_pid": 777 });
+        let map = p.as_object_mut().unwrap();
+        enrich_payload(map, Some("opencode".into()), 1, Some(4242));
+        assert_eq!(map["_pid"], json!(777), "upstream value kept");
     }
 
     #[test]
@@ -332,7 +370,7 @@ mod tests {
         // A CC SessionStart payload's `source` is the start *reason* — must survive.
         let mut p = json!({ "hook_event_name": "SessionStart", "source": "startup" });
         let map = p.as_object_mut().unwrap();
-        enrich_payload(map, Some("claude-code".into()), 123);
+        enrich_payload(map, Some("claude-code".into()), 123, None);
         assert_eq!(map["_pixtuoid_source"], json!("claude-code"));
         assert_eq!(map["source"], json!("startup"), "public reason untouched");
         assert_eq!(map["_shim_ts_ms"], json!(123u64));
@@ -342,7 +380,7 @@ mod tests {
     fn no_source_env_omits_private_key_so_decoder_defaults_to_claude() {
         let mut p = json!({ "hook_event_name": "Stop" });
         let map = p.as_object_mut().unwrap();
-        enrich_payload(map, None, 1);
+        enrich_payload(map, None, 1, None);
         assert!(map.get("_pixtuoid_source").is_none());
     }
 
@@ -352,7 +390,7 @@ mod tests {
         // it too, not just decline to insert.
         let mut p = json!({ "_pixtuoid_source": "codex" });
         let map = p.as_object_mut().unwrap();
-        enrich_payload(map, Some(String::new()), 1);
+        enrich_payload(map, Some(String::new()), 1, None);
         assert!(map.get("_pixtuoid_source").is_none());
     }
 
@@ -363,7 +401,7 @@ mod tests {
         // inbound key must never pass through on the bare-CC (no source) path.
         let mut p = json!({ "hook_event_name": "Stop", "_pixtuoid_source": "codex" });
         let map = p.as_object_mut().unwrap();
-        enrich_payload(map, None, 1);
+        enrich_payload(map, None, 1, None);
         assert!(
             map.get("_pixtuoid_source").is_none(),
             "inbound spoofed key must be stripped, not passed through"
@@ -374,7 +412,7 @@ mod tests {
     fn inbound_spoofed_private_key_is_overwritten_when_source_resolves() {
         let mut p = json!({ "_pixtuoid_source": "codex" });
         let map = p.as_object_mut().unwrap();
-        enrich_payload(map, Some("reasonix".into()), 1);
+        enrich_payload(map, Some("reasonix".into()), 1, None);
         assert_eq!(map["_pixtuoid_source"], json!("reasonix"));
     }
 

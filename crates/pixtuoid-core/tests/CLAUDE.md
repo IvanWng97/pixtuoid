@@ -20,7 +20,7 @@ tests/
 │   │   └── fixtures/hook-payloads.jsonl   codewhale's OWN data (single-owner; NOT scanned)
 │   ├── snapshots/            insta snaps  (sources__conformance__<source>__<scenario>)
 │   └── fixtures/<source>/    ══ conformance scenarios ONLY — dir name MUST be a registered source ══
-├── reducer/main.rs           state-machine behavior (1 binary; shared builders `start`/`delegating_pair` live in main.rs)
+├── reducer/main.rs           state-machine behavior (1 binary; shared scaffolding lives in main.rs — builders `start`/`delegating_pair` + the apply-DSL `act_start`/`act_end`/`waiting`/`proof_of_life`/`sess_end`)
 │   ├── lifecycle.rs          SessionStart/End arms: registration/capacity, resurrect-in-place, hook synthesis of unknown ids, duplicate-start backfill, `Identity`
 │   ├── activity.rs           per-slot FSM: Active/Idle debounce, Waiting set/resolve gates, active_ms + tool_call_count
 │   ├── tasks.rs              active_tasks suppression, hook-wins dedup, drains, b1 cascade grace + waiting-clobber pins

@@ -6,7 +6,7 @@ use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::{ActivityState, SceneState};
 use pixtuoid_core::AgentId;
 
-use crate::start;
+use crate::{act_end, act_start, start, waiting};
 
 #[test]
 fn activity_start_sets_state_active() {
@@ -15,13 +15,12 @@ fn activity_start_sets_state_active() {
     let id = AgentId::from_transcript_path("/p/a.jsonl");
     start(&mut r, &mut scene, id);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: Some("Edit: foo.rs".into()),
-        },
+        id,
+        Some("t1"),
+        Some("Edit: foo.rs"),
         SystemTime::now(),
         Transport::Hook,
     );
@@ -43,22 +42,20 @@ fn activity_end_arms_debounce_then_tick_flips_to_idle() {
     let id = AgentId::from_transcript_path("/p/a.jsonl");
     start(&mut r, &mut scene, id);
     let t0 = SystemTime::now();
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-        },
+        id,
+        Some("t1"),
         t0 + Duration::from_millis(100),
         Transport::Hook,
     );
@@ -92,34 +89,31 @@ fn activity_start_inside_grace_window_cancels_debounce() {
     let id = AgentId::from_transcript_path("/p/a.jsonl");
     start(&mut r, &mut scene, id);
     let t0 = SystemTime::now();
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-        },
+        id,
+        Some("t1"),
         t0 + Duration::from_millis(100),
         Transport::Hook,
     );
     assert!(scene.agents.get(&id).unwrap().pending_idle_at.is_some());
     // Second tool starts 200ms later — well inside the grace window.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t2".into()),
-            detail: None,
-        },
+        id,
+        Some("t2"),
+        None,
         t0 + Duration::from_millis(300),
         Transport::Hook,
     );
@@ -144,12 +138,11 @@ fn waiting_sets_state_with_reason() {
     let id = AgentId::from_transcript_path("/p/a.jsonl");
     start(&mut r, &mut scene, id);
 
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "Bash: rm -rf?".into(),
-        },
+        id,
+        "Bash: rm -rf?",
         SystemTime::now(),
         Transport::Hook,
     );
@@ -170,34 +163,31 @@ fn tool_call_count_increments_on_activity_start() {
 
     assert_eq!(scene.agents.get(&id).unwrap().tool_call_count, 0);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
     assert_eq!(scene.agents.get(&id).unwrap().tool_call_count, 1);
 
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-        },
+        id,
+        Some("t1"),
         t0 + Duration::from_millis(500),
         Transport::Hook,
     );
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t2".into()),
-            detail: None,
-        },
+        id,
+        Some("t2"),
+        None,
         t0 + Duration::from_millis(600),
         Transport::Hook,
     );
@@ -212,13 +202,12 @@ fn active_ms_accumulates_on_state_transitions() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     start(&mut r, &mut scene, id);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
@@ -226,15 +215,7 @@ fn active_ms_accumulates_on_state_transitions() {
 
     // End after 1 second, then tick past grace window to flush to Idle
     let t1 = t0 + Duration::from_secs(1);
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-        },
-        t1,
-        Transport::Hook,
-    );
+    act_end(&mut r, &mut scene, id, Some("t1"), t1, Transport::Hook);
     // active_ms not yet accumulated (happens on next ActivityStart or expire)
     r.tick(&mut scene, t1 + Duration::from_secs(3));
     let slot = scene.agents.get(&id).unwrap();
@@ -253,35 +234,25 @@ fn active_ms_does_not_double_count_on_duplicate_activity_end() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     start(&mut r, &mut scene, id);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
 
     let t1 = t0 + Duration::from_secs(2);
     // First ActivityEnd (hook)
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-        },
-        t1,
-        Transport::Hook,
-    );
+    act_end(&mut r, &mut scene, id, Some("t1"), t1, Transport::Hook);
     // Second ActivityEnd (late JSONL, past dedup window)
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-        },
+        id,
+        Some("t1"),
         t1 + Duration::from_millis(600),
         Transport::Jsonl,
     );
@@ -308,13 +279,12 @@ fn active_ms_preserved_when_task_arrives_during_active_tool() {
     start(&mut r, &mut scene, id);
 
     // Tool starts
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
@@ -348,27 +318,18 @@ fn active_ms_preserved_when_waiting_interrupts_active() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     start(&mut r, &mut scene, id);
 
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
 
     let t1 = t0 + Duration::from_secs(3);
-    r.apply(
-        &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
-        t1,
-        Transport::Hook,
-    );
+    waiting(&mut r, &mut scene, id, "permission", t1, Transport::Hook);
 
     let slot = scene.agents.get(&id).unwrap();
     assert!(
@@ -395,22 +356,20 @@ fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     start(&mut r, &mut scene, id);
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
+        id,
+        "permission",
         t0 + Duration::from_millis(500),
         Transport::Hook,
     );
@@ -418,15 +377,7 @@ fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
     // The gated tool's own PostToolUse arrives — arms the idle debounce, still
     // visually Waiting for the grace window (no instant flip).
     let end = t0 + Duration::from_millis(1000);
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-        },
-        end,
-        Transport::Hook,
-    );
+    act_end(&mut r, &mut scene, id, Some("t1"), end, Transport::Hook);
     let slot = scene.agents.get(&id).unwrap();
     assert!(
         matches!(slot.state, ActivityState::Waiting { .. }),
@@ -462,33 +413,30 @@ fn parallel_tool_end_while_waiting_keeps_waiting() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     start(&mut r, &mut scene, id);
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0,
         Transport::Hook,
     );
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
+        id,
+        "permission",
         t0 + Duration::from_millis(500),
         Transport::Hook,
     );
 
     // A different tool ends — must be ignored (its permission isn't this one).
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: Some("t2".into()),
-        },
+        id,
+        Some("t2"),
         t0 + Duration::from_millis(1000),
         Transport::Jsonl,
     );
@@ -531,12 +479,11 @@ fn turn_end_stop_hook_resolves_stale_waiting() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     start(&mut r, &mut scene, id);
-    r.apply(
+    waiting(
+        &mut r,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "approval needed: bash rm -rf ./build".into(),
-        },
+        id,
+        "approval needed: bash rm -rf ./build",
         t0,
         Transport::Hook,
     );
@@ -547,15 +494,7 @@ fn turn_end_stop_hook_resolves_stale_waiting() {
 
     // Turn ends (denied prompt): Stop → ActivityEnd with no id, Hook transport.
     let end = t0 + Duration::from_millis(800);
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: None,
-        },
-        end,
-        Transport::Hook,
-    );
+    act_end(&mut r, &mut scene, id, None, end, Transport::Hook);
     r.tick(
         &mut scene,
         end + ACTIVE_GRACE_WINDOW + Duration::from_millis(100),
@@ -580,22 +519,13 @@ fn jsonl_none_id_end_while_waiting_keeps_waiting() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     start(&mut r, &mut scene, id);
-    r.apply(
-        &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
-        t0,
-        Transport::Hook,
-    );
+    waiting(&mut r, &mut scene, id, "permission", t0, Transport::Hook);
     // A late rollout line for the PREVIOUS tool races in after the prompt.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: None,
-        },
+        id,
+        None,
         t0 + Duration::from_millis(200),
         Transport::Jsonl,
     );
@@ -617,7 +547,6 @@ fn codex_permission_then_jsonl_output_resumes_to_active() {
     // Regression: a cx· agent stuck Waiting on a permission prompt must return
     // to Active once the transcript's function_call_output (an ActivityStart)
     // arrives. Hook and JSONL coalesce on the session UUID.
-    use pixtuoid_core::source::ToolDetail;
     let mut reducer = Reducer::new();
     let mut scene = SceneState::uniform(4);
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
@@ -637,12 +566,11 @@ fn codex_permission_then_jsonl_output_resumes_to_active() {
         Transport::Hook,
     );
 
-    reducer.apply(
+    waiting(
+        &mut reducer,
         &mut scene,
-        AgentEvent::Waiting {
-            agent_id: id,
-            reason: "permission".into(),
-        },
+        id,
+        "permission",
         now,
         Transport::Hook,
     );
@@ -651,13 +579,12 @@ fn codex_permission_then_jsonl_output_resumes_to_active() {
         "should be Waiting on permission"
     );
 
-    reducer.apply(
+    act_start(
+        &mut reducer,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: None,
-            detail: Some(ToolDetail::from("exec_command")),
-        },
+        id,
+        None,
+        Some("exec_command"),
         now,
         Transport::Jsonl,
     );

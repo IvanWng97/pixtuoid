@@ -285,23 +285,23 @@ pub(crate) fn save_backend_as_png(
             let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
 
             // For the half-block character "▀", the cell is split: top half = fg, bottom half = bg.
-            // Other characters are rasterized as real text via the 8x8 bitmap font (glyph8x8);
-            // a glyph no font set covers falls back to a centered fg block.
+            // Other characters are rasterized as real anti-aliased text via `pixtuoid::aa_text`
+            // (Monaspace Neon — what a real terminal shows, not a bitmap
+            // stand-in); a glyph neither face covers falls back to a centered fg block.
             let x0 = x as u32 * CELL_W;
             let y0 = y as u32 * CELL_H;
 
+            let ch = symbol.chars().next().unwrap_or(' ');
             if symbol == "▀" {
                 fill_rect(&mut img, x0, y0, CELL_W, CELL_H / 2, fg);
                 fill_rect(&mut img, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, bg);
             } else if symbol.trim().is_empty() {
                 fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
-            } else if let Some(rows) =
-                pixtuoid_scene::font::glyph8x8(symbol.chars().next().unwrap_or(' '))
-            {
+            } else if pixtuoid::aa_text::has_glyph(ch) {
                 fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
-                blit_glyph_cell(rows, x0, y0, |px, py| {
+                draw_cell_text(ch, x0, y0, |px, py, cov| {
                     if px < img_w && py < img_h {
-                        img.put_pixel(px, py, fg);
+                        img.put_pixel(px, py, mix_rgb(bg, fg, cov));
                     }
                 });
             } else {
@@ -328,7 +328,7 @@ pub(crate) fn save_backend_as_png(
 
 /// Rasterize a post-draw ratatui cell buffer to RGBA: half-block cells become
 /// two stacked pixels (fg = top, bg = bottom); text cells are drawn as real
-/// glyphs via the 8x8 bitmap font (glyph8x8) — same path as the PNG rasterizer.
+/// anti-aliased glyphs via `pixtuoid::aa_text` — same path as the PNG rasterizer.
 pub(crate) fn cells_to_rgba(
     term_buf: &ratatui::buffer::Buffer,
     cols: u16,
@@ -345,19 +345,18 @@ pub(crate) fn cells_to_rgba(
             let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
             let x0 = x as u32 * CELL_W;
             let y0 = y as u32 * CELL_H;
+            let ch = symbol.chars().next().unwrap_or(' ');
             if symbol == "▀" {
                 fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H / 2, fg);
                 fill_rgba_rect(&mut rgba, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, bg);
             } else if symbol.trim().is_empty() {
                 fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
-            } else if let Some(rows) =
-                pixtuoid_scene::font::glyph8x8(symbol.chars().next().unwrap_or(' '))
-            {
+            } else if pixtuoid::aa_text::has_glyph(ch) {
                 fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
-                let fg_rgba = Rgba([fg[0], fg[1], fg[2], 255]);
-                blit_glyph_cell(rows, x0, y0, |px, py| {
+                draw_cell_text(ch, x0, y0, |px, py, cov| {
                     if px < img_w && py < img_h {
-                        rgba.put_pixel(px, py, fg_rgba);
+                        let m = mix_rgb(bg, fg, cov);
+                        rgba.put_pixel(px, py, Rgba([m[0], m[1], m[2], 255]));
                     }
                 });
             } else {
@@ -466,7 +465,6 @@ pub(crate) fn save_as_gif(
             buf,
             store,
             mouse_pos: None,
-            pinned_agent: None,
             debug_walkable,
             theme,
             theme_picker: None,
@@ -534,19 +532,41 @@ fn fill_rect(img: &mut RgbImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u
     fill_rect_px(img, x, y, w, h, color);
 }
 
-/// Blit an 8x8 glyph into one 8x16 cell, doubled vertically (1px → 2px tall) so
-/// it fills the cell. `put` paints one foreground pixel (bg is pre-filled).
-fn blit_glyph_cell(rows: [u8; 8], x0: u32, y0: u32, mut put: impl FnMut(u32, u32)) {
-    for (fr, &bits) in rows.iter().enumerate() {
-        for col in 0..CELL_W {
-            if bits & (1u8 << col) != 0 {
-                let px = x0 + col;
-                let py = y0 + fr as u32 * 2;
-                put(px, py);
-                put(px, py + 1);
+// Size chosen so the face fits the cell: line_height(14.7) rounds to CELL_H and
+// the Monaspace advance (7.96px) ≤ CELL_W — both pinned by `cell_font_px_fits_the_cell`.
+const CELL_FONT_PX: f32 = 14.7;
+
+/// Anti-aliased cell text at the terminal grid: one char per 8×16 cell, drawn
+/// in `pixtuoid::aa_text` (Monaspace Neon) at CELL_FONT_PX,
+/// horizontally centered on the cell's advance and CLIPPED to the cell rect so
+/// a wide fallback glyph can't bleed into a neighbor. Per-cell origins (never a
+/// running cursor) keep the raster locked to the terminal grid.
+fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)) {
+    let s = ch.to_string();
+    let adv = pixtuoid::aa_text::text_width(&s, CELL_FONT_PX);
+    let dx = ((CELL_W as i32 - adv) / 2).max(0);
+    pixtuoid::aa_text::draw_text_at(
+        &s,
+        x0 as i32 + dx,
+        y0 as i32,
+        CELL_FONT_PX,
+        |px, py, cov| {
+            if cov <= 0.0 || px < x0 as i32 || py < y0 as i32 {
+                return;
             }
-        }
-    }
+            let (px, py) = (px as u32, py as u32);
+            if px < x0 + CELL_W && py < y0 + CELL_H {
+                put(px, py, cov.clamp(0.0, 1.0));
+            }
+        },
+    );
+}
+
+/// Per-channel mix of `fg` over `bg` by AA coverage — wraps the ONE blend
+/// curve (`aa_text::blend_channel`) for the `ImgRgb` pixel type.
+fn mix_rgb(bg: ImgRgb<u8>, fg: ImgRgb<u8>, cov: f32) -> ImgRgb<u8> {
+    let mix = |b: u8, f: u8| pixtuoid::aa_text::blend_channel(b, f, cov);
+    ImgRgb([mix(bg[0], fg[0]), mix(bg[1], fg[1]), mix(bg[2], fg[2])])
 }
 
 fn color_to_rgb(c: Color, default: ImgRgb<u8>) -> ImgRgb<u8> {
@@ -577,37 +597,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn blit_glyph_cell_lsb_is_leftmost_and_doubles_vertically() {
-        // Row 0 = 0x01: only bit 0 (LSB) set → only col 0 fires, doubled to 2px.
-        // A font8x8 bit-order change would silently MIRROR all demo text — this
-        // is the guard against that (the HIGH review finding on PR #288).
-        let mut hits: Vec<(u32, u32)> = Vec::new();
-        let mut rows = [0u8; 8];
-        rows[0] = 0x01;
-        blit_glyph_cell(rows, 0, 0, |px, py| hits.push((px, py)));
-        assert_eq!(
-            hits,
-            vec![(0, 0), (0, 1)],
-            "LSB must map to the LEFTMOST column"
-        );
+    fn draw_cell_text_stays_inside_its_cell_and_lights_ink() {
+        // Every emitted pixel must land INSIDE the 8×16 cell at the given origin
+        // (the clip is what keeps a wide glyph — ★ ink can exceed the face's
+        // advance — from bleeding into the neighbor cell), with coverage in
+        // [0,1], and a real glyph must light SOME ink.
+        for (ch, ox, oy) in [('M', 0u32, 0u32), ('g', 8, 16), ('\u{2605}', 24, 32)] {
+            let mut lit = 0usize;
+            draw_cell_text(ch, ox, oy, |px, py, cov| {
+                assert!(
+                    px >= ox && px < ox + CELL_W && py >= oy && py < oy + CELL_H,
+                    "{ch:?} pixel ({px},{py}) escaped its cell at ({ox},{oy})"
+                );
+                assert!((0.0..=1.0).contains(&cov));
+                lit += 1;
+            });
+            assert!(lit > 0, "{ch:?} lit no pixels");
+        }
+    }
 
-        // Bit 7 (MSB) → rightmost col (7); font row 1 → image rows 2,3.
-        let mut hits2: Vec<(u32, u32)> = Vec::new();
-        let mut rows2 = [0u8; 8];
-        rows2[1] = 0x80;
-        blit_glyph_cell(rows2, 0, 0, |px, py| hits2.push((px, py)));
+    #[test]
+    fn cell_font_px_fits_the_cell() {
+        // The WHY behind CELL_FONT_PX (14.7): the face's line height must fill the
+        // 8×16 cell exactly and its monospace advance must fit the cell width —
+        // a face/metric drift would silently clip descenders (the cell clip
+        // masks it visually), so pin both halves of the claim.
         assert_eq!(
-            hits2,
-            vec![(7, 2), (7, 3)],
-            "MSB → rightmost col; row 1 → img rows 2,3"
+            pixtuoid::aa_text::line_height(CELL_FONT_PX),
+            CELL_H as i32,
+            "line height fills the cell"
         );
+        assert!(
+            pixtuoid::aa_text::text_width("M", CELL_FONT_PX) <= CELL_W as i32,
+            "the primary face's advance fits the cell width"
+        );
+    }
 
-        // The x0/y0 origin offset is honored.
-        let mut hits3: Vec<(u32, u32)> = Vec::new();
-        let mut rows3 = [0u8; 8];
-        rows3[0] = 0x01;
-        blit_glyph_cell(rows3, 8, 16, |px, py| hits3.push((px, py)));
-        assert_eq!(hits3, vec![(8, 16), (8, 17)]);
+    #[test]
+    fn mix_rgb_endpoints_and_midpoint() {
+        let bg = ImgRgb([0u8, 100, 200]);
+        let fg = ImgRgb([200u8, 100, 0]);
+        assert_eq!(mix_rgb(bg, fg, 0.0), bg);
+        assert_eq!(mix_rgb(bg, fg, 1.0), fg);
+        assert_eq!(mix_rgb(bg, fg, 0.5), ImgRgb([100, 100, 100]));
     }
 
     #[test]

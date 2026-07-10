@@ -52,6 +52,22 @@ export class Office {
      */
     constructor(seed: number);
     /**
+     * Export the current frame's name-badge labels + neon wall-board TEXT as a
+     * small JSON string for the site's DOM overlay (`OfficeBackdrop.astro`).
+     *
+     * The wasm office renders at a SMALL buffer that CSS upscales with
+     * `image-rendering: pixelated`, so anti-aliased text CANNOT be baked into the
+     * pixels (it would nearest-neighbor blow up blocky). Instead the site lays
+     * crisp JetBrains Mono DOM spans over the canvas from this model. Coordinates
+     * are OFFICE-BUFFER px (a label's `x` is the sprite CENTER, `y` its head-top;
+     * the board `rect` is the neon-panel interior) — the site scales them to the
+     * CSS-displayed canvas. Colors are RESOLVED against the CURRENT theme, so a
+     * `set_theme` reflects with no extra call. Call right after `step` (it reads
+     * the step's clock). No serde — the payload is tiny and hand-built (escaped);
+     * the site wraps `JSON.parse` in try/catch so a bad frame degrades to no overlay.
+     */
+    overlay_json(): string;
+    /**
      * Recolor the whole office to a theme by name (`"normal"|"cyberpunk"|
      * "dracula"|"tokyo-night"|"catppuccin"|"gruvbox"`). Unknown name = no-op.
      * Flushes the recolor cache so agent sprites repaint on the next frame; the
@@ -89,11 +105,13 @@ export interface InitOutput {
     readonly office_hire: (a: number) => number;
     readonly office_is_day: (a: number, b: number) => number;
     readonly office_new: (a: number) => [number, number, number];
+    readonly office_overlay_json: (a: number) => [number, number];
     readonly office_set_theme: (a: number, b: number, c: number) => void;
     readonly office_set_weather: (a: number, b: number, c: number) => void;
     readonly office_step: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_start: () => void;

@@ -37,7 +37,6 @@ chrono        = { version = "0.4", default-features = false, features = ["clock"
 # palette gives Lab-space color blending — perceptually-correct twilight
 # transitions and dim overlays vs naive sRGB linear blend.
 palette       = { version = "0.7", default-features = false, features = ["std"] }
-font8x8       = "0.3.1"
 
 [dev-dependencies]
 serde_json = { workspace = true }
