@@ -279,6 +279,13 @@ struct SnapshotArgs {
     #[arg(long, conflicts_with_all = ["gif", "anim"])]
     crop_furniture: Option<String>,
 
+    /// Give the agent with this label a Top burn tier (claude-fable-5 at
+    /// fresh ultra effort → ember hair + flame crown) — the visual-iteration
+    /// knob for the burn feature. NOT used by any gen-media job, so the
+    /// committed baselines stay flame-free.
+    #[arg(long)]
+    flame: Option<String>,
+
     /// Crop the generated PNG to a window centered on the gateway lobster mascot
     /// — its position is time-derived, so this reads it back from the renderer
     /// AFTER the draw (unlike --crop-agent/--crop-furniture, which precompute).
@@ -405,7 +412,30 @@ fn main() -> Result<()> {
     } else if args.dashboard {
         dashboard_scene(now)
     } else {
-        sample_scene(now, args.max_desks, args.agents)
+        {
+            let mut scene = sample_scene(now, args.max_desks, args.agents);
+            if let Some(label) = &args.flame {
+                let hit = scene
+                    .agents
+                    .values_mut()
+                    .find(|a| a.label.as_ref() == label.as_str());
+                match hit {
+                    Some(a) => {
+                        a.model = Some("claude-fable-5".into());
+                        a.effort = Some(pixtuoid_core::state::EffortObservation::new(
+                            "ultra".into(),
+                            now,
+                        ));
+                    }
+                    None => {
+                        let labels: Vec<_> =
+                            scene.agents.values().map(|a| a.label.to_string()).collect();
+                        anyhow::bail!("--flame {label:?} not found in scene; labels: {labels:?}");
+                    }
+                }
+            }
+            scene
+        }
     };
     if let Some(secs) = args.warmup_secs {
         skip_ms = (secs * 1000.0) as u64;

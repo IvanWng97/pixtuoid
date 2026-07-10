@@ -25,6 +25,10 @@ pub struct FrameKey {
     pub frame_idx: usize,
     pub flip_x: bool,
     pub glow_tint: Option<Rgb>,
+    /// Burn tier keys the recolor too (ember hair) — a tier flip mid-life
+    /// (model switch / effort TTL decay) simply misses to a fresh entry, the
+    /// same containment as `glow_tint` variants (evicted with the agent).
+    pub burn: crate::burn::BurnTier,
 }
 
 #[derive(Default)]
@@ -105,6 +109,7 @@ mod tests {
             frame_idx: 0,
             flip_x: false,
             glow_tint: None,
+            burn: crate::burn::BurnTier::Normal,
         }
     }
 

@@ -688,7 +688,7 @@ pub(super) fn paint_drawable(
                 paint_walking_dust(buf, *anchor, *dust_frame, theme);
             }
             paint_character_at(
-                buf, anim_name, *frame_idx, *anchor, agent, pack, *flip_x, *glow_tint, cache,
+                buf, anim_name, *frame_idx, *anchor, agent, pack, *flip_x, *glow_tint, cache, now,
             );
             if let Some(seed) = sleep_z_seed {
                 paint_sleep_z(buf, *anchor, now, *seed, theme);

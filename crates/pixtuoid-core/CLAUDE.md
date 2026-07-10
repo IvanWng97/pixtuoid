@@ -111,6 +111,21 @@ src/
 └── tests/              one integration test per concern
 ```
 
+**Burn-tier plumbing (model flame):** `AgentEvent::ModelInfo { model, effort }`
+carries RAW wire strings (interpret-at-paint — the tier tables live in
+`pixtuoid-scene::burn`): CC assistant lines' `message.model` (per turn, filters
+`<synthetic>`) + the periodic `ultra_effort_enter`/`ultrathink_effort`
+attachment markers (no wire value → decoder-synthesized "ultra"/"ultrathink");
+Codex `turn_context` model+effort verbatim; copilot per-tool `data.model`
+(attributed to the ACTING agent); opencode `session.created` `info.model.id`.
+The reducer caches `slot.model` (last-seen-wins — a mid-session `/model`
+switch tracks) + `slot.effort: EffortObservation{value, seen_at}` (re-stamped
+per sighting; the scene's EFFORT_TTL turns Codex's per-turn field and CC's
+periodic marker into ONE freshness semantic). Unknown id = no-op (a model
+line never registers a session); legitimate on BOTH transports (wire data,
+not liveness — the watcher seeds at EOF, so history can't replay stale
+values). Both fields serde-skipped.
+
 **Focus-jump plumbing (#focus-jump):** the shim fills `_pid` (getppid) into the
 hook envelope WHEN ABSENT — opencode's plugin and CodeWhale's env-mode supply
 their own, which win; the daemon's `handle_conn` peeks `_pid` UNCONDITIONALLY

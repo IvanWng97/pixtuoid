@@ -202,6 +202,17 @@ pub(crate) fn paint_hover_tooltip(
         format!("\u{25a4} {}", short_cwd(&agent.cwd)),
         dim,
     )));
+    // The LLM brain, when the wire told us (CC/Codex/copilot/opencode) — RAW
+    // model string, with the effort suffixed only while FRESH (the same
+    // burn-TTL the flame reads, so the text can't outlive the fire). Sources
+    // without a model channel simply skip the row.
+    if let Some(model) = agent.model.as_deref() {
+        let mut row = format!("\u{2605} {model}");
+        if let Some(effort) = pixtuoid_scene::burn::fresh_effort(agent, now) {
+            row.push_str(&format!(" \u{b7} {effort}"));
+        }
+        body.push(Line::from(Span::styled(row, dim)));
+    }
 
     let session_secs = now
         .duration_since(agent.created_at)

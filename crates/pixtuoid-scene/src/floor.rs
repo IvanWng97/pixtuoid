@@ -1370,6 +1370,64 @@ mod tests {
     }
 
     #[test]
+    fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
+        // The PIPELINE-level burn pin: a fable+ultra slot must come out of the
+        // full render_floor pass with ember hair + flame pixels — a projection
+        // or sim/paint hop silently dropping slot.model/effort fails HERE even
+        // while the unit-level paint_character_at test stays green.
+        let pack = crate::embedded_pack::test_default_pack();
+        let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut scene = make_scene(1, 8);
+        let slot = scene.agents.values_mut().next().expect("one agent");
+        slot.model = Some("claude-fable-5".into());
+        slot.effort = Some(pixtuoid_core::state::EffortObservation::new(
+            "ultra".into(),
+            now,
+        ));
+        let mut fctx = FloorCtx::new();
+        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+        let mut coffee = CoffeeState::new();
+        let mut chitchat = HashMap::new();
+        render_floor(
+            &mut fctx,
+            &mut buf,
+            &mut coffee,
+            &mut chitchat,
+            FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w: 192, h: 160 },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            },
+        )
+        .expect("layout");
+        let ember = pixtuoid_core::sprite::Rgb {
+            r: 0xc2,
+            g: 0x28,
+            b: 0x12,
+        };
+        let tip = pixtuoid_core::sprite::Rgb {
+            r: 0xff,
+            g: 0xd2,
+            b: 0x4a,
+        };
+        let count = |c| {
+            (0..buf.height())
+                .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+                .filter(|&(x, y)| buf.get(x, y) == c)
+                .count()
+        };
+        assert!(count(ember) > 0, "ember hair must survive the full pass");
+        assert!(count(tip) > 0, "flame tips must survive the full pass");
+    }
+
+    #[test]
     fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
         let pack = crate::embedded_pack::test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
@@ -1557,6 +1615,7 @@ mod tests {
                 frame_idx: 0,
                 flip_x: false,
                 glow_tint: None,
+                burn: crate::burn::BurnTier::Normal,
             },
             Frame::default,
         );

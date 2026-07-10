@@ -361,7 +361,21 @@ pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
     }
 }
 
-pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option<Rgb>) -> Palette {
+/// Burn-tier ember hair (`BurnTier::Premium`+) — the flame palette's DEEP,
+/// deliberately saturated past every natural `HAIR_PRESETS` entry so a
+/// premium head never reads as "just auburn".
+const EMBER_HAIR: Rgb = Rgb {
+    r: 0xc2,
+    g: 0x28,
+    b: 0x12,
+};
+
+pub(super) fn agent_palette(
+    base: &Palette,
+    agent: &AgentSlot,
+    glow_tint: Option<Rgb>,
+    burn: crate::burn::BurnTier,
+) -> Palette {
     // Hair/skin stay per-individual (agent_id); only the OUTFIT re-keys on cwd
     // so same-repo agents share a shirt (Team Palette). The old WARM/COOL split
     // was personality-derived (an agent_id artifact cwd-keying breaks anyway);
@@ -369,7 +383,11 @@ pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option
     let id_seed = agent.agent_id.raw() as usize;
     let outfit_seed = outfit_seed_for(agent);
     let outfit = OUTFITS[outfit_seed as usize % OUTFITS.len()];
-    let hair = HAIR_PRESETS[(id_seed / 7) % HAIR_PRESETS.len()];
+    let hair = if burn == crate::burn::BurnTier::Normal {
+        HAIR_PRESETS[(id_seed / 7) % HAIR_PRESETS.len()]
+    } else {
+        EMBER_HAIR
+    };
     let skin = SKIN_PRESETS[(id_seed / 13) % SKIN_PRESETS.len()];
     let final_skin = if let Some(tint) = glow_tint {
         blend_rgb(skin, tint, 0.18)

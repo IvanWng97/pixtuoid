@@ -21,6 +21,7 @@ pub(super) fn paint_character_at(
     flip_x: bool,
     glow_tint: Option<Rgb>,
     cache: &mut FrameCache,
+    now: SystemTime,
 ) {
     let Some(anim) = pack.animation(anim_name) else {
         return;
@@ -31,6 +32,10 @@ pub(super) fn paint_character_at(
     // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the
     // change so the cache drops the agent's stale recolors before the lookup.
     cache.note_outfit_seed(agent.agent_id, outfit_seed_for(agent));
+    // Burn tier (model gate × effort split, see `crate::burn`) recolors the
+    // hair and, at Top, crowns the head with flame — judged here in the ONE
+    // shared blit so every pose (seated/walking/standing) rides it.
+    let burn = crate::burn::slot_burn_tier(agent, now);
     let cached = cache.get_or_make(
         crate::frame_cache::FrameKey {
             agent_id: agent.agent_id,
@@ -38,9 +43,10 @@ pub(super) fn paint_character_at(
             frame_idx,
             flip_x,
             glow_tint,
+            burn,
         },
         || {
-            let pal = agent_palette(&pack.palette, agent, glow_tint);
+            let pal = agent_palette(&pack.palette, agent, glow_tint, burn);
             let recolored = recolor_frame(frame, &pal, &pack.palette);
             if flip_x {
                 recolored.mirror_horizontal()
@@ -49,7 +55,11 @@ pub(super) fn paint_character_at(
             }
         },
     );
+    let sprite_w = cached.width();
     blit_frame(cached, anchor.x, anchor.y, buf);
+    if burn == crate::burn::BurnTier::Top {
+        super::effects::paint_flame_crown(buf, anchor, sprite_w, now);
+    }
 }
 
 /// Sprite name + horizontal flip for an agent SEATED at a seat slot, by its

@@ -383,6 +383,51 @@ fn hovered_active_agent_tooltip_shows_state_and_detail() {
 }
 
 #[test]
+fn hovered_burning_agent_tooltip_shows_model_and_fresh_effort() {
+    // The `★ {model} · {effort}` dossier row: RAW model, effort suffixed only
+    // while fresh (the same burn TTL the flame reads). Model-less agents skip
+    // the row entirely — pinned by the negative half.
+    use pixtuoid_core::state::EffortObservation;
+    let mut a = active(
+        "/burn/0.jsonl",
+        0,
+        "Read src/main.rs",
+        t0() - Duration::from_secs(30),
+    );
+    a.source = std::sync::Arc::from("claude-code");
+    a.model = Some("claude-fable-5".into());
+    a.effort = Some(EffortObservation::new("ultra".into(), t0()));
+    let id = a.agent_id;
+    let plain = active(
+        "/burn/1.jsonl",
+        1,
+        "Read src/lib.rs",
+        t0() - Duration::from_secs(30),
+    );
+    let plain_id = plain.agent_id;
+    let scene = scene_with(vec![a, plain], 16);
+    let mut r = build(120, 44, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, id, 120, 44);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("\u{2605} claude-fable-5 \u{b7} ultra"),
+        "model + fresh effort row: {text}"
+    );
+    // A model-less agent's dossier has NO ★ row.
+    super::hover_agent(&mut r, &scene, plain_id, 120, 44);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    // (The wall board's own `★ Star` CTA is unrelated — assert the MODEL row
+    // specifically is gone, not the glyph.)
+    assert!(
+        !text.contains("\u{2605} claude-fable-5"),
+        "no model row without an observation: {text}"
+    );
+}
+
+#[test]
 fn hovered_agent_tooltip_shows_source_badge() {
     // The dossier leads with the shared `[xx]` source badge (same builder as the
     // dashboard/Sources panel) so the tooltip can't drift from them.
