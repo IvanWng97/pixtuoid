@@ -488,6 +488,7 @@ mod tests {
             source: "codex".into(),
             session_id: "s".into(),
             cwd: None,
+            pid: None,
         };
         assert_eq!(event_source(&scene, &idy), Some("codex"));
 
@@ -510,6 +511,7 @@ mod tests {
             source: String::new(),
             session_id: "s".into(),
             cwd: None,
+            pid: None,
         };
         assert_eq!(event_source(&scene, &empty), Some("claude-code"));
     }

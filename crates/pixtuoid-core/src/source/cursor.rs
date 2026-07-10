@@ -130,6 +130,7 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         source: SOURCE_NAME.to_string(),
         session_id: key.to_string(),
         cwd: (!cwd.is_empty()).then(|| cwd.into()),
+        pid: None,
     };
 
     match event {
@@ -504,6 +505,7 @@ mod tests {
                     source,
                     session_id,
                     cwd,
+                    pid: None,
                 } => {
                     assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "s"));
                     assert_eq!(source, SOURCE_NAME);

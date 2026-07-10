@@ -37,6 +37,7 @@ fn mk_slot(id: AgentId, source: &str, last_event_at: SystemTime) -> AgentSlot {
         active_ms: 0,
         unknown_cwd: false,
         parent_id: None,
+        pid: None,
     }
 }
 

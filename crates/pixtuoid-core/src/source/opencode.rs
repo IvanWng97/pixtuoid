@@ -275,6 +275,7 @@ fn oc_identity(agent_id: AgentId, session_id: &str) -> AgentEvent {
         source: SOURCE_NAME.to_string(),
         session_id: session_id.to_string(),
         cwd: None,
+        pid: None,
     }
 }
 

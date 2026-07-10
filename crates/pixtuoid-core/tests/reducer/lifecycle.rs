@@ -1305,6 +1305,60 @@ fn two_step_backfill_source_first_then_cwd_still_upgrades_the_label() {
 // `last_event_at` stay owned by the activity/SessionStart paths.
 
 #[test]
+fn hook_identity_pid_fills_refreshes_and_never_downgrades_slot_pid() {
+    // The focus-jump cache: `_pid` rides each hook-transport Identity (patched
+    // in by handle_conn's envelope peek). Registration fills it, a later
+    // Identity with a new pid refreshes it, and a pid-less Identity (e.g. an
+    // opencode plugin event without the stamp) never DOWNGRADES Some -> None.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("opencode", "ses_pid");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let identity = |pid: Option<i32>| AgentEvent::Identity {
+        agent_id: id,
+        source: "opencode".into(),
+        session_id: "ses_pid".into(),
+        cwd: Some(PathBuf::from("/w")),
+        pid,
+    };
+
+    // Registration fills the cache.
+    r.apply(&mut scene, identity(Some(41)), t0, Transport::Hook);
+    assert_eq!(scene.agents[&id].pid, Some(41), "registration fills pid");
+
+    // A later Identity refreshes it (restart under a new pid).
+    r.apply(&mut scene, identity(Some(42)), t0, Transport::Hook);
+    assert_eq!(scene.agents[&id].pid, Some(42), "backfill refreshes pid");
+
+    // A pid-less Identity keeps the cached value.
+    r.apply(&mut scene, identity(None), t0, Transport::Hook);
+    assert_eq!(scene.agents[&id].pid, Some(42), "None never downgrades");
+}
+
+#[test]
+fn session_start_registration_leaves_pid_unset() {
+    // Transcript-family sources resolve pid via their liveness probes at
+    // click time — their SessionStart registration must not invent one.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_transcript_path("/t/pidless.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "pidless".into(),
+            cwd: PathBuf::from("/t"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert_eq!(scene.agents[&id].pid, None);
+}
+
+#[test]
 fn hook_identity_registers_unknown_id_with_real_identity() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -1318,6 +1372,7 @@ fn hook_identity_registers_unknown_id_with_real_identity() {
             source: "claude-code".into(),
             session_id: "gated-sess".into(),
             cwd: Some(PathBuf::from("/Users/me/repo")),
+            pid: None,
         },
         t0,
         Transport::Hook,
@@ -1366,6 +1421,7 @@ fn hook_identity_without_cwd_registers_reap_exempt_blank_cwd() {
             source: "codex".into(),
             session_id: "cx-sess".into(),
             cwd: None,
+            pid: None,
         },
         t0,
         Transport::Hook,
@@ -1431,6 +1487,7 @@ fn hook_identity_on_existing_unknown_cwd_slot_clears_ghost_reap() {
             source: "codex".into(),
             session_id: "cx-revive".into(),
             cwd: None,
+            pid: None,
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1491,6 +1548,7 @@ fn hook_identity_backfills_blank_synthesized_slot() {
             source: "reasonix".into(),
             session_id: "/Users/dev/proj".into(),
             cwd: Some(PathBuf::from("/Users/dev/proj")),
+            pid: None,
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1535,6 +1593,7 @@ fn hook_identity_does_not_clobber_existing_identity() {
             source: "codex".into(),
             session_id: "other-sess".into(),
             cwd: Some(PathBuf::from("/Users/me/repo-b")),
+            pid: None,
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1573,6 +1632,7 @@ fn hook_identity_respects_session_end_tombstone() {
             source: "claude-code".into(),
             session_id: "exited-invisible".into(),
             cwd: Some(PathBuf::from("/Users/me/repo")),
+            pid: None,
         },
         t0 + Duration::from_millis(50),
         Transport::Hook,
@@ -1600,6 +1660,7 @@ fn jsonl_identity_is_a_no_op() {
             source: "claude-code".into(),
             session_id: "replayed-sess".into(),
             cwd: Some(PathBuf::from("/Users/me/repo")),
+            pid: None,
         },
         t0,
         Transport::Jsonl,
@@ -1629,6 +1690,7 @@ fn hook_identity_desk_refusal_is_quiet() {
             source: "claude-code".into(),
             session_id: "gated-sess".into(),
             cwd: Some(PathBuf::from("/Users/me/repo")),
+            pid: None,
         },
         t0,
         Transport::Hook,

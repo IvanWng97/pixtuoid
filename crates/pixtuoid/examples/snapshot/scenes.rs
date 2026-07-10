@@ -215,6 +215,7 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 active_ms: 0,
                 unknown_cwd: false,
                 parent_id: None,
+                pid: None,
             },
         );
     }
@@ -420,6 +421,7 @@ pub(crate) fn meeting_scene(
                 active_ms: 0,
                 unknown_cwd: false,
                 parent_id: None,
+                pid: None,
             },
         );
     }
@@ -530,6 +532,7 @@ pub(crate) fn dashboard_scene(now: SystemTime) -> SceneState {
                 active_ms: 0,
                 unknown_cwd: false,
                 parent_id: *parent_id,
+                pid: None,
             },
         );
     }
@@ -659,6 +662,7 @@ pub(crate) fn anim_scene(
             active_ms: 0,
             unknown_cwd: false,
             parent_id: None,
+            pid: None,
         },
     );
     (s, skip_ms)

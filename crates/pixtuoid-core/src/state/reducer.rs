@@ -616,6 +616,7 @@ impl Reducer {
                 source,
                 session_id,
                 cwd,
+                pid,
             } => {
                 // Boundary (1) made structural: JSONL must never synthesize —
                 // a transcript line can be a historical replay. No in-tree
@@ -633,6 +634,13 @@ impl Reducer {
                 };
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
                     backfill_identity(slot, ctx);
+                    // Focus-jump pid cache: hook-transport Identity recurs
+                    // ahead of every activity, so this stays fresh. A pid-less
+                    // Identity never DOWNGRADES a cached Some (e.g. an
+                    // opencode plugin event following a shim-stamped one).
+                    if pid.is_some() {
+                        slot.pid = pid;
+                    }
                     // The same reap exemption the registration branch below
                     // honors, mirrored: Identity is hook-only (transport
                     // guard above), so the owning process is alive — a
@@ -665,6 +673,10 @@ impl Reducer {
                     // poisoned (boundary 3 untouched).
                     if let Some(slot) = scene.agents.get_mut(&agent_id) {
                         slot.unknown_cwd = false;
+                        // Focus-jump pid cache, same rule as the backfill branch.
+                        if pid.is_some() {
+                            slot.pid = pid;
+                        }
                     }
                 }
             }
@@ -1084,6 +1096,7 @@ impl Reducer {
                 // cwd-bearing event is swept while alive.
                 unknown_cwd: !has_cwd && parent_id.is_none(),
                 parent_id,
+                pid: None,
             },
         );
         true

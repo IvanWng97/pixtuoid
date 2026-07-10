@@ -186,6 +186,21 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
     }
 }
 
+/// Stamp the connection's peeked `_pid` onto every `Identity` event of a
+/// decoded batch — the focus-jump wiring. Identity is the carrier (it recurs
+/// ahead of every activity, so the reducer's `slot.pid` cache stays fresh);
+/// the per-source decoders never see the envelope key, so this single patch
+/// point IS the whole wiring. `None` leaves events untouched (the reducer
+/// never downgrades a cached pid either — belt and braces).
+fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<i32>) {
+    let Some(pid) = pid else { return };
+    for ev in evs {
+        if let AgentEvent::Identity { pid: p, .. } = ev {
+            *p = Some(pid);
+        }
+    }
+}
+
 pub(crate) async fn handle_conn(
     stream: impl AsyncRead + Unpin,
     tx: TaggedSender,
@@ -271,6 +286,10 @@ pub(crate) async fn handle_conn(
                                 }
                             }
                         }
+                        // Second consumer of the SAME peeked `_pid`: the
+                        // focus-jump cache (see `patch_identity_pids`).
+                        let mut evs = evs;
+                        patch_identity_pids(&mut evs, pid);
                         let mut undelivered = UndeliveredEvents::new(&evs);
                         for ev in evs {
                             debug!("hook event: {ev:?}");
@@ -301,6 +320,33 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     #[test]
+    fn patch_identity_pids_stamps_only_identity_events() {
+        let id = AgentId::from_parts("opencode", "ses_x");
+        let mut evs = vec![
+            AgentEvent::Identity {
+                agent_id: id,
+                source: "opencode".into(),
+                session_id: "ses_x".into(),
+                cwd: None,
+                pid: None,
+            },
+            AgentEvent::ActivityStart {
+                agent_id: id,
+                tool_use_id: None,
+                detail: None,
+            },
+        ];
+        patch_identity_pids(&mut evs, Some(77));
+        assert!(
+            matches!(evs[0], AgentEvent::Identity { pid: Some(77), .. }),
+            "Identity stamped"
+        );
+        // None leaves the batch untouched.
+        patch_identity_pids(&mut evs, None);
+        assert!(matches!(evs[0], AgentEvent::Identity { pid: Some(77), .. }));
+    }
+
+    #[test]
     fn pid_bind_target_covers_both_registration_carriers() {
         // SessionStart and Identity both register-or-back-fill a slot, so both
         // bind the pid. Identity is the mid-attach carrier (a session whose
@@ -319,6 +365,7 @@ mod tests {
                 source: "opencode".into(),
                 session_id: "ses_x".into(),
                 cwd: None,
+                pid: None,
             },
         ] {
             assert_eq!(pid_bind_target(&ev), Some(id), "{ev:?} must bind the pid");

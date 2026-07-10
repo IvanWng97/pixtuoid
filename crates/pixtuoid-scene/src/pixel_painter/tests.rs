@@ -171,6 +171,7 @@ fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
         active_ms: 0,
         unknown_cwd: false,
         parent_id: None,
+        pid: None,
     }
 }
 

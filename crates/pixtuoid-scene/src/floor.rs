@@ -942,6 +942,7 @@ mod tests {
                     active_ms: 0,
                     unknown_cwd: false,
                     parent_id: None,
+                    pid: None,
                 },
             );
         }
@@ -1076,6 +1077,7 @@ mod tests {
                 active_ms: 0,
                 unknown_cwd: false,
                 parent_id: None,
+                pid: None,
             },
         );
         // Simulate floor 0 capacity growth
@@ -1115,6 +1117,7 @@ mod tests {
                     active_ms: 0,
                     unknown_cwd: false,
                     parent_id: None,
+                    pid: None,
                 },
             );
         }

@@ -225,6 +225,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
             .and_then(|s| s.as_str())
             .filter(|s| !s.is_empty())
             .map(std::path::PathBuf::from),
+        pid: None,
     };
 
     match event {
@@ -676,6 +677,7 @@ mod tests {
                 source,
                 session_id,
                 cwd,
+                pid: None,
             } => {
                 assert_eq!(
                     *agent_id,

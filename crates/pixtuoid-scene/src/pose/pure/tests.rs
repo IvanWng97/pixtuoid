@@ -28,6 +28,7 @@ fn slot(state: ActivityState, age_ms: u64) -> (AgentSlot, SystemTime) {
         active_ms: 0,
         unknown_cwd: false,
         parent_id: None,
+        pid: None,
     };
     (s, now)
 }
@@ -358,6 +359,7 @@ fn entry_animation_overrides_normal_pose_for_first_4s() {
         active_ms: 0,
         unknown_cwd: false,
         parent_id: None,
+        pid: None,
     };
     let probe = now0 + Duration::from_millis(1500);
     let l = layout();
@@ -604,6 +606,7 @@ fn entry_walk_does_not_carry_coffee() {
         active_ms: 0,
         unknown_cwd: false,
         parent_id: None,
+        pid: None,
     };
     let probe = now0 + Duration::from_millis(1500);
     let l = layout();
@@ -650,6 +653,7 @@ fn derive_state_only_skips_entry_override() {
         active_ms: 0,
         unknown_cwd: false,
         parent_id: None,
+        pid: None,
     };
     let probe = now0 + Duration::from_millis(1500);
     let l = layout();
