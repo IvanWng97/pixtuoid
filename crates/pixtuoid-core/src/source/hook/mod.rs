@@ -192,11 +192,21 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
 /// the per-source decoders never see the envelope key, so this single patch
 /// point IS the whole wiring. `None` leaves events untouched (the reducer
 /// never downgrades a cached pid either — belt and braces).
+///
+/// The TRANSCRIPT family (any source with a `line_decoder`) is skipped: the
+/// shim's `getppid` is their hook-command parent (possibly a transient shell,
+/// never recycle-guarded), while their real focus channel is the liveness
+/// probes (`cc_pid_for_session`/`codex_pid_for_session`). A stamped stale pid
+/// would shadow the probe's recycle guard in `resolve_pid`.
 fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<i32>) {
     let Some(pid) = pid else { return };
     for ev in evs {
-        if let AgentEvent::Identity { pid: p, .. } = ev {
-            *p = Some(pid);
+        if let AgentEvent::Identity { source, pid: p, .. } = ev {
+            let transcript_bearing = crate::source::registry::descriptor_for(source)
+                .is_some_and(|d| d.line_decoder().is_some());
+            if !transcript_bearing {
+                *p = Some(pid);
+            }
         }
     }
 }
@@ -251,8 +261,10 @@ pub(crate) async fn handle_conn(
                     }
                 }
                 // Peek the shim-supplied CLI pid BEFORE `v` is consumed by
-                // decode. Only sources whose shim/plugin stamps `_pid`
-                // (CodeWhale, opencode) have it, so this is inert for the rest.
+                // decode. Every unix shim invocation carries `_pid` now (the
+                // shim fills it from getppid when the plugin didn't stamp one);
+                // the transcript family is filtered downstream in
+                // `patch_identity_pids` — the probes are their channel.
                 // `as_u64` already rejects negatives; the `> 0` filter drops a
                 // crafted `_pid: 0` too (kill(0) targets the process GROUP —
                 // same guard as cc_probe/fd_probe/openclaw).
@@ -344,6 +356,42 @@ mod tests {
         // None leaves the batch untouched.
         patch_identity_pids(&mut evs, None);
         assert!(matches!(evs[0], AgentEvent::Identity { pid: Some(77), .. }));
+    }
+
+    #[test]
+    fn patch_identity_pids_never_stamps_the_transcript_family() {
+        // CC/Codex resolve pid via the recycle-guarded probes; the shim's
+        // getppid is their hook-command parent (possibly a transient shell).
+        // A stamped stale pid would shadow the probe in `resolve_pid`.
+        for source in ["claude-code", "codex", "antigravity", "copilot"] {
+            let mut evs = vec![AgentEvent::Identity {
+                agent_id: AgentId::from_parts(source, "ses_t"),
+                source: source.into(),
+                session_id: "ses_t".into(),
+                cwd: None,
+                pid: None,
+            }];
+            patch_identity_pids(&mut evs, Some(77));
+            assert!(
+                matches!(evs[0], AgentEvent::Identity { pid: None, .. }),
+                "{source} Identity must stay pid: None"
+            );
+        }
+        // Hook-only sources (no line_decoder) still get the stamp.
+        for source in ["opencode", "cursor", "codewhale", "hermes", "reasonix"] {
+            let mut evs = vec![AgentEvent::Identity {
+                agent_id: AgentId::from_parts(source, "ses_t"),
+                source: source.into(),
+                session_id: "ses_t".into(),
+                cwd: None,
+                pid: None,
+            }];
+            patch_identity_pids(&mut evs, Some(77));
+            assert!(
+                matches!(evs[0], AgentEvent::Identity { pid: Some(77), .. }),
+                "{source} Identity must be stamped"
+            );
+        }
     }
 
     #[test]
@@ -680,6 +728,42 @@ mod tests {
             matches!(ev, AgentEvent::SessionEnd { agent_id, as_child: false } if agent_id == expected),
             "the payload-bound agent must end when its pid dies, got {ev:?}"
         );
+    }
+
+    // The composed focus-jump path (peek `_pid` → decode → patch_identity_pids):
+    // a transcript-family (CC) payload's Identity must arrive with pid: None
+    // even when the shim stamped `_pid` and a live pid_watch enables the peek —
+    // the unit test on patch_identity_pids can't catch a wiring regression in
+    // handle_conn itself. Platform-gated like the bind test above.
+    #[tokio::test]
+    async fn handle_conn_never_stamps_a_transcript_family_identity_pid() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
+            return; // no exit-watch backend on this platform — the peek is off
+        };
+        let (mut client, server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(handle_conn(server, tx, Some(watch), None));
+        // Our own (live) pid so the bound exit-watch never fires mid-test.
+        let me = std::process::id();
+        let line = format!(
+            "{{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"ses-cc\",\
+             \"transcript_path\":\"/p/a.jsonl\",\"cwd\":\"/repo\",\
+             \"tool_name\":\"Bash\",\"tool_use_id\":\"t1\",\"_pid\":{me}}}\n"
+        );
+        client.write_all(line.as_bytes()).await.unwrap();
+        drop(client);
+        task.await.unwrap();
+
+        let (_, ev) = rx
+            .recv()
+            .await
+            .expect("the Identity ahead of the tool event");
+        assert!(
+            matches!(&ev, AgentEvent::Identity { source, pid: None, .. } if source == "claude-code"),
+            "CC Identity must stay pid: None through the socket loop, got {ev:?}"
+        );
+        let (_, ev) = rx.recv().await.expect("the paired ActivityStart");
+        assert!(matches!(ev, AgentEvent::ActivityStart { .. }), "got {ev:?}");
     }
 
     // The decode-error arm (line 280): a syntactically-valid JSON object whose

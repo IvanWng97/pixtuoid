@@ -134,8 +134,8 @@ fn env_payload(event: &str) -> serde_json::Map<String, Value> {
 
 /// The spawning CLI's pid — the shim's parent. Two consumers: CodeWhale's
 /// env-mode `_pid` (the daemon's liveness watch: an abrupt exit that fires no
-/// `session_end` ends the sprite promptly) and the generic `_pixtuoid_ppid`
-/// stamp (the TUI's focus-jump). `sh -c` EXEC's the hook (verified: the
+/// `session_end` ends the sprite promptly) and the generic fill-if-absent
+/// `_pid` stamp (the TUI's focus-jump). `sh -c` EXEC's the hook (verified: the
 /// hook's getppid() == the CLI's pid), so the shim's parent IS the CLI — on
 /// UNIX. On Windows the hook runs under `cmd /C`, so the parent is `cmd.exe`
 /// (the WRONG pid, and it exits right after spawning the shim → a false

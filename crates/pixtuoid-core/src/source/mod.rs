@@ -228,12 +228,14 @@ pub enum AgentEvent {
         /// Codex PermissionRequest) — the registration is then label-ordinal
         /// but still reap-exempt, exactly like the blank synthesis path.
         cwd: Option<PathBuf>,
-        /// The agent process's pid, from the shim's `_pixtuoid_ppid` stamp —
-        /// the focus-jump channel for hook-only sources (transcript-family
+        /// The agent process's pid, from the shim/plugin `_pid` stamp — the
+        /// focus-jump channel for hook-only sources. Transcript-family
         /// sources resolve pid via their liveness probes instead and always
-        /// carry `None` here). Hook-transport Identity recurs ahead of every
-        /// activity, so the slot's cached pid stays fresh. serde-skipped so
-        /// the conformance/scene goldens don't churn on `None`.
+        /// carry `None` here (structural: `patch_identity_pids` skips any
+        /// source with a `line_decoder`). Hook-transport Identity recurs
+        /// ahead of every activity, so the slot's cached pid stays fresh.
+        /// serde-skipped so the conformance/scene goldens don't churn on
+        /// `None`.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         pid: Option<i32>,
     },

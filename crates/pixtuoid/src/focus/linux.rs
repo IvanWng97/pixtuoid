@@ -1,10 +1,14 @@
-//! Linux focus glue: `/proc/<pid>/stat` for the ancestor walk; activation
-//! prefers a tiling-WM IPC when its env marker is present (sway/i3's
-//! `$SWAYSOCK`/`$I3SOCK` → `swaymsg`, hyprland's
-//! `$HYPRLAND_INSTANCE_SIGNATURE` → `hyprctl`) and otherwise falls to the
-//! X11/EWMH `_NET_ACTIVE_WINDOW` protocol (the wmctrl mechanism) via x11rb.
-//! GNOME Wayland forbids focus-steal by design — every channel simply fails
-//! there → the caller's silent no-op, per the ONE failure rule.
+//! Linux focus glue: `/proc/<pid>/stat` for the ancestor walk; window
+//! ownership and activation ride ONE channel per environment — sway's IPC
+//! when `$SWAYSOCK` is present (`swaymsg`), hyprland's when
+//! `$HYPRLAND_INSTANCE_SIGNATURE` is (`hyprctl`), else the X11/EWMH
+//! `_NET_ACTIVE_WINDOW` protocol (the wmctrl mechanism) via x11rb — which
+//! covers i3 too (X11-native; `$I3SOCK` deliberately does NOT route to
+//! `swaymsg`). `focusable` asks the SAME channel "does this pid own a
+//! window?" (compositor tree / `_NET_WM_PID`), so the walk surfaces the
+//! terminal emulator — the agent process itself owns no surface. GNOME
+//! Wayland forbids focus-steal by design — every channel simply fails there
+//! → the caller's silent no-op, per the ONE failure rule.
 //!
 //! codecov-ignored glue; the walk logic is tested in `focus::tests`.
 
@@ -22,22 +26,37 @@ impl ProcessTable for OsProcessTable {
     }
 
     fn focusable(&self, pid: i32) -> bool {
-        // Under a tiling-WM IPC we can address windows BY pid directly, so
-        // the walk's job is only "is this pid a window owner" — which the
-        // IPC/X11 activation answers implicitly. Treat any pid that owns an
-        // X11 window (per _NET_WM_PID) as focusable; under pure Wayland IPC
-        // WMs the activate step matches by pid anyway, so accepting the first
-        // ancestor that activation can address keeps this cheap: we probe
-        // lazily by attempting only at activate time and let the walk surface
-        // ancestors in order. Cheap conservative test: an X11 window exists.
-        x11_window_of(pid).is_some() || wm_ipc_available()
+        if std::env::var_os("SWAYSOCK").is_some() {
+            return tree_lists_pid("swaymsg", &["-t", "get_tree"], pid);
+        }
+        if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+            return tree_lists_pid("hyprctl", &["clients", "-j"], pid);
+        }
+        x11_window_of(pid).is_some()
     }
 }
 
-fn wm_ipc_available() -> bool {
-    std::env::var_os("SWAYSOCK").is_some()
-        || std::env::var_os("I3SOCK").is_some()
-        || std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+/// Whether the compositor's JSON tree (`swaymsg -t get_tree` / `hyprctl
+/// clients -j`) lists a node with `"pid": <pid>` — the IPC answer to "does
+/// this pid own a window". Full serde parse + recursive scan rather than a
+/// substring match: both tools vary pretty-vs-compact output by tty.
+fn tree_lists_pid(cmd: &str, args: &[&str], pid: i32) -> bool {
+    let Ok(out) = std::process::Command::new(cmd).args(args).output() else {
+        return false;
+    };
+    serde_json::from_slice::<serde_json::Value>(&out.stdout)
+        .is_ok_and(|v| json_tree_has_pid(&v, i64::from(pid)))
+}
+
+fn json_tree_has_pid(v: &serde_json::Value, pid: i64) -> bool {
+    match v {
+        serde_json::Value::Object(m) => {
+            m.get("pid").and_then(serde_json::Value::as_i64) == Some(pid)
+                || m.values().any(|c| json_tree_has_pid(c, pid))
+        }
+        serde_json::Value::Array(a) => a.iter().any(|c| json_tree_has_pid(c, pid)),
+        _ => false,
+    }
 }
 
 /// Find an X11 window whose `_NET_WM_PID` matches, via x11rb.
@@ -76,10 +95,11 @@ fn x11_window_of(pid: i32) -> Option<u32> {
     None
 }
 
-/// Activate `pid`'s window: tiling-WM IPC first (zero-setup, pid-addressed),
-/// else EWMH `_NET_ACTIVE_WINDOW`.
+/// Activate `pid`'s window on the same channel `focusable` matched it on:
+/// sway/hyprland IPC (pid-addressed) when the env marker is present, else
+/// EWMH `_NET_ACTIVE_WINDOW`.
 pub(crate) fn activate_os(pid: i32) -> bool {
-    if std::env::var_os("SWAYSOCK").is_some() || std::env::var_os("I3SOCK").is_some() {
+    if std::env::var_os("SWAYSOCK").is_some() {
         return std::process::Command::new("swaymsg")
             .arg(format!("[pid={pid}] focus"))
             .status()

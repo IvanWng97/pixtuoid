@@ -78,11 +78,13 @@ pub(crate) fn resolve_pid(slot: &AgentSlot, paths: &FocusPaths<'_>) -> Option<i3
     if let Some(pid) = slot.pid {
         return Some(pid);
     }
+    // The registry consts, not literals — a source rename must not silently
+    // drop these arms to `_ => None`.
     match slot.source.as_ref() {
-        "claude-code" => paths
+        s if s == pixtuoid_core::source::claude_code::SOURCE_NAME => paths
             .cc_projects_root
             .and_then(|d| pixtuoid_core::source::cc_pid_for_session(d, &slot.session_id)),
-        "codex" => paths
+        s if s == pixtuoid_core::source::codex::SOURCE_NAME => paths
             .codex_sessions_root
             .and_then(|d| pixtuoid_core::source::codex_pid_for_session(d, &slot.session_id)),
         _ => None,
@@ -171,6 +173,18 @@ mod tests {
             focusable: vec![],
         };
         assert_eq!(ancestor_walk(&t2, 300), None);
+    }
+
+    #[test]
+    fn walk_of_a_dead_pid_is_a_silent_miss() {
+        // A dead/recycled-away pid: the table knows nothing about it (the real
+        // per-OS reads fail → None/false), so the walk no-ops without any
+        // extra liveness check — the documented dead-pid posture.
+        let t = MockTable {
+            parents: HashMap::new(),
+            focusable: vec![],
+        };
+        assert_eq!(ancestor_walk(&t, 4242), None);
     }
 
     #[test]

@@ -118,7 +118,10 @@ their own, which win; the daemon's `handle_conn` already peeked `_pid` for the
 events (`patch_identity_pids` — the per-source decoders never see the key).
 The reducer caches it on `AgentSlot.pid` (fill at registration, refresh per
 Identity, `Some` never downgraded), serde-skipped so the scene golden doesn't
-churn. Transcript-family sources stay `pid: None` — their channel is the
+churn. Transcript-family sources stay `pid: None` — STRUCTURALLY:
+`patch_identity_pids` skips any source with a `line_decoder` (their getppid is
+the hook-command parent, never recycle-guarded, and a stamped stale pid would
+shadow the probe in `resolve_pid`). Their channel is the
 recycle-guarded probes, exposed as the two pub point-query seams
 `source::cc_pid_for_session` (projects root → sibling sessions registry) and
 `source::codex_pid_for_session` (rollout UUID). Windows hook-family pids are
