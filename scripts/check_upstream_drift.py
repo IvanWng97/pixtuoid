@@ -145,6 +145,17 @@ CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
 # review-class drift (something new to adopt), never breaking. `session_end`
 # is snake_case on purpose: the SessionEnd HOOK name appears throughout
 # hooks.md and must not match.
+# CC hook-payload surfaces we DEPEND on that are DOCUMENTED (hooks.md) — the
+# inverse direction of the appearance markers below: these strings VANISHING
+# from hooks.md is review-class drift (the docs moved/renamed a surface the
+# burn-tier decoder reads). `CLAUDE_EFFORT` pins the effort row (the decoder
+# reads `effort.level` off tool-context payloads; ultracode reports as xhigh);
+# the model sentence pins SessionStart's optional `model` field.
+CC_DEPENDED_DOC_MARKERS = {
+    "CLAUDE_EFFORT": "the hook-payload effort surface (effort.level, burn tier)",
+    "receive a `model` field": "SessionStart's optional model field (burn tier)",
+}
+
 CC_LIFECYCLE_SURFACE_MARKERS = {
     "session_end": 'a structural transcript end record (subtype:"session_end")',
     ".claude/sessions/": "the ~/.claude/sessions/<pid>.json session registry",
@@ -1092,6 +1103,12 @@ def run_checks(
                         f"install/claude.rs EVENTS, or add it to "
                         f"CC_KNOWN_OMITTED)."
                     )
+        for marker, what in sorted(CC_DEPENDED_DOC_MARKERS.items()):
+            if marker not in hooks_doc:
+                review.append(
+                    f"CC hooks.md no longer mentions `{marker}` — {what} may have "
+                    f"moved/renamed; re-verify the burn-tier hook decode."
+                )
         for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
             if marker in hooks_doc:
                 review.append(

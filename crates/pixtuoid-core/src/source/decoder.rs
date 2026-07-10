@@ -228,17 +228,50 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         pid: None,
     };
 
+    // Burn-tier effort observation (CC): tool-context hook payloads carry an
+    // `effort: {level}` object (documented in hooks.md — low/medium/high/
+    // xhigh/max; ULTRACODE mode "is not a distinct level and reports as
+    // xhigh", also exported as $CLAUDE_EFFORT — live-verified 2026-07-10).
+    // Codex hook payloads carry no such field — absent = emit nothing. This
+    // is the primary CC effort channel (per tool event, verbatim vocabulary);
+    // the transcript's periodic ultra attachment markers are the JSONL twin.
+    let effort_info = || {
+        obj.get("effort")
+            .and_then(|e| e.get("level"))
+            .and_then(|l| l.as_str())
+            .filter(|l| !l.is_empty())
+            .map(|level| AgentEvent::ModelInfo {
+                agent_id,
+                model: None,
+                effort: Some(ellipsize(level, MAX_DECODED_FIELD_CHARS)),
+            })
+    };
+
     match event {
         "SessionStart" => {
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
             let source = source.to_string();
-            Ok(vec![AgentEvent::SessionStart {
+            let mut evs = vec![AgentEvent::SessionStart {
                 agent_id,
-                source,
+                source: source.clone(),
                 session_id,
                 cwd,
                 parent_id: None,
-            }])
+            }];
+            // "Only SessionStart hooks can receive a `model` field, and it is
+            // not guaranteed to be present" (hooks.md) — take it when offered.
+            if let Some(model) = obj
+                .get("model")
+                .and_then(|m| m.as_str())
+                .filter(|m| !m.is_empty())
+            {
+                evs.push(AgentEvent::ModelInfo {
+                    agent_id,
+                    model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+                    effort: None,
+                });
+            }
+            Ok(evs)
         }
         "PreToolUse" => {
             let tool_name = obj
@@ -252,27 +285,31 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                 .get("tool_use_id")
                 .and_then(|s| s.as_str())
                 .map(String::from);
-            Ok(vec![
+            let mut evs = vec![
                 identity(),
                 AgentEvent::ActivityStart {
                     agent_id,
                     tool_use_id,
                     detail: Some(make_tool_detail(source, tool_name, obj.get("tool_input"))),
                 },
-            ])
+            ];
+            evs.extend(effort_info());
+            Ok(evs)
         }
         "PostToolUse" => {
             let tool_use_id = obj
                 .get("tool_use_id")
                 .and_then(|s| s.as_str())
                 .map(String::from);
-            Ok(vec![
+            let mut evs = vec![
                 identity(),
                 AgentEvent::ActivityEnd {
                     agent_id,
                     tool_use_id,
                 },
-            ])
+            ];
+            evs.extend(effort_info());
+            Ok(evs)
         }
         "Notification" => {
             let msg = obj
@@ -453,6 +490,73 @@ pub(crate) fn ellipsize(s: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- burn-tier observations riding the shared hook arms ----
+
+    #[test]
+    fn tool_hooks_surface_the_effort_level() {
+        // hooks.md: tool-context payloads carry `effort:{level}`; ultracode
+        // reports as "xhigh" (live-verified via $CLAUDE_EFFORT 2026-07-10).
+        for event in ["PreToolUse", "PostToolUse"] {
+            let v = serde_json::json!({
+                "hook_event_name": event,
+                "session_id": "ses-e",
+                "transcript_path": "/p/ses-e.jsonl",
+                "cwd": "/repo",
+                "tool_name": "Bash",
+                "tool_use_id": "t1",
+                "effort": {"level": "xhigh"}
+            });
+            let evs = decode_hook_payload(v).unwrap();
+            assert!(
+                evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: None, effort: Some(f), .. } if f == "xhigh")),
+                "{event} must surface effort, got {evs:?}"
+            );
+        }
+        // Effort-less payloads (codex hooks, older CC) emit no ModelInfo.
+        let v = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "ses-e",
+            "transcript_path": "/p/ses-e.jsonl",
+            "tool_name": "Bash"
+        });
+        let evs = decode_hook_payload(v).unwrap();
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, AgentEvent::ModelInfo { .. })),
+            "got {evs:?}"
+        );
+    }
+
+    #[test]
+    fn session_start_hook_surfaces_the_model_when_offered() {
+        // "Only SessionStart hooks can receive a model field, and it is not
+        // guaranteed" (hooks.md) — present → observation, absent → nothing.
+        let v = serde_json::json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "ses-m",
+            "transcript_path": "/p/ses-m.jsonl",
+            "cwd": "/repo",
+            "model": "claude-fable-5"
+        });
+        let evs = decode_hook_payload(v).unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: None, .. } if m == "claude-fable-5")),
+            "got {evs:?}"
+        );
+        let v = serde_json::json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "ses-m",
+            "transcript_path": "/p/ses-m.jsonl",
+            "cwd": "/repo"
+        });
+        let evs = decode_hook_payload(v).unwrap();
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, AgentEvent::ModelInfo { .. })),
+            "got {evs:?}"
+        );
+    }
     use serde_json::json;
 
     // Real CC sessions are full of task-management tools whose names START WITH

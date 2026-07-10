@@ -114,8 +114,14 @@ src/
 **Burn-tier plumbing (model flame):** `AgentEvent::ModelInfo { model, effort }`
 carries RAW wire strings (interpret-at-paint — the tier tables live in
 `pixtuoid-scene::burn`): CC assistant lines' `message.model` (per turn, filters
-`<synthetic>`) + the periodic `ultra_effort_enter`/`ultrathink_effort`
-attachment markers (no wire value → decoder-synthesized "ultra"/"ultrathink");
+`<synthetic>`) + TWO CC effort channels — the HOOK payloads' documented
+`effort.level` (low..max verbatim, on every tool-context hook; ultracode
+reports as `xhigh` — the PRIMARY channel, decoded in the shared arms) and the
+transcript's periodic `ultra_effort_enter`/`ultrathink_effort` attachment
+markers (no wire value → decoder-synthesized "ultra"/"ultrathink"; the
+`ultra_effort_exit` twin synthesizes the NON-max "ultra_exit", so
+last-seen-wins kills the flame instantly, the TTL only backstops a missed
+exit) — plus the SessionStart hook's optional `model` field;
 Codex `turn_context` model+effort verbatim; copilot per-tool `data.model`
 (attributed to the ACTING agent); opencode `session.created` `info.model.id`.
 The reducer caches `slot.model` (last-seen-wins — a mid-session `/model`

@@ -22,6 +22,7 @@ pub(crate) async fn capture_live_scene(
     );
     let scene: Arc<RwLock<SceneState>> = Arc::new(RwLock::new(SceneState::uniform(12)));
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(1024);
+    let tx_hook = tx.clone();
     let root = PathBuf::from(projects_root);
     let watcher = JsonlWatcher::new(
         root,
@@ -29,8 +30,32 @@ pub(crate) async fn capture_live_scene(
         pixtuoid_core::source::claude_code::decode_cc_line,
         pixtuoid_core::source::claude_code::cc_derive_label,
         pixtuoid_core::source::claude_code::cc_session_ended,
-    );
+    )
+    // The SAME UUID keying the real CC source wires (claude_code/native.rs):
+    // without it the watcher registers under the path-hash id while every
+    // line-decoded event (activity, ModelInfo) keys on the UUID — nothing
+    // coalesces and --live agents sit Idle/model-less forever (latent since
+    // #203, exposed by the burn-tier replay).
+    .with_id_deriver(pixtuoid_core::source::claude_code::cc_id_from_path);
     let watcher_handle = tokio::spawn(async move { watcher.run(tx).await });
+    // ALSO listen on the real hook socket: a live CC session's hooks carry
+    // activity + the burn-tier effort level (hooks.md `effort:{level}`;
+    // ultracode reports as xhigh) that the transcript alone can't provide in
+    // real time. Same latent-gap class as the id-deriver above — "--live"
+    // without hooks was silently activity-poor. SocketBusy (a running
+    // pixtuoid owns the socket) degrades to transcript-only, like the app.
+    let hook_handle = {
+        use pixtuoid_core::source::hook::HookRouter;
+        use pixtuoid_core::source::DynSource;
+        let socket = pixtuoid_core::source::claude_code::ClaudeCodeSource::default_socket_path();
+        let router: Box<dyn DynSource> = Box::new(HookRouter::new(socket));
+        let tx = tx_hook;
+        tokio::spawn(async move {
+            if let Err(e) = router.run(tx).await {
+                eprintln!("hook listener unavailable ({e}); transcript-only capture");
+            }
+        })
+    };
 
     let mut reducer = Reducer::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(listen_secs);
@@ -55,11 +80,17 @@ pub(crate) async fn capture_live_scene(
     );
     for (id, slot) in &snapshot.agents {
         println!(
-            "  {} ({}) at desk {}: {:?}",
-            slot.label, id, slot.desk_index.0, slot.state
+            "  {} ({}) at desk {}: {:?} model={:?} effort={:?}",
+            slot.label,
+            id,
+            slot.desk_index.0,
+            slot.state,
+            slot.model,
+            slot.effort.as_ref().map(|e| e.value.clone())
         );
     }
     watcher_handle.abort();
+    hook_handle.abort();
     Ok(snapshot)
 }
 
