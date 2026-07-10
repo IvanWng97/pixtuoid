@@ -588,6 +588,16 @@ mod tests {
         // An empty/missing model must not mint a phantom observation.
         let empty = r#"{"type":"message","id":"m3","timestamp":"t","message":{"role":"assistant","model":"","content":[],"timestamp":3}}"#;
         assert!(decode(empty).is_empty());
+        // A content-ABSENT message (defensive: pi-ai types.ts requires
+        // `content`, so this can't occur on real wire) still stamps the model
+        // — pins the let-else early return's `Ok(out)`, not `Ok(vec![])`.
+        let no_content = r#"{"type":"message","id":"m4","timestamp":"t","message":{"role":"assistant","model":"claude-fable-5","timestamp":4}}"#;
+        match &decode(no_content)[..] {
+            [AgentEvent::ModelInfo { model: Some(m), .. }] => {
+                assert_eq!(m.as_str(), "claude-fable-5");
+            }
+            other => panic!("expected one ModelInfo, got {other:?}"),
+        }
     }
 
     #[test]
