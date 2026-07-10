@@ -265,12 +265,15 @@ pub(crate) async fn handle_conn(
                 // shim fills it from getppid when the plugin didn't stamp one);
                 // the transcript family is filtered downstream in
                 // `patch_identity_pids` — the probes are their channel.
-                // `as_u64` already rejects negatives; the `> 0` filter drops a
-                // crafted `_pid: 0` too (kill(0) targets the process GROUP —
-                // same guard as cc_probe/fd_probe/openclaw).
-                let pid = pid_watch
-                    .as_ref()
-                    .and_then(|_| v.get("_pid"))
+                // Deliberately NOT gated on `pid_watch`: the exit-watch backend
+                // failing to init (pre-5.3 Linux kernel, Windows) must not
+                // take the focus-jump pid cache down with it — only the BIND
+                // below needs the watch. `as_u64` already rejects negatives;
+                // the `> 0` filter drops a crafted `_pid: 0` too (kill(0)
+                // targets the process GROUP — same guard as
+                // cc_probe/fd_probe/openclaw).
+                let pid = v
+                    .get("_pid")
                     .and_then(serde_json::Value::as_u64)
                     .and_then(|p| i32::try_from(p).ok())
                     .filter(|p| *p > 0);
@@ -732,18 +735,14 @@ mod tests {
 
     // The composed focus-jump path (peek `_pid` → decode → patch_identity_pids):
     // a transcript-family (CC) payload's Identity must arrive with pid: None
-    // even when the shim stamped `_pid` and a live pid_watch enables the peek —
-    // the unit test on patch_identity_pids can't catch a wiring regression in
-    // handle_conn itself. Platform-gated like the bind test above.
+    // even when the shim stamped `_pid` — the unit test on patch_identity_pids
+    // can't catch a wiring regression in handle_conn itself. The peek needs no
+    // watch (deliberately un-gated), so this runs on every platform.
     #[tokio::test]
     async fn handle_conn_never_stamps_a_transcript_family_identity_pid() {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
-        let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
-            return; // no exit-watch backend on this platform — the peek is off
-        };
         let (mut client, server) = tokio::io::duplex(4096);
-        let task = tokio::spawn(handle_conn(server, tx, Some(watch), None));
-        // Our own (live) pid so the bound exit-watch never fires mid-test.
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
         let me = std::process::id();
         let line = format!(
             "{{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"ses-cc\",\
@@ -764,6 +763,33 @@ mod tests {
         );
         let (_, ev) = rx.recv().await.expect("the paired ActivityStart");
         assert!(matches!(ev, AgentEvent::ActivityStart { .. }), "got {ev:?}");
+    }
+
+    // The focus-jump stamp must survive a missing exit-watch backend: the
+    // `_pid` peek is deliberately NOT gated on `pid_watch` (pre-5.3 Linux /
+    // Windows spawn `None`), so a hook-family Identity still carries the pid
+    // with NO watch attached — only the exit-watch BIND needs the watch.
+    // This is the regression pin: re-gating the peek fails this test.
+    #[tokio::test]
+    async fn handle_conn_stamps_identity_pid_even_without_a_pid_watch() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let (mut client, server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
+        // CodeWhale tool_call_before decodes to [Identity, ActivityStart].
+        let line = "{\"_pixtuoid_source\":\"codewhale\",\"event\":\"tool_call_before\",\
+                    \"cwd\":\"/repo\",\"tool\":\"exec_shell\",\"_pid\":4242}\n";
+        client.write_all(line.as_bytes()).await.unwrap();
+        drop(client);
+        task.await.unwrap();
+
+        let (_, ev) = rx
+            .recv()
+            .await
+            .expect("the Identity ahead of the tool event");
+        assert!(
+            matches!(&ev, AgentEvent::Identity { source, pid: Some(4242), .. } if source == "codewhale"),
+            "hook-family Identity must carry the peeked pid without a watch, got {ev:?}"
+        );
     }
 
     // The decode-error arm (line 280): a syntactically-valid JSON object whose

@@ -113,9 +113,11 @@ src/
 
 **Focus-jump plumbing (#focus-jump):** the shim fills `_pid` (getppid) into the
 hook envelope WHEN ABSENT — opencode's plugin and CodeWhale's env-mode supply
-their own, which win; the daemon's `handle_conn` already peeked `_pid` for the
-`HookPidWatch` exit-watch, and now ALSO stamps it onto the batch's `Identity`
-events (`patch_identity_pids` — the per-source decoders never see the key).
+their own, which win; the daemon's `handle_conn` peeks `_pid` UNCONDITIONALLY
+(an exit-watch backend failing to init — pre-5.3 Linux — must not take the
+focus pid cache down with it; only the `HookPidWatch` BIND needs the watch)
+and stamps it onto the batch's `Identity` events (`patch_identity_pids` — the
+per-source decoders never see the key).
 The reducer caches it on `AgentSlot.pid` (fill at registration, refresh per
 Identity, `Some` never downgraded), serde-skipped so the scene golden doesn't
 churn. Transcript-family sources stay `pid: None` — STRUCTURALLY:
@@ -124,9 +126,13 @@ the hook-command parent, never recycle-guarded, and a stamped stale pid would
 shadow the probe in `resolve_pid`). Their channel is the
 recycle-guarded probes, exposed as the two pub point-query seams
 `source::cc_pid_for_session` (projects root → sibling sessions registry) and
-`source::codex_pid_for_session` (rollout UUID). Windows hook-family pids are
-effectively absent by design: the hook runs under `cmd /C`, so getppid names a
-transient cmd.exe (the documented `parent_pid` trap) — focus silently no-ops.
+`source::codex_pid_for_session` (rollout UUID). On Windows the SHIM sends no
+pid (the hook runs under `cmd /C`, so getppid would name a transient cmd.exe —
+the documented `parent_pid` trap), so shim-dependent sources focus-no-op there;
+a plugin-stamped pid (opencode's `process.pid`) still flows — the peek doesn't
+need the exit-watch, whose backend is also absent on Windows/pre-5.3 Linux. On
+those no-watch platforms an abrupt exit can't set `exiting_at`, so the
+click-time pid-staleness window is wider (the documented v1 sharp edge).
 
 ## Known sharp edges (don't be surprised by these)
 

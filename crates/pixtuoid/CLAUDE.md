@@ -141,8 +141,9 @@ src/
 │                       so the walk surfaces the terminal, not the agent) else EWMH _NET_ACTIVE_WINDOW via
 │                       x11rb — i3 rides EWMH, NOT swaymsg (GNOME Wayland fails closed). ONE failure rule: every
 │                       miss = tracing::debug + silent no-op — no fallback tiers, no info UI (user-directed).
-│                       App-level only in v1 (no tab/pane precision — backlog). Windows hook-family pids are
-│                       effectively absent (the shim's parent is a transient cmd.exe — see pixtuoid-hook).
+│                       App-level only in v1 (no tab/pane precision — backlog). On Windows the SHIM sends no
+│                       pid (transient cmd.exe parent — see pixtuoid-hook), but a plugin-stamped pid
+│                       (opencode's process.pid) still flows: the `_pid` peek doesn't need the exit-watch.
 ├── config.rs           AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
 ├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize — all unit-tested;
 │                       ConnectedSources = the live `Arc<Mutex<HashSet<String>>>` connected-set,
