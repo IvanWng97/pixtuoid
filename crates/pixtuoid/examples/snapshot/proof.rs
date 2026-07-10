@@ -3,10 +3,10 @@
 //! (terminal chrome, an anti-aliased JetBrains Mono face — see `fonts/`), the
 //! right side is the REAL draw_scene pass replaying the SAME decoded AgentEvent
 //! stream through the real Reducer — the two sides structurally cannot desync.
-//! The coral office annotations + connector stay the office's own 8x8 pixel
-//! font (they belong to the pixel world, a user-ratified split); the burned
-//! coda strip joins the panel's AA side. scripts/gen-media.py (kind:"proof")
-//! encodes the frames.
+//! The coral office annotations + connector dot render in the SAME AA face as
+//! the panel (the 8x8 pixel-font split was retired with the bitmap font — the
+//! user reversed it: "no 8x8 stand-in at all"); the burned coda strip likewise.
+//! scripts/gen-media.py (kind:"proof") encodes the frames.
 
 use anyhow::{anyhow, Context as _, Result};
 use image::{Rgba, RgbaImage};
@@ -17,7 +17,6 @@ use pixtuoid_core::source::claude_code::{
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
-use pixtuoid_scene::font;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::collections::VecDeque;
@@ -37,7 +36,7 @@ const TALL_PANEL_H: u32 = 400; // terminal panel height (tall layout)
 const HEADER_H: u32 = 32; // chrome strip: "captured..." / "pixtuoid"
 const PAD: u32 = 16;
 const LINE_H: u32 = 28;
-const TEXT_SCALE: i32 = 2; // office-side 8x8 pixel font (coral annotations only) → 16px
+const ANNOT_FONT_PX: f32 = 16.0; // coral annotation callouts — same AA face as the panel
 const TYPE_CPS: u64 = 30; // typewriter reveal, chars/sec
 const PREAMBLE_MS: u64 = 6000; // "$ claude" + session start precede the first fixture line
 
@@ -104,11 +103,10 @@ pub(crate) struct ProofScript {
 }
 
 /// Greedy word-wrap of `text` to fit within `max_width` px, measuring each
-/// candidate line via the caller-supplied `width_fn` (font8x8's fixed-advance
-/// `font::text_width` or the AA font's metric-derived advance — the panel/coda
-/// callers each pick their own face and size). A single over-long word is kept
-/// whole (never split mid-word) rather than looping forever; never returns an
-/// empty vec.
+/// candidate line via the caller-supplied `width_fn` (the AA font's
+/// metric-derived advance at the caller's own size). A single over-long word is
+/// kept whole (never split mid-word) rather than looping forever; never returns
+/// an empty vec.
 fn wrap_text(text: &str, max_width: i32, width_fn: impl Fn(&str) -> i32) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();
@@ -406,19 +404,18 @@ fn fill(img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, c: Rgba<u8>) {
     }
 }
 
-fn text_at(img: &mut RgbaImage, s: &str, x: i32, y: i32, scale: i32, c: Rgba<u8>) {
-    font::draw_text(s, x, y, scale, |px, py| put(img, px, py, c));
-}
-
 fn text(img: &mut RgbaImage, s: &str, x: i32, y: i32, c: Rgba<u8>) {
-    text_at(img, s, x, y, TEXT_SCALE, c);
+    aa_draw_text_at(img, s, x, y, ANNOT_FONT_PX, c);
 }
 
-/// A small filled disc anchoring the connector to an exact scene point — reuses
-/// the office's own status-dot glyph vocabulary (`font::glyph8x8`'s `●`) rather
-/// than a bespoke circle rasterizer.
-fn dot(img: &mut RgbaImage, cx: i32, cy: i32, scale: i32, c: Rgba<u8>) {
-    text_at(img, "\u{25CF}", cx - 4 * scale, cy - 4 * scale, scale, c);
+/// A small filled disc, centered on `(cx, cy)` by its own metrics — reuses the
+/// AA face's `●` rather than a bespoke circle rasterizer. `px` picks the size:
+/// the window-chrome traffic lights run small (8px), the connector anchor runs
+/// at the annotation size.
+fn dot(img: &mut RgbaImage, cx: i32, cy: i32, px: f32, c: Rgba<u8>) {
+    let w = aa_text_width_at("\u{25CF}", px);
+    let h = pixtuoid::aa_text::line_height(px);
+    aa_draw_text_at(img, "\u{25CF}", cx - w / 2, cy - h / 2, px, c);
 }
 
 /// 2px-thick dashed horizontal connector (4-on/4-off), the burned "wire".
@@ -449,7 +446,7 @@ fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str, is_panel: bo
         let cy = (y + HEADER_H / 2) as i32;
         let mut cx = x as i32 + PAD as i32 + 4;
         for c in [DOT_RED, DOT_YELLOW, DOT_GREEN] {
-            dot(img, cx, cy, 1, c);
+            dot(img, cx, cy, 8.0, c);
             cx += DOT_PITCH;
         }
         let title_x = cx + DOT_GAP_AFTER;
@@ -571,7 +568,7 @@ pub(crate) fn compose_frame(
             let anchor_y = desk.1 - GLOW_CLEARANCE;
             match layout {
                 ProofLayout::Wide => {
-                    let text_w = font::text_width(label, TEXT_SCALE);
+                    let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
                     let label_x = (desk.0 - text_w - 16).max((PANEL_W + PAD) as i32);
                     dashed_h(
                         &mut img,
@@ -588,18 +585,18 @@ pub(crate) fn compose_frame(
                         Rgba([0, 0, 0, 255]),
                     );
                     text(&mut img, label, label_x, anchor_y - 22, ANNOT);
-                    dot(&mut img, desk.0 - 6, anchor_y, 2, ANNOT);
+                    dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
                 }
                 ProofLayout::Tall => {
                     // no cross-panel connector line (the panel sits above, not
                     // beside) — just the callout well clear of the sprite's
                     // head/name-tag, plus a dot marking the desk itself.
-                    let text_w = font::text_width(label, TEXT_SCALE);
+                    let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
                     let label_x = (desk.0 - text_w - 16).max(PAD as i32);
                     let label_y = anchor_y - 22;
                     text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
                     text(&mut img, label, label_x, label_y, ANNOT);
-                    dot(&mut img, desk.0 - 6, anchor_y, 2, ANNOT);
+                    dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
                 }
             }
         }

@@ -72,15 +72,14 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   bucket_slot/per_floor_counts/gateway_rollup/compact_hms (relocated from the binary's tui
 │                   widgets so floating + wasm share them), plus BoardTone/BoardSegment/BoardModel and
 │                   build_board(counts, uptime_secs, floor, gateway) → the three model rows. Carries TONE not a
-│                   resolved color (like overlay), so each painter maps it: tui (hud.rs board_tone_color →
-│                   ratatui), floating (offscreen.rs board_glow → AA), wasm (lib.rs board_hex → DOM span). Width
+│                   resolved color (like overlay); tone_rgb(tone, theme) HERE is the ONE tone→theme-role map,
+│                   each painter only converts the Rgb to its surface type: tui (hud.rs board_tone_color →
+│                   ratatui), floating (offscreen.rs pack_xrgb → AA), wasm (lib.rs board_hex → DOM span). Width
 │                   via chars().count() (mood glyphs ▲●○ are single-column). Panel interior geometry is the
-│                   pixel_painter NEON_PANEL_INNER_{X,Y,W,H} consts (2,2,28,6)
-├── font.rs         8×8 bitmap font (glyph8x8/custom_glyph over the font8x8 crate + draw_text/text_width) —
-│                   the snapshot example's video-overlay (encode.rs) + some proof labels rasterize with it.
-│                   The floating label + wall-board painters MOVED to anti-aliased JetBrains Mono (binary
-│                   `aa_text`, #aa-text), so they no longer ride this 8×8 font — it's the crisp-pixel status
-│                   glyph source, not the label face
+│                   pixel_painter NEON_PANEL_INNER_{X,Y,W,H} consts (2,2,28,6).
+│                   (font.rs — the old 8×8 bitmap font over the font8x8 crate — was DELETED with its dep:
+│                   every text surface renders anti-aliased JetBrains Mono via the BINARY's `aa_text`,
+│                   incl. the snapshot example's cell rasterizer; the "8×8 stand-in" look is fully retired)
 ├── pose/           pose derivation, pure-vs-routed split FILE-level (core/pose merged in here):
 │                   mod.rs (the ROUTED authority: PoseHistory, derive_with_routing, snap-back; snapshots A*
 │                   path length once at walk-start → freezes WalkProfile → drives t_x1000 per-frame via

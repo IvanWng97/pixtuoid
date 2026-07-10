@@ -163,15 +163,21 @@ src/
 │                       embed ESC/OSC via \u escapes), so every printed line routes through
 │                       strip_control_chars (same egress rule as the headless summary + doctor)
 ├── version.rs          pure version-popup boot logic
-├── aa_text.rs          the anti-aliased text rasterizer for the FLOATING window (+ shared by the snapshot
-│                       example): a `LazyLock<FontRef>` over `fonts/JetBrainsMono-Regular.ttf` (include_bytes!),
-│                       exposing text_width / line_height / draw_text_at(s, x, top_y, px, put(x,y,coverage)) — a
-│                       surface-agnostic coverage callback the caller blends (offscreen.rs `blend_xrgb`, the
-│                       snapshot example `blend_px`). Binary-only (ab_glyph is a runtime dep of THIS crate, not
-│                       pixtuoid-scene — the engine stays font-impl-free); the wasm/site painter does its own AA
-│                       via DOM spans, not this. Replaced the 8px `pixtuoid_scene::font` for the label + board faces.
-├── fonts/              JetBrainsMono-Regular.ttf + OFL.txt (the label/board face; git-moved OUT of
-│                       examples/snapshot/fonts/ when aa_text was promoted from the example into the lib)
+├── aa_text.rs          THE anti-aliased text rasterizer — every rasterized text surface rides it: the floating
+│                       window's badges/board AND the snapshot example's terminal-cell text + --proof panel
+│                       (the old 8×8 `pixtuoid_scene::font` + its font8x8 dep were DELETED — no bitmap stand-in
+│                       anywhere). TWO faces behind one seam: `fonts/JetBrainsMono-Regular.ttf` primary +
+│                       `fonts/PixtuoidSymbols.ttf` fallback (a renamed JuliaMono symbol-block subset — JBM has
+│                       NO glyph for ★ ◐ ⬢ ▮ ▯ ⏱ ↳ ❚, and so does JetBrainsMono NERD Font, whose patches all
+│                       live in the Private Use Area; a real terminal shows those via system-font fallback,
+│                       which the second face replicates). Exposes has_glyph / text_width / line_height /
+│                       draw_text_at(s, x, top_y, px, put(x,y,coverage)) — a surface-agnostic coverage callback
+│                       the caller blends (offscreen.rs `blend_xrgb`, snapshot `blend_px`/`mix_rgb`); per-char
+│                       face resolution, one shared baseline (the primary's ascent). Binary-only (ab_glyph is a
+│                       runtime dep of THIS crate, not pixtuoid-scene — the engine stays font-impl-free); the
+│                       wasm/site painter does its own AA via DOM spans, not this.
+├── fonts/              JetBrainsMono-Regular.ttf (OFL.txt) + PixtuoidSymbols.ttf (OFL-JuliaMono.txt; RFN-renamed
+│                       JuliaMono subset — regen instructions in fonts/README.md)
 ├── install/            multi-target (Claude + Codex + Reasonix + CodeWhale + opencode + Cursor + Hermes + OpenClaw) hook install via the `Target` registry:
 │                       mod.rs (install_target/uninstall_target = structured core → InstallReport/UninstallReport,
 │                         driven SOLELY by the in-TUI Sources panel's connect/disconnect (no CLI orchestration —

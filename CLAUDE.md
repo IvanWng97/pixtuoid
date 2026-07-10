@@ -49,7 +49,7 @@ crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pix
 │                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)
 │                    pixel_painter/ (render_to_rgb_buffer) layout/ physics.rs pose/ (pure + routed,
 │                    file-level split) motion/ pathfind.rs floor.rs theme/ pet.rs chitchat.rs
-│                    frame_cache.rs anim.rs overlay.rs font.rs embedded_pack.rs (default pack at
+│                    frame_cache.rs anim.rs overlay.rs board.rs embedded_pack.rs (default pack at
 │                    sprites/default/, own build.rs); depends on pixtuoid-core (forwards `native`)
 ├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene
 │                    cli.rs config.rs runtime/ install/ tui/ floating/ (two thin painters over the
