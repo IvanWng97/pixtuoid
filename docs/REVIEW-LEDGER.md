@@ -1028,3 +1028,47 @@ The CI `claude[bot]` security review of the two post-`abee3f5` commits returned 
 | ID | Seam | Claim | Verdict | Mechanism / notes | Tier | HEAD | Date |
 |---|---|---|---|---|---|---|---|
 | R0626-DOD-18 | `justfile:641` unquoted `{{ args }}` · `check_dod.py` `_strip_control` dup · `check_dod.py:124` scripts-only bypass | 3× MED: shell-interp injection surface; verbatim-duplicate drift; scripts/docs-only PRs skip the two-lens gate | #1 REFUTED-design · #2 CONFIRMED→fixed · #3 CONFIRMED→#404 | #1 unquoted forwarding is REQUIRED so `just dod --pr N` word-splits into argv — the bot's suggested `quote(args)` collapses it to one token and breaks it; the input is the dev's own local CLI args, no untrusted path. #2 `_strip_control` was byte-identical in both scripts → extracted to `scripts/_gov.py`, both import it, still pinned through both `*_selftest.py` sites. #3 same root cause as #404 (`code_touched` = `crates/**/*.rs` only); #404 extended to enumerate scripts/docs-only PRs | A | #405 | 2026-06-26 |
+
+## 2026-07-10 — full expired-row re-audit (workflow wf_a41dcf08; 85 rows, 19 agents, mechanical expiry pre-screen → per-subsystem re-adjudication → skeptic pass on reopen candidates)
+
+The first full run of this ledger's own expiry protocol over EVERY refuted /
+accepted-residual row whose anchors changed since verdict (85 of 114 rows
+mechanically expired via `git diff <verdict-head>..HEAD -- <anchors>`).
+Result: **78 STILL-REFUTED (92%) · 7 MOOT · 0 REOPENED** — the skeptic pass
+confirmed zero reopenings. Every expiry was line drift, a systematic module
+relocation, or a basename fuzzy-match false positive; **no refuting mechanism
+actually broke**. At least six refutations got STRONGER since verdict:
+R0610-13 (#485 hardened `/tmp` socket → 0700 per-user dir), R0610-14
+(AcceptBackoff closed the EMFILE-spin residual), R0620-WCR-27 (#443
+affirmatively fixed flag rollback, now test-pinned), R0615-06 (the deferred
+third consumer landed citing the row id), R0616-343-05 (EnvVarOverride +
+TEST_ENV_LOCK went RAII), R0615-OC-R3/R5 (YAGNI deferrals overtaken by the
+registry-demux / HookRouter redesigns).
+
+**MOOT (no live target — future dedup skips these):** R0620-WCR-27 (#443
+fixed), R0615-OC-R3 + R0615-OC-R5 (designed seam rewrites implemented the
+deferred genericity), R0626-06 + R0626-DOD-05 + R0626-DOD-13 + R0626-DOD-18
+(the #407 DoD-machinery deletion removed check_dod.py/_gov.py/review-metrics
+selftests/.claude settings hooks).
+
+**Anchor-translation table (map old anchors through these BEFORE declaring a
+row expired):** (1) core→scene crate split — pose/motion/pixel_painter/layout
+mask/chitchat/floor moved `crates/pixtuoid-core/src/...` →
+`crates/pixtuoid-scene/src/...`; sharp edges moved core CLAUDE.md → scene
+CLAUDE.md. (2) CLI presenters: `main.rs` bodies → `sources_cli.rs`.
+(3) jsonl split: `source/jsonl/mod.rs` → `jsonl/{walk,liveness,unclaim}.rs`.
+(4) `AgentId::from_parts`: `source/mod.rs` → `id.rs`. (5) hook-plane rewrite:
+CC presence ownership → `source/hook/router.rs`; openclaw peek →
+registry-driven `presence_decoder_for`. (6) install: env-prefix →
+`install/hook_cmd/`; `verified_version` → core `registry.rs`; `_pid` emitter
+→ embedded `openclaw_plugin.js`. (7) TUI: drift scan → `tui/ui_state.rs`;
+harness → `harness/` dir. (8) governance deletion 5e30d996 (#407).
+(9) runtime-location drift: hook socket `/tmp/pixtuoid-<uid>.sock` →
+`/tmp/pixtuoid-{uid}/pixtuoid.sock` (#485).
+
+**Protocol calibration:** the expiry TRIGGER over-fires (85/85 false in
+substance); tighten anchor matching to full repo-relative paths (basename
+fuzzy-matching fired R0619-04 / polluted R0620-WCR-31 via unrelated
+`main.rs` files), and treat a diff hit under a KNOWN relocation family above
+as a line-drift refresh, not a full re-verification. The tier-A demote
+fast-path is validated 78/78 at ≥90 confidence.
