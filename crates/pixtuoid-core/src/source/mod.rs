@@ -254,6 +254,31 @@ impl AgentEvent {
     }
 }
 
+/// Focus-jump pid point-queries for the transcript family — the ONE public
+/// seam the binary's `focus` module consumes (probe internals stay
+/// `pub(crate)`). Point queries against the live registries, never a
+/// transcript scan; both ride the recycle-guarded probes (#220), the reason
+/// transcript-family pids are NEVER taken from the shim parent. Native/unix
+/// backed — a non-unix build resolves nothing (focus silently no-ops).
+#[cfg(feature = "native")]
+pub fn cc_pid_for_session(sessions_dir: &std::path::Path, session_id: &str) -> Option<i32> {
+    cc_probe::live_cc_session_ids(sessions_dir)?
+        .pid_of
+        .get(session_id)
+        .copied()
+}
+
+/// Codex twin of [`cc_pid_for_session`], keyed by the rollout UUID (the
+/// slot's `session_id`) — NOT the rollout path, which comes back
+/// kernel-canonicalized from the fd probe and is deliberately not matched on.
+#[cfg(feature = "native")]
+pub fn codex_pid_for_session(sessions_root: &std::path::Path, uuid: &str) -> Option<i32> {
+    codex::live_codex_rollout_ids(sessions_root)?
+        .pid_of
+        .get(uuid)
+        .copied()
+}
+
 pub mod antigravity;
 // The async runtime + watcher + liveness-probe layer: gated out of a wasm
 // (`--no-default-features`) build. These modules own all the tokio/notify/libc
@@ -302,3 +327,46 @@ pub mod reasonix;
 // breaking-version bump. Same treatment as `jsonl`'s test-only seam.
 #[doc(hidden)]
 pub mod registry;
+
+#[cfg(all(test, unix, feature = "native"))]
+mod focus_pid_tests {
+    // The two focus-jump point-query seams, over real tempdir registries.
+    use super::*;
+
+    #[test]
+    fn cc_pid_for_session_hits_misses_and_tolerates_garbage() {
+        let dir = tempfile::tempdir().unwrap();
+        // A live entry (our own pid is alive by construction) + garbage.
+        std::fs::write(
+            dir.path().join("self.json"),
+            serde_json::json!({
+                "pid": std::process::id(),
+                "sessionId": "focus-sess",
+                "status": "idle"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("junk.json"), "not json {{{").unwrap();
+
+        assert_eq!(
+            cc_pid_for_session(dir.path(), "focus-sess"),
+            Some(std::process::id() as i32),
+            "hit: the session's live registry pid"
+        );
+        assert_eq!(
+            cc_pid_for_session(dir.path(), "unknown-sess"),
+            None,
+            "miss: unknown session resolves nothing"
+        );
+    }
+
+    #[test]
+    fn codex_pid_for_session_misses_on_unknown_uuid() {
+        // No codex processes hold fds under a fresh tempdir → an empty (but
+        // healthy) snapshot → any uuid misses. The hit side rides the probe's
+        // own fd-matching tests (codex/native.rs).
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(codex_pid_for_session(root.path(), "0000-none"), None);
+    }
+}

@@ -2270,6 +2270,7 @@ dependencies = [
  "image",
  "insta",
  "libc",
+ "objc2-app-kit",
  "open",
  "pixtuoid-core",
  "pixtuoid-scene",
@@ -2290,6 +2291,7 @@ dependencies = [
  "which",
  "windows-sys 0.61.2",
  "winit",
+ "x11rb",
 ]
 
 [[package]]
