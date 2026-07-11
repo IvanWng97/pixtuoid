@@ -20,7 +20,7 @@ tests/
 │   │   └── fixtures/hook-payloads.jsonl   codewhale's OWN data (single-owner; NOT scanned)
 │   ├── snapshots/            insta snaps  (sources__conformance__<source>__<scenario>)
 │   └── fixtures/<source>/    ══ conformance scenarios ONLY — dir name MUST be a registered source ══
-├── reducer/main.rs           state-machine behavior (1 binary; shared builders `start`/`delegating_pair` live in main.rs)
+├── reducer/main.rs           state-machine behavior (1 binary; shared scaffolding lives in main.rs — builders `start`/`delegating_pair` + the apply-DSL `act_start`/`act_end`/`waiting`/`proof_of_life`/`sess_end`)
 │   ├── lifecycle.rs          SessionStart/End arms: registration/capacity, resurrect-in-place, hook synthesis of unknown ids, duplicate-start backfill, `Identity`
 │   ├── activity.rs           per-slot FSM: Active/Idle debounce, Waiting set/resolve gates, active_ms + tool_call_count
 │   ├── tasks.rs              active_tasks suppression, hook-wins dedup, drains, b1 cascade grace + waiting-clobber pins
@@ -35,7 +35,7 @@ tests/
 │   ├── first_sight.rs        the first-sight gate: stale/recent/ended/oversized seeds, probe bypass, cwd + id/label derivers, subagent parent links
 │   ├── liveness.rs           proof-of-life emission, negative vouch, instant exit (pid death), probe-failure no-ops
 │   ├── unclaim.rs            child-end un-claim: turn-N+1 re-register + in-flight multi-turn revival
-│   ├── sources.rs            Source::run glue (codex / antigravity / claude-code / copilot bind+spawn)
+│   ├── sources.rs            Source::run glue (codex / antigravity / claude-code / copilot / omp bind+spawn)
 │   └── attach.rs             the mid-attach scenario suite (attach shows exactly the live set)
 ├── transport/main.rs         #[cfg(unix)] mod socket;  #[cfg(windows)] mod pipe;
 ├── render/main.rs            mod {blit, format}  +  render/fixtures/ (sprites)

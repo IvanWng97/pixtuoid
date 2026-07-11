@@ -8,7 +8,7 @@ use pixtuoid_core::state::reducer::{
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
 
-use crate::start;
+use crate::{act_end, act_start, sess_end, start};
 
 #[test]
 fn hook_session_end_tombstone_blocks_reordered_trailing_event_synthesis() {
@@ -24,22 +24,13 @@ fn hook_session_end_tombstone_blocks_reordered_trailing_event_synthesis() {
     let other = AgentId::from_parts("claude-code", "still-alive");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, id, false, t0, Transport::Hook);
     // The straggler lands shortly after — within the tombstone TTL.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: id,
-            tool_use_id: None,
-        },
+        id,
+        None,
         t0 + Duration::from_millis(50),
         Transport::Hook,
     );
@@ -50,12 +41,11 @@ fn hook_session_end_tombstone_blocks_reordered_trailing_event_synthesis() {
 
     // Control: a DIFFERENT id is untouched by the tombstone — hook proof of
     // life still synthesizes for it.
-    r.apply(
+    act_end(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityEnd {
-            agent_id: other,
-            tool_use_id: None,
-        },
+        other,
+        None,
         t0 + Duration::from_millis(50),
         Transport::Hook,
     );
@@ -75,22 +65,13 @@ fn hook_event_after_tombstone_ttl_synthesizes_again() {
     let id = AgentId::from_parts("claude-code", "revived-later");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
+    sess_end(&mut r, &mut scene, id, false, t0, Transport::Hook);
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
-    r.apply(
-        &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: Some("t1".into()),
-            detail: None,
-        },
+        id,
+        Some("t1"),
+        None,
         t0 + HOOK_SESSION_END_TOMBSTONE_TTL + Duration::from_secs(1),
         Transport::Hook,
     );
@@ -117,15 +98,7 @@ fn jsonl_child_session_start_within_tombstone_is_gated_too() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     start(&mut r, &mut scene, parent);
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: child,
-            as_child: true,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, child, true, t0, Transport::Hook);
     // The watcher's first-sight emission for the child's transcript lands
     // within the TTL.
     r.apply(
@@ -161,15 +134,7 @@ fn non_child_session_end_tombstone_alone_gates_a_parented_start() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     start(&mut r, &mut scene, parent);
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: child,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, child, false, t0, Transport::Hook);
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {
@@ -205,15 +170,7 @@ fn child_session_start_past_tombstone_ttl_registers() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     start(&mut r, &mut scene, parent);
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: child,
-            as_child: true,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, child, true, t0, Transport::Hook);
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {
@@ -245,15 +202,7 @@ fn tombstoned_parentless_session_start_still_registers() {
     let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: id,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, id, false, t0, Transport::Hook);
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {
@@ -537,12 +486,11 @@ fn parentless_session_start_enriching_a_parentless_child_slot_adopts_ledger_pare
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: child,
-            as_child: true,
-        },
+        child,
+        true,
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
@@ -553,13 +501,12 @@ fn parentless_session_start_enriching_a_parentless_child_slot_adopts_ledger_pare
     // The hook straggler at +10s (inside the 90s ledger window, no #242
     // tombstone — the end had a slot) re-registers the child PARENTLESS via
     // hook synthesis.
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: child,
-            tool_use_id: Some("t-straggler".into()),
-            detail: None,
-        },
+        child,
+        Some("t-straggler"),
+        None,
         gone + Duration::from_secs(10),
         Transport::Hook,
     );
@@ -704,12 +651,11 @@ fn adopted_ledger_parent_still_runs_the_cycle_filter() {
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: x,
-            as_child: true,
-        },
+        x,
+        true,
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );
@@ -775,23 +721,21 @@ fn reasonix_resurrect_is_unaffected_by_a_ledger_entry_for_another_id() {
         t0,
         Transport::Hook,
     );
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: codex_child,
-            as_child: true,
-        },
+        codex_child,
+        true,
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
 
     // The Reasonix `/new` rotation, inside every ledger/tombstone window.
-    r.apply(
+    sess_end(
+        &mut r,
         &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: rx,
-            as_child: false,
-        },
+        rx,
+        false,
         t0 + Duration::from_secs(2),
         Transport::Hook,
     );

@@ -25,6 +25,7 @@ on:
       - "crates/pixtuoid-core/src/source/decoder.rs"
       - "crates/pixtuoid-core/src/source/opencode.rs"
       - "crates/pixtuoid-core/src/source/copilot.rs"
+      - "crates/pixtuoid-core/src/source/omp.rs"
       # codex.rs: the drift parser reads its rollout `("event_msg"|"response_item", …)`
       # decode arms (checked vs upstream EventMsg/ResponseItem), so a refactor of
       # those arms must trip the selftest here, not only weekly.

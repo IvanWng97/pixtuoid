@@ -21,7 +21,8 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("?", "toggle this overlay"),
     ("\u{2191} \u{2193} j k", "switch floor"),
     ("PgUp / PgDn", "switch floor"),
-    ("click agent", "pin tooltip"),
+    ("click agent", "focus its terminal"),
+    ("f (dashboard)", "focus selected agent's terminal"),
     ("Enter / Esc", "dismiss popup"),
 ];
 

@@ -327,6 +327,13 @@ impl UiState {
         floor
     }
 
+    /// `f` in the dashboard: the selected row's agent, for the focus-jump
+    /// (the panel STAYS open — focusing a terminal is a glance-and-return
+    /// action, unlike Enter's floor navigation which closes to show it).
+    pub(crate) fn dashboard_focus(&self) -> Option<pixtuoid_core::AgentId> {
+        self.dashboard.selected
+    }
+
     /// `s` on a closed panel: open with the freshly rebuilt connection facet.
     /// The rows' blocking I/O (`build_rows` — FS probes + per-source
     /// `diagnose`) runs at the loop under its documented `block_in_place`

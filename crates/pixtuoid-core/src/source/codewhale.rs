@@ -132,6 +132,7 @@ pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         // the cwd IS the session key.
         session_id: cwd.to_string(),
         cwd: Some(cwd.into()),
+        pid: None,
     };
 
     match event {
@@ -432,6 +433,7 @@ mod tests {
                     source,
                     session_id,
                     cwd,
+                    pid: None,
                 } => {
                     assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "/Users/dev/p"));
                     assert_eq!(source, SOURCE_NAME);

@@ -522,5 +522,10 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 0x58,
             b: 0xe0,
         }, // Hermes/Nous indigo (brand-constant like openclaw marigold; clears reasonix-violet + cursor-slate + codex-blue on every theme, min Manhattan >=92)
+        omp: Rgb {
+            r: 0x8a,
+            g: 0xc8,
+            b: 0x32,
+        }, // omp lime (brand-constant; clears antigravity-green + codewhale-teal + claude-amber on every theme)
     },
 };

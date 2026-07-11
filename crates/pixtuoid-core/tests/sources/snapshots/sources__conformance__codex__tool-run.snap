@@ -2,6 +2,10 @@
 source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
+- ModelInfo:
+    agent_id: 6841381709280743575
+    model: gpt-5.5
+    effort: medium
 - ActivityStart:
     agent_id: 6841381709280743575
     tool_use_id: ~

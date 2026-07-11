@@ -36,21 +36,21 @@ fn agent_label_painted_above_character() {
 }
 
 #[test]
-fn pinned_agent_renders_stats_tooltip() {
+fn hovered_agent_renders_stats_tooltip() {
     let a = AgentId::from_transcript_path("/pintip/0.jsonl");
     let scene = scene_with(vec![slot(a, 0, 0, t0() - Duration::from_secs(600))], 16);
     let mut r = build(120, 44, vec![]);
-    // Baseline without pin.
+    // Baseline without hover.
     r.render(&scene, &pack(), t0()).unwrap();
     let before = frame_text(r.frame_buffer());
     assert!(!before.contains("calls"));
-    // Pin → centered stats tooltip appears.
-    r.set_pinned_agent(Some(a));
+    // Hover → the dossier appears.
+    super::hover_agent(&mut r, &scene, a, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let after = frame_text(r.frame_buffer());
     assert!(
         after.contains("calls"),
-        "pinned tooltip should show the agent duration·calls stat line"
+        "hovered dossier should show the agent duration·calls stat line"
     );
 }
 

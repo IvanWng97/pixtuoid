@@ -25,6 +25,7 @@ use pixtuoid_core::source::daemon::{self, PresenceMsg};
 use pixtuoid_core::source::hook::HookRouter;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::manager::SourceManager;
+use pixtuoid_core::source::omp::OmpSource;
 use pixtuoid_core::source::registry;
 use pixtuoid_core::source::DynSource;
 use pixtuoid_core::state::MAX_FLOORS;
@@ -58,13 +59,17 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         log_path,
         first_run,
     } = cfg;
+    // Focus-jump pid point-query roots (cloned: build_source_set consumes the
+    // originals). CC = projects root (sessions registry derived in-core);
+    // Codex = the rollout tree the fd probe walks.
+    let focus_roots = (projects_root.clone(), codex_sessions_root.clone());
     // The live, shared connected-source set: the reducer-task gate reads it, the
     // Sources panel mutates it. Seeded from the resolved boot flags.
     let connected = ConnectedSources::new(connected);
     // The runtime source set, built in ONE place (`build_source_set`): the
     // `HookRouter` (the shared-socket owner — every source's hooks ride it) plus
-    // the transcript-bearing watchers (CC / Antigravity / Codex / Copilot). The
-    // hook-only sources (Reasonix / CodeWhale / opencode / Cursor) and the daemon
+    // the transcript-bearing watchers (CC / Antigravity / Codex / Copilot / omp).
+    // The hook-only sources (Reasonix / CodeWhale / opencode / Cursor / Hermes) and the daemon
     // (OpenClaw) have no watchable JSONL — their payloads ride the router's socket,
     // attributed per-payload by `_pixtuoid_source` — so they have no entry here.
     // Resolve the bound socket (Unix) / pipe (Windows) the HookRouter binds; the
@@ -138,6 +143,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             connected,
             log_path,
             first_run,
+            focus_roots,
         })
         .await
     }
@@ -164,6 +170,7 @@ pub(crate) fn build_source_set(
     }
     let ag_src = AntigravitySource::default_paths();
     let copilot_src = CopilotSource::default_paths();
+    let omp_src = OmpSource::default_paths();
 
     let mut codex_src = CodexSource::default_paths();
     if let Some(p) = codex_sessions_root {
@@ -192,6 +199,7 @@ pub(crate) fn build_source_set(
         Box::new(ag_src),
         Box::new(codex_src),
         Box::new(copilot_src),
+        Box::new(omp_src),
     ]
 }
 
@@ -488,6 +496,7 @@ mod tests {
             source: "codex".into(),
             session_id: "s".into(),
             cwd: None,
+            pid: None,
         };
         assert_eq!(event_source(&scene, &idy), Some("codex"));
 
@@ -510,6 +519,7 @@ mod tests {
             source: String::new(),
             session_id: "s".into(),
             cwd: None,
+            pid: None,
         };
         assert_eq!(event_source(&scene, &empty), Some("claude-code"));
     }

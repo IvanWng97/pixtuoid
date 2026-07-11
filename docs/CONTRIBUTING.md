@@ -115,7 +115,6 @@ configured before the tag is pushed, or that target's publish step fails. See
 - Every PR is reviewed by **2+ agents** (explorer / reviewer / architect) before merge — no exceptions. The teeth here are the `claude-review` + `claude-security-review` CI workflows plus your own local pass; the lens-labelled write-up is a practice, not a parsed gate.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check before merge.
 - Track every consciously-deferred finding as a GitHub issue (`gh issue create`) before moving on.
-- [`REVIEW-LEDGER.md`](REVIEW-LEDGER.md) and `docs/review-metrics/` are a **frozen historical archive** of past adjudications — handy to skim before re-arguing a finding that smells familiar, but no longer a required-update log.
 
 ### Recurring pitfalls (this codebase's review history, distilled)
 

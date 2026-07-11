@@ -66,3 +66,100 @@ fn delegating_pair(
     );
     (parent, child)
 }
+
+// ── The reducer-suite DSL ─────────────────────────────────────────────────
+// One terse applier per AgentEvent shape the suite hand-rolls the most. Each is
+// behavior-identical to the `r.apply(scene, AgentEvent::…, at, tp)` block it
+// replaces — pure test scaffolding, no reducer logic. `Some(&str)` args convert
+// through `.into()` exactly as the inline constructors did (`String` for ids/
+// reasons, `ToolDetail` for the tool detail). Calls the DSL can't express
+// verbatim (a `ToolDetail::` enum detail, a `SessionStart` with custom fields)
+// stay inline / use `start` + `delegating_pair`.
+
+fn act_start(
+    r: &mut Reducer,
+    scene: &mut SceneState,
+    id: AgentId,
+    tool_use_id: Option<&str>,
+    detail: Option<&str>,
+    at: SystemTime,
+    tp: Transport,
+) {
+    r.apply(
+        scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: tool_use_id.map(Into::into),
+            detail: detail.map(Into::into),
+        },
+        at,
+        tp,
+    );
+}
+
+fn act_end(
+    r: &mut Reducer,
+    scene: &mut SceneState,
+    id: AgentId,
+    tool_use_id: Option<&str>,
+    at: SystemTime,
+    tp: Transport,
+) {
+    r.apply(
+        scene,
+        AgentEvent::ActivityEnd {
+            agent_id: id,
+            tool_use_id: tool_use_id.map(Into::into),
+        },
+        at,
+        tp,
+    );
+}
+
+fn waiting(
+    r: &mut Reducer,
+    scene: &mut SceneState,
+    id: AgentId,
+    reason: &str,
+    at: SystemTime,
+    tp: Transport,
+) {
+    r.apply(
+        scene,
+        AgentEvent::Waiting {
+            agent_id: id,
+            reason: reason.into(),
+        },
+        at,
+        tp,
+    );
+}
+
+fn proof_of_life(
+    r: &mut Reducer,
+    scene: &mut SceneState,
+    id: AgentId,
+    at: SystemTime,
+    tp: Transport,
+) {
+    r.apply(scene, AgentEvent::ProofOfLife { agent_id: id }, at, tp);
+}
+
+fn sess_end(
+    r: &mut Reducer,
+    scene: &mut SceneState,
+    id: AgentId,
+    as_child: bool,
+    at: SystemTime,
+    tp: Transport,
+) {
+    r.apply(
+        scene,
+        AgentEvent::SessionEnd {
+            agent_id: id,
+            as_child,
+        },
+        at,
+        tp,
+    );
+}

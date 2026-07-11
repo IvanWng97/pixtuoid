@@ -64,7 +64,6 @@ pub struct DrawCtx<'a> {
     /// sibling of the `FloorCtx` on a `PerFloor`, borrowed disjointly.
     pub store: &'a mut pixtuoid_scene::floor::FloorCtx,
     pub mouse_pos: Option<(u16, u16)>,
-    pub pinned_agent: Option<pixtuoid_core::AgentId>,
     /// Live walkable/approach/route debug layer toggle (`w`). Threaded into the
     /// pixel pass; off by default, transient (not persisted to config).
     pub debug_walkable: bool,
@@ -293,7 +292,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     ctx.new_coffee_carriers = pixel_result.new_coffee_carriers;
 
     let mouse_pos = ctx.mouse_pos;
-    let pinned_agent = ctx.pinned_agent;
     let hovered = mouse_pos.and_then(|(mx, my)| {
         hit_test_agent(scene, &layout, now, &mut ctx.store.route_ctx(), mx, my)
     });
@@ -350,22 +348,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             let current = floor_info.map(|fi| fi.current).unwrap_or(1);
             paint_elevator_indicator(f, door, current, actual_scene, theme);
         }
-        let tooltip_agent = hovered.or(pinned_agent);
-        if let (Some(agent_id), Some((mx, my))) = (tooltip_agent, mouse_pos) {
+        if let (Some(agent_id), Some((mx, my))) = (hovered, mouse_pos) {
             paint_hover_tooltip(f, scene, agent_id, mx, my, actual_scene, now, theme);
-        } else if let Some(agent_id) = pinned_agent {
-            paint_hover_tooltip(
-                f,
-                scene,
-                agent_id,
-                actual_scene.width / 2,
-                actual_scene.height / 2,
-                actual_scene,
-                now,
-                theme,
-            );
         }
-        if tooltip_agent.is_none() && pinned_agent.is_none() {
+        if hovered.is_none() {
             if let Some((mx, my)) = mouse_pos {
                 // Priority chain: coffee machine > pet (only when the cursor is
                 // over it) > furniture. `.filter` keeps the pet arm a single

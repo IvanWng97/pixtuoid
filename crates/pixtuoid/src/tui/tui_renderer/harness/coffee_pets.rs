@@ -378,25 +378,32 @@ fn furniture_tooltip_flips_below_near_top_edge() {
 // (the ty overflow branch). Pin it to force the centered/hover panel path.
 #[test]
 fn agent_tooltip_flips_up_near_bottom_edge() {
-    let scene = scene_with(
-        vec![idle("/flup/0.jsonl", 0, t0() - Duration::from_secs(120))],
-        16,
-    );
+    // Seat the agent at the BOTTOM-most home desk so its hover hit-cells sit
+    // near the scene's bottom edge — the dossier then can't fit below the
+    // cursor and must flip up. (The pinned-anchor variant died with
+    // click-to-pin; hover anchors at the real hit cell now.)
+    let probe = SceneState::uniform(16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&probe, &pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout").clone();
-    // Pick the home desk nearest the bottom of the scene.
-    let bottom_desk = layout
+    let bottom_idx = layout
         .home_desks
         .iter()
-        .max_by_key(|d| d.y)
-        .copied()
+        .enumerate()
+        .max_by_key(|(_, d)| d.y)
+        .map(|(i, _)| i)
         .expect("a home desk");
+    let scene = scene_with(
+        vec![idle(
+            "/flup/0.jsonl",
+            bottom_idx,
+            t0() - Duration::from_secs(120),
+        )],
+        16,
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
     let id = AgentId::from_transcript_path("/flup/0.jsonl");
-    r.set_pinned_agent(Some(id));
-    // Hover near the very bottom rows so the hover-tooltip ty must flip up.
-    let my = (44u16).saturating_sub(2);
-    r.set_mouse_pos(Some((bottom_desk.x, my)));
+    super::hover_agent(&mut r, &scene, id, 120, 44);
     r.render(&scene, &pack(), t0())
         .expect("bottom-edge hover must not panic");
     // Reaching here (no panic, tooltip flipped within bounds) is the assertion.

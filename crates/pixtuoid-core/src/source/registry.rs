@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use crate::source::decoder::{extract_top_level_cwd, CwdExtractor, LineDecoder};
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, openclaw, opencode,
+    antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, omp, openclaw, opencode,
     reasonix, AgentEvent,
 };
 
@@ -172,6 +172,38 @@ pub struct Transcript {
     pub cwd_extractor: CwdExtractor,
 }
 
+/// How focus-jump resolves this source's OS pid — a DATA-only capability
+/// (this const table compiles to wasm via `default-features = false`, so a
+/// native-only probe FN POINTER can never live here; the transcript probes
+/// stay in the BINARY's `focus::resolve_pid`, pinned to this enum by its
+/// lockstep test). ONE source of truth for the three consumers that used to
+/// hand-agree: the hook stamp gate (`patch_identity_pids`), the click-time
+/// probe dispatch (`focus::resolve_pid`), and the doctor report bucketing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusChannel {
+    /// The shim stamps its `getppid` into `_pid` — trustworthy because
+    /// `sh -c` EXECs the hook so the parent IS the CLI; absent on Windows
+    /// (`cmd /C` transient parent, the documented `parent_pid` trap).
+    ShimStamp,
+    /// The source's own runtime stamps `_pid` (opencode's `process.pid`) —
+    /// cross-platform, survives even where the shim sends nothing.
+    PluginStamp,
+    /// Pid resolves through a recycle-guarded liveness probe at CLICK time;
+    /// hook stamps are never trusted (the shim's getppid is the hook-command
+    /// parent, not the CLI). The probe fn itself lives in the binary.
+    TranscriptProbe,
+    /// No pid channel — a focus click silently no-ops (the ONE failure rule).
+    Unsupported,
+}
+
+impl FocusChannel {
+    /// Whether a hook-envelope `_pid` stamp is a trustworthy pid for this
+    /// source — the `patch_identity_pids` gate.
+    pub fn accepts_stamp(self) -> bool {
+        matches!(self, FocusChannel::ShimStamp | FocusChannel::PluginStamp)
+    }
+}
+
 /// The two source classes, type-isolated. Adding a daemon (a 2nd one is "one
 /// `Daemon` row + one binary mascot arm + one badge arm") needs no `handle_conn`
 /// edit and no new reducer arm — the registry-driven demux + the
@@ -185,6 +217,9 @@ pub enum SourceKind {
         transcript: Option<Transcript>,
         hook: HookDecoding,
         caps: SourceCaps,
+        /// The focus-jump pid channel. Lives INSIDE `Agent` so a daemon can't
+        /// carry one (structurally unrepresentable — a mascot isn't clickable).
+        focus: FocusChannel,
     },
     /// Produces `DaemonPresenceUpdate`s → `SceneState::daemons` → a wandering
     /// mascot (the OpenClaw gateway is instance #1). Its `presence_decoder` maps
@@ -219,6 +254,15 @@ impl SourceDescriptor {
     /// daemon — neither has a transcript for the walker to head-scan).
     pub fn cwd_extractor(&self) -> Option<CwdExtractor> {
         self.transcript().map(|t| t.cwd_extractor)
+    }
+
+    /// The focus-jump pid channel (`Unsupported` for a daemon — a mascot has
+    /// no terminal to jump to).
+    pub fn focus_channel(&self) -> FocusChannel {
+        match &self.kind {
+            SourceKind::Agent { focus, .. } => *focus,
+            SourceKind::Daemon { .. } => FocusChannel::Unsupported,
+        }
     }
 
     /// The hook-decoding spec (`None` for a daemon — its payloads never reach
@@ -258,6 +302,7 @@ pub const REGISTRY: &[SourceDescriptor] = &[
     COPILOT,
     CURSOR,
     HERMES,
+    OMP,
     OPENCLAW,
 ];
 
@@ -334,6 +379,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
             resurrects_on_prompt: false,
             delegations_are_hook_silent: false,
         },
+        focus: FocusChannel::TranscriptProbe,
     },
 };
 
@@ -359,6 +405,7 @@ const CODEX: SourceDescriptor = SourceDescriptor {
             resurrects_on_prompt: true,
             delegations_are_hook_silent: false,
         },
+        focus: FocusChannel::TranscriptProbe,
     },
 };
 
@@ -384,6 +431,7 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
             resurrects_on_prompt: false,
             delegations_are_hook_silent: false,
         },
+        focus: FocusChannel::Unsupported,
     },
 };
 
@@ -416,6 +464,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
             // stale window (see `stale_threshold_with_caps`).
             delegations_are_hook_silent: true,
         },
+        focus: FocusChannel::ShimStamp,
     },
 };
 
@@ -455,6 +504,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
             // `codewhale::decode_cw_subagent`.)
             delegations_are_hook_silent: true,
         },
+        focus: FocusChannel::ShimStamp,
     },
 };
 
@@ -488,6 +538,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
             // needed.
             delegations_are_hook_silent: false,
         },
+        focus: FocusChannel::PluginStamp,
     },
 };
 
@@ -541,6 +592,7 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
             // `subagent.started`/`completed` events, so a delegation is not hook-silent.
             delegations_are_hook_silent: false,
         },
+        focus: FocusChannel::Unsupported,
     },
 };
 
@@ -584,6 +636,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
             // `sessionEnd` reaps it cleanly in the normal case).
             delegations_are_hook_silent: true,
         },
+        focus: FocusChannel::ShimStamp,
     },
 };
 
@@ -618,6 +671,56 @@ const HERMES: SourceDescriptor = SourceDescriptor {
             // no hook-silent delegation window to hold.
             delegations_are_hook_silent: false,
         },
+        focus: FocusChannel::ShimStamp,
+    },
+};
+
+/// Oh My Pi (`omp`, omp.sh). TRANSCRIPT-ONLY (Copilot/Antigravity-class): the
+/// whole lifecycle is persisted to
+/// `<omp_agent_dir>/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl` (assistant
+/// toolCall blocks + toolResult messages + the `session_exit` custom entry),
+/// and omp has NO shell-hook seam (its hooks are in-process TS extensions), so
+/// it needs NO install target and NO custom hook decoder. Subagents persist as
+/// SEPARATE nested files (`<parent-stem>/<taskId>.jsonl`) — parent-linked by
+/// path (`omp::omp_id_from_path` keys the stem chain).
+const OMP: SourceDescriptor = SourceDescriptor {
+    name: omp::SOURCE_NAME,
+    label_prefix: "om",
+    // Byte-real capture anchor (2026-07-10): `omp/16.4.0` (`omp --version`);
+    // the omp fixtures are sanitized captures from that install.
+    verified_version: "16.4.0",
+    version_probe: Some(&["omp", "--version"]),
+    kind: SourceKind::Agent {
+        transcript: Some(Transcript {
+            line_decoder: omp::decode_omp_line,
+            // The `type:"session"` header carries a top-level `cwd` — the
+            // shared shape.
+            cwd_extractor: extract_top_level_cwd,
+        }),
+        hook: HookDecoding {
+            id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
+            custom: None,
+        },
+        caps: SourceCaps {
+            // The `session_exit` custom entry is appended + flushed on every
+            // clean teardown incl. SIGINT/SIGTERM (best-effort counts;
+            // SIGKILL falls to the stale-sweep) → no short-idle reaper.
+            has_exit_signal: true,
+            // The header `SessionStart` decodes once per transcript life (and
+            // first-sight is once per path), so a stale-swept session does not
+            // walk back in on the next prompt — moot anyway with a real exit
+            // signal (short_idle_reap == false).
+            resurrects_on_prompt: false,
+            // The `task` dispatch emits a toolCall/toolResult pair on the
+            // parent AND the child persists its own parent-linked transcript
+            // (liveness flows up), so a delegation is not hook-silent.
+            delegations_are_hook_silent: false,
+        },
+        // Transcript-only: no shim to stamp a pid, and no click-time
+        // transcript probe wired in the binary (the #518 fd probe binds
+        // pid_of for LIVENESS; promoting it to a focus point-query is a
+        // separate seam). Matches Copilot/Antigravity.
+        focus: FocusChannel::Unsupported,
     },
 };
 
@@ -705,10 +808,11 @@ mod tests {
         assert_eq!(COPILOT.name, copilot::SOURCE_NAME);
         assert_eq!(CURSOR.name, cursor::SOURCE_NAME);
         assert_eq!(HERMES.name, hermes::SOURCE_NAME);
+        assert_eq!(OMP.name, omp::SOURCE_NAME);
         assert_eq!(OPENCLAW.name, openclaw::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 10, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 11, "new row? add its name-pin assert above");
     }
 
     #[test]

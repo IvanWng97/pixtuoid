@@ -170,8 +170,8 @@ pub struct ApplianceColors {
     pub coats: [Rgb; 3],
 }
 
-/// Per-source badge hues. One color per registered source — the 9 agent CLIs +
-/// the OpenClaw daemon (`all()` returns `[Rgb; 10]`, count-pinned to
+/// Per-source badge hues. One color per registered source — the 10 agent CLIs +
+/// the OpenClaw daemon (`all()` returns `[Rgb; 11]`, count-pinned to
 /// `REGISTERED_SOURCES` by `source_colors_cover_every_registered_source`) — drawn
 /// as a leading `[xx]` badge in the agent-dashboard popup (agents only) and the
 /// Sources panel (all sources, incl. the daemon). Each theme supplies its own so
@@ -189,6 +189,7 @@ pub struct SourceColors {
     pub cursor: Rgb,
     pub openclaw: Rgb,
     pub hermes: Rgb,
+    pub omp: Rgb,
 }
 
 impl SourceColors {
@@ -196,7 +197,7 @@ impl SourceColors {
     /// guard and the count-pin test share, so adding a source forces a new field
     /// HERE (caught by `source_colors_cover_every_registered_source`) instead of
     /// silently escaping the per-theme distinctness check.
-    pub fn all(&self) -> [Rgb; 10] {
+    pub fn all(&self) -> [Rgb; 11] {
         [
             self.claude_code,
             self.codex,
@@ -208,6 +209,7 @@ impl SourceColors {
             self.cursor,
             self.openclaw,
             self.hermes,
+            self.omp,
         ]
     }
 
@@ -229,6 +231,7 @@ impl SourceColors {
             "cu" => self.cursor,
             "ok" => self.openclaw,
             "hm" => self.hermes,
+            "om" => self.omp,
             _ => return None,
         })
     }
@@ -441,5 +444,26 @@ mod tests {
             "SourceColors has a different hue count than the registered sources — add the \
              new source's field to SourceColors + all() (and a hue in every theme file)"
         );
+    }
+
+    // `by_prefix`'s match arms are a hand-kept copy of the registry's
+    // authoritative `SourceDescriptor::label_prefix` strings. The count guard
+    // above and the distinctness guard pin the HUES, not the prefix STRINGS —
+    // those were only pinned transitively, via the site-manifest chain and only
+    // for `status == "supported"` rows. A registry prefix RENAME that misses the
+    // matching `by_prefix` arm silently drops that source's badge to the idle
+    // fallback (`by_prefix(tag).unwrap_or(ui.label_idle)` in the painters). Pin
+    // the string mapping directly to the registry so the rename fails loudly HERE.
+    #[test]
+    fn by_prefix_accepts_every_registered_label_prefix() {
+        for d in pixtuoid_core::source::registry::REGISTRY {
+            assert!(
+                NORMAL.source.by_prefix(d.label_prefix).is_some(),
+                "theme::by_prefix has no arm for source {:?} label_prefix {:?} — its badge \
+                 would fall back to idle; add the arm (or align it with the registry rename)",
+                d.name,
+                d.label_prefix
+            );
+        }
     }
 }

@@ -6,7 +6,7 @@ use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
 
-use crate::start;
+use crate::{act_start, sess_end, start};
 
 #[test]
 fn session_start_with_cwd_derives_label_from_basename() {
@@ -81,13 +81,12 @@ fn session_start_label_caps_a_pathologically_long_cwd_basename() {
     // The sibling mint site: a blank hook-synthesized slot whose fallback
     // label the duplicate-SessionStart backfill upgrades (explicitly capped).
     let upgraded = AgentId::from_transcript_path("/p/upgraded.jsonl");
-    r.apply(
+    act_start(
+        &mut r,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: upgraded,
-            tool_use_id: Some("t-1".into()),
-            detail: Some("Bash: ls".into()),
-        },
+        upgraded,
+        Some("t-1"),
+        Some("Bash: ls"),
         t0,
         Transport::Hook,
     );
@@ -202,15 +201,7 @@ fn capacity_dropped_unknown_cwd_session_consumes_no_ghost_ordinal() {
 
     // Free the desk, then a NEW unknown-cwd session is the FIRST ghost: cc#1,
     // not cc#2 — the dropped one consumed no ordinal.
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionEnd {
-            agent_id: occupant,
-            as_child: false,
-        },
-        t0,
-        Transport::Hook,
-    );
+    sess_end(&mut r, &mut scene, occupant, false, t0, Transport::Hook);
     r.tick(&mut scene, t0 + EXIT_GRACE_WINDOW + Duration::from_secs(1));
     assert!(!scene.agents.contains_key(&occupant), "occupant reaped");
 

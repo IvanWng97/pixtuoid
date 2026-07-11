@@ -201,6 +201,95 @@ pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &T
     }
 }
 
+/// The Top-tier flame crown (`burn::BurnTier::Top`) — a 2-frame flicker above
+/// the sprite's hair, painted AFTER the character blit so it rides every pose
+/// (seated/walking/standing) through the one `paint_character_at` seam. The
+/// aesthetic is the user-ratified mockup (2026-07-10): tips capped ≤2 px above
+/// the hair top so the flame never collides with the name-badge row; the
+/// asymmetric two-frame flicker is what reads as fire, not a hat. INTEGER
+/// phase division before any float (the epoch-ms-as-f32 freeze sharp edge).
+/// The flame gradient's deep-ember base — ONE literal shared with the
+/// Premium ember-hair recolor (`palette::agent_palette`), so a gradient
+/// tweak can't desync the hair from the crown.
+pub(crate) const FLAME_DEEP: Rgb = Rgb {
+    r: 0xc2,
+    g: 0x28,
+    b: 0x12,
+};
+
+/// The flame gradient's yellow tip. `pub(crate)` alongside [`FLAME_DEEP`] so
+/// render tests assert the REAL painted colors instead of re-hardcoding them.
+pub(crate) const FLAME_TIP: Rgb = Rgb {
+    r: 0xff,
+    g: 0xd2,
+    b: 0x4a,
+};
+
+pub(super) fn paint_flame_crown(
+    buf: &mut RgbBuffer,
+    anchor: Point,
+    sprite_w: u16,
+    now: SystemTime,
+) {
+    // Ratified flame palette (deep ember → orange → yellow tip → hot core);
+    // the deep base is the shared FLAME_DEEP (also the Premium hair recolor).
+    const MID: Rgb = Rgb {
+        r: 0xe8,
+        g: 0x64,
+        b: 0x1f,
+    };
+    const TIP: Rgb = FLAME_TIP;
+    const CORE: Rgb = Rgb {
+        r: 0xff,
+        g: 0xf3,
+        b: 0xa0,
+    };
+    const FLICKER_MS: u64 = 260;
+    let f2 = (epoch_ms(now) / FLICKER_MS) % 2 == 1;
+
+    // Head-center column; the crown hugs the hair's top row (anchor.y) and
+    // rises two rows above it. Pattern is (dx from center-left, dy up, color).
+    let cx = anchor.x + sprite_w / 2;
+    let frame_a: &[(i32, u16, Rgb)] = &[
+        // crown row over the hair top
+        (-2, 0, MID),
+        (-1, 0, MID),
+        (0, 0, FLAME_DEEP),
+        (1, 0, MID),
+        // first rise
+        (-2, 1, MID),
+        (-1, 1, CORE),
+        (0, 1, MID),
+        (1, 1, TIP),
+        // tips
+        (-2, 2, TIP),
+        (0, 2, TIP),
+    ];
+    let frame_b: &[(i32, u16, Rgb)] = &[
+        (-2, 0, MID),
+        (-1, 0, FLAME_DEEP),
+        (0, 0, MID),
+        (1, 0, MID),
+        (-2, 1, TIP),
+        (-1, 1, MID),
+        (0, 1, CORE),
+        (1, 1, MID),
+        (-1, 2, TIP),
+        (1, 2, TIP),
+    ];
+    for &(dx, dy, c) in if f2 { frame_b } else { frame_a } {
+        let Some(px) = cx.checked_add_signed(dx as i16) else {
+            continue;
+        };
+        let Some(py) = anchor.y.checked_sub(dy) else {
+            continue;
+        };
+        if px < buf.width() && py < buf.height() {
+            buf.put(px, py, c);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

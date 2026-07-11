@@ -171,6 +171,9 @@ fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
         active_ms: 0,
         unknown_cwd: false,
         parent_id: None,
+        pid: None,
+        model: None,
+        effort: None,
     }
 }
 
@@ -225,8 +228,18 @@ fn base_palette() -> Palette {
 fn agent_palette_is_deterministic_per_id() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
     let base = base_palette();
-    let a = agent_palette(&base, &make_slot(id, ActivityState::Idle), None);
-    let b = agent_palette(&base, &make_slot(id, ActivityState::Idle), None);
+    let a = agent_palette(
+        &base,
+        &make_slot(id, ActivityState::Idle),
+        None,
+        crate::burn::BurnTier::Normal,
+    );
+    let b = agent_palette(
+        &base,
+        &make_slot(id, ActivityState::Idle),
+        None,
+        crate::burn::BurnTier::Normal,
+    );
     assert_eq!(a.get('B'), b.get('B'));
     assert_eq!(a.get('H'), b.get('H'));
     assert_eq!(a.get('S'), b.get('S'));
@@ -236,7 +249,12 @@ fn agent_palette_is_deterministic_per_id() {
 fn agent_palette_overrides_only_bhs_keys() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
     let base = base_palette();
-    let p = agent_palette(&base, &make_slot(id, ActivityState::Idle), None);
+    let p = agent_palette(
+        &base,
+        &make_slot(id, ActivityState::Idle),
+        None,
+        crate::burn::BurnTier::Normal,
+    );
     // X is not a recolor target — must pass through unchanged.
     assert_eq!(
         p.get('X'),
@@ -279,7 +297,7 @@ fn agent_palette_glow_tint_shifts_skin_toward_given_color() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
     let base = base_palette();
     let slot = make_slot(id, ActivityState::Idle);
-    let unlit = agent_palette(&base, &slot, None);
+    let unlit = agent_palette(&base, &slot, None, crate::burn::BurnTier::Normal);
     let green_glow = agent_palette(
         &base,
         &slot,
@@ -288,6 +306,7 @@ fn agent_palette_glow_tint_shifts_skin_toward_given_color() {
             g: 240,
             b: 170,
         }),
+        crate::burn::BurnTier::Normal,
     );
     let blue_glow = agent_palette(
         &base,
@@ -297,6 +316,7 @@ fn agent_palette_glow_tint_shifts_skin_toward_given_color() {
             g: 160,
             b: 255,
         }),
+        crate::burn::BurnTier::Normal,
     );
     // Shirt / hair / pants are unaffected by glow.
     assert_eq!(unlit.get('B'), green_glow.get('B'));
@@ -1385,6 +1405,75 @@ fn seat_view_of_obstacle_kinds_is_upright_unflipped() {
     }
 }
 
+// --- burn tier: ember hair + flame crown through the one shared blit ---
+
+#[test]
+fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
+    use pixtuoid_core::state::EffortObservation;
+    use std::time::Duration;
+    let pack = crate::embedded_pack::test_default_pack();
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let black = Rgb { r: 0, g: 0, b: 0 };
+    let anchor = Point { x: 8, y: 8 };
+    let mut slot = make_slot(
+        pixtuoid_core::AgentId::from_parts("claude-code", "ses_burn"),
+        ActivityState::Idle,
+    );
+
+    let render = |slot: &pixtuoid_core::AgentSlot| {
+        let mut buf = RgbBuffer::filled(32, 32, black);
+        paint_character_at(
+            &mut buf,
+            "seated",
+            0,
+            anchor,
+            slot,
+            &pack,
+            false,
+            None,
+            &mut FrameCache::new(),
+            now,
+        );
+        buf
+    };
+    let has = |buf: &RgbBuffer, c: Rgb| {
+        (0..buf.height()).any(|y| (0..buf.width()).any(|x| buf.get(x, y) == c))
+    };
+    // The painter's own constants — not re-hardcoded copies.
+    const EMBER: Rgb = super::effects::FLAME_DEEP;
+    const TIP: Rgb = super::effects::FLAME_TIP;
+
+    // Normal (no model): natural hair, no flame colors anywhere.
+    let plain = render(&slot);
+    assert!(
+        !has(&plain, EMBER) && !has(&plain, TIP),
+        "Normal must not burn"
+    );
+
+    // Premium (top model, no fresh max effort): ember hair, still no flame.
+    slot.model = Some("claude-fable-5".into());
+    let ember = render(&slot);
+    assert!(has(&ember, EMBER), "Premium recolors the hair to ember");
+    assert!(!has(&ember, TIP), "Premium must not flame");
+    assert_ne!(plain.as_slice(), ember.as_slice());
+
+    // Top (fresh max effort): the flame crown paints ABOVE the sprite anchor.
+    slot.effort = Some(EffortObservation::new("ultra".into(), now));
+    let burning = render(&slot);
+    assert!(has(&burning, TIP), "Top paints flame tips");
+    let above = (0..anchor.y).any(|y| (0..32).any(|x| burning.get(x, y) != black));
+    assert!(above, "the crown must rise above the sprite's top row");
+
+    // TTL decay: a stale effort falls back to ember (no flame).
+    slot.effort = Some(EffortObservation::new(
+        "ultra".into(),
+        now - Duration::from_secs(crate::burn::EFFORT_TTL_SECS + 1),
+    ));
+    let decayed = render(&slot);
+    assert!(!has(&decayed, TIP), "stale effort must decay the flame");
+    assert!(has(&decayed, EMBER), "…back to ember hair");
+}
+
 // --- paint_character_at defensive missing-anim early return -----------
 
 #[test]
@@ -1405,6 +1494,7 @@ fn paint_character_at_missing_anim_is_a_noop() {
         false,
         None,
         &mut cache,
+        SystemTime::UNIX_EPOCH,
     );
     for y in 0..buf.height() {
         for x in 0..buf.width() {
@@ -1683,8 +1773,8 @@ fn agent_palette_outfit_is_keyed_by_cwd_not_id() {
     // Same cwd, DIFFERENT agent ids.
     let a = make_slot_cwd("/demo/api/aaaa.jsonl", "/demo/api", false);
     let b = make_slot_cwd("/demo/api/bbbb.jsonl", "/demo/api", false);
-    let pa = agent_palette(&base, &a, None);
-    let pb = agent_palette(&base, &b, None);
+    let pa = agent_palette(&base, &a, None, crate::burn::BurnTier::Normal);
+    let pb = agent_palette(&base, &b, None, crate::burn::BurnTier::Normal);
     // Same cwd => same outfit (shirt 'B' + pants 'P').
     assert_eq!(pa.get('B'), pb.get('B'), "same cwd should share shirt");
     assert_eq!(pa.get('P'), pb.get('P'), "same cwd should share pants");
@@ -1702,15 +1792,15 @@ fn agent_palette_unknown_cwd_falls_back_to_id_outfit() {
     // unknown_cwd and empty-cwd both fall back to the agent_id-seeded outfit.
     let unknown = make_slot_cwd("/x/aaaa.jsonl", "/whatever", true);
     let empty = make_slot_cwd("/x/aaaa.jsonl", "", false);
-    let p_unknown = agent_palette(&base, &unknown, None);
-    let p_empty = agent_palette(&base, &empty, None);
+    let p_unknown = agent_palette(&base, &unknown, None, crate::burn::BurnTier::Normal);
+    let p_empty = agent_palette(&base, &empty, None, crate::burn::BurnTier::Normal);
     // Same agent_id under both fallback triggers => identical outfit.
     assert_eq!(p_unknown.get('B'), p_empty.get('B'));
     assert_eq!(p_unknown.get('P'), p_empty.get('P'));
     // Fallback preserves per-agent variety: two cwd-less agents with different
     // ids must NOT collapse to one "unknown" outfit.
     let other = make_slot_cwd("/x/zzzz.jsonl", "", false);
-    let p_other = agent_palette(&base, &other, None);
+    let p_other = agent_palette(&base, &other, None, crate::burn::BurnTier::Normal);
     assert_ne!(
         p_other.get('B'),
         p_empty.get('B'),
@@ -1732,8 +1822,9 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let healed = (0..64)
         .map(|i| make_slot_cwd("/p/heal.jsonl", &format!("/repo/team{i}"), false))
         .find(|h| {
-            agent_palette(&pack.palette, h, None).get('B')
-                != agent_palette(&pack.palette, &unknown, None).get('B')
+            agent_palette(&pack.palette, h, None, crate::burn::BurnTier::Normal).get('B')
+                != agent_palette(&pack.palette, &unknown, None, crate::burn::BurnTier::Normal)
+                    .get('B')
         })
         .expect("some cwd lands on a different outfit than the fallback");
 
@@ -1751,12 +1842,22 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
         false,
         None,
         &mut cache,
+        SystemTime::UNIX_EPOCH,
     );
 
     // Heal the cwd, repaint the SAME pose through the SAME cache.
     let mut after = RgbBuffer::filled(24, 24, black);
     paint_character_at(
-        &mut after, "seated", 0, anchor, &healed, &pack, false, None, &mut cache,
+        &mut after,
+        "seated",
+        0,
+        anchor,
+        &healed,
+        &pack,
+        false,
+        None,
+        &mut cache,
+        SystemTime::UNIX_EPOCH,
     );
 
     // Ground truth: the same repaint through a FRESH cache.
@@ -1771,6 +1872,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
         false,
         None,
         &mut FrameCache::new(),
+        SystemTime::UNIX_EPOCH,
     );
 
     assert_ne!(
@@ -1791,8 +1893,8 @@ fn agent_palette_same_id_different_cwd_changes_outfit() {
     // Same id stem, different cwds chosen to land on different pool indices.
     let a = make_slot_cwd("/p/aaaa.jsonl", "/demo/api", false);
     let b = make_slot_cwd("/p/aaaa.jsonl", "/demo/infra", false);
-    let pa = agent_palette(&base, &a, None);
-    let pb = agent_palette(&base, &b, None);
+    let pa = agent_palette(&base, &a, None, crate::burn::BurnTier::Normal);
+    let pb = agent_palette(&base, &b, None, crate::burn::BurnTier::Normal);
     assert_ne!(
         pa.get('B'),
         pb.get('B'),

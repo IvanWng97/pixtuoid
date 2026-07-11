@@ -511,6 +511,7 @@ fn display_name_for(source_id: &'static str) -> &'static str {
     match source_id {
         "antigravity" => "Antigravity",
         "copilot" => "Copilot CLI",
+        "omp" => "Oh My Pi",
         other => other,
     }
 }

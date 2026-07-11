@@ -1,4 +1,5 @@
 {"timestamp":"2026-01-01T00:00:00.000Z","type":"session_meta","payload":{"id":"01000000-0000-7000-8000-000000000002","cwd":"/home/user/demo-project","cli_version":"0.135.0"}}
+{"timestamp": "2026-05-30T04:56:57.663Z", "type": "turn_context", "payload": {"turn_id": "019e773e-11a2-7850-a427-40391b62e18a", "cwd": "/home/user/demo-project", "approval_policy": "on-request", "model": "gpt-5.5", "effort": "medium"}}
 {"timestamp":"2026-01-01T00:00:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-0001"}}
 {"timestamp":"2026-01-01T00:00:00.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"call-0001"}}
 {"timestamp":"2026-01-01T00:00:00.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-0001","output":"(command output)\n"}}

@@ -67,6 +67,21 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   (one name-badge per visible agent — text disambiguated/truncated, tone from activity, anchor
 │                   from character_anchor); owns truncate_label/disambig_suffix. The tui + floating painters
 │                   consume it identically (single source of truth so the two surfaces can't drift)
+├── burn.rs         burn tier (model gate × effort split, USER-PINNED): TOP_MODELS prefix table
+│                   (claude-fable/claude-mythos/gpt-5.6-sol — source-verified slugs) × MAX_EFFORTS
+│                   ({ultra,ultrathink,xhigh,max}) → BurnTier{Normal,Premium,Top}; fresh_effort =
+│                   the ONE EFFORT_TTL freshness rule (tier + dossier share it), and it ALSO drops
+│                   CC's decoder-synthesized ultra_exit exit-sentinel so the internal token never
+│                   reaches the dossier — the one source-specific special-case in this otherwise
+│                   source-agnostic table (string = core-owned claude_code::ULTRA_EXIT_LABEL,
+│                   referenced not re-hardcoded). Interpretation
+│                   lives HERE; the RAW strings live on AgentSlot (core). Consumed by
+│                   pixel_painter's paint_character_at (ember 'H' recolor + Top flame crown) and
+│                   the binary's tooltip. Unknown model → Normal (fail-quiet, never flames).
+│                   BACK-VIEW ember slab is DELIBERATE (user-ratified): walking_back/back_couch
+│                   sprites are ~6 rows of 'H', so Premium+ reads as a solid red back — accepted
+│                   (transient pose; spotting an expensive agent from behind is the point). Don't
+│                   "fix" with per-row recolor.
 ├── board.rs        backend-agnostic NEON WALL-BOARD model + shared scene-stats — the sibling of overlay.rs for
 │                   the wall panel (brand+★ / mood pulse / uptime·floor·gateway). Owns StateCounts + scene_stats/
 │                   bucket_slot/per_floor_counts/gateway_rollup/compact_hms (relocated from the binary's tui

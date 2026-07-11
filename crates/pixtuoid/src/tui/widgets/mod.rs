@@ -380,6 +380,9 @@ mod tests {
             active_ms: 0,
             unknown_cwd: false,
             parent_id: None,
+            pid: None,
+            model: None,
+            effort: None,
         }
     }
 
@@ -676,6 +679,9 @@ mod tests {
             active_ms: 0,
             unknown_cwd: false,
             parent_id: None,
+            pid: None,
+            model: None,
+            effort: None,
         }
     }
     fn active_with(detail: &str, label: &str) -> AgentSlot {

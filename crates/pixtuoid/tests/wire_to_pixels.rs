@@ -312,6 +312,15 @@ fn agent_cases() -> Vec<WireCase> {
             // The events.jsonl carries a session.start → its own SessionStart.
             seed: SeedStart::None,
         },
+        WireCase {
+            name: "omp",
+            source: "omp",
+            fixture: "omp/tool-run/2026-07-10T08-00-00-000Z_01990000-0000-7000-8000-000000000002.jsonl",
+            decode: DecodeKind::Transcript,
+            transport: Transport::Jsonl,
+            // The session header line carries its own SessionStart.
+            seed: SeedStart::None,
+        },
         // ---- hook-only sources (decode_hook_payload, Hook transport) ----
         // A hook event for an unknown session id REGISTERS it (hooks are proof
         // of life), so no seed is needed — the SessionStart envelope (or the
@@ -451,6 +460,11 @@ fn antigravity_transcript_line_renders_a_painted_sprite() {
 #[test]
 fn copilot_transcript_line_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("copilot"));
+}
+
+#[test]
+fn omp_transcript_line_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_case("omp"));
 }
 
 #[test]

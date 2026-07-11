@@ -24,6 +24,10 @@ expression: events
 - ActivityEnd:
     agent_id: 4184320534004752587
     tool_use_id: call_nf1RvU9GxssNg2g7WtPgHqQ4
+- ModelInfo:
+    agent_id: 4184320534004752587
+    model: gpt-5-mini
+    effort: ~
 - SessionEnd:
     agent_id: 4184320534004752587
     as_child: false

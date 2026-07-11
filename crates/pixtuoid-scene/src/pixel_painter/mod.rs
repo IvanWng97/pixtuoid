@@ -96,6 +96,11 @@ pub use palette::tool_glow_for_kind;
 // `sim_step` + `SimStores` (the per-call borrow-set) stay crate-internal —
 // the session is the public entry to the sim tick.
 pub(crate) use sim::{sim_step, SimStores};
+// The flame-crown/ember colors, for render tests (floor.rs) to assert the
+// REAL painted values (effects itself stays a private submodule) — test-only,
+// hence the cfg: the lib target has no consumer.
+#[cfg(test)]
+pub(crate) use effects::{FLAME_DEEP, FLAME_TIP};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 
 /// The coffee-machine sub-region within the pantry counter sprite, as sprite-local

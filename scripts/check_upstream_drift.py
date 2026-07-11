@@ -31,7 +31,11 @@ and compares against the live upstream:
   * CodeWhale hooks    -> `CODEWHALE_EVENTS` in crates/pixtuoid/src/install/codewhale.rs
                           vs the snake_case `HookEvent` enum in
                           Hmbown/CodeWhale crates/tui/src/hooks.rs
-  * opencode events    -> the EventV2 `type`s the decoder maps (the `match event`
+  * burn-tier fields   -> codex turn_context.{model,effort} (TurnContextItem,
+                        protocol.rs) + copilot data.model (schema) + opencode
+                        info.model (session.ts) + CC ultra attachment markers
+                        (docs appearance watch) — see #541
+* opencode events    -> the EventV2 `type`s the decoder maps (the `match event`
                           block in crates/pixtuoid-core/src/source/opencode.rs)
                           vs the `EventV2.define` type literals in
                           anomalyco/opencode packages/schema/src/v1/session.ts +
@@ -141,10 +145,29 @@ CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
 # review-class drift (something new to adopt), never breaking. `session_end`
 # is snake_case on purpose: the SessionEnd HOOK name appears throughout
 # hooks.md and must not match.
+# CC hook-payload surfaces we DEPEND on that are DOCUMENTED (hooks.md) — the
+# inverse direction of the appearance markers below: these strings VANISHING
+# from hooks.md is review-class drift (the docs moved/renamed a surface the
+# burn-tier decoder reads). `CLAUDE_EFFORT` pins the effort row (the decoder
+# reads `effort.level` off tool-context payloads; ultracode reports as xhigh);
+# the model sentence pins SessionStart's optional `model` field.
+CC_DEPENDED_DOC_MARKERS = {
+    "CLAUDE_EFFORT": "the hook-payload effort surface (effort.level, burn tier)",
+    "receive a `model` field": "SessionStart's optional model field (burn tier)",
+}
+
 CC_LIFECYCLE_SURFACE_MARKERS = {
     "session_end": 'a structural transcript end record (subtype:"session_end")',
     ".claude/sessions/": "the ~/.claude/sessions/<pid>.json session registry",
     "procStart": "the sessions-registry procStart field",
+    # burn tier (#541): the periodic ultra-effort attachment markers the CC
+    # decoder synthesizes effort labels from (undocumented wire, verified live
+    # 2026-07-10). CC is a closed binary, so like the registry above this is an
+    # APPEARANCE watch: the docs mentioning them = upstream started documenting
+    # the surface — a review ping to re-verify our synthesized labels/shape.
+    "ultra_effort_enter": "the ultra-effort transcript attachment marker",
+    "ultrathink_effort": "the ultrathink transcript attachment marker",
+    "ultra_effort_exit": "the ultra-effort EXIT attachment marker (instant flame-off)",
 }
 
 # Codex hook events we DELIBERATELY do not register — they are not agent
@@ -267,6 +290,10 @@ OPENCODE_TOLERATED = {"permission.asked"}
 OPENCODE_PAYLOAD_FIELDS = {
     "info", "id", "parentID", "directory",
     "part", "sessionID", "callID", "tool", "state", "status", "input",
+    # burn tier (#541): session.created carries `info.model.{id, providerID}`
+    # (SessionInfo.model → SessionModel in session.ts); the decoder reads
+    # `model.id` — `id` is watched above, this watches the wrapper.
+    "model",
 }
 
 # Copilot CLI publishes a session-events JSON schema; unpkg serves the file
@@ -306,6 +333,9 @@ COPILOT_PAYLOAD_FIELDS = {
     "agentId", "sessionId", "context", "cwd",
     "toolCallId", "toolName", "arguments", "agentDisplayName",
     "permissionRequest", "result", "kind",
+    # burn tier (#541): the per-tool model (ToolExecutionCompleteData.model,
+    # schema-verified 2026-07-10) — a rename silently darkens the cp· badge.
+    "model",
 }
 
 # Cursor CLI (`cursor-agent`) is HOOK-ONLY; the events we register/decode are
@@ -364,6 +394,49 @@ HERMES_SHELL_HOOK_URL = (
 # `hook_event_name` is the discriminator (event check covers it). Checked as
 # dict-key literals in _serialize_payload; ONE-DIRECTIONAL (a depended field gone).
 HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
+
+# Oh My Pi (omp) is TRANSCRIPT-ONLY: the decoder tails the session JSONL, so the
+# depended names are the entry `type` discriminators (source/omp.rs `match kind`)
+# plus a handful of field literals, split across the upstream files that define
+# them (open TS, can1357/oh-my-pi). ONE-DIRECTIONAL like copilot: omp persists
+# ~15 entry types and we map 3 by design — only a name WE DEPEND ON vanishing is
+# breaking (a rename → the transcript still flows but decodes to nothing).
+OMP_SESSION_ENTRIES_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/session-entries.ts"
+)
+# Field names defined in session-entries.ts: the header `cwd` (the label/first-
+# sight identity) + the `customType` discriminator decode_omp_line keys custom
+# entries on — checked as TS property keys (`cwd: string`), not bare words. The
+# entry `type` values from read_omp_entry_types are checked against the SAME
+# file as QUOTED literals (`type: "message"`): these are generic English words,
+# so a \b word match would survive an upstream rename on any stray prose use.
+OMP_SESSION_ENTRY_FIELDS = {"cwd", "customType"}
+# The clean-teardown marker (SESSION_EXIT_CUSTOM_TYPE) lives in exit-diagnostics.ts
+# — the session-ended checker + the SessionEnd decode both key on it.
+OMP_EXIT_DIAG_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/exit-diagnostics.ts"
+)
+# The message-level names (roles + tool-call block shape) live in the pi-ai LLM
+# types: `role:"assistant"`/`"toolResult"`, the `"toolCall"` content-block type
+# (quoted TS literals), plus the result's `toolCallId` back-reference, the
+# call's `arguments`, and the assistant message's bare `model` (the burn-tier
+# carrier, #545 — AssistantMessage requires it) as property keys.
+OMP_AI_TYPES_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/ai/src/types.ts"
+)
+OMP_MESSAGE_LITERALS = {"assistant", "toolResult", "toolCall"}
+OMP_MESSAGE_FIELDS = {"toolCallId", "arguments", "model"}
+# The ask tool (#519): its toolCall NAME is STATE-bearing — decode_omp_line
+# maps an assistant `ask` block to Waiting — and the first question's text
+# feeds the Waiting reason. Checked against the tool's own source (`readonly
+# name = "ask"` + the arkType schema property keys). `arguments.i` (the
+# intent fallback) is the harness-wide tool-call intent key, NOT defined in
+# ask.ts — its loss only degrades the reason label, so it is deliberately
+# unwatched.
+OMP_ASK_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/tools/ask.ts"
+)
+OMP_ASK_FIELDS = {"questions", "question"}
 
 
 def fetch(url: str) -> str:
@@ -518,6 +591,18 @@ def codex_function_call_fields(text: str) -> set[str] | None:
     return set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*:", m.group(1)))
 
 
+def codex_turn_context_fields(text: str) -> set[str] | None:
+    """The field idents of the `TurnContextItem` struct (protocol.rs) — the
+    burn-tier feature reads `model` + `effort` off every `turn_context`
+    rollout line (source/codex.rs). Same graceful-skip contract as
+    `codex_function_call_fields`: None = the struct moved/changed shape, the
+    caller alarms on that separately."""
+    m = re.search(r"pub struct TurnContextItem\s*\{([^}]*)\}", text)
+    if not m:
+        return None
+    return set(re.findall(r"\bpub ([a-z_][a-z0-9_]*)\s*:", m.group(1)))
+
+
 def upstream_cc_hook_events(text: str) -> set[str] | None:
     """The hook-event summary table near the top of hooks.md ("| Event | When
     it fires |") is the canonical event list — parse only its rows (other
@@ -559,6 +644,23 @@ def read_opencode_events() -> set[str]:
     if not m:
         raise RuntimeError("could not locate the `match event` block in source/opencode.rs")
     return set(re.findall(r'"((?:session|message|permission)\.[a-z0-9.]+)"', m.group(1)))
+
+
+def read_omp_entry_types() -> set[str]:
+    """The session-entry `type` strings decode_omp_line maps, read from the
+    `match kind` block in source/omp.rs (the source of truth — stays in sync
+    with the decoder by construction). Scoped to the match block so the unit
+    tests further down the file (which embed the same strings as JSON) don't
+    leak in."""
+    src = (REPO / "crates/pixtuoid-core/src/source/omp.rs").read_text()
+    m = re.search(r"let out = match kind \{(.*?)\n    \};", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate the `match kind` block in source/omp.rs")
+    # Arm-position capture (a line-leading quoted pattern, `"session" => {` or a
+    # guarded `"custom"` on its own line) — a 4th decode arm is picked up
+    # automatically, and arm-BODY literals (`"toolCall"`, `"session_exit"`) that
+    # belong to the other two upstream checks never leak in.
+    return set(re.findall(r'(?m)^\s*"(\w+)"\s*(?:=>|if\b|$)', m.group(1)))
 
 
 def read_copilot_events() -> set[str]:
@@ -678,6 +780,29 @@ def upstream_codewhale_hooks(text: str) -> set[str] | None:
     return snake or None
 
 
+def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
+    # Both marker directions over an already-fetched hooks.md text, as a pure
+    # function so the selftest can exercise the DETECTION (not just the
+    # parsers): depended markers alarm on VANISH, surface markers on
+    # APPEARANCE.
+    review: list[str] = []
+    for marker, what in sorted(CC_DEPENDED_DOC_MARKERS.items()):
+        if marker not in hooks_doc:
+            review.append(
+                f"CC hooks.md no longer mentions `{marker}` — {what} may have "
+                f"moved/renamed; re-verify the burn-tier hook decode."
+            )
+    for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
+        if marker in hooks_doc:
+            review.append(
+                f"CC hooks doc now mentions `{marker}` — {what} may have "
+                f"landed upstream. Adopt it (a durable end signal for the "
+                f"JSONL transport / the liveness-probe registry) and "
+                f"update this watch."
+            )
+    return review
+
+
 def run_checks(
     codex_ours: set[str] | None,
     codex_rollout: tuple[set[str], set[str]] | None,
@@ -687,6 +812,7 @@ def run_checks(
     codewhale_ours: set[str] | None,
     opencode_ours: set[str] | None,
     copilot_ours: set[str] | None,
+    omp_ours: set[str] | None,
     cursor_ours: set[str] | None,
     openclaw_ours: set[str] | None,
     hermes_ours: set[str] | None,
@@ -749,6 +875,27 @@ def run_checks(
                             f"source/codex.rs) is GONE from upstream `EventMsg` — "
                             f"renamed; the transcript decoder drops it SILENTLY "
                             f"(`_ => vec![]`, no drift breadcrumb)."
+                        )
+        # `turn_context` FIELD survival (burn tier, #541): the transcript
+        # decoder reads `model` + `effort` off every turn_context line
+        # (source/codex.rs) — a rename silently kills the model badge/flame
+        # (fail-quiet by design, so this watch is the only alarm).
+        if text is not None:
+            tc_fields = codex_turn_context_fields(text)
+            if tc_fields is None:
+                breaking.append(
+                    "Codex `TurnContextItem` struct not found in protocol.rs — "
+                    "upstream moved it; update the parser (burn-tier model/effort "
+                    "watch is blind)."
+                )
+            else:
+                for f in ("model", "effort"):
+                    if f not in tc_fields:
+                        breaking.append(
+                            f"Codex turn_context field `{f}` is GONE from "
+                            f"TurnContextItem in protocol.rs — renamed; the "
+                            f"burn-tier decoder reads None (model badge/flame "
+                            f"silently dark for codex agents)."
                         )
         # Rollout `response_item` types → the ResponseItem enum in models.rs.
         if codex_rollout is not None:
@@ -924,6 +1071,70 @@ def run_checks(
                             f"no tool label / permission never gates)."
                         )
 
+    # --- omp session-entry types + wire names (only the FETCH is transient) --
+    if omp_ours is not None:
+        text = try_fetch(OMP_SESSION_ENTRIES_URL, "omp session-entries", breaking, errors)
+        if text is not None:
+            # Entry `type` discriminators are QUOTED TS literal types
+            # (`type: "message"`); the names are generic English words, so a
+            # bare \b match would stay green on prose/comment uses after an
+            # upstream rename — quote-anchored on purpose.
+            for name in sorted(omp_ours):
+                if f'"{name}"' not in text:
+                    breaking.append(
+                        f"omp entry type `{name}` (decoded in source/omp.rs) is GONE "
+                        f"from session-entries.ts — likely renamed; the transcript "
+                        f"still flows but the decoder maps it to nothing (no sprite "
+                        f"/ no activity)."
+                    )
+            # Field names appear as TS property keys (`cwd: string`).
+            for field in sorted(OMP_SESSION_ENTRY_FIELDS):
+                if not re.search(rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", text):
+                    breaking.append(
+                        f"omp field `{field}` (read by decode_omp_line) is GONE from "
+                        f"session-entries.ts property keys — renamed; the decoder "
+                        f"reads None (no cwd label / no session_exit end)."
+                    )
+        diag = try_fetch(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", breaking, errors)
+        if diag is not None and '"session_exit"' not in diag:
+            breaking.append(
+                "omp customType `session_exit` (the clean-teardown marker the "
+                "session-ended checker + SessionEnd decode key on) is GONE from "
+                "exit-diagnostics.ts — renamed; finished sessions resurrect at "
+                "first sight and never SessionEnd."
+            )
+        ai = try_fetch(OMP_AI_TYPES_URL, "omp pi-ai types", breaking, errors)
+        if ai is not None:
+            for name in sorted(OMP_MESSAGE_LITERALS):
+                if f'"{name}"' not in ai:
+                    breaking.append(
+                        f"omp message literal `{name}` (read by decode_omp_line) is "
+                        f"GONE from pi-ai types.ts — renamed; tool rounds decode to "
+                        f"nothing."
+                    )
+            for field in sorted(OMP_MESSAGE_FIELDS):
+                if not re.search(rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", ai):
+                    breaking.append(
+                        f"omp message field `{field}` (read by decode_omp_line) is "
+                        f"GONE from pi-ai types.ts property keys — renamed; tool "
+                        f"rounds lose their key/target."
+                    )
+        ask = try_fetch(OMP_ASK_URL, "omp ask tool", breaking, errors)
+        if ask is not None:
+            if '"ask"' not in ask:
+                breaking.append(
+                    "omp tool name `ask` (drives the ask→Waiting decode) is GONE "
+                    "from tools/ask.ts — renamed; a session parked on a user "
+                    "question renders active instead of waiting."
+                )
+            for field in sorted(OMP_ASK_FIELDS):
+                if not re.search(rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", ask):
+                    breaking.append(
+                        f"omp ask field `{field}` (feeds the Waiting reason) is GONE "
+                        f"from tools/ask.ts property keys — renamed; the Waiting "
+                        f"reason degrades to the intent/bare-name fallback."
+                    )
+
     # --- Cursor hook events (only the FETCH is transient) ------------------
     if cursor_ours is not None:
         text = try_fetch(CURSOR_HOOKS_URL, "Cursor hooks doc", breaking, errors)
@@ -1041,14 +1252,7 @@ def run_checks(
                         f"install/claude.rs EVENTS, or add it to "
                         f"CC_KNOWN_OMITTED)."
                     )
-        for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
-            if marker in hooks_doc:
-                review.append(
-                    f"CC hooks doc now mentions `{marker}` — {what} may have "
-                    f"landed upstream. Adopt it (a durable end signal for the "
-                    f"JSONL transport / the liveness-probe registry) and "
-                    f"update this watch."
-                )
+        review.extend(cc_doc_marker_findings(hooks_doc))
 
 
 
@@ -1069,6 +1273,7 @@ def main() -> int:
     codewhale_ours = None
     opencode_ours = None
     copilot_ours = None
+    omp_ours = None
     cursor_ours = None
     openclaw_ours = None
     hermes_ours = None
@@ -1081,6 +1286,7 @@ def main() -> int:
         codewhale_ours = read_codewhale_events()
         opencode_ours = read_opencode_events()
         copilot_ours = read_copilot_events()
+        omp_ours = read_omp_entry_types()
         cursor_ours = read_cursor_events()
         openclaw_ours = read_openclaw_events()
         hermes_ours = read_hermes_events()
@@ -1101,6 +1307,7 @@ def main() -> int:
             codewhale_ours,
             opencode_ours,
             copilot_ours,
+            omp_ours,
             cursor_ours,
             openclaw_ours,
             hermes_ours,
