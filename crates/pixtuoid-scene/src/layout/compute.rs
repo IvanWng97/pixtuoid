@@ -261,8 +261,37 @@ pub(super) fn compute_with_seed(
         y: couch_y,
     } = couch_pos(&cubicle_band, top_margin);
 
+    // Water-cooler spot, derived HERE where home_desks is known: primary =
+    // the SE corner below the band (needs 12px clear of the south runner);
+    // fallback = the band's east margin beside the bottom desk row (exact —
+    // measured from the rightmost desk, not a width heuristic). None if
+    // neither fits; the companion plant in `plants` uses the same hint.
+    let cooler_hint: Option<Point> = {
+        let right_edge = cubicle_band.x + cubicle_band.width;
+        let rightmost_desk = home_desks
+            .iter()
+            .map(|d| d.x + DESK_W)
+            .max()
+            .unwrap_or(cubicle_band.x);
+        let corner_y = cubicle_band.y + cubicle_band.height + 5;
+        if cubicle_band.width > 50 && corner_y + 12 <= buf_h {
+            Some(Point {
+                x: right_edge.saturating_sub(20),
+                y: corner_y,
+            })
+        } else if right_edge.saturating_sub(rightmost_desk) >= 12 {
+            Some(Point {
+                x: right_edge.saturating_sub(6),
+                y: (cubicle_band.y + cubicle_band.height).saturating_sub(6),
+            })
+        } else {
+            None
+        }
+    };
+
     let (waypoints, couch_sprite_center) = compute_waypoints(
         &cubicle_band,
+        cooler_hint,
         top_margin,
         pantry_room,
         pantry_counter_size,
@@ -296,6 +325,20 @@ pub(super) fn compute_with_seed(
         },
     ]
     .into_iter()
+    // Companion to the water cooler — derived from the SAME hint, so the
+    // pair appears together or not at all (corner spot only: the east-margin
+    // fallback is too narrow for both, the cooler wins it).
+    .chain(
+        cooler_hint
+            .filter(|c| c.y > cubicle_band.y + cubicle_band.height)
+            .map(|c| PlantItem {
+                kind: PlantKind::Tall,
+                pos: Point {
+                    x: (c.x + 7).min(cubicle_band.x + cubicle_band.width),
+                    y: c.y,
+                },
+            }),
+    )
     // No pantry plants — the room is small (≤ 26 px wide), and the
     // plant + 1-px pad blocks the only horizontal bridge between the
     // pantry interior and the cubicle area's bottom row. Leaving the
@@ -476,6 +519,26 @@ pub(super) fn compute_with_seed(
         height: cubicle_aisle.height,
     });
 
+    // Shared trash bins: one in the pantry's south-west corner, one beside
+    // the vending machine (which only exists at aisle sizes — mirror its
+    // guard via the placed waypoint so the pair can't drift).
+    let mut bins: Vec<Point> = Vec::new();
+    if let Some(pr) = pantry_room {
+        bins.push(Point {
+            x: pr.x + 3,
+            y: (pr.y + pr.height).saturating_sub(4),
+        });
+    }
+    if let Some(v) = waypoints
+        .iter()
+        .find(|w| w.kind == WaypointKind::VendingMachine)
+    {
+        bins.push(Point {
+            x: v.pos.x + 4,
+            y: v.pos.y + 1,
+        });
+    }
+
     let walkable = mask::build_walkable_mask(
         buf_w,
         buf_h,
@@ -487,6 +550,7 @@ pub(super) fn compute_with_seed(
         &pantry_chairs,
         &waypoints,
         &plants,
+        &bins,
         floor_lamp,
         lounge_side_table,
         &wall_decor,
@@ -516,6 +580,7 @@ pub(super) fn compute_with_seed(
         home_desks,
         waypoints,
         plants,
+        bins,
         wall_decor,
         pod_decor,
         floor_lamp,
@@ -990,8 +1055,10 @@ pub(super) fn compute_room_walls(
 
 /// Waypoints: couch, pantry, pod-decor-promoted (PhoneBooth/StandingDesk),
 /// corridor appliances (VendingMachine/Printer).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_waypoints(
     cubicle_band: &Bounds,
+    cooler_hint: Option<Point>,
     top_margin: u16,
     pantry_room: Option<Bounds>,
     pantry_counter_size: Size,
@@ -1092,6 +1159,20 @@ pub(super) fn compute_waypoints(
                 y: cubicle_aisle.y + 2,
             },
             kind: WaypointKind::Printer,
+            facing: Facing::South,
+            room_id: None,
+        });
+    }
+    // Water cooler — the south-east floor below the cubicle band (the zone
+    // the 2026-07-11 vibe audit flagged empty). Center-pinned like its
+    // corridor siblings; the companion tall plant is placed by the caller
+    // (compute) next to it so the corner reads as a small break spot.
+    // Water cooler — position derived by the caller (`cooler_hint`), where
+    // home_desks is in scope for the exact east-margin fallback.
+    if let Some(pos) = cooler_hint {
+        waypoints.push(Waypoint {
+            pos,
+            kind: WaypointKind::WaterCooler,
             facing: Facing::South,
             room_id: None,
         });

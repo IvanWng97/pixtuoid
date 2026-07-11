@@ -132,6 +132,7 @@ impl SeatView {
             | WaypointKind::PhoneBooth
             | WaypointKind::StandingDesk
             | WaypointKind::VendingMachine
+            | WaypointKind::WaterCooler
             | WaypointKind::Printer => SeatView::Side { flip: false },
         }
     }

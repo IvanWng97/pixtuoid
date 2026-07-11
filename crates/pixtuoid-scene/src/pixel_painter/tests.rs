@@ -935,14 +935,15 @@ fn desk_occupant_always_sorts_behind_its_desk() {
 fn desk_z_key_is_footprint_front_plus_overhang() {
     // The DeskCubicle z-sort baseline is `desk.y + footprint.h +
     // DESK_FRONT_OVERHANG` — footprint-front-derived (consistent with the
-    // waypoint/wall baselines), not a bare sprite-bottom literal. Equals
-    // the historical `desk.y + 8` (6 + 2). Locks the relationship so a
+    // waypoint/wall baselines), not a bare sprite-bottom literal. Was
+    // `desk.y + 8` (6 + 2) until the 2026-07-11 density pass slimmed the
+    // footprint to 10×5 → now +7 (5 + 2). Locks the relationship so a
     // footprint or overhang edit surfaces here, not as a layering bug.
     let fp_h = crate::layout::desk_furniture_def()
         .footprint
         .expect("desk has a footprint")
         .h;
-    assert_eq!(fp_h + DESK_FRONT_OVERHANG, 8, "desk z-key offset (was +8)");
+    assert_eq!(fp_h + DESK_FRONT_OVERHANG, 7, "desk z-key offset (was +7)");
 }
 
 #[test]

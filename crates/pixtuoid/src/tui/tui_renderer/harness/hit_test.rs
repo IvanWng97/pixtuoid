@@ -114,6 +114,7 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
                 WaypointKind::PhoneBooth => Some("Phone Booth"),
                 WaypointKind::StandingDesk => Some("Standing Desk"),
                 WaypointKind::VendingMachine => Some("Vending Machine"),
+                WaypointKind::WaterCooler => Some("Water Cooler"),
                 WaypointKind::Printer => Some("Printer"),
                 WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {
                     None

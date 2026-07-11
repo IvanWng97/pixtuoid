@@ -46,6 +46,16 @@ pub static CYBERPUNK: Theme = Theme {
             g: 10,
             b: 20,
         },
+        rug_meeting: Rgb {
+            r: 0x6a,
+            g: 0x1f,
+            b: 0x5c,
+        },
+        rug_pantry: Rgb {
+            r: 0x1f,
+            g: 0x5c,
+            b: 0x6a,
+        },
     },
     office: OfficeColors {
         room_wall_body: Rgb {
@@ -394,6 +404,21 @@ pub static CYBERPUNK: Theme = Theme {
             r: 180,
             g: 140,
             b: 80,
+        },
+        cooler_body: Rgb {
+            r: 0xc8,
+            g: 0xc8,
+            b: 0xd8,
+        },
+        cooler_bottle: Rgb {
+            r: 0x00,
+            g: 0xe5,
+            b: 0xff,
+        },
+        cooler_trim: Rgb {
+            r: 0x4a,
+            g: 0x3a,
+            b: 0x6a,
         },
         vending_dark: Rgb {
             r: 15,

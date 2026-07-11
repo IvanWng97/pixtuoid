@@ -48,6 +48,11 @@ pub struct SurfaceColors {
     pub carpet_dark: Rgb,
     pub window_frame: Rgb,
     pub bg_fallback: Rgb,
+    /// Zone rug tints (meeting room / pantry), BLENDED over the carpet
+    /// texture (not flat fills) by `paint_zone_rug` — pick hues that read as
+    /// deliberate rugs against carpet_base, not recolored floor.
+    pub rug_meeting: Rgb,
+    pub rug_pantry: Rgb,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +159,12 @@ pub struct ApplianceColors {
     pub vending_drinks: [Rgb; 4],
     /// Warm small detail (coin-slot trim).
     pub vending_trim: Rgb,
+    /// Water-cooler body (light cabinet).
+    pub cooler_body: Rgb,
+    /// Water-cooler bottle (the liquid read — usually the theme's cyan/blue).
+    pub cooler_bottle: Rgb,
+    /// Water-cooler tap + base + side shading (dark detail).
+    pub cooler_trim: Rgb,
     /// Darkest recess / slot.
     pub vending_dark: Rgb,
     /// Printer chassis — a light neutral.

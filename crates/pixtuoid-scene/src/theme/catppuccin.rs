@@ -54,6 +54,16 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 30,
             b: 46,
         },
+        rug_meeting: Rgb {
+            r: 0x8a,
+            g: 0x4a,
+            b: 0x62,
+        },
+        rug_pantry: Rgb {
+            r: 0x8a,
+            g: 0x74,
+            b: 0x4a,
+        },
     },
     office: OfficeColors {
         room_wall_body: Rgb {
@@ -422,6 +432,21 @@ pub static CATPPUCCIN: Theme = Theme {
             r: 210,
             g: 180,
             b: 160,
+        },
+        cooler_body: Rgb {
+            r: 0xf2,
+            g: 0xe9,
+            b: 0xe1,
+        },
+        cooler_bottle: Rgb {
+            r: 0x89,
+            g: 0xdc,
+            b: 0xeb,
+        },
+        cooler_trim: Rgb {
+            r: 0x6e,
+            g: 0x6c,
+            b: 0x7e,
         },
         vending_dark: Rgb {
             r: 24,

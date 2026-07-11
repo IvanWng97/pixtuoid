@@ -186,6 +186,7 @@ pub fn supports_chitchat(kind: WaypointKind) -> bool {
         WaypointKind::Pantry
             | WaypointKind::Couch
             | WaypointKind::VendingMachine
+            | WaypointKind::WaterCooler
             | WaypointKind::Printer
             | WaypointKind::MeetingSofa
             | WaypointKind::MeetingStand

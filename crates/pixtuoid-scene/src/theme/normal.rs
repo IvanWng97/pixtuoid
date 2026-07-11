@@ -46,6 +46,16 @@ pub static NORMAL: Theme = Theme {
             g: 32,
             b: 40,
         },
+        rug_meeting: Rgb {
+            r: 0x8a,
+            g: 0x3d,
+            b: 0x30,
+        },
+        rug_pantry: Rgb {
+            r: 0xb0,
+            g: 0x8a,
+            b: 0x4a,
+        },
     },
     office: OfficeColors {
         room_wall_body: Rgb {
@@ -415,6 +425,21 @@ pub static NORMAL: Theme = Theme {
             r: 180,
             g: 170,
             b: 100,
+        },
+        cooler_body: Rgb {
+            r: 0xec,
+            g: 0xec,
+            b: 0xec,
+        },
+        cooler_bottle: Rgb {
+            r: 0x7e,
+            g: 0xd4,
+            b: 0xe2,
+        },
+        cooler_trim: Rgb {
+            r: 0x8a,
+            g: 0x8a,
+            b: 0x92,
         },
         vending_dark: Rgb {
             r: 40,

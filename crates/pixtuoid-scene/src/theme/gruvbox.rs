@@ -52,6 +52,16 @@ pub static GRUVBOX: Theme = Theme {
             g: 40,
             b: 40,
         },
+        rug_meeting: Rgb {
+            r: 0x9d,
+            g: 0x3a,
+            b: 0x28,
+        },
+        rug_pantry: Rgb {
+            r: 0xb5,
+            g: 0x86,
+            b: 0x3b,
+        },
     },
     office: OfficeColors {
         room_wall_body: Rgb {
@@ -421,6 +431,21 @@ pub static GRUVBOX: Theme = Theme {
             r: 180,
             g: 135,
             b: 85,
+        },
+        cooler_body: Rgb {
+            r: 0xeb,
+            g: 0xdb,
+            b: 0xb2,
+        },
+        cooler_bottle: Rgb {
+            r: 0x83,
+            g: 0xa5,
+            b: 0x98,
+        },
+        cooler_trim: Rgb {
+            r: 0x66,
+            g: 0x5c,
+            b: 0x54,
         },
         vending_dark: Rgb {
             r: 29,

@@ -106,6 +106,7 @@ pub(super) fn build_walkable_mask(
     pantry_chairs: &[Point],
     waypoints: &[Waypoint],
     plants: &[PlantItem],
+    bins: &[Point],
     floor_lamp: Option<Point>,
     lounge_side_table: Option<Point>,
     wall_decor: &[WallDecorItem],
@@ -291,6 +292,14 @@ pub(super) fn build_walkable_mask(
         }
     }
 
+    for &pos in bins {
+        // Same shallow-base + overhang treatment as the plants.
+        let def = furniture_def(Furniture::TrashBin);
+        if let Some(Size { w, h }) = def.footprint {
+            stamp_overhang_aware(&mut mask, Anchor::Center, pos, w, h, def.visual, 1);
+        }
+    }
+
     if let Some(lamp) = floor_lamp {
         // EXCEPTION: the lamp has visual.h > footprint.h yet stamps plain-centered
         // (NOT via `stamp_overhang_aware`). Its 7px footprint is already sized so a
@@ -414,6 +423,7 @@ mod tests {
             &[],
             &[],
             None,
+            &[],
             &[],
             &[],
             &[],

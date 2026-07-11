@@ -464,6 +464,25 @@ mod tests {
     // the const must move with it — else the pin box drifts off the painted
     // sprite. `sim.rs` resolves the SAME "standing" reference pose per frame.
     #[test]
+    fn desk_sprite_width_tracks_the_footprint_overhang() {
+        // The divider column paints at `desk.x + DESK_W + 3` (drawable.rs) and
+        // must land exactly on the desk sprite's LAST column — i.e. the sprite
+        // is DESK_W + 4 wide. A sprite or footprint edit that breaks the
+        // relationship shows up as a divider floating in the gap (or slicing
+        // through the desk surface) — catch it here instead.
+        let pack = test_default_pack();
+        let frame = pack
+            .animation("desk")
+            .and_then(|a| a.frames.first())
+            .expect("embedded pack carries a desk");
+        assert_eq!(
+            frame.width(),
+            crate::layout::DESK_W + 4,
+            "desk sprite width must equal DESK_W + 4 (footprint + overhang)"
+        );
+    }
+
+    #[test]
     fn character_sprite_w_matches_the_embedded_pack() {
         let pack = test_default_pack();
         let frame = pack

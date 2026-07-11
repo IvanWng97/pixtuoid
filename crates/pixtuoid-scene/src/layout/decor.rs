@@ -24,6 +24,10 @@ pub enum WaypointKind {
     VendingMachine,
     /// Corridor printer — agent stands in front while "printing."
     Printer,
+    /// Lower-right water cooler — agent stands in front for a drink (the
+    /// classic office chat spot). Fills the south-east floor that read
+    /// empty in the 2026-07-11 vibe audit.
+    WaterCooler,
     /// Meeting-room sofa seat — agent sits, facing the table. Multiple
     /// seats per sofa; a group conversation runs when ≥2 share the room.
     MeetingSofa,
@@ -212,6 +216,7 @@ impl WaypointKind {
             WaypointKind::PhoneBooth => Furniture::PhoneBooth,
             WaypointKind::StandingDesk => Furniture::StandingDesk,
             WaypointKind::VendingMachine => Furniture::VendingMachine,
+            WaypointKind::WaterCooler => Furniture::WaterCooler,
             WaypointKind::Printer => Furniture::Printer,
             WaypointKind::MeetingSofa => Furniture::MeetingSofa,
             WaypointKind::MeetingStand => Furniture::MeetingStand,
@@ -234,6 +239,7 @@ pub enum Furniture {
     StandingDesk,
     VendingMachine,
     Printer,
+    WaterCooler,
     MeetingSofa,
     MeetingStand,
     PlantFicus,
@@ -257,6 +263,9 @@ pub enum Furniture {
     PantryChair,
     FloorLamp,
     LoungeSideTable,
+    /// Shared corridor trash bin (pantry corner + beside the vending
+    /// machine — replaces the old per-desk bins, 2026-07-11 vibe pass).
+    TrashBin,
     /// The agent's OWNED home workstation. Not a [`WaypointKind`] (N per-agent
     /// desks, forced-seat when Active, never a wander destination) — but a
     /// first-class geometry row so desk and couch share ONE table and the same
@@ -277,6 +286,7 @@ impl Furniture {
         Furniture::StandingDesk,
         Furniture::VendingMachine,
         Furniture::Printer,
+        Furniture::WaterCooler,
         Furniture::MeetingSofa,
         Furniture::MeetingStand,
         Furniture::PlantFicus,
@@ -295,6 +305,7 @@ impl Furniture {
         Furniture::PantryChair,
         Furniture::FloorLamp,
         Furniture::LoungeSideTable,
+        Furniture::TrashBin,
         Furniture::Desk,
     ];
 }
@@ -378,6 +389,21 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             dwell: DwellWindow {
                 base_ms: 4_000,
                 range_ms: 4_000,
+            },
+            approach: ApproachSides::ALL,
+        },
+        Furniture::WaterCooler => FurnitureDef {
+            // Tall bottle-on-base appliance: only the 5x3 base contacts the
+            // floor (invariant #6 — the mask south-anchors the shallow
+            // footprint under the 5x8 visual, like the pantry counter).
+            footprint: Some(Size { w: 5, h: 3 }),
+            visual: Size { w: 5, h: 8 },
+            occupies_pos: false,
+            // The classic chat spot: linger a touch longer than
+            // vending/printer so two agents can overlap into a chitchat.
+            dwell: DwellWindow {
+                base_ms: 6_000,
+                range_ms: 6_000,
             },
             approach: ApproachSides::ALL,
         },
@@ -551,6 +577,15 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // Not a `WaypointKind`, so `stand_point` never runs on it; entry/wander/
         // exit reach its seat via `approach_point(Furniture::Desk)` (the N/E/W
         // `desk_approach_cell`) + the unified `seated_foot_cell` settle.
+        Furniture::TrashBin => FurnitureDef {
+            // 3x4 sprite over a 3x2 base strip (invariant #6): a walker
+            // brushing past shows behind the rim, never through it.
+            footprint: Some(Size { w: 3, h: 2 }),
+            visual: Size { w: 3, h: 4 },
+            occupies_pos: false,
+            dwell: DwellWindow::DECOR,
+            approach: ApproachSides::ALL,
+        },
         Furniture::Desk => FurnitureDef {
             footprint: Some(Size {
                 w: DESK_W + 4,
@@ -897,12 +932,12 @@ mod tests {
     #[test]
     fn furniture_def_invariants_hold_for_every_row() {
         // The singleton/decor rows have no other test (unlike WaypointKind::ALL),
-        // so a typo in any of the 25 rows — wrong dwell sentinel, an accidental
+        // so a typo in any of the 27 rows — wrong dwell sentinel, an accidental
         // occupies_pos, a wrong plant footprint — is caught HERE rather than as a
         // silent wrong-mask/wrong-render at runtime.
         assert_eq!(
             Furniture::ALL.len(),
-            25,
+            27,
             "Furniture variant added/removed — update ALL (and this count)"
         );
         for &f in Furniture::ALL {

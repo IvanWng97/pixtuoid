@@ -145,6 +145,10 @@ pub struct SceneLayout {
     pub home_desks: Vec<Point>,
     pub waypoints: Vec<Waypoint>,
     pub plants: Vec<PlantItem>,
+    /// Shared trash bins (Furniture::TrashBin rows: masked base + y-sorted
+    /// sprite). Placed by `compute` at the pantry corner and beside the
+    /// vending machine.
+    pub bins: Vec<Point>,
     pub wall_decor: Vec<WallDecorItem>,
     /// Decor items placed in the aisles between 2×2 desk pods. Each
     /// item paints its sprite centred on `pos` and marks it as an obstacle
@@ -214,8 +218,11 @@ pub const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
 /// `mask::build_walkable_mask`.
 pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 
-pub const DESK_W: u16 = 12;
-pub const DESK_H: u16 = 6;
+/// Desk GROUND footprint (walkable mask + pod pitch space; the 14×8 desk
+/// SPRITE overhangs it per invariant #6 — see desk.sprite's header + the
+/// width-pin test). Slimmed 12×6 → 10×5 in the laptop-density pass.
+pub const DESK_W: u16 = 10;
+pub const DESK_H: u16 = 5;
 /// Default character sprite width (px). The bundled pack is 8×12; this is the
 /// ONE authority every out-of-pixel_painter consumer centers/hit-tests on
 /// (anchors' LABEL fallback, `layout::decor::DESK_WALK_X_OFF`, the tui hit-test
@@ -263,17 +270,20 @@ pub const POD_SIDE: u16 = 2;
 /// desk reads as its own workstation (chair + monitor + space), not
 /// a merged blob. 12 px ≈ a full desk width of empty floor between
 /// pod-mates.
-pub const INTRA_POD_GAP_X: u16 = 12;
-pub const INTRA_POD_GAP_Y: u16 = 12;
+pub const INTRA_POD_GAP_X: u16 = 10;
+pub const INTRA_POD_GAP_Y: u16 = 10;
 /// Gap between adjacent pods — wider than the intra-pod gap so the pod
 /// boundary stays visually distinct, while still hosting the rolling
 /// whiteboard's 10-px GROUND footprint (the 14-px board panel overhangs it,
-/// invariant #6) in the aisle. Tightened 28 → 22 to pack the 4-desk pods
-/// denser (the office read too sparse — big empty aisles between clusters);
-/// 22 px still clears the 10-px board + its 1-px pad. The walkable-connectivity
-/// + decor-overlap + approach tests guard that the tighter aisle stays routable.
-pub const INTER_POD_AISLE_X: u16 = 22;
-pub const INTER_POD_AISLE_Y: u16 = 22;
+/// invariant #6) in the aisle. Tightened 28 → 22 (the office read too
+/// sparse), then 22 → 16/20 in the laptop-density pass (2026-07-11) together
+/// with the 10×5 desk footprint. The Y floor is EXACTLY 20: 18 breaks
+/// `every_home_desk_has_a_reachable_north_approach` (bisected — the seat
+/// approach cell collides with the row above), and X 16 still clears the
+/// 10-px board + pads. The walkable-connectivity + decor-overlap + approach
+/// tests guard that the tighter aisles stay routable.
+pub const INTER_POD_AISLE_X: u16 = 16;
+pub const INTER_POD_AISLE_Y: u16 = 20;
 
 impl SceneLayout {
     /// Returns `None` if the buffer is too small for even one cubicle and the

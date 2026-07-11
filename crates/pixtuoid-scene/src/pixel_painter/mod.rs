@@ -152,7 +152,7 @@ use anchors::compute_door_frame_idx;
 use background::{
     daylight_floor_overlay, dim_floor_overlay, paint_ceiling_pool, paint_clock,
     paint_corridor_runner, paint_floor_and_walls, paint_floor_lamp_halo, paint_neon_panel,
-    paint_shadow, time_of_day_look, Ellipse,
+    paint_shadow, paint_wall_dressing, paint_zone_rug, time_of_day_look, Ellipse,
 };
 use drawable::{
     gateway_mascot_def, mascot_position, paint_drawable, pet_position, Drawable, DrawableKind,
@@ -371,6 +371,17 @@ fn paint_frame(
         ctx.theme,
         ctx.floor.altitude,
     );
+
+    // Zone rugs (theme-tinted blends over the carpet texture) + wall dressing
+    // (framed posters, window-sill succulents). Painted AFTER floor/walls and
+    // BEFORE furniture so everything else stacks on top.
+    if let Some(mr) = ctx.layout.meeting_room {
+        paint_zone_rug(ctx.buf, mr, ctx.theme.surface.rug_meeting);
+    }
+    if let Some(pr) = ctx.layout.pantry_room {
+        paint_zone_rug(ctx.buf, pr, ctx.theme.surface.rug_pantry);
+    }
+    paint_wall_dressing(ctx.buf, buf_w, top_wall_h, ctx.pack);
 
     // Per-floor lighting: `sim_step` already ticked the fade state with the
     // current occupancy. `indoor_scale` smoothly travels from MIN_LEVEL
@@ -775,7 +786,7 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 }
 
 /// Desk cubicles — each carries its divider + cabinet + bin + screen glow.
-/// The desk sprite (16×8) sorts at `desk.y + footprint_h + DESK_FRONT_OVERHANG`
+/// The desk sprite (14×8) sorts at `desk.y + footprint_h + DESK_FRONT_OVERHANG`
 /// (front-lip overhang past the blocked footprint), just past the seated
 /// worker's feet (`desk.y + 4`) so the sitter stays visually behind the desk.
 /// `seated_agents` (built once before the ambient pass) gates the screen glow
@@ -1110,6 +1121,12 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
                     kind: DrawableKind::Printer { pos: wp.pos },
                 });
             }
+            WaypointKind::WaterCooler => {
+                drawables.push(Drawable {
+                    anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
+                    kind: DrawableKind::WaterCooler { pos: wp.pos },
+                });
+            }
             WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {}
         }
     }
@@ -1136,6 +1153,18 @@ fn enqueue_pod_decor_and_plants<'a>(layout: &'a Layout, drawables: &mut Vec<Draw
                 crate::layout::furniture_def(kind.furniture()).visual.h,
             ),
             kind: DrawableKind::Plant { kind, pos },
+        });
+    }
+    for &pos in &layout.bins {
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                pos,
+                crate::layout::furniture_def(crate::layout::Furniture::TrashBin)
+                    .visual
+                    .h,
+            ),
+            kind: DrawableKind::TrashBin { pos },
         });
     }
 }

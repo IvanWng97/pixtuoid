@@ -46,6 +46,16 @@ pub static DRACULA: Theme = Theme {
             g: 42,
             b: 54,
         },
+        rug_meeting: Rgb {
+            r: 0x6a,
+            g: 0x2f,
+            b: 0x55,
+        },
+        rug_pantry: Rgb {
+            r: 0x4a,
+            g: 0x3f,
+            b: 0x6e,
+        },
     },
     office: OfficeColors {
         room_wall_body: Rgb {
@@ -414,6 +424,21 @@ pub static DRACULA: Theme = Theme {
             r: 200,
             g: 150,
             b: 80,
+        },
+        cooler_body: Rgb {
+            r: 0xd8,
+            g: 0xd8,
+            b: 0xe8,
+        },
+        cooler_bottle: Rgb {
+            r: 0x8b,
+            g: 0xe9,
+            b: 0xfd,
+        },
+        cooler_trim: Rgb {
+            r: 0x62,
+            g: 0x62,
+            b: 0x80,
         },
         vending_dark: Rgb {
             r: 25,

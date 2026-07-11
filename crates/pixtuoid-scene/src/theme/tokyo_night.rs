@@ -46,6 +46,16 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 27,
             b: 38,
         },
+        rug_meeting: Rgb {
+            r: 0x3d,
+            g: 0x59,
+            b: 0x8a,
+        },
+        rug_pantry: Rgb {
+            r: 0x4a,
+            g: 0x6a,
+            b: 0x5a,
+        },
     },
     office: OfficeColors {
         room_wall_body: Rgb {
@@ -414,6 +424,21 @@ pub static TOKYO_NIGHT: Theme = Theme {
             r: 127,
             g: 115,
             b: 80,
+        },
+        cooler_body: Rgb {
+            r: 0xc0,
+            g: 0xca,
+            b: 0xf5,
+        },
+        cooler_bottle: Rgb {
+            r: 0x7d,
+            g: 0xcf,
+            b: 0xff,
+        },
+        cooler_trim: Rgb {
+            r: 0x56,
+            g: 0x5f,
+            b: 0x89,
         },
         vending_dark: Rgb {
             r: 18,

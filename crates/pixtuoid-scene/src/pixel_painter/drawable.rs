@@ -145,6 +145,14 @@ pub(super) enum DrawableKind<'a> {
         kind: crate::layout::WallDecor,
         pos: Point,
     },
+    /// Lower-right water cooler (procedural like its corridor siblings).
+    WaterCooler {
+        pos: Point,
+    },
+    /// Shared corridor trash bin (pack sprite, center-pinned like plants).
+    TrashBin {
+        pos: Point,
+    },
     VendingMachine {
         pos: Point,
     },
@@ -661,13 +669,6 @@ pub(super) fn paint_drawable(
                 // rows still land at their original desk.y-relative positions.
                 blit_frame(frame, desk.x, desk.y.saturating_sub(1), buf);
             }
-            if let Some(bin) = pack.animation("trash_bin").and_then(|a| a.frames.first()) {
-                let bin_x = desk.x + DESK_W;
-                let bin_y = desk.y + 4;
-                if bin_x + bin.width() <= buf.width() && bin_y + bin.height() <= buf.height() {
-                    blit_frame(bin, bin_x, bin_y, buf);
-                }
-            }
             paint_desk_coffee(buf, *desk, *has_coffee, *coffee_steam, now, theme);
             if let Some(tint) = screen_glow {
                 paint_screen_glow(buf, desk.x, desk.y, now, *tint, theme);
@@ -781,6 +782,13 @@ pub(super) fn paint_drawable(
         DrawableKind::PantryChair { pos } => {
             paint_pantry_chair(buf, pos.x, pos.y, theme);
         }
+        DrawableKind::TrashBin { pos } => {
+            if let Some(f) = pack.animation("trash_bin").and_then(|a| a.frames.first()) {
+                let px = pos.x.saturating_sub(f.width() / 2);
+                let py = pos.y.saturating_sub(f.height() / 2);
+                blit_frame(f, px, py, buf);
+            }
+        }
         DrawableKind::Plant { kind, pos } => {
             let anim_name = kind.sprite_name();
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
@@ -851,6 +859,48 @@ pub(super) fn paint_drawable(
                         };
                         buf.put(px, py, color);
                     }
+                }
+            }
+        }
+        DrawableKind::WaterCooler { pos } => {
+            // 5x8, center-pinned: teal bottle (3 rows) on a light body with a
+            // tap dot + dark base — themed via `appliance.cooler_*`.
+            let body = theme.appliance.cooler_body;
+            let bottle = theme.appliance.cooler_bottle;
+            let trim = theme.appliance.cooler_trim;
+            let cx = pos.x.saturating_sub(2);
+            let cy = pos.y.saturating_sub(4);
+            for dy in 0..8u16 {
+                for dx in 0..5u16 {
+                    let (px, py) = (cx + dx, cy + dy);
+                    if px >= buf.width() || py >= buf.height() {
+                        continue;
+                    }
+                    let c = match dy {
+                        0..=2 => {
+                            if dx == 0 || dx == 4 {
+                                continue; // bottle is narrower than the body
+                            }
+                            bottle
+                        }
+                        3 => body,
+                        4 => {
+                            if dx == 2 {
+                                trim // the tap
+                            } else {
+                                body
+                            }
+                        }
+                        7 => trim, // dark base row grounds it
+                        _ => {
+                            if dx == 0 || dx == 4 {
+                                trim
+                            } else {
+                                body
+                            }
+                        }
+                    };
+                    buf.put(px, py, c);
                 }
             }
         }

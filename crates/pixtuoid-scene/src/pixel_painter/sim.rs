@@ -409,6 +409,7 @@ fn resolve_characters(
                         WaypointKind::PhoneBooth
                         | WaypointKind::StandingDesk
                         | WaypointKind::VendingMachine
+                        | WaypointKind::WaterCooler
                         | WaypointKind::Printer => {
                             ("standing", waypoint_anchor(stand, char_w), 12u16, false)
                         }

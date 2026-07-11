@@ -181,6 +181,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
                 WaypointKind::PhoneBooth => "Phone Booth",
                 WaypointKind::StandingDesk => "Standing Desk",
                 WaypointKind::VendingMachine => "Vending Machine",
+                WaypointKind::WaterCooler => "Water Cooler",
                 WaypointKind::Printer => "Printer",
                 // Proven unreachable today (couch + meeting slots `continue`
                 // above), but this is a per-frame mouse path: skip an unexpected

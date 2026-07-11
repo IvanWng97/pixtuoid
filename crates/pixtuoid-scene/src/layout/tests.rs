@@ -33,7 +33,9 @@ fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
     // desk appears at num_agents = cap-1 and second at cap, so cap-1 breaks the
     // 'partial_y loop mid-row). Driven through the public compute path (the
     // private PodGrid has no constructor — see the cov verdict).
-    for (w, h, cap) in [(90u16, 110u16, 4usize), (100, 200, 10), (120, 150, 8)] {
+    // (Re-tuned for the 10×5 desk footprint + 16/20 aisles, 2026-07-11 —
+    // probed: each size has cap desks with a 2-desk partial bottom row.)
+    for (w, h, cap) in [(90u16, 110u16, 6usize), (80, 120, 8), (100, 200, 12)] {
         // Total capacity at this size is exactly `cap`.
         let full = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
         assert_eq!(
@@ -426,6 +428,13 @@ fn compute_places_all_waypoint_kinds() {
             WaypointKind::VendingMachine | WaypointKind::Printer => {
                 assert!(w.pos.y >= l.top_margin);
             }
+            WaypointKind::WaterCooler => {
+                // SE corner below the band (primary) or the band's east
+                // margin beside the bottom row (fallback) — always the right
+                // half and the bottom region, never up among the pods.
+                assert!(w.pos.y + 8 >= l.cubicle_band.y + l.cubicle_band.height);
+                assert!(w.pos.x > l.cubicle_band.x + l.cubicle_band.width / 2);
+            }
             WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {
                 // A meeting slot only exists when a meeting room does, and
                 // it carries the room id it belongs to.
@@ -491,32 +500,37 @@ fn every_home_desk_has_a_reachable_north_approach() {
     // origin far north makes `approach_point` prefer the north side whenever it
     // has a reachable cell, so a north return proves the scan reached it.
     use crate::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
+    // Seed-swept (like the connectivity sweep): the dense variant (seed 2)
+    // re-arranges pods, and the 2026-07-11 density pass proved the aisle
+    // floor is seed-sensitive — 18px broke exactly this test.
     for (w, h) in [(192u16, 158u16), (160, 120), (240, 160)] {
-        let l = SceneLayout::compute(w, h, Some(64)).expect("fits");
-        for &desk in &l.home_desks {
-            let chair = desk_walk_anchor(desk);
-            let north_origin = Point {
-                x: chair.x,
-                y: chair.y.saturating_sub(40),
-            };
-            let a = approach_point(
-                Furniture::Desk,
-                chair,
-                Facing::South,
-                l.pantry_counter_size,
-                &l.walkable,
-                north_origin,
-                &l.reachable,
-            );
-            assert_ne!(a, chair, "desk {desk:?}: no reachable approach (sentinel)");
-            assert!(
-                a.y < chair.y,
-                "desk {desk:?}: approach {a:?} should be NORTH of the chair {chair:?}"
-            );
-            assert!(
-                l.reachable.reaches(a),
-                "desk {desk:?}: approach {a:?} must be A*-reachable"
-            );
+        for seed in 0..5u64 {
+            let l = SceneLayout::compute_with_seed(w, h, Some(64), seed).expect("fits");
+            for &desk in &l.home_desks {
+                let chair = desk_walk_anchor(desk);
+                let north_origin = Point {
+                    x: chair.x,
+                    y: chair.y.saturating_sub(40),
+                };
+                let a = approach_point(
+                    Furniture::Desk,
+                    chair,
+                    Facing::South,
+                    l.pantry_counter_size,
+                    &l.walkable,
+                    north_origin,
+                    &l.reachable,
+                );
+                assert_ne!(a, chair, "desk {desk:?}: no reachable approach (sentinel)");
+                assert!(
+                    a.y < chair.y,
+                    "desk {desk:?}: approach {a:?} should be NORTH of the chair {chair:?}"
+                );
+                assert!(
+                    l.reachable.reaches(a),
+                    "desk {desk:?} (seed {seed}): approach {a:?} must be A*-reachable"
+                );
+            }
         }
     }
 }

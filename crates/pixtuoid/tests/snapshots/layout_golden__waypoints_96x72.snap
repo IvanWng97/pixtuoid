@@ -39,4 +39,13 @@ expression: l.waypoints
         facing: South,
         room_id: None,
     },
+    Waypoint {
+        pos: Point {
+            x: 90,
+            y: 58,
+        },
+        kind: WaterCooler,
+        facing: South,
+        room_id: None,
+    },
 ]

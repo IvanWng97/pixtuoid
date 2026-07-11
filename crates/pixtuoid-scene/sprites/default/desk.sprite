@@ -1,18 +1,18 @@
-# 16x9 top-down desk — the monitor's top bezel RISES 1px above the desk back so
-# the screen reads as a standing display, not flush with the desktop. Row 0 is
-# the raised bezel (sides transparent so only the monitor pokes up); the desk is
-# blitted at desk.y-1 (see DeskCubicle in drawable.rs) so this row sits ABOVE the
-# desk while the frame/screen/surface/keyboard keep their original desk.y-relative
-# rows — which is why paint_screen_glow (anchored at desk.y) still lines up.
-# Screen uses `j` (dark) so the bright lime screen-glow overlay reads as
-# "monitor lit up — workstation is active" by contrast.
+# 14x8 top-down desk (slimmed 16x9 -> 14x8 for laptop density: ONE keyboard
+# row, two right surface columns trimmed; monitor/keyboard/cup all keep their
+# reads). Row 0 is the raised monitor bezel that RISES 1px above the desk back
+# (blitted at desk.y-1, see DeskCubicle in drawable.rs) so the screen reads as
+# a standing display. Screen uses `j` (dark) so the lime screen-glow overlay
+# reads as "workstation active" by contrast. The sprite deliberately overhangs
+# the 10x5 ground footprint (DESK_W/DESK_H, invariant #6) by 4px of width: the
+# divider column (desk.x + DESK_W + 3) lands exactly on the sprite's last
+# column, pinned by `desk_sprite_width_tracks_the_footprint_overhang`.
 @frame 0
-. . . M M M M M M M M . . . . .
-D D D M M M M M M M M D D D D D
-D D D M j j j j j j M D D D D D
-D D D M j j j j j j M D D D D D
-D D D D n n n n n n D D D D D D
-d d d d d d d d d d d d d d d d
-D k k k k k k k k k D D D K D D
-D k k k k k k k k k D D D D D D
-d d d d d d d d d d d d d d d d
+. . . M M M M M M M M . . .
+D D D M M M M M M M M D D D
+D D D M j j j j j j M D D D
+D D D M j j j j j j M D D D
+D D D D n n n n n n D D D D
+d d d d d d d d d d d d d d
+D k k k k k k k k k D D K D
+d d d d d d d d d d d d d d
