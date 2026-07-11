@@ -51,10 +51,13 @@ pub static NORMAL: Theme = Theme {
             g: 0x3d,
             b: 0x30,
         },
+        // Desaturated teal, NOT tan — the pantry floor is already warm tan,
+        // so a tan rug vanished into it (film-critic census, 2026-07-11);
+        // teal also matches the dark themes' pantry-rug family.
         rug_pantry: Rgb {
-            r: 0xb0,
+            r: 0x4e,
             g: 0x8a,
-            b: 0x4a,
+            b: 0x7c,
         },
     },
     office: OfficeColors {

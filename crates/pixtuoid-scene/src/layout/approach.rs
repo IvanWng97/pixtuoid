@@ -818,7 +818,7 @@ mod tests {
         // catches a new variant that was added there but not to ALL.
         assert_eq!(
             WaypointKind::ALL.len(),
-            8,
+            9,
             "a WaypointKind variant was added/removed — update ALL",
         );
     }

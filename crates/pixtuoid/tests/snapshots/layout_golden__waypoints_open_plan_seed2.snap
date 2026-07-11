@@ -59,8 +59,8 @@ expression: l.waypoints
     },
     Waypoint {
         pos: Point {
-            x: 154,
-            y: 106,
+            x: 140,
+            y: 116,
         },
         kind: WaterCooler,
         facing: South,

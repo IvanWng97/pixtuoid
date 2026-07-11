@@ -204,6 +204,7 @@ impl WaypointKind {
         WaypointKind::Printer,
         WaypointKind::MeetingSofa,
         WaypointKind::MeetingStand,
+        WaypointKind::WaterCooler,
     ];
 
     /// This waypoint's geometry kind in the unified [`Furniture`] table. The

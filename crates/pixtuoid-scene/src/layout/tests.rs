@@ -536,6 +536,37 @@ fn every_home_desk_has_a_reachable_north_approach() {
 }
 
 #[test]
+fn shared_bins_track_their_anchor_fixtures() {
+    // The pantry bin exists iff the pantry room does; the vending-side bin
+    // mirrors the vending WAYPOINT's own guard (aisle sizes only). Pin the
+    // derivation — compute pushes pantry first, then vending — so the pair
+    // can't silently drift from its anchors.
+    for (w, h) in [(96u16, 72u16), (150, 68), (192, 158), (240, 160)] {
+        for seed in 0..5u64 {
+            let l = SceneLayout::compute_with_seed(w, h, Some(64), seed).expect("fits");
+            let expected = usize::from(l.pantry_room.is_some())
+                + usize::from(
+                    l.waypoints
+                        .iter()
+                        .any(|wp| wp.kind == WaypointKind::VendingMachine),
+                );
+            assert_eq!(
+                l.bins.len(),
+                expected,
+                "{w}x{h} seed {seed}: one bin per present anchor fixture"
+            );
+            if let Some(pr) = l.pantry_room {
+                let b = l.bins[0];
+                assert!(
+                    b.x >= pr.x && b.x < pr.x + pr.width && b.y >= pr.y && b.y < pr.y + pr.height,
+                    "{w}x{h} seed {seed}: pantry bin {b:?} outside the pantry room {pr:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn sofas_seat_three_people() {
     // Both venues seat 3: each meeting sofa (3 seats per sofa) and the
     // lounge couch (was 1 seat → 3). Seats are dx ∈ {-6, 0, +6} on the

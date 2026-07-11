@@ -30,8 +30,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                       the WalkableMask VOCABULARY it stamps stays in core, coherence-bound to Grid):
 │                       mod.rs (SceneLayout struct, Bounds, Point, Size, WallSegment, constants, accessors) + tests.rs sibling,
 │                       compute.rs (compute_with_seed + 4 private helpers; the water-cooler
-│                         spot is a `cooler_hint` derived where home_desks is known — SE corner
-│                         below the band, east-margin fallback at laptop heights — and the shared
+│                         spot is a `cooler_hint` standing ON the corridor-runner strip's SE
+│                         end — aisle-mid y, inset x on wide bands — and the shared
 │                         trash bins [pantry corner + beside the vending machine] fill `bins`),
 │                       decor.rs (role enums WaypointKind/PodDecor/PlantKind/WallDecor + Facing — carry NO
 │                         dimensions, each .furniture()-maps to the unified Furniture geometry enum; the ONE
@@ -219,10 +219,13 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 
 ## Known sharp edges (don't be surprised by these)
 
-- **Laptop-density constants (2026-07-11, user-ratified mockups)**: desk footprint
-  10×5 under a 14×8 sprite (width pinned by `desk_sprite_width_tracks_the_footprint_overhang`
-  — the divider column = the sprite's last column), pod gaps 10, aisles 16/20.
-  **The aisle Y floor is EXACTLY 20** — 18 breaks
+- **Laptop-density constants (2026-07-11, user-ratified mockups)**: desk pitch
+  10×5 (`DESK_W`/`DESK_H`) under a 14×8 sprite whose FULL 14-px width is blocked
+  ground — the FurnitureDef footprint is (DESK_W+4)×DESK_H, stamped TopLeft, so
+  the sprite's overhang is VERTICAL only (bezel row + 2-row front lip; width
+  pinned by `desk_sprite_width_tracks_the_footprint_overhang` — the divider
+  column = the sprite's last column). Pod gaps 10, aisles 16/20.
+  **The aisle Y floor is EXACTLY 20** — 18 and 19 both break
   `every_home_desk_has_a_reachable_north_approach` (seed-swept 3 sizes × 5 seeds);
   don't tighten further without that test in hand.
 - **Background paints PROCEDURAL fixtures that are NOT in the decor tables**: the
@@ -235,7 +238,9 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 - **Vending machine + printer only exist on very tall buffers**: their corridor
   strip is `(usable_h/10).max(8)` and their guards need ≥10/≥9 — laptop sizes never
   place them (pre-existing, NOT a density-pass regression). The water cooler is the
-  corridor appliance laptops actually get (east-margin fallback).
+  corridor appliance laptops actually get: it always stands ON the strip (aisle-mid
+  y, so it can't straddle the runner's edge stripes), and its companion Tall plant
+  appears only when the strip holds the plant visual + 2 (deeper than laptop's 8).
 
 - **Agent OUTFIT (shirt+pants) is keyed on the normalized `cwd`, not `agent_id`** (Team Palette): same working directory → same outfit, so the office reads as a color-coded org-chart. Hair/skin stay `agent_id`-seeded for individual distinctness; `unknown_cwd`/empty-cwd falls back to the `agent_id` seed. The old WARM/COOL personality split for outfit selection was intentionally dropped (it was an `agent_id` artifact) — the outfit now spans the full 16-preset pool. The `examples/snapshot` fixture deliberately assigns VARIED cwds so the gallery shows grouping; don't collapse it back to one cwd.
 - **`recolor_frame` substitutes by RGB equality.** Works because each recolor key maps to a unique RGB. The recolor key set is `pixtuoid_core::sprite::format::RECOLOR_KEYS` (`B/H/S/P`) — the SINGLE source of truth `recolor_frame` (`pixel_painter/palette.rs`) iterates AND `validate_recolor_palette` guards, so the substitution and the guard can't drift (add a 5th recolor key there, once). **The uniqueness invariant is ENFORCED at pack load** (`validate_recolor_palette` in `sprite/format.rs::build_pack` bails on a collision) for the embedded AND `--pack-dir` custom packs — it is no longer just "documented, be careful." If you genuinely need two recolor keys to share a color, swap to a palette-key-indexed approach instead. (Core validates / scene consumes — the dep direction is kept.)

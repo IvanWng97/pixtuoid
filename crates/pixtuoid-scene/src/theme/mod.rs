@@ -389,6 +389,30 @@ mod tests {
                 "{}: vending body should be darker than its drinks",
                 t.name
             );
+            // Water cooler: the bottle must read against the cabinet, and the
+            // trim/base must sit darker than the cabinet so the unit has depth.
+            assert_ne!(
+                a.cooler_bottle, a.cooler_body,
+                "{}: cooler bottle invisible on body",
+                t.name
+            );
+            assert!(
+                lum(a.cooler_body) > lum(a.cooler_trim),
+                "{}: cooler trim/base must be darker than the cabinet",
+                t.name
+            );
+            // Zone rugs: must differ from the carpet they tint over, or the
+            // rug degenerates into recolored floor.
+            assert_ne!(
+                t.surface.rug_meeting, t.surface.carpet_base,
+                "{}: meeting rug invisible on carpet",
+                t.name
+            );
+            assert_ne!(
+                t.surface.rug_pantry, t.surface.carpet_base,
+                "{}: pantry rug invisible on carpet",
+                t.name
+            );
         }
     }
 

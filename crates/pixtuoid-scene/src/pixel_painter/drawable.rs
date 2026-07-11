@@ -1053,7 +1053,10 @@ fn paint_desk_coffee(
             buf.put(x, y, c);
         }
     };
-    let cx = desk.x + 2;
+    // +1, not +2: on the 14-px desk the monitor frame starts at col 3, so a
+    // 2-px cup at +2 clipped the frame's corner — +1 keeps the cup fully on
+    // the left surface wing (density pass, 2026-07-11).
+    let cx = desk.x + 1;
     let cy = desk.y + 2;
     put(buf, cx, cy, theme.furniture.coffee_cup);
     put(buf, cx + 1, cy, theme.furniture.coffee_cup);

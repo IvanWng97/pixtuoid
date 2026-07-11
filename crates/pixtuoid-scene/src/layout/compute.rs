@@ -51,6 +51,37 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16) -> Point {
     }
 }
 
+/// Water-cooler spot: standing ON the SE end of the corridor runner (the
+/// `cubicle_aisle` strip — vertically centred in it, so the centre-pinned
+/// visual never straddles the strip's edge stripes; the 2026-07-11
+/// film-critic census caught the old band-bottom+5 spot half-sunk into
+/// the runner edge on tall buffers, and the earlier east-margin fallback
+/// collided with the corridor-edge succulent). Wide bands pull it 20 px in
+/// from the edge (a break spot with room to gather); narrow bands park it
+/// flush at the east end. None only if a future aisle formula shrinks the
+/// strip below the cooler's visual height. The waypoint AND the companion
+/// plant both derive from this one hint so the pair can't drift apart.
+fn cooler_spot(cubicle_band: &Bounds, cubicle_aisle: &Bounds) -> Option<Point> {
+    // WHY 50: on narrower bands the inset break-spot x would crowd the
+    // whiteboard / pantry edge, so the cooler hugs the east end instead
+    // (taste-pinned, vibe mockups).
+    const INSET_MIN_BAND_W: u16 = 50;
+    let cooler_h = furniture_def(Furniture::WaterCooler).visual.h;
+    if cubicle_aisle.height < cooler_h {
+        return None;
+    }
+    let right_edge = cubicle_band.x + cubicle_band.width;
+    let inset = if cubicle_band.width > INSET_MIN_BAND_W {
+        20
+    } else {
+        6
+    };
+    Some(Point {
+        x: right_edge.saturating_sub(inset),
+        y: cubicle_aisle.y + cubicle_aisle.height / 2,
+    })
+}
+
 pub(super) fn compute_with_seed(
     buf_w: u16,
     buf_h: u16,
@@ -261,33 +292,9 @@ pub(super) fn compute_with_seed(
         y: couch_y,
     } = couch_pos(&cubicle_band, top_margin);
 
-    // Water-cooler spot, derived HERE where home_desks is known: primary =
-    // the SE corner below the band (needs 12px clear of the south runner);
-    // fallback = the band's east margin beside the bottom desk row (exact —
-    // measured from the rightmost desk, not a width heuristic). None if
-    // neither fits; the companion plant in `plants` uses the same hint.
-    let cooler_hint: Option<Point> = {
-        let right_edge = cubicle_band.x + cubicle_band.width;
-        let rightmost_desk = home_desks
-            .iter()
-            .map(|d| d.x + DESK_W)
-            .max()
-            .unwrap_or(cubicle_band.x);
-        let corner_y = cubicle_band.y + cubicle_band.height + 5;
-        if cubicle_band.width > 50 && corner_y + 12 <= buf_h {
-            Some(Point {
-                x: right_edge.saturating_sub(20),
-                y: corner_y,
-            })
-        } else if right_edge.saturating_sub(rightmost_desk) >= 12 {
-            Some(Point {
-                x: right_edge.saturating_sub(6),
-                y: (cubicle_band.y + cubicle_band.height).saturating_sub(6),
-            })
-        } else {
-            None
-        }
-    };
+    // Water-cooler spot, derived HERE where home_desks is known; the
+    // companion plant in `plants` chains from the SAME hint.
+    let cooler_hint = cooler_spot(&cubicle_band, &cubicle_aisle);
 
     let (waypoints, couch_sprite_center) = compute_waypoints(
         &cubicle_band,
@@ -326,15 +333,17 @@ pub(super) fn compute_with_seed(
     ]
     .into_iter()
     // Companion to the water cooler — derived from the SAME hint, so the
-    // pair appears together or not at all (corner spot only: the east-margin
-    // fallback is too narrow for both, the cooler wins it).
+    // pair can't drift apart. Only when the runner strip also holds the
+    // taller plant visual (+2 rows of stripe margin); a shallow strip
+    // (laptop sizes) gets the cooler alone. WEST of the cooler — the
+    // strip's east end is the printer's spot on tall buffers.
     .chain(
         cooler_hint
-            .filter(|c| c.y > cubicle_band.y + cubicle_band.height)
+            .filter(|_| cubicle_aisle.height >= furniture_def(Furniture::PlantTall).visual.h + 2)
             .map(|c| PlantItem {
                 kind: PlantKind::Tall,
                 pos: Point {
-                    x: (c.x + 7).min(cubicle_band.x + cubicle_band.width),
+                    x: c.x.saturating_sub(7),
                     y: c.y,
                 },
             }),
@@ -1163,12 +1172,11 @@ pub(super) fn compute_waypoints(
             room_id: None,
         });
     }
-    // Water cooler — the south-east floor below the cubicle band (the zone
-    // the 2026-07-11 vibe audit flagged empty). Center-pinned like its
-    // corridor siblings; the companion tall plant is placed by the caller
-    // (compute) next to it so the corner reads as a small break spot.
-    // Water cooler — position derived by the caller (`cooler_hint`), where
-    // home_desks is in scope for the exact east-margin fallback.
+    // Water cooler — standing on the corridor runner's SE end (the zone the
+    // 2026-07-11 vibe audit flagged empty). Center-pinned like its corridor
+    // siblings; the position is derived by the caller (`cooler_spot`), which
+    // also places the companion tall plant so the spot reads as a small
+    // break area on deeper strips.
     if let Some(pos) = cooler_hint {
         waypoints.push(Waypoint {
             pos,

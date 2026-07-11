@@ -218,9 +218,12 @@ pub const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
 /// `mask::build_walkable_mask`.
 pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 
-/// Desk GROUND footprint (walkable mask + pod pitch space; the 14×8 desk
-/// SPRITE overhangs it per invariant #6 — see desk.sprite's header + the
-/// width-pin test). Slimmed 12×6 → 10×5 in the laptop-density pass.
+/// Desk pitch width (the pod-spacing unit). The BLOCKED ground is the
+/// FurnitureDef row: (DESK_W + 4) × DESK_H — the full 14-px sprite width
+/// incl. the divider column, stamped TopLeft (mask.rs). The 14×8 sprite
+/// overhangs that footprint only VERTICALLY (bezel row at desk.y-1 + the
+/// 2-row front lip, invariant #6) — see desk.sprite's header + the
+/// width-pin test. Slimmed 12×6 → 10×5 in the laptop-density pass.
 pub const DESK_W: u16 = 10;
 pub const DESK_H: u16 = 5;
 /// Default character sprite width (px). The bundled pack is 8×12; this is the
@@ -277,9 +280,10 @@ pub const INTRA_POD_GAP_Y: u16 = 10;
 /// whiteboard's 10-px GROUND footprint (the 14-px board panel overhangs it,
 /// invariant #6) in the aisle. Tightened 28 → 22 (the office read too
 /// sparse), then 22 → 16/20 in the laptop-density pass (2026-07-11) together
-/// with the 10×5 desk footprint. The Y floor is EXACTLY 20: 18 breaks
-/// `every_home_desk_has_a_reachable_north_approach` (bisected — the seat
-/// approach cell collides with the row above), and X 16 still clears the
+/// with the 10×5 desk footprint. The Y floor is EXACTLY 20: 18 AND 19 both
+/// break `every_home_desk_has_a_reachable_north_approach` (bisected, 19
+/// re-verified 2026-07-11 — the seat approach cell collides with the row
+/// above), and X 16 still clears the
 /// 10-px board + pads. The walkable-connectivity + decor-overlap + approach
 /// tests guard that the tighter aisles stay routable.
 pub const INTER_POD_AISLE_X: u16 = 16;

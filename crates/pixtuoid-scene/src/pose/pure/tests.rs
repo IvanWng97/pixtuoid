@@ -209,6 +209,7 @@ fn dwell_ms_is_within_per_kind_range() {
         (WaypointKind::StandingDesk, 8_000, 30_000),
         (WaypointKind::VendingMachine, 4_000, 8_000),
         (WaypointKind::Printer, 4_000, 8_000),
+        (WaypointKind::WaterCooler, 6_000, 12_000),
     ];
     for (kind, lo, hi) in cases {
         for i in 0..256 {

@@ -478,7 +478,7 @@ mod tests {
         assert_eq!(
             frame.width(),
             crate::layout::DESK_W + 4,
-            "desk sprite width must equal DESK_W + 4 (footprint + overhang)"
+            "desk sprite width must equal DESK_W + 4 (the full blocked ground width)"
         );
     }
 
