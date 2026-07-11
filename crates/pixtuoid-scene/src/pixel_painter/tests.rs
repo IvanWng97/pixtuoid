@@ -803,12 +803,9 @@ fn desk_settle_z_key_matches_the_seated_arm() {
                 seated_arm_z,
                 "desk settle z-key must equal the SeatedIdle/Typing arm z-key"
             );
-            let fp_h = crate::layout::desk_furniture_def()
-                .footprint
-                .expect("desk footprint")
-                .h;
+            let visual_h = crate::layout::desk_furniture_def().visual.h;
             assert!(
-                desk.y + DESK_SEAT_Z_OFF < desk.y + fp_h + DESK_FRONT_OVERHANG,
+                desk.y + DESK_SEAT_Z_OFF < desk.y + visual_h,
                 "desk sitter must sort behind the desk furniture"
             );
         }
@@ -901,20 +898,17 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     // The same "agent on the correct side of its furniture" guarantee the
     // wander-seat invariant gives, extended to the home desk so EVERY seatable
     // is covered. A seated or standing desk occupant must y-sort BEHIND the
-    // desk cubicle (which sorts at `desk.y + footprint.h + DESK_FRONT_OVERHANG`
-    // — pinned by `desk_z_key_is_footprint_front_plus_overhang`). The desk
+    // desk cubicle (which sorts at `desk.y + visual.h` — pinned by
+    // `desk_z_key_is_the_visual_south`). The desk
     // keeps its own render arms (different sprite/work-state by design), but
     // ties its character z-key to its furniture z-key so a footprint or anchor
     // edit can never drift the agent in front of its own desk (no flicker,
     // matching the wander seats — the z-order GUARANTEE is unified even though
     // the render code is intentionally not).
-    let fp_h = crate::layout::desk_furniture_def()
-        .footprint
-        .expect("desk has a footprint")
-        .h;
+    let visual_h = crate::layout::desk_furniture_def().visual.h;
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for w in [CHARACTER_SPRITE_W, 10] {
-            let desk_furniture_z = desk.y + fp_h + DESK_FRONT_OVERHANG;
+            let desk_furniture_z = desk.y + visual_h;
             // SeatedIdle / SeatedThinking / SeatedTyping z-key.
             let seated_z = seated_anchor(desk, w).y + 12;
             // StandingAtDesk z-key.
@@ -932,17 +926,17 @@ fn desk_occupant_always_sorts_behind_its_desk() {
 }
 
 #[test]
-fn desk_z_key_is_footprint_front_plus_overhang() {
-    // The DeskCubicle z-sort baseline is `desk.y + footprint.h +
-    // DESK_FRONT_OVERHANG` — footprint-front-derived (consistent with the
-    // waypoint/wall baselines), not a bare sprite-bottom literal. Equals
-    // the historical `desk.y + 8` (6 + 2). Locks the relationship so a
-    // footprint or overhang edit surfaces here, not as a layering bug.
-    let fp_h = crate::layout::desk_furniture_def()
-        .footprint
-        .expect("desk has a footprint")
-        .h;
-    assert_eq!(fp_h + DESK_FRONT_OVERHANG, 8, "desk z-key offset (was +8)");
+fn desk_z_key_is_the_visual_south() {
+    // The DeskCubicle z-sort baseline is `desk.y + visual.h` — a VISUAL
+    // property (it must track the sprite, not the blocked ground, so a
+    // footprint edit is z-neutral by construction). Equals the historical
+    // `desk.y + 8` (footprint 6 + front lip 2). Locks the value so a visual
+    // resize surfaces here, not as a layering bug.
+    assert_eq!(
+        crate::layout::desk_furniture_def().visual.h,
+        8,
+        "desk z-key offset (was +8)"
+    );
 }
 
 #[test]

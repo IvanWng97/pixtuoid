@@ -207,12 +207,6 @@ pub fn hour_is_day(hour: f32) -> bool {
 // a reference, not a second copy of the value.
 const COFFEE_STEAM_WINDOW_SECS: u64 = crate::floor::CoffeeState::STEAM_WINDOW_SECS;
 
-/// The home desk sprite's front lip extends this many px past its blocked
-/// footprint (the top-down 3/4 bevel), so the desk's z-sort baseline is the
-/// footprint front edge + this overhang — the same "footprint front + sprite
-/// overhang" form every other drawable's z-key uses (was a bare `desk.y + 8`).
-const DESK_FRONT_OVERHANG: u16 = 2;
-
 /// Z-sort offset from a center-pinned sprite's center to its SOUTH (front) row.
 /// A sprite of height `h` blitted at `py = center - h/2` occupies rows
 /// `[py, py + h - 1]`, so its south row is `center + (h - 1) / 2`. This works
@@ -775,9 +769,12 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 }
 
 /// Desk cubicles — each carries its divider + cabinet + bin + screen glow.
-/// The desk sprite (16×8) sorts at `desk.y + footprint_h + DESK_FRONT_OVERHANG`
-/// (front-lip overhang past the blocked footprint), just past the seated
-/// worker's feet (`desk.y + 4`) so the sitter stays visually behind the desk.
+/// The desk sprite (16×8) sorts at `desk.y + visual.h` — one row past its
+/// visual south row (the same value as the historical footprint-front + lip
+/// form, `desk.y + 8`), just past the seated worker's feet (`desk.y + 4`) so
+/// the sitter stays visually behind the desk. Z is a VISUAL property: it must
+/// track the sprite, not the blocked ground, so a future footprint change
+/// (e.g. freeing the north row for walk-behind) is z-neutral by construction.
 /// `seated_agents` (built once before the ambient pass) gates the screen glow
 /// so it only paints for a worker actually at the desk. The DeskCubicle
 /// drawable is Copy, so this borrows nothing from the agent set.
@@ -789,11 +786,8 @@ fn enqueue_desk_cubicles<'a>(
 ) {
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let local = FloorLocalDeskIndex(i);
-        let Some(Size {
-            w: desk_fp_w,
-            h: desk_fp_h,
-        }) = crate::layout::desk_furniture_def().footprint
-        else {
+        let desk_def = crate::layout::desk_furniture_def();
+        let Some(Size { w: desk_fp_w, .. }) = desk_def.footprint else {
             continue;
         };
         let is_last_col = desk.x + desk_fp_w + DESK_W
@@ -813,7 +807,7 @@ fn enqueue_desk_cubicles<'a>(
                     .is_some_and(|d| d.as_secs() < COFFEE_STEAM_WINDOW_SECS)
             });
         drawables.push(Drawable {
-            anchor_y: desk.y + desk_fp_h + DESK_FRONT_OVERHANG,
+            anchor_y: desk.y + desk_def.visual.h,
             kind: DrawableKind::DeskCubicle {
                 desk,
                 is_last_col,

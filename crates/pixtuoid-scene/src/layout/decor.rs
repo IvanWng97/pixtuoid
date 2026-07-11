@@ -570,6 +570,99 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
     }
 }
 
+/// `ground_dy` intent constructor: the footprint pinned to the VISUAL's
+/// south row — the canopy/panel/column shape (invariant #6): a walker parks
+/// deep behind the overhang and the sprite's own y-sort occludes them.
+const fn ground_south(visual: Size, fp: Size) -> u16 {
+    visual.h.saturating_sub(fp.h)
+}
+
+/// `ground_dy` intent constructor: the footprint centered inside the VISUAL
+/// box (mirrors `anchored_top_left`'s integer halving exactly, so a
+/// Center-placed piece keeps its legacy `pos − fp.h/2` rows).
+const fn ground_centered(visual: Size, fp: Size) -> u16 {
+    visual.h / 2 - fp.h / 2
+}
+
+/// Rows below the VISUAL box top where a row's blocked ground begins — the
+/// general top-down collision-box model (a rect declared relative to the
+/// sprite, x always centered under the visual; the standard shape in
+/// tile-world engines), constrained to what the mask needs today. This used
+/// to be PER-SITE lore: `mask.rs` inferred south-strip anchoring from
+/// `visual.h > footprint.h`, and the three kinds that violate the inference
+/// (Desk, MeetingSofaBody, FloorLamp) bypassed the helper through dedicated
+/// stamp sites. In the general model they are not exceptions — just
+/// different `dy` values, each with its WHY below.
+///
+/// Companion fn rather than a `FurnitureDef` field because adding a `pub`
+/// field to the published 0.14.0 struct is a semver break; fold it into the
+/// struct when the next 0.x window opens.
+pub(crate) const fn ground_dy(kind: Furniture) -> u16 {
+    let def = furniture_def(kind);
+    let fp = match def.footprint {
+        Some(fp) => fp,
+        // No static ground of their own (wall-hung rows, seat rows, the
+        // runtime-sized Pantry whose dedicated site owns its strip math):
+        // nothing consumes a dy.
+        None => return 0,
+    };
+    match kind {
+        // Overhanging canopy/panel/column pieces: strip at the sprite base.
+        Furniture::PhoneBooth
+        | Furniture::StandingDesk
+        | Furniture::PlantFicus
+        | Furniture::PlantTall
+        | Furniture::PlantFlower
+        | Furniture::PlantSucculent
+        | Furniture::Whiteboard
+        | Furniture::Tv
+        | Furniture::Bookshelf
+        | Furniture::MeetingScreen => ground_south(def.visual, fp),
+        // CENTERED inside the visual: the sofa's 16×3 strip sits on the sofa
+        // pos (seat settle clearance + narrowest-room connectivity are tuned
+        // to it); the lamp's deliberately tall 2×7 footprint reaches the disc
+        // at the sprite south from a centered stamp (a south strip would lift
+        // the block off the disc).
+        Furniture::MeetingSofaBody | Furniture::FloorLamp => ground_centered(def.visual, fp),
+        // TOP-anchored: the desk body blocks; its 2-row south lip is the SEAT
+        // zone — pinning the ground south would block the sitter's row.
+        Furniture::Desk => 0,
+        // Flat boxes (footprint == visual): top == centered == south; 0 is
+        // the canonical spelling.
+        Furniture::Couch
+        | Furniture::VendingMachine
+        | Furniture::Printer
+        | Furniture::MeetingTable
+        | Furniture::PantryTable
+        | Furniture::PantryChair
+        | Furniture::LoungeSideTable => 0,
+        // footprint None rows returned above; unreachable here but the match
+        // must be exhaustive without a `_` (a new kind must classify itself).
+        Furniture::Pantry
+        | Furniture::MeetingSofa
+        | Furniture::MeetingStand
+        | Furniture::BulletinBoard
+        | Furniture::ExitSign => 0,
+    }
+}
+
+/// Static footprints of the pantry bistro pair, lifted to consts so the
+/// placement clamp in `compute.rs` derives its cluster half-extent from the
+/// ONE table instead of a hand-folded copy (whose comment had already rotted
+/// against the row). The `None` arms are unreachable — both rows are static
+/// `Some` (a zero size would trip the clamp tests immediately if that ever
+/// changed).
+pub(crate) const PANTRY_TABLE_FOOTPRINT: Size =
+    match furniture_def(Furniture::PantryTable).footprint {
+        Some(s) => s,
+        None => Size { w: 0, h: 0 },
+    };
+pub(crate) const PANTRY_CHAIR_FOOTPRINT: Size =
+    match furniture_def(Furniture::PantryChair).footprint {
+        Some(s) => s,
+        None => Size { w: 0, h: 0 },
+    };
+
 /// The **home desk** descriptor — sugar over the [`Furniture::Desk`] table row
 /// (kept because the desk is per-agent, not a `WaypointKind`, and ~10 call sites
 /// read it). The geometry now lives in ONE place: `furniture_def(Furniture::Desk)`.
@@ -892,6 +985,41 @@ mod tests {
             "desk uses the editable DESK_APPROACH policy"
         );
         assert!(d.dwell.range_ms > 0, "seated dwell range must be positive");
+    }
+
+    #[test]
+    fn ground_dy_stays_inside_the_visual_and_follows_the_declared_intent() {
+        // The dy table must keep every blocked rect INSIDE its visual box
+        // (a rect poking past the sprite would block ground the renderer
+        // never draws — invisible walls), and must match the intent class
+        // each row declares: south-strip for the overhang rows, centered for
+        // MeetingSofaBody/FloorLamp, top for the desk, 0 for flat boxes. A
+        // new overhanging kind that forgets to classify itself fails the
+        // south-strip arm here instead of silently blocking wrong cells.
+        for &kind in Furniture::ALL {
+            let def = furniture_def(kind);
+            let dy = ground_dy(kind);
+            let Some(fp) = def.footprint else {
+                assert_eq!(dy, 0, "{kind:?}: no static ground, dy must be 0");
+                continue;
+            };
+            assert!(
+                dy + fp.h <= def.visual.h.max(fp.h),
+                "{kind:?}: blocked rect must not poke past the visual box"
+            );
+            let expect = match kind {
+                Furniture::MeetingSofaBody | Furniture::FloorLamp => {
+                    ground_centered(def.visual, fp)
+                }
+                Furniture::Desk => 0,
+                _ if def.visual.h > fp.h => ground_south(def.visual, fp),
+                _ => 0,
+            };
+            assert_eq!(
+                dy, expect,
+                "{kind:?}: dy must follow its declared intent class"
+            );
+        }
     }
 
     #[test]

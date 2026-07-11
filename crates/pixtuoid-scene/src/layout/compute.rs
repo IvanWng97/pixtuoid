@@ -430,11 +430,22 @@ pub(super) fn compute_with_seed(
     let (pantry_table, pantry_chairs) = if let Some(pr) = pantry_room {
         // Inset the bistro table + stools clear of the room walls. A small
         // pantry puts the raw 25% mark inside the meeting/pantry divider wall
-        // (caught by `furniture_does_not_overlap_room_walls`). Clearance = wall
-        // face + obstacle pad; the cluster half-extent is 5×4 (table 8×5 plus
-        // the ±4 / ±3 stool reach).
+        // (caught by `furniture_does_not_overlap_room_walls`). Clearance =
+        // wall face + obstacle pad.
+        // Stool ring reach from the table center — the stool positions below
+        // and the cluster half-extent both read these.
+        const STOOL_DX: u16 = 4;
+        const STOOL_DY: u16 = 3;
         let clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
-        let (half_w, half_h) = (5u16, 4u16);
+        // Cluster half-extent DERIVED from the furniture table + stool reach
+        // (was a hand-folded `(5, 4)` whose comment had already rotted to
+        // "table 8×5" against the row's real 7×4 — the two-copies drift):
+        // per axis, the wider of the table's half-span and the stool offset
+        // + stool half-span.
+        let table_fp = super::decor::PANTRY_TABLE_FOOTPRINT;
+        let stool_fp = super::decor::PANTRY_CHAIR_FOOTPRINT;
+        let half_w = (table_fp.w / 2).max(STOOL_DX + stool_fp.w / 2);
+        let half_h = (table_fp.h / 2).max(STOOL_DY + stool_fp.h / 2);
         let min_x = pr.x + clr + half_w;
         let max_x = (pr.x + pr.width).saturating_sub(clr + half_w);
         let min_y = pr.y + clr + half_h;
@@ -454,15 +465,21 @@ pub(super) fn compute_with_seed(
             Some(Point { x: tx, y: ty }),
             vec![
                 Point {
-                    x: tx.saturating_sub(4),
+                    x: tx.saturating_sub(STOOL_DX),
                     y: ty,
                 },
-                Point { x: tx + 4, y: ty },
+                Point {
+                    x: tx + STOOL_DX,
+                    y: ty,
+                },
                 Point {
                     x: tx,
-                    y: ty.saturating_sub(3),
+                    y: ty.saturating_sub(STOOL_DY),
                 },
-                Point { x: tx, y: ty + 3 },
+                Point {
+                    x: tx,
+                    y: ty + STOOL_DY,
+                },
             ],
         )
     } else {
