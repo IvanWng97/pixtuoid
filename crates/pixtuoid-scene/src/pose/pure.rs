@@ -29,13 +29,13 @@ use pixtuoid_core::AgentId;
 /// pose (seated, awake, no z's) before entering the wander/sleep cycle.
 /// 20s covers typical CC thinking pauses between tool bursts.
 ///
-/// `pub` so `tui::pose::derive_with_routing`'s wander dispatch references the
+/// `pub` so `pose::derive_with_routing`'s wander dispatch references the
 /// same window — otherwise the thinking gate could silently drift between
-/// core's `derive` and the tui-side dispatch.
+/// the stateless `derive` and the routed dispatch.
 pub const THINKING_WINDOW_SECS: u64 = 20;
 
 /// Base cycle length used only as the stale-resume / off-screen-gap sentinel
-/// in `tui::motion::advance_wander` (a few seconds, above on-screen frame
+/// in `motion::advance_wander` (a few seconds, above on-screen frame
 /// cadence and below a floor-switch-away gap). NOT the wander dwell anymore —
 /// see `dwell_ms` / `seated_dwell_ms` for the absolute per-spot timeline.
 pub const STALE_RESUME_GAP_BASE_MS: u64 = 7_000;
@@ -43,12 +43,12 @@ pub const STALE_RESUME_GAP_BASE_MS: u64 = 7_000;
 pub const STALE_RESUME_GAP_RANGE_MS: u64 = 6_000;
 
 /// Stateless-overlay wander-timeline estimates. The render authority
-/// (`tui::motion::advance_wander`) drives the at-waypoint beat with the
+/// (`motion::advance_wander`) drives the at-waypoint beat with the
 /// per-spot `dwell_ms`; `idle_pose` only needs an approximate timeline to
 /// place the occupancy overlay, so it uses these fixed estimates plus a
 /// constant per-agent cycle period (`est_wander_cycle_ms`). Exact coherence
 /// with the routed timeline is impossible — core has no router and walk legs
-/// are physics-timed only in the tui path — and #62's frozen leg paths make
+/// are physics-timed only in the routed motion path — and #62's frozen leg paths make
 /// approximate overlay timing safe (a new leg's shape is snapshotted once).
 pub const WANDER_WALK_EST_MS: u64 = 3_500;
 pub const WANDER_DWELL_EST_MS: u64 = 18_000;
@@ -61,22 +61,22 @@ pub const WALKING_FRAMES: usize = 2;
 
 /// The walking sprite's frame index at `elapsed_ms` into the walk — the one
 /// `(elapsed / WALKING_FRAME_MS) % WALKING_FRAMES` cadence, named once so the
-/// core stateless overlay and the tui motion authority can't recompute it
+/// the stateless overlay and the routed motion authority can't recompute it
 /// differently (it was open-coded at 8 sites across both crates).
 pub fn walking_frame(elapsed_ms: u64) -> usize {
     (elapsed_ms / WALKING_FRAME_MS) as usize % WALKING_FRAMES
 }
 
-/// Spawn-window guard for entry routing in `tui::pose::derive_with_routing`.
+/// Spawn-window guard for entry routing in `pose::derive_with_routing`.
 /// After `physics::walk_profile` took over motion timing this constant is no
 /// longer used to compute walk duration — it is only the *upper bound* on the
-/// time window during which the tui layer will attempt to route an entry walk
+/// time window during which the routed motion layer will attempt to route an entry walk
 /// and (via `FloorCtx::door_anim_max_ms`) drive door-open cosmetics. The
 /// actual walk completes when `physics::walk_arrived` returns true.
 pub const ENTRY_ANIMATION_MS: u64 = 4000;
 
 /// Per-agent stale-resume gap (ms): the `now - last_advanced_at` threshold above
-/// which `tui::motion::advance_wander` treats the floor as off-screen/paused and
+/// which `motion::advance_wander` treats the floor as off-screen/paused and
 /// re-bootstraps analytically instead of replaying the backlog one transition per
 /// frame. This is NOT the wander cycle length (`est_wander_cycle_ms` is) — it's a
 /// frame-cadence-vs-frozen-floor sentinel (7..13s), jittered per agent so floors
@@ -97,7 +97,7 @@ fn jittered_dwell(window: DwellWindow, agent_id: AgentId, tag: u64) -> u64 {
 
 /// Absolute dwell (ms) an agent lingers at a waypoint, per spot kind, with
 /// per-agent jitter. A sofa / meeting seat is a long lounge; a vending grab
-/// is quick. The render authority (`tui::motion::advance_wander`) uses this
+/// is quick. The render authority (`motion::advance_wander`) uses this
 /// for the AtWaypoint beat.
 pub fn dwell_ms(kind: WaypointKind, agent_id: AgentId) -> u64 {
     jittered_dwell(
@@ -259,7 +259,7 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
 
 /// The shared `Walking` pose for the stateless entry/exit overrides: a
 /// LINEAR (not physics-timed) interpolation over `ENTRY_ANIMATION_MS`. This
-/// is deliberately distinct from the tui motion path's kinematic profiles —
+/// is deliberately distinct from the routed motion path's kinematic profiles —
 /// the overlay/snapshot path stays linear so it has no per-frame history.
 fn linear_walk_pose(since_ms: u64, from: Point, to: Point) -> Pose {
     let t = (since_ms * 1000 / ENTRY_ANIMATION_MS).min(1000) as u16;
@@ -315,7 +315,7 @@ fn state_driven_pose(
 /// evaluated (elapsed time since `state_started_at` drives the animation
 /// frame counters).
 ///
-/// This is the seam used by `tui::pose::derive_with_routing` so that a
+/// This is the seam used by `pose::derive_with_routing` so that a
 /// physics-driven entry (already in-flight via `MotionState`) does not
 /// restart a redundant linear entry walk. `derive()` itself stays
 /// UNTOUCHED — its existing callers (TestRenderer, overlay pass, snapshot
@@ -327,8 +327,8 @@ pub fn derive_state_only(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout
     state_driven_pose(slot, desk, layout, now)
 }
 
-/// Per-(agent, cycle) seed for `pick_aimless_dest`. Shared by core's
-/// `idle_pose` and the tui's `pick_wander_dest` so the two paths can never
+/// Per-(agent, cycle) seed for `pick_aimless_dest`. Shared by the stateless
+/// `idle_pose` and the routed `pick_wander_dest` so the two paths can never
 /// drift to different aimless destinations for the same (agent, cycle).
 pub fn aimless_wander_seed(agent_id: AgentId, cycle_n: u64) -> u64 {
     agent_id.raw() ^ cycle_n.wrapping_mul(0xd1b5_4a32_d192_ed03)
@@ -522,7 +522,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     // is continuous, the cycle boundary stays continuous (Seated → Seated),
     // and the next trip's walk-out starts from its beginning. Deliberately
     // phase-only — shifting `cycle_n` would desync destination selection from
-    // `tui::motion::advance_wander`'s bootstrap (`elapsed_idle /
+    // `motion::advance_wander`'s bootstrap (`elapsed_idle /
     // est_wander_cycle_ms`), which must stay in lockstep with this function.
     let hold = thinking_hold_ms(slot);
     if cycle_n == hold / cycle_ms && hold % cycle_ms > seated_end {

@@ -55,7 +55,7 @@ pub(super) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
     }
 }
 
-/// One-pixel vertical bob on a ~2.8 s cycle with a per-agent phase offset,
+/// One-pixel vertical bob on a ~4.5 s cycle with a per-agent phase offset,
 /// so static (seated / standing) characters look alive instead of frozen.
 /// Walking + waypoint-trip poses already animate, so we skip those.
 fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {

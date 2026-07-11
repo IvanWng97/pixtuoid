@@ -11,7 +11,7 @@
 //! approached from the front — matching the real world.
 //!
 //! Pure geometry over [`WalkableMask`] — no A*, no terminal deps — so the
-//! stateless `pose::pure::idle_pose` and the stateful `tui::motion` walk
+//! stateless `pose::pure::idle_pose` and the stateful `motion` walk
 //! destinations stay in lockstep with the render anchor (all three call
 //! this with the same `origin = home desk`).
 

@@ -620,7 +620,7 @@ fn entry_walk_does_not_carry_coffee() {
 /// `derive_state_only` must return the state-driven pose even when the
 /// slot is inside the entry-animation window (now - created_at < 4 s).
 /// This proves it does NOT emit the door→desk entry Walking pose that
-/// `derive` would return — preventing double-walk when the tui physics
+/// `derive` would return — preventing double-walk when the routed motion physics
 /// layer is already driving its own entry walk.
 #[test]
 fn derive_state_only_skips_entry_override() {
