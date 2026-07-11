@@ -59,9 +59,11 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.14.0" => Some(&[
-            "Click an agent, land in its terminal — clicking a sprite (or pressing f on the dashboard's selected agent) brings the terminal app hosting that session to the foreground, on macOS, Windows and Linux; if the terminal can't be found, nothing happens — no popups, no errors",
-            "Works across the fleet — hook-connected CLIs are located through the session's own process, Claude Code and Codex through their recycle-guarded liveness registries, so a stale or reused pid never yanks the wrong window forward",
-            "The old click-to-pin tooltip is retired in its favor — hovering a sprite still shows the full dossier, one click now means \"take me there\"",
+            "Click an agent, land in its terminal — clicking a sprite (or pressing f on the dashboard's selected agent) brings that session's terminal app to the foreground on macOS, Windows and Linux; it's located through the session's own process, so a stale or reused pid never yanks the wrong window forward",
+            "Top models wear their tier — agents running a frontier model now sport ember hair and a flame crown, so the office's horsepower reads at a glance, and the flames light and snuff the instant a session switches models",
+            "New agent supported — Oh My Pi (omp) sessions show up as om· pixel-art coworkers, wired in like every other CLI, with full model burn-tier parity",
+            "Crisper text everywhere — the old 8×8 bitmap font is retired: every name badge, label, and the neon wall board now render anti-aliased across the terminal, the floating window, and the web hero",
+            "Sturdier under the hood — a whole-codebase review pass (correctness, naming, wire-decoding), a burn-tier upstream-drift watch, and focus-jump pid recycle-guards; the office looks the same, just steadier",
         ]),
         "0.13.0" => Some(&[
             "New agent supported — Hermes Agent (Nous Research) sessions now show up as animated pixel-art coworkers in the office, wired in like every other CLI",
