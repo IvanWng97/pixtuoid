@@ -21,7 +21,7 @@ path = "src/main.rs"
 [dependencies]
 pixtuoid-core  = { path = "../pixtuoid-core", version = "0.14.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.14.0" }
-# AA text rasterizer (JetBrains Mono) for the binary's pixel surfaces: the
+# AA text rasterizer (Monaspace Neon) for the binary's pixel surfaces: the
 # floating window's name badges + wall board (src/aa_text.rs) AND the --proof
 # example panel. On Linux it's already resolved transitively via sctk-adwaita
 # (winit's Wayland CSD titlebar text — see Cargo.lock), so the direct entry adds
