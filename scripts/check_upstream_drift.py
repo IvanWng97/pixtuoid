@@ -418,13 +418,14 @@ OMP_EXIT_DIAG_URL = (
 )
 # The message-level names (roles + tool-call block shape) live in the pi-ai LLM
 # types: `role:"assistant"`/`"toolResult"`, the `"toolCall"` content-block type
-# (quoted TS literals), plus the result's `toolCallId` back-reference and the
-# call's `arguments` (property keys).
+# (quoted TS literals), plus the result's `toolCallId` back-reference, the
+# call's `arguments`, and the assistant message's bare `model` (the burn-tier
+# carrier, #545 — AssistantMessage requires it) as property keys.
 OMP_AI_TYPES_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/ai/src/types.ts"
 )
 OMP_MESSAGE_LITERALS = {"assistant", "toolResult", "toolCall"}
-OMP_MESSAGE_FIELDS = {"toolCallId", "arguments"}
+OMP_MESSAGE_FIELDS = {"toolCallId", "arguments", "model"}
 # The ask tool (#519): its toolCall NAME is STATE-bearing — decode_omp_line
 # maps an assistant `ask` block to Waiting — and the first question's text
 # feeds the Waiting reason. Checked against the tool's own source (`readonly

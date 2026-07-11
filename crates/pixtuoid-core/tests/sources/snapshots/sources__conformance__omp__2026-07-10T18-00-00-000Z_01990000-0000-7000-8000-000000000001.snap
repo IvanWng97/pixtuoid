@@ -8,6 +8,10 @@ expression: events
     session_id: 2026-07-10T18-00-00-000Z_01990000-0000-7000-8000-000000000001/FixtureCaptureChild
     cwd: /home/user/demo-project
     parent_id: 10340979680718815602
+- ModelInfo:
+    agent_id: 15994559954055168040
+    model: kimi-for-coding
+    effort: ~
 - ActivityStart:
     agent_id: 15994559954055168040
     tool_use_id: tool_AAAAAAAAAAAAAAAAAAAAAAAA
@@ -17,6 +21,14 @@ expression: events
 - ActivityEnd:
     agent_id: 15994559954055168040
     tool_use_id: tool_AAAAAAAAAAAAAAAAAAAAAAAA
+- ModelInfo:
+    agent_id: 15994559954055168040
+    model: kimi-for-coding
+    effort: ~
+- ModelInfo:
+    agent_id: 15994559954055168040
+    model: kimi-for-coding
+    effort: ~
 - ActivityStart:
     agent_id: 15994559954055168040
     tool_use_id: tool_BBBBBBBBBBBBBBBBBBBBBBBB

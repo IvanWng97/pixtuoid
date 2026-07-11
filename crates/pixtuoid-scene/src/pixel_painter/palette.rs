@@ -334,18 +334,6 @@ fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     z ^ (z >> 31)
 }
 
-/// Build the per-agent palette. `glow_tint` carries the monitor-glow
-/// color when the agent is seated at a lit screen (SeatedTyping). The
-/// skin blends 18% toward that tint so the eye reads "the monitor is
-/// lighting them up." `None` means no glow — skin stays natural.
-///
-/// The color varies by tool type so scanning a row of typing agents
-/// gives an at-a-glance read of what they're working on:
-///   green  = generic / default
-///   blue   = Edit / Write
-///   cyan   = Read
-///   orange = Bash
-///   purple = Agent / Task
 /// The outfit-determining seed for `agent` — the ONE input `agent_palette`
 /// keys the shirt+pants (Team Palette) on. Extracted so the frame cache can
 /// watch it for the mid-lifetime cwd backfill (`FrameCache::note_outfit_seed`)
@@ -367,6 +355,18 @@ pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
 /// a premium head never reads as "just auburn".
 const EMBER_HAIR: Rgb = super::effects::FLAME_DEEP;
 
+/// Build the per-agent palette. `glow_tint` carries the monitor-glow
+/// color when the agent is seated at a lit screen (SeatedTyping). The
+/// skin blends 18% toward that tint so the eye reads "the monitor is
+/// lighting them up." `None` means no glow — skin stays natural.
+///
+/// The color varies by tool type so scanning a row of typing agents
+/// gives an at-a-glance read of what they're working on:
+///   green  = generic / default
+///   blue   = Edit / Write
+///   cyan   = Read
+///   orange = Bash
+///   purple = Agent / Task
 pub(super) fn agent_palette(
     base: &Palette,
     agent: &AgentSlot,

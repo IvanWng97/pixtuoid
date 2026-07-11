@@ -56,8 +56,14 @@ pub(crate) fn has_hooks(t: &'static Target) -> bool {
 /// exists+executable (HARD); a Claude/Unix bare name is a soft PATH note (a
 /// doctor-process PATH miss is not proof the CLI can't resolve it). `config`
 /// overrides the default path (tests + a `--config` round); `None` = the
-/// target's default — mirrors `install_target`.
-pub fn verify_target(t: &'static Target, config: Option<PathBuf>) -> verify::SchemaVerifyResult {
+/// target's default — mirrors `install_target`. Layer-internal (`pub(crate)`,
+/// like its sibling `has_hooks`): the sole caller is `doctor::diagnose`'s verify
+/// gate — `pub mod install` makes the path pub-reachable, so `unreachable_pub`
+/// can't mechanically catch the over-broad `pub`.
+pub(crate) fn verify_target(
+    t: &'static Target,
+    config: Option<PathBuf>,
+) -> verify::SchemaVerifyResult {
     use verify::ShimRef;
     let path = match config.map(Ok).unwrap_or_else(|| (t.default_config_path)()) {
         Ok(p) => p,

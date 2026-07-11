@@ -125,7 +125,10 @@ backstops a missed exit; the sentinel is display-suppressed by
 `burn::fresh_effort`, so the dossier never renders it) — plus the SessionStart
 hook's optional `model` field;
 Codex `turn_context` model+effort verbatim; copilot per-tool `data.model`
-(attributed to the ACTING agent); opencode `session.created` `info.model.id`.
+(attributed to the ACTING agent); opencode `session.created` `info.model.id`;
+omp assistant messages' bare `model` (#545 — the separate `provider` field and
+the provider-prefixed `model_change` entry are deliberately NOT decoded: the
+bare field matches TOP_MODELS' prefix vocabulary and every turn re-stamps it).
 The reducer caches `slot.model` (last-seen-wins — a mid-session `/model`
 switch tracks) + `slot.effort: EffortObservation{value, seen_at}` (re-stamped
 per sighting; the scene's EFFORT_TTL turns Codex's per-turn field and CC's

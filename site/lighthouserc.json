@@ -10,7 +10,8 @@
         "http://localhost:4321/architecture/",
         "http://localhost:4321/config/",
         "http://localhost:4321/contributing/",
-        "http://localhost:4321/knowledge-base/"
+        "http://localhost:4321/knowledge-base/",
+        "http://localhost:4321/parallel-delivery/"
       ]
     },
     "assert": {

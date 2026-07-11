@@ -220,10 +220,29 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
             match msg.get("role").and_then(|r| r.as_str()) {
                 // Assistant content blocks carry the tool CALLS.
                 Some("assistant") => {
-                    let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else {
-                        return Ok(vec![]);
-                    };
                     let mut out = Vec::new();
+                    // Model identity rides EVERY assistant message (pi-ai
+                    // types.ts: AssistantMessage requires provider+model) —
+                    // the burn-tier carrier (#545). The BARE `model` field,
+                    // never the provider-prefixed `model_change` form, so
+                    // TOP_MODELS prefix matching sees the same vocabulary
+                    // CC/codex/copilot emit; the reducer's last-seen-wins
+                    // dedups the per-turn re-stamp.
+                    if let Some(model) = msg
+                        .get("model")
+                        .and_then(|m| m.as_str())
+                        .filter(|m| !m.is_empty())
+                    {
+                        out.push(AgentEvent::ModelInfo {
+                            agent_id: acting,
+                            model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+                            effort: None,
+                        });
+                    }
+                    // A blocks-less/text-only turn still stamps the model.
+                    let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else {
+                        return Ok(out);
+                    };
                     // `ask` (the built-in user-question tool) BLOCKS on human
                     // input: its Start is followed by a Waiting so the session
                     // renders waiting, not active. The Start binds the
@@ -289,6 +308,9 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
         }
         // title / title_change / model_change / compaction / session_init /
         // custom_message / thinking_level_change / … — not sprite-visible.
+        // (model_change stays undecoded even though the burn tier reads model:
+        // its value is the provider-prefixed combined form, and every assistant
+        // message re-stamps the bare `model` anyway — one turn's lag at most.)
         _ => vec![],
     };
     Ok(out)
@@ -532,6 +554,49 @@ mod tests {
                 );
             }
             other => panic!("expected one ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn assistant_message_surfaces_model_info_for_the_burn_tier() {
+        // Every assistant message carries the BARE `model` (+ a separate
+        // `provider`) — pi-ai types.ts requires both. The bare field is the
+        // burn-tier carrier (#545): the same shape CC/codex/copilot emit, so
+        // TOP_MODELS prefix matching sees one vocabulary (the
+        // provider-prefixed `model_change` form is deliberately NOT decoded);
+        // the reducer's last-seen-wins dedups the per-turn re-stamp.
+        let line = r#"{"type":"message","id":"m1","parentId":null,"timestamp":"t","message":{"role":"assistant","provider":"kimi-code","model":"kimi-for-coding","content":[{"type":"toolCall","id":"t1","name":"bash","arguments":{"command":"ls"}}],"timestamp":1}}"#;
+        match &decode(line)[..] {
+            [AgentEvent::ModelInfo {
+                agent_id,
+                model: Some(model),
+                effort: None,
+            }, AgentEvent::ActivityStart { .. }] => {
+                assert_eq!(*agent_id, root());
+                assert_eq!(model.as_str(), "kimi-for-coding");
+            }
+            other => panic!("expected ModelInfo then ActivityStart, got {other:?}"),
+        }
+        // A text-only assistant turn still stamps the model.
+        let text_only = r#"{"type":"message","id":"m2","parentId":null,"timestamp":"t","message":{"role":"assistant","provider":"anthropic","model":"claude-fable-5","content":[{"type":"text","text":"done"}],"timestamp":2}}"#;
+        match &decode(text_only)[..] {
+            [AgentEvent::ModelInfo { model: Some(m), .. }] => {
+                assert_eq!(m.as_str(), "claude-fable-5");
+            }
+            other => panic!("expected one ModelInfo, got {other:?}"),
+        }
+        // An empty/missing model must not mint a phantom observation.
+        let empty = r#"{"type":"message","id":"m3","timestamp":"t","message":{"role":"assistant","model":"","content":[],"timestamp":3}}"#;
+        assert!(decode(empty).is_empty());
+        // A content-ABSENT message (defensive: pi-ai types.ts requires
+        // `content`, so this can't occur on real wire) still stamps the model
+        // — pins the let-else early return's `Ok(out)`, not `Ok(vec![])`.
+        let no_content = r#"{"type":"message","id":"m4","timestamp":"t","message":{"role":"assistant","model":"claude-fable-5","timestamp":4}}"#;
+        match &decode(no_content)[..] {
+            [AgentEvent::ModelInfo { model: Some(m), .. }] => {
+                assert_eq!(m.as_str(), "claude-fable-5");
+            }
+            other => panic!("expected one ModelInfo, got {other:?}"),
         }
     }
 

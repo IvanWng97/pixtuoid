@@ -273,9 +273,19 @@ fn toml_merge_install(doc: toml::Value, base_cmd: &str) -> toml::Value {
         *hooks = toml::Value::Table(Table::new());
     }
     if let Some(hooks) = hooks.as_table_mut() {
-        // Hooks are gated on this flag (default true). Set it so a previously
-        // disabled config still fires the visualizer the user just opted into.
-        hooks.insert("enabled".into(), toml::Value::Boolean(true));
+        // Hooks are gated on this flag (default true). Set it ONLY when the user
+        // has made no explicit choice — an explicit `enabled = false` is the
+        // user's own global "all CodeWhale hooks off" switch, so we must NOT flip
+        // it: we couldn't faithfully restore it on disconnect (no per-source
+        // install state since 0.12.0), and silently re-enabling a user's own
+        // hooks is a config mutation. Our hooks then won't fire, but the
+        // verify/`doctor` `[hooks].enabled = false — none fire` note surfaces
+        // exactly that, so it isn't a silent no-sprite. An ABSENT key defaults
+        // true upstream, so writing it here only affects the fresh-install case
+        // (the [hooks] table we just created).
+        hooks
+            .entry("enabled".to_string())
+            .or_insert_with(|| toml::Value::Boolean(true));
         let arr = hooks
             .entry("hooks".to_string())
             .or_insert_with(|| toml::Value::Array(vec![]));
@@ -310,15 +320,16 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
     {
         hooks.remove("hooks");
     }
-    // If the [hooks] table is now empty or holds ONLY the `enabled` flag we set,
-    // it was ours — drop it so an uninstall fully reverses a pixtuoid-only
-    // install. A user's own hooks / extra keys keep it alive. ACCEPTED residual:
-    // a user who had a LONE `enabled = false` (no hooks) before install does not
-    // get it restored here — install force-set it true (an explicit opt-in to
-    // visualization), and with no hooks defined the flag is moot, so the only
-    // loss is a no-op config line. Faithfully restoring it would need install to
-    // record that it flipped the value; not worth the state for a nil effect.
-    let ours_only = hooks.is_empty() || hooks.keys().all(|k| k == "enabled");
+    // If the [hooks] table is now empty or holds ONLY the `enabled = true` flag
+    // we add on a fresh install, it was ours — drop it so an uninstall fully
+    // reverses a pixtuoid-only install. A user's own hooks / extra keys keep it
+    // alive. Install only ever WRITES `enabled = true` (and only when the key was
+    // absent), so a surviving `enabled = false` is the user's OWN global switch —
+    // keep it (and its table) so a connect→disconnect round never removes a
+    // setting we didn't create.
+    let ours_only = hooks.is_empty()
+        || (hooks.keys().all(|k| k == "enabled")
+            && hooks.get("enabled").and_then(|v| v.as_bool()) != Some(false));
     if ours_only {
         root.remove("hooks");
     }
@@ -470,14 +481,24 @@ mod tests {
     }
 
     #[test]
-    fn install_sets_enabled_true_even_when_user_disabled_hooks() {
-        let user = "[hooks]\nenabled = false\n";
-        let out = merge_install(user, BASE).unwrap();
-        let v = parse(&out.content);
+    fn install_respects_an_explicit_enabled_false_but_defaults_a_fresh_install_to_true() {
+        // Option B (respect the user's global switch): an explicit `enabled = false`
+        // is the user's own "all CodeWhale hooks off" — connect must NOT flip it
+        // (we can't restore it on disconnect, and re-enabling their hooks mutates
+        // their config; the verify/doctor "none fire" note surfaces that ours
+        // won't fire). A fresh install with no `enabled` key still defaults it to
+        // true so the visualizer fires out of the box.
+        let disabled = merge_install("[hooks]\nenabled = false\n", BASE).unwrap();
         assert_eq!(
-            v["hooks"]["enabled"].as_bool(),
+            parse(&disabled.content)["hooks"]["enabled"].as_bool(),
+            Some(false),
+            "an explicit enabled = false is left untouched"
+        );
+        let fresh = merge_install("", BASE).unwrap();
+        assert_eq!(
+            parse(&fresh.content)["hooks"]["enabled"].as_bool(),
             Some(true),
-            "install must (re-)enable hooks so the visualizer fires"
+            "a fresh install (no enabled key) defaults enabled = true"
         );
     }
 
@@ -508,6 +529,45 @@ command = "echo hi"
         assert!(
             arr.iter().any(|e| e["command"].as_str() == Some("echo hi")),
             "the user's own hook must be preserved"
+        );
+    }
+
+    #[test]
+    fn connect_respects_an_explicit_enabled_false_and_disconnect_preserves_it() {
+        // A user who globally disabled CodeWhale hooks (enabled = false) AND has
+        // their own hook entries: connect must NOT flip their switch, and
+        // disconnect must leave both the switch and their own hooks intact — we
+        // only ever write enabled = true, and only when the key was absent.
+        let user = "[hooks]\nenabled = false\n\n[[hooks.hooks]]\nevent = \"session_start\"\ncommand = \"my-own-hook\"\n";
+        let installed = merge_install(user, BASE).unwrap();
+        let v = parse(&installed.content);
+        assert_eq!(
+            v["hooks"]["enabled"].as_bool(),
+            Some(false),
+            "an explicit enabled = false is the user's global switch — leave it untouched on connect"
+        );
+        assert!(
+            v["hooks"]["hooks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(is_managed_entry),
+            "our managed entries are still installed (they just won't fire until the user enables hooks)"
+        );
+
+        let removed = merge_uninstall(&installed.content).unwrap();
+        let v = parse(&removed.content);
+        assert_eq!(
+            v["hooks"]["enabled"].as_bool(),
+            Some(false),
+            "disconnect must not remove the user's own enabled = false"
+        );
+        let arr = v["hooks"]["hooks"].as_array().unwrap();
+        assert_eq!(arr.len(), 1, "only the user's own hook remains");
+        assert_eq!(arr[0]["command"].as_str(), Some("my-own-hook"));
+        assert!(
+            !arr.iter().any(is_managed_entry),
+            "none of our managed entries survive disconnect"
         );
     }
 

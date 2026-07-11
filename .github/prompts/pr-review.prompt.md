@@ -319,7 +319,11 @@ Judge as a demanding critic:
    `-D warnings`) is the mechanical half — a `pub` in a PRIVATE module tree;
    this lens owns the half the lint can't see: a reachable-but-should-be-
    funnelled API, where the right fix is "demote to `pub(crate)` and call the
-   orchestrator," not "leave it public."
+   orchestrator," not "leave it public." The lint ALSO misses a plainer case the
+   same demotion fixes: a bare `pub` fn/type whose only callers are IN-CRATE, in
+   a `pub` module tree (the path is pub-reachable, so `unreachable_pub` stays
+   silent) — demote to `pub(crate)` even with no orchestrator involved (the
+   `verify_target`-vs-`has_hooks` least-privilege slip, whole-codebase audit round 2).
 
 [the five hard requirements]
 Your final message is the report.

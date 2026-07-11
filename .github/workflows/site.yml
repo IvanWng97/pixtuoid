@@ -69,8 +69,8 @@ jobs:
       # inlined fonts on day one). Chromium is already installed above.
       - run: npm run e2e
       # Lighthouse CI: gate a11y / SEO / best-practices (perf advisory) against
-      # the built pages — serves dist via `astro preview` (honors the /pixtuoid
-      # base) and audits each. Replaces the dropped eslint-plugin-jsx-a11y with a
+      # the built pages — serves dist via `astro preview` (root `/` base on the
+      # custom domain) and audits each. Replaces the dropped eslint-plugin-jsx-a11y with a
       # rendered-DOM a11y check (axe-powered) plus SEO/perf budgets. Uses the
       # runner's pre-installed Chrome (chrome-launcher finds it).
       - run: npm run lighthouse

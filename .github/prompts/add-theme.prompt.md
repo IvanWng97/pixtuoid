@@ -9,7 +9,7 @@ Add a new color theme named `${input:name}` to pixtuoid.
 
 1. Read an existing theme for the full field set — e.g.
    `crates/pixtuoid-scene/src/theme/dracula.rs`. A theme is a `pub static Theme`
-   with ~110 color roles across **9** groups (including `ApplianceColors` for the
+   with ~90 color roles across **9** groups (including `ApplianceColors` for the
    vending machine / printer / coat rack, and `SourceColors` for the per-CLI
    dashboard badge hues).
 2. Create `crates/pixtuoid-scene/src/theme/<name>.rs` defining

@@ -146,16 +146,15 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
     }
 }
 
-/// Resolve `CLAUDE_CONFIG_DIR` (an empty value is treated as unset). `pub` +
+/// Resolve `CLAUDE_CONFIG_DIR` (an empty OR whitespace-only value is treated as
+/// unset, via the shared `platform::nonempty` trim authority — a `"  "` value
+/// otherwise resolved hooks/watch to a relative `"  /…"`). `pub` +
 /// `#[doc(hidden)]` so the `pixtuoid` install crate's settings.json resolver
 /// shares this one definition — the two CC path sites must not drift. Internal
 /// cross-crate helper, not a stable API.
 #[doc(hidden)]
 pub fn claude_config_dir() -> Option<PathBuf> {
-    std::env::var("CLAUDE_CONFIG_DIR")
-        .ok()
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
+    crate::platform::nonempty(std::env::var("CLAUDE_CONFIG_DIR").ok()).map(PathBuf::from)
 }
 
 /// Decode one CC JSONL transcript line into 0..N AgentEvents.

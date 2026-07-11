@@ -3,7 +3,7 @@
 //! The SINGLE source of truth for the office's "lit sign" — brand + ★ CTA (L1),
 //! the plain-English mood pulse echoing the shared `StateCounts` (L2), and the
 //! office-context row (L3: uptime · floor · gateway chip). Three painters render
-//! it: the TUI (ratatui `Paragraph`), the floating window (AA JetBrains Mono
+//! it: the TUI (ratatui `Paragraph`), the floating window (AA Monaspace Neon
 //! blitted into its surface), and the wasm hero (exported to a DOM overlay).
 //! `scene` has no terminal/window deps (invariant #1), so the model carries a
 //! backend-agnostic `BoardTone`; `tone_rgb` (here) is the ONE tone→theme-role map

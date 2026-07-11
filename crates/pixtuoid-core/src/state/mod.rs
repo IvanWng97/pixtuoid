@@ -368,9 +368,10 @@ pub struct AgentSlot {
     pub pid: Option<crate::source::PidIdentity>,
     /// The RAW model string last observed on this agent's wire (CC assistant
     /// lines / Codex turn_context / copilot per-tool / opencode
-    /// session.created) — last-seen-wins, so a mid-session `/model` switch
-    /// tracks. Interpretation (the burn-tier tables) lives in the scene layer;
-    /// this stays uninterpreted wire truth. serde-skipped (goldens quiet).
+    /// session.created / omp assistant messages) — last-seen-wins, so a
+    /// mid-session `/model` switch tracks. Interpretation (the burn-tier
+    /// tables) lives in the scene layer; this stays uninterpreted wire truth.
+    /// serde-skipped (goldens quiet).
     #[serde(
         with = "opt_arc_str_serde",
         skip_serializing_if = "Option::is_none",

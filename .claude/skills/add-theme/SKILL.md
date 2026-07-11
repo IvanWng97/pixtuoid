@@ -1,14 +1,14 @@
 ---
 name: add-theme
 version: 1.0.0
-description: "Add a new color theme to pixtuoid (a full ~110-role palette across 9 groups, rendered into the office). Use when the user says 'add a <name> theme', 'new color scheme', or 'port <palette> to pixtuoid'. Orchestrates the Rust registration PLUS the two steps agents miss — the site manifest bridge test and the committed-media regen."
+description: "Add a new color theme to pixtuoid (a full ~90-role palette across 9 groups, rendered into the office). Use when the user says 'add a <name> theme', 'new color scheme', or 'port <palette> to pixtuoid'. Orchestrates the Rust registration PLUS the two steps agents miss — the site manifest bridge test and the committed-media regen."
 metadata:
   scope: "pixtuoid repo only"
 ---
 
 # add-theme (v1)
 
-A theme is a `pub static Theme` with ~110 color roles across **9** groups
+A theme is a `pub static Theme` with ~90 color roles across **9** groups
 (surface, office, lighting, furniture, effects, ui, tool_glow, `ApplianceColors`
 for corridor appliances, and `SourceColors` for per-CLI dashboard badge hues).
 Every field must be supplied — corridor appliances render wrong until each theme

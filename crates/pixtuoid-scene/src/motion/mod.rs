@@ -1,4 +1,4 @@
-//! Per-agent walk-timing state owned by the TUI layer.
+//! Per-agent walk-timing state owned by each `FloorCtx` in this crate.
 //!
 //! `MotionState` is the single source of truth for in-flight walk profiles
 //! (entry, exit, snap-back, and wander phases). It is keyed on `AgentId`
@@ -137,7 +137,7 @@ pub struct WanderState {
     pub last_advanced_at: SystemTime,
 }
 
-/// Per-agent walk-timing state owned by the TUI layer.
+/// Per-agent walk-timing state owned by each `FloorCtx` in this crate.
 ///
 /// One `MotionState` exists per live agent (per floor). Fields are `Option`
 /// so the struct can be default-initialised for new agents and populated

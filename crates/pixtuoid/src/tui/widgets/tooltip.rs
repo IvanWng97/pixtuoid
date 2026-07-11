@@ -204,7 +204,7 @@ pub(crate) fn paint_hover_tooltip(
         format!("\u{25a4} {}", short_cwd(&agent.cwd)),
         dim,
     )));
-    // The LLM brain, when the wire told us (CC/Codex/copilot/opencode) — RAW
+    // The LLM brain, when the wire told us (CC/Codex/copilot/opencode/omp) — RAW
     // model string, with the effort suffixed only while FRESH (the same
     // burn-TTL the flame reads, so the text can't outlive the fire). Sources
     // without a model channel simply skip the row.

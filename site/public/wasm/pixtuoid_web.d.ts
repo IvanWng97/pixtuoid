@@ -58,7 +58,7 @@ export class Office {
      * The wasm office renders at a SMALL buffer that CSS upscales with
      * `image-rendering: pixelated`, so anti-aliased text CANNOT be baked into the
      * pixels (it would nearest-neighbor blow up blocky). Instead the site lays
-     * crisp JetBrains Mono DOM spans over the canvas from this model. Coordinates
+     * crisp Monaspace Neon DOM spans over the canvas from this model. Coordinates
      * are OFFICE-BUFFER px (a label's `x` is the sprite CENTER, `y` its head-top;
      * the board `rect` is the neon-panel interior) — the site scales them to the
      * CSS-displayed canvas. Colors are RESOLVED against the CURRENT theme, so a

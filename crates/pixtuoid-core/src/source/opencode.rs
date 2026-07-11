@@ -72,9 +72,11 @@ pub const SOURCE_NAME: &str = "opencode";
 /// `sessions.create({parentID})` to spawn a child session; the parent's `task`
 /// tool part maps to `ToolDetail::Task` so the parent reads "Delegating" while
 /// it runs. The CHILD gets its own sprite via its `session.created` (which
-/// carries `info.parentID`). Detection is ALSO semantic — a `subagent_type` /
-/// `subagentType` key in the tool input — so a rename survives (the CC
-/// `Task`→`Agent` lesson).
+/// carries `info.parentID`). Detection is NAME-ONLY — `task` is opencode's
+/// stable builtin with no CC-style rename to survive, and (unlike CC) opencode's
+/// `ActivityStart` carries a real `callID`, so a `subagent_type`-presence signal
+/// would let a model-authored key on an ordinary tool seed `active_tasks` and
+/// cascade real children out (the lifecycle-authority trap — see `oc_tool_detail`).
 const SUBAGENT_TOOLS: &[&str] = &["task"];
 
 /// Decode one opencode plugin envelope (already identified by
@@ -303,17 +305,21 @@ pub(crate) fn decode_oc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
     decode_oc_hook_payload(v).map(Some)
 }
 
-/// opencode-side tool detail: the `task` dispatch tool (or any tool whose input
-/// carries a `subagent_type`/`subagentType`) → `ToolDetail::Task` (parent reads
-/// "Delegating"); everything else → a `"name: target"` display, the target
-/// pulled from the tool `input` record (opencode builtins: bash→`command`,
-/// read/edit/write→`filePath`, grep/glob→`pattern`, webfetch→`url`).
+/// opencode-side tool detail: the `task` dispatch tool (by NAME) →
+/// `ToolDetail::Task` (parent reads "Delegating"); everything else → a
+/// `"name: target"` display, the target pulled from the tool `input` record
+/// (opencode builtins: bash→`command`, read/edit/write→`filePath`,
+/// grep/glob→`pattern`, webfetch→`url`).
 fn oc_tool_detail(tool: &str, input: Option<&Value>) -> ToolDetail {
-    let input_obj = input.and_then(|i| i.as_object());
-    let is_subagent = SUBAGENT_TOOLS.contains(&tool)
-        || input_obj
-            .is_some_and(|i| i.contains_key("subagent_type") || i.contains_key("subagentType"));
-    if is_subagent {
+    // NAME-ONLY subagent detection: opencode's dispatch is the stably-named
+    // `task` tool. Deliberately NOT the CC `subagent_type`-presence signal —
+    // opencode's tool `ActivityStart` carries a real `callID`, so a model-authored
+    // `subagent_type` on an ORDINARY tool's input would seed the reducer's
+    // `active_tasks` and, on drain, cascade the parent's real `ses_*` children out
+    // (the lifecycle-authority trap). opencode subagents are first-class SESSIONS
+    // (`session.created` `parentID`), never this Task path, and `task` has no
+    // CC-style rename to survive — so presence detection would buy only the spoof.
+    if SUBAGENT_TOOLS.contains(&tool) {
         return ToolDetail::Task;
     }
     // Per-source target vocabulary; the shared scan lives in the decoder, the
@@ -465,6 +471,17 @@ mod tests {
     }
 
     #[test]
+    fn spoofed_subagent_type_on_an_ordinary_tool_is_not_a_task() {
+        // lifecycle-authority: a model-authored `subagent_type` on an ORDINARY
+        // tool must NOT read as a Task dispatch — opencode emits a real callID, so
+        // a Task here would seed active_tasks and cascade real ses_* children out.
+        // Only the `task` tool NAME dispatches (opencode has no CC-style rename).
+        let spoof = json!({"command": "ls", "subagent_type": "general"});
+        assert!(!oc_tool_detail("bash", Some(&spoof)).is_task());
+        assert!(oc_tool_detail("task", Some(&json!({"description": "go"}))).is_task());
+    }
+
+    #[test]
     fn running_tool_part_is_activity_start_keyed_on_callid() {
         let events = decode_all(json!({
             "type": "message.part.updated",
@@ -548,16 +565,19 @@ mod tests {
     }
 
     #[test]
-    fn subagent_type_input_maps_to_delegating_even_under_a_renamed_tool() {
-        // Semantic detection (the CC Task→Agent lesson): a subagent_type in the
-        // input means delegation regardless of the tool name.
+    fn spoofed_subagent_type_input_does_not_make_a_task() {
+        // Regression (inverts the old CC-lesson test): opencode's dispatch is the
+        // stably-named `task` tool and its ActivityStart carries a real callID, so
+        // a model-authored `subagent_type` on an ORDINARY tool must NOT read as a
+        // Task — else it seeds `active_tasks` and cascades real `ses_*` children
+        // out (the lifecycle-authority trap). NAME-ONLY detection, by design.
         let ev = decode(json!({
             "type": "message.part.updated", "properties": {"sessionID": "ses_x", "part": {
                 "type": "tool", "callID": "c", "tool": "spawn",
                 "state": {"status": "running", "input": {"subagent_type": "explore"}}
             }}
         }));
-        assert!(matches!(&ev, AgentEvent::ActivityStart { detail: Some(d), .. } if d.is_task()));
+        assert!(matches!(&ev, AgentEvent::ActivityStart { detail: Some(d), .. } if !d.is_task()));
     }
 
     #[test]

@@ -51,9 +51,12 @@ pub use native::CopilotSource;
 
 pub const SOURCE_NAME: &str = "copilot";
 
-/// `$COPILOT_HOME` if set, else `~/.copilot`.
+/// `$COPILOT_HOME` if set, else `~/.copilot`. An empty OR whitespace-only
+/// `$COPILOT_HOME` counts as unset via the shared `platform::nonempty` trim
+/// authority (was `var_os` + empty-only, which let a `"  "` value resolve the
+/// sessions base to a relative `"  /…"`).
 pub fn copilot_home() -> PathBuf {
-    match std::env::var_os("COPILOT_HOME").filter(|v| !v.is_empty()) {
+    match crate::platform::nonempty(std::env::var("COPILOT_HOME").ok()) {
         Some(v) => PathBuf::from(v),
         None => PathBuf::from(crate::platform::user_home()).join(".copilot"),
     }
@@ -855,12 +858,19 @@ mod tests {
             "a non-empty COPILOT_HOME is used verbatim"
         );
 
-        // Set-but-empty is treated as unset (the `.filter(|v| !v.is_empty())`),
-        // so it falls through to the `<home>/.copilot` default.
+        // Set-but-empty OR whitespace-only is treated as unset (the shared
+        // `platform::nonempty` trim authority), so it falls through to the
+        // `<home>/.copilot` default — never a relative "  /.copilot".
         std::env::set_var("COPILOT_HOME", "");
         assert!(
             copilot_home().ends_with(".copilot"),
             "empty COPILOT_HOME → ~/.copilot fallback"
+        );
+
+        std::env::set_var("COPILOT_HOME", "   ");
+        assert!(
+            copilot_home().ends_with(".copilot"),
+            "whitespace-only COPILOT_HOME → ~/.copilot fallback"
         );
 
         std::env::remove_var("COPILOT_HOME");

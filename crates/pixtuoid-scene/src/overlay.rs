@@ -1,8 +1,9 @@
 //! Backend-agnostic name-badge overlay model.
 //!
 //! The SINGLE source of truth for "what label, what tone, where" so both
-//! painters — the TUI (ratatui `Paragraph`) and the floating window (an 8px
-//! pixel font) — render the same name badges from one model and can't drift.
+//! painters — the TUI (ratatui `Paragraph`) and the floating window (AA
+//! Monaspace Neon via the binary's `aa_text`) — render the same name badges
+//! from one model and can't drift.
 //! `scene` has no terminal/window deps (invariant #1), so the per-painter color
 //! mapping (ratatui `Color` vs `Rgb`) stays in each painter; the model only
 //! carries an activity-derived `LabelTone`.
