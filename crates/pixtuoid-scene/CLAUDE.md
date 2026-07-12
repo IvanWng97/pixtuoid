@@ -19,6 +19,29 @@ headless lib [`../pixtuoid-core/CLAUDE.md`](../pixtuoid-core/CLAUDE.md); the bin
 [`../pixtuoid/CLAUDE.md`](../pixtuoid/CLAUDE.md); the terminal painter
 [`../pixtuoid/src/tui/CLAUDE.md`](../pixtuoid/src/tui/CLAUDE.md).
 
+## Screen-space compass (THE convention — read before reasoning about N/S)
+
+Directions in this crate are **SCREEN-SPACE**, map-style (north = up), NOT
+real-world headings. Pin this and stop re-deriving it:
+
+- **North = −y = screen TOP** — the far wall, the floor-to-ceiling windows,
+  the city skyline (`mask.rs`'s `north wall band`). "Behind" a piece.
+- **South = +y = screen BOTTOM** — the near side, the FRONT, toward the
+  viewer. This is the z-sort **"south row"** (`placement.rs`: *the z-sort row
+  IS the south row of the box*) and the **south-anchored** ground strip
+  (`GroundAlign::End`): a sprite's front/base row.
+- East = +x (right), West = −x (left).
+
+`ApproachSides` states this once (`decor.rs`: *north = −y*); a piece's
+approach set is canonical (facing-South) then rotated by live `Facing`.
+Worked example — the **home desk** (`DESK_APPROACH = {n:true, s:false,
+e:true, w:true}`): approached from **North (far) + East + West**, NEVER
+South — the monitor faces the viewer at the south front, so the seat opens
+away from it. (We keep north=up even though a real sunny-window office in the
+northern hemisphere would face its windows SOUTH — the compass is
+screen-space, and flipping it would invert the entire z-sort/"south row"
+vocabulary across 400+ sites for zero behavior change.)
+
 ## Layout
 
 ```
