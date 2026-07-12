@@ -185,10 +185,11 @@ pub struct FurnitureDef {
     /// `Start`/`End` instead of needing a new stamp path.
     pub ground_x: GroundAlign,
     /// Where `footprint` sits inside the VISUAL box vertically: `End` for the
-    /// overhang canopy/panel/column pieces (invariant #6), `Center` for the
-    /// meeting sofa body + floor lamp, `Start` for the desk (its south lip is
-    /// the seat zone), `Inset(n)` for an interior band. Resolves to a pixel
-    /// offset from `visual − footprint` at stamp time (drift-free).
+    /// overhang canopy/panel/column pieces (invariant #6, the walk-behind
+    /// shape), `Center` for the meeting sofa body + floor lamp, `Start` for
+    /// the desk (footprint at the top; its front lip is free — the desk still
+    /// occludes walkers behind it via z-sort, same as every piece). Resolves
+    /// to a pixel offset from `visual − footprint` at stamp time (drift-free).
     pub ground_y: GroundAlign,
 }
 
@@ -619,13 +620,13 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
 
 /// Where a footprint sits inside its VISUAL box on ONE axis — the general
 /// top-down collision-box model (a rect declared relative to the sprite, the
-/// standard shape in tile-world engines). The three alignment variants
-/// declare INTENT and resolve their pixel offset from `visual − footprint`
-/// at stamp time, so they can NEVER drift when a sprite is resized (a raw
-/// stored offset would — that is the whole point of this type over a
-/// `dx: u16` field). `Inset` is the escape hatch: an arbitrary offset no
-/// pure alignment expresses (a footprint pinned to an interior band — the
-/// walk-behind desk's north-freed row).
+/// standard shape in tile-world engines). Each variant declares INTENT and
+/// resolves its pixel offset from `visual − footprint` at stamp time, so it
+/// can NEVER drift when a sprite is resized (a raw stored offset would —
+/// that is the whole point of this type over a `dx: u16` field). Three
+/// variants cover every furniture row today; add an `Inset(u16)` escape
+/// hatch here IF a piece ever needs a footprint pinned to an interior band
+/// (none does — walk-behind is just `End`, the overhang shape).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroundAlign {
     /// Flush to the box's LOW edge — North (y) / West (x): offset 0.
@@ -641,11 +642,9 @@ pub enum GroundAlign {
     /// Flush to the box's HIGH edge — South (y) / East (x): offset
     /// `visual − footprint`. The canopy/panel/column shape (invariant #6):
     /// a walker parks deep behind the overhang and the sprite's own y-sort
-    /// occludes them.
+    /// occludes them. This IS the walk-behind shape every overhang piece
+    /// (and, if ever wanted, the desk) uses — no special case needed.
     End,
-    /// Explicit offset from the low edge — an interior band no alignment
-    /// expresses (e.g. a footprint inset 1px from the box top).
-    Inset(u16),
 }
 
 impl GroundAlign {
@@ -658,7 +657,6 @@ impl GroundAlign {
             // center-on-pos, NOT center-in-box: see the `Center` doc.
             GroundAlign::Center => (visual / 2).saturating_sub(footprint / 2),
             GroundAlign::End => visual.saturating_sub(footprint),
-            GroundAlign::Inset(n) => n,
         }
     }
 }
@@ -1014,8 +1012,8 @@ mod tests {
         // for the desk. A new overhanging kind that forgets to classify
         // itself (leaving DECOR's End default is correct for overhang; a
         // wrong Center/Start on an overhang row) is caught HERE, not as a
-        // silent wrong-mask at runtime. Flat boxes (footprint == visual) and
-        // Inset rows only get the in-box check.
+        // silent wrong-mask at runtime. Flat boxes (footprint == visual) only
+        // get the in-box check.
         for &kind in Furniture::ALL {
             let def = furniture_def(kind);
             let Some(fp) = def.footprint else {
@@ -1028,12 +1026,11 @@ mod tests {
                 "{kind:?}: blocked rect must not poke past the visual box"
             );
             // Vertical intent guard for the overhang rows (visual taller than
-            // footprint). The two documented Center exceptions and any Inset
-            // are exempt; flat boxes aren't overhang so they're skipped.
+            // footprint). The two documented Center exceptions are exempt;
+            // flat boxes aren't overhang so they're skipped.
             let center_exception =
                 matches!(kind, Furniture::MeetingSofaBody | Furniture::FloorLamp);
-            let is_inset = matches!(def.ground_y, GroundAlign::Inset(_));
-            if def.visual.h > fp.h && !center_exception && !is_inset && kind != Furniture::Desk {
+            if def.visual.h > fp.h && !center_exception && kind != Furniture::Desk {
                 assert_eq!(
                     def.ground_y,
                     GroundAlign::End,
