@@ -14,7 +14,7 @@
 //! anchor field could not represent both and would have to be overridden at the
 //! wall site, recreating the very drift this module removes.
 
-use super::Point;
+use super::{Point, Size};
 
 /// How a `(w, h)` box is positioned relative to its `pos`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +47,25 @@ pub fn anchored_top_left(anchor: Anchor, pos: Point, w: u16, h: u16) -> Point {
 /// (front) base ROW. Derived from [`anchored_top_left`] so it can NEVER drift
 /// from where the sprite actually blits (`origin.y + h - 1`). For `Center` this
 /// equals the legacy `pos.y + center_pin_south_offset(h)` (i.e. `(h-1)/2`).
+/// Half-open AABB intersection of two `(top_left, size)` rects. Lives here —
+/// the geometry-primitive module — so the placement sweep's overlap invariant
+/// and production collision checks (the whiteboard-vs-desk drop in compute.rs)
+/// read ONE formula instead of each hand-rolling the four comparisons (the
+/// exact drift class this module exists to remove). Zero-sized rects overlap
+/// nothing.
+pub(super) fn rects_overlap(a: (Point, Size), b: (Point, Size)) -> bool {
+    let (at, asz) = a;
+    let (bt, bsz) = b;
+    asz.w > 0
+        && asz.h > 0
+        && bsz.w > 0
+        && bsz.h > 0
+        && at.x < bt.x + bsz.w
+        && bt.x < at.x + asz.w
+        && at.y < bt.y + bsz.h
+        && bt.y < at.y + asz.h
+}
+
 pub fn z_sort_row(anchor: Anchor, pos: Point, h: u16) -> u16 {
     anchored_top_left(anchor, pos, 0, h)
         .y

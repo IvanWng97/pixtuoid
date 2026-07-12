@@ -21,6 +21,7 @@
 //! edit fail two suites. Position-STABILITY stays with the insta goldens.
 
 use super::mask::{ground_rect, pantry_ground_rect};
+use super::placement::rects_overlap;
 use super::*;
 
 /// The sweep's size axis. A union of: the corner sizes the retired tests
@@ -45,6 +46,7 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
     (150, 68),
     (160, 120),
     (192, 158),
+    (200, 116),
     (240, 160),
     (320, 180),
 ];
@@ -108,7 +110,7 @@ struct Piece {
     /// no obstacle of its own (wall-hung decor).
     ground: Option<(Point, Size)>,
     /// The anchored visual box (sprite extent) — must stay inside the buffer.
-    visual: Option<(Point, Size)>,
+    visual: (Point, Size),
     /// For `Anchor::Center` pieces: the unclamped center position + visual
     /// size, to catch a west/north spill that `anchored_top_left`'s
     /// `saturating_sub` silently clamps to 0 (a centered piece "fits" iff
@@ -122,6 +124,11 @@ struct Piece {
     /// Pieces sharing a group id are one physical cluster (the 3-seat couch's
     /// overlapping body stamps; the pantry table + its tucked-under stools) —
     /// exempt from the pairwise-overlap invariant WITHIN the group.
+    /// DISCIPLINE (this is the harness's one exemption with no compile
+    /// tooth): a NEW group id requires (a) a WHY comment at the declaration
+    /// naming the authored composition, and (b) the cluster's internal
+    /// geometry pinned by a golden — a group is one designed vignette, never
+    /// a way to silence a real overlap finding.
     overlap_group: Option<u8>,
 }
 
@@ -141,7 +148,7 @@ impl Piece {
             ground: def
                 .footprint
                 .map(|fp| ground_rect(anchor, pos, fp, def.visual, def.ground_x, def.ground_y)),
-            visual: Some((vis_tl, def.visual)),
+            visual: (vis_tl, def.visual),
             center_fit: matches!(anchor, Anchor::Center).then_some((pos, def.visual)),
             container,
             visual_in_container: false,
@@ -289,10 +296,10 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                 out.push(Piece {
                     label: format!("waypoint[{i}] Pantry counter"),
                     ground: Some(pantry_ground_rect(wp.pos, counter)),
-                    visual: Some((
+                    visual: (
                         anchored_top_left(Anchor::Center, wp.pos, counter.w, counter.h),
                         counter,
-                    )),
+                    ),
                     center_fit: Some((wp.pos, counter)),
                     container: Container::Pantry,
                     visual_in_container: false,
@@ -396,19 +403,6 @@ fn rect_in_bounds(tl: Point, sz: Size, b: Bounds) -> bool {
     tl.x >= b.x && tl.y >= b.y && tl.x + sz.w <= b.x + b.width && tl.y + sz.h <= b.y + b.height
 }
 
-fn rects_overlap(a: (Point, Size), b: (Point, Size)) -> bool {
-    let (at, asz) = a;
-    let (bt, bsz) = b;
-    asz.w > 0
-        && asz.h > 0
-        && bsz.w > 0
-        && bsz.h > 0
-        && at.x < bt.x + bsz.w
-        && bt.x < at.x + asz.w
-        && at.y < bt.y + bsz.h
-        && bt.y < at.y + asz.h
-}
-
 /// Resolve a piece's container to concrete Bounds. `None` = the container
 /// legitimately doesn't exist for this layout, which is itself a failure —
 /// a piece can't be placed in a room the floor doesn't have.
@@ -470,7 +464,7 @@ fn every_piece_stays_inside_the_buffer() {
             height: l.buf_h,
         };
         for p in pieces(l) {
-            for (what, rect) in [("ground", p.ground), ("visual", p.visual)] {
+            for (what, rect) in [("ground", p.ground), ("visual", Some(p.visual))] {
                 if let Some((tl, sz)) = rect {
                     if !rect_in_bounds(tl, sz, buffer) {
                         v.push(format!(
@@ -517,13 +511,12 @@ fn every_piece_ground_stays_in_its_container() {
                 }
             }
             if p.visual_in_container {
-                if let Some((tl, sz)) = p.visual {
-                    if !rect_in_bounds(tl, sz, b) {
-                        v.push(format!(
-                            "{w}x{h} seed {seed}: {} visual {tl:?}+{sz:?} leaves its {:?} {b:?}",
-                            p.label, p.container
-                        ));
-                    }
+                let (tl, sz) = p.visual;
+                if !rect_in_bounds(tl, sz, b) {
+                    v.push(format!(
+                        "{w}x{h} seed {seed}: {} visual {tl:?}+{sz:?} leaves its {:?} {b:?}",
+                        p.label, p.container
+                    ));
                 }
             }
         }

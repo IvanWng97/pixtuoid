@@ -228,11 +228,11 @@ fn compute_returns_none_at_exact_boundary() {
     let min_h = crate::layout::compute::MIN_LAYOUT_H;
     assert!(
         SceneLayout::compute(min_w - 1, min_h, Some(1)).is_none(),
-        "one pixel below MIN_W should return None"
+        "one pixel below MIN_LAYOUT_W should return None"
     );
     assert!(
         SceneLayout::compute(min_w, min_h - 1, Some(1)).is_none(),
-        "one pixel below min_h should return None"
+        "one pixel below MIN_LAYOUT_H should return None"
     );
     assert!(
         SceneLayout::compute(min_w, min_h, Some(1)).is_some(),

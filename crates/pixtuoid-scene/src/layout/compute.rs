@@ -439,10 +439,12 @@ pub(super) fn compute_with_seed(
             None => x,
         }
     };
-    // Everything east of the exit sign / elevator face is off-limits.
-    let wall_east_limit = buf_w
-        .saturating_sub(9)
-        .min(door.map(|d| d.x).unwrap_or(u16::MAX));
+    // Everything east of the exit sign / elevator face is off-limits. The
+    // exit sign's slot is computed ONCE here and reused by its push below —
+    // two copies of the `buf_w - 9` offset would silently desync the limit
+    // from the sign if the offset ever moves (online-review catch).
+    let exit_sign_x = buf_w.saturating_sub(9);
+    let wall_east_limit = exit_sign_x.min(door.map(|d| d.x).unwrap_or(u16::MAX));
     let mut wall_decor = Vec::new();
     if bookshelf_x + bookshelf_w < wall_east_limit {
         wall_decor.push(WallDecorItem {
@@ -456,7 +458,7 @@ pub(super) fn compute_with_seed(
     wall_decor.push(WallDecorItem {
         kind: WallDecor::ExitSign,
         pos: Point {
-            x: buf_w.saturating_sub(9),
+            x: exit_sign_x,
             y: top_margin.saturating_sub(13),
         },
     });
@@ -482,18 +484,20 @@ pub(super) fn compute_with_seed(
             );
             let desk = super::decor::desk_furniture_def();
             home_desks.iter().any(|&d| {
-                let (dt, ds) = mask::ground_rect(
-                    Anchor::TopLeft,
-                    d,
-                    desk.footprint.expect("desk carries a static footprint"),
-                    desk.visual,
-                    desk.ground_x,
-                    desk.ground_y,
-                );
-                wb_tl.x < dt.x + ds.w
-                    && dt.x < wb_tl.x + wb_sz.w
-                    && wb_tl.y < dt.y + ds.h
-                    && dt.y < wb_tl.y + wb_sz.h
+                // is_some_and: the desk row's footprint is statically Some,
+                // but the house rule bans unwrap/expect in prod — a None
+                // simply means no ground to collide with.
+                desk.footprint.is_some_and(|fp| {
+                    let desk_ground = mask::ground_rect(
+                        Anchor::TopLeft,
+                        d,
+                        fp,
+                        desk.visual,
+                        desk.ground_x,
+                        desk.ground_y,
+                    );
+                    super::placement::rects_overlap((wb_tl, wb_sz), desk_ground)
+                })
             })
         });
         if !collides_a_desk {
@@ -550,7 +554,12 @@ pub(super) fn compute_with_seed(
         // `max.max(min)` degradation placed the cluster anyway and let it
         // spill east out of the room into the band (placement-sweep catch:
         // at ≤50px-wide buffers the bistro table sat OUTSIDE its 6-11px
-        // room, colliding with the corridor plant).
+        // room, colliding with the corridor plant). The Y arm also fires on
+        // SHORT rooms (e.g. the 96×70 fixtures): `counter_north` caps max_y
+        // (the anti-merge routing constraint above), and a ~25px-tall room
+        // can't hold cluster + counter + clearances — the old code declared
+        // that constraint then force-violated it. Render-verified: the
+        // pantry reads as a coherent kitchenette without the bistro.
         if max_x < min_x || max_y < min_y {
             (None, vec![])
         } else {
