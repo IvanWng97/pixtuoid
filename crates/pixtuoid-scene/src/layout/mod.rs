@@ -231,7 +231,9 @@ pub const DESK_H: u16 = 5;
 /// `DESK_H` (the body/pitch height): `DESK_H` prices the slot, `DESK_FOOT_H`
 /// is the real blocked ground depth. The 5-px body still z-sorts by the full
 /// `visual.h`, so the monitor paints over the walker behind it.
-pub const DESK_FOOT_H: u16 = 2;
+/// `pub(crate)`: no cross-crate consumer (unlike `DESK_W`/`DESK_H`, which the
+/// binary's hit-test reads) — least-privilege on the semver surface.
+pub(crate) const DESK_FOOT_H: u16 = 2;
 /// Default character sprite width (px). The bundled pack is 8×12; this is the
 /// ONE authority every out-of-pixel_painter consumer centers/hit-tests on
 /// (anchors' LABEL fallback, `layout::decor::DESK_WALK_X_OFF`, the tui hit-test

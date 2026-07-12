@@ -9,15 +9,14 @@
 # (blitted at desk.y-1, see DeskCubicle in drawable.rs) so the screen reads
 # as a standing display. Screen uses `j` (dark) so the lime screen-glow
 # overlay reads as "workstation active" by contrast. The sprite is
-# DESK_W + 4 = 14 px wide -- exactly the BLOCKED ground width (the
-# FurnitureDef footprint is (DESK_W+4) x DESK_FOOT_H, a shallow south strip
-# since the desk went walk-behind (ground_y: End), stamped TopLeft in
-# mask.rs); the divider column (desk.x + DESK_W + 3) lands exactly on the
-# sprite's last column, pinned by
-# `desk_sprite_width_tracks_the_footprint_overhang`; the divider stops at
-# the desk's front edge (its two leg rows are transparent) so the legs read
-# as a symmetric pair. The overhang is VERTICAL only: the bezel row above
-# (desk.y-1) + the 2-row front lip (invariant #6).
+# DESK_W + 4 = 14 px wide == the FurnitureDef visual.w AND the blocked-ground
+# width (footprint is (DESK_W+4) x DESK_FOOT_H, a shallow south strip,
+# ground_y: End -- the monitor + surface overhang NORTH = walk-behind,
+# invariant #6 -- stamped TopLeft in mask.rs). Sprite-width-vs-visual.w is
+# pinned by `desk_sprite_width_tracks_the_footprint_overhang` so a DESK_W edit
+# that moves visual.w but not these rows can't silently desync render vs
+# mask/occlusion/z-sort. The overhang is VERTICAL only: the bezel row above
+# (desk.y-1) + the 2-row front lip.
 @frame 0
 . . . M M M M M M M M . . .
 D D D M M M M M M M M D D D

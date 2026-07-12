@@ -898,8 +898,8 @@ pub enum PodDecor {
 
 impl PodDecor {
     /// The randomly-picked pool. Whiteboard's 10-px GROUND footprint
-    /// (the 14-px board panel overhangs it) fits the 22-px aisle with
-    /// ~5 px clearance each side after the 1-px obstacle pad — same
+    /// (the 14-px board panel overhangs it) fits the 20-px aisle with
+    /// ~4 px clearance each side after the 1-px obstacle pad — same
     /// rolling-whiteboard sprite as the wall mount, just in an aisle slot.
     pub const ALL: &'static [PodDecor] = &[
         PodDecor::PlantTall,

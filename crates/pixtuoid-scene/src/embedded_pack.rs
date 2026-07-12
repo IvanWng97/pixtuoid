@@ -489,4 +489,28 @@ mod tests {
             crate::layout::CHARACTER_SPRITE_H_CELLS * 2
         );
     }
+
+    // The desk sprite's row width is a THIRD copy of `DESK_W + 4` (baked into the
+    // `.sprite` asset rows), alongside the FurnitureDef `visual.w` the renderer
+    // blits from and the mask/z-key/anchor read. `DESK_W`'s doc invites future
+    // laptop-density edits; such an edit moves `visual.w` but NOT the asset rows,
+    // silently desyncing render vs mask/occlusion/collision. Pin the asset width
+    // to `visual.w` so that drift fails loud (mirrors
+    // `character_sprite_w_matches_the_embedded_pack` above).
+    #[test]
+    fn desk_sprite_width_tracks_the_footprint_overhang() {
+        let pack = test_default_pack();
+        let w = pack
+            .animation("desk")
+            .and_then(|a| a.frames.first())
+            .expect("embedded pack carries a desk sprite")
+            .width();
+        assert_eq!(
+            w,
+            crate::layout::desk_furniture_def().visual.w,
+            "embedded 'desk' sprite is {w}px wide but visual.w (DESK_W+4) is {} — \
+             a DESK_W edit moved visual.w but not the .sprite rows; render/mask/z-sort will drift",
+            crate::layout::desk_furniture_def().visual.w
+        );
+    }
 }

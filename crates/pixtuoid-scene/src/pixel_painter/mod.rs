@@ -769,12 +769,12 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 }
 
 /// Desk cubicles — each carries its divider + cabinet + bin + screen glow.
-/// The desk sprite (16×8) sorts at `desk.y + visual.h` — one row past its
-/// visual south row (the same value as the historical footprint-front + lip
-/// form, `desk.y + 8`), just past the seated worker's feet (`desk.y + 4`) so
-/// the sitter stays visually behind the desk. Z is a VISUAL property: it must
-/// track the sprite, not the blocked ground, so a future footprint change
-/// (e.g. freeing the north row for walk-behind) is z-neutral by construction.
+/// The desk sprite (14×7) sorts at `desk.y + visual.h` = `desk.y + 7`
+/// (`DESK_H + 2`; was `desk.y + 8` pre-density) — one row past its visual south
+/// row, just past the seated worker's feet (`desk.y + 4`) so the sitter stays
+/// visually behind the desk. Z is a VISUAL property: it tracks the sprite, not
+/// the blocked ground — which is why the walk-behind footprint change (shrinking
+/// the ground to a shallow south strip, #551) was z-neutral by construction.
 /// `seated_agents` (built once before the ambient pass) gates the screen glow
 /// so it only paints for a worker actually at the desk. The DeskCubicle
 /// drawable is Copy, so this borrows nothing from the agent set.
