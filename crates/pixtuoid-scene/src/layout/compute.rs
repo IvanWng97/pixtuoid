@@ -165,14 +165,13 @@ pub(super) fn compute_with_seed(
     // clusters and frees up `pod_decor` slots in the aisles.
     let pod_w = POD_SIDE * DESK_W + (POD_SIDE - 1) * INTRA_POD_GAP_X;
     let pod_h = POD_SIDE * DESK_H + (POD_SIDE - 1) * INTRA_POD_GAP_Y;
-    let aisle_x = inter_pod_aisle_x(right_w);
-    let pod_stride_x = pod_w + aisle_x;
+    let pod_stride_x = pod_w + INTER_POD_AISLE_X;
     let pod_stride_y = pod_h + INTER_POD_AISLE_Y;
     // Extra padding between the viewing couch (top of cubicle area)
     // and the first row of pods. Scales with buf_h so taller
     // terminals get more breathing room.
     let couch_to_desk_extra = buf_h.saturating_sub(60) / 20;
-    let pod_cols = ((right_w.saturating_sub(aisle_x / 2)) / pod_stride_x).max(1);
+    let pod_cols = ((right_w.saturating_sub(INTER_POD_AISLE_X / 2)) / pod_stride_x).max(1);
     // Fill: the pod grid packs as many rows as physically fit. The desk COUNT
     // cap (if any) is applied at emission in `compute_pod_desks` via `max_desks`
     // — the grid geometry itself is always the room's true capacity, so a bigger
@@ -184,7 +183,6 @@ pub(super) fn compute_with_seed(
         rows: pod_rows,
         stride_x: pod_stride_x,
         stride_y: pod_stride_y,
-        aisle_x,
         couch_to_desk_extra,
     };
 
@@ -565,9 +563,6 @@ pub(super) struct PodGrid {
     rows: u16,
     stride_x: u16,
     stride_y: u16,
-    /// Band-width-adaptive [`inter_pod_aisle_x`] — resolved ONCE here so the
-    /// desk-placement, partial-column, and decor passes can't disagree.
-    aisle_x: u16,
     couch_to_desk_extra: u16,
 }
 
@@ -576,7 +571,7 @@ impl PodGrid {
     /// cubicle band. The single formula the desk-placement and aisle-decor passes
     /// both step from — golden snapshots pin its byte-exact output.
     fn pod_origin(self, cubicle_band: &Bounds, pod_c: u16, pod_r: u16) -> (u16, u16) {
-        let x = cubicle_band.x + self.aisle_x / 2 + pod_c * self.stride_x;
+        let x = cubicle_band.x + INTER_POD_AISLE_X / 2 + pod_c * self.stride_x;
         let y = cubicle_band.y
             + INTER_POD_AISLE_Y / 2
             + self.couch_to_desk_extra
@@ -707,7 +702,6 @@ pub(super) fn compute_pod_desks(
         rows: pod_rows,
         stride_x: pod_stride_x,
         stride_y: pod_stride_y,
-        aisle_x,
         couch_to_desk_extra,
     } = grid;
     // `None` fills the grid (emission unbounded); `Some(cap)` caps the count —
@@ -770,13 +764,14 @@ pub(super) fn compute_pod_desks(
     // column. Resolves the "office looks empty on the right" issue
     // at wide buffers where a full 2nd pod doesn't fit but multiple
     // single-desk columns do.
-    let main_pod_used_w = aisle_x / 2 + pod_cols * pod_stride_x;
+    let main_pod_used_w = INTER_POD_AISLE_X / 2 + pod_cols * pod_stride_x;
     let residual_w = right_w.saturating_sub(main_pod_used_w);
-    let partial_col_stride = DESK_W + aisle_x / 2;
+    let partial_col_stride = DESK_W + INTER_POD_AISLE_X / 2;
     let partial_col_count = (residual_w / partial_col_stride).min(4);
     let partial_col_at_right = partial_col_count > 0;
-    let partial_col_x =
-        |i: u16| -> u16 { right_x + main_pod_used_w + aisle_x / 2 + i * partial_col_stride };
+    let partial_col_x = |i: u16| -> u16 {
+        right_x + main_pod_used_w + INTER_POD_AISLE_X / 2 + i * partial_col_stride
+    };
     if partial_col_at_right {
         'partial_x: for pod_r in 0..pod_rows {
             let (_, pod_origin_y) = grid.pod_origin(cubicle_band, 0, pod_r);
@@ -838,10 +833,9 @@ pub(super) fn compute_pod_decor(
         rows: pod_rows,
         stride_x: pod_stride_x,
         stride_y: pod_stride_y,
-        aisle_x,
         ..
     } = grid;
-    let pod_w = pod_stride_x - aisle_x;
+    let pod_w = pod_stride_x - INTER_POD_AISLE_X;
     let pod_h = pod_stride_y - INTER_POD_AISLE_Y;
     let mut pod_decor: Vec<PodDecorItem> = Vec::new();
     // Cycle through ALL with a per-slot counter so every decor type
@@ -886,7 +880,7 @@ pub(super) fn compute_pod_decor(
     for pod_r in 0..pod_rows {
         for pod_c in 0..pod_cols.saturating_sub(1) {
             let (pod_origin_x, pod_origin_y) = grid.pod_origin(cubicle_band, pod_c, pod_r);
-            let aisle_cx = pod_origin_x + pod_w + aisle_x / 2;
+            let aisle_cx = pod_origin_x + pod_w + INTER_POD_AISLE_X / 2;
             let aisle_cy = pod_origin_y + pod_h / 2;
             push_slot(&mut pod_decor, aisle_cx, aisle_cy);
         }

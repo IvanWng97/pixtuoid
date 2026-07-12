@@ -289,25 +289,6 @@ pub const INTRA_POD_GAP_Y: u16 = 12;
 /// and pack tighter vertically. 20 clears the 10-px board + pads. The
 /// walkable-connectivity + decor-overlap + approach tests guard routability.
 pub const INTER_POD_AISLE_X: u16 = 20;
-/// Narrow-band relief for the X aisle: at the full 20 a 96-px-wide portrait
-/// buffer (the site hero on phones) loses a desk column, and the 8-member
-/// scripted hero cast can no longer leave a spare desk for a visitor hire —
-/// pinned by pixtuoid-web's
-/// `capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted`.
-/// Same width-gated two-tier pattern as the pantry counter (32/20).
-pub const INTER_POD_AISLE_X_NARROW: u16 = 16;
-/// Cubicle-band width below which [`inter_pod_aisle_x`] uses the narrow
-/// aisle: a 96-wide buffer's band is ~69 px (relief fires, 9 desks survive);
-/// a 128-wide buffer's is ~92 px (full 18 aisle).
-pub const NARROW_BAND_AISLE_W: u16 = 80;
-/// The inter-pod X aisle for a cubicle band `band_w` px wide.
-pub fn inter_pod_aisle_x(band_w: u16) -> u16 {
-    if band_w < NARROW_BAND_AISLE_W {
-        INTER_POD_AISLE_X_NARROW
-    } else {
-        INTER_POD_AISLE_X
-    }
-}
 /// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W
 /// gap (landscape screens — see `INTER_POD_AISLE_X`). The floor USED to be
 /// EXACTLY 20 (18 AND 19 broke `every_home_desk_has_a_reachable_north_approach`:
