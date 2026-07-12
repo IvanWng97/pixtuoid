@@ -116,12 +116,12 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
     }
 }
 
-/// Kitchen island — the pantry's counter-height centre piece (14×6 visual,
-/// centred at `pos`): 2 rows of dressed countertop (fruit bowl + cups reuse
-/// the vending-drinks accent palette — zero new theme fields), a wood body,
-/// and a base row. The mask blocks only the south-anchored 14×4 base
-/// (invariant #6): a north-side stander tucks behind the counter and the
-/// island's own y-sort occludes them, bartender-style.
+/// Kitchen island — the pantry's counter-height centre piece (16×7 visual,
+/// centred at `pos`; dims read from the FurnitureDef row, prose here is
+/// descriptive): 2 rows of dressed countertop (fruit bowl + mug reuse the
+/// vending-drinks accent palette — zero new theme fields), a cabinet body
+/// with door seams + handles, and a base row. The mask blocks only the
+/// south-anchored 16×5 base (invariant #6).
 pub(super) fn paint_kitchen_island(
     buf: &mut RgbBuffer,
     cx: u16,

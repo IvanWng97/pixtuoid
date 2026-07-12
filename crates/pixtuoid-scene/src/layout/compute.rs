@@ -528,18 +528,19 @@ pub(super) fn compute_with_seed(
         let vis = def.visual;
         let (half_w, half_h) = (vis.w / 2, vis.h / 2);
         let clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
-        // Stands flank the island at ±(half_w + 3): 1 walkable cell beyond the
-        // body's padded footprint. They must stay in-room too, so the x clamps
-        // price the stand extent, not just the body.
-        let stand_dx = half_w + 3;
+        // Stands flank the island 1 walkable cell beyond the body's padded
+        // footprint (pad + 1, derived — not a re-hardcoded 3). They must stay
+        // in-room too, so the x clamps price the stand extent, not the body.
+        let stand_dx = half_w + super::OBSTACLE_PAD_PX + 1;
         let counter_y = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
         let counter_north =
             counter_y.saturating_sub(pantry_counter_size.h / 2 + super::OBSTACLE_PAD_PX);
         let min_x = pr.x + clr + stand_dx;
         let max_x = (pr.x + pr.width).saturating_sub(clr + stand_dx);
-        // North stander needs a walkable row above the body's padded strip.
-        let min_y = pr.y + clr + half_h + 2;
-        let max_y = counter_north.saturating_sub(half_h + 3);
+        // North stander needs a walkable row above the body's padded strip
+        // (pad-derived, same rule as stand_dx).
+        let min_y = pr.y + clr + half_h + super::OBSTACLE_PAD_PX;
+        let max_y = counter_north.saturating_sub(half_h + super::OBSTACLE_PAD_PX + 1);
         if min_x <= max_x && min_y <= max_y {
             let ix = (pr.x + pr.width / 2).clamp(min_x, max_x);
             let iy = (pr.y + pct(pr.height, 40)).clamp(min_y, max_y);
@@ -547,7 +548,11 @@ pub(super) fn compute_with_seed(
             for (dx, dy, facing) in [
                 (-(stand_dx as i16), 0i16, Facing::East),
                 (stand_dx as i16, 0, Facing::West),
-                (0, -((half_h + 2) as i16), Facing::South),
+                (
+                    0,
+                    -((half_h + super::OBSTACLE_PAD_PX) as i16),
+                    Facing::South,
+                ),
             ] {
                 waypoints.push(Waypoint {
                     pos: Point {

@@ -84,7 +84,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                         coarsening; reaches(p) ⇒ A* routable, so approach_point never targets a walled-off cell),
 │                       placement_sweep.rs (#[cfg(test)] — the GENERATIVE placement-invariant harness: a
 │                         sizes×seeds sweep asserting table-derived invariants [in-buffer, in-container,
-│                         no-ground-overlap, no-wall-overlap, pixel-BFS connectivity, the capacity law,
+│                         no-ground-overlap, no-wall-overlap, mask≡pieces parity (a stamped-nowhere
+│                         ground = agents walk through the piece), pixel-BFS connectivity, the capacity law,
 │                         every-kind-placed] over EVERY placed piece. Its `pieces()` destructures SceneLayout
 │                         with NO `..` — a new furniture field fails compilation until wired in or exempted
 │                         with a WHY; geometry comes from the SAME mask::ground_rect the collision mask
@@ -200,7 +201,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
                     pub(crate); walk position re-imported from motion::walking_position;
                     the per-pose anchor fns take `sprite_w` — the pack's character width,
                     resolved ONCE per frame [8 bundled / 10 robot] — so a non-8-wide pack centers correctly),
-                    furniture.rs (meeting table, area rug, side table, pantry table/chair),
+                    furniture.rs (meeting table, area rug, side table, kitchen island),
                     glass.rs (frosted-glass room-divider walls: consts + stitch + paint_glass_wall_h/v),
                     seat.rs (SeatView orientation single-source + seat_sprite + settle_seat_view + paint_character_at),
                     debug_overlay.rs (#[cfg(debug_assertions)] mask/approach/route overlay — the `w` toggle),

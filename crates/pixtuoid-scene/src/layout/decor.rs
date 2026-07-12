@@ -578,10 +578,11 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 11, h: 5 },
             ..DECOR
         },
-        // Island body: the 14×6 sprite's top two rows are countertop surface
-        // that OVERHANGS the 14×4 south-anchored base (invariant #6) — a
-        // north-side stander tucks slightly behind the counter, bartender-
-        // style, occluded by the island's own y-sort.
+        // Island body: the 16×7 sprite's top two rows are countertop surface
+        // that OVERHANGS the 16×5 south-anchored base (invariant #6). The
+        // north stand slot sits just clear of the padded base — reading as
+        // "at the counter's back face" (true occlusion would need a stand
+        // INSIDE the pad zone, which A* can't reach).
         Furniture::KitchenIsland => FurnitureDef {
             footprint: Some(Size { w: 16, h: 5 }),
             visual: Size { w: 16, h: 7 },
@@ -590,6 +591,9 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // Island stand slot: pre-positioned CLEAR of the body's padded
         // footprint by compute.rs (the MeetingStand pattern) — no obstacle,
         // no clearance scan needed, the agent stands exactly at `pos`.
+        // `approach: ALL` (not SEAT_APPROACH like MeetingStand): the stands
+        // ring the island on three OPEN sides with no backrest to exclude —
+        // reachability alone filters the island-body side.
         Furniture::IslandStand => FurnitureDef {
             footprint: None,
             visual: Size { w: 0, h: 0 },
@@ -812,7 +816,8 @@ pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
         // desk render is `seated_anchor`; its inverse is the bespoke
         // `desk_walk_anchor` (pinned by DESK_WALK_X/Y_OFF). ONE source.
         Furniture::Desk => desk_walk_anchor(pos),
-        // `occupies_pos` is exactly {Couch, MeetingSofa, MeetingStand, Desk}
+        // `occupies_pos` is exactly {Couch, MeetingSofa, MeetingStand,
+        // IslandStand, Desk}
         // (guarded by `furniture_def_invariants_hold_for_every_row`); the early
         // return handled every obstacle kind. A FUTURE occupies_pos seat that
         // forgets its arm here must fail loud, not silently settle the occupant

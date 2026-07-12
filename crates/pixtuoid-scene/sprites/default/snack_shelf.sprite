@@ -1,7 +1,7 @@
 # 7x10 pantry snack shelf -- wood frame (D/d desk-wood family), three
-# shelves of colorful snack packets reusing the book-spine palette
-# (r/b/y) + plant green `l` + cyan `c` so no new palette letters are
-# needed. The FurnitureDef footprint is 7x2 (ground_y: End) -- only the
+# shelves of colorful snack packets reusing existing palette letters
+# (book spines r/b/y, plant green l, cyan c, cup beige V, terracotta g)
+# so no new letters are needed. The FurnitureDef footprint is 7x2 (ground_y: End) -- only the
 # bottom base rows block; the stocked shelves overhang north
 # (walk-behind, invariant #6), so a browser standing east reads in
 # front of the shelf while a walker passes behind it occluded.

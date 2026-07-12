@@ -266,9 +266,8 @@ pub(super) fn build_walkable_mask(
     }
 
     if let Some(island) = kitchen_island {
-        // Island body: block the south-anchored 14×4 base only; the two
-        // countertop rows overhang (walk-behind, invariant #6) so a north
-        // stander tucks behind the counter, occluded by the island's y-sort.
+        // Island body: block the south-anchored 16×5 base only; the two
+        // countertop rows overhang (walk-behind, invariant #6).
         let def = furniture_def(Furniture::KitchenIsland);
         if let Some(fp) = def.footprint {
             stamp_ground(

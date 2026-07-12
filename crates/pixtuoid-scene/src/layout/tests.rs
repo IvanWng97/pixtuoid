@@ -24,7 +24,7 @@ fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
             s.pos
         );
     }
-    // Small Standard floor: the 26-wide pantry can't host a 14-wide island +
+    // Small Standard floor: the 26-wide pantry can't host a 16-wide island +
     // stands + clearances — refuse, don't force (and no stray stand waypoints).
     let s = SceneLayout::compute_with_seed(96, 70, None, 0).expect("fits");
     assert_eq!(s.kitchen_island, None, "26-wide pantry refuses the island");
