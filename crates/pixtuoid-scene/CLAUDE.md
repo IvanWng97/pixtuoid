@@ -69,8 +69,9 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                         ground, the blitted sprite, and the z-key can't drift. Anchor is passed per
 │                         PLACEMENT SITE, not stored on FurnitureDef — Whiteboard is Center as pod decor but
 │                         TopLeft as wall decor),
-│                       mask.rs (build_walkable_mask — stamps each obstacle via stamp_anchored/anchored_top_left
-│                         [no inline origin math]; WALL_THICK_H/V wall footprints; pantry south-strip +
+│                       mask.rs (build_walkable_mask — stamps each obstacle via stamp_ground: the footprint
+│                         offset inside the visual box by the row's ground_x/ground_y GroundAlign, placed at
+│                         anchored_top_left [no inline origin math]; WALL_THICK_H/V wall footprints; pantry south-strip +
 │                         meeting-furniture-too-narrow gate are the documented exceptions; a TopLeft
 │                         south-strip CENTERS the narrower ground footprint under the sprite's visual
 │                         width — the wall-decor whiteboard's 10px wheel span sits at sprite cols 2-11,

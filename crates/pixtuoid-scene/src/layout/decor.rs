@@ -506,8 +506,9 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // below the window band into the room). It needs a ground footprint or
         // a walker clips through its base. The shelves above overhang that base
         // (invariant #6), so the mask south-anchors the shallow 3px base strip
-        // to the sprite bottom (`stamp_south_strip`, the wall-decor loop) — the
-        // upper shelves sit in the already-blocked window band.
+        // to the sprite bottom (`ground_y: End` via `stamp_ground`, the
+        // wall-decor loop) — the upper shelves sit in the already-blocked
+        // window band.
         Furniture::Bookshelf => FurnitureDef {
             footprint: Some(Size { w: 8, h: 3 }),
             visual: Size { w: 8, h: 12 },
