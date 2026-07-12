@@ -2,9 +2,10 @@ use super::*;
 
 #[test]
 fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
-    // Roomy Senior floor: island + its 3 stands (E/W flank + the north
-    // "bartender" slot) all inside the pantry, clear of the counter's padded
-    // north (the anti-merge routing line).
+    // Roomy Senior floor: island + its 4 stands (E/W flank + the two
+    // "bartender" slots INSIDE the body — occluded by the counter's y-sort)
+    // all inside the pantry, clear of the counter's padded north (the
+    // anti-merge routing line).
     let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
     let island = l
         .kitchen_island
@@ -16,7 +17,7 @@ fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
         .iter()
         .filter(|w| matches!(w.kind, WaypointKind::Island))
         .collect();
-    assert_eq!(stands.len(), 3, "E + W + N stands");
+    assert_eq!(stands.len(), 4, "E + W flanks + 2 bartenders");
     for s in &stands {
         assert!(
             s.pos.x >= pr.x && s.pos.x < pr.x + pr.width && s.pos.y >= pr.y,
@@ -24,8 +25,33 @@ fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
             s.pos
         );
     }
-    // Small Standard floor: the 26-wide pantry can't host a 16-wide island +
-    // stands + clearances — refuse, don't force (and no stray stand waypoints).
+    // The bartender pair stands ON the island's center row (feet inside the
+    // body, so the counter occludes their legs), at the quarter points —
+    // 8px-wide sprites at ±w/4 on a 20px island can't overlap each other.
+    let mut bartenders: Vec<Point> = stands
+        .iter()
+        .filter(|s| s.facing == Facing::South)
+        .map(|s| s.pos)
+        .collect();
+    bartenders.sort_by_key(|p| p.x);
+    let quarter = furniture_def(Furniture::KitchenIsland).visual.w / 4;
+    assert_eq!(
+        bartenders,
+        vec![
+            Point {
+                x: island.x - quarter,
+                y: island.y,
+            },
+            Point {
+                x: island.x + quarter,
+                y: island.y,
+            },
+        ],
+        "two South-facing bartender slots at the island's quarter points"
+    );
+    // Small Standard floor: the 26-wide pantry can't host the island +
+    // stands + clearances (needs ≥42 = 2·(clr + stand_dx)) — refuse, don't
+    // force (and no stray stand waypoints).
     let s = SceneLayout::compute_with_seed(96, 70, None, 0).expect("fits");
     assert_eq!(s.kitchen_island, None, "26-wide pantry refuses the island");
     assert!(
@@ -33,6 +59,122 @@ fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
             .iter()
             .any(|w| matches!(w.kind, WaypointKind::Island)),
         "no island ⇒ no island stands"
+    );
+}
+
+#[test]
+fn meeting_room_donates_surplus_height_to_the_pantry() {
+    // Short standard floor (≈ a 50-row terminal, the live report that drove
+    // this): under the old unconditional half-split the pantry got ~35 rows
+    // < its content height, so the island AND snack shelf y-refused while
+    // the meeting trio floated in empty floor. The content-fit split must
+    // free exactly the rows the pantry needs — this is the drift guard
+    // pinning `pantry_content_h`'s inverse-clamp math to the island block's
+    // real clamps (if either side changes alone, the island vanishes here).
+    let l = SceneLayout::compute_with_seed(215, 98, None, 0).expect("fits");
+    assert!(
+        l.kitchen_island.is_some(),
+        "island must place on the short floor after the height transfer"
+    );
+    assert!(
+        l.waypoints
+            .iter()
+            .any(|w| matches!(w.kind, WaypointKind::SnackShelf)),
+        "snack shelf must place too (its y-bound == the island's)"
+    );
+    let mr = l.meeting_room.expect("meeting room");
+    let pr = l.pantry_room.expect("pantry");
+    assert!(
+        mr.height < pr.height,
+        "the surplus flowed south: meeting {} !< pantry {}",
+        mr.height,
+        pr.height
+    );
+    // Tall floors sit at the ceiling of the clamp (the old half-split) —
+    // their geometry is unchanged by the transfer.
+    let tall = SceneLayout::compute_with_seed(240, 160, None, 0).expect("fits");
+    let (tmr, tpr) = (
+        tall.meeting_room.expect("meeting room"),
+        tall.pantry_room.expect("pantry"),
+    );
+    let usable = tmr.height + tpr.height;
+    assert_eq!(
+        tmr.height,
+        usable / 2,
+        "tall floors keep the old half-split exactly"
+    );
+    // Floor arm: just below the donation floor (donated < trio fit) the old
+    // half-split stands and the starved pantry refuses the island — pins the
+    // all-or-nothing rule from the other side. (The pin is deliberately
+    // asymmetric: if the island's clamps RELAX while pantry_content_h stays,
+    // the split merely over-donates a benign row or two — only the
+    // starve/rescue boundary is load-bearing.)
+    let short = SceneLayout::compute_with_seed(215, 87, None, 0).expect("fits");
+    assert_eq!(
+        short.kitchen_island, None,
+        "below the donation floor the pantry stays starved (no forced cram)"
+    );
+    let (smr, spr) = (
+        short.meeting_room.expect("meeting room"),
+        short.pantry_room.expect("pantry"),
+    );
+    assert_eq!(
+        smr.height,
+        (smr.height + spr.height) / 2,
+        "below the floor the half-split stands"
+    );
+}
+
+#[test]
+fn island_bartenders_approach_from_behind_never_through_the_front() {
+    // The bartender slots sit INSIDE the island body (blocked cells) — the
+    // couch-seat pattern: A* routes to a walkable approach cell, the settle
+    // glide bridges onto the slot. The approach must be REAL (not the "no
+    // valid approach" pos sentinel, which would silently demote every
+    // bartender trip to an aimless amble) and must never be SOUTH of the
+    // body: a south approach glides visibly THROUGH the counter's front
+    // face. Behind (north) and lateral glides stay behind the countertop
+    // for the whole settle (the glide z is pinned to the feet row).
+    // 240×160 = the roomy tall floor; 215×98 = the donated content-fit
+    // floor where the island sits at its single valid y (tightest lane).
+    let mut exercised = false;
+    for (bw, bh) in [(240u16, 160u16), (215, 98)] {
+        for seed in 0..5u64 {
+            let l = SceneLayout::compute_with_seed(bw, bh, None, seed).expect("fits");
+            let Some(island) = l.kitchen_island else {
+                continue;
+            };
+            exercised = true;
+            let origin = l.home_desks.first().copied().expect("desks");
+            for wp in l
+                .waypoints
+                .iter()
+                .filter(|w| matches!(w.kind, WaypointKind::Island) && w.facing == Facing::South)
+            {
+                let a = approach_point(
+                    wp.kind.furniture(),
+                    wp.pos,
+                    wp.facing,
+                    l.pantry_counter_size,
+                    &l.walkable,
+                    origin,
+                    &l.reachable,
+                );
+                assert_ne!(
+                    a, wp.pos,
+                    "{bw}x{bh} seed {seed}: bartender slot has no approach"
+                );
+                assert!(
+                    a.y <= island.y,
+                    "{bw}x{bh} seed {seed}: approach {a:?} is south of the island \
+                     center — the glide would cross the counter's front face"
+                );
+            }
+        }
+    }
+    assert!(
+        exercised,
+        "no size/seed hosted the island — test lost its teeth"
     );
 }
 

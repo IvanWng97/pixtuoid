@@ -211,6 +211,19 @@ const SEAT_APPROACH: ApproachSides = ApproachSides {
     w: true,
 };
 
+/// Canonical bar-slot approach: behind + sides, never across the FRONT — the
+/// mirror of [`SEAT_APPROACH`]. A bartender slot sits INSIDE the island body,
+/// so a front (south, canonical) approach would glide visibly THROUGH the
+/// counter's face; behind + lateral glides stay behind the countertop for the
+/// whole settle (the glide z is pinned to the feet row). Rotated, the E/W
+/// flank stands likewise never approach across the island they face.
+const BAR_APPROACH: ApproachSides = ApproachSides {
+    n: true,
+    s: false,
+    e: true,
+    w: true,
+};
+
 impl WaypointKind {
     /// Every variant, for exhaustive invariant tests (mirrors
     /// [`PodDecor::ALL`]). Iteration-only — order is not load-bearing.
@@ -578,22 +591,26 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 11, h: 5 },
             ..DECOR
         },
-        // Island body: the 16×7 sprite's top two rows are countertop surface
-        // that OVERHANGS the 16×5 south-anchored base (invariant #6). The
-        // north stand slot sits just clear of the padded base — reading as
-        // "at the counter's back face" (true occlusion would need a stand
-        // INSIDE the pad zone, which A* can't reach).
+        // Island body: the sprite's top two rows are countertop surface that
+        // OVERHANGS the south-anchored base (invariant #6 — footprint.h =
+        // visual.h − 2). The bartender slots stand ON the body's center row —
+        // blocked cells, reached via BAR_APPROACH + the settle glide (the
+        // couch-seat pattern), with the body's south-row z-key occluding
+        // their legs: true behind-the-counter occlusion.
+        // Sized as the room's dominant piece (owner call: it replaced BOTH
+        // bistro pieces, so it must read bigger than their old joint span).
         Furniture::KitchenIsland => FurnitureDef {
-            footprint: Some(Size { w: 16, h: 5 }),
-            visual: Size { w: 16, h: 7 },
+            footprint: Some(Size { w: 20, h: 5 }),
+            visual: Size { w: 20, h: 7 },
             ..DECOR
         },
-        // Island stand slot: pre-positioned CLEAR of the body's padded
-        // footprint by compute.rs (the MeetingStand pattern) — no obstacle,
-        // no clearance scan needed, the agent stands exactly at `pos`.
-        // `approach: ALL` (not SEAT_APPROACH like MeetingStand): the stands
-        // ring the island on three OPEN sides with no backrest to exclude —
-        // reachability alone filters the island-body side.
+        // Island stand slot — two shapes share this row: the E/W FLANKS,
+        // pre-positioned CLEAR of the body's padded footprint by compute.rs
+        // (the MeetingStand pattern), and the BARTENDER pair, whose `pos` is
+        // INSIDE the island body (the couch-seat pattern: a blocked pos is
+        // fine for `occupies_pos` — A* routes to a BAR_APPROACH cell and the
+        // settle glide bridges on; the island's south-row z-key then occludes
+        // the stander's legs, the walk-behind read).
         Furniture::IslandStand => FurnitureDef {
             footprint: None,
             visual: Size { w: 0, h: 0 },
@@ -602,7 +619,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
                 base_ms: 9_000,
                 range_ms: 9_000,
             },
-            approach: ApproachSides::ALL,
+            approach: BAR_APPROACH,
             ground_x: GroundAlign::Center,
             ground_y: GroundAlign::Center,
         },

@@ -565,15 +565,44 @@ fn paint_frame(
         // Couch shadow is emitted once below (3 seat waypoints; per-seat
         // shadows would overlap). Printer is handled just after — its 4px-tall
         // sprite's south is pos.y+1, so the generic +2 would float 1px below.
-        if matches!(wp.kind, WaypointKind::Couch | WaypointKind::Printer) {
+        // Island stands are EMPTY FLOOR cells beside the island (the body
+        // carries its own fitted shadow below) — a generic blob at each stand
+        // painted phantom shadows left/right of the island.
+        if matches!(
+            wp.kind,
+            WaypointKind::Couch | WaypointKind::Printer | WaypointKind::Island
+        ) {
             continue;
         }
+        // Fit the ellipse to the piece's actual sprite width — the flat 7
+        // half-width doubled a 7px shelf's shadow. The .min(7) is a CAP at
+        // the old value (currently dead: no shadowed sprite reaches 13px) so
+        // a future wide piece can't over-shadow; the narrow appliances
+        // deliberately churned to their fitted widths.
+        let vis_w = crate::layout::furniture_def(wp.kind.furniture()).visual.w;
+        let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
         paint_shadow(
             ctx.buf,
             Ellipse {
                 cx: wp.pos.x,
                 cy: wp.pos.y + 2,
-                half_w: 7,
+                half_w,
+                half_h: 2,
+            },
+            shadow_strength,
+            ctx.theme,
+        );
+    }
+    if let Some(island) = ctx.layout.kitchen_island {
+        // One fitted shadow under the island BODY (its stands are skipped
+        // above): south edge = the visual south row, width tracks the sprite.
+        let vis = crate::layout::furniture_def(crate::layout::Furniture::KitchenIsland).visual;
+        paint_shadow(
+            ctx.buf,
+            Ellipse {
+                cx: island.x,
+                cy: island.y + center_pin_south_offset(vis.h),
+                half_w: vis.w / 2 + 1,
                 half_h: 2,
             },
             shadow_strength,

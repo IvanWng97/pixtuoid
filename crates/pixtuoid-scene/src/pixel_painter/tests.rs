@@ -766,6 +766,51 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
 }
 
 #[test]
+fn island_settle_z_stays_behind_the_countertop() {
+    // Bartender slots sit INSIDE the island body: both the settled stander
+    // (sim's AtWaypoint arm) and the sit-down glide (settle_seat_view) must
+    // z-sort at the plain feet row — BELOW the island's own south-row key —
+    // for the entire arc. A `Side`-style `pos+3` key would TIE with the
+    // island's key and pop the sprite in front of the counter mid-glide.
+    use crate::layout::{Anchor, Furniture, WaypointKind, TEST_DEFAULT_DESKS};
+    let mut exercised = false;
+    for seed in 0..5u64 {
+        let Some(l) = Layout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), seed) else {
+            continue;
+        };
+        let Some(island) = l.kitchen_island else {
+            continue;
+        };
+        exercised = true;
+        let island_z = crate::layout::z_sort_row(
+            Anchor::Center,
+            island,
+            crate::layout::furniture_def(Furniture::KitchenIsland)
+                .visual
+                .h,
+        );
+        for wp in l
+            .waypoints
+            .iter()
+            .filter(|w| matches!(w.kind, WaypointKind::Island))
+        {
+            let (_, z) =
+                settle_seat_view(wp.pos, &l).expect("island stand foot-cell == pos, so it settles");
+            assert_eq!(
+                z, wp.pos.y,
+                "island stand glide z must be the plain feet row (the settled \
+                 AtWaypoint key), not a Side-style +3"
+            );
+            assert!(
+                z < island_z,
+                "stand z {z} must sort BEHIND the island's south-row key {island_z}"
+            );
+        }
+    }
+    assert!(exercised, "no seed hosted the island — test lost its teeth");
+}
+
+#[test]
 fn settle_seat_view_recognizes_the_home_desk() {
     // The home desk joins the unified settle: its chair (seated_foot_cell(Desk)
     // = desk_walk_anchor) is a settle target, so the arrival glide onto it goes
@@ -846,6 +891,9 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
             SeatView::Front | SeatView::Back => back_couch_anchor(w.pos, CHARACTER_SPRITE_W).y + 9,
             // waypoint_anchor.y + sprite_h(12) + 3 = (pos.y - 12) + 12 + 3
             SeatView::Side { .. } => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12 + 3,
+            // waypoint_anchor.y + sprite_h(12) = pos.y — the AtWaypoint
+            // default a plain stander historically used.
+            SeatView::Stander { .. } => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12,
         };
         assert_eq!(
             z, historical,

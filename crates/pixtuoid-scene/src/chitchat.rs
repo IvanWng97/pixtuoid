@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn multi_slot_venues_collapse_to_first_of_their_own_kind() {
         // The 3 couch seats collapse to the first COUCH index; the island's
-        // 3 stands collapse to the first ISLAND index — each kind anchors on
+        // stands collapse to the first ISLAND index — each kind anchors on
         // its OWN first waypoint (the old caller-computed group index passed
         // the couch's index for every kind, which merged island standers
         // into the couch conversation). Other waypoints keep their own index.

@@ -105,6 +105,13 @@ pub(super) enum SeatView {
     Back,
     /// Faces sideways; `flip` mirrors east↔west.
     Side { flip: bool },
+    /// An upright stander at the plain feet-row z (no `Side`-style table
+    /// clearance): the island slots. The bartender pair stands INSIDE the
+    /// island body, so its z must stay BELOW the island's south-row key for
+    /// the whole glide + settled arc (the legs-behind-the-counter read);
+    /// `Side`'s `pos+3` would tie with the island key and pop the sprite in
+    /// front of the counter mid-glide.
+    Stander { flip: bool },
 }
 
 impl SeatView {
@@ -119,8 +126,13 @@ impl SeatView {
                 Facing::North => SeatView::Back,
                 _ => SeatView::Front,
             },
-            // Stand beside the table/island, facing inward; east-facing flips.
-            WaypointKind::MeetingStand | WaypointKind::Island => SeatView::Side {
+            // Stand beside the meeting table, facing inward; east-facing flips.
+            WaypointKind::MeetingStand => SeatView::Side {
+                flip: matches!(facing, Facing::East),
+            },
+            // Island slots (flanks + the in-body bartender pair) stand at the
+            // plain feet-row z — see the `Stander` variant's WHY.
+            WaypointKind::Island => SeatView::Stander {
                 flip: matches!(facing, Facing::East),
             },
             // Not seat slots — the caller dispatches these directly (they never
@@ -142,7 +154,7 @@ impl SeatView {
         match self {
             SeatView::Front => ("seated", false),
             SeatView::Back => ("back_couch", false),
-            SeatView::Side { flip } => ("standing", flip),
+            SeatView::Side { flip } | SeatView::Stander { flip } => ("standing", flip),
         }
     }
 
@@ -154,7 +166,7 @@ impl SeatView {
         match self {
             SeatView::Front => (false, false),
             SeatView::Back => (true, false),
-            SeatView::Side { flip } => (false, flip),
+            SeatView::Side { flip } | SeatView::Stander { flip } => (false, flip),
         }
     }
 
@@ -179,6 +191,10 @@ impl SeatView {
             SeatView::Front | SeatView::Back => wp_pos.y + 2,
             // Stand clears the meeting table (table.y+2) it stands beside.
             SeatView::Side { .. } => wp_pos.y + 3,
+            // Plain feet-row key — the AtWaypoint default for a stander. The
+            // bartender's pos row sits INSIDE the island body, below the
+            // island's own south-row key, so the whole arc stays behind it.
+            SeatView::Stander { .. } => wp_pos.y,
         }
     }
 }

@@ -165,7 +165,7 @@ expression: l.waypoints
     },
     Waypoint {
         pos: Point {
-            x: 22,
+            x: 20,
             y: 126,
         },
         kind: Island,
@@ -174,7 +174,7 @@ expression: l.waypoints
     },
     Waypoint {
         pos: Point {
-            x: 44,
+            x: 46,
             y: 126,
         },
         kind: Island,
@@ -183,8 +183,17 @@ expression: l.waypoints
     },
     Waypoint {
         pos: Point {
-            x: 33,
-            y: 121,
+            x: 28,
+            y: 126,
+        },
+        kind: Island,
+        facing: South,
+        room_id: None,
+    },
+    Waypoint {
+        pos: Point {
+            x: 38,
+            y: 126,
         },
         kind: Island,
         facing: South,

@@ -99,15 +99,88 @@ pub(super) fn compute_with_seed(
     let has_pantry = geom.has_pantry();
     let mid_x = pct(buf_w, geom.mid_x_pct());
 
-    let mid_y_split = top_margin + usable_h / 2;
+    // Counter footprint depends on pantry width — 32×10 detailed kitchen on
+    // default terminals, 20×8 compact fallback for narrow ones. The threshold
+    // (36 = 32 sprite + 4 px margins) keeps the walkable strip around the
+    // counter wide enough for routing. Width-only (the pantry's width IS
+    // mid_x), so it's known before the room split below prices the pantry's
+    // content against it.
+    let pantry_counter_size: Size = if has_pantry && mid_x >= 36 {
+        Size {
+            w: PANTRY_COUNTER_LARGE_W,
+            h: 10,
+        }
+    } else {
+        Size { w: 20, h: 8 }
+    };
+
+    // One source of truth: the meeting-sofa SPRITE height (was a bare `7`). A
+    // hardcoded literal would silently let 1px-too-short rooms pass the fit
+    // gate if the sprite ever grows → MeetingSofa seat teleport on the coarse
+    // grid. furniture_def is a const fn returning Copy.
+    let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.h;
+    // Height must price the TABLE between the sofas, not just the two sofa
+    // bodies: with both sofa clamps bound (short room) the mirror positions
+    // leave `height − 2·sofa_h` between the sofa centres, and the centred
+    // table needs its own footprint depth plus the sofa's not to overlap
+    // either body (placement-sweep catch: at 96×60 the table ground clipped
+    // BOTH sofas by a row). Derived from the same table rows the mask stamps.
+    let sofa_fp_h = furniture_def(Furniture::MeetingSofaBody)
+        .footprint
+        .map_or(0, |s| s.h);
+    let table_fp_h = furniture_def(Furniture::MeetingTable)
+        .footprint
+        .map_or(0, |s| s.h);
+    let trio_fit_h = sofa_h * 2 + sofa_fp_h + table_fp_h;
+
+    // Meeting-room height: CONTENT-FIT, donating the surplus to the pantry
+    // below. The screen + bookshelf hang on the top WALL BAND (zero floor
+    // rows), so the room needs only its sofa/table trio; the old
+    // unconditional half-split left the trio floating in empty floor on
+    // short terminals while the pantry below starved (island + snack shelf
+    // y-refused). The donation is ALL-OR-NOTHING: the room shrinks exactly
+    // to `usable_h − pantry_content_h` when that both keeps the trio fit
+    // (`trio_fit_h`) AND actually reaches the pantry's content height
+    // (`pantry_content_h` — the inverse of the island's y-clamps: the
+    // counter line sits at pct(h, pantry_counter_y_pct) and the island needs
+    // `island_need` rows of ceiling above it; the snack shelf's bound is
+    // identical, its half-height 5 == the island's half_h + pad). Otherwise
+    // the old half-split stands — a partial donation would cram the trio to
+    // its fit gate to buy rows the island still couldn't use, and floors
+    // already tall enough keep their exact pre-change geometry. Dense keeps
+    // the raw split: BOTH halves host a trio. Drift guard vs the island
+    // block's own clamps: `meeting_room_donates_surplus_height_to_the_pantry`.
+    let island_clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
+    let island_half_h = furniture_def(Furniture::KitchenIsland).visual.h / 2;
+    let island_need = island_clr
+        + 2 * (island_half_h + super::OBSTACLE_PAD_PX)
+        + 1
+        + pantry_counter_size.h / 2
+        + super::OBSTACLE_PAD_PX;
+    let pantry_content_h = (u32::from(island_need) * 100)
+        .div_ceil(u32::from(pantry_counter_y_pct(pantry_counter_size.w)))
+        as u16;
+    let half_split = usable_h / 2;
+    let donated = usable_h.saturating_sub(pantry_content_h);
+    let meeting_h = if (trio_fit_h..half_split).contains(&donated) {
+        donated
+    } else {
+        half_split
+    };
+    let mid_y_split = if has_meeting && !has_dual_meeting {
+        top_margin + meeting_h
+    } else {
+        top_margin + half_split
+    };
 
     let meeting_room = if has_meeting {
         // A meeting always shares the left column with either the pantry or a
         // second meeting room (variant table: meeting-bearing variants 0/3 set
         // has_pantry, and variant 2 degrades to has_pantry when not dual) — so
-        // the room takes the top HALF unconditionally. The else-arm (full
-        // usable_h) was dead; assert the invariant so a future variant-table
-        // edit fails loud instead of silently picking a full-height room.
+        // the room takes the top of the column up to the split. The else-arm
+        // (full usable_h) was dead; assert the invariant so a future
+        // variant-table edit fails loud instead of silently picking a
+        // full-height room.
         debug_assert!(
             has_pantry || has_dual_meeting,
             "meeting implies pantry-or-dual per the variant table"
@@ -116,7 +189,7 @@ pub(super) fn compute_with_seed(
             x: 0,
             y: top_margin,
             width: mid_x,
-            height: usable_h / 2,
+            height: mid_y_split - top_margin,
         })
     } else {
         None
@@ -138,7 +211,7 @@ pub(super) fn compute_with_seed(
             y: if has_meeting { mid_y_split } else { top_margin },
             width: mid_x,
             height: if has_meeting {
-                usable_h - usable_h / 2
+                usable_h - (mid_y_split - top_margin)
             } else {
                 usable_h
             },
@@ -195,11 +268,6 @@ pub(super) fn compute_with_seed(
 
     let pod_decor = compute_pod_decor(&cubicle_band, pod_grid, floor_seed);
 
-    // One source of truth: the meeting-sofa SPRITE height (was a bare `7`). A
-    // hardcoded literal would silently let 1px-too-short rooms pass the gate
-    // below if the sprite ever grows → MeetingSofa seat teleport on the coarse
-    // grid. furniture_def is a const fn returning Copy.
-    let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.h;
     // A meeting room narrower than this can't host the 16-px-wide sofa body
     // (+ its 2-px pad) with enough walkable margin for the coarse 4×4 router to
     // reach the seats buried in the sofa — find_path returns None and an idle
@@ -209,39 +277,36 @@ pub(super) fn compute_with_seed(
     // is validated by the routability sweep
     // `meeting_and_pantry_waypoints_are_routable_on_the_coarse_grid`.
     const MEETING_FURNITURE_MIN_W: u16 = 30;
-    // Height must price the TABLE between the sofas, not just the two sofa
-    // bodies: with both sofa clamps bound (short room) the mirror positions
-    // leave `height − 2·sofa_h` between the sofa centres, and the centred
-    // table needs its own footprint depth plus the sofa's not to overlap
-    // either body (placement-sweep catch: at 96×60 the table ground clipped
-    // BOTH sofas by a row). Derived from the same table rows the mask stamps.
-    let sofa_fp_h = furniture_def(Furniture::MeetingSofaBody)
-        .footprint
-        .map_or(0, |s| s.h);
-    let table_fp_h = furniture_def(Furniture::MeetingTable)
-        .footprint
-        .map_or(0, |s| s.h);
-    let room_fits_furniture = |mr: &Bounds| {
-        mr.width >= MEETING_FURNITURE_MIN_W && mr.height >= sofa_h * 2 + sofa_fp_h + table_fp_h
-    };
+    let room_fits_furniture =
+        |mr: &Bounds| mr.width >= MEETING_FURNITURE_MIN_W && mr.height >= trio_fit_h;
     // One source for a meeting room's furniture trio: two facing sofas and the
     // table CENTERED BETWEEN THEM. The table used to sit at the room centre while
     // the sofas sat at 30%/80% of the room height — asymmetric, so the north
     // sofa's front was packed against the table (a sub-coarse-grid seam that cost
     // its seats their front approach) while the south sofa had clearance. Placing
     // the table at the sofa midpoint gives both fronts equal, routable clearance.
-    // The sofas keep their 30%/80% bias (backrest clearance from the room's top/
+    // The sofas keep their 20%/80% bias (backrest clearance from the room's top/
     // bottom walls); only the table follows them. All positions are
     // window-height-driven, so the approach points the agents path to derive from
     // the resulting mask at every size — nothing here is a fixed pixel offset.
-    let room_furniture = |mr: &Bounds| -> ([Point; 2], Point) {
+    let room_furniture = |mr: &Bounds, north_floor: u16| -> ([Point; 2], Point) {
         let cx = mr.x + mr.width / 2;
         // Sofas sit SYMMETRICALLY about the room mid-line (20%/80%, was 30%/80%)
         // so each gets equal front clearance to the centred table — the old 30%
-        // packed the north sofa's front against the table. Clamps mirror each
-        // other: north ≥ sofa_h from the top wall, south ≤ sofa_h from the bottom,
-        // so neither backrest clips its wall in a short room.
-        let north_y = (mr.y + pct(mr.height, 20)).max(mr.y + sofa_h);
+        // packed the north sofa's front against the table. The north clamp is
+        // per-room (`north_floor`): room 0's top edge is the wall band's
+        // walkable carpet apron, so its sofa may TUCK toward the wall. The
+        // sofa_h/2 floor binds only if the sprite ever grows (the trio fit
+        // gate guarantees pct-20 ≥ 4 > sofa_h/2 today), so pct-20 governs;
+        // the 1-row apron strip that remains above the padded body drains
+        // laterally through the screen-west/bookshelf-east channel the wall
+        // decor placement guarantees — do NOT weaken that channel, or the
+        // strip strands (the 150×68 sealed-pocket class). Room 1 (dense)
+        // sits under the glass divider, which stamps WALL_THICK_H rows into
+        // its top — its floor stays a full sofa_h so the sofa ground clears
+        // the wall ground. The south clamp keeps a full sofa_h off the
+        // bottom wall on both.
+        let north_y = (mr.y + pct(mr.height, 20)).max(mr.y + north_floor);
         let south_y = (mr.y + pct(mr.height, 80)).min(mr.y + mr.height.saturating_sub(sofa_h));
         let sofas = [Point { x: cx, y: north_y }, Point { x: cx, y: south_y }];
         let table = Point {
@@ -253,26 +318,15 @@ pub(super) fn compute_with_seed(
     let mut meeting_furniture: Vec<MeetingFurniture> = Vec::new();
     // Order is load-bearing: room 0 = `meeting_room`, room 1 = `meeting_room_2`
     // (dense layout). `compute_waypoints` keys seats to a room by this index.
-    for room in [meeting_room, meeting_room_2] {
+    for (room_idx, room) in [meeting_room, meeting_room_2].into_iter().enumerate() {
         if let Some(mr) = room.filter(&room_fits_furniture) {
-            let (sofas, table) = room_furniture(&mr);
+            let north_floor = if room_idx == 0 { sofa_h / 2 } else { sofa_h };
+            let (sofas, table) = room_furniture(&mr, north_floor);
             meeting_furniture.push(MeetingFurniture { sofas, table });
         }
     }
 
     let room_walls = compute_room_walls(geom, mid_x, mid_y_split, top_margin, usable_h);
-
-    // Counter footprint depends on pantry width — 32×10 detailed
-    // kitchen on default terminals, 20×8 compact fallback for narrow
-    // ones. The threshold (36 = 32 sprite + 4 px margins) keeps the
-    // walkable strip around the counter wide enough for routing.
-    let pantry_counter_size: Size = match pantry_room {
-        Some(pr) if pr.width >= 36 => Size {
-            w: PANTRY_COUNTER_LARGE_W,
-            h: 10,
-        },
-        _ => Size { w: 20, h: 8 },
-    };
 
     let Point {
         x: couch_x,
@@ -421,22 +475,74 @@ pub(super) fn compute_with_seed(
     //   exit_sign:      ~6 px (already used top_margin - 13 — kept)
     // We position the TOP-LEFT corner of each sprite so its bottom
     // row lands exactly at `top_margin - 1` (last wall band row).
-    // The meeting screen is room-anchored (centered over room 0), the
-    // bookshelf buffer-anchored (18% of width) — two independent x formulas
-    // that COLLIDED on every Senior floor and every Standard floor narrower
-    // than ~175 px (the placement sweep's first catch: the bookshelf sat 80%
-    // swallowed behind the screen). Compute the screen first; the bookshelf
-    // clamps east of it, and drops entirely when the clamped slot would run
-    // into the exit sign / elevator (degenerate widths — same degradation
-    // pattern as the bare meeting room).
-    let meeting_screen_x = meeting_room.map(|mr| mr.x + (mr.width / 2).saturating_sub(7));
+    // The meeting screen hugs room 0's WEST CORNER, not its centre: centred
+    // it loomed directly above the sofa group (worst on content-fit short
+    // rooms, where the trio tucks against the top wall), reading as a
+    // cluttered stack. Corner screen + the bookshelf's east clamp spread the
+    // band items to the room's two sides, clearing the air above the sofas.
+    // The bookshelf keeps its buffer anchor (18% of width) but ALSO clamps
+    // past the sofa pad's east end (+5: its own 2-px ground pad plus a ≥2-px
+    // walkable channel) — that channel is LOAD-BEARING, not taste: the
+    // wall-band carpet apron between the two decor grounds must drain south
+    // AROUND the tucked sofa (whose padded body seals the lane above the
+    // backrest), else those apron cells strand (placement-sweep sealed-pocket
+    // catch at 150×68). The bookshelf drops entirely when the clamped slot
+    // would run into the exit sign / elevator (degenerate widths — same
+    // degradation pattern as the bare meeting room), which reopens the
+    // channel by absence.
     let bookshelf_w = furniture_def(WallDecor::Bookshelf.furniture()).visual.w;
     let screen_w = furniture_def(WallDecor::MeetingScreen.furniture()).visual.w;
+    let meeting_screen_x = meeting_room.map(|mr| mr.x + 1);
+    let sofa_fp_w = furniture_def(Furniture::MeetingSofaBody)
+        .footprint
+        .map_or(0, |s| s.w);
     let bookshelf_x = {
         let x = pct(buf_w, 18);
-        match meeting_screen_x {
-            Some(sx) => x.max(sx + screen_w + 2),
-            None => x,
+        match (meeting_screen_x, meeting_room) {
+            (Some(sx), Some(mr)) => {
+                // The ONE flush slot (screen east edge + a 2-px gap, so the
+                // two grounds' pads merge with no strandable apron cell
+                // between them) — every arm below derives from it; a second
+                // copy of the offset could desync the spread clamp from the
+                // fallback and reopen a sub-pad channel.
+                let flush_east = sx + screen_w + 2;
+                // The drain term applies only when room 0 actually HOSTS its
+                // trio: with no sofa there is nothing to route around, and
+                // pushing the shelf east anyway hangs it over the cubicle
+                // band, where the first desk pod's pad seals the apron gap
+                // against it instead (sweep sealed-pocket catch at 48×60 —
+                // a bare doll-house room).
+                if room_fits_furniture(&mr) {
+                    // Mirrors room_furniture's cx + the mask's Center-anchored
+                    // sofa ground east edge (fp/2 + OBSTACLE_PAD_PX) — pinned
+                    // behaviorally by the sweep's connectivity invariant: if
+                    // either side drifts, the drain channel seals and the
+                    // sweep reds.
+                    let sofa_pad_east =
+                        mr.x + mr.width / 2 + sofa_fp_w / 2 + super::OBSTACLE_PAD_PX;
+                    // Past the sofa's shadow by the shelf's OWN 1-px ground
+                    // pad (mask.rs wall-decor stamp uses pad=1, not
+                    // OBSTACLE_PAD_PX) + a ≥2-px walkable channel + slack.
+                    const BOOKSHELF_DRAIN_GAP: u16 = 5;
+                    let spread = x.max(flush_east).max(sofa_pad_east + BOOKSHELF_DRAIN_GAP);
+                    if spread + bookshelf_w < mr.x + mr.width {
+                        spread
+                    } else {
+                        // Narrow trio room: the spread slot would pierce the
+                        // divider (owner catch at 150-wide Standard). Fall
+                        // back to the FLUSH slot — no strandable apron gap
+                        // opens between the pair, and the apron east of them
+                        // drains down the room's east strip past the sofa
+                        // pad. NOT the pct-18 anchor: at these widths it
+                        // opens a gap OVER the sofa pad, the original 150×68
+                        // sealed pocket.
+                        flush_east
+                    }
+                } else {
+                    x.max(flush_east)
+                }
+            }
+            _ => x,
         }
     };
     // Everything east of the exit sign / elevator face is off-limits. The
@@ -445,8 +551,16 @@ pub(super) fn compute_with_seed(
     // from the sign if the offset ever moves (online-review catch).
     let exit_sign_x = buf_w.saturating_sub(9);
     let wall_east_limit = exit_sign_x.min(door.map(|d| d.x).unwrap_or(u16::MAX));
+    // The bookshelf additionally stays WEST of the vertical divider (the
+    // meeting room's east wall): on narrow trio rooms the drain clamp can
+    // push it onto the wall's top segment (owner catch at 150-wide
+    // Standard — the shelf visually pierced the glass). Dropping it there
+    // reopens the apron channel, same degradation as the exit-sign limit.
+    let bookshelf_east_limit = meeting_room
+        .map_or(u16::MAX, |mr| mr.x + mr.width)
+        .min(wall_east_limit);
     let mut wall_decor = Vec::new();
-    if bookshelf_x + bookshelf_w < wall_east_limit {
+    if bookshelf_x + bookshelf_w < bookshelf_east_limit {
         wall_decor.push(WallDecorItem {
             kind: WallDecor::Bookshelf,
             pos: Point {
@@ -517,7 +631,7 @@ pub(super) fn compute_with_seed(
         });
     }
 
-    // ── Pantry v2: kitchen island (+3 stands) + snack shelf ──
+    // ── Pantry v2: kitchen island (+ stand slots) + snack shelf ──
     // Every piece follows the refuse-don't-force rule with BOTH-axis clamps
     // (the #549/#551/#554 one-axis-clamp class), and keeps clear of the
     // counter's padded north (the anti-merge routing constraint) —
@@ -537,27 +651,31 @@ pub(super) fn compute_with_seed(
             counter_y.saturating_sub(pantry_counter_size.h / 2 + super::OBSTACLE_PAD_PX);
         let min_x = pr.x + clr + stand_dx;
         let max_x = (pr.x + pr.width).saturating_sub(clr + stand_dx);
-        // North stander needs a walkable row above the body's padded strip
-        // (pad-derived, same rule as stand_dx).
+        // The bartenders' approach lane — the walkable row above the body's
+        // padded strip — must be in-room (pad-derived, same rule as stand_dx).
         let min_y = pr.y + clr + half_h + super::OBSTACLE_PAD_PX;
         let max_y = counter_north.saturating_sub(half_h + super::OBSTACLE_PAD_PX + 1);
         if min_x <= max_x && min_y <= max_y {
             let ix = (pr.x + pr.width / 2).clamp(min_x, max_x);
             let iy = (pr.y + pct(pr.height, 40)).clamp(min_y, max_y);
             let island = Point { x: ix, y: iy };
-            for (dx, dy, facing) in [
-                (-(stand_dx as i16), 0i16, Facing::East),
-                (stand_dx as i16, 0, Facing::West),
-                (
-                    0,
-                    -((half_h + super::OBSTACLE_PAD_PX) as i16),
-                    Facing::South,
-                ),
+            // Bartender slots sit ON the island's center row at its quarter
+            // points: 8px-wide sprites at ±w/4 on the 20px island can't
+            // overlap each other, and the blocked pos is fine for an
+            // `occupies_pos` slot (the couch-seat pattern — approach_point
+            // finds the lane BEHIND the island, the settle glide bridges in,
+            // and the island's south-row z-key occludes the standers' legs).
+            let bar_dx = (vis.w / 4) as i16;
+            for (dx, facing) in [
+                (-(stand_dx as i16), Facing::East),
+                (stand_dx as i16, Facing::West),
+                (-bar_dx, Facing::South),
+                (bar_dx, Facing::South),
             ] {
                 waypoints.push(Waypoint {
                     pos: Point {
                         x: ix.saturating_add_signed(dx),
-                        y: iy.saturating_add_signed(dy),
+                        y: iy,
                     },
                     kind: WaypointKind::Island,
                     facing,

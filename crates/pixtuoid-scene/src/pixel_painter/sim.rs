@@ -435,14 +435,18 @@ fn resolve_characters(
                         // Seats route through `SeatView::z_key_for_seat` — the SAME
                         // key the sit-down/stand-up glide uses, so the agent can't
                         // pop across its furniture's z-key at the walk→seat seam.
-                        // (back/front sofa+couch → pos+2; stand → pos+3, clearing
-                        // the meeting table.) Obstacles (pantry/booth/vending/
-                        // printer) keep the stand-at-the-approach-cell key — the
-                        // agent stands AT them, there is no settle onto them.
+                        // (back/front sofa+couch → pos+2; meeting stand → pos+3,
+                        // clearing the meeting table; island stander → the plain
+                        // feet row, staying BEHIND the island's south-row key —
+                        // the bartender occlusion.) Obstacles (pantry/booth/
+                        // vending/printer) keep the stand-at-the-approach-cell
+                        // key — the agent stands AT them, there is no settle onto
+                        // them.
                         anchor_y: match kind {
                             WaypointKind::Couch
                             | WaypointKind::MeetingSofa
-                            | WaypointKind::MeetingStand => {
+                            | WaypointKind::MeetingStand
+                            | WaypointKind::Island => {
                                 SeatView::of(kind, wp_obj.facing).z_key_for_seat(stand)
                             }
                             _ => anchor_no_breath.y + sprite_h,
