@@ -81,7 +81,14 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                         stands/approaches at, on the reachable allowed side nearest its desk, filtered by
 │                         FurnitureDef.approach (ApproachSides) AND ReachSet),
 │                       reach.rs (ReachSet — coarse-cell BFS over the WalkableMask mirroring the tui A* grid
-│                         coarsening; reaches(p) ⇒ A* routable, so approach_point never targets a walled-off cell)
+│                         coarsening; reaches(p) ⇒ A* routable, so approach_point never targets a walled-off cell),
+│                       placement_sweep.rs (#[cfg(test)] — the GENERATIVE placement-invariant harness: a
+│                         sizes×seeds sweep asserting table-derived invariants [in-buffer, in-container,
+│                         no-ground-overlap, no-wall-overlap, pixel-BFS connectivity, the capacity law,
+│                         every-kind-placed] over EVERY placed piece. Its `pieces()` destructures SceneLayout
+│                         with NO `..` — a new furniture field fails compilation until wired in or exempted
+│                         with a WHY; geometry comes from the SAME mask::ground_rect the collision mask
+│                         stamps, never a second copy. Add a new furniture kind → register it there)
 ├── physics.rs          pure walk-pace physics (no terminal/router deps): WalkIntent, WalkProfile,
 │                       walk_profile (trapezoidal/triangular kinematics), walk_progress (t_x1000),
 │                       walk_arrived, speed_mult, pause_ms_for; constants: V_CRUISE_COMMUTE=0.36,
