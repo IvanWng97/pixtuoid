@@ -46,10 +46,50 @@ fn stamp_ground(
     ground_y: GroundAlign,
     pad: u16,
 ) {
+    let (tl, sz) = ground_rect(anchor, pos, fp, visual, ground_x, ground_y);
+    mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, pad);
+}
+
+/// The ONE ground-geometry formula: the blocked rect (top-left + size) of a
+/// piece's footprint, declared relative to its VISUAL box (see `stamp_ground`,
+/// which stamps exactly this rect). Shared by the mask AND the placement
+/// sweep's containment/overlap invariants — extracted so the sweep can't grow
+/// a second copy of the offset math (the drift class this repo hunts). The
+/// per-call-site `pad` is deliberately NOT part of the rect: pad is routing
+/// slack (2/1/0 depending on the obstacle), not the object.
+pub(super) fn ground_rect(
+    anchor: Anchor,
+    pos: Point,
+    fp: Size,
+    visual: Size,
+    ground_x: GroundAlign,
+    ground_y: GroundAlign,
+) -> (Point, Size) {
     let vis_tl = anchored_top_left(anchor, pos, visual.w, visual.h);
     let left = vis_tl.x + ground_x.offset(visual.w, fp.w);
     let top = vis_tl.y + ground_y.offset(visual.h, fp.h);
-    mask.mark_blocked(left, top, fp.w, fp.h, pad);
+    (Point { x: left, y: top }, fp)
+}
+
+/// The pantry counter's blocked-ground rect — the RUNTIME-sized twin of
+/// [`ground_rect`] (the counter's `FurnitureDef` row is `footprint: None` /
+/// `visual (0,0)`; its real size arrives per-layout as `pantry_counter_size`).
+/// A shallow `PANTRY_FOOTPRINT_DEPTH` strip anchored to the sprite base
+/// (`pos.y + h/2`) — the walk-behind shape. Shared by the mask stamp AND the
+/// placement sweep so the bespoke math can't fork.
+pub(super) fn pantry_ground_rect(pos: Point, counter: Size) -> (Point, Size) {
+    let depth = PANTRY_FOOTPRINT_DEPTH.min(counter.h);
+    let south = pos.y + counter.h / 2;
+    (
+        Point {
+            x: pos.x.saturating_sub(counter.w / 2),
+            y: south.saturating_sub(depth),
+        },
+        Size {
+            w: counter.w,
+            h: depth,
+        },
+    )
 }
 
 /// Walkable footprint (and render face height) of a horizontal (E-W) interior
@@ -282,15 +322,8 @@ pub(super) fn build_walkable_mask(
             // behind it is occluded by the counter's own y-sorted sprite,
             // couch-style. `stand_point` uses the FULL `visual` so the USER parks
             // clear of the whole counter, not inside the upper sprite.
-            let depth = PANTRY_FOOTPRINT_DEPTH.min(h);
-            let south = wp.pos.y + h / 2;
-            mask.mark_blocked(
-                wp.pos.x.saturating_sub(w / 2),
-                south.saturating_sub(depth),
-                w,
-                depth,
-                1,
-            );
+            let (tl, sz) = pantry_ground_rect(wp.pos, Size { w, h });
+            mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 1);
             continue;
         }
         // Anchoring is the table's declared ground alignment: booth/standing-
@@ -426,6 +459,38 @@ pub(super) fn build_walkable_mask(
 mod tests {
     use super::*;
     use crate::layout::z_sort_row;
+
+    #[test]
+    fn ground_rect_matches_what_stamp_ground_blocks() {
+        // `ground_rect` is the ONE ground-geometry formula, shared by the mask
+        // (via `stamp_ground`) and the placement-invariant sweep — a second
+        // copy of the offset math is the drift class this repo hunts. Pin the
+        // sharing structurally: for every anchor × align combination, the rect
+        // it returns must be EXACTLY the pad-0 cell set `stamp_ground` blocks.
+        for anchor in [Anchor::TopLeft, Anchor::Center] {
+            for gx in [GroundAlign::Start, GroundAlign::Center, GroundAlign::End] {
+                for gy in [GroundAlign::Start, GroundAlign::Center, GroundAlign::End] {
+                    let pos = Point { x: 20, y: 20 };
+                    let fp = Size { w: 5, h: 3 };
+                    let visual = Size { w: 8, h: 12 };
+                    let mut mask = WalkableMask::new_open(40, 40);
+                    stamp_ground(&mut mask, anchor, pos, fp, visual, gx, gy, 0);
+                    let (tl, sz) = ground_rect(anchor, pos, fp, visual, gx, gy);
+                    for y in 0..40u16 {
+                        for x in 0..40u16 {
+                            let in_rect =
+                                x >= tl.x && x < tl.x + sz.w && y >= tl.y && y < tl.y + sz.h;
+                            assert_eq!(
+                                !mask.is_walkable(x, y),
+                                in_rect,
+                                "({x},{y}) blocked-vs-rect mismatch for {anchor:?}/{gx:?}/{gy:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn overhang_footprint_south_anchored_leaves_the_overhang_walkable() {

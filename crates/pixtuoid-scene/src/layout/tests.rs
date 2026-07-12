@@ -1,45 +1,42 @@
 use super::*;
 
 #[test]
-fn every_home_desk_ground_fits_the_band() {
-    // The desk's blocked GROUND is DESK_GROUND_W wide (the full sprite, side
-    // cabinets included), NOT the DESK_W slot; and DESK_GROUND_H TALL below its
-    // NW corner (the walk-behind footprint is `ground_y: End`-anchored to the
-    // sprite base, so its south edge is the full visual height, NOT DESK_H). BOTH
-    // band-edge clamps must leave room for the honest ground or a boundary desk
-    // pokes past the band — #549's 2px X overflow (silent: DESK_W 10 < DESK_GROUND_W
-    // 14) AND the Y twin (silent: DESK_H 5 < DESK_GROUND_H 7, the walk-behind move
-    // staled it). This guards BOTH axes. Sweep sizes where a partial right column
-    // OR a bottom row lands near the edge.
-    let ground_w = crate::layout::decor::DESK_GROUND_W;
-    let ground_h = crate::layout::decor::DESK_GROUND_H;
-    for (w, h) in [
-        (96u16, 100u16),
-        (96, 60),
-        (96, 115),
-        (128, 100),
-        (150, 68),
-        (192, 158),
-        (240, 160),
-    ] {
-        for seed in 0..6 {
-            let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("fits");
-            let band_right = l.cubicle_band.x + l.cubicle_band.width;
-            let band_bottom = l.cubicle_band.y + l.cubicle_band.height;
-            for &d in &l.home_desks {
-                assert!(
-                    d.x + ground_w <= band_right,
-                    "{w}x{h} seed{seed}: desk {d:?} ground (x+{ground_w}={}) overflows band right {band_right}",
-                    d.x + ground_w
-                );
-                assert!(
-                    d.y + ground_h <= band_bottom,
-                    "{w}x{h} seed{seed}: desk {d:?} ground (y+{ground_h}={}) spills south past band bottom {band_bottom}",
-                    d.y + ground_h
-                );
-            }
+fn dual_meeting_layout_exposes_room_1_bounds() {
+    // `meeting_room_2` was computed-then-DISCARDED inside compute_with_seed, so
+    // `meeting_furniture[1]` (+ its room_id==1 waypoints) had NO container a
+    // test could assert against — the one placement whose containment was
+    // structurally untestable. Thread it onto SceneLayout and pin the
+    // room_id → Bounds join through the ONE accessor.
+    let mut saw_dual = false;
+    for seed in 0..10u64 {
+        let l = SceneLayout::compute_with_seed(192, 160, Some(8), seed).expect("fits");
+        // One direction only: a second room's FURNITURE implies its Bounds are
+        // exposed. The converse is false by design — a too-narrow dual floor
+        // keeps both room Bounds but drops the furniture (the bare-room
+        // degradation, scene CLAUDE.md sharp edge).
+        if l.meeting_furniture.len() == 2 {
+            assert!(
+                l.meeting_room_2.is_some(),
+                "seed {seed}: room-1 furniture exists but its Bounds were discarded"
+            );
+        }
+        assert_eq!(l.meeting_room_bounds(0), l.meeting_room);
+        assert_eq!(l.meeting_room_bounds(1), l.meeting_room_2);
+        assert_eq!(l.meeting_room_bounds(2), None, "no third room exists");
+        let Some(r2) = l.meeting_room_2 else { continue };
+        saw_dual = true;
+        let mf = &l.meeting_furniture[1];
+        for p in mf.sofas.iter().chain([&mf.table]) {
+            assert!(
+                p.x >= r2.x && p.x < r2.x + r2.width && p.y >= r2.y && p.y < r2.y + r2.height,
+                "seed {seed}: room-1 furniture {p:?} must sit inside its own room {r2:?}"
+            );
         }
     }
+    assert!(
+        saw_dual,
+        "192x160 x seeds 0..10 must reach a dual-meeting Dense floor"
+    );
 }
 
 #[test]
@@ -226,81 +223,9 @@ fn none_fills_desks_past_the_old_cap_on_a_large_buffer() {
 }
 
 #[test]
-fn some_caps_desk_emission_to_the_requested_count() {
-    // `Some(n)` caps the desk COUNT — the deterministic knob for tests/snapshots
-    // — even though the same buffer physically holds far more.
-    let l = SceneLayout::compute_with_seed(800, 500, Some(6), 0).expect("large buffer lays out");
-    assert_eq!(l.home_desks.len(), 6, "Some(6) must emit exactly 6 desks");
-}
-
-// Ground-footprint rectangle `(x, y, w, h)` (no clearance pad — the pad is
-// routing slack, not the object's solid area). Mirror the stamps in `mask.rs`.
-type Rect = (u16, u16, u16, u16);
-fn rects_overlap(a: Rect, b: Rect) -> bool {
-    a.0 < b.0 + b.2 && b.0 < a.0 + a.2 && a.1 < b.1 + b.3 && b.1 < a.1 + a.3
-}
-fn wall_rect(s: Point, e: Point) -> Rect {
-    if s.x == e.x {
-        (s.x, s.y.min(e.y), WALL_THICK_V, s.y.abs_diff(e.y) + 1)
-    } else {
-        (s.x.min(e.x), s.y, s.x.abs_diff(e.x) + 1, WALL_THICK_H)
-    }
-}
-
-#[test]
-fn freestanding_decor_does_not_overlap_room_walls() {
-    // Placement-overlap guard for FREE-STANDING decor only — items meant to
-    // sit in open floor (pantry bistro table, lounge side table). Burying
-    // one inside a wall (the reported pantry-table bug) is a placement
-    // error. NOT checked: wall-ADJACENT furniture (meeting sofa/table sit
-    // against the glass partitions by design) — that overlap is intended +
-    // physically correct, and the occlusion / z-sort system draws it right.
-    // Includes the minimum-width sizes (34 = MIN_W, 48) where the lounge
-    // side table sits closest to the vertical room wall.
-    for &(w, h) in &[
-        (96u16, 72u16),
-        (120, 80),
-        (160, 120),
-        (192, 160),
-        (34, 60),
-        (48, 60),
-    ] {
-        for seed in 0..6u64 {
-            let Some(l) = SceneLayout::compute_with_seed(w, h, Some(8), seed) else {
-                continue;
-            };
-            let mut items: Vec<(&str, Rect)> = Vec::new();
-            if let Some(t) = l.pantry_table {
-                let Size { w, h } = furniture_def(Furniture::PantryTable).footprint.unwrap();
-                items.push((
-                    "pantry_table",
-                    (t.x.saturating_sub(w / 2), t.y.saturating_sub(h / 2), w, h),
-                ));
-            }
-            if let Some(t) = l.lounge_side_table {
-                let Size { w, h } = furniture_def(Furniture::LoungeSideTable).footprint.unwrap();
-                items.push((
-                    "lounge_side_table",
-                    (t.x.saturating_sub(w / 2), t.y.saturating_sub(h / 2), w, h),
-                ));
-            }
-            for (item, rect) in &items {
-                for &WallSegment { start: s, end: e } in &l.room_walls {
-                    let wr = wall_rect(s, e);
-                    assert!(
-                        !rects_overlap(*rect, wr),
-                        "{w}x{h} seed {seed}: {item} {rect:?} overlaps wall {wr:?}"
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[test]
 fn compute_returns_none_at_exact_boundary() {
-    let min_w = DESK_W + DESK_GAP_X * 2; // 34
-    let min_h: u16 = 40 + MIN_TOP_MARGIN; // 60
+    let min_w = crate::layout::compute::MIN_LAYOUT_W;
+    let min_h = crate::layout::compute::MIN_LAYOUT_H;
     assert!(
         SceneLayout::compute(min_w - 1, min_h, Some(1)).is_none(),
         "one pixel below MIN_W should return None"
@@ -324,18 +249,6 @@ fn compute_zones_are_ordered_top_to_bottom_and_nonoverlapping() {
     // Walkway runs to the baseboard now that lounge_band is gone.
     let w_bot = l.cubicle_aisle.y + l.cubicle_aisle.height;
     assert!(w_bot <= l.buf_h);
-}
-
-#[test]
-fn compute_places_one_home_desk_per_agent() {
-    let l = SceneLayout::compute(160, 80, Some(5)).expect("fits");
-    assert!(l.home_desks.len() <= 5 && !l.home_desks.is_empty());
-    for d in &l.home_desks {
-        assert!(d.y >= l.cubicle_band.y);
-        assert!(d.y + DESK_H <= l.cubicle_band.y + l.cubicle_band.height);
-        assert!(d.x >= l.cubicle_band.x);
-        assert!(d.x + DESK_W <= l.cubicle_band.x + l.cubicle_band.width);
-    }
 }
 
 #[test]
@@ -372,91 +285,6 @@ fn narrow_width_desks_stay_inside_the_band_with_anchors_on_buffer() {
                     l.buf_w,
                     l.buf_h
                 );
-            }
-        }
-    }
-}
-
-#[test]
-fn narrow_width_pod_decor_stays_inside_the_band_and_off_band_slots_are_skipped() {
-    // 34-41px-wide buffers force one pod column (`pod_cols` floors at 1), and
-    // without the push_slot clamp the forced pod's horizontal-aisle decor slot
-    // (center = pod_origin_x + pod_w/2 ≈ band.x + 29) landed past the band's
-    // right edge — even fully off-buffer (x=41 at buf_w=40). Worse than the
-    // clipped sprite: PhoneBooth/StandingDesk slots are promoted to wander
-    // waypoints unconditionally, so idle agents walked to and "used" invisible
-    // furniture at the buffer edge. Mirror of push_desk's x clamp: off-band
-    // slots are skipped and the floor degrades to fewer decor pieces.
-    for &w in &[34u16, 36, 38, 40, 41] {
-        for &h in &[100u16, 120, 160] {
-            for seed in 0..10u64 {
-                let Some(l) = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed)
-                else {
-                    continue;
-                };
-                let band_right = l.cubicle_band.x + l.cubicle_band.width;
-                for item in &l.pod_decor {
-                    let vis = furniture_def(item.kind.furniture()).visual;
-                    let east = item.pos.x.saturating_sub(vis.w / 2) + vis.w;
-                    assert!(
-                        east <= band_right,
-                        "{w}x{h} seed {seed}: {:?} decor at x={} (east edge {east}) \
-                         overflows the band's right edge {band_right}",
-                        item.kind,
-                        item.pos.x
-                    );
-                }
-                for wp in &l.waypoints {
-                    if matches!(
-                        wp.kind,
-                        WaypointKind::PhoneBooth | WaypointKind::StandingDesk
-                    ) {
-                        assert!(
-                            wp.pos.x < band_right,
-                            "{w}x{h} seed {seed}: {:?} waypoint at x={} promoted past \
-                             the band edge {band_right} — agents would wander to \
-                             invisible furniture",
-                            wp.kind,
-                            wp.pos.x
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn pod_decor_south_edge_stays_inside_the_band_and_spilling_slots_are_skipped() {
-    // The vertical twin of the east clamp above: the LAST POD ROW's
-    // vertical-aisle slot center (pod_origin_y + pod_h/2) can sit close
-    // enough to the cubicle band's bottom edge that a tall CENTERED visual
-    // crosses into the cubicle_aisle — at 200x116 seed 2 a PhoneBooth's 12px
-    // visual lands 3px past the band bottom, and its south-anchored 3-row
-    // footprint blocks a cubicle_aisle patch. Same anchoring math as the painter's
-    // centered blit (pos - h/2 .. pos - h/2 + h); spilling slots are skipped
-    // (kind cycle still advances) and the floor degrades to fewer decor
-    // pieces, mirroring the east clamp. The 34-41 widths pin the corner
-    // where BOTH clamps fire on the same forced pod.
-    for &w in &[34u16, 38, 41, 120, 160, 200] {
-        for &h in &[90u16, 100, 116, 120, 160] {
-            for seed in 0..10u64 {
-                let Some(l) = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed)
-                else {
-                    continue;
-                };
-                let band_bottom = l.cubicle_band.y + l.cubicle_band.height;
-                for item in &l.pod_decor {
-                    let vis = furniture_def(item.kind.furniture()).visual;
-                    let south = item.pos.y.saturating_sub(vis.h / 2) + vis.h;
-                    assert!(
-                        south <= band_bottom,
-                        "{w}x{h} seed {seed}: {:?} decor at y={} (south edge {south}) \
-                         crosses the band's bottom edge {band_bottom} into the cubicle_aisle",
-                        item.kind,
-                        item.pos.y
-                    );
-                }
             }
         }
     }
@@ -502,50 +330,6 @@ fn compute_places_all_waypoint_kinds() {
             }
         }
     }
-}
-
-#[test]
-fn every_waypoint_kind_is_placed_in_some_layout() {
-    // Placement conformance: a `WaypointKind` defined in `decor.rs` but never
-    // pushed by `compute_waypoints` compiles green and passes every existing
-    // test while being SILENTLY INVISIBLE in the office (the most forgettable
-    // failure mode when adding furniture — there is no compile guard that a
-    // declared kind actually gets a placement site). This sweep is that guard.
-    //
-    // The sizes MUST span small→large: `VendingMachine`/`Printer` are
-    // corridor-height-gated (`cubicle_aisle.height >= …` in `compute_waypoints`), so
-    // they only appear at large terminals; a single 192×80 seed would falsely
-    // "fail" for them.
-    use std::collections::HashSet;
-    let mut seen: HashSet<WaypointKind> = HashSet::new();
-    for seed in 0..40u64 {
-        for (w, h) in [
-            (160u16, 100u16),
-            (192, 80),
-            (240, 120),
-            (300, 140),
-            (400, 200),
-            (500, 250),
-        ] {
-            if let Some(l) = SceneLayout::compute_with_seed(w, h, Some(24), seed) {
-                seen.extend(l.waypoints.iter().map(|wp| wp.kind));
-            }
-        }
-    }
-    // Kinds deliberately NOT a wander destination (none today). A new
-    // WaypointKind that is intentionally never placed goes here WITH a reason.
-    const ALLOWLIST: &[WaypointKind] = &[];
-    let missing: Vec<_> = WaypointKind::ALL
-        .iter()
-        .copied()
-        .filter(|k| !seen.contains(k) && !ALLOWLIST.contains(k))
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "WaypointKind(s) declared in ::ALL but never pushed by compute_waypoints \
-         in any swept layout: {missing:?}. Add a placement site in \
-         compute_waypoints, or add to ALLOWLIST with a reason."
-    );
 }
 
 #[test]
@@ -825,153 +609,4 @@ fn whiteboard_blocks_only_its_wheel_base_not_the_elevated_panel() {
         !l.is_walkable(pos.x + 5, pos.y + 9),
         "the whiteboard wheel base must block the floor"
     );
-}
-
-#[test]
-fn compute_places_plants_in_lounge_and_walkway() {
-    let l = SceneLayout::compute(120, 96, Some(1)).expect("fits");
-    assert!(!l.plants.is_empty());
-    for p in &l.plants {
-        assert!(p.pos.x < l.buf_w);
-        assert!(p.pos.y < l.buf_h);
-    }
-}
-
-#[test]
-fn compute_truncates_home_desks_when_more_agents_than_fit() {
-    let l = SceneLayout::compute(50, 80, Some(20)).expect("fits");
-    assert!(l.home_desks.len() < 20);
-}
-
-/// Pixel-level BFS from `door_threshold` must reach every walkable
-/// pixel across a range of buffer sizes. If this regresses, any
-/// agent stranded in an unreachable pocket will see A* return its
-/// straight-line fallback and visibly teleport across walls ("闪现").
-///
-/// The probed sizes span small (typical 80-col terminal) through
-/// large (4K-cell terminal). Each pair is also probed with a high
-/// agent count to exercise the overflow seat placement.
-#[test]
-fn walkable_mask_is_fully_connected_across_buffer_sizes() {
-    use std::collections::VecDeque;
-
-    // Range covers the realistic terminal sizes — a small 80×35-cell
-    // terminal up to a 4K-cell rig. Below 96×70 the meeting room
-    // sofas + table + walls degenerate (sofa padding covers the
-    // entire interior) which would be a layout-design problem
-    // rather than a pathfinding regression.
-    let sizes = [
-        (96u16, 70u16, 7usize),
-        (128, 80, 10),
-        (160, 100, 12),
-        (240, 130, 16),
-        (320, 180, 16),
-    ];
-    for (buf_w, buf_h, num_agents) in sizes {
-        let l = SceneLayout::compute(buf_w, buf_h, Some(num_agents))
-            .unwrap_or_else(|| panic!("layout fits at {buf_w}x{buf_h}"));
-        let w = l.buf_w as usize;
-        let h = l.buf_h as usize;
-        let start = l
-            .door_threshold
-            .unwrap_or_else(|| panic!("door_threshold missing at {buf_w}x{buf_h}"));
-        assert!(
-            l.is_walkable(start.x, start.y),
-            "door_threshold {start:?} not walkable at {buf_w}x{buf_h}"
-        );
-
-        // BFS from the threshold.
-        let mut visited = vec![false; w * h];
-        visited[(start.y as usize) * w + (start.x as usize)] = true;
-        let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
-        queue.push_back((start.x as usize, start.y as usize));
-        let mut reachable = 1usize;
-        while let Some((x, y)) = queue.pop_front() {
-            for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
-                let nx = x as i32 + dx;
-                let ny = y as i32 + dy;
-                if nx < 0 || ny < 0 {
-                    continue;
-                }
-                let (nx, ny) = (nx as usize, ny as usize);
-                if nx >= w || ny >= h || visited[ny * w + nx] {
-                    continue;
-                }
-                if !l.is_walkable(nx as u16, ny as u16) {
-                    continue;
-                }
-                visited[ny * w + nx] = true;
-                reachable += 1;
-                queue.push_back((nx, ny));
-            }
-        }
-
-        // Total walkable pixels.
-        let mut walkable_total = 0usize;
-        for y in 0..h {
-            for x in 0..w {
-                if l.is_walkable(x as u16, y as u16) {
-                    walkable_total += 1;
-                }
-            }
-        }
-        assert_eq!(
-            reachable,
-            walkable_total,
-            "{buf_w}x{buf_h} ({num_agents} agents): {} disconnected pixels — \
-             some open area is isolated from the door",
-            walkable_total - reachable
-        );
-    }
-}
-
-#[test]
-fn walkable_mask_connected_across_floor_seeds() {
-    use std::collections::VecDeque;
-
-    // Sweep the two SMALLEST sizes across all floor seeds too: the dense
-    // floor variant (seed 2) stacks two meeting rooms and is the riskiest
-    // for connectivity at narrow widths — the size-only test runs seed 0.
-    for (buf_w, buf_h, num_agents) in [(160u16, 100u16, 12usize), (96, 70, 7), (128, 80, 10)] {
-        for seed in 0..5u64 {
-            let l = SceneLayout::compute_with_seed(buf_w, buf_h, Some(num_agents), seed)
-                .expect("layout fits");
-            let w = l.buf_w as usize;
-            let h = l.buf_h as usize;
-            let start = l.door_threshold.expect("door_threshold");
-            assert!(l.is_walkable(start.x, start.y));
-
-            let mut visited = vec![false; w * h];
-            visited[(start.y as usize) * w + (start.x as usize)] = true;
-            let mut queue = VecDeque::new();
-            queue.push_back((start.x, start.y));
-            let mut reachable = 1usize;
-            while let Some((cx, cy)) = queue.pop_front() {
-                for (dx, dy) in [(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
-                    let nx = cx as i32 + dx;
-                    let ny = cy as i32 + dy;
-                    if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
-                        continue;
-                    }
-                    let (nx, ny) = (nx as u16, ny as u16);
-                    let idx = (ny as usize) * w + (nx as usize);
-                    if !visited[idx] && l.is_walkable(nx, ny) {
-                        visited[idx] = true;
-                        reachable += 1;
-                        queue.push_back((nx, ny));
-                    }
-                }
-            }
-            let walkable_total = (0..h)
-                .flat_map(|y| (0..w).map(move |x| (x, y)))
-                .filter(|&(x, y)| l.is_walkable(x as u16, y as u16))
-                .count();
-            assert_eq!(
-                reachable,
-                walkable_total,
-                "seed={seed}: {buf_w}x{buf_h}: {} disconnected pixels",
-                walkable_total - reachable
-            );
-        }
-    }
 }

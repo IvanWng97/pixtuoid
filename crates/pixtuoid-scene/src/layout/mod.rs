@@ -157,6 +157,12 @@ pub struct SceneLayout {
     pub door: Option<Point>,
     pub door_threshold: Option<Point>,
     pub meeting_room: Option<Bounds>,
+    /// The dense layout's SECOND meeting room (room id 1, below room 0).
+    /// Was computed-then-discarded inside `compute_with_seed`, which left
+    /// `meeting_furniture[1]`'s placement structurally untestable — no Bounds
+    /// to assert containment against. Present iff the floor is dual-meeting
+    /// Dense. Join through [`Self::meeting_room_bounds`], not by hand.
+    pub meeting_room_2: Option<Bounds>,
     pub pantry_room: Option<Bounds>,
     /// Meeting rooms in floor order (room 0 = `meeting_room`, room 1 =
     /// `meeting_room_2` for the dense layout). Each carries its 2 sofas + table
@@ -343,7 +349,21 @@ impl SceneLayout {
     pub fn wall_band_h(&self) -> u16 {
         self.top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
     }
+
+    /// The Bounds of meeting room `room_id` — THE single join point between the
+    /// waypoint/`meeting_furniture` room-id index space and the two room fields
+    /// (0 → `meeting_room`, 1 → `meeting_room_2`). Consumers resolve a room id
+    /// through here rather than re-encoding the id→field mapping.
+    pub fn meeting_room_bounds(&self, room_id: usize) -> Option<Bounds> {
+        match room_id {
+            0 => self.meeting_room,
+            1 => self.meeting_room_2,
+            _ => None,
+        }
+    }
 }
 
+#[cfg(test)]
+mod placement_sweep;
 #[cfg(test)]
 mod tests;

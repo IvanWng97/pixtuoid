@@ -51,15 +51,20 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16) -> Point {
     }
 }
 
+/// The smallest buffer `compute_with_seed` lays out — below either bound it
+/// returns `None` ("terminal too small"). Module-scoped (not fn-local) so the
+/// placement sweep's None-arm asserts against THE SAME authority: a `None` at
+/// a size at-or-above these bounds is a regression, not a legitimate refusal.
+pub(super) const MIN_LAYOUT_W: u16 = DESK_W + DESK_GAP_X * 2;
+pub(super) const MIN_LAYOUT_H: u16 = 40 + MIN_TOP_MARGIN;
+
 pub(super) fn compute_with_seed(
     buf_w: u16,
     buf_h: u16,
     max_desks: Option<usize>,
     floor_seed: u64,
 ) -> Option<SceneLayout> {
-    const MIN_W: u16 = DESK_W + DESK_GAP_X * 2;
-    let min_h: u16 = 40 + MIN_TOP_MARGIN;
-    if buf_w < MIN_W || buf_h < min_h {
+    if buf_w < MIN_LAYOUT_W || buf_h < MIN_LAYOUT_H {
         return None;
     }
 
@@ -204,8 +209,21 @@ pub(super) fn compute_with_seed(
     // is validated by the routability sweep
     // `meeting_and_pantry_waypoints_are_routable_on_the_coarse_grid`.
     const MEETING_FURNITURE_MIN_W: u16 = 30;
-    let room_fits_furniture =
-        |mr: &Bounds| mr.width >= MEETING_FURNITURE_MIN_W && mr.height >= sofa_h * 2;
+    // Height must price the TABLE between the sofas, not just the two sofa
+    // bodies: with both sofa clamps bound (short room) the mirror positions
+    // leave `height − 2·sofa_h` between the sofa centres, and the centred
+    // table needs its own footprint depth plus the sofa's not to overlap
+    // either body (placement-sweep catch: at 96×60 the table ground clipped
+    // BOTH sofas by a row). Derived from the same table rows the mask stamps.
+    let sofa_fp_h = furniture_def(Furniture::MeetingSofaBody)
+        .footprint
+        .map_or(0, |s| s.h);
+    let table_fp_h = furniture_def(Furniture::MeetingTable)
+        .footprint
+        .map_or(0, |s| s.h);
+    let room_fits_furniture = |mr: &Bounds| {
+        mr.width >= MEETING_FURNITURE_MIN_W && mr.height >= sofa_h * 2 + sofa_fp_h + table_fp_h
+    };
     // One source for a meeting room's furniture trio: two facing sofas and the
     // table CENTERED BETWEEN THEM. The table used to sit at the room centre while
     // the sofas sat at 30%/80% of the room height — asymmetric, so the north
@@ -260,6 +278,15 @@ pub(super) fn compute_with_seed(
         x: couch_x,
         y: couch_y,
     } = couch_pos(&cubicle_band, top_margin);
+    // The whole lounge vignette (couch + floor lamp + side table) is one
+    // authored cluster ~23 px wide; on a band narrower than this floor the
+    // padded couch blocked the door threshold itself (placement-sweep catch).
+    // Below the gate the lounge degrades away entirely — the
+    // `couch_sprite_center: None` case the field always documented.
+    // 30 = the vignette's blocked span (side-table west edge couch_x−13 →
+    // lamp east edge couch_x+10) + OBSTACLE_PAD_PX each side + walk clearance.
+    const LOUNGE_MIN_BAND_W: u16 = 30;
+    let lounge_fits = cubicle_band.width >= LOUNGE_MIN_BAND_W;
 
     let (waypoints, couch_sprite_center) = compute_waypoints(
         &cubicle_band,
@@ -269,6 +296,7 @@ pub(super) fn compute_with_seed(
         &pod_decor,
         &cubicle_aisle,
         &meeting_furniture,
+        lounge_fits,
     );
 
     // Plants scatter through the cubicle corridor edges + pantry.
@@ -331,8 +359,9 @@ pub(super) fn compute_with_seed(
     .collect();
 
     // Floor lamp now sits right next to the viewing couch so its halo
-    // bathes the seating area at night.
-    let floor_lamp = Some(Point {
+    // bathes the seating area at night. Rides the lounge gate: no couch,
+    // no lamp (the vignette lives and dies together).
+    let floor_lamp = lounge_fits.then_some(Point {
         x: couch_x + 9,
         y: couch_y + 2,
     });
@@ -344,7 +373,7 @@ pub(super) fn compute_with_seed(
     let side_half_w = furniture_def(Furniture::LoungeSideTable)
         .footprint
         .map_or(0, |s| s.w / 2);
-    let lounge_side_table = Some(Point {
+    let lounge_side_table = lounge_fits.then_some(Point {
         x: couch_x.saturating_sub(10).max(right_x + side_half_w + 1),
         y: couch_y + 2,
     });
@@ -392,36 +421,93 @@ pub(super) fn compute_with_seed(
     //   exit_sign:      ~6 px (already used top_margin - 13 — kept)
     // We position the TOP-LEFT corner of each sprite so its bottom
     // row lands exactly at `top_margin - 1` (last wall band row).
-    let mut wall_decor = vec![
-        WallDecorItem {
+    // The meeting screen is room-anchored (centered over room 0), the
+    // bookshelf buffer-anchored (18% of width) — two independent x formulas
+    // that COLLIDED on every Senior floor and every Standard floor narrower
+    // than ~175 px (the placement sweep's first catch: the bookshelf sat 80%
+    // swallowed behind the screen). Compute the screen first; the bookshelf
+    // clamps east of it, and drops entirely when the clamped slot would run
+    // into the exit sign / elevator (degenerate widths — same degradation
+    // pattern as the bare meeting room).
+    let meeting_screen_x = meeting_room.map(|mr| mr.x + (mr.width / 2).saturating_sub(7));
+    let bookshelf_w = furniture_def(WallDecor::Bookshelf.furniture()).visual.w;
+    let screen_w = furniture_def(WallDecor::MeetingScreen.furniture()).visual.w;
+    let bookshelf_x = {
+        let x = pct(buf_w, 18);
+        match meeting_screen_x {
+            Some(sx) => x.max(sx + screen_w + 2),
+            None => x,
+        }
+    };
+    // Everything east of the exit sign / elevator face is off-limits.
+    let wall_east_limit = buf_w
+        .saturating_sub(9)
+        .min(door.map(|d| d.x).unwrap_or(u16::MAX));
+    let mut wall_decor = Vec::new();
+    if bookshelf_x + bookshelf_w < wall_east_limit {
+        wall_decor.push(WallDecorItem {
             kind: WallDecor::Bookshelf,
             pos: Point {
-                x: pct(buf_w, 18),
+                x: bookshelf_x,
                 y: top_margin.saturating_sub(12),
-            },
-        },
-        WallDecorItem {
-            kind: WallDecor::ExitSign,
-            pos: Point {
-                x: buf_w.saturating_sub(9),
-                y: top_margin.saturating_sub(13),
-            },
-        },
-    ];
-    if has_meeting || has_pantry {
-        wall_decor.push(WallDecorItem {
-            kind: WallDecor::Whiteboard,
-            pos: Point {
-                x: mid_x + 3,
-                y: top_margin + usable_h / 3,
             },
         });
     }
-    if let Some(mr) = meeting_room {
+    wall_decor.push(WallDecorItem {
+        kind: WallDecor::ExitSign,
+        pos: Point {
+            x: buf_w.saturating_sub(9),
+            y: top_margin.saturating_sub(13),
+        },
+    });
+    if has_meeting || has_pantry {
+        let pos = Point {
+            x: mid_x + 3,
+            y: top_margin + usable_h / 3,
+        };
+        // The free-standing whiteboard's y (usable_h / 3) is independent of
+        // the desk grid — at a handful of narrow-band heights it lands ON a
+        // desk row instead of an aisle (sweep catch #2). Its ground is a
+        // 10px wheel strip at the sprite base; skip the board when that
+        // strip would collide with any desk's ground.
+        let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
+        let collides_a_desk = wb_def.footprint.is_some_and(|fp| {
+            let (wb_tl, wb_sz) = mask::ground_rect(
+                Anchor::TopLeft,
+                pos,
+                fp,
+                wb_def.visual,
+                wb_def.ground_x,
+                wb_def.ground_y,
+            );
+            let desk = super::decor::desk_furniture_def();
+            home_desks.iter().any(|&d| {
+                let (dt, ds) = mask::ground_rect(
+                    Anchor::TopLeft,
+                    d,
+                    desk.footprint.expect("desk carries a static footprint"),
+                    desk.visual,
+                    desk.ground_x,
+                    desk.ground_y,
+                );
+                wb_tl.x < dt.x + ds.w
+                    && dt.x < wb_tl.x + wb_sz.w
+                    && wb_tl.y < dt.y + ds.h
+                    && dt.y < wb_tl.y + wb_sz.h
+            })
+        });
+        if !collides_a_desk {
+            wall_decor.push(WallDecorItem {
+                kind: WallDecor::Whiteboard,
+                pos,
+            });
+        }
+    }
+    if let (Some(_), Some(sx)) = (meeting_room, meeting_screen_x) {
         wall_decor.push(WallDecorItem {
             kind: WallDecor::MeetingScreen,
             pos: Point {
-                x: mr.x + (mr.width / 2).saturating_sub(7),
+                x: sx,
                 y: top_margin.saturating_sub(12),
             },
         });
@@ -459,29 +545,39 @@ pub(super) fn compute_with_seed(
         let max_y = (pr.y + pr.height)
             .saturating_sub(clr + half_h)
             .min(counter_north.saturating_sub(half_h));
-        let tx = (pr.x + pct(pr.width, 25)).clamp(min_x, max_x.max(min_x));
-        let ty = (pr.y + pct(pr.height, 25)).clamp(min_y, max_y.max(min_y));
-        (
-            Some(Point { x: tx, y: ty }),
-            vec![
-                Point {
-                    x: tx.saturating_sub(STOOL_DX),
-                    y: ty,
-                },
-                Point {
-                    x: tx + STOOL_DX,
-                    y: ty,
-                },
-                Point {
-                    x: tx,
-                    y: ty.saturating_sub(STOOL_DY),
-                },
-                Point {
-                    x: tx,
-                    y: ty + STOOL_DY,
-                },
-            ],
-        )
+        // An EMPTY clamp range means the room physically can't hold the
+        // cluster + clearances — refuse, don't force. The old
+        // `max.max(min)` degradation placed the cluster anyway and let it
+        // spill east out of the room into the band (placement-sweep catch:
+        // at ≤50px-wide buffers the bistro table sat OUTSIDE its 6-11px
+        // room, colliding with the corridor plant).
+        if max_x < min_x || max_y < min_y {
+            (None, vec![])
+        } else {
+            let tx = (pr.x + pct(pr.width, 25)).clamp(min_x, max_x);
+            let ty = (pr.y + pct(pr.height, 25)).clamp(min_y, max_y);
+            (
+                Some(Point { x: tx, y: ty }),
+                vec![
+                    Point {
+                        x: tx.saturating_sub(STOOL_DX),
+                        y: ty,
+                    },
+                    Point {
+                        x: tx + STOOL_DX,
+                        y: ty,
+                    },
+                    Point {
+                        x: tx,
+                        y: ty.saturating_sub(STOOL_DY),
+                    },
+                    Point {
+                        x: tx,
+                        y: ty + STOOL_DY,
+                    },
+                ],
+            )
+        }
     } else {
         (None, vec![])
     };
@@ -540,6 +636,7 @@ pub(super) fn compute_with_seed(
         door,
         door_threshold,
         meeting_room,
+        meeting_room_2,
         pantry_room,
         meeting_furniture,
         room_walls,
@@ -1019,6 +1116,7 @@ pub(super) fn compute_room_walls(
 
 /// Waypoints: couch, pantry, pod-decor-promoted (PhoneBooth/StandingDesk),
 /// corridor appliances (VendingMachine/Printer).
+#[allow(clippy::too_many_arguments)] // layout inputs — each arg a distinct zone/fact
 pub(super) fn compute_waypoints(
     cubicle_band: &Bounds,
     top_margin: u16,
@@ -1027,6 +1125,7 @@ pub(super) fn compute_waypoints(
     pod_decor: &[PodDecorItem],
     cubicle_aisle: &Bounds,
     meeting_furniture: &[MeetingFurniture],
+    lounge_fits: bool,
 ) -> (Vec<Waypoint>, Option<Point>) {
     let right_x = cubicle_band.x;
     let right_w = cubicle_band.width;
@@ -1039,42 +1138,59 @@ pub(super) fn compute_waypoints(
     // is keyed at the chitchat venue layer (all couch seats share one venue),
     // NOT via the meeting-only room_id field. The sprite paints once, centred
     // on couch_x (the middle seat); see `couch_sprite_center`.
-    let mut waypoints: Vec<Waypoint> = SEAT_DX
-        .into_iter()
-        .map(|dx| Waypoint {
-            pos: Point {
-                x: couch_x.saturating_add_signed(dx),
-                y: couch_y,
-            },
-            kind: WaypointKind::Couch,
-            // SEATED facing: the sitter looks NORTH at the window (→ back_couch
-            // sprite). The APPROACH side is decoupled (Furniture::Couch uses
-            // ApproachSides::ALL — the agent walks up from the south/lounge,
-            // whose front is the window WALL); see decor.rs Couch row.
-            facing: Facing::North,
-            room_id: None,
-        })
-        .collect();
+    // Gated on `lounge_fits` (the caller's band-width gate): on a degenerate
+    // narrow band the padded 20px couch swallowed the whole floor including
+    // the door threshold (placement-sweep catch) — the `couch_sprite_center:
+    // None` degradation this fn's signature always documented, now real.
+    let mut waypoints: Vec<Waypoint> = if lounge_fits {
+        SEAT_DX
+            .into_iter()
+            .map(|dx| Waypoint {
+                pos: Point {
+                    x: couch_x.saturating_add_signed(dx),
+                    y: couch_y,
+                },
+                kind: WaypointKind::Couch,
+                // SEATED facing: the sitter looks NORTH at the window (→ back_couch
+                // sprite). The APPROACH side is decoupled (Furniture::Couch uses
+                // ApproachSides::ALL — the agent walks up from the south/lounge,
+                // whose front is the window WALL); see decor.rs Couch row.
+                facing: Facing::North,
+                room_id: None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     if let Some(pr) = pantry_room {
         // Clamp x so the counter fits within pantry_room. Without this
         // the counter (32px or 20px wide) extends past the east wall
         // into the cubicle band at small buffer widths.
         let half_cw = pantry_counter_size.w / 2;
         let max_cx = pr.x + pr.width.saturating_sub(half_cw + 1);
-        // y is single-sourced with the bistro-table clamp; only x is size-shaped
-        // (large counter is room-centred, small one sits at 60% width).
-        let wy = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
-        let wx = if pantry_counter_size.w >= PANTRY_COUNTER_LARGE_W {
-            (pr.x + pr.width / 2).min(max_cx)
-        } else {
-            (pr.x + pct(pr.width, 60)).min(max_cx)
-        };
-        waypoints.push(Waypoint {
-            pos: Point { x: wx, y: wy },
-            kind: WaypointKind::Pantry,
-            facing: Facing::South,
-            room_id: None,
-        });
+        // The WEST twin of the east clamp: a room narrower than the counter
+        // has no valid center at all — the old un-clamped west side let the
+        // 20px counter spill out of a 6-9px room and off the buffer's west
+        // edge, silently hidden by saturating_sub (placement-sweep catch;
+        // the same one-axis-only clamp class as #549/#551's desk clamps).
+        // Refuse rather than force: no counter on a degenerate pantry.
+        let min_cx = pr.x + half_cw;
+        if min_cx <= max_cx {
+            // y is single-sourced with the bistro-table clamp; only x is size-shaped
+            // (large counter is room-centred, small one sits at 60% width).
+            let wy = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
+            let wx = if pantry_counter_size.w >= PANTRY_COUNTER_LARGE_W {
+                (pr.x + pr.width / 2).clamp(min_cx, max_cx)
+            } else {
+                (pr.x + pct(pr.width, 60)).clamp(min_cx, max_cx)
+            };
+            waypoints.push(Waypoint {
+                pos: Point { x: wx, y: wy },
+                kind: WaypointKind::Pantry,
+                facing: Facing::South,
+                room_id: None,
+            });
+        }
     }
     // Interactive pod-aisle decor -> also waypoints. PhoneBooth and
     // StandingDesk are workstation-like destinations agents can
@@ -1189,7 +1305,7 @@ pub(super) fn compute_waypoints(
 
     (
         waypoints,
-        Some(Point {
+        lounge_fits.then_some(Point {
             x: couch_x,
             y: couch_y,
         }),
