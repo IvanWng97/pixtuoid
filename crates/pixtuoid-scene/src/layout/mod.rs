@@ -214,8 +214,24 @@ pub const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
 /// `mask::build_walkable_mask`.
 pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 
-pub const DESK_W: u16 = 12;
-pub const DESK_H: u16 = 6;
+/// The desk BODY size in SLOT units — the grid-pitch pricing (pod stride,
+/// intra-pod gaps) counts `DESK_W`×`DESK_H`, and the sprite/visual is
+/// `DESK_W+4` wide × `DESK_H+2` tall. SLOT ≠ GROUND: the desk's blocked
+/// GROUND is the full `DESK_W+4`-px sprite width ([`decor::DESK_GROUND_W`],
+/// side cabinets included) — the +4 overhang rides the aisle, so every
+/// band-EDGE clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow
+/// drift). Laptop-density pass (2026-07-11): 12→10 / 6→5.
+pub const DESK_W: u16 = 10;
+pub const DESK_H: u16 = 5;
+/// The desk's ground-CONTACT depth (rows) — only the front edge / legs touch
+/// the floor; the surface + monitor OVERHANG north (`ground_y: End`), so a
+/// walker passes BEHIND the monitor and is occluded by the desk's own y-sort
+/// (invariant #6, the plant-canopy pattern applied to the desk — owner
+/// taste-picked "h2" from the shallow-footprint renders). Distinct from
+/// `DESK_H` (the body/pitch height): `DESK_H` prices the slot, `DESK_FOOT_H`
+/// is the real blocked ground depth. The 5-px body still z-sorts by the full
+/// `visual.h`, so the monitor paints over the walker behind it.
+pub const DESK_FOOT_H: u16 = 2;
 /// Default character sprite width (px). The bundled pack is 8×12; this is the
 /// ONE authority every out-of-pixel_painter consumer centers/hit-tests on
 /// (anchors' LABEL fallback, `layout::decor::DESK_WALK_X_OFF`, the tui hit-test
@@ -265,15 +281,42 @@ pub const POD_SIDE: u16 = 2;
 /// pod-mates.
 pub const INTRA_POD_GAP_X: u16 = 12;
 pub const INTRA_POD_GAP_Y: u16 = 12;
-/// Gap between adjacent pods — wider than the intra-pod gap so the pod
-/// boundary stays visually distinct, while still hosting the rolling
-/// whiteboard's 10-px GROUND footprint (the 14-px board panel overhangs it,
-/// invariant #6) in the aisle. Tightened 28 → 22 to pack the 4-desk pods
-/// denser (the office read too sparse — big empty aisles between clusters);
-/// 22 px still clears the 10-px board + its 1-px pad. The walkable-connectivity
-/// + decor-overlap + approach tests guard that the tighter aisle stays routable.
-pub const INTER_POD_AISLE_X: u16 = 22;
-pub const INTER_POD_AISLE_Y: u16 = 22;
+/// Horizontal (E-W) gap between adjacent pod COLUMNS — wider than the
+/// intra-pod gap so the pod boundary stays visually distinct, while hosting
+/// the rolling whiteboard's 10-px GROUND footprint (the 14-px board panel
+/// overhangs it, invariant #6) in the aisle. Deliberately > the N-S gap:
+/// screens are landscape, so spread wider horizontally (where there's room)
+/// and pack tighter vertically. 20 clears the 10-px board + pads. The
+/// walkable-connectivity + decor-overlap + approach tests guard routability.
+pub const INTER_POD_AISLE_X: u16 = 20;
+/// Narrow-band relief for the X aisle: at the full 20 a 96-px-wide portrait
+/// buffer (the site hero on phones) loses a desk column, and the 8-member
+/// scripted hero cast can no longer leave a spare desk for a visitor hire —
+/// pinned by pixtuoid-web's
+/// `capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted`.
+/// Same width-gated two-tier pattern as the pantry counter (32/20).
+pub const INTER_POD_AISLE_X_NARROW: u16 = 16;
+/// Cubicle-band width below which [`inter_pod_aisle_x`] uses the narrow
+/// aisle: a 96-wide buffer's band is ~69 px (relief fires, 9 desks survive);
+/// a 128-wide buffer's is ~92 px (full 18 aisle).
+pub const NARROW_BAND_AISLE_W: u16 = 80;
+/// The inter-pod X aisle for a cubicle band `band_w` px wide.
+pub fn inter_pod_aisle_x(band_w: u16) -> u16 {
+    if band_w < NARROW_BAND_AISLE_W {
+        INTER_POD_AISLE_X_NARROW
+    } else {
+        INTER_POD_AISLE_X
+    }
+}
+/// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W
+/// gap (landscape screens — see `INTER_POD_AISLE_X`). The floor USED to be
+/// EXACTLY 20 (18 AND 19 broke `every_home_desk_has_a_reachable_north_approach`:
+/// the seat's north approach cell collided with the full-body desk in the row
+/// above). The walk-behind change RELAXED it — the desk's shallow
+/// `DESK_FOOT_H` footprint (`ground_y: End`) freed the monitor/north zone the
+/// approach lands in, dropping the floor to 16 (18/16 pass, 14 breaks). 18
+/// keeps a 2-px margin above the floor.
+pub const INTER_POD_AISLE_Y: u16 = 18;
 
 impl SceneLayout {
     /// Returns `None` if the buffer is too small for even one cubicle and the

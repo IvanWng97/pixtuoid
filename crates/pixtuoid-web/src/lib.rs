@@ -891,11 +891,13 @@ mod tests {
     fn capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted() {
         use pixtuoid_scene::layout::Layout;
         // A portrait-phone hero buffer (the site renders BUF_H=180 at a
-        // narrow bufW) lays out 8 desks; the scripted cast alone holds 7 of
-        // them by ~2.5s (the morning rush walk-in). The reducer's capacity must derive from THAT layout,
+        // narrow bufW). The reducer's capacity must derive from THAT layout,
         // so an admitted agent always has a paintable desk anchor — an agent
         // whose desk index falls off the canvas layout renders NOWHERE
         // (character_anchor returns None) while staying alive in the scene.
+        // Free-desk count is DERIVED (capacity − cast), not a size literal —
+        // the density pass re-tunes desk-per-buffer out from under any
+        // hardcoded count.
         let (w, h) = (96u32, 180u32);
         let mut o = office();
         let mut t = 0u64;
@@ -903,14 +905,20 @@ mod tests {
             o.step(T0_MS + t as f64, w, h);
             t += 1_000;
         }
-        // Click-spam past the layout's one free desk: the first hire seats,
-        // the rest must be refused outright — a doomed hire would burn one of
+        // Click-spam one past the free desks: every free desk seats a hire,
+        // then exhaustion refuses outright — a doomed hire would burn one of
         // the MAX_LIVE slots for its whole stay with zero feedback.
-        let admitted: Vec<bool> = (0..3).map(|_| o.hire()).collect();
-        assert_eq!(
-            admitted,
-            vec![true, false, false],
-            "the one free desk seats the first click; desk exhaustion refuses the rest"
+        let free = o.scene.total_capacity() - o.scene.agents.len();
+        assert!(free >= 1, "the layout must leave a spare desk for a hire");
+        let clicks = free.min(VisitorHires::MAX_LIVE) + 1;
+        let admitted: Vec<bool> = (0..clicks).map(|_| o.hire()).collect();
+        assert!(
+            admitted[..clicks - 1].iter().all(|&ok| ok),
+            "every free desk (capped by MAX_LIVE) seats a click: {admitted:?}"
+        );
+        assert!(
+            !admitted[clicks - 1],
+            "the click past exhaustion is refused outright: {admitted:?}"
         );
         o.step(T0_MS + 32_000.0, w, h);
         let layout = Layout::compute_with_seed(w as u16, h as u16, None, o.seed)
@@ -931,7 +939,7 @@ mod tests {
         }
         assert_eq!(
             o.hires.ids.len(),
-            1,
+            free.min(VisitorHires::MAX_LIVE),
             "hires the office can't seat are refused, not admitted-invisible"
         );
     }

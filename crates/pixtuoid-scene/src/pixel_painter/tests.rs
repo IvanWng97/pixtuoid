@@ -928,14 +928,14 @@ fn desk_occupant_always_sorts_behind_its_desk() {
 #[test]
 fn desk_z_key_is_the_visual_south() {
     // The DeskCubicle z-sort baseline is `desk.y + visual.h` — a VISUAL
-    // property (it must track the sprite, not the blocked ground, so a
-    // footprint edit is z-neutral by construction). Equals the historical
-    // `desk.y + 8` (footprint 6 + front lip 2). Locks the value so a visual
-    // resize surfaces here, not as a layering bug.
+    // property (it must track the sprite, not the blocked ground, so the
+    // walk-behind footprint shrink is z-neutral by construction). Density
+    // desk: visual.h = DESK_H+2 = 7. Locks the value so a visual resize
+    // surfaces here, not as a layering bug.
     assert_eq!(
         crate::layout::desk_furniture_def().visual.h,
-        8,
-        "desk z-key offset (was +8)"
+        7,
+        "desk z-key offset (DESK_H+2)"
     );
 }
 

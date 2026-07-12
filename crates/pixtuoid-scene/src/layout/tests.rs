@@ -1,6 +1,62 @@
 use super::*;
 
 #[test]
+fn every_home_desk_ground_fits_the_band() {
+    // The desk's blocked GROUND is DESK_GROUND_W wide (the full sprite, side
+    // cabinets included), NOT the DESK_W slot. The band-edge clamp must leave
+    // room for the ground or a right-column desk pokes past the buffer edge —
+    // #549's 2px overflow, silent because DESK_W (10) < DESK_GROUND_W (14).
+    // This is the guard that would have caught it. Sweep the sizes where a
+    // partial right column lands near the edge.
+    let ground_w = crate::layout::decor::DESK_GROUND_W;
+    for (w, h) in [
+        (96u16, 100u16),
+        (128, 100),
+        (150, 68),
+        (192, 158),
+        (240, 160),
+    ] {
+        for seed in 0..6 {
+            let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("fits");
+            let band_right = l.cubicle_band.x + l.cubicle_band.width;
+            for &d in &l.home_desks {
+                assert!(
+                    d.x + ground_w <= band_right,
+                    "{w}x{h} seed{seed}: desk {d:?} ground (x+{ground_w}={}) overflows band right {band_right}",
+                    d.x + ground_w
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn desk_is_walk_behind_the_monitor() {
+    // ground_y: End south-anchors the shallow DESK_FOOT_H footprint, so the
+    // surface + monitor overhang NORTH and those cells stay walkable — a
+    // walker passes behind the monitor, occluded by the desk's own y-sort.
+    // The desk's north row (its NW corner) must be walkable; its south
+    // front-contact row must be blocked.
+    let l = SceneLayout::compute(200, 90, Some(64)).expect("fits");
+    let vis = crate::layout::desk_furniture_def().visual;
+    let foot_h = crate::layout::DESK_FOOT_H;
+    for &d in &l.home_desks {
+        let cx = d.x + vis.w / 2;
+        // North (monitor overhang) walkable — the walk-behind lane.
+        assert!(
+            l.walkable.is_walkable(cx, d.y),
+            "desk {d:?}: north row (monitor overhang) must be walkable (walk-behind)"
+        );
+        // South front-contact row blocked (the footprint's south base).
+        let south = d.y + vis.h.saturating_sub(1);
+        assert!(
+            !l.walkable.is_walkable(cx, south.saturating_sub(foot_h / 2)),
+            "desk {d:?}: front-contact ground must be blocked"
+        );
+    }
+}
+
+#[test]
 fn home_desk_typed_accessor_matches_raw_vec() {
     let l = SceneLayout::compute(160, 200, Some(4)).expect("layout fits");
     assert!(!l.home_desks.is_empty());
@@ -33,7 +89,7 @@ fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
     // desk appears at num_agents = cap-1 and second at cap, so cap-1 breaks the
     // 'partial_y loop mid-row). Driven through the public compute path (the
     // private PodGrid has no constructor — see the cov verdict).
-    for (w, h, cap) in [(90u16, 110u16, 4usize), (100, 200, 10), (120, 150, 8)] {
+    for (w, h, cap) in [(88u16, 108u16, 6usize), (88, 120, 8), (88, 175, 10)] {
         // Total capacity at this size is exactly `cap`.
         let full = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
         assert_eq!(

@@ -4,19 +4,19 @@ expression: l.home_desks
 ---
 [
     Point {
-        x: 79,
-        y: 64,
+        x: 78,
+        y: 62,
     },
     Point {
-        x: 103,
-        y: 64,
+        x: 100,
+        y: 62,
     },
     Point {
-        x: 79,
-        y: 82,
+        x: 78,
+        y: 79,
     },
     Point {
-        x: 103,
-        y: 82,
+        x: 100,
+        y: 79,
     },
 ]

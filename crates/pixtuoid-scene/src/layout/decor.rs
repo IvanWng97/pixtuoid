@@ -2,7 +2,7 @@
 //! piece of furniture and waypoint kind in the office. Kept separate from
 //! geometry so adding a new sprite kind doesn't churn the layout math.
 
-use super::{Point, Size, CHARACTER_SPRITE_W, DESK_H, DESK_W};
+use super::{Point, Size, CHARACTER_SPRITE_W, DESK_FOOT_H, DESK_H, DESK_W};
 
 /// Wander destinations the Idle state machine can pick. Each kind controls
 /// the pose + sprite an arriving agent takes. Plants/lamps are decor, not
@@ -185,13 +185,13 @@ pub struct FurnitureDef {
     /// `Start`/`End` instead of needing a new stamp path.
     pub ground_x: GroundAlign,
     /// Where `footprint` sits inside the VISUAL box vertically: `End` for the
-    /// overhang canopy/panel/column pieces (invariant #6, the walk-behind
-    /// shape — the tall sprite overhangs the shallow south strip and occludes
-    /// a walker parked behind it), `Center` for the meeting sofa body + floor
-    /// lamp, `Start` for the desk (footprint == the body; a SOLID obstacle,
-    /// NOT walk-behind — switching it to `End` is what would enable that).
-    /// Resolves to a pixel offset from `visual − footprint` at stamp time
-    /// (drift-free).
+    /// overhang canopy/panel/column pieces AND the desk (invariant #6, the
+    /// walk-behind shape — the tall sprite overhangs the shallow south strip
+    /// and occludes a walker/approaching agent parked behind it), `Center` for
+    /// the meeting sofa body + floor lamp. `Start` (top-anchored) is currently
+    /// unused — no piece contacts the floor at its sprite TOP — but stays as
+    /// the third align. Resolves to a pixel offset from `visual − footprint`
+    /// at stamp time (drift-free).
     pub ground_y: GroundAlign,
 }
 
@@ -601,9 +601,14 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // exit reach its seat via `approach_point(Furniture::Desk)` (the N/E/W
         // `desk_approach_cell`) + the unified `seated_foot_cell` settle.
         Furniture::Desk => FurnitureDef {
+            // Ground = the full 14-px sprite width (side cabinets touch the
+            // floor) × the shallow DESK_FOOT_H front-contact depth. `End`
+            // south-anchors it so the surface + monitor OVERHANG north; a
+            // walker passes behind the monitor, occluded by the desk's own
+            // y-sort (invariant #6 — the plant-canopy pattern, owner-picked).
             footprint: Some(Size {
                 w: DESK_W + 4,
-                h: DESK_H,
+                h: DESK_FOOT_H,
             }),
             visual: Size {
                 w: DESK_W + 4,
@@ -616,7 +621,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             },
             approach: DESK_APPROACH,
             ground_x: GroundAlign::Center,
-            ground_y: GroundAlign::Start,
+            ground_y: GroundAlign::End,
         },
     }
 }
@@ -682,6 +687,17 @@ pub(crate) const PANTRY_CHAIR_FOOTPRINT: Size =
         Some(s) => s,
         None => panic!("PantryChair must carry a static footprint"),
     };
+
+/// The desk's blocked-GROUND width — the full sprite width (side cabinets
+/// included), read from the ONE table row so the pod-grid's band-EDGE clamps
+/// (`compute.rs`) price the honest ground, not the `DESK_W` SLOT width. The
+/// two diverge by 4 px (the side-cabinet overhang that rides the aisle); the
+/// clamp using `DESK_W` let a desk's ground poke past the buffer edge by 2 px
+/// (#549 drift), so the edge sites read THIS.
+pub(crate) const DESK_GROUND_W: u16 = match desk_furniture_def().footprint {
+    Some(s) => s.w,
+    None => panic!("Desk must carry a static footprint"),
+};
 
 /// The **home desk** descriptor — sugar over the [`Furniture::Desk`] table row
 /// (kept because the desk is per-agent, not a `WaypointKind`, and ~10 call sites
@@ -981,15 +997,21 @@ mod tests {
             furniture_def(Furniture::Desk),
             "desk_furniture_def must be sugar over the Furniture::Desk row"
         );
-        // Footprint matches the solid 16px sprite (DESK_W+4), not the old +2
-        // under-block; footprint never exceeds the 16×8 visual.
+        // Footprint = full 14px sprite width (DESK_W+4) × the shallow
+        // DESK_FOOT_H front-contact depth (walk-behind: surface+monitor
+        // overhang north via ground_y: End); never exceeds the visual.
         assert_eq!(
             d.footprint,
             Some(Size {
                 w: DESK_W + 4,
-                h: DESK_H
+                h: DESK_FOOT_H,
             }),
             "desk footprint"
+        );
+        assert_eq!(
+            d.ground_y,
+            GroundAlign::End,
+            "desk walk-behind: south-anchored"
         );
         let Size { w: fw, h: fh } = d.footprint.unwrap();
         assert!(

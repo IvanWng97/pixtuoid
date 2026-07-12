@@ -161,20 +161,17 @@ pub(super) fn build_walkable_mask(
     }
 
     for desk in home_desks {
-        // Block ONLY the desk surface — not the 8-px-above seated-character
-        // zone. In a top-down 3/4 view a walker passing "behind" a desk row
-        // is fine: the seated character paints in Pass 1, the walker also
-        // paints in Pass 1 (occasional sprite overlap is acceptable), and
-        // the desk paints in Pass 2 on top of both. Routes become much
-        // shorter — walkers can cut diagonally between desk rows instead
-        // of weaving around each one.
-        // Desk footprint comes from the shared FurnitureDef (always Some for
-        // the desk); stamped TOP-LEFT at the desk Point (not centred like
-        // visited furniture) — the desk pos IS its NW corner. `ground_y:
-        // Start` top-anchors the footprint to the body; with the standard
-        // OBSTACLE_PAD the desk is a SOLID obstacle (unlike an `End` overhang
-        // piece there is no unblocked strip a walker could pass behind — a
-        // walker routes around the desk via the aisles).
+        // The desk is a WALK-BEHIND piece (like the plant canopy / TV): its
+        // footprint is a shallow `DESK_FOOT_H` south strip anchored to the
+        // sprite base by `ground_y: End`, so the monitor + surface overhang
+        // NORTH of the blocked ground. A walker (or an agent taking the north
+        // approach to sit) passes behind the monitor and is occluded by the
+        // desk's own Pass-2 y-sorted sprite — no full-body obstacle to weave
+        // around, and routes stay short. Footprint comes from the shared
+        // FurnitureDef (always Some for the desk); stamped TOP-LEFT at the
+        // desk Point (not centred like visited furniture) — the desk pos IS
+        // its NW corner, and `stamp_ground` offsets the shallow strip to the
+        // sprite base via `ground_y`. OBSTACLE_PAD still fences the strip.
         let desk_def = super::decor::desk_furniture_def();
         if let Some(fp) = desk_def.footprint {
             stamp_ground(
