@@ -165,7 +165,7 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
     // and A* now routes to an APPROACH POINT off an allowed N/E/W side (green) —
     // the SAME split as the seats. Mirror `desk_approach_cell`'s per-side scan
     // from the CHAIR (not the top-left corner) so every allowed+reachable side
-    // shows, including the east (the corner scan can't clear the 16px body).
+    // shows, including the east (the corner scan can't clear the 14px body).
     let desk_def = furniture_def(Furniture::Desk);
     for desk in &layout.home_desks {
         let chair = desk_walk_anchor(*desk);

@@ -717,7 +717,14 @@ pub(super) fn compute_pod_desks(
     // extend past cubicle_band into the cubicle_aisle (the pod_rows
     // formula counts strides between origins but not the final
     // pod's tail height).
-    let desk_y_max = cubicle_band.y + cubicle_band.height - DESK_H;
+    // Honest GROUND clamp on Y (the twin of desk_x_max below): the desk is
+    // walk-behind (ground_y: End), so its shallow footprint is anchored to the
+    // sprite BASE — the blocked ground reaches DESK_GROUND_H (the full visual
+    // height) below the desk Point, NOT DESK_H (the slot). Clamping on DESK_H
+    // let a bottom-row desk's ground spill up to 2 px south into cubicle_aisle
+    // (the walk-behind Start→End move staled the old clamp). Slot-vs-ground on Y.
+    let desk_y_max =
+        (cubicle_band.y + cubicle_band.height).saturating_sub(super::decor::DESK_GROUND_H);
     // Mirror clamp for x: `pod_cols` floors at 1, so on a 34-66px band the
     // forced pod's 2nd desk column lands past the band's right edge (even
     // entirely off-buffer) — an invisible desk whose walk anchor sits outside

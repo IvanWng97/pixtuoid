@@ -10,7 +10,8 @@
 # as a standing display. Screen uses `j` (dark) so the lime screen-glow
 # overlay reads as "workstation active" by contrast. The sprite is
 # DESK_W + 4 = 14 px wide -- exactly the BLOCKED ground width (the
-# FurnitureDef footprint is (DESK_W+4) x DESK_H, stamped TopLeft in
+# FurnitureDef footprint is (DESK_W+4) x DESK_FOOT_H, a shallow south strip
+# since the desk went walk-behind (ground_y: End), stamped TopLeft in
 # mask.rs); the divider column (desk.x + DESK_W + 3) lands exactly on the
 # sprite's last column, pinned by
 # `desk_sprite_width_tracks_the_footprint_overhang`; the divider stops at

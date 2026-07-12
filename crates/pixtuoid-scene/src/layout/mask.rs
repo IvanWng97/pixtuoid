@@ -21,10 +21,13 @@ use pixtuoid_core::walkable::WalkableMask;
 /// `visual − footprint` (drift-free). One formula covers every legacy shape
 /// byte-for-byte:
 /// - `ground_y = End`: south strip at the sprite base — plant canopy / booth
-///   column / board panel (invariant #6 — a walker parks DEEP behind the
-///   overhang and the sprite's own y-sort occludes them, no synthetic cap);
+///   column / board panel, AND the desk (its shallow `DESK_FOOT_H` front strip;
+///   the monitor + surface overhang NORTH — walk-behind, #551) (invariant #6 —
+///   a walker parks DEEP behind the overhang and the sprite's own y-sort
+///   occludes them, no synthetic cap);
 /// - `ground_y = Center`: sofa body, floor lamp;
-/// - `ground_y = Start`: the desk (its south lip is the seat zone);
+/// - `ground_y = Start`: currently UNUSED — the desk was here until it went
+///   walk-behind; kept as the third align;
 /// - `ground_x = Center` (every row today): the wall-decor whiteboard's 10px
 ///   wheel span sits at sprite cols 2-11, not 0-9.
 ///

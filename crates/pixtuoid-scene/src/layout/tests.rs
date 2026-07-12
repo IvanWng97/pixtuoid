@@ -3,14 +3,20 @@ use super::*;
 #[test]
 fn every_home_desk_ground_fits_the_band() {
     // The desk's blocked GROUND is DESK_GROUND_W wide (the full sprite, side
-    // cabinets included), NOT the DESK_W slot. The band-edge clamp must leave
-    // room for the ground or a right-column desk pokes past the buffer edge —
-    // #549's 2px overflow, silent because DESK_W (10) < DESK_GROUND_W (14).
-    // This is the guard that would have caught it. Sweep the sizes where a
-    // partial right column lands near the edge.
+    // cabinets included), NOT the DESK_W slot; and DESK_GROUND_H TALL below its
+    // NW corner (the walk-behind footprint is `ground_y: End`-anchored to the
+    // sprite base, so its south edge is the full visual height, NOT DESK_H). BOTH
+    // band-edge clamps must leave room for the honest ground or a boundary desk
+    // pokes past the band — #549's 2px X overflow (silent: DESK_W 10 < DESK_GROUND_W
+    // 14) AND the Y twin (silent: DESK_H 5 < DESK_GROUND_H 7, the walk-behind move
+    // staled it). This guards BOTH axes. Sweep sizes where a partial right column
+    // OR a bottom row lands near the edge.
     let ground_w = crate::layout::decor::DESK_GROUND_W;
+    let ground_h = crate::layout::decor::DESK_GROUND_H;
     for (w, h) in [
         (96u16, 100u16),
+        (96, 60),
+        (96, 115),
         (128, 100),
         (150, 68),
         (192, 158),
@@ -19,11 +25,17 @@ fn every_home_desk_ground_fits_the_band() {
         for seed in 0..6 {
             let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("fits");
             let band_right = l.cubicle_band.x + l.cubicle_band.width;
+            let band_bottom = l.cubicle_band.y + l.cubicle_band.height;
             for &d in &l.home_desks {
                 assert!(
                     d.x + ground_w <= band_right,
                     "{w}x{h} seed{seed}: desk {d:?} ground (x+{ground_w}={}) overflows band right {band_right}",
                     d.x + ground_w
+                );
+                assert!(
+                    d.y + ground_h <= band_bottom,
+                    "{w}x{h} seed{seed}: desk {d:?} ground (y+{ground_h}={}) spills south past band bottom {band_bottom}",
+                    d.y + ground_h
                 );
             }
         }
