@@ -4,7 +4,7 @@
 //! clearance band around each obstacle so walkers don't scrape along
 //! edges.
 
-use super::decor::ground_dy;
+use super::decor::GroundAlign;
 use super::{
     anchored_top_left, furniture_def, Anchor, Furniture, MeetingFurniture, PlantItem, PodDecorItem,
     Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
@@ -13,36 +13,40 @@ use super::{
 use pixtuoid_core::walkable::WalkableMask;
 
 /// Stamp a furniture footprint as a collision rect DECLARED relative to its
-/// VISUAL box — the general top-down model ([`ground_dy`], the table's
-/// per-row authority): the blocked rect starts `ground_dy` rows below the
-/// visual box top (placed by `anchor` via `anchored_top_left`, the SAME
-/// origin the renderer blits from, so blocked ground and painted sprite
-/// can't drift) and is CENTERED horizontally under the visual — the
-/// wall-decor whiteboard's 10px wheel span sits at sprite cols 2-11, not
-/// 0-9. One formula covers every legacy shape byte-for-byte:
-/// - south strip, `dy = visual.h − fp.h`: plant canopy / booth column /
-///   board panel (invariant #6 — a walker parks DEEP behind the overhang
-///   and the sprite's own y-sort occludes them, no synthetic cap);
-/// - centered, `dy = visual.h/2 − fp.h/2`: sofa body, floor lamp;
-/// - top-anchored, `dy = 0`: the desk (its south lip is the seat zone);
-/// - flat box, footprint == visual: dy 0.
+/// VISUAL box — the general top-down model. The visual box top-left comes
+/// from `anchor` via `anchored_top_left` (the SAME origin the renderer blits
+/// from, so blocked ground and painted sprite can't drift); the footprint is
+/// offset inside it by the row's [`GroundAlign`] per axis
+/// (`ground_x`/`ground_y`), each resolving to a pixel offset from
+/// `visual − footprint` (drift-free). One formula covers every legacy shape
+/// byte-for-byte:
+/// - `ground_y = End`: south strip at the sprite base — plant canopy / booth
+///   column / board panel (invariant #6 — a walker parks DEEP behind the
+///   overhang and the sprite's own y-sort occludes them, no synthetic cap);
+/// - `ground_y = Center`: sofa body, floor lamp;
+/// - `ground_y = Start`: the desk (its south lip is the seat zone);
+/// - `ground_x = Center` (every row today): the wall-decor whiteboard's 10px
+///   wheel span sits at sprite cols 2-11, not 0-9.
 ///
 /// This replaced the old `visual_h > footprint_h` per-site INFERENCE, whose
 /// three exceptions each bypassed the helper through a dedicated stamp site
-/// — in the declared model they are not exceptions, just different `dy`
-/// rows. The `pad` clearance band is added on every side.
+/// — in the declared model they are not exceptions, just different aligns.
+/// The `pad` clearance band is added on every side.
+#[allow(clippy::too_many_arguments)] // mask/visual geometry — each arg distinct
 fn stamp_ground(
     mask: &mut WalkableMask,
     anchor: Anchor,
     pos: Point,
     fp: Size,
     visual: Size,
-    ground_dy: u16,
+    ground_x: GroundAlign,
+    ground_y: GroundAlign,
     pad: u16,
 ) {
     let vis_tl = anchored_top_left(anchor, pos, visual.w, visual.h);
-    let left = vis_tl.x + visual.w.saturating_sub(fp.w) / 2;
-    mask.mark_blocked(left, vis_tl.y + ground_dy, fp.w, fp.h, pad);
+    let left = vis_tl.x + ground_x.offset(visual.w, fp.w);
+    let top = vis_tl.y + ground_y.offset(visual.h, fp.h);
+    mask.mark_blocked(left, top, fp.w, fp.h, pad);
 }
 
 /// Walkable footprint (and render face height) of a horizontal (E-W) interior
@@ -177,7 +181,8 @@ pub(super) fn build_walkable_mask(
                 *desk,
                 fp,
                 desk_def.visual,
-                ground_dy(Furniture::Desk),
+                desk_def.ground_x,
+                desk_def.ground_y,
                 OBSTACLE_PAD_PX,
             );
         }
@@ -190,15 +195,16 @@ pub(super) fn build_walkable_mask(
         let sofa_def = furniture_def(Furniture::MeetingSofaBody);
         if let Some(fp) = sofa_def.footprint {
             for sofa in room.sofas {
-                // Declared CENTERED inside the visual (see `ground_dy`'s
-                // sofa row) — the strip sits on the sofa pos, not its base.
+                // Declared CENTERED inside the visual (the sofa row's
+                // ground_y) — the strip sits on the sofa pos, not its base.
                 stamp_ground(
                     &mut mask,
                     Anchor::Center,
                     sofa,
                     fp,
                     sofa_def.visual,
-                    ground_dy(Furniture::MeetingSofaBody),
+                    sofa_def.ground_x,
+                    sofa_def.ground_y,
                     OBSTACLE_PAD_PX,
                 );
             }
@@ -211,7 +217,8 @@ pub(super) fn build_walkable_mask(
                 room.table,
                 fp,
                 table_def.visual,
-                ground_dy(Furniture::MeetingTable),
+                table_def.ground_x,
+                table_def.ground_y,
                 OBSTACLE_PAD_PX,
             );
         }
@@ -226,7 +233,8 @@ pub(super) fn build_walkable_mask(
                 t,
                 fp,
                 def.visual,
-                ground_dy(Furniture::PantryTable),
+                def.ground_x,
+                def.ground_y,
                 OBSTACLE_PAD_PX,
             );
         }
@@ -243,7 +251,8 @@ pub(super) fn build_walkable_mask(
                 *chair,
                 fp,
                 def.visual,
-                ground_dy(Furniture::PantryChair),
+                def.ground_x,
+                def.ground_y,
                 1,
             );
         }
@@ -282,16 +291,18 @@ pub(super) fn build_walkable_mask(
             );
             continue;
         }
-        // Anchoring is the table's declared `ground_dy`: booth/standing-desk
-        // strips pin to their sprite base; vending/printer/couch are flat.
-        let furniture = wp.kind.furniture();
+        // Anchoring is the table's declared ground alignment: booth/standing-
+        // desk strips pin to their sprite base (End); vending/printer/couch
+        // are flat.
+        let def = furniture_def(wp.kind.furniture());
         stamp_ground(
             &mut mask,
             Anchor::Center,
             wp.pos,
             Size { w, h },
-            furniture_def(furniture).visual,
-            ground_dy(furniture),
+            def.visual,
+            def.ground_x,
+            def.ground_y,
             1,
         );
     }
@@ -308,7 +319,8 @@ pub(super) fn build_walkable_mask(
                 pos,
                 fp,
                 def.visual,
-                ground_dy(kind.furniture()),
+                def.ground_x,
+                def.ground_y,
                 1,
             );
         }
@@ -316,7 +328,7 @@ pub(super) fn build_walkable_mask(
 
     if let Some(lamp) = floor_lamp {
         // The lamp's tall footprint stamps CENTERED despite the sprite
-        // overhang — the WHY lives on its `ground_dy` row in decor.rs.
+        // overhang — the WHY lives on its ground_y row in decor.rs.
         let def = furniture_def(Furniture::FloorLamp);
         if let Some(fp) = def.footprint {
             stamp_ground(
@@ -325,7 +337,8 @@ pub(super) fn build_walkable_mask(
                 lamp,
                 fp,
                 def.visual,
-                ground_dy(Furniture::FloorLamp),
+                def.ground_x,
+                def.ground_y,
                 1,
             );
         }
@@ -342,7 +355,8 @@ pub(super) fn build_walkable_mask(
                 t,
                 fp,
                 def.visual,
-                ground_dy(Furniture::LoungeSideTable),
+                def.ground_x,
+                def.ground_y,
                 1,
             );
         }
@@ -369,7 +383,8 @@ pub(super) fn build_walkable_mask(
                 pos,
                 fp,
                 def.visual,
-                ground_dy(kind.furniture()),
+                def.ground_x,
+                def.ground_y,
                 1,
             );
         }
@@ -384,8 +399,8 @@ pub(super) fn build_walkable_mask(
     for &PodDecorItem { kind, pos } in pod_decor {
         // GROUND footprint (not the sprite size). Every overhanging aisle piece
         // (plant canopy, booth column, TV monitor, whiteboard panel) declares a
-        // base-pinned `ground_dy`, so the overhang occludes a walker behind it
-        // (invariant #6); flat boxes declare dy 0 (a plain centered stamp).
+        // base-pinned ground_y (End), so the overhang occludes a walker behind
+        // it (invariant #6); flat boxes declare Center (offset 0).
         let def = furniture_def(kind.furniture());
         let Some(fp) = def.footprint else {
             continue;
@@ -396,7 +411,8 @@ pub(super) fn build_walkable_mask(
             pos,
             fp,
             def.visual,
-            ground_dy(kind.furniture()),
+            def.ground_x,
+            def.ground_y,
             1,
         );
     }
@@ -412,7 +428,7 @@ mod tests {
     #[test]
     fn overhang_footprint_south_anchored_leaves_the_overhang_walkable() {
         // A 6-wide piece whose sprite is 12 tall but whose ground base is only 3
-        // (a phone booth): a base-pinned `ground_dy` (visual.h − fp.h = 9) must
+        // (a phone booth): a base-pinned ground_y=End (visual.h − fp.h = 9) must
         // block ONLY the 3-row south strip at the sprite base, leaving the tall
         // overhang north of it walkable — that's where a walker parks deep so
         // the sprite's y-sort occludes them. This is the core invariant the
@@ -425,7 +441,8 @@ mod tests {
             pos,
             Size { w: 6, h: 3 },
             Size { w: 6, h: 12 },
-            9,
+            GroundAlign::Center,
+            GroundAlign::End,
             0,
         );
         let south = z_sort_row(Anchor::Center, pos, 12); // sprite base row
@@ -516,7 +533,8 @@ mod tests {
             pos,
             Size { w: 4, h: 6 },
             Size { w: 4, h: 6 },
-            0,
+            GroundAlign::Center,
+            GroundAlign::Center,
             0,
         );
         assert!(

@@ -58,6 +58,12 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.15.0" => Some(&[
+            // Internal-only so far (the FurnitureDef ground-anchoring refactor).
+            // The density + vibe PR that rebases onto this extends this arm with
+            // the user-facing bullets; keep this last "under the hood" line.
+            "Sturdier under the hood — the office's furniture now declares how each piece meets the floor in one place, so a sprite resize can't drift a walkable-collision edge; the office looks the same, just steadier",
+        ]),
         "0.14.0" => Some(&[
             "Click an agent, land in its terminal — clicking a sprite (or pressing f on the dashboard's selected agent) brings that session's terminal app to the foreground on macOS, Windows and Linux; it's located through the session's own process, so a stale or reused pid never yanks the wrong window forward",
             "Top models wear their tier — agents running a frontier model now sport ember hair and a flame crown, so the office's horsepower reads at a glance, and the flames light and snuff the instant a session switches models",
