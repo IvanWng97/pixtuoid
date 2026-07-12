@@ -170,9 +170,11 @@ pub(super) fn build_walkable_mask(
         // of weaving around each one.
         // Desk footprint comes from the shared FurnitureDef (always Some for
         // the desk); stamped TOP-LEFT at the desk Point (not centred like
-        // visited furniture) — the desk pos IS its NW corner. Anchor: the
-        // table's declared Plain (top-anchored; the 2-row south lip is the
-        // seat zone — see `ground_anchor`).
+        // visited furniture) — the desk pos IS its NW corner. `ground_y:
+        // Start` top-anchors the footprint to the body; with the standard
+        // OBSTACLE_PAD the desk is a SOLID obstacle (unlike an `End` overhang
+        // piece there is no unblocked strip a walker could pass behind — a
+        // walker routes around the desk via the aisles).
         let desk_def = super::decor::desk_furniture_def();
         if let Some(fp) = desk_def.footprint {
             stamp_ground(
@@ -545,5 +547,36 @@ mod tests {
             !mask.is_walkable(pos.x, pos.y - 2),
             "centered block: north-of-center blocked (not a south strip)"
         );
+    }
+
+    #[test]
+    fn topleft_wall_decor_x_centering_is_parity_safe() {
+        // `stamp_ground` centers a TopLeft footprint with `GroundAlign::Center`
+        // = center-ON-pos `⌊v/2⌋−⌊f/2⌋`, whereas the OLD `stamp_south_strip`
+        // used center-IN-box `⌊(v−f)/2⌋`. The two agree ONLY when v and f have
+        // the same parity; they diverge by 1px at opposite parity. Every
+        // current TopLeft-stamped wall-decor kind is same-parity, so the two
+        // conventions coincide and the mask is byte-identical to before the
+        // refactor. This test FAILS the day someone adds a TopLeft wall piece
+        // with an even visual width over an odd footprint width (or vice
+        // versa) — at which point the 1px offset is a conscious decision, not
+        // a silent drift. (Center-ANCHORED pieces are parity-immune: the
+        // visual term cancels — see GroundAlign::Center's doc.)
+        for kind in [
+            Furniture::Whiteboard,
+            Furniture::Bookshelf,
+            Furniture::MeetingScreen,
+        ] {
+            let def = furniture_def(kind);
+            let Some(fp) = def.footprint else { continue };
+            let center_on_pos = def.visual.w / 2 - fp.w / 2;
+            let center_in_box = (def.visual.w - fp.w) / 2;
+            assert_eq!(
+                center_on_pos, center_in_box,
+                "{kind:?}: TopLeft x-centering diverges at opposite parity \
+                 (visual.w={}, footprint.w={}) — decide the 1px offset explicitly",
+                def.visual.w, fp.w
+            );
+        }
     }
 }

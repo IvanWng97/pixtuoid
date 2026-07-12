@@ -186,10 +186,12 @@ pub struct FurnitureDef {
     pub ground_x: GroundAlign,
     /// Where `footprint` sits inside the VISUAL box vertically: `End` for the
     /// overhang canopy/panel/column pieces (invariant #6, the walk-behind
-    /// shape), `Center` for the meeting sofa body + floor lamp, `Start` for
-    /// the desk (footprint at the top; its front lip is free — the desk still
-    /// occludes walkers behind it via z-sort, same as every piece). Resolves
-    /// to a pixel offset from `visual − footprint` at stamp time (drift-free).
+    /// shape — the tall sprite overhangs the shallow south strip and occludes
+    /// a walker parked behind it), `Center` for the meeting sofa body + floor
+    /// lamp, `Start` for the desk (footprint == the body; a SOLID obstacle,
+    /// NOT walk-behind — switching it to `End` is what would enable that).
+    /// Resolves to a pixel offset from `visual − footprint` at stamp time
+    /// (drift-free).
     pub ground_y: GroundAlign,
 }
 
@@ -664,18 +666,20 @@ impl GroundAlign {
 /// Static footprints of the pantry bistro pair, lifted to consts so the
 /// placement clamp in `compute.rs` derives its cluster half-extent from the
 /// ONE table instead of a hand-folded copy (whose comment had already rotted
-/// against the row). The `None` arms are unreachable — both rows are static
-/// `Some` (a zero size would trip the clamp tests immediately if that ever
-/// changed).
+/// against the row). Both rows are static `Some`; the `None` arm is a
+/// compile-time impossibility, so `panic!` (const-stable) makes that a build
+/// guarantee rather than a silent `Size{0,0}` that would only SHRINK the
+/// derived half-extent — a smaller cluster doesn't overlap walls, so the
+/// clamp tests would NOT catch it.
 pub(crate) const PANTRY_TABLE_FOOTPRINT: Size =
     match furniture_def(Furniture::PantryTable).footprint {
         Some(s) => s,
-        None => Size { w: 0, h: 0 },
+        None => panic!("PantryTable must carry a static footprint"),
     };
 pub(crate) const PANTRY_CHAIR_FOOTPRINT: Size =
     match furniture_def(Furniture::PantryChair).footprint {
         Some(s) => s,
-        None => Size { w: 0, h: 0 },
+        None => panic!("PantryChair must carry a static footprint"),
     };
 
 /// The **home desk** descriptor — sugar over the [`Furniture::Desk`] table row
