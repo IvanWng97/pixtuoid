@@ -607,6 +607,8 @@ pub(crate) fn anim_scene(
         "sofa" => Some(WaypointKind::MeetingSofa),
         "stand" => Some(WaypointKind::MeetingStand),
         "pantry" => Some(WaypointKind::Pantry),
+        "island" => Some(WaypointKind::Island),
+        "snackshelf" => Some(WaypointKind::SnackShelf),
         _ => None, // "desk": always visited (return-to-desk), not a waypoint
     };
     let want_facing = match facing {
