@@ -168,15 +168,24 @@ impl ActiveChitchat {
 
 /// The chitchat `wp_idx` a waypoint visitor groups under. Multi-slot venues
 /// (the 3 lounge-couch seats, the kitchen island's stands) collapse to ONE
-/// venue — the first waypoint of that kind — so
-/// each hosts a single group conversation like the meeting room, WITHOUT
-/// overloading the meeting-only `room_id` field (which indexes
-/// `meeting_furniture`). Every other waypoint keys on its own index.
-/// `group_idx` is the first waypoint index OF THE SAME KIND (or `None` if
-/// none exists — degenerate, falls back to self).
-pub fn venue_wp_idx(kind: WaypointKind, wp_idx: usize, group_idx: Option<usize>) -> usize {
+/// venue — the first waypoint OF THAT KIND — so each hosts a single group
+/// conversation like the meeting room, WITHOUT overloading the meeting-only
+/// `room_id` field (which indexes `meeting_furniture`). Every other waypoint
+/// keys on its own index. Takes the waypoint slice and finds the group
+/// anchor ITSELF: the old shape took a caller-computed `group_idx`, and the
+/// one caller passed the COUCH's index for every kind — which silently
+/// merged island standers into the couch's conversation the moment a second
+/// collapsible kind existed.
+pub fn venue_wp_idx(
+    kind: WaypointKind,
+    wp_idx: usize,
+    waypoints: &[crate::layout::Waypoint],
+) -> usize {
     match kind {
-        WaypointKind::Couch | WaypointKind::Island => group_idx.unwrap_or(wp_idx),
+        WaypointKind::Couch | WaypointKind::Island => waypoints
+            .iter()
+            .position(|w| w.kind == kind)
+            .unwrap_or(wp_idx),
         _ => wp_idx,
     }
 }
@@ -497,25 +506,39 @@ mod tests {
     }
 
     #[test]
-    fn lounge_couch_seats_share_one_venue() {
-        // The 3 couch seats (distinct wp_idx) all collapse to the first
-        // couch's index → one VenueKey → one group conversation. Other
-        // waypoints keep their own index. This is what makes the lounge a
-        // group-chat venue without touching the meeting-only room_id.
-        let gi = Some(7);
-        assert_eq!(venue_wp_idx(WaypointKind::Couch, 7, gi), 7);
-        assert_eq!(venue_wp_idx(WaypointKind::Couch, 8, gi), 7);
-        assert_eq!(venue_wp_idx(WaypointKind::Couch, 9, gi), 7);
-        // Non-couch waypoints are unaffected.
-        assert_eq!(venue_wp_idx(WaypointKind::Pantry, 12, gi), 12);
-        assert_eq!(venue_wp_idx(WaypointKind::MeetingSofa, 3, gi), 3);
-        // The kitchen island's stands collapse like the couch: one shared
-        // conversation per island.
-        assert_eq!(venue_wp_idx(WaypointKind::Island, 9, Some(7)), 7);
-        assert_eq!(venue_wp_idx(WaypointKind::Island, 7, Some(7)), 7);
-        assert_eq!(venue_wp_idx(WaypointKind::SnackShelf, 4, Some(2)), 4);
-        // No couch in the layout → falls back to the visitor's own index.
-        assert_eq!(venue_wp_idx(WaypointKind::Couch, 5, None), 5);
+    fn multi_slot_venues_collapse_to_first_of_their_own_kind() {
+        // The 3 couch seats collapse to the first COUCH index; the island's
+        // 3 stands collapse to the first ISLAND index — each kind anchors on
+        // its OWN first waypoint (the old caller-computed group index passed
+        // the couch's index for every kind, which merged island standers
+        // into the couch conversation). Other waypoints keep their own index.
+        use crate::layout::{Facing, Point, Waypoint};
+        let wp = |kind, x| Waypoint {
+            pos: Point { x, y: 10 },
+            kind,
+            facing: Facing::South,
+            room_id: None,
+        };
+        let wps = vec![
+            wp(WaypointKind::Pantry, 0),      // 0
+            wp(WaypointKind::Couch, 10),      // 1 ← couch anchor
+            wp(WaypointKind::Couch, 16),      // 2
+            wp(WaypointKind::Couch, 22),      // 3
+            wp(WaypointKind::Island, 40),     // 4 ← island anchor
+            wp(WaypointKind::Island, 50),     // 5
+            wp(WaypointKind::SnackShelf, 60), // 6
+        ];
+        assert_eq!(venue_wp_idx(WaypointKind::Couch, 1, &wps), 1);
+        assert_eq!(venue_wp_idx(WaypointKind::Couch, 3, &wps), 1);
+        // Island stands anchor on the ISLAND's first index, never the couch's.
+        assert_eq!(venue_wp_idx(WaypointKind::Island, 5, &wps), 4);
+        assert_eq!(venue_wp_idx(WaypointKind::Island, 4, &wps), 4);
+        // Non-collapsible kinds keep their own index.
+        assert_eq!(venue_wp_idx(WaypointKind::Pantry, 0, &wps), 0);
+        assert_eq!(venue_wp_idx(WaypointKind::SnackShelf, 6, &wps), 6);
+        assert_eq!(venue_wp_idx(WaypointKind::MeetingSofa, 3, &wps), 3);
+        // Degenerate: no waypoint of the kind → falls back to self.
+        assert_eq!(venue_wp_idx(WaypointKind::Couch, 5, &[]), 5);
     }
 
     #[test]

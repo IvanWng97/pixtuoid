@@ -274,10 +274,6 @@ fn resolve_characters(
     // on the first couch's index) so the couch hosts a single group
     // conversation like the meeting room — without overloading the
     // meeting-only `room_id` field (which indexes `meeting_furniture`).
-    let couch_group_idx = layout
-        .waypoints
-        .iter()
-        .position(|w| w.kind == crate::layout::WaypointKind::Couch);
     // The pack's character sprite width (8 for the bundled pack, 10 for the
     // robot pack). All character poses share one width, so resolve it ONCE from
     // a reference pose and center every anchor on it — a non-8-wide pack would
@@ -422,7 +418,7 @@ fn resolve_characters(
                         waypoint_visitors.push(chitchat::Visitor {
                             // Couch seats share one venue (group chat); other
                             // waypoints key on their own index.
-                            wp_idx: chitchat::venue_wp_idx(kind, wp, couch_group_idx),
+                            wp_idx: chitchat::venue_wp_idx(kind, wp, &layout.waypoints),
                             agent_id: agent.agent_id,
                             anchor: anchor_no_breath,
                             room_id: wp_obj.room_id,
