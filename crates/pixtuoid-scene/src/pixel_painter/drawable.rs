@@ -30,7 +30,7 @@ use super::effects::{
 use super::epoch_ms;
 use super::frame_at;
 use super::furniture::{
-    paint_area_rug, paint_meeting_table, paint_pantry_chair, paint_pantry_table, paint_side_table,
+    paint_area_rug, paint_kitchen_island, paint_meeting_table, paint_side_table,
 };
 use super::paint_character_at;
 use crate::frame_cache::FrameCache;
@@ -111,10 +111,14 @@ pub(super) enum DrawableKind<'a> {
     LoungeSideTable {
         pos: Point,
     },
-    PantryTable {
+    /// Kitchen-island body (centred at `pos`) — procedural, like the pantry
+    /// table but counter-height with a dressed top (bowl + cups).
+    KitchenIsland {
         pos: Point,
     },
-    PantryChair {
+    /// Snack shelf (centred at `pos`) — pack sprite `snack_shelf`; the tall
+    /// shelf overhangs its shallow 2-row base (walk-behind class).
+    SnackShelf {
         pos: Point,
     },
     Plant {
@@ -775,11 +779,15 @@ pub(super) fn paint_drawable(
         DrawableKind::LoungeSideTable { pos } => {
             paint_side_table(buf, pos.x, pos.y, theme);
         }
-        DrawableKind::PantryTable { pos } => {
-            paint_pantry_table(buf, pos.x, pos.y, theme);
+        DrawableKind::KitchenIsland { pos } => {
+            paint_kitchen_island(buf, pos.x, pos.y, theme);
         }
-        DrawableKind::PantryChair { pos } => {
-            paint_pantry_chair(buf, pos.x, pos.y, theme);
+        DrawableKind::SnackShelf { pos } => {
+            if let Some(f) = pack.animation("snack_shelf").and_then(|a| a.frames.first()) {
+                let px = pos.x.saturating_sub(f.width() / 2);
+                let py = pos.y.saturating_sub(f.height() / 2);
+                blit_frame(f, px, py, buf);
+            }
         }
         DrawableKind::Plant { kind, pos } => {
             let anim_name = kind.sprite_name();

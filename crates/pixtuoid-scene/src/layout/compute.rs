@@ -23,7 +23,7 @@ pub const PANTRY_COUNTER_LARGE_W: u16 = 32;
 
 /// Y-position percentage of the pantry counter within its room — lower (65%) for
 /// the large counter, a touch higher (60%) for the small one. SINGLE SOURCE: the
-/// bistro-table clamp (which keeps that cluster clear of the counter) and the
+/// island clamp (which keeps the island clear of the counter) and the
 /// counter's own waypoint placement both read it, so they cannot disagree — were
 /// they to drift, the clamp would guard a phantom counter position.
 fn pantry_counter_y_pct(counter_w: u16) -> u16 {
@@ -288,7 +288,7 @@ pub(super) fn compute_with_seed(
     const LOUNGE_MIN_BAND_W: u16 = 30;
     let lounge_fits = cubicle_band.width >= LOUNGE_MIN_BAND_W;
 
-    let (waypoints, couch_sprite_center) = compute_waypoints(
+    let (mut waypoints, couch_sprite_center) = compute_waypoints(
         &cubicle_band,
         top_margin,
         pantry_room,
@@ -517,79 +517,86 @@ pub(super) fn compute_with_seed(
         });
     }
 
-    let (pantry_table, pantry_chairs) = if let Some(pr) = pantry_room {
-        // Inset the bistro table + stools clear of the room walls. A small
-        // pantry puts the raw 25% mark inside the meeting/pantry divider wall
-        // (caught by `furniture_does_not_overlap_room_walls`). Clearance =
-        // wall face + obstacle pad.
-        // Stool ring reach from the table center — the stool positions below
-        // and the cluster half-extent both read these.
-        const STOOL_DX: u16 = 4;
-        const STOOL_DY: u16 = 3;
+    // ── Pantry v2: kitchen island (+3 stands) + snack shelf ──
+    // Every piece follows the refuse-don't-force rule with BOTH-axis clamps
+    // (the #549/#551/#554 one-axis-clamp class), and keeps clear of the
+    // counter's padded north (the anti-merge routing constraint) —
+    // placement_sweep's overlap/containment/connectivity/mask-parity
+    // invariants are the backstop.
+    let kitchen_island = if let Some(pr) = pantry_room {
+        let def = furniture_def(Furniture::KitchenIsland);
+        let vis = def.visual;
+        let (half_w, half_h) = (vis.w / 2, vis.h / 2);
         let clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
-        // Cluster half-extent DERIVED from the furniture table + stool reach
-        // (was a hand-folded `(5, 4)` whose comment had already rotted to
-        // "table 8×5" against the row's real 7×4 — the two-copies drift):
-        // per axis, the wider of the table's half-span and the stool offset
-        // + stool half-span.
-        let table_fp = super::decor::PANTRY_TABLE_FOOTPRINT;
-        let stool_fp = super::decor::PANTRY_CHAIR_FOOTPRINT;
-        let half_w = (table_fp.w / 2).max(STOOL_DX + stool_fp.w / 2);
-        let half_h = (table_fp.h / 2).max(STOOL_DY + stool_fp.h / 2);
-        let min_x = pr.x + clr + half_w;
-        let max_x = (pr.x + pr.width).saturating_sub(clr + half_w);
-        let min_y = pr.y + clr + half_h;
-        // The counter sits lower in the room (60/65%); keep the table cluster's
-        // padded south edge above the counter's padded north so the two
-        // footprints don't merge into a band that closes the east routing strip
-        // in a short pantry (was unreachable at 120×80, outside the old matrix).
+        // Stands flank the island at ±(half_w + 3): 1 walkable cell beyond the
+        // body's padded footprint. They must stay in-room too, so the x clamps
+        // price the stand extent, not just the body.
+        let stand_dx = half_w + 3;
         let counter_y = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
         let counter_north =
             counter_y.saturating_sub(pantry_counter_size.h / 2 + super::OBSTACLE_PAD_PX);
-        let max_y = (pr.y + pr.height)
-            .saturating_sub(clr + half_h)
-            .min(counter_north.saturating_sub(half_h));
-        // An EMPTY clamp range means the room physically can't hold the
-        // cluster + clearances — refuse, don't force. The old
-        // `max.max(min)` degradation placed the cluster anyway and let it
-        // spill east out of the room into the band (placement-sweep catch:
-        // at ≤50px-wide buffers the bistro table sat OUTSIDE its 6-11px
-        // room, colliding with the corridor plant). The Y arm also fires on
-        // SHORT rooms (e.g. the 96×70 fixtures): `counter_north` caps max_y
-        // (the anti-merge routing constraint above), and a ~25px-tall room
-        // can't hold cluster + counter + clearances — the old code declared
-        // that constraint then force-violated it. Render-verified: the
-        // pantry reads as a coherent kitchenette without the bistro.
-        if max_x < min_x || max_y < min_y {
-            (None, vec![])
+        let min_x = pr.x + clr + stand_dx;
+        let max_x = (pr.x + pr.width).saturating_sub(clr + stand_dx);
+        // North stander needs a walkable row above the body's padded strip.
+        let min_y = pr.y + clr + half_h + 2;
+        let max_y = counter_north.saturating_sub(half_h + 3);
+        if min_x <= max_x && min_y <= max_y {
+            let ix = (pr.x + pr.width / 2).clamp(min_x, max_x);
+            let iy = (pr.y + pct(pr.height, 40)).clamp(min_y, max_y);
+            let island = Point { x: ix, y: iy };
+            for (dx, dy, facing) in [
+                (-(stand_dx as i16), 0i16, Facing::East),
+                (stand_dx as i16, 0, Facing::West),
+                (0, -((half_h + 2) as i16), Facing::South),
+            ] {
+                waypoints.push(Waypoint {
+                    pos: Point {
+                        x: ix.saturating_add_signed(dx),
+                        y: iy.saturating_add_signed(dy),
+                    },
+                    kind: WaypointKind::Island,
+                    facing,
+                    room_id: None,
+                });
+            }
+            Some(island)
         } else {
-            let tx = (pr.x + pct(pr.width, 25)).clamp(min_x, max_x);
-            let ty = (pr.y + pct(pr.height, 25)).clamp(min_y, max_y);
-            (
-                Some(Point { x: tx, y: ty }),
-                vec![
-                    Point {
-                        x: tx.saturating_sub(STOOL_DX),
-                        y: ty,
-                    },
-                    Point {
-                        x: tx + STOOL_DX,
-                        y: ty,
-                    },
-                    Point {
-                        x: tx,
-                        y: ty.saturating_sub(STOOL_DY),
-                    },
-                    Point {
-                        x: tx,
-                        y: ty + STOOL_DY,
-                    },
-                ],
-            )
+            None
         }
     } else {
-        (None, vec![])
+        None
     };
+
+    // Snack shelf: hugs the west wall (the buffer edge — the pantry's only
+    // wall-free side is the EAST bridge, which must stay open). Waypoint-only
+    // (vending-machine class): the mask stamps its table footprint via the
+    // generic waypoint loop, the stander approaches from the open east side.
+    if let Some(pr) = pantry_room {
+        let def = furniture_def(Furniture::SnackShelf);
+        let vis = def.visual;
+        let (half_w, half_h) = (vis.w / 2, vis.h / 2);
+        let clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
+        let counter_y = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
+        let counter_north =
+            counter_y.saturating_sub(pantry_counter_size.h / 2 + super::OBSTACLE_PAD_PX);
+        let sx = pr.x + 1 + half_w;
+        // Width gate: 1px west margin + the 7px shelf + 3px so the east-side
+        // stander has an in-room walkable cell — narrower rooms refuse (the
+        // sweep's first catch on this block was a 7px shelf in a 6px room).
+        let width_fits = pr.width >= vis.w + 4;
+        let min_y = pr.y + clr + half_h;
+        let max_y = counter_north.saturating_sub(half_h + 1);
+        let target = pr.y + pct(pr.height, 30);
+        let candidate = (width_fits && min_y <= max_y).then(|| target.clamp(min_y, max_y));
+        if let Some(sy) = candidate {
+            waypoints.push(Waypoint {
+                pos: Point { x: sx, y: sy },
+                kind: WaypointKind::SnackShelf,
+                facing: Facing::West,
+                room_id: None,
+            });
+        }
+    }
 
     let corridor = Some(Bounds {
         x: 0,
@@ -605,8 +612,7 @@ pub(super) fn compute_with_seed(
         door,
         &home_desks,
         &meeting_furniture,
-        pantry_table,
-        &pantry_chairs,
+        kitchen_island,
         &waypoints,
         &plants,
         floor_lamp,
@@ -650,9 +656,8 @@ pub(super) fn compute_with_seed(
         meeting_furniture,
         room_walls,
         top_margin,
-        pantry_table,
-        pantry_chairs,
         pantry_counter_size,
+        kitchen_island,
         corridor,
         couch_sprite_center,
         walkable,
@@ -1185,7 +1190,7 @@ pub(super) fn compute_waypoints(
         // Refuse rather than force: no counter on a degenerate pantry.
         let min_cx = pr.x + half_cw;
         if min_cx <= max_cx {
-            // y is single-sourced with the bistro-table clamp; only x is size-shaped
+            // y is single-sourced with the island clamp; only x is size-shaped
             // (large counter is room-centred, small one sits at 60% width).
             let wy = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
             let wx = if pantry_counter_size.w >= PANTRY_COUNTER_LARGE_W {

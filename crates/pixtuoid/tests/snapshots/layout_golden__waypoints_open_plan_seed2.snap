@@ -127,4 +127,40 @@ expression: l.waypoints
             0,
         ),
     },
+    Waypoint {
+        pos: Point {
+            x: 17,
+            y: 92,
+        },
+        kind: Island,
+        facing: East,
+        room_id: None,
+    },
+    Waypoint {
+        pos: Point {
+            x: 39,
+            y: 92,
+        },
+        kind: Island,
+        facing: West,
+        room_id: None,
+    },
+    Waypoint {
+        pos: Point {
+            x: 28,
+            y: 87,
+        },
+        kind: Island,
+        facing: South,
+        room_id: None,
+    },
+    Waypoint {
+        pos: Point {
+            x: 4,
+            y: 91,
+        },
+        kind: SnackShelf,
+        facing: West,
+        room_id: None,
+    },
 ]

@@ -119,8 +119,8 @@ impl SeatView {
                 Facing::North => SeatView::Back,
                 _ => SeatView::Front,
             },
-            // Stand beside the table, facing inward; west stand marked East.
-            WaypointKind::MeetingStand => SeatView::Side {
+            // Stand beside the table/island, facing inward; east-facing flips.
+            WaypointKind::MeetingStand | WaypointKind::Island => SeatView::Side {
                 flip: matches!(facing, Facing::East),
             },
             // Not seat slots — the caller dispatches these directly (they never
@@ -132,7 +132,8 @@ impl SeatView {
             | WaypointKind::PhoneBooth
             | WaypointKind::StandingDesk
             | WaypointKind::VendingMachine
-            | WaypointKind::Printer => SeatView::Side { flip: false },
+            | WaypointKind::Printer
+            | WaypointKind::SnackShelf => SeatView::Side { flip: false },
         }
     }
 

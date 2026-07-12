@@ -184,6 +184,10 @@ frame_ms = 600
 frames   = ["bookshelf.sprite"]
 frame_ms = 600
 
+[animations.snack_shelf]
+frames   = ["snack_shelf.sprite"]
+frame_ms = 600
+
 [animations.tv_stand]
 frames   = ["tv_stand.sprite"]
 frame_ms = 600

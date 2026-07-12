@@ -121,9 +121,10 @@ struct Piece {
     /// placement sites SKIP a slot whose whole sprite wouldn't fit the band —
     /// that skip semantic is part of the contract, not just the ground).
     visual_in_container: bool,
-    /// Pieces sharing a group id are one physical cluster (the 3-seat couch's
-    /// overlapping body stamps; the pantry table + its tucked-under stools) —
-    /// exempt from the pairwise-overlap invariant WITHIN the group.
+    /// Pieces sharing a group id are one physical cluster (the lounge
+    /// vignette: the 3-seat couch's overlapping body stamps + its lamp and
+    /// side table) — exempt from the pairwise-overlap invariant WITHIN the
+    /// group.
     /// DISCIPLINE (this is the harness's one exemption with no compile
     /// tooth): a NEW group id requires (a) a WHY comment at the declaration
     /// naming the authored composition, and (b) the cluster's internal
@@ -183,9 +184,8 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         meeting_furniture,
         room_walls: _, // the containers' edges; overlap-vs-walls is its own invariant
         top_margin: _, // wall-band geometry, read via wall_band_h() in invariants
-        pantry_table,
-        pantry_chairs,
         pantry_counter_size,
+        kitchen_island,
         corridor: _, // router/pet zone, spans the full width by design
         couch_sprite_center,
         walkable: _,  // probed directly by the connectivity invariant
@@ -316,6 +316,23 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                     None,
                 ));
             }
+            // The snack shelf is an approachable obstacle living in the
+            // pantry (vending-machine class, pantry container).
+            WaypointKind::SnackShelf => {
+                out.push(Piece::table(
+                    format!("waypoint[{i}] SnackShelf"),
+                    Anchor::Center,
+                    wp.pos,
+                    wp.kind.furniture(),
+                    Container::Pantry,
+                    None,
+                ));
+            }
+            // Island stands carry no ground of their own: the island BODY
+            // registers via `kitchen_island` below. Their pos-in-room
+            // containment is covered by the kind→zone arm in
+            // compute_places_all_waypoint_kinds.
+            WaypointKind::Island => {}
         }
     }
 
@@ -369,26 +386,14 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
     // (the mask's truth); presence still feeds the every-kind coverage test.
     let _ = couch_sprite_center;
 
-    // The pantry cluster: stools tuck under the table by design — one
-    // overlap group.
-    if let Some(p) = pantry_table {
+    if let Some(p) = kitchen_island {
         out.push(Piece::table(
-            "pantry_table".into(),
+            "kitchen_island".into(),
             Anchor::Center,
             *p,
-            Furniture::PantryTable,
+            Furniture::KitchenIsland,
             Container::Pantry,
-            Some(1),
-        ));
-    }
-    for (i, &c) in pantry_chairs.iter().enumerate() {
-        out.push(Piece::table(
-            format!("pantry_chair[{i}]"),
-            Anchor::Center,
-            c,
-            Furniture::PantryChair,
-            Container::Pantry,
-            Some(1),
+            None,
         ));
     }
 
@@ -522,6 +527,30 @@ fn every_piece_ground_stays_in_its_container() {
         }
     });
     assert_no_violations("container", v);
+}
+
+#[test]
+fn every_piece_ground_is_blocked_in_the_mask() {
+    // Mask ≡ pieces parity: a piece whose ground rect is NOT blocked in the
+    // walkable mask is a MISSING STAMP — the piece renders (and the sweep's
+    // rect invariants pass) while agents walk straight through it. Caught
+    // live: the kitchen island's mask stamp was silently dropped by a bad
+    // edit; every rect invariant stayed green because none of them read the
+    // MASK. Interior-only probe (no pad assumptions).
+    let mut v = Vec::new();
+    sweep(|w, h, seed, l| {
+        for p in pieces(l) {
+            let Some((tl, sz)) = p.ground else { continue };
+            let (cx, cy) = (tl.x + sz.w / 2, tl.y + sz.h / 2);
+            if l.walkable.is_walkable(cx, cy) {
+                v.push(format!(
+                    "{w}x{h} seed {seed}: {} ground centre ({cx},{cy}) is WALKABLE —                      missing mask stamp",
+                    p.label
+                ));
+            }
+        }
+    });
+    assert_no_violations("mask-parity", v);
 }
 
 #[test]
@@ -705,8 +734,8 @@ fn every_kind_is_placed_somewhere_in_the_sweep() {
         if l.lounge_side_table.is_some() {
             seen.insert("lounge_side_table".into());
         }
-        if l.pantry_table.is_some() {
-            seen.insert("pantry_cluster".into());
+        if l.kitchen_island.is_some() {
+            seen.insert("kitchen_island".into());
         }
         if l.couch_sprite_center.is_some() {
             seen.insert("couch".into());
@@ -751,7 +780,7 @@ fn every_kind_is_placed_somewhere_in_the_sweep() {
             missing.push(k);
         }
     }
-    for fixed in ["floor_lamp", "lounge_side_table", "pantry_cluster", "couch"] {
+    for fixed in ["floor_lamp", "lounge_side_table", "kitchen_island", "couch"] {
         if !seen.contains(fixed) {
             missing.push(fixed.into());
         }

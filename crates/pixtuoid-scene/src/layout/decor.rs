@@ -30,6 +30,13 @@ pub enum WaypointKind {
     /// Meeting-room standing spot beside the table — agent stands, facing
     /// the table. Part of the same room conversation venue as MeetingSofa.
     MeetingStand,
+    /// Kitchen-island standing spot — agent stands at the island edge
+    /// (coffee-and-chat). All of one island's stands share ONE chitchat
+    /// venue, couch-style.
+    Island,
+    /// Snack shelf — agent stands in front browsing the shelves (short
+    /// dwell, vending-machine-like).
+    SnackShelf,
 }
 
 /// Per-spot idle dwell window. `range_ms == 0` is the DECOR sentinel (not a
@@ -216,6 +223,8 @@ impl WaypointKind {
         WaypointKind::Printer,
         WaypointKind::MeetingSofa,
         WaypointKind::MeetingStand,
+        WaypointKind::Island,
+        WaypointKind::SnackShelf,
     ];
 
     /// This waypoint's geometry kind in the unified [`Furniture`] table. The
@@ -231,6 +240,8 @@ impl WaypointKind {
             WaypointKind::Printer => Furniture::Printer,
             WaypointKind::MeetingSofa => Furniture::MeetingSofa,
             WaypointKind::MeetingStand => Furniture::MeetingStand,
+            WaypointKind::Island => Furniture::IslandStand,
+            WaypointKind::SnackShelf => Furniture::SnackShelf,
         }
     }
 }
@@ -269,10 +280,17 @@ pub enum Furniture {
     // stamps once per room.
     MeetingSofaBody,
     MeetingTable,
-    PantryTable,
-    PantryChair,
     FloorLamp,
     LoungeSideTable,
+    /// Kitchen-island BODY (the big center counter) — the obstacle the mask
+    /// stamps once; the `IslandStand` rows are the stand slots around it
+    /// (same body/seat split as MeetingSofaBody/MeetingSofa).
+    KitchenIsland,
+    /// A standing slot at the kitchen island's edge (no obstacle of its own).
+    IslandStand,
+    /// Snack shelf against the pantry's west wall — an approachable obstacle
+    /// (vending-machine class): tall shelf sprite, shallow walk-behind base.
+    SnackShelf,
     /// The agent's OWNED home workstation. Not a [`WaypointKind`] (N per-agent
     /// desks, forced-seat when Active, never a wander destination) — but a
     /// first-class geometry row so desk and couch share ONE table and the same
@@ -307,10 +325,11 @@ impl Furniture {
         Furniture::MeetingScreen,
         Furniture::MeetingSofaBody,
         Furniture::MeetingTable,
-        Furniture::PantryTable,
-        Furniture::PantryChair,
         Furniture::FloorLamp,
         Furniture::LoungeSideTable,
+        Furniture::KitchenIsland,
+        Furniture::IslandStand,
+        Furniture::SnackShelf,
         Furniture::Desk,
     ];
 }
@@ -327,7 +346,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
     // ground_y default `End`: the decor rows that spread `..DECOR` are the
     // overhang canopy/panel/column pieces (plants, whiteboard, TV, bookshelf,
     // meeting screen), whose ground strip pins to the sprite base. The flat
-    // singletons that also spread it (meeting/pantry/side tables, stool)
+    // singletons that also spread it (meeting tables, side table)
     // resolve `End` to offset 0 anyway (footprint == visual), so they stay
     // byte-identical; the two CENTERED exceptions (meeting sofa body, floor
     // lamp) override `ground_y` explicitly below. `ground_x` is `Center` for
@@ -559,19 +578,45 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 11, h: 5 },
             ..DECOR
         },
-        Furniture::PantryTable => FurnitureDef {
-            footprint: Some(Size { w: 7, h: 4 }),
-            visual: Size { w: 7, h: 4 },
+        // Island body: the 14×6 sprite's top two rows are countertop surface
+        // that OVERHANGS the 14×4 south-anchored base (invariant #6) — a
+        // north-side stander tucks slightly behind the counter, bartender-
+        // style, occluded by the island's own y-sort.
+        Furniture::KitchenIsland => FurnitureDef {
+            footprint: Some(Size { w: 16, h: 5 }),
+            visual: Size { w: 16, h: 7 },
             ..DECOR
         },
-        // 2×2 = exactly the four pixels the painter draws (no back / legs). Both
-        // footprint AND visual match the draw; mask.rs stamps it CENTERED so it
-        // sits on the visible stool, not 1px north/west of it (the old 3×3 +
-        // left/top-biased stamp blocked floor where nothing was drawn).
-        Furniture::PantryChair => FurnitureDef {
-            footprint: Some(Size { w: 2, h: 2 }),
-            visual: Size { w: 2, h: 2 },
-            ..DECOR
+        // Island stand slot: pre-positioned CLEAR of the body's padded
+        // footprint by compute.rs (the MeetingStand pattern) — no obstacle,
+        // no clearance scan needed, the agent stands exactly at `pos`.
+        Furniture::IslandStand => FurnitureDef {
+            footprint: None,
+            visual: Size { w: 0, h: 0 },
+            occupies_pos: true,
+            dwell: DwellWindow {
+                base_ms: 9_000,
+                range_ms: 9_000,
+            },
+            approach: ApproachSides::ALL,
+            ground_x: GroundAlign::Center,
+            ground_y: GroundAlign::Center,
+        },
+        // Snack shelf: tall shelf sprite, shallow 2-row walk-behind base
+        // (bookshelf-class overhang). Approachable obstacle like the vending
+        // machine — stand_point delegates to approach_point, which finds the
+        // open (east, on the west wall) side via reachability.
+        Furniture::SnackShelf => FurnitureDef {
+            footprint: Some(Size { w: 7, h: 2 }),
+            visual: Size { w: 7, h: 10 },
+            occupies_pos: false,
+            dwell: DwellWindow {
+                base_ms: 5_000,
+                range_ms: 5_000,
+            },
+            approach: ApproachSides::ALL,
+            ground_x: GroundAlign::Center,
+            ground_y: GroundAlign::End,
         },
         // Width 2 = the 2px base disc (was 4, over-blocking the 1px pole + empty
         // margins). Height 7 is deliberate, NOT the disc's 1px: the disc sits at
@@ -672,25 +717,6 @@ impl GroundAlign {
     }
 }
 
-/// Static footprints of the pantry bistro pair, lifted to consts so the
-/// placement clamp in `compute.rs` derives its cluster half-extent from the
-/// ONE table instead of a hand-folded copy (whose comment had already rotted
-/// against the row). Both rows are static `Some`; the `None` arm is a
-/// compile-time impossibility, so `panic!` (const-stable) makes that a build
-/// guarantee rather than a silent `Size{0,0}` that would only SHRINK the
-/// derived half-extent — a smaller cluster doesn't overlap walls, so the
-/// clamp tests would NOT catch it.
-pub(crate) const PANTRY_TABLE_FOOTPRINT: Size =
-    match furniture_def(Furniture::PantryTable).footprint {
-        Some(s) => s,
-        None => panic!("PantryTable must carry a static footprint"),
-    };
-pub(crate) const PANTRY_CHAIR_FOOTPRINT: Size =
-    match furniture_def(Furniture::PantryChair).footprint {
-        Some(s) => s,
-        None => panic!("PantryChair must carry a static footprint"),
-    };
-
 /// The desk's blocked-GROUND width — the full sprite width (side cabinets
 /// included), read from the ONE table row so the pod-grid's band-EDGE clamps
 /// (`compute.rs`) price the honest ground, not the `DESK_W` SLOT width. The
@@ -782,7 +808,7 @@ pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
             y: pos.y + (WALKING_Y_OFF - SEAT_RENDER_Y_OFF),
         },
         // waypoint render (`== walking_anchor`): S == pos.
-        Furniture::MeetingStand => pos,
+        Furniture::MeetingStand | Furniture::IslandStand => pos,
         // desk render is `seated_anchor`; its inverse is the bespoke
         // `desk_walk_anchor` (pinned by DESK_WALK_X/Y_OFF). ONE source.
         Furniture::Desk => desk_walk_anchor(pos),
@@ -1090,12 +1116,12 @@ mod tests {
     #[test]
     fn furniture_def_invariants_hold_for_every_row() {
         // The singleton/decor rows have no other test (unlike WaypointKind::ALL),
-        // so a typo in any of the 25 rows — wrong dwell sentinel, an accidental
+        // so a typo in any of the 26 rows — wrong dwell sentinel, an accidental
         // occupies_pos, a wrong plant footprint — is caught HERE rather than as a
         // silent wrong-mask/wrong-render at runtime.
         assert_eq!(
             Furniture::ALL.len(),
-            25,
+            26,
             "Furniture variant added/removed — update ALL (and this count)"
         );
         for &f in Furniture::ALL {
@@ -1114,11 +1140,16 @@ mod tests {
                 Furniture::Couch
                     | Furniture::MeetingSofa
                     | Furniture::MeetingStand
+                    | Furniture::IslandStand
                     | Furniture::Desk
             );
             assert_eq!(d.occupies_pos, expect_occupies, "{f:?}: occupies_pos");
-            // Meeting SEAT rows add no obstacle (3 seats sit on the 1 body row).
-            if matches!(f, Furniture::MeetingSofa | Furniture::MeetingStand) {
+            // SEAT/STAND rows add no obstacle (they sit/stand ON a separately
+            // stamped body: meeting sofa/table, kitchen island).
+            if matches!(
+                f,
+                Furniture::MeetingSofa | Furniture::MeetingStand | Furniture::IslandStand
+            ) {
                 assert!(
                     d.footprint.is_none(),
                     "{f:?}: seat row must carry no footprint"

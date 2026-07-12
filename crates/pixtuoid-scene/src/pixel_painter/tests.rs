@@ -731,8 +731,13 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
         // added to the Furniture table without a `SeatView::of` arm fails HERE
         // rather than silently rendering as an upright stander.
         assert!(
-            matches!(w.kind, WaypointKind::Couch | WaypointKind::MeetingSofa)
-                || matches!(w.kind, WaypointKind::MeetingStand),
+            matches!(
+                w.kind,
+                WaypointKind::Couch
+                    | WaypointKind::MeetingSofa
+                    | WaypointKind::MeetingStand
+                    | WaypointKind::Island
+            ),
             "seat kind {:?} has a settle foot-cell but is not explicitly handled \
              in SeatView::of — add an arm there",
             w.kind
@@ -1640,14 +1645,14 @@ fn furniture_room_decor_large_bounds_paint() {
 
 #[test]
 fn furniture_corner_clip_does_not_panic() {
-    use super::furniture::{paint_area_rug, paint_pantry_table, paint_side_table};
+    use super::furniture::{paint_area_rug, paint_side_table};
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     // Centre each piece near the (0,0) corner so part of the sprite has a
     // negative px/py, exercising the `< 0` / out-of-range `continue` clamps.
     let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 0, g: 0, b: 0 });
     paint_area_rug(&mut buf, 1, 1, 10, 8, theme);
     paint_side_table(&mut buf, 1, 1, theme);
-    paint_pantry_table(&mut buf, 1, 1, theme);
+    super::furniture::paint_kitchen_island(&mut buf, 1, 1, theme);
     // No panic reaching here is the assertion (negative coords are clipped).
 }
 

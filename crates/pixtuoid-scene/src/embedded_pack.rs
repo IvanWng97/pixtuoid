@@ -192,6 +192,7 @@ fn load_embedded_pack() -> Result<Pack> {
             "pantry_small.sprite",
             "whiteboard.sprite",
             "bookshelf.sprite",
+            "snack_shelf.sprite",
             "tv_stand.sprite",
             "phone_booth.sprite",
             "standing_desk.sprite",

@@ -134,7 +134,6 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     // sprite) for what the user points at, `.footprint` where the obstacle is
     // the thing — so a geometry edit can't leave a stale hit box behind.
     let visual = |f| furniture_def(f).visual;
-    let footprint = |f| furniture_def(f).footprint.unwrap_or(Size { w: 0, h: 0 });
     let px = mx;
     let py = my * 2;
 
@@ -164,8 +163,12 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
             // Couch hovers via the one-time region above (3 seat waypoints).
             WaypointKind::Couch => continue,
             WaypointKind::Pantry => layout.pantry_counter_size,
-            // Meeting slots hover via the dedicated meeting_sofas loop below.
-            WaypointKind::MeetingSofa | WaypointKind::MeetingStand => continue,
+            // Meeting slots hover via the dedicated meeting_sofas loop below;
+            // island stands are footprint-less slots on the island body,
+            // which has its own hover region — skip.
+            WaypointKind::MeetingSofa | WaypointKind::MeetingStand | WaypointKind::Island => {
+                continue
+            }
             // Footprint owned by furniture_def — same shape the mask + stand
             // point use, so the hover box can't drift from them.
             other => match furniture_def(other.furniture()).footprint {
@@ -182,13 +185,16 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
                 WaypointKind::StandingDesk => "Standing Desk",
                 WaypointKind::VendingMachine => "Vending Machine",
                 WaypointKind::Printer => "Printer",
-                // Proven unreachable today (couch + meeting slots `continue`
-                // above), but this is a per-frame mouse path: skip an unexpected
-                // kind rather than panic the whole TUI if a future refactor adds
-                // a WaypointKind or drops one of those earlier `continue`s.
-                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {
-                    continue
-                }
+                WaypointKind::SnackShelf => "Snack Shelf",
+                // Proven unreachable today (couch + meeting/island slots
+                // `continue` above), but this is a per-frame mouse path: skip an
+                // unexpected kind rather than panic the whole TUI if a future
+                // refactor adds a WaypointKind or drops one of those earlier
+                // `continue`s.
+                WaypointKind::Couch
+                | WaypointKind::MeetingSofa
+                | WaypointKind::MeetingStand
+                | WaypointKind::Island => continue,
             });
         }
     }
@@ -217,19 +223,11 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Pantry table
-    if let Some(t) = layout.pantry_table {
-        let Size { w, h } = footprint(Furniture::PantryTable);
-        if hit(t.x.saturating_sub(w / 2), t.y.saturating_sub(h / 2), w, h) {
-            return Some("Pantry Table");
-        }
-    }
-
-    // Pantry chairs
-    for chair in &layout.pantry_chairs {
-        let Size { w, h } = footprint(Furniture::PantryChair); // left-biased offset 2 matches the mask stamp
-        if hit(chair.x.saturating_sub(2), chair.y.saturating_sub(2), w, h) {
-            return Some("Chair");
+    // Kitchen island (the pantry's centre piece; hover the full sprite).
+    if let Some(p) = layout.kitchen_island {
+        let Size { w, h } = visual(Furniture::KitchenIsland);
+        if hit(p.x.saturating_sub(w / 2), p.y.saturating_sub(h / 2), w, h) {
+            return Some("Kitchen Island");
         }
     }
 

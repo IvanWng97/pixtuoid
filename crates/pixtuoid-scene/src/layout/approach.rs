@@ -370,7 +370,10 @@ mod tests {
         let seat = |k| {
             matches!(
                 k,
-                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                WaypointKind::Couch
+                    | WaypointKind::MeetingSofa
+                    | WaypointKind::MeetingStand
+                    | WaypointKind::Island
             )
         };
         // 160×120 (cubicle_aisle 8 → no vending/printer) AND 160×150 (cubicle_aisle ≥10 →
@@ -422,7 +425,10 @@ mod tests {
         let obstacle = |k| {
             !matches!(
                 k,
-                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                WaypointKind::Couch
+                    | WaypointKind::MeetingSofa
+                    | WaypointKind::MeetingStand
+                    | WaypointKind::Island
             )
         };
         for (bw, bh) in [
@@ -750,7 +756,10 @@ mod tests {
         for &kind in WaypointKind::ALL {
             let expected = matches!(
                 kind,
-                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                WaypointKind::Couch
+                    | WaypointKind::MeetingSofa
+                    | WaypointKind::MeetingStand
+                    | WaypointKind::Island
             );
             assert_eq!(
                 furniture_def(kind.furniture()).occupies_pos,
@@ -818,7 +827,7 @@ mod tests {
         // catches a new variant that was added there but not to ALL.
         assert_eq!(
             WaypointKind::ALL.len(),
-            8,
+            10,
             "a WaypointKind variant was added/removed — update ALL",
         );
     }

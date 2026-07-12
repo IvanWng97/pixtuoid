@@ -171,14 +171,16 @@ pub struct SceneLayout {
     pub meeting_furniture: Vec<MeetingFurniture>,
     pub room_walls: Vec<WallSegment>,
     pub top_margin: u16,
-    pub pantry_table: Option<Point>,
-    pub pantry_chairs: Vec<Point>,
     /// Footprint (width, height) of the pantry counter sprite. (32, 10)
     /// when the pantry is large enough for the detailed kitchen run;
     /// (20, 8) fallback for narrow terminals where the wide sprite
     /// wouldn't fit. The renderer reads this to pick which sprite to
     /// paint (`pantry` vs `pantry_small`).
     pub pantry_counter_size: Size,
+    /// Kitchen-island body centre (pantry v2's centre piece) — `None` when the
+    /// room can't host it clear of walls + the counter (refuse-don't-force).
+    /// Its 3 `WaypointKind::Island` stand slots ride in `waypoints`.
+    pub kitchen_island: Option<Point>,
     pub corridor: Option<Bounds>,
     /// Centre point of the lounge couch sprite (the middle of its 3 seats).
     /// The couch is 3 separate seat waypoints; the sprite + rug + side table

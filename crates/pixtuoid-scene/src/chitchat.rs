@@ -166,15 +166,17 @@ impl ActiveChitchat {
     }
 }
 
-/// The chitchat `wp_idx` a waypoint visitor groups under. The 3 lounge-couch
-/// seats collapse to ONE venue (the first couch's waypoint index) so they host
-/// a single group conversation like the meeting room — WITHOUT overloading the
-/// meeting-only `room_id` field (which indexes `meeting_furniture`). Every other
-/// waypoint keys on its own index. `couch_group_idx` is the first `Couch`
-/// waypoint's index, or `None` if the layout has no couch.
-pub fn venue_wp_idx(kind: WaypointKind, wp_idx: usize, couch_group_idx: Option<usize>) -> usize {
+/// The chitchat `wp_idx` a waypoint visitor groups under. Multi-slot venues
+/// (the 3 lounge-couch seats, the kitchen island's stands) collapse to ONE
+/// venue — the first waypoint of that kind — so
+/// each hosts a single group conversation like the meeting room, WITHOUT
+/// overloading the meeting-only `room_id` field (which indexes
+/// `meeting_furniture`). Every other waypoint keys on its own index.
+/// `group_idx` is the first waypoint index OF THE SAME KIND (or `None` if
+/// none exists — degenerate, falls back to self).
+pub fn venue_wp_idx(kind: WaypointKind, wp_idx: usize, group_idx: Option<usize>) -> usize {
     match kind {
-        WaypointKind::Couch => couch_group_idx.unwrap_or(wp_idx),
+        WaypointKind::Couch | WaypointKind::Island => group_idx.unwrap_or(wp_idx),
         _ => wp_idx,
     }
 }
@@ -189,6 +191,8 @@ pub fn supports_chitchat(kind: WaypointKind) -> bool {
             | WaypointKind::Printer
             | WaypointKind::MeetingSofa
             | WaypointKind::MeetingStand
+            | WaypointKind::Island
+            | WaypointKind::SnackShelf
     )
 }
 
@@ -505,6 +509,11 @@ mod tests {
         // Non-couch waypoints are unaffected.
         assert_eq!(venue_wp_idx(WaypointKind::Pantry, 12, gi), 12);
         assert_eq!(venue_wp_idx(WaypointKind::MeetingSofa, 3, gi), 3);
+        // The kitchen island's stands collapse like the couch: one shared
+        // conversation per island.
+        assert_eq!(venue_wp_idx(WaypointKind::Island, 9, Some(7)), 7);
+        assert_eq!(venue_wp_idx(WaypointKind::Island, 7, Some(7)), 7);
+        assert_eq!(venue_wp_idx(WaypointKind::SnackShelf, 4, Some(2)), 4);
         // No couch in the layout → falls back to the visitor's own index.
         assert_eq!(venue_wp_idx(WaypointKind::Couch, 5, None), 5);
     }
@@ -512,6 +521,8 @@ mod tests {
     #[test]
     fn supports_chitchat_kinds() {
         assert!(supports_chitchat(WaypointKind::Pantry));
+        assert!(supports_chitchat(WaypointKind::Island));
+        assert!(supports_chitchat(WaypointKind::SnackShelf));
         assert!(supports_chitchat(WaypointKind::Couch));
         assert!(supports_chitchat(WaypointKind::VendingMachine));
         assert!(supports_chitchat(WaypointKind::Printer));

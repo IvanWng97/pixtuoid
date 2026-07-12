@@ -115,9 +115,11 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
                 WaypointKind::StandingDesk => Some("Standing Desk"),
                 WaypointKind::VendingMachine => Some("Vending Machine"),
                 WaypointKind::Printer => Some("Printer"),
-                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {
-                    None
-                }
+                WaypointKind::SnackShelf => Some("Snack Shelf"),
+                WaypointKind::Couch
+                | WaypointKind::MeetingSofa
+                | WaypointKind::MeetingStand
+                | WaypointKind::Island => None,
             };
             if let Some(label) = want {
                 assert!(
@@ -134,11 +136,11 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
                 "seed {seed}: Meeting Table"
             );
         }
-        if layout.pantry_table.is_some() {
-            assert!(labels.contains("Pantry Table"), "seed {seed}: Pantry Table");
-        }
-        if !layout.pantry_chairs.is_empty() {
-            assert!(labels.contains("Chair"), "seed {seed}: Chair");
+        if layout.kitchen_island.is_some() {
+            assert!(
+                labels.contains("Kitchen Island"),
+                "seed {seed}: Kitchen Island"
+            );
         }
         if layout.floor_lamp.is_some() {
             assert!(labels.contains("Floor Lamp"), "seed {seed}: Floor Lamp");

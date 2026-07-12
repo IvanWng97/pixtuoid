@@ -1,6 +1,65 @@
 use super::*;
 
 #[test]
+fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
+    // Roomy Senior floor: island + its 3 stands (E/W flank + the north
+    // "bartender" slot) all inside the pantry, clear of the counter's padded
+    // north (the anti-merge routing line).
+    let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
+    let island = l
+        .kitchen_island
+        .expect("84-wide Senior pantry hosts the island");
+    let pr = l.pantry_room.expect("pantry");
+    assert!(island.x >= pr.x && island.x < pr.x + pr.width);
+    let stands: Vec<_> = l
+        .waypoints
+        .iter()
+        .filter(|w| matches!(w.kind, WaypointKind::Island))
+        .collect();
+    assert_eq!(stands.len(), 3, "E + W + N stands");
+    for s in &stands {
+        assert!(
+            s.pos.x >= pr.x && s.pos.x < pr.x + pr.width && s.pos.y >= pr.y,
+            "stand {:?} must stay in the pantry",
+            s.pos
+        );
+    }
+    // Small Standard floor: the 26-wide pantry can't host a 14-wide island +
+    // stands + clearances — refuse, don't force (and no stray stand waypoints).
+    let s = SceneLayout::compute_with_seed(96, 70, None, 0).expect("fits");
+    assert_eq!(s.kitchen_island, None, "26-wide pantry refuses the island");
+    assert!(
+        !s.waypoints
+            .iter()
+            .any(|w| matches!(w.kind, WaypointKind::Island)),
+        "no island ⇒ no island stands"
+    );
+}
+
+#[test]
+fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
+    // Roomy floor: one shelf waypoint against the west wall (the east bridge
+    // must stay open), its ground inside the room.
+    let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
+    let pr = l.pantry_room.expect("pantry");
+    let shelf = l
+        .waypoints
+        .iter()
+        .find(|w| matches!(w.kind, WaypointKind::SnackShelf))
+        .expect("roomy pantry hosts the shelf");
+    let vis = furniture_def(Furniture::SnackShelf).visual;
+    assert_eq!(shelf.pos.x, pr.x + 1 + vis.w / 2, "west-wall hug");
+    // Narrow room (36-wide buffer ⇒ 6-7px pantry): refuse.
+    let s = SceneLayout::compute_with_seed(36, 100, None, 1).expect("fits");
+    assert!(
+        !s.waypoints
+            .iter()
+            .any(|w| matches!(w.kind, WaypointKind::SnackShelf)),
+        "a 6px room refuses the 7px shelf"
+    );
+}
+
+#[test]
 fn dual_meeting_layout_exposes_room_1_bounds() {
     // `meeting_room_2` was computed-then-DISCARDED inside compute_with_seed, so
     // `meeting_furniture[1]` (+ its room_id==1 waypoints) had NO container a
@@ -316,6 +375,12 @@ fn compute_places_all_waypoint_kinds() {
             // valid anywhere inside the cubicle band — the
             // tighter check just confirms they're south of the
             // top wall.
+            // The pantry-redesign kinds all live inside the pantry room.
+            WaypointKind::Island | WaypointKind::SnackShelf => {
+                let pr = l.pantry_room.expect("pantry room hosts the new kinds");
+                assert!(w.pos.y >= pr.y && w.pos.y < pr.y + pr.height);
+                assert!(w.pos.x >= pr.x && w.pos.x < pr.x + pr.width);
+            }
             WaypointKind::PhoneBooth | WaypointKind::StandingDesk => {
                 assert!(w.pos.y >= l.top_margin);
             }

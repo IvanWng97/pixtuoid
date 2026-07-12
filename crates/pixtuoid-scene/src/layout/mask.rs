@@ -110,8 +110,7 @@ pub(super) fn build_walkable_mask(
     door: Option<Point>,
     home_desks: &[Point],
     meeting_furniture: &[MeetingFurniture],
-    pantry_table: Option<Point>,
-    pantry_chairs: &[Point],
+    kitchen_island: Option<Point>,
     waypoints: &[Waypoint],
     plants: &[PlantItem],
     floor_lamp: Option<Point>,
@@ -266,36 +265,21 @@ pub(super) fn build_walkable_mask(
         }
     }
 
-    if let Some(t) = pantry_table {
-        let def = furniture_def(Furniture::PantryTable);
+    if let Some(island) = kitchen_island {
+        // Island body: block the south-anchored 14×4 base only; the two
+        // countertop rows overhang (walk-behind, invariant #6) so a north
+        // stander tucks behind the counter, occluded by the island's y-sort.
+        let def = furniture_def(Furniture::KitchenIsland);
         if let Some(fp) = def.footprint {
             stamp_ground(
                 &mut mask,
                 Anchor::Center,
-                t,
+                island,
                 fp,
                 def.visual,
                 def.ground_x,
                 def.ground_y,
                 OBSTACLE_PAD_PX,
-            );
-        }
-    }
-    for chair in pantry_chairs {
-        // Small stool, stamped CENTERED on its pos like the other centered
-        // furniture — was left/top-biased (offset 2), which blocked floor 1px
-        // north & west of the 2×2 the painter actually draws.
-        let def = furniture_def(Furniture::PantryChair);
-        if let Some(fp) = def.footprint {
-            stamp_ground(
-                &mut mask,
-                Anchor::Center,
-                *chair,
-                fp,
-                def.visual,
-                def.ground_x,
-                def.ground_y,
-                1,
             );
         }
     }
@@ -552,7 +536,6 @@ mod tests {
             &[],
             &[],
             None,
-            &[],
             &[],
             &[],
             None,

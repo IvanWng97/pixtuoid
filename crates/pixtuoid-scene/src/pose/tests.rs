@@ -2353,7 +2353,9 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     // Step until the agent is clearly away from its desk.
     let mut last = seat;
     let mut away_frame = None;
-    for i in 0..1500u64 {
+    // 3000 frames (~100s) spans several wander cycles, so one near-desk cycle
+    // pick can't starve the away-detection.
+    for i in 0..3000u64 {
         let t = now + Duration::from_millis(i * 33);
         if let Some(a) = character_anchor(
             &idle,
@@ -2370,13 +2372,19 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
             let d = (a.x as i32 - seat.x as i32)
                 .abs()
                 .max((a.y as i32 - seat.y as i32).abs());
-            if d > 30 {
+            // 20, not 30: "clearly away" must hold for the NEAREST legitimate
+            // trip destination — the lounge couch sits ~26px chebyshev from
+            // desk 0 at this fixture, and which destination a cycle picks
+            // re-rolls whenever the waypoint SET changes (the pantry-v2 kinds
+            // re-rolled it onto the couch). The assertion under test is
+            // exit-from-current-position, not trip length.
+            if d > 20 {
                 away_frame = Some(i);
                 break;
             }
         }
     }
-    let away_frame = away_frame.expect("agent should walk away from desk within 50 s");
+    let away_frame = away_frame.expect("agent should walk away from desk within 100 s");
 
     // Session ends now: set exiting_at at this frame.
     let exit_at = now + Duration::from_millis(away_frame * 33);

@@ -398,7 +398,7 @@ fn resolve_characters(
                             (anim, back_couch_anchor(stand, char_w), 9u16, flip)
                         }
                         // Meeting stand: beside the table, facing inward.
-                        WaypointKind::MeetingStand => {
+                        WaypointKind::MeetingStand | WaypointKind::Island => {
                             let (anim, flip) = seat_sprite(kind, wp_obj.facing);
                             (anim, waypoint_anchor(stand, char_w), 12u16, flip)
                         }
@@ -409,7 +409,8 @@ fn resolve_characters(
                         WaypointKind::PhoneBooth
                         | WaypointKind::StandingDesk
                         | WaypointKind::VendingMachine
-                        | WaypointKind::Printer => {
+                        | WaypointKind::Printer
+                        | WaypointKind::SnackShelf => {
                             ("standing", waypoint_anchor(stand, char_w), 12u16, false)
                         }
                     };
