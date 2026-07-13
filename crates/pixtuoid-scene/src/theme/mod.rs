@@ -384,6 +384,14 @@ mod tests {
                     t.name
                 );
             }
+            // The water cooler's glug bubble paints tank_water_line over the
+            // bottle's fixed fill — equal colors erase the third appliance anim.
+            assert_ne!(
+                t.furniture.tank_water_line,
+                crate::pixel_painter::COOLER_WATER,
+                "{}: glug bubble invisible in the cooler bottle",
+                t.name
+            );
             // The busy printer ejects its page onto corridor carpet — the paper
             // must not dissolve into any carpet speckle color.
             for c in [

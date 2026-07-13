@@ -1075,7 +1075,7 @@ fn desk_columns_stay_on_one_lattice_and_never_shift_with_width() {
 
 #[test]
 fn desk_rows_stay_on_one_lattice() {
-    // The Y twin of the #553 column invariant (owner catch: the partial
+    // The Y twin of the #553 column invariant (the partial
     // bottom row sat 14px below the last full row vs the 23px inter-pod
     // rhythm). Every desk row top must be on the row lattice: offset from
     // the grid origin is k*stride_y + {0 | intra row step}.

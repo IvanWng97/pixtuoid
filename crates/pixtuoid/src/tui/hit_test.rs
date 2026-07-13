@@ -169,6 +169,11 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
             WaypointKind::MeetingSofa | WaypointKind::MeetingChair | WaypointKind::Island => {
                 continue
             }
+            // The shelf's sprite is CENTRED on the waypoint (7x10 visual) while
+            // its walkable footprint is the End-anchored 7x2 south strip — a
+            // footprint hover box would leave only a 2px band mid-sprite, so
+            // hover the visual, like the fish tank and island bodies.
+            WaypointKind::SnackShelf => furniture_def(Furniture::SnackShelf).visual,
             // Footprint owned by furniture_def — same shape the mask + stand
             // point use, so the hover box can't drift from them.
             other => match furniture_def(other.furniture()).footprint {
@@ -741,10 +746,10 @@ mod tests {
         }
     }
 
-    // --- hit_test_furniture: kinds the compute path never emits -------------
-    // compute_with_seed never produces PlantKind::Ficus or WallDecor::Bulletin
-    // Board, so the harness real-layout loop can't reach those two return arms.
-    // Push them into the pub Vecs of a computed layout and hit their centers.
+    // --- hit_test_furniture: arms the real-layout loop may not reach --------
+    // WallDecor::BulletinBoard is never emitted by compute_with_seed, and the
+    // Ficus only appears on ROOMY-band floors — push them into the pub Vecs of
+    // a computed layout and hit their centers, size-independent.
 
     #[test]
     fn furniture_hit_test_ficus_via_synthetic_plant() {
@@ -920,6 +925,38 @@ mod tests {
         let p = Point { x: 40, y: 40 };
         layout.fish_tank = Some(p);
         assert_eq!(hit_test_furniture(&layout, p.x, p.y / 2), Some("Fish Tank"));
+    }
+
+    #[test]
+    fn snack_shelf_hovers_across_its_whole_sprite_not_just_the_footprint() {
+        // The shelf sprite (7x10 visual) is CENTRED on the waypoint while the
+        // walkable footprint is the End-anchored 7x2 south strip. Hover must
+        // cover the sprite a user actually sees — the north (top shelf) row
+        // and the centre both label; a footprint-centred box leaves only a
+        // 2px mid-sprite band.
+        let layout = Layout::compute(192, 160, Some(12)).expect("layout");
+        let shelf = layout
+            .waypoints
+            .iter()
+            .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::SnackShelf)
+            .map(|w| w.pos)
+            .expect("192x160 places the snack shelf");
+        let vis =
+            pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture::SnackShelf)
+                .visual;
+        // div_ceil: hit_test doubles the cell row back to buffer px, so an odd
+        // top edge must probe the cell whose pixel pair falls INSIDE the box.
+        let top_y = shelf.y.saturating_sub(vis.h / 2);
+        assert_eq!(
+            hit_test_furniture(&layout, shelf.x, top_y.div_ceil(2)),
+            Some("Snack Shelf"),
+            "top shelf row hovers"
+        );
+        assert_eq!(
+            hit_test_furniture(&layout, shelf.x, shelf.y / 2),
+            Some("Snack Shelf"),
+            "sprite centre hovers"
+        );
     }
 
     #[test]

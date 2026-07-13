@@ -166,8 +166,6 @@ pub(crate) fn compute_crop_rect(
     rows: u16,
     now: SystemTime,
 ) -> Result<Option<ratatui::layout::Rect>> {
-    use pixtuoid_scene::layout::WaypointKind;
-
     // Fail loudly like --theme/--weather above — a typo'd crop target silently
     // writing the full uncropped PNG defeats the point of the flag.
     let target_pixel: pixtuoid_scene::layout::Point = if let Some(ref agent_label) = args.crop_agent
@@ -199,16 +197,11 @@ pub(crate) fn compute_crop_rect(
         let found = match furniture_str.to_lowercase().as_str() {
             "desk" => layout.home_desks.first().copied(),
             name => {
-                let kind = match name {
-                    "pantry" => WaypointKind::Pantry,
-                    "couch" => WaypointKind::Couch,
-                    "vending" => WaypointKind::VendingMachine,
-                    "printer" => WaypointKind::Printer,
-                    "meeting" | "sofa" => WaypointKind::MeetingSofa,
-                    other => anyhow::bail!(
-                        "unknown --crop-furniture {other:?}; valid: pantry | couch | vending | printer | meeting | sofa | desk"
-                    ),
-                };
+                let kind = crate::scenes::waypoint_target(name).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unknown --crop-furniture {name:?}; valid: pantry | couch | vending | printer | meeting | sofa | chair | island | snackshelf | desk"
+                    )
+                })?;
                 layout
                     .waypoints
                     .iter()

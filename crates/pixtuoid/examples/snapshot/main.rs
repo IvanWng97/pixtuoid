@@ -276,7 +276,8 @@ struct SnapshotArgs {
 
     /// Crop the generated PNG (and text preview) to a 40x24-cell window
     /// centered on a furniture piece. Static-PNG path only (see --crop-agent).
-    /// One of: pantry | couch | vending | printer | meeting | sofa | desk.
+    /// One of: pantry | couch | vending | printer | meeting | sofa | chair |
+    /// island | snackshelf | desk.
     #[arg(long, conflicts_with_all = ["gif", "anim"])]
     crop_furniture: Option<String>,
 

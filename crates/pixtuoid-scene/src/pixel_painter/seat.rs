@@ -192,11 +192,10 @@ impl SeatView {
             // Behind a couch/sofa back (furniture sorts at pos+3) or tied with a
             // front sofa (pos+2, insertion order puts the sitter on top).
             SeatView::Front | SeatView::Back => wp_pos.y + 2,
-            // Historical stand-beside-the-table clearance (+3 over the
-            // table's y+2). No SEAT kind routes Side since the head-of-table
-            // chairs went Front; only the six non-seat obstacle kinds still
-            // produce Side, and they never settle onto a seat, so this arm is
-            // a defensive default rather than a live seat key.
+            // Stand-beside-the-table clearance (+3 over the table's y+2).
+            // No seat kind routes Side today (the head-of-table chairs went
+            // Front) and the non-seat obstacle kinds never settle onto a
+            // seat, so this arm is a defensive default, not a live seat key.
             SeatView::Side { .. } => wp_pos.y + 3,
             // Plain feet-row key — the AtWaypoint default for a stander. The
             // bartender's pos row sits INSIDE the island body, below the
@@ -222,7 +221,7 @@ impl SeatView {
 ///   (`seated_foot_cell(Desk)` = `desk_walk_anchor`) is a settle target too once
 ///   the desk's arrival glides onto it (see `pose::desk_approach_cell`). The desk
 ///   sitter faces the camera (front) and renders at the desk's seated z-key
-///   (`seated_anchor.y + 12 = desk.y + 4`, below the desk furniture's `desk.y+8`),
+///   (`seated_anchor.y + 12 = desk.y + 4`, below the desk furniture's `desk.y + 7`),
 ///   so the glide stays behind the desk — no front-cross.
 pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView, u16)> {
     use crate::layout::{seated_foot_cell, Furniture};
@@ -246,6 +245,6 @@ pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView
 }
 
 /// The home-desk sitter's z-key offset south of `desk`: `seated_anchor.y(=desk.y
-/// − 8) + sprite_h(12) = desk.y + 4`. Below the desk furniture key (`desk.y + 8`)
+/// − 8) + sprite_h(12) = desk.y + 4`. Below the desk furniture key (`desk.y + 7`)
 /// so the sitter and its sit-down glide always sort behind the desk monitor.
 pub(super) const DESK_SEAT_Z_OFF: u16 = 4;

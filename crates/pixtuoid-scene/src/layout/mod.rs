@@ -224,7 +224,7 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 /// GROUND is the full `DESK_W+4`-px sprite width ([`decor::DESK_GROUND_W`],
 /// side cabinets included) — the +4 overhang rides the aisle, so every
 /// band-EDGE clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow
-/// drift). Laptop-density pass (2026-07-11): 12→10 / 6→5.
+/// drift).
 pub const DESK_W: u16 = 10;
 pub const DESK_H: u16 = 5;
 /// The desk's ground-CONTACT depth (rows) — only the front edge / legs touch

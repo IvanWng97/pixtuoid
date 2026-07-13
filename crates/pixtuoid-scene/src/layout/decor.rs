@@ -367,8 +367,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
     // singletons that also spread it (meeting tables, side table)
     // resolve `End` to offset 0 anyway (footprint == visual), so they stay
     // byte-identical; the two CENTERED exceptions (meeting sofa body, floor
-    // lamp) override `ground_y` explicitly below. `ground_x` is `Center` for
-    // every row today.
+    // lamp) override `ground_y` explicitly below. `ground_x`: see the field
+    // doc (Center everywhere, test-pinned).
     const DECOR: FurnitureDef = FurnitureDef {
         footprint: None,
         visual: Size { w: 0, h: 0 },
@@ -1124,8 +1124,8 @@ mod tests {
         // INSIDE its visual box (a rect poking past the sprite would block
         // ground the renderer never draws — invisible walls), and the
         // declared `ground_y` must match the intent class: End (south strip)
-        // for the overhang rows, Center for MeetingSofaBody/FloorLamp, Start
-        // for the desk. A new overhanging kind that forgets to classify
+        // for the overhang rows incl. the walk-behind desk, Center for
+        // MeetingSofaBody/FloorLamp. A new overhanging kind that forgets to classify
         // itself (leaving DECOR's End default is correct for overhang; a
         // wrong Center/Start on an overhang row) is caught HERE, not as a
         // silent wrong-mask at runtime. Flat boxes (footprint == visual) only
@@ -1146,20 +1146,27 @@ mod tests {
             // flat boxes aren't overhang so they're skipped.
             let center_exception =
                 matches!(kind, Furniture::MeetingSofaBody | Furniture::FloorLamp);
-            if def.visual.h > fp.h && !center_exception && kind != Furniture::Desk {
+            if def.visual.h > fp.h && !center_exception {
                 assert_eq!(
                     def.ground_y,
                     GroundAlign::End,
                     "{kind:?}: an overhang row must south-anchor (End) unless documented"
                 );
             }
+            // Pins the "ground_x is Center for every row" claim the field doc
+            // makes — a first Start/End row updates that doc alongside this.
+            assert_eq!(
+                def.ground_x,
+                GroundAlign::Center,
+                "{kind:?}: first non-Center ground_x — update the ground_x field doc"
+            );
         }
     }
 
     #[test]
     fn furniture_def_invariants_hold_for_every_row() {
         // The singleton/decor rows have no other test (unlike WaypointKind::ALL),
-        // so a typo in any of the 26 rows — wrong dwell sentinel, an accidental
+        // so a typo in any row — wrong dwell sentinel, an accidental
         // occupies_pos, a wrong plant footprint — is caught HERE rather than as a
         // silent wrong-mask/wrong-render at runtime.
         assert_eq!(

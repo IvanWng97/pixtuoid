@@ -101,6 +101,8 @@ pub(crate) use sim::{sim_step, SimStores};
 // hence the cfg: the lib target has no consumer.
 #[cfg(test)]
 pub(crate) use effects::{FLAME_DEEP, FLAME_TIP};
+#[cfg(test)]
+pub(crate) use furniture::COOLER_WATER;
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 
 /// The coffee-machine sub-region within the pantry counter sprite, as sprite-local
@@ -520,17 +522,9 @@ fn paint_frame(
         paint_door_frame_v(ctx.buf, ctx.theme, dw.start, dw.end);
     }
 
-    // Meeting sofas + table and the kitchen island are all painted by
-    // the y-sorted Drawable pass below (MeetingSofa / MeetingTable /
-    // KitchenIsland variants). They used to be painted here in the
-    // background pass too — leftover from before the y-sort refactor;
-    // the duplicate paints were dead pixels overwritten 50 lines
-    // later. Removed.
-    //
-    // Entry mat was also painted here (a small blue rug just south of
-    // the door). The old wooden-door era used it to define the arrival
-    // zone, but the elevator already defines that visually + the blue
-    // rectangle looked out of place under the elevator.
+    // Meeting sofas + table and the kitchen island paint in the y-sorted
+    // Drawable pass below — nothing room-scale belongs in this background
+    // pass, or it double-paints under the sorted copy.
 
     // Procedural room fill — small pixel items that make rooms feel lived-in.
     // Ground footprint rule: walkable mask is NOT affected by these (they're
@@ -591,11 +585,9 @@ fn paint_frame(
         ) {
             continue;
         }
-        // Fit the ellipse to the piece's actual sprite width — the flat 7
-        // half-width doubled a 7px shelf's shadow. The .min(7) is a CAP at
-        // the old value (currently dead: no shadowed sprite reaches 13px) so
-        // a future wide piece can't over-shadow; the narrow appliances
-        // deliberately churned to their fitted widths.
+        // Fit the ellipse to the piece's actual sprite width — a flat 7
+        // half-width doubles a narrow shelf's shadow. The .min(7) caps a
+        // future wide piece from over-shadowing.
         let vis_w = crate::layout::furniture_def(wp.kind.furniture()).visual.w;
         let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
         paint_shadow(
@@ -828,9 +820,9 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
     anim.frames.get(idx).or_else(|| anim.frames.first())
 }
 
-/// Desk cubicles — each carries its divider + cabinet + bin + screen glow.
+/// Desk cubicles — each carries its divider + cabinet + screen glow.
 /// The desk sprite (14×7) sorts at `desk.y + visual.h` = `desk.y + 7`
-/// (`DESK_H + 2`; was `desk.y + 8` pre-density) — one row past its visual south
+/// (`DESK_H + 2`) — one row past its visual south
 /// row, just past the seated worker's feet (`desk.y + 4`) so the sitter stays
 /// visually behind the desk. Z is a VISUAL property: it tracks the sprite, not
 /// the blocked ground — which is why the walk-behind footprint change (shrinking

@@ -931,7 +931,7 @@ fn desk_settle_z_key_matches_the_seated_arm() {
     // The desk's settle z-key (desk.y + DESK_SEAT_Z_OFF) must equal the z-key
     // the seated desk arms use (anchor_no_breath.y + 12 with anchor =
     // seated_anchor) so the glide and the settled render sort identically —
-    // and both stay below the desk furniture z-key (desk.y + 8).
+    // and both stay below the desk furniture z-key (desk.y + visual.h).
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for w in [CHARACTER_SPRITE_W, 10] {
             let seated_arm_z = seated_anchor(desk, w).y + 12;
@@ -1135,10 +1135,13 @@ fn back_view_seats_sort_over_their_sitter() {
 #[test]
 fn character_anchor_y_exceeds_desk_when_south_of_it() {
     // The bug-fix invariant: a character whose feet (anchor.y + 12)
-    // land BELOW the desk's bottom row (desk.y + 8) must sort AFTER
+    // land BELOW the desk's bottom row (desk.y + visual.h) must sort AFTER
     // the desk and therefore paint on top.
     let desk_y: u16 = 20;
-    let desk_anchor_y = desk_y + 8;
+    let desk_anchor_y = desk_y
+        + crate::layout::furniture_def(crate::layout::Furniture::Desk)
+            .visual
+            .h;
     let char_feet_anchor = (desk_y + 10) + 12; // walker south of desk
     assert!(
         char_feet_anchor > desk_anchor_y,
@@ -1155,7 +1158,10 @@ fn character_anchor_y_below_desk_when_seated_at_it() {
     let desk_y: u16 = 20;
     let seated_anchor = seated_anchor(Point { x: 0, y: desk_y }, CHARACTER_SPRITE_W);
     let char_feet_anchor = seated_anchor.y + 12;
-    let desk_anchor_y = desk_y + 8;
+    let desk_anchor_y = desk_y
+        + crate::layout::furniture_def(crate::layout::Furniture::Desk)
+            .visual
+            .h;
     assert!(
         char_feet_anchor < desk_anchor_y,
         "seated char must sort before desk: char={char_feet_anchor}, desk={desk_anchor_y}"
@@ -2045,6 +2051,41 @@ fn agent_palette_same_id_different_cwd_changes_outfit() {
 
 /// Shared rig for the seam tests: one fresh agent (mid entry-walk), a real
 /// layout, and every sim store — no pixel buffer anywhere near the sim half.
+/// The six sim stores, owned — each sim test needs the full mutable set and
+/// hand-rolling them per test triple-spelled the bundle (E-review nit).
+struct OwnedSimStores {
+    router: crate::pathfind::AStarRouter,
+    overlay: OccupancyOverlay,
+    history: pose::PoseHistory,
+    motion: std::collections::HashMap<pixtuoid_core::AgentId, crate::motion::MotionState>,
+    light: LightingState,
+    chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
+}
+
+impl OwnedSimStores {
+    fn new() -> Self {
+        Self {
+            router: crate::pathfind::AStarRouter::new(),
+            overlay: OccupancyOverlay::new(),
+            history: pose::PoseHistory::new(),
+            motion: std::collections::HashMap::new(),
+            light: LightingState::new(),
+            chitchat: std::collections::HashMap::new(),
+        }
+    }
+
+    fn stores(&mut self) -> SimStores<'_> {
+        SimStores {
+            router: &mut self.router,
+            overlay: &mut self.overlay,
+            history: &mut self.history,
+            motion: &mut self.motion,
+            light: &mut self.light,
+            chitchat: &mut self.chitchat,
+        }
+    }
+}
+
 fn sim_rig() -> (SceneState, Layout, pixtuoid_core::AgentId, SystemTime, Pack) {
     let pack = crate::embedded_pack::test_default_pack();
     let layout = Layout::compute_with_seed(160, 96, None, 0).expect("160x96 lays out");
@@ -2070,20 +2111,8 @@ fn sim_step_advances_motion_without_painting() {
     let (scene, layout, id, now0, pack) = sim_rig();
     let coffee = HashMap::new();
 
-    let mut router = crate::pathfind::AStarRouter::new();
-    let mut overlay = OccupancyOverlay::new();
-    let mut history = pose::PoseHistory::new();
-    let mut motion = HashMap::new();
-    let mut light = LightingState::new();
-    let mut chitchat = HashMap::new();
-    let mut stores = SimStores {
-        router: &mut router,
-        overlay: &mut overlay,
-        history: &mut history,
-        motion: &mut motion,
-        light: &mut light,
-        chitchat: &mut chitchat,
-    };
+    let mut owned = OwnedSimStores::new();
+    let mut stores = owned.stores();
 
     let walk_t = |f: &SimFrame| match f.poses.get(&id) {
         Some(Some(Pose::Walking { t_x1000, .. })) => *t_x1000,
@@ -2122,8 +2151,9 @@ fn sim_step_advances_motion_without_painting() {
             .any(|c| c.anim_name.starts_with("walking")),
         "the tick's placements carry the walking sprite"
     );
+    let _ = stores;
     assert!(
-        motion.get(&id).is_some_and(|m| m.entry.is_some()),
+        owned.motion.get(&id).is_some_and(|m| m.entry.is_some()),
         "sim_step snapshotted the entry walk profile into the motion store"
     );
 }
@@ -2141,34 +2171,14 @@ fn paint_frame_is_pure_and_byte_identical() {
     let _ = id;
     let coffee = HashMap::new();
 
-    let mut router = crate::pathfind::AStarRouter::new();
-    let mut overlay = OccupancyOverlay::new();
-    let mut history = pose::PoseHistory::new();
-    let mut motion = HashMap::new();
-    let mut light = LightingState::new();
-    let mut chitchat = HashMap::new();
+    let mut owned = OwnedSimStores::new();
     let now = now0 + Duration::from_millis(120);
-    let frame = sim_step(
-        &mut SimStores {
-            router: &mut router,
-            overlay: &mut overlay,
-            history: &mut history,
-            motion: &mut motion,
-            light: &mut light,
-            chitchat: &mut chitchat,
-        },
-        &scene,
-        &layout,
-        &pack,
-        &coffee,
-        0,
-        now,
-    );
+    let frame = sim_step(&mut owned.stores(), &scene, &layout, &pack, &coffee, 0, now);
 
-    let light_before = light.level();
-    let motion_before = format!("{motion:?}");
-    let history_before = format!("{history:?}");
-    let chitchat_before = chitchat.len();
+    let light_before = owned.light.level();
+    let motion_before = format!("{:?}", owned.motion);
+    let history_before = format!("{:?}", owned.history);
+    let chitchat_before = owned.chitchat.len();
 
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let black = Rgb { r: 0, g: 0, b: 0 };
@@ -2189,7 +2199,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 active_pet: None,
                 floor_pet: None,
                 coffee: &coffee,
-                motion: &motion,
+                motion: &owned.motion,
                 door_anim_max_ms: 0,
                 debug_walkable: false,
             },
@@ -2206,19 +2216,23 @@ fn paint_frame_is_pure_and_byte_identical() {
         buf1.as_slice().iter().any(|p| *p != black),
         "the paint pass actually painted the office"
     );
-    assert_eq!(light.level(), light_before, "paint must not tick lighting");
     assert_eq!(
-        format!("{motion:?}"),
+        owned.light.level(),
+        light_before,
+        "paint must not tick lighting"
+    );
+    assert_eq!(
+        format!("{:?}", owned.motion),
         motion_before,
         "paint must not move motion state"
     );
     assert_eq!(
-        format!("{history:?}"),
+        format!("{:?}", owned.history),
         history_before,
         "paint must not record pose history"
     );
     assert_eq!(
-        chitchat.len(),
+        owned.chitchat.len(),
         chitchat_before,
         "paint must not start/expire chitchat"
     );
@@ -2637,20 +2651,8 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
     use std::time::Duration;
     let (scene, layout, _id, now0, pack) = sim_rig();
     let coffee = HashMap::new();
-    let mut router = crate::pathfind::AStarRouter::new();
-    let mut overlay = OccupancyOverlay::new();
-    let mut history = pose::PoseHistory::new();
-    let mut motion = HashMap::new();
-    let mut light = LightingState::new();
-    let mut chitchat = HashMap::new();
-    let mut stores = SimStores {
-        router: &mut router,
-        overlay: &mut overlay,
-        history: &mut history,
-        motion: &mut motion,
-        light: &mut light,
-        chitchat: &mut chitchat,
-    };
+    let mut owned = OwnedSimStores::new();
+    let mut stores = owned.stores();
     // (a) walk the idle agent through wander cycles until it settles at SOME
     // waypoint; the frame must report that occupancy.
     let mut pinned = false;

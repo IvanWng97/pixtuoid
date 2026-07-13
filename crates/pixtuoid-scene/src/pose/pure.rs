@@ -402,8 +402,8 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
     }
     // Fallback — randomised point along the corridor's x-range so multiple
     // fallback agents spread out instead of clustering. The midline is NOT
-    // guaranteed open (vending / printer / water-cooler / trash footprints
-    // sit in the cubicle_aisle band), so scan outward from the jittered x for the
+    // guaranteed open (the vending / printer footprints sit in the
+    // cubicle_aisle band), so scan outward from the jittered x for the
     // nearest walkable midline cell — everywhere else this function's
     // contract is "returns a walkable pixel". Bounded by the corridor width
     // and purely (layout, seed)-deterministic, like the probes above.

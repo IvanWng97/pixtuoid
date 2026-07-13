@@ -582,6 +582,25 @@ pub(crate) fn dashboard_scene(now: SystemTime) -> SceneState {
 /// so the caller can crop the GIF to it. `target` ∈ {couch, sofa, chair, pantry,
 /// printer, vending, island, snackshelf, desk}; "desk" captures the
 /// always-present return-to-desk leg.
+/// The ONE name→waypoint vocabulary shared by `--anim` and `--crop-furniture`
+/// ("desk" stays each caller's special case; "meeting" aliases the sofa). The
+/// #567 review completed one flag's list and missed the sibling — a shared
+/// resolver plus the exhaustive census below stops the two from forking again.
+pub(crate) fn waypoint_target(name: &str) -> Option<pixtuoid_scene::layout::WaypointKind> {
+    use pixtuoid_scene::layout::WaypointKind as K;
+    match name {
+        "couch" => Some(K::Couch),
+        "meeting" | "sofa" => Some(K::MeetingSofa),
+        "chair" => Some(K::MeetingChair),
+        "pantry" => Some(K::Pantry),
+        "printer" => Some(K::Printer),
+        "vending" => Some(K::VendingMachine),
+        "island" => Some(K::Island),
+        "snackshelf" => Some(K::SnackShelf),
+        _ => None,
+    }
+}
+
 pub(crate) fn anim_scene(
     now: SystemTime,
     target: &str,
@@ -590,7 +609,7 @@ pub(crate) fn anim_scene(
     floor_seed: u64,
     facing: Option<&str>,
 ) -> (SceneState, u64) {
-    use pixtuoid_scene::layout::{Facing, SceneLayout, WaypointKind, CLASSIC_OFFICE_DESKS};
+    use pixtuoid_scene::layout::{Facing, SceneLayout, CLASSIC_OFFICE_DESKS};
     use pixtuoid_scene::pose::{
         is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
     };
@@ -603,17 +622,9 @@ pub(crate) fn anim_scene(
         .expect("anim layout computes");
     let n = l.waypoints.len();
 
-    let target_kind = match target {
-        "couch" => Some(WaypointKind::Couch),
-        "sofa" => Some(WaypointKind::MeetingSofa),
-        "chair" => Some(WaypointKind::MeetingChair),
-        "pantry" => Some(WaypointKind::Pantry),
-        "printer" => Some(WaypointKind::Printer),
-        "vending" => Some(WaypointKind::VendingMachine),
-        "island" => Some(WaypointKind::Island),
-        "snackshelf" => Some(WaypointKind::SnackShelf),
-        _ => None, // "desk": always visited (return-to-desk), not a waypoint
-    };
+    // "desk" (and any unknown name) resolves None: always visited via the
+    // return-to-desk leg, not a waypoint.
+    let target_kind = waypoint_target(target);
     let want_facing = match facing {
         Some("north") => Some(Facing::North),
         Some("south") => Some(Facing::South),
@@ -788,5 +799,65 @@ mod tests {
             MEETING_DWELL_SPREAD_MS
         );
         assert_eq!(warmup_ms, min_d.saturating_sub(MEETING_WARMUP_LEAD_MS));
+    }
+}
+
+#[cfg(test)]
+mod vocabulary_tests {
+    use super::*;
+
+    /// Exhaustive-by-construction inverse of `waypoint_target`: a NEW
+    /// `WaypointKind` fails this match (clippy --all-targets builds it) until
+    /// it either joins the vocabulary or is deliberately excluded here
+    /// (PhoneBooth/StandingDesk: stand-in-place spots with no distinct
+    /// approach to film or crop to).
+    fn canonical_target_name(kind: pixtuoid_scene::layout::WaypointKind) -> Option<&'static str> {
+        use pixtuoid_scene::layout::WaypointKind as K;
+        match kind {
+            K::Couch => Some("couch"),
+            K::MeetingSofa => Some("sofa"),
+            K::MeetingChair => Some("chair"),
+            K::Pantry => Some("pantry"),
+            K::Printer => Some("printer"),
+            K::VendingMachine => Some("vending"),
+            K::Island => Some("island"),
+            K::SnackShelf => Some("snackshelf"),
+            K::PhoneBooth | K::StandingDesk => None,
+        }
+    }
+
+    #[test]
+    fn anim_and_crop_share_one_waypoint_vocabulary() {
+        // Round-trip pin: every canonical name resolves to its kind and back.
+        // The exhaustive match inside canonical_target_name is the real tooth —
+        // a NEW WaypointKind fails compilation until it joins the vocabulary or
+        // is deliberately excluded there.
+        use pixtuoid_scene::layout::WaypointKind as K;
+        for kind in [
+            K::Couch,
+            K::Pantry,
+            K::PhoneBooth,
+            K::StandingDesk,
+            K::VendingMachine,
+            K::Printer,
+            K::MeetingSofa,
+            K::MeetingChair,
+            K::Island,
+            K::SnackShelf,
+        ] {
+            if let Some(name) = canonical_target_name(kind) {
+                assert_eq!(waypoint_target(name), Some(kind), "{name} round-trips");
+            }
+        }
+        assert_eq!(
+            waypoint_target("meeting"),
+            Some(K::MeetingSofa),
+            "meeting aliases the sofa"
+        );
+        assert_eq!(
+            waypoint_target("desk"),
+            None,
+            "desk stays the callers' special case"
+        );
     }
 }

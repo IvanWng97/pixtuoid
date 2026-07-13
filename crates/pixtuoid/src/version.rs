@@ -59,10 +59,11 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.15.0" => Some(&[
-            // Internal-only so far (the FurnitureDef ground-anchoring refactor).
-            // The density + vibe PR that rebases onto this extends this arm with
-            // the user-facing bullets; keep this last "under the hood" line.
-            "Sturdier under the hood — the office's furniture now declares how each piece meets the floor in one place, so a sprite resize can't drift a walkable-collision edge; the office looks the same, just steadier",
+            "A busier, better-looking office — denser desk pods that pack the grid at every size, agents walking behind their desks, and a full interior-decor pass: glass walls with door jambs and mullions, a lounge aquarium, real head-of-table meeting chairs, greenery (two ficus trees) and mats",
+            "Pantry v2 — a kitchen island with bartender slots and a snack shelf join the pantry; per-desk trash bins retire (the pantry keeps the office's one bin)",
+            "Appliances come alive — the printer ejects pages and the vending machine drops a can while an agent stands there; the water cooler glugs on its own",
+            "The web hero zooms in — the landing-page office renders at a closer camera (and the app's own 1F layout), so sprites finally read at a glance",
+            "Sturdier under the hood — furniture declares how each piece meets the floor in one place (a sprite resize can't drift a walkable edge), and a generative placement sweep guards every size the office lays out",
         ]),
         "0.14.0" => Some(&[
             "Click an agent, land in its terminal — clicking a sprite (or pressing f on the dashboard's selected agent) brings that session's terminal app to the foreground on macOS, Windows and Linux; it's located through the session's own process, so a stale or reused pid never yanks the wrong window forward",

@@ -26,8 +26,10 @@ use super::*;
 
 /// The sweep's size axis. A union of: the corner sizes the retired tests
 /// encoded (34–41 forced-single-pod widths; 48×60 decor-vs-wall corner;
-/// 96×{60,115} the #551 Y-overflow windows), the golden/hero sizes, and a
-/// spread up to a wide-corridor floor so the appliance kinds appear.
+/// 96×{60,115} the #551 Y-overflow windows), the golden sizes, the live wasm
+/// hero buffers (desktop 231×130 and the 64px portrait floor — the most-seen
+/// layouts since #568), and a spread up to a wide-corridor floor so the
+/// appliance kinds appear.
 const SWEEP_SIZES: &[(u16, u16)] = &[
     (34, 60),
     (36, 100),
@@ -36,6 +38,7 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
     (41, 160),
     (48, 60),
     (50, 80),
+    (64, 130),
     (96, 60),
     (96, 70),
     (96, 100),
@@ -47,6 +50,7 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
     (160, 120),
     (192, 158),
     (200, 116),
+    (231, 130),
     (240, 160),
     (320, 180),
 ];
@@ -631,30 +635,13 @@ fn no_furniture_ground_overlaps_a_wall() {
     // (Padded rects legitimately touch walls — pad is routing slack.)
     let mut v = Vec::new();
     sweep(|w, h, seed, l| {
+        // THE mask's own wall-rect derivation (incl. the north-band seg_top
+        // raise a hand-rolled copy here once missed) — the sweep and the mask
+        // cannot disagree on wall geometry.
         let walls: Vec<(Point, Size)> = l
             .room_walls
             .iter()
-            .map(|seg| {
-                if seg.start.x == seg.end.x {
-                    // Vertical: WALL_THICK_V wide, seen edge-on.
-                    (
-                        seg.start,
-                        Size {
-                            w: WALL_THICK_V,
-                            h: seg.end.y - seg.start.y + 1,
-                        },
-                    )
-                } else {
-                    // Horizontal: WALL_THICK_H tall (the glass face).
-                    (
-                        seg.start,
-                        Size {
-                            w: seg.end.x - seg.start.x + 1,
-                            h: WALL_THICK_H,
-                        },
-                    )
-                }
-            })
+            .map(|seg| super::mask::wall_segment_rect(seg, l.top_margin))
             .collect();
         for p in pieces(l) {
             let Some(g) = p.ground else { continue };
@@ -887,7 +874,7 @@ fn the_sweep_reaches_every_floor_variant() {
 
 #[test]
 fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
-    // Two-lens catch on the first clearance cut: yield-by-DELETION was
+    // Yield-by-DELETION was
     // structurally universal (the corner appliances share the plants'
     // authored corners at most sizes), stripping greenery office-wide and
     // leaving OpenPlan floors with zero plants. Plants now SLIDE inward
@@ -931,6 +918,43 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
                         "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of the fish tank @{:?}",
                         p.kind, p.pos, t
                     ));
+                }
+            }
+            // Meeting trio bodies are neither waypoints nor singletons — a
+            // census that misses them lets a room plant merge into the sofa
+            // (visible at ~110x45).
+            for room in &l.meeting_rooms {
+                let Some(trio) = &room.trio else { continue };
+                let m = PLANT_OBSTACLE_CLEARANCE_PX;
+                let bodies = [
+                    (
+                        trio.sofas[0],
+                        furniture_def(Furniture::MeetingSofaBody).visual,
+                    ),
+                    (
+                        trio.sofas[1],
+                        furniture_def(Furniture::MeetingSofaBody).visual,
+                    ),
+                    (trio.table, furniture_def(Furniture::MeetingTable).visual),
+                ];
+                for (bpos, bv) in bodies {
+                    let (btl, bsz) = visual_tl(bpos, bv);
+                    let inflated = (
+                        Point {
+                            x: btl.x.saturating_sub(m),
+                            y: btl.y.saturating_sub(m),
+                        },
+                        Size {
+                            w: bsz.w + 2 * m,
+                            h: bsz.h + 2 * m,
+                        },
+                    );
+                    if super::placement::rects_overlap(visual_tl(p.pos, pv), inflated) {
+                        v.push(format!(
+                            "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of a trio body @{:?}",
+                            p.kind, p.pos, bpos
+                        ));
+                    }
                 }
             }
             for wp in &l.waypoints {

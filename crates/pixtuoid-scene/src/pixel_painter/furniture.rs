@@ -176,15 +176,11 @@ pub(super) fn paint_kitchen_island(
     putxy(buf, w / 2 + 2, 3, shade); // right door handle
                                      // Countertop dressing (row 0): a CLUSTERED fruit bowl (two adjacent
                                      // accents) + one cup — clustered so it reads as objects, not confetti.
-    if accents.len() >= 2 {
-        putxy(buf, 3, 0, accents[0]);
-        putxy(buf, 4, 0, accents[1]);
-    }
+    putxy(buf, 3, 0, accents[0]);
+    putxy(buf, 4, 0, accents[1]);
     // One mug — a THIRD accent so it can't blend into the fruit pair (the
     // vending panel color is theme-dependent and collided in default).
-    if accents.len() > 2 {
-        putxy(buf, w - 5, 0, accents[2]);
-    }
+    putxy(buf, w - 5, 0, accents[2]);
 }
 
 /// Notice board on the meeting room's south wall (8×5 framed rectangle).
@@ -231,6 +227,15 @@ pub(super) fn paint_doormat(buf: &mut RgbBuffer, mr: Bounds, theme: &crate::them
 }
 
 /// Water cooler near the pantry wall (3×6: blue bottle over a light body).
+/// The cooler bottle's fill — theme-independent, so every theme's
+/// `tank_water_line` glug bubble must stay distinguishable from it
+/// (pinned in `appliance_palette_is_legible_for_every_theme`).
+pub(crate) const COOLER_WATER: Rgb = Rgb {
+    r: 100,
+    g: 180,
+    b: 230,
+};
+
 pub(super) fn paint_water_cooler(
     buf: &mut RgbBuffer,
     pr: Bounds,
@@ -241,11 +246,7 @@ pub(super) fn paint_water_cooler(
         return;
     }
     let cooler_body = theme.office.building_light;
-    let cooler_water = Rgb {
-        r: 100,
-        g: 180,
-        b: 230,
-    };
+    let cooler_water = COOLER_WATER;
     let wx = pr.x + pr.width - 6;
     let wy = pr.y + 8;
     for dy in 0..6u16 {

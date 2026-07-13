@@ -172,10 +172,8 @@ impl ActiveChitchat {
 /// conversation like the meeting room, WITHOUT overloading the meeting-only
 /// `room_id` field (which indexes `meeting_rooms`). Every other waypoint
 /// keys on its own index. Takes the waypoint slice and finds the group
-/// anchor ITSELF: the old shape took a caller-computed `group_idx`, and the
-/// one caller passed the COUCH's index for every kind — which silently
-/// merged island standers into the couch's conversation the moment a second
-/// collapsible kind existed.
+/// anchor ITSELF — a caller-supplied index invites the bug that merged
+/// island standers into the couch's conversation.
 pub fn venue_wp_idx(
     kind: WaypointKind,
     wp_idx: usize,

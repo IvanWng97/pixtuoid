@@ -102,6 +102,46 @@ pub const WALL_THICK_H: u16 = 6;
 /// read this rather than re-typing `1`.
 pub const WALL_THICK_V: u16 = 1;
 
+/// A wall segment's PHYSICAL blocked rect (origin + size), shared by the mask
+/// stamp and the placement sweep so the two can't disagree on wall geometry.
+/// Vertical segments plugging into the north window band get their top raised
+/// by WALL_BAND_TO_TOP_MARGIN — the stitch that keeps A* from threading the
+/// wall top (regression: vertical_wall_is_impassable_except_through_the_door);
+/// a hand-rolled copy omits it, so both callers derive from HERE.
+pub(super) fn wall_segment_rect(seg: &WallSegment, top_margin: u16) -> (Point, Size) {
+    let (start, end) = (seg.start, seg.end);
+    if start.x == end.x {
+        let seg_top = start.y.min(end.y);
+        let seg_bot = start.y.max(end.y);
+        let seg_top = if seg_top == top_margin {
+            top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
+        } else {
+            seg_top
+        };
+        (
+            Point {
+                x: start.x,
+                y: seg_top,
+            },
+            Size {
+                w: WALL_THICK_V,
+                h: seg_bot - seg_top + 1,
+            },
+        )
+    } else {
+        (
+            Point {
+                x: start.x.min(end.x),
+                y: start.y,
+            },
+            Size {
+                w: start.x.abs_diff(end.x) + 1,
+                h: WALL_THICK_H,
+            },
+        )
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_walkable_mask(
     buf_w: u16,
@@ -169,38 +209,17 @@ pub(super) fn build_walkable_mask(
     //     [this] padding" (see rooms/walls.rs). The 1px FOOTPRINT is unchanged
     //     (characters still stand right next to the 3px visual); the pad is a
     //     routing-only clearance band, not a wider wall.
-    for &WallSegment { start, end } in room_walls {
-        if start.x == end.x {
-            let seg_top = start.y.min(end.y);
-            let seg_bot = start.y.max(end.y);
-            // Mirror the renderer's stitch_vertical_wall: a segment whose top
-            // is at top_margin plugs into the north window band — but the band
-            // mask now ends WALL_BAND_TO_TOP_MARGIN px higher (the freed carpet
-            // apron). Raise the wall's top to meet it, or a walkable slot opens
-            // at the wall's top and A* threads between the rooms there (the wall
-            // is DRAWN connecting to the band but the mask wouldn't block it).
-            // Regression: vertical_wall_is_impassable_except_through_the_door.
-            let seg_top = if seg_top == top_margin {
-                top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
-            } else {
-                seg_top
-            };
-            mask.mark_blocked(
-                start.x,
-                seg_top,
-                WALL_THICK_V,
-                seg_bot - seg_top + 1,
-                OBSTACLE_PAD_PX,
-            );
+    for seg in room_walls {
+        let (origin, size) = wall_segment_rect(seg, top_margin);
+        // Vertical walls are 1px edge-on — invisible to the coarse grid without
+        // OBSTACLE_PAD_PX; horizontal faces already fill their routing cells
+        // (pad would only bloat, see the block comment above).
+        let pad = if seg.start.x == seg.end.x {
+            OBSTACLE_PAD_PX
         } else {
-            mask.mark_blocked(
-                start.x.min(end.x),
-                start.y,
-                start.x.abs_diff(end.x) + 1,
-                WALL_THICK_H,
-                0,
-            );
-        }
+            0
+        };
+        mask.mark_blocked(origin.x, origin.y, size.w, size.h, pad);
     }
 
     for desk in home_desks {

@@ -15,8 +15,8 @@ use super::palette::blend_over;
 // `GLASS_SEAM_STRIDE` px. The horizontal wall paints in the y-sorted drawable
 // pass (so it composites over — frostily occluding — a walker standing behind
 // it); the vertical paints in the background.
-pub(super) const WALL_THICK_V_PX: u16 = 4; // visual (was 3 — the thin face read
-                                           // as a render artifact at doll-house sizes, #559); footprint stays 1 px (mask.rs)
+pub(super) const WALL_THICK_V_PX: u16 = 4; // visual: a thinner face reads as a render
+                                           // artifact at doll-house sizes (#559); footprint stays 1 px (mask.rs)
                                            // Derived from the core mask const so the visible glass face and the blocked
                                            // ground footprint share a single source of truth (can't drift apart).
 pub(super) const WALL_THICK_H_PX: u16 = crate::layout::WALL_THICK_H;
@@ -194,7 +194,7 @@ pub(super) fn paint_door_frame_v(
     // Both glass painters are endpoint-INCLUSIVE, so the flanking segments'
     // cut-end pixels are exactly start.y (top) and end.y (bottom): each post
     // must COVER its cut end or a 1px glass sliver survives between jamb and
-    // opening (review catch — the top range originally excluded start.y).
+    // opening (the top range must include start.y).
     for (y0, y1) in [
         ((start.y + 1).saturating_sub(DOOR_JAMB_PX), start.y + 1),
         (end.y, end.y + DOOR_JAMB_PX),

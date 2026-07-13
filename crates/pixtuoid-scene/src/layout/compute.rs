@@ -30,7 +30,7 @@ pub(super) const ROOMY_BAND_MIN_W: u16 = 60;
 /// Air kept between a scatter plant's sprite box and any obstacle waypoint's
 /// visual box (vending/printer/booth/couch/snack shelf) — 1px apart in the
 /// same column read as one totem (the machine's panel row joined the
-/// bouquet; film-critic catch).
+/// bouquet).
 pub(super) const PLANT_OBSTACLE_CLEARANCE_PX: u16 = 3;
 
 /// Gap kept between the fish tank's east edge and the elevator door column so
@@ -98,7 +98,8 @@ pub(super) fn compute_with_seed(
     // counter wide enough for routing. Width-only (the pantry's width IS
     // mid_x), so it's known before the room split below prices the pantry's
     // content against it.
-    let pantry_counter_size: Size = if has_pantry && mid_x >= 36 {
+    // 32px large counter + 2px routing margin each side.
+    let pantry_counter_size: Size = if has_pantry && mid_x >= PANTRY_COUNTER_LARGE_W + 4 {
         Size {
             w: PANTRY_COUNTER_LARGE_W,
             h: 10,
@@ -358,7 +359,6 @@ pub(super) fn compute_with_seed(
     // plant + 1-px pad blocks the only horizontal bridge between the
     // pantry interior and the cubicle area's bottom row. Leaving the
     // pantry plant-free keeps the mask fully connected.
-    .chain(std::iter::empty::<PlantItem>())
     // Two meeting-room corner plants on the west wall, well clear of
     // the door (which is on the east wall) and the central
     // sofa/table column. Only added when the meeting room is large
@@ -520,7 +520,14 @@ pub(super) fn compute_with_seed(
     // channel by absence.
     let bookshelf_w = furniture_def(WallDecor::Bookshelf.furniture()).visual.w;
     let screen_w = furniture_def(WallDecor::MeetingScreen.furniture()).visual.w;
-    let meeting_screen_x = meeting_room.map(|mr| mr.x + 1);
+    // Doll-house rooms narrower than the screen would hang it ACROSS their
+    // east wall (34/36-wide buffers; pinned by no_furniture_ground_overlaps_a_wall)
+    // — drop it entirely, the same degradation pattern as the bare meeting
+    // room and the bookshelf.
+    let meeting_screen_x = meeting_room.and_then(|mr| {
+        let sx = mr.x + 1;
+        (sx + screen_w < mr.x + mr.width).then_some(sx)
+    });
     let sofa_fp_w = furniture_def(Furniture::MeetingSofaBody)
         .footprint
         .map_or(0, |s| s.w);
@@ -557,7 +564,7 @@ pub(super) fn compute_with_seed(
                         spread
                     } else {
                         // Narrow trio room: the spread slot would pierce the
-                        // divider (owner catch at 150-wide Standard). Fall
+                        // divider (visible at 150-wide Standard). Fall
                         // back to the FLUSH slot — no strandable apron gap
                         // opens between the pair, and the apron east of them
                         // drains down the room's east strip past the sofa
@@ -576,12 +583,12 @@ pub(super) fn compute_with_seed(
     // Everything east of the exit sign / elevator face is off-limits. The
     // exit sign's slot is computed ONCE here and reused by its push below —
     // two copies of the `buf_w - 9` offset would silently desync the limit
-    // from the sign if the offset ever moves (online-review catch).
+    // from the sign if the offset ever moves.
     let exit_sign_x = buf_w.saturating_sub(9);
     let wall_east_limit = exit_sign_x.min(door.map(|d| d.x).unwrap_or(u16::MAX));
     // The bookshelf additionally stays WEST of the vertical divider (the
     // meeting room's east wall): on narrow trio rooms the drain clamp can
-    // push it onto the wall's top segment (owner catch at 150-wide
+    // push it onto the wall's top segment (visible at 150-wide
     // Standard — the shelf visually pierced the glass). Dropping it there
     // reopens the apron channel, same degradation as the exit-sign limit.
     let bookshelf_east_limit = meeting_room
@@ -749,7 +756,7 @@ pub(super) fn compute_with_seed(
     });
 
     // Scatter plants settle only now — AFTER every waypoint exists (the
-    // island stands and snack shelf push above; lens catch: filtering at the
+    // island stands and snack shelf push above; filtering at the
     // candidate site checked a subset of the final waypoint set). Each
     // candidate yields to desk grounds and keeps PLANT_OBSTACLE_CLEARANCE_PX
     // from every obstacle waypoint's visual box, SLIDING inward along the
@@ -761,18 +768,31 @@ pub(super) fn compute_with_seed(
     // widths ~88-123 (lens render catch). Lamp/couch verified clear by the
     // same census; the side table's 1px adjacency to the lounge Ficus is the
     // owner-ratified mock look — deliberately NOT repelled.
+    // ...and the meeting trio bodies: sofa/table are neither waypoints (their
+    // SEATS are, footprint-less) nor singletons, so a room plant could merge
+    // into the sofa (pinned by scatter_plants_keep_obstacle_clearance_...).
+    let centered = |pos: Point, v: Size| {
+        (
+            Point {
+                x: pos.x.saturating_sub(v.w / 2),
+                y: pos.y.saturating_sub(v.h / 2),
+            },
+            v,
+        )
+    };
     let singleton_rects: Vec<(Point, Size)> = fish_tank
-        .map(|t| {
-            let v = furniture_def(Furniture::FishTank).visual;
-            (
-                Point {
-                    x: t.x.saturating_sub(v.w / 2),
-                    y: t.y.saturating_sub(v.h / 2),
-                },
-                v,
-            )
-        })
+        .map(|t| centered(t, furniture_def(Furniture::FishTank).visual))
         .into_iter()
+        .chain(meeting_rooms.iter().flat_map(|room| {
+            room.trio.iter().flat_map(|trio| {
+                let sofa_v = furniture_def(Furniture::MeetingSofaBody).visual;
+                [
+                    centered(trio.sofas[0], sofa_v),
+                    centered(trio.sofas[1], sofa_v),
+                    centered(trio.table, furniture_def(Furniture::MeetingTable).visual),
+                ]
+            })
+        }))
         .collect();
     let plants: Vec<PlantItem> = plant_candidates
         .into_iter()
@@ -984,7 +1004,7 @@ fn plant_spot_clear(
     }) {
         return false;
     }
-    // Delegates to THE one inflate-and-overlap check (bot catch: this loop
+    // Delegates to THE one inflate-and-overlap check (this loop
     // was a verbatim second copy of first_blocking_waypoint's math).
     first_blocking_waypoint(kind, pos, waypoints).is_none()
 }
@@ -1255,7 +1275,7 @@ pub(super) fn compute_pod_desks(
     // columns above: the row IS the first row of the (pod_rows)-th pod, so
     // the inter-pod rhythm holds (the old residual_h math both counted a
     // phantom trailing aisle (#552) and parked the row 14px below the last
-    // one vs the 23px pod rhythm — owner catch on the fix's first cut).
+    // one vs the 23px pod rhythm).
     let (_, partial_y) = grid.pod_origin(cubicle_band, 0, pod_rows);
     let partial_row_at_bottom = partial_y <= desk_y_max;
     if partial_row_at_bottom {
@@ -1526,7 +1546,7 @@ pub(super) fn compute_waypoints(
         // pad=2)` → blocks x ∈ [t.x-7, t.x+7]; ±9 clears it by 2 px on BOTH
         // sides. The offsets must MIRROR: the stands-era -9/+8 pair put the
         // east chair body 1px closer to the table wood and swallowed the rug
-        // border its west twin showed (owner catch, PR #561) — a standing
+        // border its west twin showed — a standing
         // agent was too thin for the skew to read, the 7px chair body isn't.
         let chair_dx = super::rooms::meeting::MEETING_CHAIR_TABLE_DX as i16;
         for (dx, facing) in [(-chair_dx, Facing::East), (chair_dx, Facing::West)] {

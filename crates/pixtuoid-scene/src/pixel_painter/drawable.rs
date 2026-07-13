@@ -1341,7 +1341,10 @@ mod tests {
         let bg = Rgb { r: 1, g: 2, b: 3 };
         let mut buf = RgbBuffer::filled(120, 80, bg);
         let d = Drawable {
-            anchor_y: desk.y + 8,
+            anchor_y: desk.y
+                + crate::layout::furniture_def(crate::layout::Furniture::Desk)
+                    .visual
+                    .h,
             kind: DrawableKind::DeskCubicle {
                 desk,
                 is_last_col: true,
