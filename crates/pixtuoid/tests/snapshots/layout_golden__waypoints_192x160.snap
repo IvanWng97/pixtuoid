@@ -145,7 +145,7 @@ expression: l.waypoints
     },
     Waypoint {
         pos: Point {
-            x: 34,
+            x: 35,
             y: 75,
         },
         kind: MeetingChair,

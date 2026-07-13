@@ -282,8 +282,8 @@ pub static NORMAL: Theme = Theme {
             b: 0x2f,
         },
         tank_fish_alt: Rgb {
-            // NOT the lobster carapace reds (#d2402f/#e85540/#c83828): the
-            // mascot harness counts those RGBs as exclusive presence proof.
+            // NOT the lobster carapace reds (#d2402f/#e85540/#c83828/#9e2a20):
+            // the mascot harness counts those RGBs as exclusive presence proof.
             r: 0xd9,
             g: 0x4f,
             b: 0x1f,

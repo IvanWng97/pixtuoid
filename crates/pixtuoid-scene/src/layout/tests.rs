@@ -746,7 +746,7 @@ fn meeting_slots_track_meeting_trios() {
                 sofa_slots
                     .iter()
                     .any(|w| w.kind == WaypointKind::MeetingChair),
-                "seed {seed}: meeting room but no standing slot"
+                "seed {seed}: meeting room but no chair seat"
             );
             let rooms = l.meeting_rooms.len();
             for w in &sofa_slots {
@@ -816,9 +816,10 @@ fn meeting_table_is_centered_between_its_two_sofas() {
 #[test]
 fn meeting_slots_face_the_table() {
     // Sofa seats face the table across the room (north seat faces South,
-    // south seat faces North); standing slots face inward toward the table
-    // centre (west faces East, east faces West). This is what makes the
-    // render pick front "seated" vs "back_couch" and the correct flip.
+    // south seat faces North); chair seats face inward toward the table
+    // centre (west faces East, east faces West). Sofa facing drives front
+    // "seated" vs "back_couch"; chair facing drives the painted chair body's
+    // backrest side (the occupant always renders front "seated").
     for seed in 0..40u64 {
         let l = SceneLayout::compute_with_seed(160, 120, Some(8), seed).expect("fits");
         for w in &l.waypoints {
@@ -935,9 +936,11 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
     let lamp = l.floor_lamp.expect("lounge fits at this size");
     let tank = l.fish_tank.expect("tank fits at this size");
     let half_w = furniture_def(Furniture::FishTank).visual.w / 2;
-    assert!(
-        tank.x.saturating_sub(half_w) > lamp.x + 1,
-        "tank west edge clears the lamp"
+    let lamp_east = lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
+    assert_eq!(
+        tank.x - half_w,
+        lamp_east + 2,
+        "tank west edge sits exactly the pinned gap past the lamp's east edge"
     );
     let door_west = l.door.expect("elevator fits at this size").x;
     assert!(
@@ -984,4 +987,12 @@ fn meeting_table_ends_are_chair_seats_not_stands() {
     assert_eq!(west.facing, Facing::East, "west chair faces the table");
     assert_eq!(east.facing, Facing::West, "east chair faces the table");
     assert_eq!(west.pos.y, trio.table.y, "chairs sit on the table's row");
+    // Owner catch (PR #561): the stands-era offsets were -9/+8, so the east
+    // chair body sat 1px closer to the table wood and swallowed the rug
+    // border its west twin showed. Chairs must MIRROR around the table.
+    assert_eq!(
+        trio.table.x - west.pos.x,
+        east.pos.x - trio.table.x,
+        "chair offsets mirror around the table center"
+    );
 }

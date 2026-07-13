@@ -385,17 +385,21 @@ fn resolve_characters(
                             12u16,
                             false,
                         ),
-                        // Lounge couch + meeting sofa: the sprite follows the
-                        // SEATED facing (couch always North/window → back_couch;
-                        // the sofa's two seats face each other across the table).
-                        // Both reuse the 16×7-sofa anchor.
-                        WaypointKind::Couch | WaypointKind::MeetingSofa => {
+                        // Lounge couch + meeting sofa + head-of-table chair:
+                        // the sprite follows the SEATED facing (couch always
+                        // North/window → back_couch; the sofa's two seats face
+                        // each other across the table; the chair sits Front).
+                        // All reuse the seat anchor — pairing the chair with
+                        // the stand-era waypoint_anchor left its 10-row seated
+                        // sprite hovering 5 rows above the chair body.
+                        WaypointKind::Couch
+                        | WaypointKind::MeetingSofa
+                        | WaypointKind::MeetingChair => {
                             let (anim, flip) = seat_sprite(kind, wp_obj.facing);
                             (anim, back_couch_anchor(stand, char_w), 9u16, flip)
                         }
-                        // Head-of-table chair (seated Front) + island stander:
-                        // both anchor on the waypoint cell itself.
-                        WaypointKind::MeetingChair | WaypointKind::Island => {
+                        // Island stander anchors on the waypoint cell itself.
+                        WaypointKind::Island => {
                             let (anim, flip) = seat_sprite(kind, wp_obj.facing);
                             (anim, waypoint_anchor(stand, char_w), 12u16, flip)
                         }

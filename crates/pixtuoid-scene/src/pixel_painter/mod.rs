@@ -547,14 +547,16 @@ fn paint_frame(
 
         furniture::paint_doormat(ctx.buf, mr, ctx.theme);
     }
+    // Soft goods (decor arc) paint FIRST: floor-level mats sit under every
+    // upright pantry fixture — on a narrow pantry the entry mat's box reaches
+    // the water-cooler column, and mats-after-cooler clipped the cooler's
+    // west edge (lens-1 catch at 120x160).
+    furniture::paint_pantry_entry_mat(ctx.buf, ctx.layout, ctx.theme);
+    furniture::paint_island_bar_mat(ctx.buf, ctx.layout, ctx.theme);
     if let Some(pr) = ctx.layout.pantry.map(|p| p.bounds) {
         furniture::paint_water_cooler(ctx.buf, pr, ctx.theme);
         furniture::paint_trash_bin(ctx.buf, pr);
     }
-    // Soft goods (decor arc): both mats paint UNDER the drawable pass, so the
-    // island body and walkers stack over them.
-    furniture::paint_pantry_entry_mat(ctx.buf, ctx.layout, ctx.theme);
-    furniture::paint_island_bar_mat(ctx.buf, ctx.layout, ctx.theme);
 
     // Shadow pass — soft floor shadows under desks + lounge furniture
     // so nothing floats. Painted BEFORE the y-sorted entity pass so

@@ -839,15 +839,18 @@ pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
         return None;
     }
     Some(match kind {
-        // back_couch render (`pos.y − SEAT_RENDER_Y_OFF`): S is
+        // Seat render (`pos.y − SEAT_RENDER_Y_OFF`): S is
         // `WALKING_Y_OFF − SEAT_RENDER_Y_OFF` px south of `pos`, the one cell
-        // where `walking_anchor` lands exactly on `back_couch_anchor`.
-        Furniture::Couch | Furniture::MeetingSofa => Point {
+        // where `walking_anchor` lands exactly on `back_couch_anchor`. The
+        // meeting chair joined this branch when its occupant went from
+        // standing to SEATED — the old waypoint pairing left the seated
+        // sprite hovering 5 rows above its chair body.
+        Furniture::Couch | Furniture::MeetingSofa | Furniture::MeetingChair => Point {
             x: pos.x,
             y: pos.y + (WALKING_Y_OFF - SEAT_RENDER_Y_OFF),
         },
         // waypoint render (`== walking_anchor`): S == pos.
-        Furniture::MeetingChair | Furniture::IslandStand => pos,
+        Furniture::IslandStand => pos,
         // desk render is `seated_anchor`; its inverse is the bespoke
         // `desk_walk_anchor` (pinned by DESK_WALK_X/Y_OFF). ONE source.
         Furniture::Desk => desk_walk_anchor(pos),

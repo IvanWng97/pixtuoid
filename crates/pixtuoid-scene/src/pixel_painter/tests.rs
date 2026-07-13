@@ -750,11 +750,15 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
                     "{f:?}: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
                 );
             }
+            // The chair occupant SITS (SeatView::Front), so its settle/render
+            // pair with the SEAT anchor like the sofas — the stands-era
+            // waypoint_anchor pairing left the seated sprite hovering 5 rows
+            // above its chair (lens-1 frame-census catch, PR #561).
             let s = seated_foot_cell(Furniture::MeetingChair, pos).expect("occupies_pos seat");
             assert_eq!(
                 walking_anchor(s, w),
-                waypoint_anchor(pos, w),
-                "MeetingChair: walking_anchor(S={s:?}) must equal waypoint_anchor(pos={pos:?}) w={w}",
+                back_couch_anchor(pos, w),
+                "MeetingChair: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
             );
             // The home desk flows through the SAME fn — its S is
             // desk_walk_anchor, its render seated_anchor. Same identity,
@@ -2344,7 +2348,9 @@ fn pantry_mats_stay_inside_the_pantry_bounds() {
     // Both soft-goods mats derive from in-pantry anchors; neither may bleed
     // past the room, whatever the floor size.
     use crate::layout::TEST_DEFAULT_DESKS;
-    for (w, h) in [(192u16, 160u16), (240, 160), (160, 120)] {
+    // 120x160 is the narrow-pantry case where the entry mat box reaches the
+    // water-cooler column (the paint-order catch).
+    for (w, h) in [(192u16, 160u16), (240, 160), (160, 120), (120, 160)] {
         let Some(l) = Layout::compute(w, h, Some(TEST_DEFAULT_DESKS)) else {
             continue;
         };
@@ -2485,5 +2491,32 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
         furniture::MEETING_FABRIC_LIT,
         g,
         "chair highlight == sofa 'G'"
+    );
+}
+
+#[test]
+fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
+    // The three-way identity the floating-sitter bug broke silently: the
+    // seat render anchor (pos.y − SEAT_RENDER_Y_OFF) + the REAL seated
+    // sprite's height − 1 must land exactly on SeatView::Front's z-key row
+    // (pos.y + 2) — which sits INSIDE the 7-row chair body, so the sitter
+    // visibly occupies the cushion. The z-key tests alone passed while the
+    // sprite hovered 5 rows above the chair (lens-1 frame-census catch).
+    use crate::layout::{Point, SEAT_RENDER_Y_OFF};
+    let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let seated_h = pack.animation("seated").expect("seated sprite").frames[0].height();
+    let pos = Point { x: 40, y: 30 };
+    let anchor_y = pos.y - SEAT_RENDER_Y_OFF;
+    let bottom = anchor_y + seated_h - 1;
+    assert_eq!(
+        bottom,
+        SeatView::Front.z_key_for_seat(pos),
+        "seated sprite bottom row must land on the Front z-key row"
+    );
+    let chair = crate::layout::furniture_def(crate::layout::Furniture::MeetingChair).visual;
+    let chair_top = pos.y - chair.h / 2;
+    assert!(
+        bottom > chair_top,
+        "sitter bottom ({bottom}) must overlap the chair body (top {chair_top})"
     );
 }

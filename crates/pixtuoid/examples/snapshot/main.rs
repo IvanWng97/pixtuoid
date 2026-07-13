@@ -208,7 +208,7 @@ struct SnapshotArgs {
 
     /// Animation-verification mode: render ONE agent walking to + settling at a
     /// chosen furniture, so the approach→settle reads correctly (no pop, no
-    /// teleport) BEFORE human verify. One of: couch | sofa | stand | pantry |
+    /// teleport) BEFORE human verify. One of: couch | sofa | chair | pantry |
     /// desk. Forces `--gif`; the agent is back-dated so its walk-out starts at
     /// frame 0. Pair with `--gif-duration`/`--gif-fps`. The target furniture's
     /// buffer position is printed so you can crop to it.
@@ -257,7 +257,7 @@ struct SnapshotArgs {
     )]
     warmup_secs: Option<f64>,
 
-    /// Restrict `--anim sofa`/`couch`/`stand` to a seat with a given SEATED
+    /// Restrict `--anim sofa`/`couch`/`chair` to a seat with a given SEATED
     /// facing: `north` (back-view, `back_couch` sprite — sofa occludes the lower
     /// body) or `south` (front-view, `seated` sprite). Lets a single meeting room
     /// be captured from BOTH its sofas (north-of-table faces south, south-of-table
