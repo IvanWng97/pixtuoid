@@ -15,6 +15,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: EmbarkStudios/cargo-deny-action@v2.0.20 # v2.1.0 (2026-07-13) broke: musl toolchain override + "unrecognized subcommand" — repin when fixed upstream
+      - uses: EmbarkStudios/cargo-deny-action@v2.1.1 # explicit pin: the floating @v2 broke 2026-07-13 (v2.1.0 shift-5 ate the subcommand; v2.1.1 fixed same-day) — bump deliberately, not via the tag
         with:
           command: check advisories
