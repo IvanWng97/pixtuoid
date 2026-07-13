@@ -376,6 +376,26 @@ mod tests {
                     "{}: drink {i} invisible on body",
                     t.name
                 );
+                // The busy drop darkens the picked product cell to vending_dark;
+                // a drink equal to it would erase that feedback frame.
+                assert_ne!(
+                    *d, a.vending_dark,
+                    "{}: drink {i} indistinguishable from the darkened drop cell",
+                    t.name
+                );
+            }
+            // The busy printer ejects its page onto corridor carpet — the paper
+            // must not dissolve into any carpet speckle color.
+            for c in [
+                t.surface.carpet_base,
+                t.surface.carpet_light,
+                t.surface.carpet_dark,
+            ] {
+                assert_ne!(
+                    a.printer_paper, c,
+                    "{}: ejected page invisible on carpet",
+                    t.name
+                );
             }
             // The chassis is darker than its brightest drink (the box reads as a
             // box, the bottles pop).

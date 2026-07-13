@@ -2572,9 +2572,10 @@ fn busy_vending_machine_drops_a_can_and_idle_stays_stocked() {
     };
     let busy = render(true);
     let idle = render(false);
-    // The pickup slot (vx+2, vy+4) shows a drink color mid-drop; idle shows
-    // the machine's trim there.
-    let slot = (pos.x.saturating_sub(2) + 2, pos.y.saturating_sub(3) + 4);
+    // The pickup slot shows a drink color mid-drop; idle shows the machine's
+    // trim there.
+    let (sdx, sdy) = super::drawable::VENDING_PICKUP_SLOT;
+    let slot = (pos.x.saturating_sub(2) + sdx, pos.y.saturating_sub(3) + sdy);
     assert!(
         theme
             .appliance
@@ -2625,4 +2626,80 @@ fn water_cooler_glugs_a_rising_bubble() {
     let c = render(1_500); // rest of the cycle: no bubble
     assert_ne!(c.get(wx + 1, wy), bubble);
     assert_ne!(c.get(wx + 1, wy + 1), bubble);
+}
+
+#[test]
+fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
+    // Pins the two halves of the busy wiring the pixel tests can't reach
+    // (both survived as mutants in review): (a) sim_step publishes wp_rank's
+    // keys as occupied_waypoints; (b) the appliance enqueuer turns
+    // membership into the drawable's busy flag.
+    use std::time::Duration;
+    let (scene, layout, _id, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    let mut router = crate::pathfind::AStarRouter::new();
+    let mut overlay = OccupancyOverlay::new();
+    let mut history = pose::PoseHistory::new();
+    let mut motion = HashMap::new();
+    let mut light = LightingState::new();
+    let mut chitchat = HashMap::new();
+    let mut stores = SimStores {
+        router: &mut router,
+        overlay: &mut overlay,
+        history: &mut history,
+        motion: &mut motion,
+        light: &mut light,
+        chitchat: &mut chitchat,
+    };
+    // (a) walk the idle agent through wander cycles until it settles at SOME
+    // waypoint; the frame must report that occupancy.
+    let mut pinned = false;
+    for step in 0..240u64 {
+        let now = now0 + Duration::from_secs(5 * step);
+        let f = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let at_wp: Vec<usize> = f
+            .poses
+            .values()
+            .filter_map(|p| match p {
+                Some(crate::pose::Pose::AtWaypoint { wp, .. }) => Some(*wp),
+                _ => None,
+            })
+            .collect();
+        if !at_wp.is_empty() {
+            for wp in at_wp {
+                assert!(
+                    f.occupied_waypoints.contains(&wp),
+                    "AtWaypoint({wp}) must appear in occupied_waypoints"
+                );
+            }
+            pinned = true;
+            break;
+        }
+    }
+    assert!(
+        pinned,
+        "the idle agent never reached a waypoint in 20 min of sim"
+    );
+    // (b) synthetic membership must surface as busy on the drawable — on a
+    // floor tall enough to host the corridor appliances.
+    let layout = Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let printer_idx = layout
+        .waypoints
+        .iter()
+        .position(|w| w.kind == crate::layout::WaypointKind::Printer)
+        .expect("printer at 160x96");
+    let occupied: std::collections::HashSet<usize> = [printer_idx].into();
+    let mut drawables = Vec::new();
+    enqueue_lounge_pantry_appliances(&layout, &occupied, &mut drawables);
+    let busy_flag = drawables
+        .iter()
+        .find_map(|d| match d.kind {
+            DrawableKind::Printer { busy, .. } => Some(busy),
+            _ => None,
+        })
+        .expect("printer drawable enqueued");
+    assert!(
+        busy_flag,
+        "occupied printer waypoint must enqueue busy=true"
+    );
 }

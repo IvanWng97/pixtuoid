@@ -47,6 +47,11 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
+// Vending pickup-slot offset from the sprite's top-left — the ONE cell where
+// the idle trim paints and the busy can-drop lands; the pixel test derives
+// the same cell from here.
+pub(crate) const VENDING_PICKUP_SLOT: (u16, u16) = (2, 4);
+
 pub(super) struct Drawable<'a> {
     pub(super) anchor_y: u16,
     pub(super) kind: DrawableKind<'a>,
@@ -874,7 +879,7 @@ pub(super) fn paint_drawable(
                             } else {
                                 body
                             }
-                        } else if dy == 4 && dx == 2 {
+                        } else if (dx, dy) == VENDING_PICKUP_SLOT {
                             theme.appliance.vending_trim
                         } else if dy == 5 {
                             theme.appliance.vending_dark
@@ -893,7 +898,7 @@ pub(super) fn paint_drawable(
                 const DROP_STEP_MS: u64 = 500;
                 let t = epoch_ms(now);
                 let phase = (t % DROP_CYCLE_MS) / DROP_STEP_MS; // 0..6
-                let pick = ((t / DROP_CYCLE_MS) % 4) as u16;
+                let pick = ((t / DROP_CYCLE_MS) % drinks.len() as u64) as u16;
                 let (ddx, ddy) = (1 + pick % 2, 1 + pick / 2);
                 let mut put = |x: u16, y: u16, c| {
                     if x < buf.width() && y < buf.height() {
@@ -905,7 +910,7 @@ pub(super) fn paint_drawable(
                 }
                 if (2..=4).contains(&phase) {
                     let can = drinks[(pick as usize) % drinks.len()];
-                    put(vx + 2, vy + 4, can);
+                    put(vx + VENDING_PICKUP_SLOT.0, vy + VENDING_PICKUP_SLOT.1, can);
                 }
             }
         }
