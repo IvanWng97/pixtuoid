@@ -1,5 +1,5 @@
 //! Frosted-glass room-divider partitions (E-W horizontal + N-S vertical walls).
-//! Extracted from mod.rs; the rendering WHY lives in tui/CLAUDE.md
+//! Extracted from mod.rs; the rendering WHY lives in this header + the scene CLAUDE.md room-dividers entry
 //! ("How do the room dividers render (frosted-glass partitions)?").
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -8,7 +8,7 @@ use super::palette::blend_over;
 
 // Room-divider frosted-glass partitions. The E-W (horizontal) wall shows its
 // face — 6 px tall, kept in sync with `mask.rs` WALL_THICK_H — while the N-S
-// (vertical) wall is seen edge-on at 3 px (wider than its 1 px footprint). The
+// (vertical) wall is seen edge-on at 4 px (wider than its 1 px footprint). The
 // 2:1 ratio sells the top-down fake-3D. Each strip is a cool gradient (bright
 // specular edge → tinted body → soft slate edge, all alpha-composited over
 // what's behind so the room glows through) with a brighter seam every
@@ -191,8 +191,12 @@ pub(super) fn paint_door_frame_v(
 ) {
     let dark = theme.office.room_wall_trim_dark;
     let (bw, bh) = (buf.width(), buf.height());
+    // Both glass painters are endpoint-INCLUSIVE, so the flanking segments'
+    // cut-end pixels are exactly start.y (top) and end.y (bottom): each post
+    // must COVER its cut end or a 1px glass sliver survives between jamb and
+    // opening (review catch — the top range originally excluded start.y).
     for (y0, y1) in [
-        (start.y.saturating_sub(DOOR_JAMB_PX), start.y),
+        ((start.y + 1).saturating_sub(DOOR_JAMB_PX), start.y + 1),
         (end.y, end.y + DOOR_JAMB_PX),
     ] {
         for y in y0..y1.min(bh) {

@@ -158,10 +158,9 @@ use drawable::{
     gateway_mascot_def, mascot_position, paint_drawable, pet_position, Drawable, DrawableKind,
 };
 use glass::{
-    paint_door_frame_v, paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall,
-    WALL_THICK_H_PX,
+    paint_door_frame_v, paint_door_jamb_h, paint_glass_wall_h, paint_glass_wall_v,
+    stitch_vertical_wall, DOOR_JAMB_PX, WALL_THICK_H_PX,
 };
-use glass::{paint_door_jamb_h, DOOR_JAMB_PX};
 use palette::{agent_palette, outfit_seed_for, recolor_frame};
 use seat::paint_character_at;
 

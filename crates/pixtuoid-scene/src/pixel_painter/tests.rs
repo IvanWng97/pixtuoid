@@ -77,6 +77,89 @@ fn vertical_wall_top_raise_agrees_between_renderer_and_mask() {
 }
 
 #[test]
+fn v_door_jambs_sit_flush_on_both_cut_ends() {
+    // The glass painters are endpoint-INCLUSIVE, so a doorway's flanking
+    // segments end exactly at the Doorway span's start.y/end.y — each jamb
+    // must COVER its cut end, or a 1px glass sliver survives between post
+    // and opening (the #560 review's empirically-confirmed off-by-one: the
+    // top post originally excluded start.y while the bottom one was flush).
+    use crate::layout::Point;
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let floor = Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    let mut buf = RgbBuffer::filled(20, 60, floor);
+    // Wall segments [10, 24] + [38, 52] flanking the opening (24, 38).
+    glass::paint_glass_wall_v(&mut buf, theme, 5, 10, 24);
+    glass::paint_glass_wall_v(&mut buf, theme, 5, 38, 52);
+    glass::paint_door_frame_v(
+        &mut buf,
+        theme,
+        Point { x: 5, y: 24 },
+        Point { x: 5, y: 38 },
+    );
+    let dark = theme.office.room_wall_trim_dark;
+    for y in [23, 24, 38, 39] {
+        assert_eq!(
+            buf.get(5, y),
+            dark,
+            "row {y} must be jamb (posts cover BOTH inclusive cut ends)"
+        );
+    }
+    for y in 25..38 {
+        assert_eq!(buf.get(5, y), floor, "row {y} is the OPENING — untouched");
+    }
+}
+
+#[test]
+fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
+    // The jamb_left/jamb_right flags are computed at enqueue (the paint pass
+    // has no layout access): gap.start == a segment's x1 ⇒ that segment's
+    // RIGHT end gets the jamb; gap.end == a segment's x0 ⇒ LEFT end. Probe a
+    // real meeting+pantry floor's drawables for exactly that join.
+    use crate::layout::TEST_DEFAULT_DESKS;
+    let l = Layout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let dw = l
+        .doorways
+        .iter()
+        .find(|d| d.start.y == d.end.y)
+        .expect("the meeting-pantry 60% door");
+    let mut drawables = Vec::new();
+    enqueue_room_walls_h(&l, &mut drawables);
+    let walls: Vec<_> = drawables
+        .iter()
+        .filter_map(|d| match d.kind {
+            DrawableKind::RoomWallH {
+                x0,
+                x1,
+                jamb_left,
+                jamb_right,
+                ..
+            } => Some((x0, x1, jamb_left, jamb_right)),
+            _ => None,
+        })
+        .collect();
+    let left = walls
+        .iter()
+        .find(|(_, x1, ..)| *x1 == dw.start.x)
+        .expect("segment left of the door");
+    assert!(
+        left.3 && !left.2,
+        "left segment: jamb on its RIGHT end only"
+    );
+    let right = walls
+        .iter()
+        .find(|(x0, ..)| *x0 == dw.end.x)
+        .expect("segment right of the door");
+    assert!(
+        right.2 && !right.3,
+        "right segment: jamb on its LEFT end only"
+    );
+}
+
+#[test]
 fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     // Occlusion: the horizontal wall's frosted glass rises GLASS_CAP_PX
     // north of its footprint, y-sorted at the south base — so a character

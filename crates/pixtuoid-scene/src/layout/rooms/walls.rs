@@ -17,7 +17,7 @@
 use crate::layout::{pct, Bounds, MeetingRoom, Point, WallSegment, WALL_THICK_H};
 
 /// An opening the resolver CUT into a wall run. The resolver is the one
-/// place that knows every door (it holds the `DoorSpec`s), so it hands the
+/// place that knows every door (it holds the `DoorAt` requests), so it hands the
 /// openings to the renderer instead of the painter re-inferring them from
 /// segment adjacency (#559 — door frames + future doorway dressing draw
 /// from this). Axis is implicit: `start.x == end.x` ⇒ a vertical wall's
