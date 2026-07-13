@@ -227,13 +227,15 @@ pub(super) enum DrawableKind<'a> {
 fn desk_visit_spot(desk: Point) -> Point {
     // Below the desk's own GROUND (walk-behind End: the blocked strip reaches
     // DESK_GROUND_H under the Point, deeper than the DESK_H slot) and on the
-    // desk's centerline — the mid-aisle cell that stays walkable even in the
-    // fully-packed grid (#552's new bottom row + #553's lattice partials
-    // closed the pocket the old x+DESK_W+1 corner spot relied on snap to
-    // escape).
+    // desk's centerline — the first row past the desk's OBSTACLE_PAD_PX
+    // strip. Walkable in the packed grid almost everywhere (the old
+    // x+DESK_W+1 corner spot sat inside the desk's OWN padded ground and
+    // relied on snap for every desk); the one residue is a bottom-row desk
+    // whose spot lands on a corridor appliance's ground — snap still covers
+    // that sliver.
     Point {
         x: desk.x + DESK_W / 2,
-        y: desk.y + crate::layout::DESK_GROUND_H + 2,
+        y: desk.y + crate::layout::DESK_GROUND_H + crate::layout::OBSTACLE_PAD_PX,
     }
 }
 

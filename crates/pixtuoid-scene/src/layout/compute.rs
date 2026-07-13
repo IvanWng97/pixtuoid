@@ -392,19 +392,7 @@ pub(super) fn compute_with_seed(
             def.ground_x,
             def.ground_y,
         );
-        let desk_def = desk_furniture_def();
-        let desk_fp = desk_def.footprint.expect("desk has ground");
-        !home_desks.iter().any(|d| {
-            let desk_r = mask::ground_rect(
-                Anchor::TopLeft,
-                *d,
-                desk_fp,
-                desk_def.visual,
-                desk_def.ground_x,
-                desk_def.ground_y,
-            );
-            super::placement::rects_overlap(plant_r, desk_r)
-        })
+        !overlaps_a_desk_ground(plant_r, &home_desks)
     })
     .collect();
 
@@ -608,7 +596,7 @@ pub(super) fn compute_with_seed(
         // strip would collide with any desk's ground.
         let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
         let collides_a_desk = wb_def.footprint.is_some_and(|fp| {
-            let (wb_tl, wb_sz) = mask::ground_rect(
+            let wb_r = mask::ground_rect(
                 Anchor::TopLeft,
                 pos,
                 fp,
@@ -616,23 +604,7 @@ pub(super) fn compute_with_seed(
                 wb_def.ground_x,
                 wb_def.ground_y,
             );
-            let desk = super::decor::desk_furniture_def();
-            home_desks.iter().any(|&d| {
-                // is_some_and: the desk row's footprint is statically Some,
-                // but the house rule bans unwrap/expect in prod — a None
-                // simply means no ground to collide with.
-                desk.footprint.is_some_and(|fp| {
-                    let desk_ground = mask::ground_rect(
-                        Anchor::TopLeft,
-                        d,
-                        fp,
-                        desk.visual,
-                        desk.ground_x,
-                        desk.ground_y,
-                    );
-                    super::placement::rects_overlap((wb_tl, wb_sz), desk_ground)
-                })
-            })
+            overlaps_a_desk_ground(wb_r, &home_desks)
         });
         if !collides_a_desk {
             wall_decor.push(WallDecorItem {
@@ -816,6 +788,29 @@ pub(super) fn compute_with_seed(
         couch_sprite_center,
         walkable,
         reachable,
+    })
+}
+
+/// Does `r` (a blocked ground rect) overlap ANY home desk's ground? THE one
+/// desk-collision scan — the whiteboard-yield and the scatter-plant-yield
+/// both read it, so a future pad/anchor tweak can't land on one copy.
+/// `is_some_and`: the desk row's footprint is statically Some, but the house
+/// rule bans unwrap/expect in prod — a None simply means no ground to collide
+/// with.
+fn overlaps_a_desk_ground(r: (Point, Size), home_desks: &[Point]) -> bool {
+    let desk = super::decor::desk_furniture_def();
+    desk.footprint.is_some_and(|fp| {
+        home_desks.iter().any(|&d| {
+            let desk_ground = mask::ground_rect(
+                Anchor::TopLeft,
+                d,
+                fp,
+                desk.visual,
+                desk.ground_x,
+                desk.ground_y,
+            );
+            super::placement::rects_overlap(r, desk_ground)
+        })
     })
 }
 
@@ -1033,7 +1028,10 @@ pub(super) fn compute_pod_desks(
         let (x, _) = grid.pod_origin(cubicle_band, pod_cols + i / POD_SIDE, 0);
         x + (i % POD_SIDE) * (DESK_W + INTRA_POD_GAP_X)
     };
-    let partial_col_count = (0..4u16)
+    // POD_SIDE: the partials are exactly one pod's own columns; the lattice
+    // makes a further column arithmetically unreachable (it would need a
+    // residual wider than the pod stride pod_cols already consumed).
+    let partial_col_count = (0..POD_SIDE)
         .take_while(|&i| partial_col_x(i) <= desk_x_max)
         .count() as u16;
     let partial_col_at_right = partial_col_count > 0;

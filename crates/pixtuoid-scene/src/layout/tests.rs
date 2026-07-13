@@ -1066,12 +1066,10 @@ fn desk_columns_stay_on_one_lattice_and_never_shift_with_width() {
             );
         }
         assert!(
-            prev.is_subset(&offs) || offs.len() >= prev.len(),
+            prev.is_subset(&offs),
             "{w}x160: existing columns moved or vanished on widen: {prev:?} -> {offs:?}"
         );
-        if offs.is_superset(&prev) {
-            prev = offs;
-        }
+        prev = offs;
     }
 }
 
