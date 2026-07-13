@@ -1,8 +1,8 @@
 //! The pantry aggregate: bounds + the counter footprint + the island.
 
 use crate::layout::{
-    furniture_def, pct, Bounds, Furniture, Point, Size, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W,
-    WALL_THICK_H,
+    furniture_def, pct, Bounds, Facing, Furniture, Point, Size, Waypoint, WaypointKind,
+    OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, WALL_THICK_H,
 };
 
 /// Compact counter footprint — the fallback for pantries narrower than the
@@ -81,5 +81,95 @@ impl PantryRoom {
         let island_need =
             clr + 2 * (island_half_h + OBSTACLE_PAD_PX) + 1 + counter.h / 2 + OBSTACLE_PAD_PX;
         (u32::from(island_need) * 100).div_ceil(u32::from(pantry_counter_y_pct(counter.w))) as u16
+    }
+}
+
+/// Place the kitchen island (pantry v2's centre piece) in room `pr`: refuse-
+/// don't-force with BOTH-axis clamps (the #549/#551/#554 one-axis-clamp class),
+/// staying clear of the counter's padded north ([`PantryRoom::counter_north`],
+/// the anti-merge routing constraint). Returns the island body centre, or
+/// `None` when the room can't host it clear of walls + counter. On success it
+/// ALSO pushes the four `WaypointKind::Island` bartender stand slots (E/W behind
+/// the body, two S at the ±w/4 quarter points) onto `waypoints`. The
+/// placement_sweep overlap/containment/connectivity/mask-parity invariants are
+/// the backstop.
+pub(crate) fn place_kitchen_island(
+    pr: Bounds,
+    counter: Size,
+    waypoints: &mut Vec<Waypoint>,
+) -> Option<Point> {
+    let vis = furniture_def(Furniture::KitchenIsland).visual;
+    let (half_w, half_h) = (vis.w / 2, vis.h / 2);
+    let clr = WALL_THICK_H + OBSTACLE_PAD_PX;
+    // Stands flank the island 1 walkable cell beyond the body's padded
+    // footprint (pad + 1, derived — not a re-hardcoded 3). They must stay
+    // in-room too, so the x clamps price the stand extent, not the body.
+    let stand_dx = half_w + OBSTACLE_PAD_PX + 1;
+    let counter_north = PantryRoom::counter_north(pr, counter);
+    let min_x = pr.x + clr + stand_dx;
+    let max_x = (pr.x + pr.width).saturating_sub(clr + stand_dx);
+    // The bartenders' approach lane — the walkable row above the body's
+    // padded strip — must be in-room (pad-derived, same rule as stand_dx).
+    let min_y = pr.y + clr + half_h + OBSTACLE_PAD_PX;
+    let max_y = counter_north.saturating_sub(half_h + OBSTACLE_PAD_PX + 1);
+    if min_x > max_x || min_y > max_y {
+        return None;
+    }
+    let ix = (pr.x + pr.width / 2).clamp(min_x, max_x);
+    let iy = (pr.y + pct(pr.height, 40)).clamp(min_y, max_y);
+    // Bartender slots sit ON the island's center row at its quarter points:
+    // 8px-wide sprites at ±w/4 on the 20px island can't overlap each other,
+    // and the blocked pos is fine for an `occupies_pos` slot (the couch-seat
+    // pattern — approach_point finds the lane BEHIND the island, the settle
+    // glide bridges in, and the island's south-row z-key occludes the standers'
+    // legs).
+    let bar_dx = (vis.w / 4) as i16;
+    for (dx, facing) in [
+        (-(stand_dx as i16), Facing::East),
+        (stand_dx as i16, Facing::West),
+        (-bar_dx, Facing::South),
+        (bar_dx, Facing::South),
+    ] {
+        waypoints.push(Waypoint {
+            pos: Point {
+                x: ix.saturating_add_signed(dx),
+                y: iy,
+            },
+            kind: WaypointKind::Island,
+            facing,
+            room_id: None,
+        });
+    }
+    Some(Point { x: ix, y: iy })
+}
+
+/// Place the snack shelf in room `pr`, pushing its single `WaypointKind::SnackShelf`
+/// slot (vending-machine class: the mask stamps the table footprint via the
+/// generic waypoint loop, the stander approaches from the open east side). It
+/// hugs the WEST wall (the buffer edge — the pantry's only wall-free side is the
+/// EAST bridge, which must stay open) and refuses rooms too narrow for a shelf +
+/// an east-side stander cell, with the same both-axis clamp / counter-north
+/// clearance as [`place_kitchen_island`].
+pub(crate) fn place_snack_shelf(pr: Bounds, counter: Size, waypoints: &mut Vec<Waypoint>) {
+    let vis = furniture_def(Furniture::SnackShelf).visual;
+    let (half_w, half_h) = (vis.w / 2, vis.h / 2);
+    let clr = WALL_THICK_H + OBSTACLE_PAD_PX;
+    let counter_north = PantryRoom::counter_north(pr, counter);
+    let sx = pr.x + 1 + half_w;
+    // Width gate: 1px west margin + the 7px shelf + 3px so the east-side
+    // stander has an in-room walkable cell — narrower rooms refuse (the
+    // sweep's first catch on this block was a 7px shelf in a 6px room).
+    let width_fits = pr.width >= vis.w + 4;
+    let min_y = pr.y + clr + half_h;
+    let max_y = counter_north.saturating_sub(half_h + 1);
+    let target = pr.y + pct(pr.height, 30);
+    let candidate = (width_fits && min_y <= max_y).then(|| target.clamp(min_y, max_y));
+    if let Some(sy) = candidate {
+        waypoints.push(Waypoint {
+            pos: Point { x: sx, y: sy },
+            kind: WaypointKind::SnackShelf,
+            facing: Facing::West,
+            room_id: None,
+        });
     }
 }

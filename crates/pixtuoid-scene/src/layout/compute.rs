@@ -397,26 +397,6 @@ pub(super) fn compute_with_seed(
     }))
     .collect();
 
-    // Floor lamp now sits right next to the viewing couch so its halo
-    // bathes the seating area at night. Rides the lounge gate: no couch,
-    // no lamp (the vignette lives and dies together).
-    let floor_lamp = lounge_fits.then_some(Point {
-        x: couch_x + 9,
-        y: couch_y + 2,
-    });
-
-    // Lounge side table on the OPPOSITE side from the floor lamp
-    // (west of the couch). Clamp its x so the footprint's left edge clears the
-    // vertical room wall at `right_x` — at the minimum buffer width couch_x-10
-    // would otherwise drop the 7-wide footprint onto the wall column.
-    let side_half_w = furniture_def(Furniture::LoungeSideTable)
-        .footprint
-        .map_or(0, |s| s.w / 2);
-    let lounge_side_table = lounge_fits.then_some(Point {
-        x: couch_x.saturating_sub(10).max(right_x + side_half_w + 1),
-        y: couch_y + 2,
-    });
-
     // Elevator door — 16×14 sprite mounted in the back wall, slotted
     // into the rightmost window position and BOTTOM-aligned with the
     // floor-to-ceiling windows so both sit on the same wall plane.
@@ -448,6 +428,14 @@ pub(super) fn compute_with_seed(
         y: top_margin + 4,
     });
 
+    // Lounge vignette (lamp + side table + aquarium) — computed AFTER `door`
+    // because the tank prices its east limit against the elevator column.
+    let LoungeVignette {
+        floor_lamp,
+        side_table: lounge_side_table,
+        fish_tank,
+    } = place_lounge_vignette(couch_x, couch_y, right_x, buf_w, door, lounge_fits);
+
     // The two owner-ratified Ficus spots (B-3): a greeting plant west of the
     // elevator door, and the lounge's west flank. Each rides its anchor's own
     // gate and joins the same settle pipeline as every scatter candidate.
@@ -476,30 +464,6 @@ pub(super) fn compute_with_seed(
         }
     }
 
-    // Aquarium east of the floor lamp (decor arc, owner-picked spot). Center
-    // offsets derive from the lounge vignette: the lamp's east edge is
-    // couch_x+10 (the vignette comment above), +2 clearance + half the tank.
-    // Vertically the tank backs onto the wall band like band decor (top rows
-    // overlap the band bottom; the cabinet base is the only ground blocker).
-    // Extra gate vs lamp/table: the tank must stay clear of the elevator door
-    // column so the spawn threshold never routes around it.
-    let fish_tank = floor_lamp.and_then(|lamp| {
-        let def = furniture_def(Furniture::FishTank);
-        let half_w = def.visual.w / 2;
-        // The tank's west edge sits LAMP_TANK_GAP columns past the lamp
-        // shade's east edge (one clear floor column) — the vignette breathing
-        // room the mock round pinned. Center-pin east edge is (w-1)/2 past
-        // the anchor (the x-axis twin of center_pin_south_offset).
-        const LAMP_TANK_GAP: u16 = 2;
-        let lamp_east = lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
-        let cx = lamp_east + LAMP_TANK_GAP + half_w;
-        let east_limit = door.map_or(buf_w.saturating_sub(2), |d| d.x);
-        (cx + half_w + FISH_TANK_ELEVATOR_CLEARANCE <= east_limit).then_some(Point {
-            x: cx,
-            y: couch_y.saturating_sub(4),
-        })
-    });
-
     let wall_decor = place_wall_decor(
         buf_w,
         top_margin,
@@ -511,90 +475,16 @@ pub(super) fn compute_with_seed(
         &home_desks,
     );
 
-    // ── Pantry v2: kitchen island (+ stand slots) + snack shelf ──
-    // Every piece follows the refuse-don't-force rule with BOTH-axis clamps
-    // (the #549/#551/#554 one-axis-clamp class), and keeps clear of the
-    // counter's padded north (the anti-merge routing constraint) —
-    // placement_sweep's overlap/containment/connectivity/mask-parity
-    // invariants are the backstop.
-    let kitchen_island = if let Some(pr) = pantry_room {
-        let def = furniture_def(Furniture::KitchenIsland);
-        let vis = def.visual;
-        let (half_w, half_h) = (vis.w / 2, vis.h / 2);
-        let clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
-        // Stands flank the island 1 walkable cell beyond the body's padded
-        // footprint (pad + 1, derived — not a re-hardcoded 3). They must stay
-        // in-room too, so the x clamps price the stand extent, not the body.
-        let stand_dx = half_w + super::OBSTACLE_PAD_PX + 1;
-        let counter_north = PantryRoom::counter_north(pr, pantry_counter_size);
-        let min_x = pr.x + clr + stand_dx;
-        let max_x = (pr.x + pr.width).saturating_sub(clr + stand_dx);
-        // The bartenders' approach lane — the walkable row above the body's
-        // padded strip — must be in-room (pad-derived, same rule as stand_dx).
-        let min_y = pr.y + clr + half_h + super::OBSTACLE_PAD_PX;
-        let max_y = counter_north.saturating_sub(half_h + super::OBSTACLE_PAD_PX + 1);
-        if min_x <= max_x && min_y <= max_y {
-            let ix = (pr.x + pr.width / 2).clamp(min_x, max_x);
-            let iy = (pr.y + pct(pr.height, 40)).clamp(min_y, max_y);
-            let island = Point { x: ix, y: iy };
-            // Bartender slots sit ON the island's center row at its quarter
-            // points: 8px-wide sprites at ±w/4 on the 20px island can't
-            // overlap each other, and the blocked pos is fine for an
-            // `occupies_pos` slot (the couch-seat pattern — approach_point
-            // finds the lane BEHIND the island, the settle glide bridges in,
-            // and the island's south-row z-key occludes the standers' legs).
-            let bar_dx = (vis.w / 4) as i16;
-            for (dx, facing) in [
-                (-(stand_dx as i16), Facing::East),
-                (stand_dx as i16, Facing::West),
-                (-bar_dx, Facing::South),
-                (bar_dx, Facing::South),
-            ] {
-                waypoints.push(Waypoint {
-                    pos: Point {
-                        x: ix.saturating_add_signed(dx),
-                        y: iy,
-                    },
-                    kind: WaypointKind::Island,
-                    facing,
-                    room_id: None,
-                });
-            }
-            Some(island)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Snack shelf: hugs the west wall (the buffer edge — the pantry's only
-    // wall-free side is the EAST bridge, which must stay open). Waypoint-only
-    // (vending-machine class): the mask stamps its table footprint via the
-    // generic waypoint loop, the stander approaches from the open east side.
+    // Pantry v2 — refuse-don't-force placement (both-axis clamps, clear of the
+    // counter's padded north) of the kitchen island + its bartender stand slots,
+    // then the snack shelf; both live in rooms/pantry.rs beside content_fit_h.
+    // The island pushes its 4 Island slots BEFORE the snack shelf's slot — the
+    // waypoint push order the goldens pin.
+    let kitchen_island = pantry_room.and_then(|pr| {
+        super::rooms::pantry::place_kitchen_island(pr, pantry_counter_size, &mut waypoints)
+    });
     if let Some(pr) = pantry_room {
-        let def = furniture_def(Furniture::SnackShelf);
-        let vis = def.visual;
-        let (half_w, half_h) = (vis.w / 2, vis.h / 2);
-        let clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
-        let counter_north = PantryRoom::counter_north(pr, pantry_counter_size);
-        let sx = pr.x + 1 + half_w;
-        // Width gate: 1px west margin + the 7px shelf + 3px so the east-side
-        // stander has an in-room walkable cell — narrower rooms refuse (the
-        // sweep's first catch on this block was a 7px shelf in a 6px room).
-        let width_fits = pr.width >= vis.w + 4;
-        let min_y = pr.y + clr + half_h;
-        let max_y = counter_north.saturating_sub(half_h + 1);
-        let target = pr.y + pct(pr.height, 30);
-        let candidate = (width_fits && min_y <= max_y).then(|| target.clamp(min_y, max_y));
-        if let Some(sy) = candidate {
-            waypoints.push(Waypoint {
-                pos: Point { x: sx, y: sy },
-                kind: WaypointKind::SnackShelf,
-                facing: Facing::West,
-                room_id: None,
-            });
-        }
+        super::rooms::pantry::place_snack_shelf(pr, pantry_counter_size, &mut waypoints);
     }
 
     let corridor = Some(Bounds {
@@ -867,6 +757,66 @@ fn place_wall_decor(
         });
     }
     wall_decor
+}
+
+/// The lounge vignette singletons, all anchored to the viewing couch and gated
+/// as ONE cluster on `lounge_fits`.
+struct LoungeVignette {
+    floor_lamp: Option<Point>,
+    side_table: Option<Point>,
+    fish_tank: Option<Point>,
+}
+
+/// Place the lounge vignette — floor lamp, side table, aquarium — around the
+/// viewing couch. The three live and die together on `lounge_fits` (no couch,
+/// no vignette). The lamp sits just east of the couch so its halo bathes the
+/// seating area at night; the side table takes the OPPOSITE (west) flank, its x
+/// clamped so the 7-wide footprint's left edge clears the room-divider column at
+/// `right_x` (at the minimum buffer width `couch_x - 10` would drop it onto the
+/// wall). The aquarium sits one clear floor column east of the lamp shade,
+/// backed onto the wall band like band decor, and carries an EXTRA gate the
+/// lamp/table don't: it must stay clear of the elevator `door` column so the
+/// spawn threshold never routes around it. Called AFTER `door` is known.
+fn place_lounge_vignette(
+    couch_x: u16,
+    couch_y: u16,
+    right_x: u16,
+    buf_w: u16,
+    door: Option<Point>,
+    lounge_fits: bool,
+) -> LoungeVignette {
+    let floor_lamp = lounge_fits.then_some(Point {
+        x: couch_x + 9,
+        y: couch_y + 2,
+    });
+    let side_half_w = furniture_def(Furniture::LoungeSideTable)
+        .footprint
+        .map_or(0, |s| s.w / 2);
+    let side_table = lounge_fits.then_some(Point {
+        x: couch_x.saturating_sub(10).max(right_x + side_half_w + 1),
+        y: couch_y + 2,
+    });
+    let fish_tank = floor_lamp.and_then(|lamp| {
+        let def = furniture_def(Furniture::FishTank);
+        let half_w = def.visual.w / 2;
+        // The tank's west edge sits LAMP_TANK_GAP columns past the lamp
+        // shade's east edge (one clear floor column) — the vignette breathing
+        // room the mock round pinned. Center-pin east edge is (w-1)/2 past
+        // the anchor (the x-axis twin of center_pin_south_offset).
+        const LAMP_TANK_GAP: u16 = 2;
+        let lamp_east = lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
+        let cx = lamp_east + LAMP_TANK_GAP + half_w;
+        let east_limit = door.map_or(buf_w.saturating_sub(2), |d| d.x);
+        (cx + half_w + FISH_TANK_ELEVATOR_CLEARANCE <= east_limit).then_some(Point {
+            x: cx,
+            y: couch_y.saturating_sub(4),
+        })
+    });
+    LoungeVignette {
+        floor_lamp,
+        side_table,
+        fish_tank,
+    }
 }
 
 /// Settle a scatter-plant candidate: keep its authored spot when clear, else
