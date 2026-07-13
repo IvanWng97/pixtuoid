@@ -16,6 +16,18 @@
 
 use crate::layout::{pct, Bounds, MeetingRoom, Point, WallSegment, WALL_THICK_H};
 
+/// An opening the resolver CUT into a wall run. The resolver is the one
+/// place that knows every door (it holds the `DoorSpec`s), so it hands the
+/// openings to the renderer instead of the painter re-inferring them from
+/// segment adjacency (#559 — door frames + future doorway dressing draw
+/// from this). Axis is implicit: `start.x == end.x` ⇒ a vertical wall's
+/// doorway (the span is in y), else horizontal (span in x).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Doorway {
+    pub start: Point,
+    pub end: Point,
+}
+
 /// Doorway width in ABSOLUTE pixels — a percentage shrinks to zero on small
 /// terminals, which after the 2-px wall padding leaves no walkable cell for
 /// A* and disconnects the room (the documented lesson behind the old
@@ -52,7 +64,7 @@ struct WallRequest {
 pub(crate) fn derive_room_walls(
     meeting_rooms: &[MeetingRoom],
     pantry: Option<Bounds>,
-) -> Vec<WallSegment> {
+) -> (Vec<WallSegment>, Vec<Doorway>) {
     let mut requests: Vec<WallRequest> = Vec::new();
 
     // Each meeting room: an east (corridor) wall with a centered door, and —
@@ -121,7 +133,7 @@ fn stacked(above: Bounds, below: Bounds) -> bool {
     below.y == above.y + above.height && below.x == above.x && below.width == above.width
 }
 
-fn resolve(requests: Vec<WallRequest>) -> Vec<WallSegment> {
+fn resolve(requests: Vec<WallRequest>) -> (Vec<WallSegment>, Vec<Doorway>) {
     // 1. Merge duplicate/overlapping collinear runs, unioning their doors.
     //    Runs that merely TOUCH end-to-end stay separate: each keeps its own
     //    door (two stacked meeting rooms' east walls touch at the split line
@@ -172,10 +184,11 @@ fn resolve(requests: Vec<WallRequest>) -> Vec<WallSegment> {
         .into_iter()
         .partition(|r| matches!(r.run, Run::V { .. }));
     let mut out = Vec::new();
+    let mut doorways = Vec::new();
     for req in vs.into_iter().chain(hs) {
-        emit(&req, &mut out);
+        emit(&req, &mut out, &mut doorways);
     }
-    out
+    (out, doorways)
 }
 
 fn same_run(a: &Run, b: &Run) -> bool {
@@ -204,7 +217,7 @@ fn same_run(a: &Run, b: &Run) -> bool {
 /// (zero-length) pieces are pushed too — the mask stamp of an empty segment
 /// is a no-op and the old fn emitted them unconditionally (kept for exact
 /// behavior equality).
-fn emit(req: &WallRequest, out: &mut Vec<WallSegment>) {
+fn emit(req: &WallRequest, out: &mut Vec<WallSegment>, doorways: &mut Vec<Doorway>) {
     let (start, end) = match req.run {
         Run::V { x: _, y0, y1 } => (y0, y1),
         Run::H { y: _, x0, x1 } => (x0, x1),
@@ -228,6 +241,18 @@ fn emit(req: &WallRequest, out: &mut Vec<WallSegment>) {
             (center + DOOR_GAP / 2).min(end),
         )
     });
+    if let Some((gs, ge)) = gap {
+        doorways.push(match req.run {
+            Run::V { x, .. } => Doorway {
+                start: Point { x, y: gs },
+                end: Point { x, y: ge },
+            },
+            Run::H { y, .. } => Doorway {
+                start: Point { x: gs, y },
+                end: Point { x: ge, y },
+            },
+        });
+    }
     let spans: Vec<(u16, u16)> = match gap {
         Some((gs, ge)) => vec![(start, gs), (ge, end)],
         None => vec![(start, end)],
@@ -269,7 +294,7 @@ mod tests {
     #[test]
     fn dense_shared_wall_resolves_once_and_solid() {
         let rooms = [room(0, 20, 40, 30), room(0, 50, 40, 30)];
-        let walls = derive_room_walls(&rooms, None);
+        let (walls, _) = derive_room_walls(&rooms, None);
         let h: Vec<_> = walls.iter().filter(|w| w.start.y == w.end.y).collect();
         assert_eq!(h.len(), 1, "one horizontal wall, not two: {h:?}");
         assert_eq!(
@@ -291,7 +316,7 @@ mod tests {
             width: 40,
             height: 30,
         });
-        let walls = derive_room_walls(&rooms, pantry);
+        let (walls, doorways) = derive_room_walls(&rooms, pantry);
         let h: Vec<_> = walls.iter().filter(|w| w.start.y == w.end.y).collect();
         assert_eq!(h.len(), 2, "the 60% door splits the shared wall: {h:?}");
         let gap = (h[0].end.x, h[1].start.x);
@@ -314,7 +339,7 @@ mod tests {
     #[test]
     fn vertical_run_trims_below_crossing_horizontal_wall() {
         let rooms = [room(0, 20, 40, 30), room(0, 50, 40, 30)];
-        let walls = derive_room_walls(&rooms, None);
+        let (walls, _) = derive_room_walls(&rooms, None);
         let v: Vec<_> = walls.iter().filter(|w| w.start.x == w.end.x).collect();
         // room 0's pair spans [20, 50]; room 1's pair starts BELOW the wall.
         assert_eq!(v[0].start.y, 20);
@@ -333,16 +358,16 @@ mod tests {
     /// No rooms, or a pantry with nothing above it (open-plan) → no walls.
     #[test]
     fn open_plan_requests_nothing() {
-        assert!(derive_room_walls(&[], None).is_empty());
-        assert!(derive_room_walls(
+        assert!(derive_room_walls(&[], None).0.is_empty());
+        let (w, d) = derive_room_walls(
             &[],
             Some(Bounds {
                 x: 0,
                 y: 20,
                 width: 40,
                 height: 60,
-            })
-        )
-        .is_empty());
+            }),
+        );
+        assert!(w.is_empty() && d.is_empty());
     }
 }

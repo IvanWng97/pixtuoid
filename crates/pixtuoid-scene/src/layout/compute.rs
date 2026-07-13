@@ -286,7 +286,8 @@ pub(super) fn compute_with_seed(
     // (rooms/walls.rs). The committed room_walls goldens pin the non-dense
     // output byte-identical to the old scalar-derived fn; dense's
     // inter-meeting wall deliberately went solid (#557 door policy).
-    let room_walls = super::rooms::walls::derive_room_walls(&meeting_rooms, pantry_room);
+    let (room_walls, doorways) =
+        super::rooms::walls::derive_room_walls(&meeting_rooms, pantry_room);
 
     let Point {
         x: couch_x,
@@ -748,6 +749,7 @@ pub(super) fn compute_with_seed(
             kitchen_island,
         }),
         room_walls,
+        doorways,
         top_margin,
         corridor,
         couch_sprite_center,

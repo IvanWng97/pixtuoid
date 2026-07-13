@@ -37,6 +37,7 @@ pub use decor::{
 pub use mask::{WALL_THICK_H, WALL_THICK_V};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
+pub use rooms::walls::Doorway;
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 // The shared coarse routing-grid primitives (crate-internal — no semver surface):
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
@@ -156,6 +157,11 @@ pub struct SceneLayout {
     /// on floors without a pantry (Dense dual-meeting).
     pub pantry: Option<PantryRoom>,
     pub room_walls: Vec<WallSegment>,
+    /// The openings the wall resolver cut into `room_walls` — the painter
+    /// draws door frames from these instead of re-inferring gaps from
+    /// segment adjacency (the resolver is the one place that knows every
+    /// door; see `rooms/walls.rs`).
+    pub doorways: Vec<Doorway>,
     pub top_margin: u16,
     pub corridor: Option<Bounds>,
     /// Centre point of the lounge couch sprite (the middle of its 3 seats).

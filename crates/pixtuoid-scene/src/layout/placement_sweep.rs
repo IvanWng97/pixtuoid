@@ -181,6 +181,8 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         meeting_rooms,
         pantry,
         room_walls: _, // the containers' edges; overlap-vs-walls is its own invariant
+        doorways: _,   // architectural openings, not furniture — the connectivity
+        //                invariant proves every room drains through them
         top_margin: _, // wall-band geometry, read via wall_band_h() in invariants
         corridor: _,   // router/pet zone, spans the full width by design
         couch_sprite_center,

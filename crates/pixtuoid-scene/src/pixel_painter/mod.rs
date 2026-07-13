@@ -157,7 +157,11 @@ use background::{
 use drawable::{
     gateway_mascot_def, mascot_position, paint_drawable, pet_position, Drawable, DrawableKind,
 };
-use glass::{paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall, WALL_THICK_H_PX};
+use glass::{
+    paint_door_frame_v, paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall,
+    WALL_THICK_H_PX,
+};
+pub(self) use glass::{paint_door_jamb_h, DOOR_JAMB_PX};
 use palette::{agent_palette, outfit_seed_for, recolor_frame};
 use seat::paint_character_at;
 
@@ -510,6 +514,12 @@ fn paint_frame(
             stitch_vertical_wall(start.y, end.y, ctx.layout.top_margin, top_wall_h, &h_rows);
         paint_glass_wall_v(ctx.buf, ctx.theme, start.x, y_top, y_bot.min(buf_h - 1));
     }
+    // Door frames on VERTICAL walls paint here, over the strips above;
+    // horizontal walls' frames ride their y-sorted RoomWallH drawable (the
+    // background pass would be overpainted by it).
+    for dw in ctx.layout.doorways.iter().filter(|d| d.start.x == d.end.x) {
+        paint_door_frame_v(ctx.buf, ctx.theme, dw.start, dw.end);
+    }
 
     // Meeting sofas + table and the kitchen island are all painted by
     // the y-sorted Drawable pass below (MeetingSofa / MeetingTable /
@@ -778,12 +788,26 @@ fn enqueue_characters<'a>(
 fn enqueue_room_walls_h<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
     for &WallSegment { start, end } in &layout.room_walls {
         if start.y == end.y {
+            let (x0, x1) = (start.x.min(end.x), start.x.max(end.x));
+            // A cut end abutting a doorway gets a jamb — flagged HERE because
+            // the paint pass has no layout access. gap.start == this
+            // segment's x1 (the run was cut there), gap.end == a segment x0.
+            let jamb_right = layout
+                .doorways
+                .iter()
+                .any(|d| d.start.y == start.y && d.end.y == start.y && d.start.x == x1);
+            let jamb_left = layout
+                .doorways
+                .iter()
+                .any(|d| d.start.y == start.y && d.end.y == start.y && d.end.x == x0);
             drawables.push(Drawable {
                 anchor_y: start.y + (WALL_THICK_H_PX - 1),
                 kind: DrawableKind::RoomWallH {
-                    x0: start.x.min(end.x),
-                    x1: start.x.max(end.x),
+                    x0,
+                    x1,
                     y_top: start.y,
+                    jamb_left,
+                    jamb_right,
                 },
             });
         }

@@ -182,6 +182,10 @@ pub(super) enum DrawableKind<'a> {
         x0: u16,
         x1: u16,
         y_top: u16,
+        /// This end abuts a doorway ⇒ paint its dark jamb (#559). Flagged at
+        /// enqueue (the paint pass has no layout access).
+        jamb_left: bool,
+        jamb_right: bool,
     },
     /// Meeting-room coat rack (pole + base + coat blobs), y-sorted at its base
     /// row so a character walking in front of it occludes it (and one behind
@@ -953,8 +957,27 @@ pub(super) fn paint_drawable(
                 paint_mascot_bubbles(buf, *pos, frame.height(), *run_count, now);
             }
         }
-        DrawableKind::RoomWallH { x0, x1, y_top } => {
+        DrawableKind::RoomWallH {
+            x0,
+            x1,
+            y_top,
+            jamb_left,
+            jamb_right,
+        } => {
             super::paint_glass_wall_h(buf, theme, *x0, *x1, *y_top);
+            // Jambs ride the y-sorted glass (the background pass would be
+            // overpainted by it). The post sits ON this segment's cut end.
+            if *jamb_left {
+                super::paint_door_jamb_h(buf, theme, *x0, *y_top);
+            }
+            if *jamb_right {
+                super::paint_door_jamb_h(
+                    buf,
+                    theme,
+                    x1.saturating_sub(super::DOOR_JAMB_PX - 1),
+                    *y_top,
+                );
+            }
         }
         DrawableKind::CoatRack { pos } => {
             let (cx, cy) = (pos.x, pos.y);
