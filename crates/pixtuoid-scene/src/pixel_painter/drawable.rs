@@ -54,7 +54,7 @@ pub(super) struct Drawable<'a> {
 
 pub(super) enum DrawableKind<'a> {
     /// Whole cubicle as one z-unit: divider + filing cabinet (every
-    /// other desk) + desk sprite + trash bin + screen-glow if the
+    /// other desk) + desk sprite + screen-glow if the
     /// occupant is Active. Bundled so the cubicle paints atomically at
     /// the desk's bottom-edge row.
     DeskCubicle {
@@ -1271,6 +1271,10 @@ mod tests {
         // removed the per-desk trash bins (25 grey cylinders read as noise at
         // half-block scale; the office keeps the pantry's one bin).
         let pack = test_pack();
+        // Pin the ASSET removal directly, not just its pixels: the embedded
+        // pack no longer ships the animation, so a blit re-add alone is dead
+        // code.
+        assert!(pack.animation("trash_bin").is_none());
         let mut cache = FrameCache::new();
         let now = SystemTime::UNIX_EPOCH;
         let desk = Point { x: 40, y: 30 };

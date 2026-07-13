@@ -387,7 +387,6 @@ pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &["walking_coffee"];
 
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
-    "trash_bin",
     "filing_cabinet",
     "plant",
     "plant_tall",
