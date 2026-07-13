@@ -526,7 +526,9 @@ fn paint_frame(
     // Procedural room fill — small pixel items that make rooms feel lived-in.
     // Ground footprint rule: walkable mask is NOT affected by these (they're
     // small items characters can walk around or over).
-    if let Some(mr) = ctx.layout.meeting_rooms.first().map(|r| r.bounds) {
+    // EVERY meeting room (#555: dense room 1 used to render bare — the
+    // decor all keyed room 0).
+    for mr in ctx.layout.meeting_rooms.iter().map(|r| r.bounds) {
         furniture::paint_notice_board(ctx.buf, mr, ctx.theme);
 
         // Coat rack is now a y-sorted DrawableKind::CoatRack (pushed in the
@@ -1174,7 +1176,8 @@ fn enqueue_floor_fixtures<'a>(
             kind: DrawableKind::FloorLamp { pos: lamp },
         });
     }
-    if let Some(mr) = ctx.layout.meeting_rooms.first().map(|r| r.bounds) {
+    // One coat rack per meeting room (#555: room 1 used to go without).
+    for mr in ctx.layout.meeting_rooms.iter().map(|r| r.bounds) {
         if mr.width > 20 {
             let cx = mr.x + mr.width - 5;
             let cy = mr.y + mr.height / 2 - 4;

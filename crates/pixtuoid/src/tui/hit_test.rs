@@ -302,8 +302,9 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Meeting room procedural items (coat rack, doormat)
-    if let Some(mr) = layout.meeting_room_bounds(0) {
+    // Meeting room procedural items (coat rack, doormat) — EVERY room
+    // (#555: room 1 used to render bare of decor, keyed room 0 only).
+    for mr in layout.meeting_rooms.iter().map(|r| r.bounds) {
         if mr.width > 20 {
             let cx = mr.x + mr.width - 5;
             let cy = mr.y + mr.height / 2 - 4;
@@ -449,6 +450,39 @@ mod tests {
             hit_test_furniture(&layout, door.x + 8, cell_y),
             Some("Elevator")
         );
+    }
+
+    #[test]
+    fn dense_room_1_has_coat_rack_and_doormat() {
+        // #555's second half: the meeting-decor painters + hover labels
+        // iterate ALL meeting_rooms — a dense floor's second room used to
+        // render sofas + table but NO coat rack / doormat / notice board
+        // (everything keyed room 0).
+        let mut saw_dual = false;
+        for seed in 0..10u64 {
+            let layout = Layout::compute_with_seed(192, 160, Some(8), seed).expect("layout");
+            if layout.meeting_rooms.len() < 2 {
+                continue;
+            }
+            saw_dual = true;
+            let mr = layout.meeting_rooms[1].bounds;
+            assert!(mr.width > 20, "seed {seed}: dense room 1 hosts the rack");
+            let cx = mr.x + mr.width - 5;
+            let cy = mr.y + mr.height / 2 - 4;
+            assert_eq!(
+                hit_test_furniture(&layout, cx, (cy + 3) / 2),
+                Some("Coat Rack"),
+                "seed {seed}: room 1 must hover its own coat rack"
+            );
+            let mat_x = mr.x + mr.width + 1;
+            let mat_y = mr.y + mr.height / 2 - 2;
+            assert_eq!(
+                hit_test_furniture(&layout, mat_x + 1, (mat_y + 2) / 2),
+                Some("Doormat"),
+                "seed {seed}: room 1 must hover its own doormat"
+            );
+        }
+        assert!(saw_dual, "192x160 seeds 0..10 must reach a dual floor");
     }
 
     #[test]
