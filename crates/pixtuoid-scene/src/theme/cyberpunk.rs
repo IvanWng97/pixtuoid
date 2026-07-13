@@ -249,6 +249,31 @@ pub static CYBERPUNK: Theme = Theme {
             g: 48,
             b: 72,
         },
+        tank_water: Rgb {
+            r: 0x0e,
+            g: 0x4a,
+            b: 0x5e,
+        },
+        tank_water_line: Rgb {
+            r: 0x3f,
+            g: 0xd4,
+            b: 0xe6,
+        },
+        tank_fish: Rgb {
+            r: 0xff,
+            g: 0x9f,
+            b: 0x43,
+        },
+        tank_fish_alt: Rgb {
+            r: 0xff,
+            g: 0x2d,
+            b: 0x78,
+        },
+        tank_plant: Rgb {
+            r: 0x2d,
+            g: 0xe0,
+            b: 0x6a,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

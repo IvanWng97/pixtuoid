@@ -1203,6 +1203,17 @@ fn enqueue_floor_fixtures<'a>(
             kind: DrawableKind::FloorLamp { pos: lamp },
         });
     }
+    if let Some(tank) = ctx.layout.fish_tank {
+        // Center anchor: the cabinet's south row is center + half the visual.
+        let half_h = crate::layout::furniture_def(crate::layout::Furniture::FishTank)
+            .visual
+            .h
+            / 2;
+        drawables.push(Drawable {
+            anchor_y: tank.y + half_h,
+            kind: DrawableKind::FishTank { pos: tank },
+        });
+    }
     // One coat rack per meeting room (#555: room 1 used to go without).
     for mr in ctx.layout.meeting_rooms.iter().map(|r| r.bounds) {
         if mr.width > 20 {

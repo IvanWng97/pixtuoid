@@ -919,3 +919,36 @@ fn whiteboard_blocks_only_its_wheel_base_not_the_elevated_panel() {
         "the whiteboard wheel base must block the floor"
     );
 }
+
+#[test]
+fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
+    // Decor arc: the aquarium joins the lounge vignette (owner-picked spot —
+    // east of the couch's floor lamp, against the north wall band). It rides
+    // the SAME lounge gate as lamp/side table, plus an east-clearance gate so
+    // it never crowds the elevator door threshold.
+    let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let lamp = l.floor_lamp.expect("lounge fits at this size");
+    let tank = l.fish_tank.expect("tank fits at this size");
+    let half_w = furniture_def(Furniture::FishTank).visual.w / 2;
+    assert!(
+        tank.x.saturating_sub(half_w) > lamp.x + 1,
+        "tank west edge clears the lamp"
+    );
+    let door_west = 192 - ELEVATOR_W - 2;
+    assert!(
+        tank.x + half_w + 2 <= door_west,
+        "tank + clearance stays west of the elevator"
+    );
+    // The vignette lives and dies together: never a tank without the couch.
+    for (w, h) in [(96u16, 70u16), (120, 80), (150, 68), (215, 98), (240, 160)] {
+        let Some(l) = SceneLayout::compute(w, h, Some(TEST_DEFAULT_DESKS)) else {
+            continue;
+        };
+        if l.fish_tank.is_some() {
+            assert!(
+                l.couch_sprite_center.is_some(),
+                "{w}x{h}: tank requires the lounge"
+            );
+        }
+    }
+}

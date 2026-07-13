@@ -115,6 +115,7 @@ pub(super) fn build_walkable_mask(
     plants: &[PlantItem],
     floor_lamp: Option<Point>,
     lounge_side_table: Option<Point>,
+    fish_tank: Option<Point>,
     wall_decor: &[WallDecorItem],
     pod_decor: &[PodDecorItem],
     room_walls: &[WallSegment],
@@ -380,6 +381,25 @@ pub(super) fn build_walkable_mask(
         }
     }
 
+    if let Some(t) = fish_tank {
+        // Only the cabinet base blocks (ground_y End pins the 3-row strip to
+        // the sprite base); the glass tank is visual overhang against the
+        // wall band. pad=1 like the other lounge pieces.
+        let def = furniture_def(Furniture::FishTank);
+        if let Some(fp) = def.footprint {
+            stamp_ground(
+                &mut mask,
+                Anchor::Center,
+                t,
+                fp,
+                def.visual,
+                def.ground_x,
+                def.ground_y,
+                1,
+            );
+        }
+    }
+
     // Wall decor is top-left anchored. Only kinds with a ground footprint in
     // the furniture table are obstacles (the rolling whiteboard + the floor-
     // standing bookshelf / meeting screen); the truly wall-HUNG kinds (bulletin
@@ -537,6 +557,7 @@ mod tests {
             None,
             &[],
             &[],
+            None,
             None,
             None,
             &wall_decor,

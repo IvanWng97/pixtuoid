@@ -145,6 +145,11 @@ pub struct SceneLayout {
     /// Lounge side table (7×4 wood + magazine) placed next to the
     /// viewing couch on the side opposite the floor lamp.
     pub lounge_side_table: Option<Point>,
+    /// Aquarium center, east of the floor lamp against the north wall band.
+    /// Rides the lounge gate (couch/lamp/table/tank live and die together)
+    /// plus an east-clearance gate against the elevator door; `None` when
+    /// either fails.
+    pub fish_tank: Option<Point>,
     pub door: Option<Point>,
     pub door_threshold: Option<Point>,
     /// Meeting rooms in floor order — index IS the `room_id` every waypoint

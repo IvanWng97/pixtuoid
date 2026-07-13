@@ -424,6 +424,25 @@ pub(super) fn compute_with_seed(
         y: top_margin + 4,
     });
 
+    // Aquarium east of the floor lamp (decor arc, owner-picked spot). Center
+    // offsets derive from the lounge vignette: the lamp's east edge is
+    // couch_x+10 (the vignette comment above), +2 clearance + half the tank.
+    // Vertically the tank backs onto the wall band like band decor (top rows
+    // overlap the band bottom; the cabinet base is the only ground blocker).
+    // Extra gate vs lamp/table: the tank must stay clear of the elevator door
+    // column so the spawn threshold never routes around it.
+    let fish_tank = {
+        let def = furniture_def(Furniture::FishTank);
+        let half_w = def.visual.w / 2;
+        let cx = couch_x + 12 + half_w;
+        let east_limit = door.map_or(buf_w.saturating_sub(2), |d| d.x);
+        const FISH_TANK_ELEVATOR_CLEARANCE: u16 = 2;
+        (lounge_fits && cx + half_w + FISH_TANK_ELEVATOR_CLEARANCE <= east_limit).then_some(Point {
+            x: cx,
+            y: couch_y.saturating_sub(4),
+        })
+    };
+
     // Wall decor anchored to the BOTTOM of the wall band so the sprites
     // sit "below the windows" no matter how tall the wall band grows.
     // Hardcoded y=6/8 (like the old code) leaves bookshelf + bulletin
@@ -709,6 +728,7 @@ pub(super) fn compute_with_seed(
         &plants,
         floor_lamp,
         lounge_side_table,
+        fish_tank,
         &wall_decor,
         &pod_decor,
         &room_walls,
@@ -740,6 +760,7 @@ pub(super) fn compute_with_seed(
         pod_decor,
         floor_lamp,
         lounge_side_table,
+        fish_tank,
         door,
         door_threshold,
         meeting_rooms,

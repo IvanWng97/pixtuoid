@@ -265,6 +265,31 @@ pub static DRACULA: Theme = Theme {
             g: 98,
             b: 115,
         },
+        tank_water: Rgb {
+            r: 0x2b,
+            g: 0x4a,
+            b: 0x6f,
+        },
+        tank_water_line: Rgb {
+            r: 0x8b,
+            g: 0xe9,
+            b: 0xfd,
+        },
+        tank_fish: Rgb {
+            r: 0xff,
+            g: 0xb8,
+            b: 0x6c,
+        },
+        tank_fish_alt: Rgb {
+            r: 0xff,
+            g: 0x55,
+            b: 0x55,
+        },
+        tank_plant: Rgb {
+            r: 0x50,
+            g: 0xfa,
+            b: 0x7a,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

@@ -273,6 +273,31 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 112,
             b: 134,
         },
+        tank_water: Rgb {
+            r: 0x45,
+            g: 0x64,
+            b: 0x7e,
+        },
+        tank_water_line: Rgb {
+            r: 0x89,
+            g: 0xdc,
+            b: 0xeb,
+        },
+        tank_fish: Rgb {
+            r: 0xfa,
+            g: 0xb3,
+            b: 0x87,
+        },
+        tank_fish_alt: Rgb {
+            r: 0xf3,
+            g: 0x8b,
+            b: 0xa8,
+        },
+        tank_plant: Rgb {
+            r: 0xa6,
+            g: 0xe3,
+            b: 0xa1,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

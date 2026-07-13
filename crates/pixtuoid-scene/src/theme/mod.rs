@@ -105,6 +105,13 @@ pub struct FurnitureColors {
     pub chair_trim: Rgb,
     pub coffee_cup: Rgb,
     pub coffee_cup_shadow: Rgb,
+    /// Aquarium water body (deep) + its lit surface row.
+    pub tank_water: Rgb,
+    pub tank_water_line: Rgb,
+    /// The two fish (frame/cabinet reuse `room_wall_trim_dark` / `wood_*`).
+    pub tank_fish: Rgb,
+    pub tank_fish_alt: Rgb,
+    pub tank_plant: Rgb,
 }
 
 #[derive(Debug, Clone)]

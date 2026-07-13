@@ -2327,3 +2327,56 @@ fn kitchen_island_sits_on_a_bar_mat() {
         "floor beyond the west edge"
     );
 }
+
+#[test]
+fn fish_tank_paints_water_fish_and_cabinet_from_the_furniture_row() {
+    // The aquarium's geometry derives from its FurnitureDef row (14x11,
+    // center-anchored like the mask stamp); fish patrol their lanes on the
+    // anim clock, so SOME cell in each lane must carry a fish color at any
+    // instant. Frame reuses room_wall_trim_dark, cabinet reuses wood_*.
+    use crate::layout::{furniture_def, Furniture};
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let floor = Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    let mut buf = RgbBuffer::filled(60, 40, floor);
+    let pos = Point { x: 30, y: 20 };
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_234_567);
+    furniture::paint_fish_tank(&mut buf, pos, now, theme);
+    let def = furniture_def(Furniture::FishTank);
+    let (x0, y0) = (pos.x - def.visual.w / 2, pos.y - def.visual.h / 2);
+    let fc = &theme.furniture;
+    assert_eq!(
+        buf.get(x0, y0),
+        theme.office.room_wall_trim_dark,
+        "lid row is the shared dark frame"
+    );
+    assert_eq!(
+        buf.get(x0 + 7, y0 + 2),
+        fc.tank_water,
+        "water body fills the glass"
+    );
+    assert_eq!(
+        buf.get(x0 + 7, y0 + 1),
+        fc.tank_water_line,
+        "lit surface row under the lid"
+    );
+    let lane =
+        |dy: u16, color: Rgb| (1..def.visual.w - 1).any(|dx| buf.get(x0 + dx, y0 + dy) == color);
+    assert!(lane(3, fc.tank_fish), "a fish patrols the upper lane");
+    assert!(
+        lane(5, fc.tank_fish_alt),
+        "the alt fish patrols the lower lane"
+    );
+    assert!(
+        (2..8).any(|dy| buf.get(x0 + 2, y0 + dy) == fc.tank_plant),
+        "plant sprig rises from the gravel"
+    );
+    assert_eq!(
+        buf.get(x0 + 3, y0 + 9),
+        fc.wood_top,
+        "cabinet row reuses the wood family"
+    );
+}

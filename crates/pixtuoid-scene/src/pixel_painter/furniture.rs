@@ -364,3 +364,93 @@ pub(super) fn paint_island_bar_mat(
         theme,
     );
 }
+
+/// Aquarium on a low cabinet (decor arc): theme water behind a shared-dark
+/// frame, two fish patrolling opposite lanes on the anim clock, a rising
+/// bubble and a plant sprig rooted in the gravel. Geometry derives from the
+/// `FishTank` furniture row (center-anchored, matching its mask stamp); only
+/// water/fish/plant are tank-specific theme fields — frame reuses
+/// `room_wall_trim_dark`, cabinet + gravel the wood family.
+pub(super) fn paint_fish_tank(
+    buf: &mut RgbBuffer,
+    pos: crate::layout::Point,
+    now: std::time::SystemTime,
+    theme: &crate::theme::Theme,
+) {
+    use crate::layout::{furniture_def, Furniture};
+    let def = furniture_def(Furniture::FishTank);
+    let (w, h) = (def.visual.w, def.visual.h);
+    let x0 = pos.x.saturating_sub(w / 2);
+    let y0 = pos.y.saturating_sub(h / 2);
+    let frame = theme.office.room_wall_trim_dark;
+    let fc = &theme.furniture;
+    let mut put = |dx: u16, dy: u16, c: Rgb| {
+        let (px, py) = (x0 + dx, y0 + dy);
+        if px < buf.width() && py < buf.height() {
+            buf.put(px, py, c);
+        }
+    };
+    // Lid, glass walls, water (lit surface row under the lid), gravel bed.
+    for dx in 0..w {
+        put(dx, 0, frame);
+        put(dx, h - 3, frame);
+    }
+    for dy in 1..=(h - 4) {
+        put(0, dy, frame);
+        put(w - 1, dy, frame);
+        for dx in 1..w - 1 {
+            let c = if dy == 1 {
+                fc.tank_water_line
+            } else if dy == h - 4 {
+                if dx % 2 == 0 {
+                    fc.wood_trim
+                } else {
+                    fc.wood_top
+                }
+            } else {
+                fc.tank_water
+            };
+            put(dx, dy, c);
+        }
+    }
+    // Cabinet: wood door face with a center seam, then the plinth shadow row.
+    for dx in 0..w {
+        put(
+            dx,
+            h - 2,
+            if dx == w / 2 {
+                fc.wood_trim
+            } else {
+                fc.wood_top
+            },
+        );
+        put(dx, h - 1, fc.wood_trim);
+    }
+    // Fish patrol: a triangle wave over the interior span, one lane each,
+    // opposite phases so they rarely mirror. 3px bodies read at half-block
+    // scale; direction comes free from the wave's half.
+    let t = super::epoch_ms(now);
+    let span = (w - 5) as u64;
+    let mut fish = |lane_dy: u16, color: Rgb, step_ms: u64, phase: u64| {
+        let cycle = span * 2;
+        let step = ((t / step_ms) + phase) % cycle;
+        let start = if step < span {
+            1 + step as u16
+        } else {
+            1 + (cycle - step) as u16
+        };
+        for dx in start..start + 3 {
+            put(dx, lane_dy, color);
+        }
+    };
+    fish(3, fc.tank_fish, 430, 0);
+    fish(5, fc.tank_fish_alt, 520, 7);
+    // One bubble rising near the east glass.
+    let bubble_dy = (h - 5) - ((t / 300) % (h as u64 - 6)) as u16;
+    put(w - 3, bubble_dy, fc.tank_water_line);
+    // Plant sprig last: fish swim behind it.
+    put(2, 5, fc.tank_plant);
+    put(2, 6, fc.tank_plant);
+    put(2, 7, fc.tank_plant);
+    put(3, 6, fc.tank_plant);
+}

@@ -265,6 +265,31 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 84,
             b: 108,
         },
+        tank_water: Rgb {
+            r: 0x2a,
+            g: 0x4a,
+            b: 0x73,
+        },
+        tank_water_line: Rgb {
+            r: 0x7d,
+            g: 0xcf,
+            b: 0xff,
+        },
+        tank_fish: Rgb {
+            r: 0xff,
+            g: 0x9e,
+            b: 0x64,
+        },
+        tank_fish_alt: Rgb {
+            r: 0xf7,
+            g: 0x76,
+            b: 0x8e,
+        },
+        tank_plant: Rgb {
+            r: 0x9e,
+            g: 0xce,
+            b: 0x6a,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

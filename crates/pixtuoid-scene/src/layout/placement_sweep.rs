@@ -174,6 +174,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         pod_decor,
         floor_lamp,
         lounge_side_table,
+        fish_tank,
         door: _, // wall-band architecture, not furniture: it PUNCHES walkability
         //                    through the blocked band (DOOR_CUT); pinned by the
         //                    connectivity invariant + door_threshold below
@@ -388,6 +389,18 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
             Anchor::Center,
             *p,
             Furniture::LoungeSideTable,
+            Container::Band,
+            Some(2),
+        ));
+    }
+    if let Some(p) = fish_tank {
+        // Joins the lounge cluster: it backs onto the wall band beside the
+        // lamp by design, so it shares the vignette's overlap group.
+        out.push(Piece::table(
+            "fish_tank".into(),
+            Anchor::Center,
+            *p,
+            Furniture::FishTank,
             Container::Band,
             Some(2),
         ));
@@ -754,6 +767,9 @@ fn every_kind_is_placed_somewhere_in_the_sweep() {
         if l.lounge_side_table.is_some() {
             seen.insert("lounge_side_table".into());
         }
+        if l.fish_tank.is_some() {
+            seen.insert("fish_tank".into());
+        }
         if l.pantry.is_some_and(|p| p.kitchen_island.is_some()) {
             seen.insert("kitchen_island".into());
         }
@@ -800,7 +816,13 @@ fn every_kind_is_placed_somewhere_in_the_sweep() {
             missing.push(k);
         }
     }
-    for fixed in ["floor_lamp", "lounge_side_table", "kitchen_island", "couch"] {
+    for fixed in [
+        "floor_lamp",
+        "lounge_side_table",
+        "fish_tank",
+        "kitchen_island",
+        "couch",
+    ] {
         if !seen.contains(fixed) {
             missing.push(fixed.into());
         }

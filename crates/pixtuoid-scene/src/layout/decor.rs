@@ -310,6 +310,10 @@ pub enum Furniture {
     /// `seated_foot_cell` + approach/settle path. Replaces the old standalone
     /// `desk_furniture_def` literal (now a shim over this row).
     Desk,
+    /// Aquarium on a low cabinet, east of the lounge lamp against the north
+    /// wall band (decor arc). Pure decor: glass tank overhangs a shallow
+    /// cabinet base, idle fish animate in the paint pass.
+    FishTank,
 }
 
 impl Furniture {
@@ -344,6 +348,7 @@ impl Furniture {
         Furniture::IslandStand,
         Furniture::SnackShelf,
         Furniture::Desk,
+        Furniture::FishTank,
     ];
 }
 
@@ -654,6 +659,14 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         Furniture::LoungeSideTable => FurnitureDef {
             footprint: Some(Size { w: 7, h: 4 }),
             visual: Size { w: 7, h: 4 },
+            ..DECOR
+        },
+        Furniture::FishTank => FurnitureDef {
+            // Ground rule (invariant #6): only the cabinet base blocks; the
+            // glass tank above it is visual overhang (ground_y End pins the
+            // 3-row strip to the sprite base).
+            footprint: Some(Size { w: 14, h: 3 }),
+            visual: Size { w: 14, h: 11 },
             ..DECOR
         },
         // The home desk — the agent's OWNED workstation, now a first-class row
@@ -1143,7 +1156,7 @@ mod tests {
         // silent wrong-mask/wrong-render at runtime.
         assert_eq!(
             Furniture::ALL.len(),
-            26,
+            27,
             "Furniture variant added/removed — update ALL (and this count)"
         );
         for &f in Furniture::ALL {

@@ -272,6 +272,31 @@ pub static GRUVBOX: Theme = Theme {
             g: 131,
             b: 116,
         },
+        tank_water: Rgb {
+            r: 0x2e,
+            g: 0x5a,
+            b: 0x66,
+        },
+        tank_water_line: Rgb {
+            r: 0x83,
+            g: 0xa5,
+            b: 0x98,
+        },
+        tank_fish: Rgb {
+            r: 0xfe,
+            g: 0x80,
+            b: 0x19,
+        },
+        tank_fish_alt: Rgb {
+            r: 0xcc,
+            g: 0x24,
+            b: 0x1d,
+        },
+        tank_plant: Rgb {
+            r: 0x98,
+            g: 0x97,
+            b: 0x1a,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {
