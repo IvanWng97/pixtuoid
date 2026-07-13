@@ -161,7 +161,7 @@ use glass::{
     paint_door_frame_v, paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall,
     WALL_THICK_H_PX,
 };
-pub(self) use glass::{paint_door_jamb_h, DOOR_JAMB_PX};
+use glass::{paint_door_jamb_h, DOOR_JAMB_PX};
 use palette::{agent_palette, outfit_seed_for, recolor_frame};
 use seat::paint_character_at;
 

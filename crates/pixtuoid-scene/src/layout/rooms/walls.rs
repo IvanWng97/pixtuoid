@@ -331,6 +331,19 @@ mod tests {
             v[0].end.y < v[1].start.y,
             "a real gap exists — the meeting room is never sealed"
         );
+        // The resolver HANDS both openings to the renderer (#559): one per
+        // cut, spans exactly matching the segment gaps above.
+        assert_eq!(doorways.len(), 2, "one Doorway per cut opening");
+        let v_door = doorways
+            .iter()
+            .find(|d| d.start.x == d.end.x)
+            .expect("east door");
+        assert_eq!((v_door.start.y, v_door.end.y), (v[0].end.y, v[1].start.y));
+        let h_door = doorways
+            .iter()
+            .find(|d| d.start.y == d.end.y)
+            .expect("60% door");
+        assert_eq!((h_door.start.x, h_door.end.x), gap);
     }
 
     /// A vertical run starting ON a horizontal wall's line starts below its
