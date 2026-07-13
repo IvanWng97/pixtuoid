@@ -4,8 +4,8 @@
 //! The poster used to be a terminal-cell render at a ~1.18:1 aspect; under
 //! `object-fit: cover` a wide viewport cropped ~60% of its height and the
 //! poster→canvas crossfade visibly reframed. This renders the ACTUAL wasm
-//! hero — same `Office`, same seed-3 layout, same looped script, at the
-//! 320×180 buffer a 16:9 viewport's canvas computes — so the fade dissolves
+//! hero — same `Office`, same seed-0 layout, same looped script, at the
+//! 231×130 buffer a 16:9 viewport's canvas computes — so the fade dissolves
 //! in place.
 //!
 //! Determinism: a FIXED `--t0-ms` (calendar epoch — pins the wall clock,
@@ -68,17 +68,17 @@ fn positional_out(args: &[String]) -> Option<&str> {
 // The wasm hero's canvas buffer for a 16:9 viewport (see the module doc) —
 // the default so `--hour`/`--weather` runs don't have to spell out the same
 // dimensions the committed poster already uses.
-const DEFAULT_WIDTH: u32 = 320;
-const DEFAULT_HEIGHT: u32 = 180;
+const DEFAULT_WIDTH: u32 = 231;
+const DEFAULT_HEIGHT: u32 = 130;
 // Matches the committed poster's "populated plateau" advance (see the module
 // doc) — a reasonable default so an `--hour` render also shows a seated cast
 // rather than an empty office at t0.
 const DEFAULT_ADVANCE_MS: u64 = 100_000;
-// Layout seed. The hero backdrop (OfficeBackdrop.astro) is seed 3, so the
+// Layout seed. The hero backdrop (OfficeBackdrop.astro) is seed 0, so the
 // default keeps `hero-wide.png` byte-identical; a caller passes `--seed` to
 // match a DIFFERENT live canvas (e.g. the VIBING channel is seed 11) so its
 // poster shows the same office layout the live office will paint.
-const DEFAULT_SEED: u32 = 3;
+const DEFAULT_SEED: u32 = 0;
 
 // A fixed reference calendar date (arbitrary but FIXED — never "today") used
 // to turn `--hour` into a deterministic `t0_ms`. Only the hour-of-day drives

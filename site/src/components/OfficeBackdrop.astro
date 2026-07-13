@@ -12,7 +12,7 @@ import { asset, DIM_RESTING } from '../consts';
      FLOOR-ROLLS up out of that tone into the LIVE frame once the boot splash
      clears — never a cross-dissolve of the wrong-time still, so the day/night
      flip is gone by construction (see the reveal in the script). The poster
-     (demos/hero-wide.png) is a REAL wasm-hero frame at the 320x180 buffer a
+     (demos/hero-wide.png) is a REAL wasm-hero frame at the 231x130 buffer a
      16:9 canvas computes (#425) and stays the instant FALLBACK layer.
      Reduced-motion / no-JS / no-wasm / fetch-failure all simply stay on
      the still. */
@@ -22,15 +22,15 @@ import { asset, DIM_RESTING } from '../consts';
     class="backdrop__poster px"
     src={asset('demos/hero-wide.png')}
     alt=""
-    width="320"
-    height="180"
+    width="231"
+    height="130"
     decoding="async"
     fetchpriority="high"
   />
   <canvas id="office-live" class="backdrop__live px"></canvas>
   {
     /* THE CAPTION LAYER — crisp anti-aliased text laid OVER the pixel office.
-       The canvas renders a ~180px buffer that CSS upscales with
+       The canvas renders a ~130px buffer that CSS upscales with
        image-rendering: pixelated, so baked AA text would nearest-neighbor blow
        up blocky. Instead the engine exports the name-badge labels + neon
        wall-board as a model (Office.overlay_json) and these DOM spans (Monaspace
@@ -358,14 +358,17 @@ import { asset, DIM_RESTING } from '../consts';
     else markEngineResolved(); // no office will boot → don't make the splash wait
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Render SMALL and let CSS stretch (image-rendering: pixelated): ~180px
-    // tall is the app's own chunky-pixel scale (OFFICE_TARGET_H).
-    const BUF_H = 180;
+    // Render SMALL and let CSS stretch (image-rendering: pixelated): 130px
+    // tall is a deliberately CLOSER camera than the app's own ~180px
+    // (OFFICE_TARGET_H) — the hero reads as a scene, not a schematic; sprites
+    // are fixed-size, so zoom = a smaller buffer (owner-ratified, roadmap C).
+    const BUF_H = 130;
     const FRAME_MS = 33; // ~30fps cap
-    // ONE office for the whole page (user-pinned): the hero's Dense variant
-    // (seed 3 → two meeting rooms). One continuous world, one timeline that
-    // never resets while you scroll — no per-floor swapping.
-    const SEED = 3;
+    // ONE office for the whole page (user-pinned): the app's 1F look (seed 0
+    // → Standard: meeting room + pantry — richer left column than Dense's two
+    // stacked meeting rooms at the closer camera). One continuous world, one
+    // timeline that never resets while you scroll — no per-floor swapping.
+    const SEED = 0;
     // The office "rolls in" on the first live frame once the boot splash clears:
     // floors scroll up and decelerate (easeOutQuart) onto 6F, ghosting up out of
     // the bg-tone cover into the LIVE current-time frame — so the reveal shows the

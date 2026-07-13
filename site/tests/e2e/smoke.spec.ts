@@ -113,13 +113,13 @@ test('the office goes live and the statusline truth-light agrees', async ({ page
   // pix:onair event vs the statusline's listener (the seed-from-class fix).
   await expect(page.locator('[data-sl-onair]')).toHaveText('● LIVE', { timeout: 10_000 });
   // Resize re-aspects the render buffer (rAF-throttled sizeBuffer): the buffer
-  // height is fixed at 180, so width = min(640, max(64, round(w/h · 180))) —
-  // 320 at the 1280×720 default, 100 at a 500×900 portrait.
+  // height is fixed at 130, so width = min(640, max(64, round(w/h · 130))) —
+  // 231 at the 1280×720 default, 72 at a 500×900 portrait.
   const bufW = () =>
     page.evaluate(() => (document.getElementById('office-live') as HTMLCanvasElement).width);
-  expect(await bufW()).toBe(320);
+  expect(await bufW()).toBe(231);
   await page.setViewportSize({ width: 500, height: 900 });
-  await expect.poll(bufW).toBe(100);
+  await expect.poll(bufW).toBe(72);
   expect(errors()).toEqual([]);
 });
 
@@ -291,7 +291,7 @@ test('the hero pause switch freezes the office and resumes it seamlessly', async
   // it, so the resize handler must re-render the ONE frozen frame — a blank
   // var(--bg) void here is the exact regression this branch prevents.
   await page.setViewportSize({ width: 500, height: 900 });
-  await expect.poll(bufW).toBe(100); // re-aspected
+  await expect.poll(bufW).toBe(72); // re-aspected
   expect(await btn.getAttribute('aria-pressed')).toBe('true'); // still paused
   const painted = await page.evaluate(() => {
     const c = document.getElementById('office-live') as HTMLCanvasElement;
@@ -312,7 +312,7 @@ test('the hero pause switch freezes the office and resumes it seamlessly', async
 });
 
 test('crisp AA captions overlay the live office (name badges + neon board)', async ({ page }) => {
-  // The office canvas is a ~180px buffer CSS-upscaled with image-rendering:
+  // The office canvas is a ~130px buffer CSS-upscaled with image-rendering:
   // pixelated, so text baked into it pixelates. Instead the engine exports the
   // name badges + neon wall-board (Office.overlay_json) and OfficeBackdrop lays
   // crisp Monaspace Neon DOM spans over the canvas at display resolution. Pin

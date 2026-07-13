@@ -140,7 +140,7 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   Never hand-edit
   (prettier/eslint/knip all ignore it); regenerate from the crate.
 - **The crisp AA caption layer (`#office-overlay`).** The canvas renders a
-  ~180px buffer that CSS upscales with `image-rendering: pixelated`, so text
+  ~130px buffer that CSS upscales with `image-rendering: pixelated`, so text
   BAKED into the office pixels blows up blocky. Instead the engine exports the
   name badges + the neon wall board as a MODEL — `pixtuoid-web`'s
   `Office.overlay_json()` (the SAME `pixtuoid_scene::overlay` + `pixtuoid_scene::board`

@@ -241,7 +241,7 @@ def run_clip(job, out_dirs, work, intermediates):
 
 def run_wasm_still(job, out_dirs, work, intermediates):
     # The live-office backdrop's poster (#425): a REAL frame of the pixtuoid-web
-    # Office — same seed-3 layout, same looped script, same 320x180 buffer a
+    # Office — same seed-0 layout, same looped script, same 231x130 buffer a
     # 16:9 viewport's canvas computes — so the poster→canvas crossfade
     # dissolves in place instead of reframing (the old terminal-render poster
     # was ~1.18:1; cover-cropping it dropped ~60% of its height on wide
@@ -269,7 +269,7 @@ def run_wasm_still(job, out_dirs, work, intermediates):
     # Layout seed: match the LIVE canvas this poster falls back for (the VIBING
     # channel is seed 11), else the poster's office layout pops when the live
     # canvas paints over it. hero-wide sets no seed, so hero_still defaults to
-    # the backdrop's seed 3 (byte-identical).
+    # the backdrop's seed 0 (byte-identical).
     if "seed" in job:
         extra += ["--seed", str(job["seed"])]
     for d in out_dirs:

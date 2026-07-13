@@ -890,7 +890,7 @@ mod tests {
     #[test]
     fn capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted() {
         use pixtuoid_scene::layout::Layout;
-        // A portrait-phone hero buffer (the site renders BUF_H=180 at a
+        // A portrait-phone hero buffer (the site renders BUF_H=130 at a
         // narrow bufW). The reducer's capacity must derive from THAT layout,
         // so an admitted agent always has a paintable desk anchor — an agent
         // whose desk index falls off the canvas layout renders NOWHERE
