@@ -863,12 +863,6 @@ pub(super) struct FloorGeometry {
 }
 
 impl FloorGeometry {
-    fn has_meeting(self) -> bool {
-        self.variant.has_meeting()
-    }
-    fn has_vertical_wall(self) -> bool {
-        self.variant.has_meeting()
-    }
     /// Resolved pantry presence AFTER the Dense-degrade: a Dense floor too short
     /// for two rooms gains a pantry (Standard geometry).
     fn has_pantry(self) -> bool {
