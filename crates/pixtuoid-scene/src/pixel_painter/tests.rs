@@ -2328,6 +2328,50 @@ fn kitchen_island_sits_on_a_bar_mat() {
         floor,
         "floor beyond the west edge"
     );
+    // Under-furniture order: the island BODY paints over the mat's center
+    // (the mat lives in the background pass; only its south sliver shows).
+    let before = buf.get(isl.x, isl.y);
+    furniture::paint_kitchen_island(&mut buf, isl.x, isl.y, theme);
+    assert_ne!(
+        buf.get(isl.x, isl.y),
+        before,
+        "island body must cover the mat center"
+    );
+}
+
+#[test]
+fn pantry_mats_stay_inside_the_pantry_bounds() {
+    // Both soft-goods mats derive from in-pantry anchors; neither may bleed
+    // past the room, whatever the floor size.
+    use crate::layout::TEST_DEFAULT_DESKS;
+    for (w, h) in [(192u16, 160u16), (240, 160), (160, 120)] {
+        let Some(l) = Layout::compute(w, h, Some(TEST_DEFAULT_DESKS)) else {
+            continue;
+        };
+        let Some(p) = l.pantry else { continue };
+        let floor = Rgb {
+            r: 150,
+            g: 110,
+            b: 72,
+        };
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let mut buf = RgbBuffer::filled(w, h, floor);
+        furniture::paint_pantry_entry_mat(&mut buf, &l, theme);
+        furniture::paint_island_bar_mat(&mut buf, &l, theme);
+        let b = p.bounds;
+        for y in 0..h {
+            for x in 0..w {
+                let inside = x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height;
+                if !inside {
+                    assert_eq!(
+                        buf.get(x, y),
+                        floor,
+                        "{w}x{h}: mat pixel escaped the pantry at ({x},{y})"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

@@ -22,6 +22,11 @@ const SEAT_DX: [i16; 3] = [-6, 0, 6];
 /// waypoints + `couch_sprite_center`) both derive from it and must agree
 /// byte-for-byte — recomputed via this fn rather than threaded as an `Option`
 /// (no unwrap on a read-back).
+/// Gap kept between the fish tank's east edge and the elevator door column so
+/// the spawn threshold never routes around furniture. Module-scoped so the
+/// gate test references THE value instead of a re-typed copy.
+pub(super) const FISH_TANK_ELEVATOR_CLEARANCE: u16 = 2;
+
 fn couch_pos(cubicle_band: &Bounds, top_margin: u16) -> Point {
     Point {
         x: cubicle_band.x + pct(cubicle_band.width, 35),
@@ -436,7 +441,6 @@ pub(super) fn compute_with_seed(
         let half_w = def.visual.w / 2;
         let cx = couch_x + 12 + half_w;
         let east_limit = door.map_or(buf_w.saturating_sub(2), |d| d.x);
-        const FISH_TANK_ELEVATOR_CLEARANCE: u16 = 2;
         (lounge_fits && cx + half_w + FISH_TANK_ELEVATOR_CLEARANCE <= east_limit).then_some(Point {
             x: cx,
             y: couch_y.saturating_sub(4),

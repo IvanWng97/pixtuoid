@@ -1210,7 +1210,9 @@ fn enqueue_floor_fixtures<'a>(
         .filter(|w| w.kind == crate::layout::WaypointKind::MeetingChair)
     {
         drawables.push(Drawable {
-            anchor_y: wp.pos.y + 1,
+            // One row UNDER the sitter's z — derived from the SAME seat key
+            // the occupant sorts by, so the pair can't drift apart.
+            anchor_y: seat::SeatView::Front.z_key_for_seat(wp.pos) - 1,
             kind: DrawableKind::MeetingChair {
                 pos: wp.pos,
                 // The backrest rides the side AWAY from the table: a chair
@@ -1220,13 +1222,13 @@ fn enqueue_floor_fixtures<'a>(
         });
     }
     if let Some(tank) = ctx.layout.fish_tank {
-        // Center anchor: the cabinet's south row is center + half the visual.
-        let half_h = crate::layout::furniture_def(crate::layout::Furniture::FishTank)
+        // Center anchor: z at the sprite's south (cabinet base) row, via the
+        // SAME center-pin helper the lamp derives its base from.
+        let h = crate::layout::furniture_def(crate::layout::Furniture::FishTank)
             .visual
-            .h
-            / 2;
+            .h;
         drawables.push(Drawable {
-            anchor_y: tank.y + half_h,
+            anchor_y: tank.y + center_pin_south_offset(h),
             kind: DrawableKind::FishTank { pos: tank },
         });
     }

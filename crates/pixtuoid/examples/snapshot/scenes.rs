@@ -605,7 +605,7 @@ pub(crate) fn anim_scene(
     let target_kind = match target {
         "couch" => Some(WaypointKind::Couch),
         "sofa" => Some(WaypointKind::MeetingSofa),
-        "stand" => Some(WaypointKind::MeetingChair),
+        "chair" => Some(WaypointKind::MeetingChair),
         "pantry" => Some(WaypointKind::Pantry),
         "island" => Some(WaypointKind::Island),
         "snackshelf" => Some(WaypointKind::SnackShelf),

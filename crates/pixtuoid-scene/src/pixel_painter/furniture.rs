@@ -430,6 +430,12 @@ pub(super) fn paint_fish_tank(
     // opposite phases so they rarely mirror. 3px bodies read at half-block
     // scale; direction comes free from the wave's half.
     let t = super::epoch_ms(now);
+    // Patrol/rise cadences: one cell per step. Distinct fish periods (and a
+    // phase offset) keep the pair from mirroring in lockstep.
+    const FISH_STEP_MS: u64 = 430;
+    const FISH_ALT_STEP_MS: u64 = 520;
+    const FISH_ALT_PHASE_STEPS: u64 = 7;
+    const BUBBLE_RISE_STEP_MS: u64 = 300;
     let span = (w - 5) as u64;
     let mut fish = |lane_dy: u16, color: Rgb, step_ms: u64, phase: u64| {
         let cycle = span * 2;
@@ -443,10 +449,10 @@ pub(super) fn paint_fish_tank(
             put(dx, lane_dy, color);
         }
     };
-    fish(3, fc.tank_fish, 430, 0);
-    fish(5, fc.tank_fish_alt, 520, 7);
+    fish(3, fc.tank_fish, FISH_STEP_MS, 0);
+    fish(5, fc.tank_fish_alt, FISH_ALT_STEP_MS, FISH_ALT_PHASE_STEPS);
     // One bubble rising near the east glass.
-    let bubble_dy = (h - 5) - ((t / 300) % (h as u64 - 6)) as u16;
+    let bubble_dy = (h - 5) - ((t / BUBBLE_RISE_STEP_MS) % (h as u64 - 6)) as u16;
     put(w - 3, bubble_dy, fc.tank_water_line);
     // Plant sprig last: fish swim behind it.
     put(2, 5, fc.tank_plant);
@@ -466,19 +472,23 @@ pub(super) fn paint_meeting_chair(
     theme: &crate::theme::Theme,
 ) {
     let fc = &theme.furniture;
-    let (x0, y0) = (pos.x.saturating_sub(3), pos.y.saturating_sub(3));
+    let chair = crate::layout::furniture_def(crate::layout::Furniture::MeetingChair).visual;
+    let (x0, y0) = (
+        pos.x.saturating_sub(chair.w / 2),
+        pos.y.saturating_sub(chair.h / 2),
+    );
     let mut put = |dx: u16, dy: u16, c: Rgb| {
         let (px, py) = (x0 + dx, y0 + dy);
         if px < buf.width() && py < buf.height() {
             buf.put(px, py, c);
         }
     };
-    let back_dx = if back_west { 0 } else { 6 };
+    let back_dx = if back_west { 0 } else { chair.w - 1 };
     for dy in 0..5u16 {
         put(back_dx, dy, fc.chair_trim);
     }
     for dy in 1..5u16 {
-        for dx in 1..6u16 {
+        for dx in 1..chair.w - 1 {
             let c = if dy == 1 {
                 MEETING_FABRIC_LIT
             } else {
@@ -488,7 +498,7 @@ pub(super) fn paint_meeting_chair(
         }
     }
     // Feet on the ground row, table side + outer side.
-    for dx in [1u16, 5] {
+    for dx in [1u16, chair.w - 2] {
         put(dx, 5, fc.chair_trim);
         put(dx, 6, fc.chair_trim);
     }

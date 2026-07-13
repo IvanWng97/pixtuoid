@@ -192,7 +192,11 @@ impl SeatView {
             // Behind a couch/sofa back (furniture sorts at pos+3) or tied with a
             // front sofa (pos+2, insertion order puts the sitter on top).
             SeatView::Front | SeatView::Back => wp_pos.y + 2,
-            // Stand clears the meeting table (table.y+2) it stands beside.
+            // Historical stand-beside-the-table clearance (+3 over the
+            // table's y+2). No SEAT kind routes Side since the head-of-table
+            // chairs went Front; only the six non-seat obstacle kinds still
+            // produce Side, and they never settle onto a seat, so this arm is
+            // a defensive default rather than a live seat key.
             SeatView::Side { .. } => wp_pos.y + 3,
             // Plain feet-row key — the AtWaypoint default for a stander. The
             // bartender's pos row sits INSIDE the island body, below the

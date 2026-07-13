@@ -860,10 +860,15 @@ fn meeting_slots_face_the_table() {
 
 // Regression: the WEST MeetingChair point used to land on the table's padded
 // obstacle (blocked x ∈ [t.x-8, t.x+7]; the symmetric -8 hit the inclusive
-// left edge), so the router had to snap it off-target. Both stands must be on
-// walkable cells across seeds/sizes.
+// left edge), so the router had to snap it off-target. Both chair cells must
+// stay walkable across seeds/sizes — DELIBERATELY so, unlike the island's
+// in-body slots: the chair has no furniture body to sit inside
+// (`Furniture::MeetingChair` keeps `footprint: None`, the painted 7×7 chair
+// blocks nothing), and blocking the cell would ripple the mask/approach for
+// a piece walkers can visually clip at worst. See the scene CLAUDE.md decor
+// entry.
 #[test]
-fn meeting_stand_points_are_walkable() {
+fn meeting_chair_cells_stay_walkable() {
     for seed in 0..40u64 {
         for (w, h) in [(160u16, 120u16), (200, 100), (240, 140)] {
             let l = SceneLayout::compute_with_seed(w, h, Some(8), seed).expect("fits");
@@ -934,10 +939,10 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
         tank.x.saturating_sub(half_w) > lamp.x + 1,
         "tank west edge clears the lamp"
     );
-    let door_west = 192 - ELEVATOR_W - 2;
+    let door_west = l.door.expect("elevator fits at this size").x;
     assert!(
-        tank.x + half_w + 2 <= door_west,
-        "tank + clearance stays west of the elevator"
+        tank.x + half_w + super::compute::FISH_TANK_ELEVATOR_CLEARANCE <= door_west,
+        "tank + clearance stays west of the elevator door column"
     );
     // The vignette lives and dies together: never a tank without the couch.
     for (w, h) in [(96u16, 70u16), (120, 80), (150, 68), (215, 98), (240, 160)] {
