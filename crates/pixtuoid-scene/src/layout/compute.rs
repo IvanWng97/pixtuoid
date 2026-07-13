@@ -22,6 +22,11 @@ const SEAT_DX: [i16; 3] = [-6, 0, 6];
 /// waypoints + `couch_sprite_center`) both derive from it and must agree
 /// byte-for-byte — recomputed via this fn rather than threaded as an `Option`
 /// (no unwrap on a read-back).
+/// Air kept between a scatter plant's sprite box and any obstacle waypoint's
+/// (vending/printer/booth...) — 1px apart in the same column read as one
+/// totem (the machine's panel row joined the bouquet; film-critic catch).
+pub(super) const PLANT_APPLIANCE_CLEARANCE_PX: u16 = 3;
+
 /// Gap kept between the fish tank's east edge and the elevator door column so
 /// the spawn threshold never routes around furniture. Module-scoped so the
 /// gate test references THE value instead of a re-typed copy.
@@ -393,6 +398,33 @@ pub(super) fn compute_with_seed(
             def.ground_y,
         );
         !overlaps_a_desk_ground(plant_r, &home_desks)
+    })
+    // ...and to the obstacle waypoints, at VISUAL rects with breathing room:
+    // the aisle-corner Flower 1px above the VendingMachine read as one totem
+    // (grounds disjoint, so the sweep stayed silent — a clearance rule, not
+    // an overlap rule).
+    .filter(|p| {
+        let pv = furniture_def(p.kind.furniture()).visual;
+        let plant_tl = Point {
+            x: p.pos.x.saturating_sub(pv.w / 2),
+            y: p.pos.y.saturating_sub(pv.h / 2),
+        };
+        !waypoints.iter().any(|w| {
+            let def = furniture_def(w.kind.furniture());
+            if def.footprint.is_none() {
+                return false;
+            }
+            let m = PLANT_APPLIANCE_CLEARANCE_PX;
+            let inflated_tl = Point {
+                x: w.pos.x.saturating_sub(def.visual.w / 2 + m),
+                y: w.pos.y.saturating_sub(def.visual.h / 2 + m),
+            };
+            let inflated = Size {
+                w: def.visual.w + 2 * m,
+                h: def.visual.h + 2 * m,
+            };
+            super::placement::rects_overlap((plant_tl, pv), (inflated_tl, inflated))
+        })
     })
     .collect();
 
