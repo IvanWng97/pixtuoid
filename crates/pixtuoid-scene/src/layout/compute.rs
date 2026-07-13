@@ -912,27 +912,9 @@ fn plant_spot_clear(
             return false;
         }
     }
-    let pv = def.visual;
-    let plant_tl = Point {
-        x: pos.x.saturating_sub(pv.w / 2),
-        y: pos.y.saturating_sub(pv.h / 2),
-    };
-    !waypoints.iter().any(|w| {
-        let wdef = furniture_def(w.kind.furniture());
-        if wdef.footprint.is_none() {
-            return false;
-        }
-        let m = PLANT_OBSTACLE_CLEARANCE_PX;
-        let inflated_tl = Point {
-            x: w.pos.x.saturating_sub(wdef.visual.w / 2 + m),
-            y: w.pos.y.saturating_sub(wdef.visual.h / 2 + m),
-        };
-        let inflated = Size {
-            w: wdef.visual.w + 2 * m,
-            h: wdef.visual.h + 2 * m,
-        };
-        super::placement::rects_overlap((plant_tl, pv), (inflated_tl, inflated))
-    })
+    // Delegates to THE one inflate-and-overlap check (bot catch: this loop
+    // was a verbatim second copy of first_blocking_waypoint's math).
+    first_blocking_waypoint(kind, pos, waypoints).is_none()
 }
 
 /// Does `r` (a blocked ground rect) overlap ANY home desk's ground? THE one
