@@ -773,10 +773,7 @@ pub(super) fn compute_with_seed(
     // into the sofa (pinned by scatter_plants_keep_obstacle_clearance_...).
     let centered = |pos: Point, v: Size| {
         (
-            Point {
-                x: pos.x.saturating_sub(v.w / 2),
-                y: pos.y.saturating_sub(v.h / 2),
-            },
+            super::placement::anchored_top_left(super::placement::Anchor::Center, pos, v.w, v.h),
             v,
         )
     };
