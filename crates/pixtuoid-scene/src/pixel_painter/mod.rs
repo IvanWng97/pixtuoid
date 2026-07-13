@@ -554,7 +554,7 @@ fn paint_frame(
     furniture::paint_pantry_entry_mat(ctx.buf, ctx.layout, ctx.theme);
     furniture::paint_island_bar_mat(ctx.buf, ctx.layout, ctx.theme);
     if let Some(pr) = ctx.layout.pantry.map(|p| p.bounds) {
-        furniture::paint_water_cooler(ctx.buf, pr, ctx.theme);
+        furniture::paint_water_cooler(ctx.buf, pr, ctx.now, ctx.theme);
         furniture::paint_trash_bin(ctx.buf, pr);
     }
 
@@ -709,7 +709,7 @@ fn paint_frame(
 
     enqueue_meeting_furniture(ctx.layout, &mut drawables);
 
-    enqueue_lounge_pantry_appliances(ctx.layout, &mut drawables);
+    enqueue_lounge_pantry_appliances(ctx.layout, &frame.occupied_waypoints, &mut drawables);
 
     enqueue_pod_decor_and_plants(ctx.layout, &mut drawables);
     enqueue_floor_fixtures(ctx, agents, &mut drawables);
@@ -1068,7 +1068,11 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
 /// center-pinned waypoint appliances (pantry counter, vending, printer).
 /// PhoneBooth/StandingDesk render via pod-decor; meeting slots ride the
 /// sofa/table — so those waypoint kinds emit nothing here.
-fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+fn enqueue_lounge_pantry_appliances<'a>(
+    layout: &'a Layout,
+    occupied_waypoints: &std::collections::HashSet<usize>,
+    drawables: &mut Vec<Drawable<'a>>,
+) {
     if let Some(island) = layout.pantry.and_then(|p| p.kitchen_island) {
         drawables.push(Drawable {
             anchor_y: z_sort_row(
@@ -1121,8 +1125,9 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
         }
     }
 
-    for wp in &layout.waypoints {
+    for (wp_idx, wp) in layout.waypoints.iter().enumerate() {
         use crate::layout::{furniture_def, WaypointKind};
+        let busy = occupied_waypoints.contains(&wp_idx);
         // y-sort baseline = the sprite's south row (these appliances are
         // center-pinned at `pos`). Read the VISUAL height, not the (shallow)
         // footprint, so an overhang would still sort by what's painted.
@@ -1143,13 +1148,13 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
             WaypointKind::VendingMachine => {
                 drawables.push(Drawable {
                     anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
-                    kind: DrawableKind::VendingMachine { pos: wp.pos },
+                    kind: DrawableKind::VendingMachine { pos: wp.pos, busy },
                 });
             }
             WaypointKind::Printer => {
                 drawables.push(Drawable {
                     anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
-                    kind: DrawableKind::Printer { pos: wp.pos },
+                    kind: DrawableKind::Printer { pos: wp.pos, busy },
                 });
             }
             WaypointKind::SnackShelf => {

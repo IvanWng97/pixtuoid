@@ -110,6 +110,10 @@ pub struct SimFrame {
     /// Agents observed walking back with coffee this tick — the caller
     /// persists them into its `CoffeeState` (unchanged epilogue contract).
     pub new_coffee_carriers: Vec<AgentId>,
+    /// Waypoint indices with an occupant this tick — the paint-facing
+    /// observation (like `seated_agents`) that drives the appliance feedback
+    /// animations (printer eject / vending drop, B-4).
+    pub occupied_waypoints: std::collections::HashSet<usize>,
 }
 
 /// Advance the world one tick WITHOUT painting: lighting fade, occupancy
@@ -231,7 +235,7 @@ pub(crate) fn sim_step(
         })
         .collect();
 
-    let (characters, waypoint_visitors, new_coffee_carriers) =
+    let (characters, waypoint_visitors, new_coffee_carriers, occupied_waypoints) =
         resolve_characters(&agents, &poses, layout, pack, coffee, now);
 
     let chitchat_bubbles =
@@ -245,6 +249,7 @@ pub(crate) fn sim_step(
         indoor_scale,
         chitchat_bubbles,
         new_coffee_carriers,
+        occupied_waypoints,
     }
 }
 
@@ -265,6 +270,7 @@ fn resolve_characters(
     Vec<CharacterPlacement>,
     Vec<chitchat::Visitor>,
     Vec<AgentId>,
+    std::collections::HashSet<usize>,
 ) {
     let mut placements: Vec<CharacterPlacement> = Vec::new();
     let mut new_coffee_carriers: Vec<AgentId> = Vec::new();
@@ -555,5 +561,12 @@ fn resolve_characters(
             }
         }
     }
-    (placements, waypoint_visitors, new_coffee_carriers)
+    // wp_rank's keys ARE this tick's occupied waypoints (every AtWaypoint
+    // occupant registers a rank) — no second bookkeeping pass.
+    (
+        placements,
+        waypoint_visitors,
+        new_coffee_carriers,
+        wp_rank.into_keys().collect(),
+    )
 }

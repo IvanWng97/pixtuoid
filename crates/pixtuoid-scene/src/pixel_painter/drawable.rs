@@ -152,9 +152,15 @@ pub(super) enum DrawableKind<'a> {
     },
     VendingMachine {
         pos: Point,
+        /// An agent stands at this waypoint this frame — drives the
+        /// drink-drop feedback animation (B-4).
+        busy: bool,
     },
     Printer {
         pos: Point,
+        /// An agent stands at this waypoint this frame — drives the
+        /// page-eject feedback animation (B-4).
+        busy: bool,
     },
     Pet {
         kind: PetKind,
@@ -848,7 +854,7 @@ pub(super) fn paint_drawable(
                 blit_frame(f, pos.x, pos.y, buf);
             }
         }
-        DrawableKind::VendingMachine { pos } => {
+        DrawableKind::VendingMachine { pos, busy } => {
             let body = theme.appliance.vending_body;
             let panel = theme.appliance.vending_panel;
             let drinks = theme.appliance.vending_drinks;
@@ -879,8 +885,31 @@ pub(super) fn paint_drawable(
                     }
                 }
             }
+
+            if *busy {
+                // Feedback drop (B-4): a product cell goes dark and its can
+                // lands in the pickup slot; the product rotates per cycle.
+                const DROP_CYCLE_MS: u64 = 3_000;
+                const DROP_STEP_MS: u64 = 500;
+                let t = epoch_ms(now);
+                let phase = (t % DROP_CYCLE_MS) / DROP_STEP_MS; // 0..6
+                let pick = ((t / DROP_CYCLE_MS) % 4) as u16;
+                let (ddx, ddy) = (1 + pick % 2, 1 + pick / 2);
+                let mut put = |x: u16, y: u16, c| {
+                    if x < buf.width() && y < buf.height() {
+                        buf.put(x, y, c);
+                    }
+                };
+                if (1..=4).contains(&phase) {
+                    put(vx + ddx, vy + ddy, theme.appliance.vending_dark);
+                }
+                if (2..=4).contains(&phase) {
+                    let can = drinks[(pick as usize) % drinks.len()];
+                    put(vx + 2, vy + 4, can);
+                }
+            }
         }
-        DrawableKind::Printer { pos } => {
+        DrawableKind::Printer { pos, busy } => {
             let body_white = theme.appliance.printer_body;
             let top_dark = theme.appliance.printer_top;
             let glass = theme.appliance.printer_glass;
@@ -911,6 +940,28 @@ pub(super) fn paint_drawable(
                             body_white
                         };
                         buf.put(px, py, color);
+                    }
+                }
+            }
+
+            if *busy {
+                // Feedback eject (B-4): a page slides out below the tray while
+                // an agent stands here, rests, then clears. One cell per step.
+                const PAGE_CYCLE_MS: u64 = 2_400;
+                const PAGE_STEP_MS: u64 = 300;
+                let phase = (epoch_ms(now) % PAGE_CYCLE_MS) / PAGE_STEP_MS; // 0..8
+                let rows = match phase {
+                    1 => 1,
+                    2..=6 => 2,
+                    _ => 0,
+                };
+                for dy in 0..rows {
+                    for dx in 1..=3u16 {
+                        let px = px0 + dx;
+                        let py = py0 + 4 + dy;
+                        if px < buf.width() && py < buf.height() {
+                            buf.put(px, py, paper);
+                        }
                     }
                 }
             }
@@ -1640,7 +1691,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(80, 80, bg);
         let d = Drawable {
             anchor_y: pos.y,
-            kind: DrawableKind::VendingMachine { pos },
+            kind: DrawableKind::VendingMachine { pos, busy: false },
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
         let vx = pos.x - 2;
@@ -1689,7 +1740,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(80, 80, bg);
         let d = Drawable {
             anchor_y: pos.y,
-            kind: DrawableKind::Printer { pos },
+            kind: DrawableKind::Printer { pos, busy: false },
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
         let px0 = pos.x - 2;

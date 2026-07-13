@@ -231,7 +231,12 @@ pub(super) fn paint_doormat(buf: &mut RgbBuffer, mr: Bounds, theme: &crate::them
 }
 
 /// Water cooler near the pantry wall (3×6: blue bottle over a light body).
-pub(super) fn paint_water_cooler(buf: &mut RgbBuffer, pr: Bounds, theme: &crate::theme::Theme) {
+pub(super) fn paint_water_cooler(
+    buf: &mut RgbBuffer,
+    pr: Bounds,
+    now: std::time::SystemTime,
+    theme: &crate::theme::Theme,
+) {
     if !(pr.height > 25 && pr.width > 12) {
         return;
     }
@@ -251,6 +256,19 @@ pub(super) fn paint_water_cooler(buf: &mut RgbBuffer, pr: Bounds, theme: &crate:
                 let color = if dy < 2 { cooler_water } else { cooler_body };
                 buf.put(px, py, color);
             }
+        }
+    }
+    // Ambient glug (B-4, owner-ratified): a lit-water bubble climbs the
+    // bottle each cycle. Color reuses tank_water_line — THE lit-water
+    // highlight — which also keeps it off the mascot harness's exclusive
+    // bubble sentinel.
+    const GLUG_CYCLE_MS: u64 = 2_000;
+    const GLUG_STEP_MS: u64 = 400;
+    let phase = (super::epoch_ms(now) % GLUG_CYCLE_MS) / GLUG_STEP_MS; // 0..5
+    if phase < 2 {
+        let (bx, by) = (wx + 1, wy + 1 - phase as u16);
+        if bx < buf.width() && by < buf.height() {
+            buf.put(bx, by, theme.furniture.tank_water_line);
         }
     }
 }

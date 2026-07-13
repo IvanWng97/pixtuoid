@@ -607,6 +607,8 @@ pub(crate) fn anim_scene(
         "sofa" => Some(WaypointKind::MeetingSofa),
         "chair" => Some(WaypointKind::MeetingChair),
         "pantry" => Some(WaypointKind::Pantry),
+        "printer" => Some(WaypointKind::Printer),
+        "vending" => Some(WaypointKind::VendingMachine),
         "island" => Some(WaypointKind::Island),
         "snackshelf" => Some(WaypointKind::SnackShelf),
         _ => None, // "desk": always visited (return-to-desk), not a waypoint

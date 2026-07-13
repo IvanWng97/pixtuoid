@@ -1748,7 +1748,7 @@ fn furniture_room_decor_too_small_bounds_are_noops() {
     };
     assert_noop(&|b| paint_notice_board(b, small, theme));
     assert_noop(&|b| paint_doormat(b, small, theme));
-    assert_noop(&|b| paint_water_cooler(b, small, theme));
+    assert_noop(&|b| paint_water_cooler(b, small, std::time::SystemTime::UNIX_EPOCH, theme));
     assert_noop(&|b| paint_trash_bin(b, small));
 }
 
@@ -1776,7 +1776,7 @@ fn furniture_room_decor_large_bounds_paint() {
     };
     assert_paints(&|b| paint_notice_board(b, big, theme));
     assert_paints(&|b| paint_doormat(b, big, theme));
-    assert_paints(&|b| paint_water_cooler(b, big, theme));
+    assert_paints(&|b| paint_water_cooler(b, big, std::time::SystemTime::UNIX_EPOCH, theme));
     assert_paints(&|b| paint_trash_bin(b, big));
 }
 
@@ -2519,4 +2519,110 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
         bottom > chair_top,
         "sitter bottom ({bottom}) must overlap the chair body (top {chair_top})"
     );
+}
+
+#[test]
+fn busy_printer_ejects_a_page_and_idle_printer_stays_still() {
+    // B-4 (owner-ratified): appliance feedback — a page slides out of the
+    // tray only while an agent stands at the printer. Probe one mid-eject
+    // phase for paper below the body, and the same instant with busy=false
+    // for stillness.
+    let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+    let mut cache = FrameCache::new();
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let pos = Point { x: 30, y: 20 };
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(600); // mid-eject
+    let bg = Rgb { r: 1, g: 2, b: 3 };
+    let mut render = |busy: bool| {
+        let mut buf = RgbBuffer::filled(60, 40, bg);
+        let d = Drawable {
+            anchor_y: pos.y + 2,
+            kind: DrawableKind::Printer { pos, busy },
+        };
+        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme);
+        buf
+    };
+    let busy = render(true);
+    let idle = render(false);
+    let paper = theme.appliance.printer_paper;
+    let below = (1..=3u16).any(|dx| busy.get(pos.x - 2 + dx, pos.y + 2) == paper);
+    assert!(below, "busy printer shows paper emerging below the tray");
+    assert!(
+        (1..=3u16).all(|dx| idle.get(pos.x - 2 + dx, pos.y + 2) == bg),
+        "idle printer paints nothing below the tray"
+    );
+}
+
+#[test]
+fn busy_vending_machine_drops_a_can_and_idle_stays_stocked() {
+    let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+    let mut cache = FrameCache::new();
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let pos = Point { x: 30, y: 20 };
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_200); // mid-drop
+    let bg = Rgb { r: 1, g: 2, b: 3 };
+    let mut render = |busy: bool| {
+        let mut buf = RgbBuffer::filled(60, 40, bg);
+        let d = Drawable {
+            anchor_y: pos.y + 3,
+            kind: DrawableKind::VendingMachine { pos, busy },
+        };
+        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme);
+        buf
+    };
+    let busy = render(true);
+    let idle = render(false);
+    // The pickup slot (vx+2, vy+4) shows a drink color mid-drop; idle shows
+    // the machine's trim there.
+    let slot = (pos.x.saturating_sub(2) + 2, pos.y.saturating_sub(3) + 4);
+    assert!(
+        theme
+            .appliance
+            .vending_drinks
+            .contains(&busy.get(slot.0, slot.1)),
+        "busy vending drops a can into the slot"
+    );
+    assert_eq!(
+        idle.get(slot.0, slot.1),
+        theme.appliance.vending_trim,
+        "idle vending keeps the plain slot"
+    );
+}
+
+#[test]
+fn water_cooler_glugs_a_rising_bubble() {
+    // Ambient like the coffee steam: a lit-water bubble climbs the bottle on
+    // a fixed cycle. The bubble reuses tank_water_line (THE lit-water color)
+    // — NOT the mascot harness's #d6f2f8 sentinel.
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let bg = Rgb { r: 1, g: 2, b: 3 };
+    let pr = crate::layout::Bounds {
+        x: 4,
+        y: 4,
+        width: 30,
+        height: 40,
+    };
+    let render = |ms: u64| {
+        let mut buf = RgbBuffer::filled(60, 60, bg);
+        furniture::paint_water_cooler(
+            &mut buf,
+            pr,
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms),
+            theme,
+        );
+        buf
+    };
+    let bubble = theme.furniture.tank_water_line;
+    let (wx, wy) = (pr.x + pr.width - 6, pr.y + 8);
+    let a = render(100); // phase 0: bubble low
+    let b = render(500); // phase 1: bubble high
+    assert_eq!(
+        a.get(wx + 1, wy + 1),
+        bubble,
+        "bubble starts low in the bottle"
+    );
+    assert_eq!(b.get(wx + 1, wy), bubble, "bubble rises a row");
+    let c = render(1_500); // rest of the cycle: no bubble
+    assert_ne!(c.get(wx + 1, wy), bubble);
+    assert_ne!(c.get(wx + 1, wy + 1), bubble);
 }
