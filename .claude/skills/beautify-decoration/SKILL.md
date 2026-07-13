@@ -113,7 +113,7 @@ When a sprite **changes size**:
 1. Update the decoration's footprint in the `furniture_def(Furniture)` geometry table in `crates/pixtuoid-scene/src/layout/decor.rs` — the single source of truth for footprint + visual, read by `mask::build_walkable_mask` (waypoints via `approach::obstacle_footprint`), `approach.rs`, and the z-sort. Do NOT hardcode a `(w, h)` at the mask stamp site; it would diverge from the table that `stand_point`/approach and render-centering read.
 2. A non-waypoint obstacle (plant, wall decor, pod decor) is likewise stamped from its `FurnitureDef` row via `furniture_def(kind.furniture()).footprint`, not an inline literal — so the same table edit covers it.
 3. Run `cargo test -p pixtuoid-scene` — the `walkable_mask_is_fully_connected_across_buffer_sizes` test (lives in `layout/tests.rs`, moved with the layout cluster) catches mask/sprite mismatches by trying multiple buffer sizes and asserting BFS reach from the door.
-4. If the connectivity test fails on the smallest buffer (96×70), the sprite is too big for that pantry. Add a `_small` variant + conditional pick (see `pantry_counter_size` in `SceneLayout` for the pattern).
+4. If the connectivity test fails on the smallest buffer (96×70), the sprite is too big for that pantry. Add a `_small` variant + conditional pick (see `PantryRoom::counter_size` / `SceneLayout::pantry_counter_size()` for the pattern).
 5. Update animation list in `crates/pixtuoid-scene/sprites/default/pack.toml` and `embedded_pack.rs` to include both `foo.sprite` and `foo_small.sprite` if you added a variant.
 
 ### 8. Live binary uses different binary than snapshot

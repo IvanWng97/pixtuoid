@@ -62,7 +62,7 @@ fn glass_tones(theme: &crate::theme::Theme) -> (Rgb, Rgb, Rgb) {
 ///     ends 4 px higher at `top_wall_h` — raise it so no floor shows between
 ///     window and wall. A segment sitting just below a horizontal wall (the
 ///     dual-meeting layout offsets its lower segment ~6 px to clear the cross
-///     wall — see `compute_room_walls`) is bridged up to meet it.
+///     wall — see `rooms/walls.rs's derive_room_walls`) is bridged up to meet it.
 ///   • Bottom: where the vertical meets a horizontal wall, extend it down by
 ///     the horizontal's thickness to fill the inside corner (else its right
 ///     columns leave an L-notch beside the horizontal run).

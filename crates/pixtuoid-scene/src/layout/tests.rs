@@ -715,7 +715,7 @@ fn sofas_seat_three_people() {
 }
 
 #[test]
-fn meeting_slots_track_meeting_furniture() {
+fn meeting_slots_track_meeting_trios() {
     // Across every floor variant, a meeting slot exists iff a meeting
     // room exists, every slot carries a valid room_id, and a dual-meeting
     // floor produces slots for both rooms.

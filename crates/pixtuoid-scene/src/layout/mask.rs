@@ -164,8 +164,8 @@ pub(super) fn build_walkable_mask(
     //     coarse grid — every straddling cell keeps ≥12/16 px walkable, so A*
     //     routes STRAIGHT THROUGH the wall. It needs OBSTACLE_PAD_PX (→5px blocked)
     //     to drive the wall's whole cell-column under the threshold. This is the
-    //     original design: DOOR_GAP_V=14 is sized for "≥10px effective gap after
-    //     [this] padding" (see compute_room_walls). The 1px FOOTPRINT is unchanged
+    //     original design: DOOR_GAP=14 is sized for "≥10px effective gap after
+    //     [this] padding" (see rooms/walls.rs). The 1px FOOTPRINT is unchanged
     //     (characters still stand right next to the 3px visual); the pad is a
     //     routing-only clearance band, not a wider wall.
     for &WallSegment { start, end } in room_walls {

@@ -144,16 +144,23 @@ fn resolve(requests: Vec<WallRequest>) -> Vec<WallSegment> {
     //    WALL_THICK_H rows downward with pad 0; starting inside them would
     //    double-stamp and de-sync the renderer's stitch-up tolerance, which
     //    is defined AS WALL_THICK_H — see `stitch_vertical_wall`).
-    let h_lines: Vec<u16> = merged
+    let h_runs: Vec<(u16, u16, u16)> = merged
         .iter()
         .filter_map(|r| match r.run {
-            Run::H { y, .. } => Some(y),
+            Run::H { y, x0, x1 } => Some((y, x0, x1)),
             Run::V { .. } => None,
         })
         .collect();
     for req in &mut merged {
-        if let Run::V { y0, .. } = &mut req.run {
-            if h_lines.contains(&*y0) {
+        if let Run::V { x, y0, .. } = &mut req.run {
+            // Same line AND the horizontal run actually reaches this
+            // column — a coincidental same-y wall in another column must
+            // not trim (single-column today, so this is the honest form
+            // of "crossing", not a behavior change).
+            if h_runs
+                .iter()
+                .any(|&(y, x0, x1)| y == *y0 && (x0..=x1).contains(x))
+            {
                 *y0 += WALL_THICK_H;
             }
         }
@@ -204,7 +211,13 @@ fn emit(req: &WallRequest, out: &mut Vec<WallSegment>) {
     };
     let len = end.saturating_sub(start);
     // Today a run carries at most ONE door (meeting east / pantry north);
-    // a doorless run emits whole.
+    // a doorless run emits whole. Fail LOUD if a future policy unions a
+    // second door onto a shared run — silently dropping a requested
+    // opening would read as a sealed room.
+    debug_assert!(
+        req.doors.len() <= 1,
+        "multi-door runs are not implemented; a request was dropped"
+    );
     let gap = req.doors.first().map(|at| {
         let center = match at {
             DoorAt::Centered => start + len / 2,

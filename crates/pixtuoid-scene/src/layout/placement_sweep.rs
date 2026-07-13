@@ -332,11 +332,19 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         }
     }
 
-    for (room, mf) in meeting_rooms
-        .iter()
-        .enumerate()
-        .filter_map(|(i, r)| r.trio.as_ref().map(|t| (i, t)))
-    {
+    for (room, r) in meeting_rooms.iter().enumerate() {
+        // Tooth #2 EXTENDS into the aggregate: destructure MeetingRoom (and
+        // its trio) with no `..`, so a NEW field on either struct is a
+        // compile error here until its pieces are registered — the same
+        // force the SceneLayout destructure above exerts on flat fields.
+        let MeetingRoom { bounds: _, trio } = r;
+        let Some(MeetingTrio { sofas, table }) = trio else {
+            continue;
+        };
+        let mf = MeetingTrio {
+            sofas: *sofas,
+            table: *table,
+        };
         for (s, &sofa) in mf.sofas.iter().enumerate() {
             out.push(Piece::table(
                 format!("meeting[{room}].sofa[{s}]"),
@@ -386,7 +394,17 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
     // (the mask's truth); presence still feeds the every-kind coverage test.
     let _ = couch_sprite_center;
 
-    if let Some(p) = pantry.as_ref().and_then(|p| p.kitchen_island.as_ref()) {
+    // Tooth #2 on the pantry aggregate (same rationale as MeetingRoom above).
+    let island = pantry.as_ref().and_then(|p| {
+        let PantryRoom {
+            bounds: _,       // container, asserted by Container::Pantry below
+            counter_size: _, // the runtime-sized counter piece registers via
+            //                  the Pantry waypoint arm above
+            kitchen_island,
+        } = p;
+        kitchen_island.as_ref()
+    });
+    if let Some(p) = island {
         out.push(Piece::table(
             "kitchen_island".into(),
             Anchor::Center,
