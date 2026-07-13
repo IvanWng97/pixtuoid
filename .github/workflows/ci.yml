@@ -89,7 +89,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@v2.0.20 # v2.1.0 (2026-07-13) broke: musl toolchain override + "unrecognized subcommand" — repin when fixed upstream
         with:
           # Advisories run daily in audit.yml; this PR gate checks the rest.
           # Keep in sync with the justfile `deny` recipe.
