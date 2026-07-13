@@ -996,3 +996,23 @@ fn meeting_table_ends_are_chair_seats_not_stands() {
         "chair offsets mirror around the table center"
     );
 }
+
+#[test]
+fn coat_rack_yields_to_the_east_chair_in_narrow_fitted_rooms() {
+    // Arc-final audit catch (PR #561): on fitted rooms ≲40 wide the rack's
+    // coats (west reach cx−2) overprinted the east chair body + its sitter.
+    // The rack yields in that geometry; bare rooms and roomy floors keep it.
+    let narrow = SceneLayout::compute(120, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let r = &narrow.meeting_rooms[0];
+    assert!(r.trio.is_some(), "120x160 hosts a fitted room");
+    assert_eq!(
+        r.coat_rack_pos(),
+        None,
+        "narrow fitted room drops the rack instead of interpenetrating the chair"
+    );
+    let roomy = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    assert!(
+        roomy.meeting_rooms[0].coat_rack_pos().is_some(),
+        "roomy fitted room keeps the rack"
+    );
+}

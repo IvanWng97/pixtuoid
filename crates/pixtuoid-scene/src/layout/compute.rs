@@ -1303,7 +1303,8 @@ pub(super) fn compute_waypoints(
         // east chair body 1px closer to the table wood and swallowed the rug
         // border its west twin showed (owner catch, PR #561) — a standing
         // agent was too thin for the skew to read, the 7px chair body isn't.
-        for (dx, facing) in [(-9i16, Facing::East), (9, Facing::West)] {
+        let chair_dx = super::rooms::meeting::MEETING_CHAIR_TABLE_DX as i16;
+        for (dx, facing) in [(-chair_dx, Facing::East), (chair_dx, Facing::West)] {
             waypoints.push(Waypoint {
                 pos: Point {
                     x: table.x.saturating_add_signed(dx),

@@ -29,7 +29,44 @@ pub struct MeetingRoom {
     pub trio: Option<MeetingTrio>,
 }
 
+/// Horizontal offset of each head-of-table chair from the table centre —
+/// mirrored ±: west chair at `table.x − DX` (faces East), east at `+DX`.
+/// Single-sourced here so the waypoint push (compute.rs) and the coat-rack
+/// clearance math below can't drift apart.
+pub(crate) const MEETING_CHAIR_TABLE_DX: u16 = 9;
+
 impl MeetingRoom {
+    /// The coat rack's spot beside the corridor door (east wall, room-centre
+    /// row) — or `None` when a fitted room is too narrow for the rack's coats
+    /// (west reach `x − 2`) to clear the east chair and its sitter (arc-final
+    /// audit catch: at ≲40-wide rooms they interpenetrated). Bare rooms keep
+    /// the rack at any width past the sprite gate. THE one authority: the
+    /// painter's enqueue and the binary's hover hit-test both read this.
+    pub fn coat_rack_pos(&self) -> Option<Point> {
+        let b = self.bounds;
+        if b.width <= 20 {
+            return None;
+        }
+        let pos = Point {
+            x: b.x + b.width - 5,
+            y: b.y + b.height / 2 - 4,
+        };
+        if let Some(t) = &self.trio {
+            // The 8-wide seated sprite centered on the chair cell shares the
+            // chair body's east edge (pos+3), so the body reach IS the reach.
+            let chair_east_reach = t.table.x
+                + MEETING_CHAIR_TABLE_DX
+                + furniture_def(Furniture::MeetingChair).visual.w / 2;
+            let rack_west_reach = pos.x.saturating_sub(2);
+            // Drop only on true overlap (coats start at or west of the chair
+            // edge) — dense 42-wide rooms sit exactly adjacent and keep it.
+            if rack_west_reach <= chair_east_reach {
+                return None;
+            }
+        }
+        Some(pos)
+    }
+
     /// Minimum room height that fits the sofa/table trio — the fit gate AND
     /// the floor of the split negotiation (`compute_with_seed` donates
     /// meeting rows to the pantry only while the trio still fits). Height

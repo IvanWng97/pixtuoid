@@ -1234,18 +1234,19 @@ fn enqueue_floor_fixtures<'a>(
             kind: DrawableKind::FishTank { pos: tank },
         });
     }
-    // One coat rack per meeting room (#555: room 1 used to go without).
-    for mr in ctx.layout.meeting_rooms.iter().map(|r| r.bounds) {
-        if mr.width > 20 {
-            let cx = mr.x + mr.width - 5;
-            let cy = mr.y + mr.height / 2 - 4;
-            drawables.push(Drawable {
-                anchor_y: cy + 7,
-                kind: DrawableKind::CoatRack {
-                    pos: Point { x: cx, y: cy },
-                },
-            });
-        }
+    // One coat rack per meeting room (#555: room 1 used to go without);
+    // placement + the narrow-fitted-room yield live in coat_rack_pos — THE
+    // one authority the hover hit-test shares.
+    for rack in ctx
+        .layout
+        .meeting_rooms
+        .iter()
+        .filter_map(|r| r.coat_rack_pos())
+    {
+        drawables.push(Drawable {
+            anchor_y: rack.y + 7,
+            kind: DrawableKind::CoatRack { pos: rack },
+        });
     }
     if let Some(door_pos) = ctx.layout.door {
         let frame_idx = compute_door_frame_idx(agents, ctx.now, ctx.door_anim_max_ms);

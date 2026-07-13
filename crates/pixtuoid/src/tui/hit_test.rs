@@ -332,12 +332,13 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Meeting room procedural items (coat rack, doormat) — EVERY room
-    // (#555: room 1 used to render bare of decor, keyed room 0 only).
-    for mr in layout.meeting_rooms.iter().map(|r| r.bounds) {
-        if mr.width > 20 {
-            let cx = mr.x + mr.width - 5;
-            let cy = mr.y + mr.height / 2 - 4;
-            if hit(cx.saturating_sub(2), cy, 5, 8) {
+    // (#555: room 1 used to render bare of decor, keyed room 0 only). The
+    // rack spot (incl. the narrow-fitted-room yield) comes from
+    // coat_rack_pos, the same authority the painter enqueues from.
+    for room in &layout.meeting_rooms {
+        let mr = room.bounds;
+        if let Some(rack) = room.coat_rack_pos() {
+            if hit(rack.x.saturating_sub(2), rack.y, 5, 8) {
                 return Some("Coat Rack");
             }
         }
