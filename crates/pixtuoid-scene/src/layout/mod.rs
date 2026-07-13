@@ -29,6 +29,7 @@ mod rooms;
 
 pub use approach::{approach_point, stand_point};
 pub use compute::PANTRY_COUNTER_LARGE_W;
+pub(crate) use decor::DESK_GROUND_H;
 pub use decor::{
     desk_furniture_def, desk_walk_anchor, furniture_def, seated_foot_cell, ApproachSides,
     DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,

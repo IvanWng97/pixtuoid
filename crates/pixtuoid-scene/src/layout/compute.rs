@@ -923,8 +923,6 @@ pub(super) fn compute_pod_desks(
     cubicle_band: &Bounds,
     grid: PodGrid,
 ) -> Vec<Point> {
-    let right_x = cubicle_band.x;
-    let right_w = cubicle_band.width;
     let cubicle_h = cubicle_band.height;
     let PodGrid {
         cols: pod_cols,
@@ -1000,14 +998,18 @@ pub(super) fn compute_pod_desks(
     // column. Resolves the "office looks empty on the right" issue
     // at wide buffers where a full 2nd pod doesn't fit but multiple
     // single-desk columns do.
-    let main_pod_used_w = INTER_POD_AISLE_X / 2 + pod_cols * pod_stride_x;
-    let residual_w = right_w.saturating_sub(main_pod_used_w);
-    let partial_col_stride = DESK_W + INTER_POD_AISLE_X / 2;
-    let partial_col_count = (residual_w / partial_col_stride).min(4);
-    let partial_col_at_right = partial_col_count > 0;
+    // Partial columns CONTINUE the pod lattice — column i is the
+    // (i % POD_SIDE)-th column of the (pod_cols + i/POD_SIDE)-th pod — so
+    // spacing never jumps as the width changes (#553, owner-ratified
+    // snap-to-stride over redistribute/drop).
     let partial_col_x = |i: u16| -> u16 {
-        right_x + main_pod_used_w + INTER_POD_AISLE_X / 2 + i * partial_col_stride
+        let (x, _) = grid.pod_origin(cubicle_band, pod_cols + i / POD_SIDE, 0);
+        x + (i % POD_SIDE) * (DESK_W + INTRA_POD_GAP_X)
     };
+    let partial_col_count = (0..4u16)
+        .take_while(|&i| partial_col_x(i) <= desk_x_max)
+        .count() as u16;
+    let partial_col_at_right = partial_col_count > 0;
     if partial_col_at_right {
         'partial_x: for pod_r in 0..pod_rows {
             let (_, pod_origin_y) = grid.pod_origin(cubicle_band, 0, pod_r);
@@ -1029,7 +1031,11 @@ pub(super) fn compute_pod_desks(
     // Partial pod ROW at the BOTTOM edge — same idea but vertical.
     // Adds POD_SIDE × pod_cols extra desks (+ the partial column's
     // single desk if it also fits).
-    let main_pod_used_h = INTER_POD_AISLE_Y / 2 + couch_to_desk_extra + pod_rows * pod_stride_y;
+    // pod_rows * pod_stride_y counts one aisle BELOW the last row; that
+    // phantom aisle starved residual_h and suppressed a bottom row that
+    // physically fit (#552).
+    let main_pod_used_h = (INTER_POD_AISLE_Y / 2 + couch_to_desk_extra + pod_rows * pod_stride_y)
+        .saturating_sub(INTER_POD_AISLE_Y);
     let residual_h = cubicle_h.saturating_sub(main_pod_used_h);
     let partial_row_at_bottom = residual_h >= DESK_H + INTER_POD_AISLE_Y / 2;
     if partial_row_at_bottom {

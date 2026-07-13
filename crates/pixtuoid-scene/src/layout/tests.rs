@@ -1016,3 +1016,61 @@ fn coat_rack_yields_to_the_east_chair_in_narrow_fitted_rooms() {
         "roomy fitted room keeps the rack"
     );
 }
+
+#[test]
+fn pod_grid_fills_every_desk_row_that_fits() {
+    // #552: main_pod_used_h counted a phantom trailing aisle below the last
+    // pod row, starving residual_h so a bottom row that physically fits never
+    // fired. Invariant, from outputs only: a whole extra desk row (one full
+    // row gap below the lowest row) must NOT fit inside the band.
+    for w in [140u16, 160, 192, 215, 240] {
+        for h in (100..=240u16).step_by(10) {
+            let Some(l) = SceneLayout::compute(w, h, Some(64)) else {
+                continue;
+            };
+            if l.home_desks.is_empty() {
+                continue;
+            }
+            let lowest = l.home_desks.iter().map(|d| d.y).max().unwrap();
+            let next_row_y = lowest + DESK_H + INTER_POD_AISLE_Y;
+            let desk_y_max = (l.cubicle_band.y + l.cubicle_band.height)
+                .saturating_sub(super::decor::DESK_GROUND_H);
+            assert!(
+                next_row_y > desk_y_max,
+                "{w}x{h}: a whole desk row fits below the grid (next_row_y {next_row_y} <= desk_y_max {desk_y_max})"
+            );
+        }
+    }
+}
+
+#[test]
+fn desk_columns_stay_on_one_lattice_and_never_shift_with_width() {
+    // #553 (ratified: snap-to-stride): every desk column sits on the pod
+    // lattice — offset from the grid origin is k*stride + {0 | intra column
+    // step} — and sweeping the width only ADDS columns (band-relative offsets
+    // never move), so resize can't make inter-desk spacing jump.
+    use std::collections::BTreeSet;
+    let stride_x = POD_SIDE * DESK_W + (POD_SIDE - 1) * INTRA_POD_GAP_X + INTER_POD_AISLE_X;
+    let mut prev: BTreeSet<u16> = BTreeSet::new();
+    for w in (140..=260u16).step_by(4) {
+        let Some(l) = SceneLayout::compute(w, 160, Some(64)) else {
+            continue;
+        };
+        let origin = l.cubicle_band.x + INTER_POD_AISLE_X / 2;
+        let offs: BTreeSet<u16> = l.home_desks.iter().map(|d| d.x - origin).collect();
+        for &off in &offs {
+            let in_pod = off % stride_x;
+            assert!(
+                in_pod == 0 || in_pod == DESK_W + INTRA_POD_GAP_X,
+                "{w}x160: column offset {off} is off the pod lattice (in_pod {in_pod})"
+            );
+        }
+        assert!(
+            prev.is_subset(&offs) || offs.len() >= prev.len(),
+            "{w}x160: existing columns moved or vanished on widen: {prev:?} -> {offs:?}"
+        );
+        if offs.is_superset(&prev) {
+            prev = offs;
+        }
+    }
+}
