@@ -132,7 +132,7 @@ pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> 
         // The desk sitter faces the camera (South); DESK_APPROACH then allows
         // N/E/W (the south front is excluded — that is the bug-prone side).
         Facing::South,
-        layout.pantry_counter_size,
+        layout.pantry_counter_size(),
         &layout.walkable,
         chair,
         &layout.reachable,

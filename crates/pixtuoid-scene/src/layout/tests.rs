@@ -8,9 +8,10 @@ fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
     // anti-merge routing line).
     let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
     let island = l
-        .kitchen_island
+        .pantry
+        .and_then(|p| p.kitchen_island)
         .expect("84-wide Senior pantry hosts the island");
-    let pr = l.pantry_room.expect("pantry");
+    let pr = l.pantry.map(|p| p.bounds).expect("pantry");
     assert!(island.x >= pr.x && island.x < pr.x + pr.width);
     let stands: Vec<_> = l
         .waypoints
@@ -53,7 +54,11 @@ fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
     // stands + clearances (needs ≥42 = 2·(clr + stand_dx)) — refuse, don't
     // force (and no stray stand waypoints).
     let s = SceneLayout::compute_with_seed(96, 70, None, 0).expect("fits");
-    assert_eq!(s.kitchen_island, None, "26-wide pantry refuses the island");
+    assert_eq!(
+        s.pantry.and_then(|p| p.kitchen_island),
+        None,
+        "26-wide pantry refuses the island"
+    );
     assert!(
         !s.waypoints
             .iter()
@@ -73,7 +78,7 @@ fn meeting_room_donates_surplus_height_to_the_pantry() {
     // real clamps (if either side changes alone, the island vanishes here).
     let l = SceneLayout::compute_with_seed(215, 98, None, 0).expect("fits");
     assert!(
-        l.kitchen_island.is_some(),
+        l.pantry.and_then(|p| p.kitchen_island).is_some(),
         "island must place on the short floor after the height transfer"
     );
     assert!(
@@ -82,8 +87,8 @@ fn meeting_room_donates_surplus_height_to_the_pantry() {
             .any(|w| matches!(w.kind, WaypointKind::SnackShelf)),
         "snack shelf must place too (its y-bound == the island's)"
     );
-    let mr = l.meeting_room.expect("meeting room");
-    let pr = l.pantry_room.expect("pantry");
+    let mr = l.meeting_room_bounds(0).expect("meeting room");
+    let pr = l.pantry.map(|p| p.bounds).expect("pantry");
     assert!(
         mr.height < pr.height,
         "the surplus flowed south: meeting {} !< pantry {}",
@@ -94,8 +99,8 @@ fn meeting_room_donates_surplus_height_to_the_pantry() {
     // their geometry is unchanged by the transfer.
     let tall = SceneLayout::compute_with_seed(240, 160, None, 0).expect("fits");
     let (tmr, tpr) = (
-        tall.meeting_room.expect("meeting room"),
-        tall.pantry_room.expect("pantry"),
+        tall.meeting_room_bounds(0).expect("meeting room"),
+        tall.pantry.map(|p| p.bounds).expect("pantry"),
     );
     let usable = tmr.height + tpr.height;
     assert_eq!(
@@ -111,12 +116,13 @@ fn meeting_room_donates_surplus_height_to_the_pantry() {
     // starve/rescue boundary is load-bearing.)
     let short = SceneLayout::compute_with_seed(215, 87, None, 0).expect("fits");
     assert_eq!(
-        short.kitchen_island, None,
+        short.pantry.and_then(|p| p.kitchen_island),
+        None,
         "below the donation floor the pantry stays starved (no forced cram)"
     );
     let (smr, spr) = (
-        short.meeting_room.expect("meeting room"),
-        short.pantry_room.expect("pantry"),
+        short.meeting_room_bounds(0).expect("meeting room"),
+        short.pantry.map(|p| p.bounds).expect("pantry"),
     );
     assert_eq!(
         smr.height,
@@ -141,7 +147,7 @@ fn island_bartenders_approach_from_behind_never_through_the_front() {
     for (bw, bh) in [(240u16, 160u16), (215, 98)] {
         for seed in 0..5u64 {
             let l = SceneLayout::compute_with_seed(bw, bh, None, seed).expect("fits");
-            let Some(island) = l.kitchen_island else {
+            let Some(island) = l.pantry.and_then(|p| p.kitchen_island) else {
                 continue;
             };
             exercised = true;
@@ -155,7 +161,7 @@ fn island_bartenders_approach_from_behind_never_through_the_front() {
                     wp.kind.furniture(),
                     wp.pos,
                     wp.facing,
-                    l.pantry_counter_size,
+                    l.pantry_counter_size(),
                     &l.walkable,
                     origin,
                     &l.reachable,
@@ -183,7 +189,7 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
     // Roomy floor: one shelf waypoint against the west wall (the east bridge
     // must stay open), its ground inside the room.
     let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
-    let pr = l.pantry_room.expect("pantry");
+    let pr = l.pantry.map(|p| p.bounds).expect("pantry");
     let shelf = l
         .waypoints
         .iter()
@@ -202,36 +208,60 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
 }
 
 #[test]
-fn dual_meeting_layout_exposes_room_1_bounds() {
-    // `meeting_room_2` was computed-then-DISCARDED inside compute_with_seed, so
-    // `meeting_furniture[1]` (+ its room_id==1 waypoints) had NO container a
-    // test could assert against — the one placement whose containment was
-    // structurally untestable. Thread it onto SceneLayout and pin the
-    // room_id → Bounds join through the ONE accessor.
+fn meeting_rooms_vec_indexes_are_the_waypoint_room_ids() {
+    // The join-key pin (#557): a room's index in `meeting_rooms` IS the
+    // `room_id` its waypoints carry — bounds and trio live in ONE element,
+    // so a bare room keeps its slot and the id can never shift (the old
+    // compacted `meeting_furniture` Vec could mis-join if a bare room 0 sat
+    // above a fitted room 1; latent then, unrepresentable now). Also pins
+    // room-1 furniture containment on the dual-meeting Dense floor.
     let mut saw_dual = false;
     for seed in 0..10u64 {
         let l = SceneLayout::compute_with_seed(192, 160, Some(8), seed).expect("fits");
-        // One direction only: a second room's FURNITURE implies its Bounds are
-        // exposed. The converse is false by design — a too-narrow dual floor
-        // keeps both room Bounds but drops the furniture (the bare-room
-        // degradation, scene CLAUDE.md sharp edge).
-        if l.meeting_furniture.len() == 2 {
+        assert_eq!(
+            l.meeting_room_bounds(l.meeting_rooms.len()),
+            None,
+            "no room past the Vec"
+        );
+        // Every meeting waypoint's room_id joins to a room whose bounds
+        // CONTAIN it — the definition of the id being the Vec index.
+        for wp in l.waypoints.iter().filter(|w| {
+            matches!(
+                w.kind,
+                WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+            )
+        }) {
+            let id = wp.room_id.expect("meeting slots carry a room_id");
+            let b = l
+                .meeting_room_bounds(id)
+                .unwrap_or_else(|| panic!("seed {seed}: room_id {id} has no room"));
             assert!(
-                l.meeting_room_2.is_some(),
-                "seed {seed}: room-1 furniture exists but its Bounds were discarded"
+                l.meeting_rooms[id].trio.is_some(),
+                "seed {seed}: room {id} emits waypoints, so it must host its trio"
+            );
+            assert!(
+                wp.pos.x >= b.x
+                    && wp.pos.x < b.x + b.width
+                    && wp.pos.y >= b.y
+                    && wp.pos.y < b.y + b.height,
+                "seed {seed}: waypoint {:?} (room {id}) outside its room {b:?}",
+                wp.pos
             );
         }
-        assert_eq!(l.meeting_room_bounds(0), l.meeting_room);
-        assert_eq!(l.meeting_room_bounds(1), l.meeting_room_2);
-        assert_eq!(l.meeting_room_bounds(2), None, "no third room exists");
-        let Some(r2) = l.meeting_room_2 else { continue };
-        saw_dual = true;
-        let mf = &l.meeting_furniture[1];
-        for p in mf.sofas.iter().chain([&mf.table]) {
-            assert!(
-                p.x >= r2.x && p.x < r2.x + r2.width && p.y >= r2.y && p.y < r2.y + r2.height,
-                "seed {seed}: room-1 furniture {p:?} must sit inside its own room {r2:?}"
-            );
+        if l.meeting_rooms.len() == 2 {
+            saw_dual = true;
+            let r2 = l.meeting_rooms[1].bounds;
+            if let Some(mf) = l.meeting_rooms[1].trio {
+                for p in mf.sofas.iter().chain([&mf.table]) {
+                    assert!(
+                        p.x >= r2.x
+                            && p.x < r2.x + r2.width
+                            && p.y >= r2.y
+                            && p.y < r2.y + r2.height,
+                        "seed {seed}: room-1 furniture {p:?} must sit inside its own room {r2:?}"
+                    );
+                }
+            }
         }
     }
     assert!(
@@ -504,7 +534,7 @@ fn compute_places_all_waypoint_kinds() {
     for w in &l.waypoints {
         match w.kind {
             WaypointKind::Pantry => {
-                let pr = l.pantry_room.expect("pantry");
+                let pr = l.pantry.map(|p| p.bounds).expect("pantry");
                 assert!(w.pos.y >= pr.y && w.pos.y < pr.y + pr.height);
                 assert!(w.pos.x >= pr.x && w.pos.x < pr.x + pr.width);
             }
@@ -519,7 +549,10 @@ fn compute_places_all_waypoint_kinds() {
             // top wall.
             // The pantry-redesign kinds all live inside the pantry room.
             WaypointKind::Island | WaypointKind::SnackShelf => {
-                let pr = l.pantry_room.expect("pantry room hosts the new kinds");
+                let pr = l
+                    .pantry
+                    .map(|p| p.bounds)
+                    .expect("pantry room hosts the new kinds");
                 assert!(w.pos.y >= pr.y && w.pos.y < pr.y + pr.height);
                 assert!(w.pos.x >= pr.x && w.pos.x < pr.x + pr.width);
             }
@@ -532,7 +565,7 @@ fn compute_places_all_waypoint_kinds() {
             WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {
                 // A meeting slot only exists when a meeting room does, and
                 // it carries the room id it belongs to.
-                assert!(l.meeting_room.is_some());
+                assert!(!l.meeting_rooms.is_empty());
                 assert!(w.room_id.is_some());
             }
         }
@@ -562,7 +595,7 @@ fn every_home_desk_has_a_reachable_north_approach() {
                 Furniture::Desk,
                 chair,
                 Facing::South,
-                l.pantry_counter_size,
+                l.pantry_counter_size(),
                 &l.walkable,
                 north_origin,
                 &l.reachable,
@@ -610,13 +643,18 @@ fn sofas_seat_three_people() {
     assert_eq!(center.x, xs[1], "sprite center sits on the middle seat");
 
     // 1 meeting room → 2 sofas (per room) → 3 seats each.
-    assert!(!l.meeting_furniture.is_empty(), "expected a meeting room");
+    assert!(!l.meeting_rooms.is_empty(), "expected a meeting room");
     let sofa_seats = l
         .waypoints
         .iter()
         .filter(|w| w.kind == WaypointKind::MeetingSofa)
         .count();
-    let total_sofas: usize = l.meeting_furniture.iter().map(|r| r.sofas.len()).sum();
+    let total_sofas: usize = l
+        .meeting_rooms
+        .iter()
+        .filter_map(|r| r.trio.as_ref())
+        .map(|t| t.sofas.len())
+        .sum();
     assert_eq!(sofa_seats, 3 * total_sofas, "each meeting sofa seats 3");
 }
 
@@ -640,7 +678,7 @@ fn meeting_slots_track_meeting_furniture() {
                 )
             })
             .collect();
-        if l.meeting_room.is_some() {
+        if !l.meeting_rooms.is_empty() {
             saw_room = true;
             assert!(
                 sofa_slots
@@ -654,7 +692,7 @@ fn meeting_slots_track_meeting_furniture() {
                     .any(|w| w.kind == WaypointKind::MeetingStand),
                 "seed {seed}: meeting room but no standing slot"
             );
-            let rooms = l.meeting_furniture.len();
+            let rooms = l.meeting_rooms.len();
             for w in &sofa_slots {
                 let rid = w.room_id.expect("meeting slot has room_id");
                 assert!(
@@ -698,7 +736,12 @@ fn meeting_table_is_centered_between_its_two_sofas() {
             let Some(l) = SceneLayout::compute_with_seed(w, h, Some(8), seed) else {
                 continue;
             };
-            for (room_id, room) in l.meeting_furniture.iter().enumerate() {
+            for (room_id, room) in l
+                .meeting_rooms
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| r.trio.as_ref().map(|t| (i, t)))
+            {
                 let table = room.table;
                 let north = room.sofas[0];
                 let south = room.sofas[1];
@@ -724,7 +767,10 @@ fn meeting_slots_face_the_table() {
         let l = SceneLayout::compute_with_seed(160, 120, Some(8), seed).expect("fits");
         for w in &l.waypoints {
             let Some(room_id) = w.room_id else { continue };
-            let table = l.meeting_furniture[room_id].table;
+            let table = l.meeting_rooms[room_id]
+                .trio
+                .expect("slot's room hosts a trio")
+                .table;
             match w.kind {
                 WaypointKind::MeetingSofa => {
                     let want = if w.pos.y < table.y {

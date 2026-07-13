@@ -165,7 +165,7 @@ pub(crate) fn sim_step(
                 let stand = crate::layout::stand_point(
                     w.kind,
                     w.pos,
-                    layout.pantry_counter_size,
+                    layout.pantry_counter_size(),
                     &layout.walkable,
                     origin,
                     w.facing,
@@ -372,7 +372,7 @@ fn resolve_characters(
                     let stand = crate::layout::stand_point(
                         wp_obj.kind,
                         wp_obj.pos,
-                        layout.pantry_counter_size,
+                        layout.pantry_counter_size(),
                         &layout.walkable,
                         desk,
                         wp_obj.facing,

@@ -111,7 +111,7 @@ pub(super) fn compute_with_seed(
             h: 10,
         }
     } else {
-        Size { w: 20, h: 8 }
+        super::rooms::pantry::COMPACT_COUNTER
     };
 
     // One source of truth: the meeting-sofa SPRITE height (was a bare `7`). A
@@ -315,15 +315,19 @@ pub(super) fn compute_with_seed(
         };
         (sofas, table)
     };
-    let mut meeting_furniture: Vec<MeetingFurniture> = Vec::new();
-    // Order is load-bearing: room 0 = `meeting_room`, room 1 = `meeting_room_2`
-    // (dense layout). `compute_waypoints` keys seats to a room by this index.
+    // Vec index IS the room_id (room 0 always exists when any room does, so
+    // push order == the [room0, room1] enumeration index). A room too small
+    // for its trio still occupies its slot with `trio: None` — bounds and
+    // furniture can't mis-join (see `MeetingRoom`'s doc).
+    let mut meeting_rooms: Vec<MeetingRoom> = Vec::new();
     for (room_idx, room) in [meeting_room, meeting_room_2].into_iter().enumerate() {
-        if let Some(mr) = room.filter(&room_fits_furniture) {
+        let Some(mr) = room else { continue };
+        let trio = room_fits_furniture(&mr).then(|| {
             let north_floor = if room_idx == 0 { sofa_h / 2 } else { sofa_h };
             let (sofas, table) = room_furniture(&mr, north_floor);
-            meeting_furniture.push(MeetingFurniture { sofas, table });
-        }
+            MeetingTrio { sofas, table }
+        });
+        meeting_rooms.push(MeetingRoom { bounds: mr, trio });
     }
 
     let room_walls = compute_room_walls(geom, mid_x, mid_y_split, top_margin, usable_h);
@@ -349,7 +353,7 @@ pub(super) fn compute_with_seed(
         pantry_counter_size,
         &pod_decor,
         &cubicle_aisle,
-        &meeting_furniture,
+        &meeting_rooms,
         lounge_fits,
     );
 
@@ -734,7 +738,7 @@ pub(super) fn compute_with_seed(
         top_margin,
         door,
         &home_desks,
-        &meeting_furniture,
+        &meeting_rooms,
         kitchen_island,
         &waypoints,
         &plants,
@@ -773,14 +777,14 @@ pub(super) fn compute_with_seed(
         lounge_side_table,
         door,
         door_threshold,
-        meeting_room,
-        meeting_room_2,
-        pantry_room,
-        meeting_furniture,
+        meeting_rooms,
+        pantry: pantry_room.map(|bounds| PantryRoom {
+            bounds,
+            counter_size: pantry_counter_size,
+            kitchen_island,
+        }),
         room_walls,
         top_margin,
-        pantry_counter_size,
-        kitchen_island,
         corridor,
         couch_sprite_center,
         walkable,
@@ -1261,7 +1265,7 @@ pub(super) fn compute_waypoints(
     pantry_counter_size: Size,
     pod_decor: &[PodDecorItem],
     cubicle_aisle: &Bounds,
-    meeting_furniture: &[MeetingFurniture],
+    meeting_rooms: &[MeetingRoom],
     lounge_fits: bool,
 ) -> (Vec<Waypoint>, Option<Point>) {
     let right_x = cubicle_band.x;
@@ -1380,13 +1384,15 @@ pub(super) fn compute_waypoints(
     }
 
     // Meeting-room slots. Each room's 2 sofas are stored north→south
-    // (`MeetingFurniture.sofas[0/1]`); each seats up to 3 agents (dx ∈ {-6, 0, +6}
+    // (`MeetingTrio.sofas[0/1]`); each seats up to 3 agents (dx ∈ {-6, 0, +6}
     // along the 20px sofa) facing the table. Two standing slots flank the table.
-    // Every slot in a room shares its `room_id` (the room's index) so the
-    // group-chitchat venue keys on the room, not the individual seat.
-    for (room_id, room) in meeting_furniture.iter().enumerate() {
-        let table = room.table;
-        for sofa in room.sofas {
+    // Every slot in a room shares its `room_id` (the room's TRUE index in
+    // `meeting_rooms` — a bare trio-less room keeps its slot, so the id can
+    // never shift) so the group-chitchat venue keys on the room.
+    for (room_id, room) in meeting_rooms.iter().enumerate() {
+        let Some(trio) = room.trio else { continue };
+        let table = trio.table;
+        for sofa in trio.sofas {
             // North-of-table sofa faces South (front toward the viewer); the
             // south sofa faces North (back toward the viewer) — the pair reads
             // as two people facing each other across the table.

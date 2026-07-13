@@ -129,14 +129,14 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
                 );
             }
         }
-        if !layout.meeting_furniture.is_empty() {
+        if layout.meeting_rooms.iter().any(|r| r.trio.is_some()) {
             assert!(labels.contains("Meeting Sofa"), "seed {seed}: Meeting Sofa");
             assert!(
                 labels.contains("Meeting Table"),
                 "seed {seed}: Meeting Table"
             );
         }
-        if layout.kitchen_island.is_some() {
+        if layout.pantry.is_some_and(|p| p.kitchen_island.is_some()) {
             assert!(
                 labels.contains("Kitchen Island"),
                 "seed {seed}: Kitchen Island"

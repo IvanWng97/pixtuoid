@@ -1095,7 +1095,7 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
         WaypointKind::Pantry.furniture(),
         l.waypoints[pantry_idx].pos,
         l.waypoints[pantry_idx].facing,
-        l.pantry_counter_size,
+        l.pantry_counter_size(),
         &l.walkable,
         desk,
         &l.reachable,

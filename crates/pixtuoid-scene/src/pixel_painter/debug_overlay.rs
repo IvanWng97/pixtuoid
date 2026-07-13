@@ -140,7 +140,7 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
         // Obstacle: mark the cell just off each ALLOWED side (facing-rotated).
         // Pantry's footprint is runtime-sized.
         let fp = if wp.kind == WaypointKind::Pantry {
-            Some(layout.pantry_counter_size)
+            Some(layout.pantry_counter_size())
         } else {
             def.footprint
         };

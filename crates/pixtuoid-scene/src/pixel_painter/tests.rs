@@ -778,7 +778,7 @@ fn island_settle_z_stays_behind_the_countertop() {
         let Some(l) = Layout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), seed) else {
             continue;
         };
-        let Some(island) = l.kitchen_island else {
+        let Some(island) = l.pantry.and_then(|p| p.kitchen_island) else {
             continue;
         };
         exercised = true;

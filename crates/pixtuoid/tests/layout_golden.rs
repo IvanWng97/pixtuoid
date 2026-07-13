@@ -28,7 +28,7 @@ fn layout_standard_96x72_waypoints() {
 #[test]
 fn layout_standard_96x72_meeting() {
     let l = SceneLayout::compute(96, 72, Some(4)).unwrap();
-    insta::assert_debug_snapshot!("meeting_96x72", l.meeting_room);
+    insta::assert_debug_snapshot!("meeting_96x72", l.meeting_room_bounds(0));
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn layout_standard_96x72_zones() {
     let l = SceneLayout::compute(96, 72, Some(4)).unwrap();
     insta::assert_debug_snapshot!("cubicle_band_96x72", l.cubicle_band);
     insta::assert_debug_snapshot!("cubicle_aisle_96x72", l.cubicle_aisle);
-    insta::assert_debug_snapshot!("pantry_96x72", l.pantry_room);
+    insta::assert_debug_snapshot!("pantry_96x72", l.pantry.map(|p| p.bounds));
 }
 
 // ── Larger terminal 192×160, 8 desks, seed 0 ────────────────────────
@@ -62,7 +62,7 @@ fn layout_standard_192x160_waypoints() {
 #[test]
 fn layout_standard_192x160_meeting() {
     let l = SceneLayout::compute(192, 160, Some(8)).unwrap();
-    insta::assert_debug_snapshot!("meeting_192x160", l.meeting_room);
+    insta::assert_debug_snapshot!("meeting_192x160", l.meeting_room_bounds(0));
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn layout_open_plan_seed2_waypoints() {
 #[test]
 fn layout_open_plan_seed2_meeting() {
     let l = SceneLayout::compute_with_seed(160, 120, Some(4), 2).unwrap();
-    insta::assert_debug_snapshot!("meeting_open_plan_seed2", l.meeting_room);
+    insta::assert_debug_snapshot!("meeting_open_plan_seed2", l.meeting_room_bounds(0));
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn layout_dense_seed6_waypoints() {
 #[test]
 fn layout_dense_seed6_meeting() {
     let l = SceneLayout::compute_with_seed(192, 160, Some(4), 6).unwrap();
-    insta::assert_debug_snapshot!("meeting_dense_seed6", l.meeting_room);
+    insta::assert_debug_snapshot!("meeting_dense_seed6", l.meeting_room_bounds(0));
 }
 
 #[test]
@@ -139,12 +139,7 @@ fn floor_variant_hash_gives_unique_layouts_per_floor() {
         .map(|i| {
             let seed = i.wrapping_mul(FLOOR_SEED_MULTIPLIER);
             let l = SceneLayout::compute_with_seed(192, 160, Some(4), seed).unwrap();
-            (
-                l.meeting_room,
-                l.pantry_room,
-                l.meeting_furniture,
-                l.home_desks,
-            )
+            (l.meeting_rooms.clone(), l.pantry, l.home_desks)
         })
         .collect();
 

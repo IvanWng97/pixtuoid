@@ -594,7 +594,7 @@ mod tests {
                             wp.kind.furniture(),
                             wp.pos,
                             wp.facing,
-                            l.pantry_counter_size,
+                            l.pantry_counter_size(),
                             &l.walkable,
                             desk,
                             &l.reachable,

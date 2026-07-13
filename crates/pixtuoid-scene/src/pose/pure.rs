@@ -366,13 +366,13 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
         // Stretch + look-at-the-view at the top of the cubicle band.
         (window_strip, 30),
         // Pantry interior — snack break, coffee, chat.
-        (layout.pantry_room.unwrap_or(window_strip), 25),
+        (layout.pantry.map_or(window_strip, |p| p.bounds), 25),
         // Main corridor — incidental traffic.
         (corridor_zone, 20),
         // Cubicle band (pod aisles) — within own area, stretching.
         (layout.cubicle_band, 15),
         // Meeting room — occasional drift-in.
-        (layout.meeting_room.unwrap_or(window_strip), 10),
+        (layout.meeting_room_bounds(0).unwrap_or(window_strip), 10),
     ];
     let total: u16 = zones.iter().map(|(_, w)| *w).sum();
     let mut roll = ((seed >> 32) as u16) % total.max(1);
@@ -476,7 +476,7 @@ pub(crate) fn resolve_wander_target(
         wp.kind.furniture(),
         wp.pos,
         wp.facing,
-        layout.pantry_counter_size,
+        layout.pantry_counter_size(),
         &layout.walkable,
         origin,
         &layout.reachable,

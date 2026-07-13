@@ -195,7 +195,7 @@ fn meeting_room_fills_and_hosts_group_chitchat() {
     r.render(&scene, &pack, now).expect("render");
     let layout = r.cached_layout().expect("layout").clone();
     let mr = layout
-        .meeting_room
+        .meeting_room_bounds(0)
         .expect("floor 0 must have a meeting room at this size");
 
     // Empty-room pixel baseline (same furniture, no agents) so the region diff

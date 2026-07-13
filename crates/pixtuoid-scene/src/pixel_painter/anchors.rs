@@ -141,7 +141,7 @@ pub fn character_anchor(
             let stand = crate::layout::stand_point(
                 wp_obj.kind,
                 wp_obj.pos,
-                layout.pantry_counter_size,
+                layout.pantry_counter_size(),
                 &layout.walkable,
                 desk,
                 wp_obj.facing,

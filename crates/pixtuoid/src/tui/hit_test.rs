@@ -102,7 +102,7 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     let Some(wp) = pantry_wp else {
         return false;
     };
-    let Size { w: cw, h: ch } = layout.pantry_counter_size;
+    let Size { w: cw, h: ch } = layout.pantry_counter_size();
     let sprite_x = wp.pos.x.saturating_sub(cw / 2);
     let sprite_y = wp.pos.y.saturating_sub(ch / 2);
     // Derive the machine box from the painter's shared column source so the click
@@ -162,7 +162,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         let Size { w, h } = match wp.kind {
             // Couch hovers via the one-time region above (3 seat waypoints).
             WaypointKind::Couch => continue,
-            WaypointKind::Pantry => layout.pantry_counter_size,
+            WaypointKind::Pantry => layout.pantry_counter_size(),
             // Meeting slots hover via the dedicated meeting_sofas loop below;
             // island stands are footprint-less slots on the island body,
             // which has its own hover region — skip.
@@ -200,8 +200,8 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Meeting sofas (20px sprite, centred on the sofa point) + tables, per room.
-    for room in &layout.meeting_furniture {
-        for sofa in room.sofas {
+    for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
+        for sofa in trio.sofas {
             let Size { w, h } = visual(Furniture::MeetingSofaBody); // full 20px sprite, not the 16px footprint
             if hit(
                 sofa.x.saturating_sub(w / 2),
@@ -214,8 +214,8 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
         let Size { w, h } = visual(Furniture::MeetingTable);
         if hit(
-            room.table.x.saturating_sub(w / 2),
-            room.table.y.saturating_sub(h / 2),
+            trio.table.x.saturating_sub(w / 2),
+            trio.table.y.saturating_sub(h / 2),
             w,
             h,
         ) {
@@ -224,7 +224,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Kitchen island (the pantry's centre piece; hover the full sprite).
-    if let Some(p) = layout.kitchen_island {
+    if let Some(p) = layout.pantry.and_then(|p| p.kitchen_island) {
         let Size { w, h } = visual(Furniture::KitchenIsland);
         if hit(p.x.saturating_sub(w / 2), p.y.saturating_sub(h / 2), w, h) {
             return Some("Kitchen Island");
@@ -303,7 +303,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Meeting room procedural items (coat rack, doormat)
-    if let Some(mr) = layout.meeting_room {
+    if let Some(mr) = layout.meeting_room_bounds(0) {
         if mr.width > 20 {
             let cx = mr.x + mr.width - 5;
             let cy = mr.y + mr.height / 2 - 4;
@@ -321,7 +321,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Pantry room procedural items (water cooler, trash bin)
-    if let Some(pr) = layout.pantry_room {
+    if let Some(pr) = layout.pantry.map(|p| p.bounds) {
         if pr.height > 25 && pr.width > 12 {
             let wx = pr.x + pr.width - 6;
             let wy = pr.y + 8;
@@ -399,7 +399,7 @@ mod tests {
             .iter()
             .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
             .expect("pantry");
-        let Size { w: cw, h: ch } = layout.pantry_counter_size;
+        let Size { w: cw, h: ch } = layout.pantry_counter_size();
         let sprite_x = pantry_wp.pos.x.saturating_sub(cw / 2);
         let sprite_y = pantry_wp.pos.y.saturating_sub(ch / 2);
         let mid_x = if cw >= 32 {
@@ -454,7 +454,7 @@ mod tests {
     #[test]
     fn furniture_hit_test_finds_meeting_table() {
         let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-        let table = layout.meeting_furniture.first().expect("room").table;
+        let table = layout.meeting_rooms[0].trio.expect("trio").table;
         let cell_y = table.y / 2;
         assert_eq!(
             hit_test_furniture(&layout, table.x, cell_y),
@@ -466,10 +466,10 @@ mod tests {
     fn furniture_hit_test_respects_floor_seed() {
         // seed=1 → Lounge variant (no meeting room)
         let layout1 = Layout::compute_with_seed(160, 200, Some(4), 1).expect("layout");
-        assert!(layout1.meeting_furniture.is_empty());
+        assert!(layout1.meeting_rooms.is_empty());
         let layout0 = Layout::compute(160, 200, Some(4)).expect("layout");
-        if let Some(room) = layout0.meeting_furniture.first() {
-            let table = room.table;
+        if let Some(trio) = layout0.meeting_rooms.first().and_then(|r| r.trio) {
+            let table = trio.table;
             let cell_y = table.y / 2;
             assert_ne!(
                 hit_test_furniture(&layout1, table.x, cell_y),
@@ -744,7 +744,7 @@ mod tests {
             .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
             .expect("pantry");
         // Mirror the existing true-test geometry to land squarely on the machine.
-        let Size { w: cw, h: ch } = layout.pantry_counter_size;
+        let Size { w: cw, h: ch } = layout.pantry_counter_size();
         let sprite_x = wp.pos.x.saturating_sub(cw / 2);
         let sprite_y = wp.pos.y.saturating_sub(ch / 2);
         let mid_x = if cw >= 32 {
@@ -784,8 +784,8 @@ mod tests {
             .iter()
             .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
             .expect("pantry");
-        let h = layout.pantry_counter_size.h;
-        layout.pantry_counter_size = Size { w: 20, h };
+        let h = layout.pantry_counter_size().h;
+        layout.pantry.as_mut().expect("pantry").counter_size = Size { w: 20, h };
         let sprite_x = wp.pos.x.saturating_sub(20 / 2);
         let sprite_y = wp.pos.y.saturating_sub(h / 2);
         let cell_y = (sprite_y + h / 2) / 2;

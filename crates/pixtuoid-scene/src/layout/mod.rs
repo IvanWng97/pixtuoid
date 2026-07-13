@@ -25,6 +25,7 @@ mod decor;
 mod mask;
 mod placement;
 mod reach;
+mod rooms;
 
 pub use approach::{approach_point, stand_point};
 pub use compute::PANTRY_COUNTER_LARGE_W;
@@ -36,6 +37,7 @@ pub use decor::{
 pub use mask::{WALL_THICK_H, WALL_THICK_V};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
+pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 // The shared coarse routing-grid primitives (crate-internal — no semver surface):
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{cell_walkable, snap, COARSE_CELL_SIZE, NEIGHBORS_8};
@@ -101,18 +103,6 @@ pub struct PodDecorItem {
     pub pos: Point,
 }
 
-/// One meeting room's furniture trio, grouped so the per-room structure is
-/// explicit instead of reconstructed by index arithmetic over two flat Vecs.
-/// `sofas[0]` is the north sofa, `sofas[1]` the south (the order the old flat
-/// `meeting_sofas` Vec was extended in); `table` is centered between them. A
-/// room always produces exactly 2 sofas + 1 table (see `compute::room_furniture`),
-/// so the fixed-size array encodes that invariant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MeetingFurniture {
-    pub sofas: [Point; 2],
-    pub table: Point,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Waypoint {
     pub pos: Point,
@@ -156,31 +146,17 @@ pub struct SceneLayout {
     pub lounge_side_table: Option<Point>,
     pub door: Option<Point>,
     pub door_threshold: Option<Point>,
-    pub meeting_room: Option<Bounds>,
-    /// The dense layout's SECOND meeting room (room id 1, below room 0).
-    /// Was computed-then-discarded inside `compute_with_seed`, which left
-    /// `meeting_furniture[1]`'s placement structurally untestable — no Bounds
-    /// to assert containment against. Present iff the floor is dual-meeting
-    /// Dense. Join through [`Self::meeting_room_bounds`], not by hand.
-    pub meeting_room_2: Option<Bounds>,
-    pub pantry_room: Option<Bounds>,
-    /// Meeting rooms in floor order (room 0 = `meeting_room`, room 1 =
-    /// `meeting_room_2` for the dense layout). Each carries its 2 sofas + table
-    /// grouped — consumers index `meeting_furniture[room_id]` rather than the old
-    /// `meeting_sofas[room_id*2 …]` / `meeting_tables[room_id]` flat arithmetic.
-    pub meeting_furniture: Vec<MeetingFurniture>,
+    /// Meeting rooms in floor order — index IS the `room_id` every waypoint
+    /// and painter joins on (room 1 exists only on the dual-meeting Dense
+    /// floor). Each element carries the room's bounds AND its trio (see
+    /// [`MeetingRoom`] for why the two live in one element). Join through
+    /// [`Self::meeting_room_bounds`] or index directly.
+    pub meeting_rooms: Vec<MeetingRoom>,
+    /// The pantry aggregate (bounds + counter footprint + island) — `None`
+    /// on floors without a pantry (Dense dual-meeting).
+    pub pantry: Option<PantryRoom>,
     pub room_walls: Vec<WallSegment>,
     pub top_margin: u16,
-    /// Footprint (width, height) of the pantry counter sprite. (32, 10)
-    /// when the pantry is large enough for the detailed kitchen run;
-    /// (20, 8) fallback for narrow terminals where the wide sprite
-    /// wouldn't fit. The renderer reads this to pick which sprite to
-    /// paint (`pantry` vs `pantry_small`).
-    pub pantry_counter_size: Size,
-    /// Kitchen-island body centre (pantry v2's centre piece) — `None` when the
-    /// room can't host it clear of walls + the counter (refuse-don't-force).
-    /// Its 3 `WaypointKind::Island` stand slots ride in `waypoints`.
-    pub kitchen_island: Option<Point>,
     pub corridor: Option<Bounds>,
     /// Centre point of the lounge couch sprite (the middle of its 3 seats).
     /// The couch is 3 separate seat waypoints; the sprite + rug + side table
@@ -352,16 +328,21 @@ impl SceneLayout {
         self.top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
     }
 
-    /// The Bounds of meeting room `room_id` — THE single join point between the
-    /// waypoint/`meeting_furniture` room-id index space and the two room fields
-    /// (0 → `meeting_room`, 1 → `meeting_room_2`). Consumers resolve a room id
-    /// through here rather than re-encoding the id→field mapping.
+    /// The Bounds of meeting room `room_id` — a thin index into
+    /// [`Self::meeting_rooms`] (the id IS the Vec index), kept as the join
+    /// accessor so consumers don't hand-roll the lookup.
     pub fn meeting_room_bounds(&self, room_id: usize) -> Option<Bounds> {
-        match room_id {
-            0 => self.meeting_room,
-            1 => self.meeting_room_2,
-            _ => None,
-        }
+        self.meeting_rooms.get(room_id).map(|r| r.bounds)
+    }
+
+    /// The pantry counter's footprint, or the [`rooms::pantry::COMPACT_COUNTER`]
+    /// fallback when no pantry exists — the shape every consumer of the old
+    /// always-present `pantry_counter_size` field expects (the runtime-sized
+    /// counter must resolve to SOME size for `approach_point`'s signature
+    /// even on pantry-less floors, where it is never consulted).
+    pub fn pantry_counter_size(&self) -> Size {
+        self.pantry
+            .map_or(rooms::pantry::COMPACT_COUNTER, |p| p.counter_size)
     }
 }
 

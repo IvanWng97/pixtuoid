@@ -390,7 +390,7 @@ mod tests {
                     let s = super::stand_point(
                         wp.kind,
                         wp.pos,
-                        l.pantry_counter_size,
+                        l.pantry_counter_size(),
                         &l.walkable,
                         origin,
                         wp.facing,
@@ -447,7 +447,7 @@ mod tests {
                         let stand = stand_point(
                             wp.kind,
                             wp.pos,
-                            l.pantry_counter_size,
+                            l.pantry_counter_size(),
                             &l.walkable,
                             desk,
                             wp.facing,
@@ -457,7 +457,7 @@ mod tests {
                             wp.kind.furniture(),
                             wp.pos,
                             wp.facing,
-                            l.pantry_counter_size,
+                            l.pantry_counter_size(),
                             &l.walkable,
                             desk,
                             &l.reachable,
@@ -487,7 +487,7 @@ mod tests {
             .find(|w| w.kind == WaypointKind::Pantry)
             .expect("pantry")
             .pos;
-        let cs = l.pantry_counter_size;
+        let cs = l.pantry_counter_size();
         let north = stand_point(
             WaypointKind::Pantry,
             p,
@@ -634,7 +634,7 @@ mod tests {
                             wp.kind.furniture(),
                             wp.pos,
                             wp.facing,
-                            l.pantry_counter_size,
+                            l.pantry_counter_size(),
                             &l.walkable,
                             desk,
                             &l.reachable,

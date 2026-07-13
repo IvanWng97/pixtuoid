@@ -419,7 +419,7 @@ fn paint_frame(
     }
     // Two ceiling fluorescents over the pantry and a third over the
     // corridor so the floor is lit consistently with the lounge_band gone.
-    if let Some(pr) = ctx.layout.pantry_room {
+    if let Some(pr) = ctx.layout.pantry.map(|p| p.bounds) {
         paint_ceiling_pool(
             ctx.buf,
             Ellipse {
@@ -526,7 +526,7 @@ fn paint_frame(
     // Procedural room fill — small pixel items that make rooms feel lived-in.
     // Ground footprint rule: walkable mask is NOT affected by these (they're
     // small items characters can walk around or over).
-    if let Some(mr) = ctx.layout.meeting_room {
+    if let Some(mr) = ctx.layout.meeting_rooms.first().map(|r| r.bounds) {
         furniture::paint_notice_board(ctx.buf, mr, ctx.theme);
 
         // Coat rack is now a y-sorted DrawableKind::CoatRack (pushed in the
@@ -536,7 +536,7 @@ fn paint_frame(
 
         furniture::paint_doormat(ctx.buf, mr, ctx.theme);
     }
-    if let Some(pr) = ctx.layout.pantry_room {
+    if let Some(pr) = ctx.layout.pantry.map(|p| p.bounds) {
         furniture::paint_water_cooler(ctx.buf, pr, ctx.theme);
         furniture::paint_trash_bin(ctx.buf, pr);
     }
@@ -593,7 +593,7 @@ fn paint_frame(
             ctx.theme,
         );
     }
-    if let Some(island) = ctx.layout.kitchen_island {
+    if let Some(island) = ctx.layout.pantry.and_then(|p| p.kitchen_island) {
         // One fitted shadow under the island BODY (its stands are skipped
         // above): south edge = the visual south row, width tracks the sprite.
         let vis = crate::layout::furniture_def(crate::layout::Furniture::KitchenIsland).visual;
@@ -984,9 +984,9 @@ fn enqueue_gateway_mascot<'a>(
 /// (whose key is `sofa.y + 2`); the north sofa stays +2 so insertion order
 /// breaks the tie in its sitter's favor.
 fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
-    for room in &layout.meeting_furniture {
-        let table = room.table;
-        let [ts, bs] = room.sofas;
+    for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
+        let table = trio.table;
+        let [ts, bs] = trio.sofas;
         let rug_w = 18u16;
         let rug_h =
             bs.y.saturating_sub(ts.y)
@@ -1001,12 +1001,12 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
             },
         });
     }
-    for room in &layout.meeting_furniture {
-        for (i, sofa) in room.sofas.into_iter().enumerate() {
+    for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
+        for (i, sofa) in trio.sofas.into_iter().enumerate() {
             // sofas[0] is the north sofa, sofas[1] the south — the south sofa
             // faces away (`mirrored`) and y-sorts +3 to occlude its sitter.
             let mirrored = i % 2 != 0;
-            let faces_away = sofa.y >= room.table.y;
+            let faces_away = sofa.y >= trio.table.y;
             drawables.push(Drawable {
                 anchor_y: sofa.y + if faces_away { 3 } else { 2 },
                 kind: DrawableKind::MeetingSofa {
@@ -1016,18 +1016,18 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
             });
         }
     }
-    for room in &layout.meeting_furniture {
+    for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
         drawables.push(Drawable {
             // z-key = sprite south row, derived from the table (== +2 for the
             // 11×5 meeting-table sprite) so it can't drift from a visual edit.
             anchor_y: z_sort_row(
                 Anchor::Center,
-                room.table,
+                trio.table,
                 crate::layout::furniture_def(crate::layout::Furniture::MeetingTable)
                     .visual
                     .h,
             ),
-            kind: DrawableKind::MeetingTable { pos: room.table },
+            kind: DrawableKind::MeetingTable { pos: trio.table },
         });
     }
 }
@@ -1038,7 +1038,7 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
 /// PhoneBooth/StandingDesk render via pod-decor; meeting slots ride the
 /// sofa/table — so those waypoint kinds emit nothing here.
 fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
-    if let Some(island) = layout.kitchen_island {
+    if let Some(island) = layout.pantry.and_then(|p| p.kitchen_island) {
         drawables.push(Drawable {
             anchor_y: z_sort_row(
                 Anchor::Center,
@@ -1099,7 +1099,7 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
         match wp.kind {
             WaypointKind::Couch => {}
             WaypointKind::Pantry => {
-                let Size { w: cw, h: ch } = layout.pantry_counter_size; // runtime-sized
+                let Size { w: cw, h: ch } = layout.pantry_counter_size(); // runtime-sized
                 drawables.push(Drawable {
                     anchor_y: z_sort_row(Anchor::Center, wp.pos, ch),
                     kind: DrawableKind::WaypointPantry {
@@ -1174,7 +1174,7 @@ fn enqueue_floor_fixtures<'a>(
             kind: DrawableKind::FloorLamp { pos: lamp },
         });
     }
-    if let Some(mr) = ctx.layout.meeting_room {
+    if let Some(mr) = ctx.layout.meeting_rooms.first().map(|r| r.bounds) {
         if mr.width > 20 {
             let cx = mr.x + mr.width - 5;
             let cy = mr.y + mr.height / 2 - 4;

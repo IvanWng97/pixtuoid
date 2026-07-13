@@ -170,7 +170,7 @@ impl ActiveChitchat {
 /// (the 3 lounge-couch seats, the kitchen island's stands) collapse to ONE
 /// venue — the first waypoint OF THAT KIND — so each hosts a single group
 /// conversation like the meeting room, WITHOUT overloading the meeting-only
-/// `room_id` field (which indexes `meeting_furniture`). Every other waypoint
+/// `room_id` field (which indexes `meeting_rooms`). Every other waypoint
 /// keys on its own index. Takes the waypoint slice and finds the group
 /// anchor ITSELF: the old shape took a caller-computed `group_idx`, and the
 /// one caller passed the COUCH's index for every kind — which silently

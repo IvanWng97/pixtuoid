@@ -85,7 +85,7 @@ pub(super) enum DrawableKind<'a> {
     /// Pantry counter (with coffee steam attached so steam rides above
     /// the counter in z-order). `use_large` picks the detailed 32×10
     /// kitchen sprite vs. the 20×8 compact fallback — derived from
-    /// `layout.pantry_counter_size` at queue time.
+    /// `layout.pantry_counter_size()` at queue time.
     WaypointPantry {
         pos: Point,
         use_large: bool,
@@ -267,8 +267,8 @@ pub(super) fn pet_position(
     {
         spots.push((corner_visit_spot(wp.pos), false));
     }
-    for room in &layout.meeting_furniture {
-        for sofa in room.sofas {
+    for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
+        for sofa in trio.sofas {
             spots.push((sofa_visit_spot(sofa), false));
         }
     }
@@ -479,8 +479,8 @@ fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> 
         {
             spots.push(corner_visit_spot(wp.pos));
         }
-        for room in &layout.meeting_furniture {
-            for sofa in room.sofas {
+        for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
+            for sofa in trio.sofas {
                 spots.push(sofa_visit_spot(sofa));
             }
         }
@@ -1156,7 +1156,7 @@ mod tests {
         // corridor centre on the RIGHT.
         layout.home_desks = vec![Point { x: 20, y: 30 }];
         layout.waypoints.clear();
-        layout.meeting_furniture.clear();
+        layout.meeting_rooms.clear();
         layout.corridor = Some(Bounds {
             x: 150,
             y: 40,
