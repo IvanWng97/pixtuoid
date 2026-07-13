@@ -66,6 +66,29 @@ pub(super) fn rects_overlap(a: (Point, Size), b: (Point, Size)) -> bool {
         && bt.y < at.y + asz.h
 }
 
+/// Does `probe` overlap `obstacle` grown by `clearance` px on every side? The
+/// shared "keep N px of air around this box" test: the scatter-plant singleton
+/// scan and `first_blocking_waypoint` (compute.rs) each spelled the same
+/// inflate-then-[`rects_overlap`] by hand — a verbatim second copy whose pad
+/// term could drift from its twin. Both pass a Center-anchored `obstacle`
+/// top-left (via [`anchored_top_left`]) so the grown rect matches the sprite.
+pub(super) fn overlaps_within_clearance(
+    probe: (Point, Size),
+    obstacle: (Point, Size),
+    clearance: u16,
+) -> bool {
+    let (tl, sz) = obstacle;
+    let grown_tl = Point {
+        x: tl.x.saturating_sub(clearance),
+        y: tl.y.saturating_sub(clearance),
+    };
+    let grown = Size {
+        w: sz.w + 2 * clearance,
+        h: sz.h + 2 * clearance,
+    };
+    rects_overlap(probe, (grown_tl, grown))
+}
+
 pub fn z_sort_row(anchor: Anchor, pos: Point, h: u16) -> u16 {
     anchored_top_left(anchor, pos, 0, h)
         .y

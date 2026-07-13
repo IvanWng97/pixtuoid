@@ -665,13 +665,7 @@ pub(super) fn compute_with_seed(
         // footprint (pad + 1, derived — not a re-hardcoded 3). They must stay
         // in-room too, so the x clamps price the stand extent, not the body.
         let stand_dx = half_w + super::OBSTACLE_PAD_PX + 1;
-        let counter_y = pr.y
-            + pct(
-                pr.height,
-                super::rooms::pantry::pantry_counter_y_pct(pantry_counter_size.w),
-            );
-        let counter_north =
-            counter_y.saturating_sub(pantry_counter_size.h / 2 + super::OBSTACLE_PAD_PX);
+        let counter_north = PantryRoom::counter_north(pr, pantry_counter_size);
         let min_x = pr.x + clr + stand_dx;
         let max_x = (pr.x + pr.width).saturating_sub(clr + stand_dx);
         // The bartenders' approach lane — the walkable row above the body's
@@ -722,13 +716,7 @@ pub(super) fn compute_with_seed(
         let vis = def.visual;
         let (half_w, half_h) = (vis.w / 2, vis.h / 2);
         let clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
-        let counter_y = pr.y
-            + pct(
-                pr.height,
-                super::rooms::pantry::pantry_counter_y_pct(pantry_counter_size.w),
-            );
-        let counter_north =
-            counter_y.saturating_sub(pantry_counter_size.h / 2 + super::OBSTACLE_PAD_PX);
+        let counter_north = PantryRoom::counter_north(pr, pantry_counter_size);
         let sx = pr.x + 1 + half_w;
         // Width gate: 1px west margin + the 7px shelf + 3px so the east-side
         // stander has an in-room walkable cell — narrower rooms refuse (the
@@ -935,25 +923,18 @@ fn first_blocking_waypoint(
     waypoints: &[Waypoint],
 ) -> Option<&Waypoint> {
     let pv = furniture_def(kind.furniture()).visual;
-    let plant_tl = Point {
-        x: pos.x.saturating_sub(pv.w / 2),
-        y: pos.y.saturating_sub(pv.h / 2),
-    };
+    let plant_tl = anchored_top_left(Anchor::Center, pos, pv.w, pv.h);
     waypoints.iter().find(|w| {
         let wdef = furniture_def(w.kind.furniture());
         if wdef.footprint.is_none() {
             return false;
         }
-        let m = PLANT_OBSTACLE_CLEARANCE_PX;
-        let inflated_tl = Point {
-            x: w.pos.x.saturating_sub(wdef.visual.w / 2 + m),
-            y: w.pos.y.saturating_sub(wdef.visual.h / 2 + m),
-        };
-        let inflated = Size {
-            w: wdef.visual.w + 2 * m,
-            h: wdef.visual.h + 2 * m,
-        };
-        super::placement::rects_overlap((plant_tl, pv), (inflated_tl, inflated))
+        let wp_tl = anchored_top_left(Anchor::Center, w.pos, wdef.visual.w, wdef.visual.h);
+        super::placement::overlaps_within_clearance(
+            (plant_tl, pv),
+            (wp_tl, wdef.visual),
+            PLANT_OBSTACLE_CLEARANCE_PX,
+        )
     })
 }
 
@@ -983,21 +964,13 @@ fn plant_spot_clear(
     }
     // Fixed singletons get the same inflated-clearance rule as waypoints.
     let pv = def.visual;
-    let plant_tl = Point {
-        x: pos.x.saturating_sub(pv.w / 2),
-        y: pos.y.saturating_sub(pv.h / 2),
-    };
-    let m = PLANT_OBSTACLE_CLEARANCE_PX;
+    let plant_tl = anchored_top_left(Anchor::Center, pos, pv.w, pv.h);
     if singletons.iter().any(|&(tl, sz)| {
-        let inflated_tl = Point {
-            x: tl.x.saturating_sub(m),
-            y: tl.y.saturating_sub(m),
-        };
-        let inflated = Size {
-            w: sz.w + 2 * m,
-            h: sz.h + 2 * m,
-        };
-        super::placement::rects_overlap((plant_tl, pv), (inflated_tl, inflated))
+        super::placement::overlaps_within_clearance(
+            (plant_tl, pv),
+            (tl, sz),
+            PLANT_OBSTACLE_CLEARANCE_PX,
+        )
     }) {
         return false;
     }
@@ -1440,11 +1413,7 @@ pub(super) fn compute_waypoints(
         if min_cx <= max_cx {
             // y is single-sourced with the island clamp; only x is size-shaped
             // (large counter is room-centred, small one sits at 60% width).
-            let wy = pr.y
-                + pct(
-                    pr.height,
-                    super::rooms::pantry::pantry_counter_y_pct(pantry_counter_size.w),
-                );
+            let wy = PantryRoom::counter_center_y(pr, pantry_counter_size);
             let wx = if pantry_counter_size.w >= PANTRY_COUNTER_LARGE_W {
                 (pr.x + pr.width / 2).clamp(min_cx, max_cx)
             } else {

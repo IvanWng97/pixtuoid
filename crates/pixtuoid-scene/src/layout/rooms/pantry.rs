@@ -1,7 +1,7 @@
 //! The pantry aggregate: bounds + the counter footprint + the island.
 
 use crate::layout::{
-    furniture_def, Bounds, Furniture, Point, Size, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W,
+    furniture_def, pct, Bounds, Furniture, Point, Size, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W,
     WALL_THICK_H,
 };
 
@@ -49,6 +49,23 @@ pub(crate) fn pantry_counter_y_pct(counter_w: u16) -> u16 {
 }
 
 impl PantryRoom {
+    /// Absolute y of the counter's blocked centre line inside a room of
+    /// `bounds`: [`pantry_counter_y_pct`] applied to the room height. THE one
+    /// derivation the island clamp, the snack-shelf clamp, and the counter's
+    /// own waypoint all read (was spelled inline at each of the three sites),
+    /// so a percent change can't move one and strand the others.
+    pub(crate) fn counter_center_y(bounds: Bounds, counter: Size) -> u16 {
+        bounds.y + pct(bounds.height, pantry_counter_y_pct(counter.w))
+    }
+
+    /// Northmost blocked row of the padded counter — its centre line raised by
+    /// half its height plus a pad. The ceiling the island body and the snack
+    /// shelf must sit clear of; single-sourced with [`counter_center_y`] so the
+    /// two placement clamps price the SAME counter position.
+    pub(crate) fn counter_north(bounds: Bounds, counter: Size) -> u16 {
+        Self::counter_center_y(bounds, counter).saturating_sub(counter.h / 2 + OBSTACLE_PAD_PX)
+    }
+
     /// The room height at which the pantry can actually HOST its content —
     /// the inverse of the island's y-clamps: the counter line sits at
     /// `pct(h, pantry_counter_y_pct)` and the island needs `island_need`
