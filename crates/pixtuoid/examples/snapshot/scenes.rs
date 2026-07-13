@@ -833,18 +833,7 @@ mod vocabulary_tests {
         // a NEW WaypointKind fails compilation until it joins the vocabulary or
         // is deliberately excluded there.
         use pixtuoid_scene::layout::WaypointKind as K;
-        for kind in [
-            K::Couch,
-            K::Pantry,
-            K::PhoneBooth,
-            K::StandingDesk,
-            K::VendingMachine,
-            K::Printer,
-            K::MeetingSofa,
-            K::MeetingChair,
-            K::Island,
-            K::SnackShelf,
-        ] {
+        for kind in K::ALL.iter().copied() {
             if let Some(name) = canonical_target_name(kind) {
                 assert_eq!(waypoint_target(name), Some(kind), "{name} round-trips");
             }
