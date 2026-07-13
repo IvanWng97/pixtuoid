@@ -21,19 +21,6 @@ fn pct(v: u16, n: u16) -> u16 {
 /// hit-test share this one source instead of re-hardcoding 32).
 pub const PANTRY_COUNTER_LARGE_W: u16 = 32;
 
-/// Y-position percentage of the pantry counter within its room — lower (65%) for
-/// the large counter, a touch higher (60%) for the small one. SINGLE SOURCE: the
-/// island clamp (which keeps the island clear of the counter) and the
-/// counter's own waypoint placement both read it, so they cannot disagree — were
-/// they to drift, the clamp would guard a phantom counter position.
-fn pantry_counter_y_pct(counter_w: u16) -> u16 {
-    if counter_w >= PANTRY_COUNTER_LARGE_W {
-        65
-    } else {
-        60
-    }
-}
-
 /// Horizontal seat offsets for a 3-across sofa, relative to the middle-seat
 /// anchor — shared by the 20px lounge couch and the meeting sofas so the two
 /// can't drift.
@@ -114,52 +101,22 @@ pub(super) fn compute_with_seed(
         super::rooms::pantry::COMPACT_COUNTER
     };
 
-    // One source of truth: the meeting-sofa SPRITE height (was a bare `7`). A
-    // hardcoded literal would silently let 1px-too-short rooms pass the fit
-    // gate if the sprite ever grows → MeetingSofa seat teleport on the coarse
-    // grid. furniture_def is a const fn returning Copy.
-    let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.h;
-    // Height must price the TABLE between the sofas, not just the two sofa
-    // bodies: with both sofa clamps bound (short room) the mirror positions
-    // leave `height − 2·sofa_h` between the sofa centres, and the centred
-    // table needs its own footprint depth plus the sofa's not to overlap
-    // either body (placement-sweep catch: at 96×60 the table ground clipped
-    // BOTH sofas by a row). Derived from the same table rows the mask stamps.
-    let sofa_fp_h = furniture_def(Furniture::MeetingSofaBody)
-        .footprint
-        .map_or(0, |s| s.h);
-    let table_fp_h = furniture_def(Furniture::MeetingTable)
-        .footprint
-        .map_or(0, |s| s.h);
-    let trio_fit_h = sofa_h * 2 + sofa_fp_h + table_fp_h;
-
     // Meeting-room height: CONTENT-FIT, donating the surplus to the pantry
-    // below. The screen + bookshelf hang on the top WALL BAND (zero floor
-    // rows), so the room needs only its sofa/table trio; the old
-    // unconditional half-split left the trio floating in empty floor on
-    // short terminals while the pantry below starved (island + snack shelf
-    // y-refused). The donation is ALL-OR-NOTHING: the room shrinks exactly
-    // to `usable_h − pantry_content_h` when that both keeps the trio fit
-    // (`trio_fit_h`) AND actually reaches the pantry's content height
-    // (`pantry_content_h` — the inverse of the island's y-clamps: the
-    // counter line sits at pct(h, pantry_counter_y_pct) and the island needs
-    // `island_need` rows of ceiling above it; the snack shelf's bound is
-    // identical, its half-height 5 == the island's half_h + pad). Otherwise
-    // the old half-split stands — a partial donation would cram the trio to
-    // its fit gate to buy rows the island still couldn't use, and floors
-    // already tall enough keep their exact pre-change geometry. Dense keeps
-    // the raw split: BOTH halves host a trio. Drift guard vs the island
-    // block's own clamps: `meeting_room_donates_surplus_height_to_the_pantry`.
-    let island_clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
-    let island_half_h = furniture_def(Furniture::KitchenIsland).visual.h / 2;
-    let island_need = island_clr
-        + 2 * (island_half_h + super::OBSTACLE_PAD_PX)
-        + 1
-        + pantry_counter_size.h / 2
-        + super::OBSTACLE_PAD_PX;
-    let pantry_content_h = (u32::from(island_need) * 100)
-        .div_ceil(u32::from(pantry_counter_y_pct(pantry_counter_size.w)))
-        as u16;
+    // below — a NEGOTIATION between the two rooms' own fit methods. The
+    // screen + bookshelf hang on the top WALL BAND (zero floor rows), so the
+    // meeting room needs only its trio; the old unconditional half-split
+    // left the trio floating in empty floor on short terminals while the
+    // pantry below starved (island + snack shelf y-refused). The donation is
+    // ALL-OR-NOTHING: the room shrinks exactly to `usable_h −
+    // pantry_content_h` when that both keeps the trio fit AND actually
+    // reaches the pantry's content height. Otherwise the old half-split
+    // stands — a partial donation would cram the trio to its fit gate to buy
+    // rows the island still couldn't use, and floors already tall enough
+    // keep their exact pre-change geometry. Dense keeps the raw split: BOTH
+    // halves host a trio. Behavior pin (all three arms):
+    // `meeting_room_donates_surplus_height_to_the_pantry`.
+    let trio_fit_h = MeetingRoom::trio_fit_h();
+    let pantry_content_h = PantryRoom::content_fit_h(pantry_counter_size);
     let half_split = usable_h / 2;
     let donated = usable_h.saturating_sub(pantry_content_h);
     let meeting_h = if (trio_fit_h..half_split).contains(&donated) {
@@ -172,6 +129,10 @@ pub(super) fn compute_with_seed(
     } else {
         top_margin + half_split
     };
+
+    // The sofa sprite height — the trio clamps below and the per-room
+    // north_floor both read it (furniture_def is a const fn returning Copy).
+    let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.h;
 
     let meeting_room = if has_meeting {
         // A meeting always shares the left column with either the pantry or a
@@ -650,7 +611,11 @@ pub(super) fn compute_with_seed(
         // footprint (pad + 1, derived — not a re-hardcoded 3). They must stay
         // in-room too, so the x clamps price the stand extent, not the body.
         let stand_dx = half_w + super::OBSTACLE_PAD_PX + 1;
-        let counter_y = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
+        let counter_y = pr.y
+            + pct(
+                pr.height,
+                super::rooms::pantry::pantry_counter_y_pct(pantry_counter_size.w),
+            );
         let counter_north =
             counter_y.saturating_sub(pantry_counter_size.h / 2 + super::OBSTACLE_PAD_PX);
         let min_x = pr.x + clr + stand_dx;
@@ -703,7 +668,11 @@ pub(super) fn compute_with_seed(
         let vis = def.visual;
         let (half_w, half_h) = (vis.w / 2, vis.h / 2);
         let clr = super::WALL_THICK_H + super::OBSTACLE_PAD_PX;
-        let counter_y = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
+        let counter_y = pr.y
+            + pct(
+                pr.height,
+                super::rooms::pantry::pantry_counter_y_pct(pantry_counter_size.w),
+            );
         let counter_north =
             counter_y.saturating_sub(pantry_counter_size.h / 2 + super::OBSTACLE_PAD_PX);
         let sx = pr.x + 1 + half_w;
@@ -1319,7 +1288,11 @@ pub(super) fn compute_waypoints(
         if min_cx <= max_cx {
             // y is single-sourced with the island clamp; only x is size-shaped
             // (large counter is room-centred, small one sits at 60% width).
-            let wy = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
+            let wy = pr.y
+                + pct(
+                    pr.height,
+                    super::rooms::pantry::pantry_counter_y_pct(pantry_counter_size.w),
+                );
             let wx = if pantry_counter_size.w >= PANTRY_COUNTER_LARGE_W {
                 (pr.x + pr.width / 2).clamp(min_cx, max_cx)
             } else {

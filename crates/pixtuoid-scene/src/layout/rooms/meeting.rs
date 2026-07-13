@@ -1,6 +1,6 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
-use crate::layout::{Bounds, Point};
+use crate::layout::{furniture_def, Bounds, Furniture, Point};
 
 /// One meeting room's furniture trio, grouped so the per-room structure is
 /// explicit instead of reconstructed by index arithmetic over two flat Vecs.
@@ -27,4 +27,25 @@ pub struct MeetingTrio {
 pub struct MeetingRoom {
     pub bounds: Bounds,
     pub trio: Option<MeetingTrio>,
+}
+
+impl MeetingRoom {
+    /// Minimum room height that fits the sofa/table trio — the fit gate AND
+    /// the floor of the split negotiation (`compute_with_seed` donates
+    /// meeting rows to the pantry only while the trio still fits). Height
+    /// must price the TABLE between the sofas, not just the two sofa
+    /// bodies: with both sofa clamps bound (short room) the mirror positions
+    /// leave `height − 2·sofa_h` between the sofa centres, and the centred
+    /// table needs its own footprint depth plus the sofa's not to overlap
+    /// either body (placement-sweep catch: at 96×60 the table ground clipped
+    /// BOTH sofas by a row). Derived from the same furniture rows the mask
+    /// stamps — a bare literal would silently let 1px-too-short rooms pass
+    /// if a sprite ever grows (MeetingSofa seat teleport on the coarse grid).
+    pub(crate) fn trio_fit_h() -> u16 {
+        let sofa = furniture_def(Furniture::MeetingSofaBody);
+        let table_fp_h = furniture_def(Furniture::MeetingTable)
+            .footprint
+            .map_or(0, |s| s.h);
+        sofa.visual.h * 2 + sofa.footprint.map_or(0, |s| s.h) + table_fp_h
+    }
 }
