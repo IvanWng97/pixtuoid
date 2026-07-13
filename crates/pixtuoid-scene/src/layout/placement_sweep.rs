@@ -220,13 +220,15 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
     }
 
     for (i, p) in plants.iter().enumerate() {
-        // Per-ITEM container: the two corridor plants live in the band, the
-        // two meeting plants in room 0 — same kinds, different homes, so the
-        // container is picked by position (inside room 0 → room 0).
+        // Per-ITEM container: picked by POSITION — meeting plants in room 0,
+        // corridor plants in the band, and a plant that settle_plant moved
+        // beside a corner appliance lives on the AISLE like the appliance
+        // itself (the beside-spot adopts the blocker's row).
         let in_meeting = l
             .meeting_room_bounds(0)
             .map(|mr| contains_point(mr, p.pos))
             .unwrap_or(false);
+        let in_aisle = contains_point(l.cubicle_aisle, p.pos);
         out.push(Piece::table(
             format!("plant[{i}] {:?}", p.kind),
             Anchor::Center,
@@ -234,6 +236,8 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
             p.kind.furniture(),
             if in_meeting {
                 Container::MeetingRoom(0)
+            } else if in_aisle {
+                Container::Aisle
             } else {
                 Container::Band
             },
@@ -881,5 +885,89 @@ fn the_sweep_reaches_every_floor_variant() {
         shapes.len() >= 5,
         "sweep seeds reach only {} distinct floor shapes: {shapes:?} — widen SWEEP_SEEDS",
         shapes.len()
+    );
+}
+
+#[test]
+fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
+    // Two-lens catch on the first clearance cut: yield-by-DELETION was
+    // structurally universal (the corner appliances share the plants'
+    // authored corners at most sizes), stripping greenery office-wide and
+    // leaving OpenPlan floors with zero plants. Plants now SLIDE inward
+    // along the aisle before giving up. Ridden on the full sweep grid
+    // (sizes x seeds x production fill), both halves:
+    //   (a) clearance invariant — no plant box within
+    //       PLANT_OBSTACLE_CLEARANCE_PX of an obstacle waypoint's box;
+    //   (b) greenery pin — an appliance never costs the corridor its plant
+    //       (vending present => a corridor-row Flower exists; printer
+    //       present => a corridor-row Succulent exists).
+    use super::compute::PLANT_OBSTACLE_CLEARANCE_PX;
+    let visual_tl = |pos: Point, v: Size| {
+        (
+            Point {
+                x: pos.x.saturating_sub(v.w / 2),
+                y: pos.y.saturating_sub(v.h / 2),
+            },
+            v,
+        )
+    };
+    let mut v = Vec::new();
+    sweep(|w, h, seed, l| {
+        for p in &l.plants {
+            let pv = furniture_def(p.kind.furniture()).visual;
+            for wp in &l.waypoints {
+                let def = furniture_def(wp.kind.furniture());
+                if def.footprint.is_none() {
+                    continue;
+                }
+                let m = PLANT_OBSTACLE_CLEARANCE_PX;
+                let (wtl, wsz) = visual_tl(wp.pos, def.visual);
+                let inflated = (
+                    Point {
+                        x: wtl.x.saturating_sub(m),
+                        y: wtl.y.saturating_sub(m),
+                    },
+                    Size {
+                        w: wsz.w + 2 * m,
+                        h: wsz.h + 2 * m,
+                    },
+                );
+                if super::placement::rects_overlap(visual_tl(p.pos, pv), inflated) {
+                    v.push(format!(
+                        "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of {:?}@{:?}",
+                        p.kind, p.pos, wp.kind, wp.pos
+                    ));
+                }
+            }
+        }
+        // Greenery pin only where room exists: on bands narrower than 60 the
+        // slide has nowhere to land (appliance + clearance + plant + the
+        // packed desk field exceed the corner) and tiny-floor degradation is
+        // the house norm — the pin's job is preventing the office-WIDE loss
+        // the first cut shipped at flagship sizes.
+        if l.cubicle_band.width >= 60 {
+            let has = |k: WaypointKind| l.waypoints.iter().any(|w| w.kind == k);
+            let corridor_plant = |kind: PlantKind| {
+                l.plants
+                    .iter()
+                    .any(|p| p.kind == kind && p.pos.y + 6 >= l.cubicle_aisle.y)
+            };
+            if has(WaypointKind::VendingMachine) && !corridor_plant(PlantKind::Flower) {
+                v.push(format!(
+                    "{w}x{h} seed {seed}: vending cost the corridor its Flower"
+                ));
+            }
+            if has(WaypointKind::Printer) && !corridor_plant(PlantKind::Succulent) {
+                v.push(format!(
+                    "{w}x{h} seed {seed}: printer cost the corridor its Succulent"
+                ));
+            }
+        }
+    });
+    assert!(
+        v.is_empty(),
+        "{} violations (first 6):\n{}",
+        v.len(),
+        v[..v.len().min(6)].join("\n")
     );
 }

@@ -23,9 +23,10 @@ const SEAT_DX: [i16; 3] = [-6, 0, 6];
 /// byte-for-byte — recomputed via this fn rather than threaded as an `Option`
 /// (no unwrap on a read-back).
 /// Air kept between a scatter plant's sprite box and any obstacle waypoint's
-/// (vending/printer/booth...) — 1px apart in the same column read as one
-/// totem (the machine's panel row joined the bouquet; film-critic catch).
-pub(super) const PLANT_APPLIANCE_CLEARANCE_PX: u16 = 3;
+/// visual box (vending/printer/booth/couch/snack shelf) — 1px apart in the
+/// same column read as one totem (the machine's panel row joined the
+/// bouquet; film-critic catch).
+pub(super) const PLANT_OBSTACLE_CLEARANCE_PX: u16 = 3;
 
 /// Gap kept between the fish tank's east edge and the elevator door column so
 /// the spawn threshold never routes around furniture. Module-scoped so the
@@ -331,7 +332,7 @@ pub(super) fn compute_with_seed(
     // walkability paths). No plants in the meeting room interior
     // either: sofas + table already fill most of the room, and any
     // plant inside its walkable strips disconnects the door gap.
-    let plants: Vec<PlantItem> = vec![
+    let plant_candidates: Vec<PlantItem> = vec![
         // Corridor edges — far from any door or room exit.
         PlantItem {
             kind: PlantKind::Flower,
@@ -381,51 +382,6 @@ pub(super) fn compute_with_seed(
             ]
         }
     }))
-    // The packed pod grid (bottom row + lattice partials, #552/#553) can now
-    // legitimately reach the corridor-edge scatter spots — a plant yields to
-    // any desk whose ground its own would overlap (scatter decor is optional,
-    // desks are the floor's purpose). Rects come from THE shared
-    // mask::ground_rect authority, so this check can't drift from the stamp.
-    .filter(|p| {
-        let def = furniture_def(p.kind.furniture());
-        let Some(fp) = def.footprint else { return true };
-        let plant_r = mask::ground_rect(
-            Anchor::Center,
-            p.pos,
-            fp,
-            def.visual,
-            def.ground_x,
-            def.ground_y,
-        );
-        !overlaps_a_desk_ground(plant_r, &home_desks)
-    })
-    // ...and to the obstacle waypoints, at VISUAL rects with breathing room:
-    // the aisle-corner Flower 1px above the VendingMachine read as one totem
-    // (grounds disjoint, so the sweep stayed silent — a clearance rule, not
-    // an overlap rule).
-    .filter(|p| {
-        let pv = furniture_def(p.kind.furniture()).visual;
-        let plant_tl = Point {
-            x: p.pos.x.saturating_sub(pv.w / 2),
-            y: p.pos.y.saturating_sub(pv.h / 2),
-        };
-        !waypoints.iter().any(|w| {
-            let def = furniture_def(w.kind.furniture());
-            if def.footprint.is_none() {
-                return false;
-            }
-            let m = PLANT_APPLIANCE_CLEARANCE_PX;
-            let inflated_tl = Point {
-                x: w.pos.x.saturating_sub(def.visual.w / 2 + m),
-                y: w.pos.y.saturating_sub(def.visual.h / 2 + m),
-            };
-            let inflated = Size {
-                w: def.visual.w + 2 * m,
-                h: def.visual.h + 2 * m,
-            };
-            super::placement::rects_overlap((plant_tl, pv), (inflated_tl, inflated))
-        })
-    })
     .collect();
 
     // Floor lamp now sits right next to the viewing couch so its halo
@@ -760,6 +716,19 @@ pub(super) fn compute_with_seed(
         height: cubicle_aisle.height,
     });
 
+    // Scatter plants settle only now — AFTER every waypoint exists (the
+    // island stands and snack shelf push above; lens catch: filtering at the
+    // candidate site checked a subset of the final waypoint set). Each
+    // candidate yields to desk grounds and keeps PLANT_OBSTACLE_CLEARANCE_PX
+    // from every obstacle waypoint's visual box, SLIDING inward along the
+    // aisle before giving up — the corner appliances share the plants'
+    // authored corners at most sizes, and yield-by-deletion stripped the
+    // office's greenery (both lenses' catch on the first cut).
+    let plants: Vec<PlantItem> = plant_candidates
+        .into_iter()
+        .filter_map(|p| settle_plant(p, &home_desks, &waypoints, &cubicle_band))
+        .collect();
+
     let walkable = mask::build_walkable_mask(
         buf_w,
         buf_h,
@@ -820,6 +789,149 @@ pub(super) fn compute_with_seed(
         couch_sprite_center,
         walkable,
         reachable,
+    })
+}
+
+/// Settle a scatter-plant candidate: keep its authored spot when clear, else
+/// slide 1px at a time toward the cubicle band's horizontal centre (bounded)
+/// until both the desk-ground and obstacle-clearance rules pass; a candidate
+/// that never clears yields entirely. Sliding preserves the greenery the
+/// first clearance cut deleted office-wide.
+fn settle_plant(
+    p: PlantItem,
+    home_desks: &[Point],
+    waypoints: &[Waypoint],
+    band: &Bounds,
+) -> Option<PlantItem> {
+    // 12: two appliance widths — enough to clear any single corner appliance
+    // without wandering out of the authored corner region.
+    const MAX_PLANT_NUDGE_PX: u16 = 12;
+    let dir: i16 = if p.pos.x < band.x + band.width / 2 {
+        1
+    } else {
+        -1
+    };
+    let clear = |cand: Point| plant_spot_clear(p.kind, cand, home_desks, waypoints);
+    if clear(p.pos) {
+        return Some(PlantItem {
+            kind: p.kind,
+            pos: p.pos,
+        });
+    }
+    // Beside the blocking obstacle, toward the band centre, on ITS row: the
+    // corner appliance owns the plant's authored corner at most sizes, and on
+    // packed floors (#552) the plant's own row is desk-saturated — standing
+    // next to the machine on the corridor floor is the one desk-free spot AND
+    // the natural coexistence (machine + plant, 3px air, no totem).
+    let pv = furniture_def(p.kind.furniture()).visual;
+    if let Some(w) = first_blocking_waypoint(p.kind, p.pos, waypoints) {
+        let wdef = furniture_def(w.kind.furniture());
+        let m = PLANT_OBSTACLE_CLEARANCE_PX;
+        // Derive the spot from the inflated box's EDGES: width-sum arithmetic
+        // truncates w/2 on odd widths and landed 1px inside the box.
+        let infl_left = w.pos.x.saturating_sub(wdef.visual.w / 2 + m);
+        let infl_right = infl_left + wdef.visual.w + 2 * m;
+        let cand_x = if dir < 0 {
+            infl_left.saturating_sub(pv.w - pv.w / 2)
+        } else {
+            infl_right + pv.w / 2
+        };
+        let cand = Point {
+            x: cand_x,
+            y: w.pos.y,
+        };
+        if clear(cand) {
+            return Some(PlantItem {
+                kind: p.kind,
+                pos: cand,
+            });
+        }
+    }
+    (1..=MAX_PLANT_NUDGE_PX).find_map(|step| {
+        let cand = Point {
+            x: p.pos.x.saturating_add_signed(dir * step as i16),
+            y: p.pos.y,
+        };
+        clear(cand).then_some(PlantItem {
+            kind: p.kind,
+            pos: cand,
+        })
+    })
+}
+
+/// The first obstacle waypoint whose clearance box the plant's authored spot
+/// violates — the thing `settle_plant` steps around.
+fn first_blocking_waypoint(
+    kind: PlantKind,
+    pos: Point,
+    waypoints: &[Waypoint],
+) -> Option<&Waypoint> {
+    let pv = furniture_def(kind.furniture()).visual;
+    let plant_tl = Point {
+        x: pos.x.saturating_sub(pv.w / 2),
+        y: pos.y.saturating_sub(pv.h / 2),
+    };
+    waypoints.iter().find(|w| {
+        let wdef = furniture_def(w.kind.furniture());
+        if wdef.footprint.is_none() {
+            return false;
+        }
+        let m = PLANT_OBSTACLE_CLEARANCE_PX;
+        let inflated_tl = Point {
+            x: w.pos.x.saturating_sub(wdef.visual.w / 2 + m),
+            y: w.pos.y.saturating_sub(wdef.visual.h / 2 + m),
+        };
+        let inflated = Size {
+            w: wdef.visual.w + 2 * m,
+            h: wdef.visual.h + 2 * m,
+        };
+        super::placement::rects_overlap((plant_tl, pv), (inflated_tl, inflated))
+    })
+}
+
+/// Both placement rules for one plant spot: ground never overlaps a desk
+/// ground, and the sprite box keeps PLANT_OBSTACLE_CLEARANCE_PX of air from
+/// every obstacle waypoint's box.
+fn plant_spot_clear(
+    kind: PlantKind,
+    pos: Point,
+    home_desks: &[Point],
+    waypoints: &[Waypoint],
+) -> bool {
+    let def = furniture_def(kind.furniture());
+    if let Some(fp) = def.footprint {
+        let r = mask::ground_rect(
+            Anchor::Center,
+            pos,
+            fp,
+            def.visual,
+            def.ground_x,
+            def.ground_y,
+        );
+        if overlaps_a_desk_ground(r, home_desks) {
+            return false;
+        }
+    }
+    let pv = def.visual;
+    let plant_tl = Point {
+        x: pos.x.saturating_sub(pv.w / 2),
+        y: pos.y.saturating_sub(pv.h / 2),
+    };
+    !waypoints.iter().any(|w| {
+        let wdef = furniture_def(w.kind.furniture());
+        if wdef.footprint.is_none() {
+            return false;
+        }
+        let m = PLANT_OBSTACLE_CLEARANCE_PX;
+        let inflated_tl = Point {
+            x: w.pos.x.saturating_sub(wdef.visual.w / 2 + m),
+            y: w.pos.y.saturating_sub(wdef.visual.h / 2 + m),
+        };
+        let inflated = Size {
+            w: wdef.visual.w + 2 * m,
+            h: wdef.visual.h + 2 * m,
+        };
+        super::placement::rects_overlap((plant_tl, pv), (inflated_tl, inflated))
     })
 }
 
