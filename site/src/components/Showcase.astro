@@ -263,7 +263,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     const vibingWeather =
       vibingStage && vibingStage.querySelector('.stage__osd[data-group="weather"]');
     const vibingTheme = vibingStage && vibingStage.querySelector('.stage__osd[data-group="theme"]');
-    const VIBING_SEED = 11; // fixed u32 — distinct from OfficeBackdrop's page office (seed 3)
+    const VIBING_SEED = 11; // fixed u32 — distinct from OfficeBackdrop's page office (seed 0)
     let vWasm = null;
     let vOffice = null;
     let vCtx = null;

@@ -898,7 +898,7 @@ mod tests {
         // Free-desk count is DERIVED (capacity − cast), not a size literal —
         // the density pass re-tunes desk-per-buffer out from under any
         // hardcoded count.
-        let (w, h) = (96u32, 180u32);
+        let (w, h) = (96u32, 130u32);
         let mut o = office();
         let mut t = 0u64;
         while t <= 30_000 {
@@ -946,7 +946,7 @@ mod tests {
 
     #[test]
     fn hire_cap_holds_under_click_spam() {
-        // 320×180 (the 16:9 hero buffer) lays out 32 desks — ample room, so
+        // 320×180 (a roomy 16:9 canvas) lays out 32 desks — ample room, so
         // this exercises the MAX_LIVE cap, not desk exhaustion (the
         // narrow-canvas test above covers that).
         let mut o = office();
