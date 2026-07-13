@@ -1074,3 +1074,31 @@ fn desk_columns_stay_on_one_lattice_and_never_shift_with_width() {
         }
     }
 }
+
+#[test]
+fn desk_rows_stay_on_one_lattice() {
+    // The Y twin of the #553 column invariant (owner catch: the partial
+    // bottom row sat 14px below the last full row vs the 23px inter-pod
+    // rhythm). Every desk row top must be on the row lattice: offset from
+    // the grid origin is k*stride_y + {0 | intra row step}.
+    let stride_y = POD_SIDE * DESK_H + (POD_SIDE - 1) * INTRA_POD_GAP_Y + INTER_POD_AISLE_Y;
+    for w in [140u16, 160, 192, 240] {
+        for h in (100..=240u16).step_by(20) {
+            let Some(l) = SceneLayout::compute(w, h, Some(64)) else {
+                continue;
+            };
+            let Some(first) = l.home_desks.first() else {
+                continue;
+            };
+            let origin_y = first.y;
+            for d in &l.home_desks {
+                let off = d.y - origin_y;
+                let in_pod = off % stride_y;
+                assert!(
+                    in_pod == 0 || in_pod == DESK_H + INTRA_POD_GAP_Y,
+                    "{w}x{h}: desk row top offset {off} is off the row lattice (in_pod {in_pod})"
+                );
+            }
+        }
+    }
+}
