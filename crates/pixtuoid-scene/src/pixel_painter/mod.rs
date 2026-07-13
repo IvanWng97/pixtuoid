@@ -551,6 +551,10 @@ fn paint_frame(
         furniture::paint_water_cooler(ctx.buf, pr, ctx.theme);
         furniture::paint_trash_bin(ctx.buf, pr);
     }
+    // Soft goods (decor arc): both mats paint UNDER the drawable pass, so the
+    // island body and walkers stack over them.
+    furniture::paint_pantry_entry_mat(ctx.buf, ctx.layout, ctx.theme);
+    furniture::paint_island_bar_mat(ctx.buf, ctx.layout, ctx.theme);
 
     // Shadow pass — soft floor shadows under desks + lounge furniture
     // so nothing floats. Painted BEFORE the y-sorted entity pass so

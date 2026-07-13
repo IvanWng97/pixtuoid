@@ -2217,3 +2217,113 @@ fn paint_frame_is_pure_and_byte_identical() {
         "paint must not start/expire chitchat"
     );
 }
+
+#[test]
+fn corridor_runner_weaves_sparse_diamonds_without_inner_edge_rows() {
+    // Taste pin from the interior-decor mock round (owner picked SOFT over
+    // keep/narrow): stride-10 lattice, border rows only. The old stride-6 +
+    // inner-edge treatment read as bathroom tiling, not a woven runner.
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let floor = Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    let mut buf = RgbBuffer::filled(60, 24, floor);
+    let rect = crate::layout::Bounds {
+        x: 0,
+        y: 4,
+        width: 60,
+        height: 12,
+    };
+    paint_corridor_runner(&mut buf, rect, theme);
+    let base = theme.office.runner_base;
+    let stripe = theme.office.runner_stripe;
+    let edge = theme.office.runner_edge;
+    assert_eq!(buf.get(0, 4), edge, "border row stays");
+    // Inner-edge rows are plain weave now — no second stripe line.
+    assert_eq!(
+        buf.get(2, 5),
+        base,
+        "inner-edge row (dx=2,dy=1) must be base"
+    );
+    // The old stride-6 lattice point (dx=2,dy=4: 6%6==0) dissolves to weave...
+    assert_eq!(
+        buf.get(2, 8),
+        base,
+        "old stride-6 lattice point must be base"
+    );
+    // ...and the sparse stride-10 lattice appears where the old one had none.
+    assert_eq!(buf.get(7, 7), stripe, "(dx+dy)=10 lands on the new lattice");
+}
+
+#[test]
+fn pantry_doorway_gets_a_centered_entry_mat() {
+    // Decor-arc taste pin (owner picked B1): an entry mat centered under the
+    // pantry's north doorway, echoing the meeting-room doormat convention.
+    // One clear row separates it from the wall face (derived from the SAME
+    // WALL_THICK_H the impl offsets by, so they can't drift apart).
+    use crate::layout::{TEST_DEFAULT_DESKS, WALL_THICK_H};
+    let l = Layout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let p = l.pantry.expect("pantry");
+    let dw = l
+        .doorways
+        .iter()
+        .find(|d| d.start.y == d.end.y && d.start.y == p.bounds.y)
+        .expect("the pantry north door");
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let floor = Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    let mut buf = RgbBuffer::filled(192, 160, floor);
+    furniture::paint_pantry_entry_mat(&mut buf, &l, theme);
+    let cx = (dw.start.x + dw.end.x) / 2;
+    let mat_cy = dw.start.y + WALL_THICK_H + 3;
+    assert_ne!(buf.get(cx, mat_cy), floor, "mat center row painted");
+    assert_ne!(buf.get(cx - 7, mat_cy), floor, "mat spans west of center");
+    assert_ne!(buf.get(cx + 7, mat_cy), floor, "mat spans east of center");
+    assert_eq!(buf.get(cx - 9, mat_cy), floor, "floor beyond the west edge");
+    assert_eq!(buf.get(cx + 9, mat_cy), floor, "floor beyond the east edge");
+    assert_eq!(
+        buf.get(cx, dw.start.y + WALL_THICK_H),
+        floor,
+        "one clear row between wall face and mat"
+    );
+}
+
+#[test]
+fn kitchen_island_sits_on_a_bar_mat() {
+    // Decor-arc taste pin (owner picked B2 alongside B1): a thin bordered mat
+    // under the island whose south sliver peeks out in front of the bar.
+    use crate::layout::TEST_DEFAULT_DESKS;
+    let l = Layout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let isl = l
+        .pantry
+        .and_then(|p| p.kitchen_island)
+        .expect("island at this size");
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let floor = Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    let mut buf = RgbBuffer::filled(192, 160, floor);
+    furniture::paint_island_bar_mat(&mut buf, &l, theme);
+    assert_ne!(
+        buf.get(isl.x, isl.y + 4),
+        floor,
+        "mat painted under the island front"
+    );
+    assert_eq!(
+        buf.get(isl.x + 14, isl.y + 4),
+        floor,
+        "floor beyond the east edge"
+    );
+    assert_eq!(
+        buf.get(isl.x - 14, isl.y + 4),
+        floor,
+        "floor beyond the west edge"
+    );
+}

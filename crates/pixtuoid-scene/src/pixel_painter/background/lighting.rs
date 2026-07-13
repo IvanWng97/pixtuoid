@@ -289,18 +289,22 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
     let runner_base = theme.office.runner_base;
     let runner_stripe = theme.office.runner_stripe;
     let runner_edge = theme.office.runner_edge;
+    // Taste pin (interior-decor mock round): a sparse lattice with border rows
+    // only. The earlier stride-6 + doubled inner-edge rows read as bathroom
+    // tiling rather than a woven runner at half-block scale.
+    const RUNNER_LATTICE_STRIDE: i32 = 10;
     let max_x = (rect.x + rect.width).min(buf.width());
     let max_y = (rect.y + rect.height).min(buf.height());
     for y in rect.y..max_y {
         for x in rect.x..max_x {
             let is_edge = y == rect.y || y + 1 == max_y;
-            let is_inner_edge = y == rect.y + 1 || y + 2 == max_y;
             let dy = (y - rect.y) as i32;
             let dx = (x - rect.x) as i32;
-            let diamond = ((dx + dy) % 6 == 0) || ((dx - dy).rem_euclid(6) == 0);
+            let diamond = ((dx + dy) % RUNNER_LATTICE_STRIDE == 0)
+                || ((dx - dy).rem_euclid(RUNNER_LATTICE_STRIDE) == 0);
             let color = if is_edge {
                 runner_edge
-            } else if is_inner_edge || diamond {
+            } else if diamond {
                 runner_stripe
             } else {
                 runner_base

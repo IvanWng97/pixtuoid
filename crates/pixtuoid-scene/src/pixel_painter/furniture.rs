@@ -312,3 +312,55 @@ pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, pr: Bounds) {
         }
     }
 }
+
+/// Entry mat centered under the pantry's north doorway — the pantry-scale
+/// sibling of the meeting doormat (decor-arc taste pin B1). Reuses the area-rug
+/// palette so every soft-goods piece stays one family. One clear floor row
+/// separates it from the wall face (offset derived from the SAME
+/// `WALL_THICK_H` the wall painter is thick by, so they can't drift).
+pub(super) fn paint_pantry_entry_mat(
+    buf: &mut RgbBuffer,
+    layout: &crate::layout::SceneLayout,
+    theme: &crate::theme::Theme,
+) {
+    const ENTRY_MAT_W: u16 = 16;
+    const ENTRY_MAT_H: u16 = 5;
+    let Some(p) = layout.pantry else { return };
+    let Some(dw) = layout
+        .doorways
+        .iter()
+        .find(|d| d.start.y == d.end.y && d.start.y == p.bounds.y)
+    else {
+        return;
+    };
+    let cx = (dw.start.x + dw.end.x) / 2;
+    let cy = dw.start.y + crate::layout::WALL_THICK_H + 1 + ENTRY_MAT_H / 2;
+    paint_area_rug(buf, cx, cy, ENTRY_MAT_W, ENTRY_MAT_H, theme);
+}
+
+/// Thin bordered bar mat under the kitchen island (decor-arc taste pin B2):
+/// the island body covers most of it, leaving a mat sliver peeking out along
+/// the bar's south serving front. Painted in the background pass so the
+/// island drawable and every character stack on top.
+pub(super) fn paint_island_bar_mat(
+    buf: &mut RgbBuffer,
+    layout: &crate::layout::SceneLayout,
+    theme: &crate::theme::Theme,
+) {
+    const BAR_MAT_W: u16 = 26;
+    const BAR_MAT_H: u16 = 4;
+    // The island anchor is its body center; +4 drops the mat's center to the
+    // seat row so the sliver clears the body's south edge (mock-verified).
+    const BAR_MAT_Y_OFF: u16 = 4;
+    let Some(isl) = layout.pantry.and_then(|p| p.kitchen_island) else {
+        return;
+    };
+    paint_area_rug(
+        buf,
+        isl.x,
+        isl.y + BAR_MAT_Y_OFF,
+        BAR_MAT_W,
+        BAR_MAT_H,
+        theme,
+    );
+}
