@@ -73,7 +73,7 @@ fn pet_hit_test_resolves_at_pet_position() {
 // (Pantry/Phone Booth/Standing Desk/Vending/Printer), meeting sofas, pantry
 // table/chairs, plants, floor lamp, wall+pod decor, lounge couch + side table,
 // and the procedural meeting/pantry items. Ficus + BulletinBoard are covered
-// by synthetic-layout unit tests (compute never emits those two kinds).
+// by synthetic-layout unit tests (compute never emits BulletinBoard; Ficus places since B-3).
 #[test]
 fn furniture_hit_test_covers_every_kind_on_real_layouts() {
     use crate::tui::hit_test::hit_test_furniture;

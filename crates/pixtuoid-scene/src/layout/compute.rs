@@ -22,6 +22,11 @@ const SEAT_DX: [i16; 3] = [-6, 0, 6];
 /// waypoints + `couch_sprite_center`) both derive from it and must agree
 /// byte-for-byte — recomputed via this fn rather than threaded as an `Option`
 /// (no unwrap on a read-back).
+/// A band this wide has room for flanking greenery (the lounge pot's west
+/// edge needs band.width >= 58 by derivation; +2 breathing). Shared by the
+/// Ficus gates AND the sweep's greenery pin — one value, one const.
+pub(super) const ROOMY_BAND_MIN_W: u16 = 60;
+
 /// Air kept between a scatter plant's sprite box and any obstacle waypoint's
 /// visual box (vending/printer/booth/couch/snack shelf) — 1px apart in the
 /// same column read as one totem (the machine's panel row joined the
@@ -326,10 +331,9 @@ pub(super) fn compute_with_seed(
     );
 
     // Plants scatter through the cubicle corridor edges + pantry.
-    // No plants in the cubicle TOP strip — that area is too narrow
-    // (the gap between top wall and the viewing couch is just 7 px,
-    // not enough for a padded plant without blocking the room/door
-    // walkability paths). No plants in the meeting room interior
+    // Scatter plants avoid the cubicle TOP strip by DEFAULT (the wall-to-
+    // couch gap is just 7 px) — the only top-strip greenery is the two
+    // gated Ficus pushes below (roomy bands only). No plants in the meeting room interior
     // either: sofas + table already fill most of the room, and any
     // plant inside its walkable strips disconnects the door gap.
     let mut plant_candidates: Vec<PlantItem> = vec![
@@ -438,12 +442,11 @@ pub(super) fn compute_with_seed(
     // The two owner-ratified Ficus spots (B-3): a greeting plant west of the
     // elevator door, and the lounge's west flank. Each rides its anchor's own
     // gate and joins the same settle pipeline as every scatter candidate.
-    // Band >= 60: the same where-room-exists threshold as the greenery pin.
-    // On a 31-wide band either pot seals a top-strip pocket (the lounge one
+    // On a sub-ROOMY band either pot seals a top-strip pocket (the lounge one
     // lands against the rooms column, the elevator one pinches the door
     // approach — connectivity sweep catch at 41x160): flanking greenery is a
     // roomy-floor luxury, not tiny-floor furniture.
-    if cubicle_band.width >= 60 {
+    if cubicle_band.width >= ROOMY_BAND_MIN_W {
         if let Some(d) = door {
             plant_candidates.push(PlantItem {
                 kind: PlantKind::Ficus,
@@ -753,9 +756,27 @@ pub(super) fn compute_with_seed(
     // aisle before giving up — the corner appliances share the plants'
     // authored corners at most sizes, and yield-by-deletion stripped the
     // office's greenery (both lenses' catch on the first cut).
+    // Fixed singletons the clearance predicate must also see: the fish tank
+    // is NOT a waypoint, so the elevator Ficus interpenetrated it at buf
+    // widths ~88-123 (lens render catch). Lamp/couch verified clear by the
+    // same census; the side table's 1px adjacency to the lounge Ficus is the
+    // owner-ratified mock look — deliberately NOT repelled.
+    let singleton_rects: Vec<(Point, Size)> = fish_tank
+        .map(|t| {
+            let v = furniture_def(Furniture::FishTank).visual;
+            (
+                Point {
+                    x: t.x.saturating_sub(v.w / 2),
+                    y: t.y.saturating_sub(v.h / 2),
+                },
+                v,
+            )
+        })
+        .into_iter()
+        .collect();
     let plants: Vec<PlantItem> = plant_candidates
         .into_iter()
-        .filter_map(|p| settle_plant(p, &home_desks, &waypoints, &cubicle_band))
+        .filter_map(|p| settle_plant(p, &home_desks, &waypoints, &singleton_rects, &cubicle_band))
         .collect();
 
     let walkable = mask::build_walkable_mask(
@@ -830,6 +851,7 @@ fn settle_plant(
     p: PlantItem,
     home_desks: &[Point],
     waypoints: &[Waypoint],
+    singletons: &[(Point, Size)],
     band: &Bounds,
 ) -> Option<PlantItem> {
     // 12: two appliance widths — enough to clear any single corner appliance
@@ -840,7 +862,7 @@ fn settle_plant(
     } else {
         -1
     };
-    let clear = |cand: Point| plant_spot_clear(p.kind, cand, home_desks, waypoints);
+    let clear = |cand: Point| plant_spot_clear(p.kind, cand, home_desks, waypoints, singletons);
     if clear(p.pos) {
         return Some(PlantItem {
             kind: p.kind,
@@ -926,6 +948,7 @@ fn plant_spot_clear(
     pos: Point,
     home_desks: &[Point],
     waypoints: &[Waypoint],
+    singletons: &[(Point, Size)],
 ) -> bool {
     let def = furniture_def(kind.furniture());
     if let Some(fp) = def.footprint {
@@ -940,6 +963,26 @@ fn plant_spot_clear(
         if overlaps_a_desk_ground(r, home_desks) {
             return false;
         }
+    }
+    // Fixed singletons get the same inflated-clearance rule as waypoints.
+    let pv = def.visual;
+    let plant_tl = Point {
+        x: pos.x.saturating_sub(pv.w / 2),
+        y: pos.y.saturating_sub(pv.h / 2),
+    };
+    let m = PLANT_OBSTACLE_CLEARANCE_PX;
+    if singletons.iter().any(|&(tl, sz)| {
+        let inflated_tl = Point {
+            x: tl.x.saturating_sub(m),
+            y: tl.y.saturating_sub(m),
+        };
+        let inflated = Size {
+            w: sz.w + 2 * m,
+            h: sz.h + 2 * m,
+        };
+        super::placement::rects_overlap((plant_tl, pv), (inflated_tl, inflated))
+    }) {
+        return false;
     }
     // Delegates to THE one inflate-and-overlap check (bot catch: this loop
     // was a verbatim second copy of first_blocking_waypoint's math).

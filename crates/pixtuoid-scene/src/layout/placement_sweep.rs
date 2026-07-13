@@ -747,9 +747,9 @@ fn desk_capacity_obeys_the_request_law() {
 fn every_kind_is_placed_somewhere_in_the_sweep() {
     // Existential coverage: every registered role-enum variant must appear in
     // at least ONE swept layout — a kind that never places is dead weight (or
-    // a placement-site regression). Allowlist: BulletinBoard has NO push site
-    // in compute (declared, never placed — documented in decor.rs's
-    // role-mapping test); it stays registered for pack authors.
+    // a placement-site regression). Allowlist: BulletinBoard — owner ruled it
+    // stays unplaced (2026-07-13, B-3 mock round); registered for pack
+    // authors.
     use std::collections::BTreeSet;
     let mut seen: BTreeSet<String> = BTreeSet::new();
     sweep(|_, _, _, l| {
@@ -898,7 +898,7 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
     //   (b) greenery pin — an appliance never costs the corridor its plant
     //       (vending present => a corridor-row Flower exists; printer
     //       present => a corridor-row Succulent exists).
-    use super::compute::PLANT_OBSTACLE_CLEARANCE_PX;
+    use super::compute::{PLANT_OBSTACLE_CLEARANCE_PX, ROOMY_BAND_MIN_W};
     let visual_tl = |pos: Point, v: Size| {
         (
             Point {
@@ -912,6 +912,27 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
     sweep(|w, h, seed, l| {
         for p in &l.plants {
             let pv = furniture_def(p.kind.furniture()).visual;
+            if let Some(t) = l.fish_tank {
+                let tv = furniture_def(Furniture::FishTank).visual;
+                let m = PLANT_OBSTACLE_CLEARANCE_PX;
+                let (ttl, tsz) = visual_tl(t, tv);
+                let inflated = (
+                    Point {
+                        x: ttl.x.saturating_sub(m),
+                        y: ttl.y.saturating_sub(m),
+                    },
+                    Size {
+                        w: tsz.w + 2 * m,
+                        h: tsz.h + 2 * m,
+                    },
+                );
+                if super::placement::rects_overlap(visual_tl(p.pos, pv), inflated) {
+                    v.push(format!(
+                        "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of the fish tank @{:?}",
+                        p.kind, p.pos, t
+                    ));
+                }
+            }
             for wp in &l.waypoints {
                 let def = furniture_def(wp.kind.furniture());
                 if def.footprint.is_none() {
@@ -942,7 +963,7 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
         // packed desk field exceed the corner) and tiny-floor degradation is
         // the house norm — the pin's job is preventing the office-WIDE loss
         // the first cut shipped at flagship sizes.
-        if l.cubicle_band.width >= 60 {
+        if l.cubicle_band.width >= ROOMY_BAND_MIN_W {
             let has = |k: WaypointKind| l.waypoints.iter().any(|w| w.kind == k);
             let corridor_plant = |kind: PlantKind| {
                 l.plants
