@@ -1100,3 +1100,30 @@ fn desk_rows_stay_on_one_lattice() {
         }
     }
 }
+
+#[test]
+fn ficus_greets_at_the_elevator_and_fills_the_lounge_west_flank() {
+    // Owner-ratified B-3 spots: one Ficus west of the elevator door (the
+    // greeting plant), one on the lounge's west flank. Each rides its
+    // anchor's own gate (door / lounge) and the settle pipeline like every
+    // scatter plant.
+    let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let ficus: Vec<_> = l
+        .plants
+        .iter()
+        .filter(|p| p.kind == PlantKind::Ficus)
+        .collect();
+    assert_eq!(ficus.len(), 2, "both ratified Ficus spots place at 192x160");
+    let door = l.door.expect("elevator");
+    assert!(
+        ficus
+            .iter()
+            .any(|p| p.pos.x + 12 > door.x && p.pos.y < l.cubicle_band.y + 12),
+        "one ficus greets beside the elevator"
+    );
+    let couch = l.couch_sprite_center.expect("lounge");
+    assert!(
+        ficus.iter().any(|p| p.pos.x < couch.x),
+        "one ficus fills the lounge west flank"
+    );
+}

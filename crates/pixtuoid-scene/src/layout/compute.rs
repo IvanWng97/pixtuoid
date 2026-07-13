@@ -332,7 +332,7 @@ pub(super) fn compute_with_seed(
     // walkability paths). No plants in the meeting room interior
     // either: sofas + table already fill most of the room, and any
     // plant inside its walkable strips disconnects the door gap.
-    let plant_candidates: Vec<PlantItem> = vec![
+    let mut plant_candidates: Vec<PlantItem> = vec![
         // Corridor edges — far from any door or room exit.
         PlantItem {
             kind: PlantKind::Flower,
@@ -434,6 +434,35 @@ pub(super) fn compute_with_seed(
         x: d.x + ELEVATOR_W / 2,
         y: top_margin + 4,
     });
+
+    // The two owner-ratified Ficus spots (B-3): a greeting plant west of the
+    // elevator door, and the lounge's west flank. Each rides its anchor's own
+    // gate and joins the same settle pipeline as every scatter candidate.
+    // Band >= 60: the same where-room-exists threshold as the greenery pin.
+    // On a 31-wide band either pot seals a top-strip pocket (the lounge one
+    // lands against the rooms column, the elevator one pinches the door
+    // approach — connectivity sweep catch at 41x160): flanking greenery is a
+    // roomy-floor luxury, not tiny-floor furniture.
+    if cubicle_band.width >= 60 {
+        if let Some(d) = door {
+            plant_candidates.push(PlantItem {
+                kind: PlantKind::Ficus,
+                pos: Point {
+                    x: d.x.saturating_sub(5),
+                    y: top_margin + 5,
+                },
+            });
+        }
+        if lounge_fits {
+            plant_candidates.push(PlantItem {
+                kind: PlantKind::Ficus,
+                pos: Point {
+                    x: couch_x.saturating_sub(17),
+                    y: couch_y,
+                },
+            });
+        }
+    }
 
     // Aquarium east of the floor lamp (decor arc, owner-picked spot). Center
     // offsets derive from the lounge vignette: the lamp's east edge is

@@ -798,10 +798,7 @@ fn every_kind_is_placed_somewhere_in_the_sweep() {
         PlantKind::Tall,
         PlantKind::Flower,
         PlantKind::Succulent,
-        // Ficus: allowlisted like BulletinBoard — compute has NO push site
-        // for it (registered kind, sized row, never placed). A polish-arc
-        // candidate; when a site lands, delete this line and the sweep
-        // starts guarding it.
+        PlantKind::Ficus,
     ] {
         let k = format!("plant:{kind:?}");
         if !seen.contains(&k) {
