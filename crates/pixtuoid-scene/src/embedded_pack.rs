@@ -164,7 +164,6 @@ fn load_embedded_pack() -> Result<Pack> {
             "plant_flower.sprite",
             "plant_succulent.sprite",
             "floor_lamp.sprite",
-            "trash_bin.sprite",
             "door.sprite",
             "door_half.sprite",
             "door_open.sprite",

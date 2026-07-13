@@ -690,13 +690,6 @@ pub(super) fn paint_drawable(
                 // rows still land at their original desk.y-relative positions.
                 blit_frame(frame, desk.x, desk.y.saturating_sub(1), buf);
             }
-            if let Some(bin) = pack.animation("trash_bin").and_then(|a| a.frames.first()) {
-                let bin_x = desk.x + DESK_W;
-                let bin_y = desk.y + 4;
-                if bin_x + bin.width() <= buf.width() && bin_y + bin.height() <= buf.height() {
-                    blit_frame(bin, bin_x, bin_y, buf);
-                }
-            }
             paint_desk_coffee(buf, *desk, *has_coffee, *coffee_steam, now, theme);
             if let Some(tint) = screen_glow {
                 paint_screen_glow(buf, desk.x, desk.y, now, *tint, theme);
@@ -1272,10 +1265,11 @@ mod tests {
     }
 
     #[test]
-    fn desk_cubicle_with_cabinet_blits_cabinet_and_trash_bin() {
-        // A DeskCubicle with has_cabinet=true paints the filing cabinet (west of
-        // the desk) and the trash bin (at the desk's east edge) when both fit in
-        // the buffer (covers the cabinet blit + the side-bin blit).
+    fn desk_cubicle_blits_cabinet_but_no_per_desk_bin() {
+        // A DeskCubicle with has_cabinet=true paints the filing cabinet (west
+        // of the desk) and NOTHING at the old east-edge bin cell — the owner
+        // removed the per-desk trash bins (25 grey cylinders read as noise at
+        // half-block scale; the office keeps the pantry's one bin).
         let pack = test_pack();
         let mut cache = FrameCache::new();
         let now = SystemTime::UNIX_EPOCH;
@@ -1284,10 +1278,6 @@ mod tests {
             .animation("filing_cabinet")
             .and_then(|a| a.frames.first())
             .expect("filing_cabinet anim");
-        let bin = pack
-            .animation("trash_bin")
-            .and_then(|a| a.frames.first())
-            .expect("trash_bin anim");
         let bg = Rgb { r: 1, g: 2, b: 3 };
         let mut buf = RgbBuffer::filled(120, 80, bg);
         let d = Drawable {
@@ -1313,17 +1303,23 @@ mod tests {
             }
         }
         assert!(cab_painted, "filing cabinet should paint west of the desk");
-        // Trash bin lands at desk.x + DESK_W.
-        let bin_x = desk.x + DESK_W;
-        let mut bin_painted = false;
-        for dy in 0..bin.height() {
-            for dx in 0..bin.width() {
-                if buf.get(bin_x + dx, desk.y + 4 + dy) != bg {
-                    bin_painted = true;
-                }
+        // The old bin cell (desk.x + DESK_W, desk.y + 4, 3x4) may show the
+        // desk sprite's own east columns, but never the bin's chrome grey
+        // ('K' #a8a8b0 — the removed cylinder's body color).
+        let bin_grey = Rgb {
+            r: 0xa8,
+            g: 0xa8,
+            b: 0xb0,
+        };
+        for dy in 0..4u16 {
+            for dx in 0..3u16 {
+                assert_ne!(
+                    buf.get(desk.x + DESK_W + dx, desk.y + 4 + dy),
+                    bin_grey,
+                    "no per-desk bin pixels at the old east-edge cell"
+                );
             }
         }
-        assert!(bin_painted, "trash bin should paint at the desk east edge");
     }
 
     #[test]

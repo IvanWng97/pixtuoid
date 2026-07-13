@@ -96,10 +96,6 @@ frame_ms = 600
 frames   = ["floor_lamp.sprite"]
 frame_ms = 600
 
-[animations.trash_bin]
-frames   = ["trash_bin.sprite"]
-frame_ms = 600
-
 [animations.door]
 # 3-frame elevator door: closed → half-open → fully open. frame_ms is
 # irrelevant — the renderer picks the frame manually each tick based on
