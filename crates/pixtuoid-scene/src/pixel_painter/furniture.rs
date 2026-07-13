@@ -454,3 +454,59 @@ pub(super) fn paint_fish_tank(
     put(2, 7, fc.tank_plant);
     put(3, 6, fc.tank_plant);
 }
+
+/// Head-of-table meeting chair (decor arc): a 7x7 cushion-and-backrest body
+/// centered on its MeetingChair waypoint. The backrest bar rides the OUTER
+/// side (`back_west`), carrying the E/W orientation the Front-seated occupant
+/// can't (no side-facing seated sprite). Colors reuse the desk-chair family.
+pub(super) fn paint_meeting_chair(
+    buf: &mut RgbBuffer,
+    pos: crate::layout::Point,
+    back_west: bool,
+    theme: &crate::theme::Theme,
+) {
+    let fc = &theme.furniture;
+    let (x0, y0) = (pos.x.saturating_sub(3), pos.y.saturating_sub(3));
+    let mut put = |dx: u16, dy: u16, c: Rgb| {
+        let (px, py) = (x0 + dx, y0 + dy);
+        if px < buf.width() && py < buf.height() {
+            buf.put(px, py, c);
+        }
+    };
+    let back_dx = if back_west { 0 } else { 6 };
+    for dy in 0..5u16 {
+        put(back_dx, dy, fc.chair_trim);
+    }
+    for dy in 1..5u16 {
+        for dx in 1..6u16 {
+            let c = if dy == 1 {
+                MEETING_FABRIC_LIT
+            } else {
+                MEETING_FABRIC
+            };
+            put(dx, dy, c);
+        }
+    }
+    // Feet on the ground row, table side + outer side.
+    for dx in [1u16, 5] {
+        put(dx, 5, fc.chair_trim);
+        put(dx, 6, fc.chair_trim);
+    }
+}
+
+/// The meeting chairs upholster in the SAME fabric as the sofas they flank —
+/// and the sofa is a SPRITE (un-themed, palette keys "C"/"G"), so the chair
+/// cannot read the value from `Theme`. These are deliberate second copies of
+/// the pack palette entries, pinned by
+/// `meeting_chair_fabric_matches_the_sofa_sprite_palette` so a sofa retint
+/// can't silently strand the chairs.
+pub(super) const MEETING_FABRIC: Rgb = Rgb {
+    r: 0x4f,
+    g: 0x6d,
+    b: 0x77,
+};
+pub(super) const MEETING_FABRIC_LIT: Rgb = Rgb {
+    r: 0x6a,
+    g: 0x8e,
+    b: 0x98,
+};

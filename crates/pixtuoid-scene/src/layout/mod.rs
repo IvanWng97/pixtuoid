@@ -113,7 +113,7 @@ pub struct Waypoint {
     /// the table for meeting-room slots.
     pub facing: Facing,
     /// Meeting-room id this slot belongs to (`Some(idx)` for
-    /// `MeetingSofa` / `MeetingStand`, `None` otherwise). Slots sharing a
+    /// `MeetingSofa` / `MeetingChair`, `None` otherwise). Slots sharing a
     /// `room_id` form one group-chitchat venue.
     pub room_id: Option<usize>,
 }

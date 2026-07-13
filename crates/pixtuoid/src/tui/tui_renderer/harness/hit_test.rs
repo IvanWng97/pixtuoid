@@ -118,7 +118,7 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
                 WaypointKind::SnackShelf => Some("Snack Shelf"),
                 WaypointKind::Couch
                 | WaypointKind::MeetingSofa
-                | WaypointKind::MeetingStand
+                | WaypointKind::MeetingChair
                 | WaypointKind::Island => None,
             };
             if let Some(label) = want {

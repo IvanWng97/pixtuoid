@@ -1158,7 +1158,7 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
             }
             // Island stands carry no art of their own: the island BODY draws
             // via `layout.kitchen_island` (like the meeting furniture).
-            WaypointKind::MeetingSofa | WaypointKind::MeetingStand | WaypointKind::Island => {}
+            WaypointKind::MeetingSofa | WaypointKind::MeetingChair | WaypointKind::Island => {}
         }
     }
 }
@@ -1201,6 +1201,22 @@ fn enqueue_floor_fixtures<'a>(
         drawables.push(Drawable {
             anchor_y: lamp.y + floor_lamp_south_offset(),
             kind: DrawableKind::FloorLamp { pos: lamp },
+        });
+    }
+    for wp in ctx
+        .layout
+        .waypoints
+        .iter()
+        .filter(|w| w.kind == crate::layout::WaypointKind::MeetingChair)
+    {
+        drawables.push(Drawable {
+            anchor_y: wp.pos.y + 1,
+            kind: DrawableKind::MeetingChair {
+                pos: wp.pos,
+                // The backrest rides the side AWAY from the table: a chair
+                // FACING East sits west of the table, bar on its west.
+                back_west: wp.facing == crate::layout::Facing::East,
+            },
         });
     }
     if let Some(tank) = ctx.layout.fish_tank {

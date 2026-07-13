@@ -341,7 +341,7 @@ mod tests {
         for kind in [
             WaypointKind::Couch,
             WaypointKind::MeetingSofa,
-            WaypointKind::MeetingStand,
+            WaypointKind::MeetingChair,
         ] {
             assert_eq!(
                 stand_point(
@@ -372,7 +372,7 @@ mod tests {
                 k,
                 WaypointKind::Couch
                     | WaypointKind::MeetingSofa
-                    | WaypointKind::MeetingStand
+                    | WaypointKind::MeetingChair
                     | WaypointKind::Island
             )
         };
@@ -427,7 +427,7 @@ mod tests {
                 k,
                 WaypointKind::Couch
                     | WaypointKind::MeetingSofa
-                    | WaypointKind::MeetingStand
+                    | WaypointKind::MeetingChair
                     | WaypointKind::Island
             )
         };
@@ -758,7 +758,7 @@ mod tests {
                 kind,
                 WaypointKind::Couch
                     | WaypointKind::MeetingSofa
-                    | WaypointKind::MeetingStand
+                    | WaypointKind::MeetingChair
                     | WaypointKind::Island
             );
             assert_eq!(

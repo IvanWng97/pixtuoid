@@ -214,7 +214,7 @@ fn meeting_room_fills_and_hosts_group_chitchat() {
             matches!(
                 w.kind,
                 pixtuoid_scene::layout::WaypointKind::MeetingSofa
-                    | pixtuoid_scene::layout::WaypointKind::MeetingStand
+                    | pixtuoid_scene::layout::WaypointKind::MeetingChair
             )
         })
         .count();

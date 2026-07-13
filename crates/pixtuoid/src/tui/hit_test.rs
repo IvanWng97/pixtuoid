@@ -166,7 +166,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
             // Meeting slots hover via the dedicated meeting_sofas loop below;
             // island stands are footprint-less slots on the island body,
             // which has its own hover region — skip.
-            WaypointKind::MeetingSofa | WaypointKind::MeetingStand | WaypointKind::Island => {
+            WaypointKind::MeetingSofa | WaypointKind::MeetingChair | WaypointKind::Island => {
                 continue
             }
             // Footprint owned by furniture_def — same shape the mask + stand
@@ -193,7 +193,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
                 // `continue`s.
                 WaypointKind::Couch
                 | WaypointKind::MeetingSofa
-                | WaypointKind::MeetingStand
+                | WaypointKind::MeetingChair
                 | WaypointKind::Island => continue,
             });
         }

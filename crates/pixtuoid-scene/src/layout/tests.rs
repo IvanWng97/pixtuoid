@@ -284,7 +284,7 @@ fn meeting_rooms_vec_indexes_are_the_waypoint_room_ids() {
         for wp in l.waypoints.iter().filter(|w| {
             matches!(
                 w.kind,
-                WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                WaypointKind::MeetingSofa | WaypointKind::MeetingChair
             )
         }) {
             let id = wp.room_id.expect("meeting slots carry a room_id");
@@ -618,7 +618,7 @@ fn compute_places_all_waypoint_kinds() {
             WaypointKind::VendingMachine | WaypointKind::Printer => {
                 assert!(w.pos.y >= l.top_margin);
             }
-            WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {
+            WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
                 // A meeting slot only exists when a meeting room does, and
                 // it carries the room id it belongs to.
                 assert!(!l.meeting_rooms.is_empty());
@@ -730,7 +730,7 @@ fn meeting_slots_track_meeting_trios() {
             .filter(|w| {
                 matches!(
                     w.kind,
-                    WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                    WaypointKind::MeetingSofa | WaypointKind::MeetingChair
                 )
             })
             .collect();
@@ -745,7 +745,7 @@ fn meeting_slots_track_meeting_trios() {
             assert!(
                 sofa_slots
                     .iter()
-                    .any(|w| w.kind == WaypointKind::MeetingStand),
+                    .any(|w| w.kind == WaypointKind::MeetingChair),
                 "seed {seed}: meeting room but no standing slot"
             );
             let rooms = l.meeting_rooms.len();
@@ -840,7 +840,7 @@ fn meeting_slots_face_the_table() {
                         w.pos, table
                     );
                 }
-                WaypointKind::MeetingStand => {
+                WaypointKind::MeetingChair => {
                     let want = if w.pos.x < table.x {
                         Facing::East
                     } else {
@@ -858,7 +858,7 @@ fn meeting_slots_face_the_table() {
     }
 }
 
-// Regression: the WEST MeetingStand point used to land on the table's padded
+// Regression: the WEST MeetingChair point used to land on the table's padded
 // obstacle (blocked x ∈ [t.x-8, t.x+7]; the symmetric -8 hit the inclusive
 // left edge), so the router had to snap it off-target. Both stands must be on
 // walkable cells across seeds/sizes.
@@ -868,10 +868,10 @@ fn meeting_stand_points_are_walkable() {
         for (w, h) in [(160u16, 120u16), (200, 100), (240, 140)] {
             let l = SceneLayout::compute_with_seed(w, h, Some(8), seed).expect("fits");
             for wp in &l.waypoints {
-                if wp.kind == WaypointKind::MeetingStand {
+                if wp.kind == WaypointKind::MeetingChair {
                     assert!(
                         l.is_walkable(wp.pos.x, wp.pos.y),
-                        "seed {seed} @ {w}x{h}: MeetingStand {:?} is non-walkable",
+                        "seed {seed} @ {w}x{h}: MeetingChair {:?} is non-walkable",
                         wp.pos
                     );
                 }
@@ -951,4 +951,32 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
             );
         }
     }
+}
+
+#[test]
+fn meeting_table_ends_are_chair_seats_not_stands() {
+    // Decor arc (owner-ratified): the two table-end spots are SEATS now —
+    // same positions/facings as the old stands (E/W flanking the table),
+    // renamed MeetingChair with a seated render + a painted chair body.
+    let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let trio = l.meeting_rooms[0].trio.as_ref().expect("trio");
+    let chairs: Vec<_> = l
+        .waypoints
+        .iter()
+        .filter(|w| w.kind == WaypointKind::MeetingChair)
+        .collect();
+    assert_eq!(chairs.len(), 2, "one chair per table end");
+    let (west, east) = (
+        chairs
+            .iter()
+            .find(|w| w.pos.x < trio.table.x)
+            .expect("west chair"),
+        chairs
+            .iter()
+            .find(|w| w.pos.x > trio.table.x)
+            .expect("east chair"),
+    );
+    assert_eq!(west.facing, Facing::East, "west chair faces the table");
+    assert_eq!(east.facing, Facing::West, "east chair faces the table");
+    assert_eq!(west.pos.y, trio.table.y, "chairs sit on the table's row");
 }

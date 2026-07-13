@@ -1298,7 +1298,7 @@ pub(super) fn compute_waypoints(
                     x: table.x.saturating_add_signed(dx),
                     y: table.y,
                 },
-                kind: WaypointKind::MeetingStand,
+                kind: WaypointKind::MeetingChair,
                 facing,
                 room_id: Some(room_id),
             });
@@ -1313,7 +1313,7 @@ pub(super) fn compute_waypoints(
         waypoints.iter().all(|w| {
             matches!(
                 w.kind,
-                WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                WaypointKind::MeetingSofa | WaypointKind::MeetingChair
             ) == w.room_id.is_some()
         }),
         "room_id must be Some exactly for meeting-slot waypoints"

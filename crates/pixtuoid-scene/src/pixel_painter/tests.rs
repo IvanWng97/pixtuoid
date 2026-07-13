@@ -221,15 +221,15 @@ fn seat_sprite_maps_facing_to_sprite_and_flip() {
         seat_sprite(WaypointKind::MeetingSofa, Facing::South),
         ("seated", false)
     );
-    // West stand (layout marks it Facing::East) mirrors toward the table.
+    // Head-of-table chairs sit Front regardless of end (no side-facing
+    // seated sprite; the chair body carries the E/W orientation).
     assert_eq!(
-        seat_sprite(WaypointKind::MeetingStand, Facing::East),
-        ("standing", true)
+        seat_sprite(WaypointKind::MeetingChair, Facing::East),
+        ("seated", false)
     );
-    // East stand (Facing::West) is unmirrored.
     assert_eq!(
-        seat_sprite(WaypointKind::MeetingStand, Facing::West),
-        ("standing", false)
+        seat_sprite(WaypointKind::MeetingChair, Facing::West),
+        ("seated", false)
     );
 }
 
@@ -750,11 +750,11 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
                     "{f:?}: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
                 );
             }
-            let s = seated_foot_cell(Furniture::MeetingStand, pos).expect("occupies_pos seat");
+            let s = seated_foot_cell(Furniture::MeetingChair, pos).expect("occupies_pos seat");
             assert_eq!(
                 walking_anchor(s, w),
                 waypoint_anchor(pos, w),
-                "MeetingStand: walking_anchor(S={s:?}) must equal waypoint_anchor(pos={pos:?}) w={w}",
+                "MeetingChair: walking_anchor(S={s:?}) must equal waypoint_anchor(pos={pos:?}) w={w}",
             );
             // The home desk flows through the SAME fn — its S is
             // desk_walk_anchor, its render seated_anchor. Same identity,
@@ -818,7 +818,7 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
                 w.kind,
                 WaypointKind::Couch
                     | WaypointKind::MeetingSofa
-                    | WaypointKind::MeetingStand
+                    | WaypointKind::MeetingChair
                     | WaypointKind::Island
             ),
             "seat kind {:?} has a settle foot-cell but is not explicitly handled \
@@ -1013,11 +1013,13 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
                     );
                 }
             }
-            WaypointKind::MeetingStand => {
-                // Stand clears the meeting table row it stands beside.
+            WaypointKind::MeetingChair => {
+                // The sitter must paint OVER its chair body (enqueued at
+                // pos.y+1); the table never overlaps it horizontally, so no
+                // table-side constraint applies.
                 assert!(
-                    z > w.pos.y + 2,
-                    "stand z {z} must clear the table at pos.y+2"
+                    z > w.pos.y + 1,
+                    "chair sitter z {z} must clear the chair body at pos.y+1"
                 );
             }
             _ => {}
@@ -2378,5 +2380,66 @@ fn fish_tank_paints_water_fish_and_cabinet_from_the_furniture_row() {
         buf.get(x0 + 3, y0 + 9),
         fc.wood_top,
         "cabinet row reuses the wood family"
+    );
+}
+
+#[test]
+fn meeting_chairs_paint_with_backrests_toward_the_table_ends() {
+    // The chair body carries the E/W orientation its Front-seated occupant
+    // lost (no side-facing seated sprite): backrest bar on the OUTER side,
+    // cushion from the chair_* theme family shared with the desk chairs.
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let floor = Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    let mut buf = RgbBuffer::filled(40, 20, floor);
+    let pos = Point { x: 20, y: 10 };
+    furniture::paint_meeting_chair(&mut buf, pos, true, theme);
+    let fc = &theme.furniture;
+    // back_west: the backrest column sits west of the cushion.
+    assert_eq!(
+        buf.get(pos.x - 3, pos.y),
+        fc.chair_trim,
+        "west backrest bar"
+    );
+    assert_eq!(
+        buf.get(pos.x, pos.y),
+        furniture::MEETING_FABRIC,
+        "cushion wears the sofa fabric"
+    );
+    let mut buf2 = RgbBuffer::filled(40, 20, floor);
+    furniture::paint_meeting_chair(&mut buf2, pos, false, theme);
+    assert_eq!(
+        buf2.get(pos.x + 3, pos.y),
+        fc.chair_trim,
+        "east backrest bar"
+    );
+    assert_eq!(
+        buf2.get(pos.x - 3, pos.y),
+        floor,
+        "no bar on the table side"
+    );
+}
+
+#[test]
+fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
+    // The chair consts are deliberate copies of the pack palette's couch
+    // fabric ("C"/"G") — the sofa is an un-themed sprite, so the painter
+    // can't read Theme for it. This pin makes a sofa retint fail HERE
+    // instead of silently stranding the chairs in the old fabric.
+    let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let c = pack.palette.get('C').flatten().expect("couch fabric key");
+    let g = pack
+        .palette
+        .get('G')
+        .flatten()
+        .expect("cushion highlight key");
+    assert_eq!(furniture::MEETING_FABRIC, c, "chair fabric == sofa 'C'");
+    assert_eq!(
+        furniture::MEETING_FABRIC_LIT,
+        g,
+        "chair highlight == sofa 'G'"
     );
 }

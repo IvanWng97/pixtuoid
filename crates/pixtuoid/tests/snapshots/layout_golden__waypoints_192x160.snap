@@ -137,7 +137,7 @@ expression: l.waypoints
             x: 17,
             y: 75,
         },
-        kind: MeetingStand,
+        kind: MeetingChair,
         facing: East,
         room_id: Some(
             0,
@@ -148,7 +148,7 @@ expression: l.waypoints
             x: 34,
             y: 75,
         },
-        kind: MeetingStand,
+        kind: MeetingChair,
         facing: West,
         room_id: Some(
             0,

@@ -203,7 +203,7 @@ fn dwell_ms_is_within_per_kind_range() {
     let cases = [
         (WaypointKind::Couch, 20_000u64, 40_000u64),
         (WaypointKind::MeetingSofa, 20_000, 40_000),
-        (WaypointKind::MeetingStand, 20_000, 40_000),
+        (WaypointKind::MeetingChair, 20_000, 40_000),
         (WaypointKind::Pantry, 10_000, 18_000),
         (WaypointKind::PhoneBooth, 8_000, 30_000),
         (WaypointKind::StandingDesk, 8_000, 30_000),

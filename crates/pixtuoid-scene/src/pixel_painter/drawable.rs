@@ -30,7 +30,8 @@ use super::effects::{
 use super::epoch_ms;
 use super::frame_at;
 use super::furniture::{
-    paint_area_rug, paint_fish_tank, paint_kitchen_island, paint_meeting_table, paint_side_table,
+    paint_area_rug, paint_fish_tank, paint_kitchen_island, paint_meeting_chair,
+    paint_meeting_table, paint_side_table,
 };
 use super::paint_character_at;
 use crate::frame_cache::FrameCache;
@@ -199,6 +200,12 @@ pub(super) enum DrawableKind<'a> {
     /// mask stamp's `Anchor::Center`); fish animate on the paint clock.
     FishTank {
         pos: Point,
+    },
+    /// Head-of-table meeting chair, y-sorted one row ABOVE its occupant's
+    /// seated anchor (`wp.y + 2`) so the sitter always paints over it.
+    MeetingChair {
+        pos: Point,
+        back_west: bool,
     },
 }
 
@@ -987,6 +994,9 @@ pub(super) fn paint_drawable(
         }
         DrawableKind::FishTank { pos } => {
             paint_fish_tank(buf, *pos, now, theme);
+        }
+        DrawableKind::MeetingChair { pos, back_west } => {
+            paint_meeting_chair(buf, *pos, *back_west, theme);
         }
         DrawableKind::CoatRack { pos } => {
             let (cx, cy) = (pos.x, pos.y);

@@ -329,7 +329,7 @@ pub(crate) fn meeting_scene(
                 w.room_id == Some(room)
                     && matches!(
                         w.kind,
-                        WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                        WaypointKind::MeetingSofa | WaypointKind::MeetingChair
                     )
             })
             .map(|w| w.pos.y)
@@ -348,7 +348,7 @@ pub(crate) fn meeting_scene(
             let wp = l.waypoints[wp_idx];
             let is_sofa = match wp.kind {
                 WaypointKind::MeetingSofa => true,
-                WaypointKind::MeetingStand => false,
+                WaypointKind::MeetingChair => false,
                 _ => continue,
             };
             let room_id = wp.room_id.unwrap_or(0);
@@ -605,7 +605,7 @@ pub(crate) fn anim_scene(
     let target_kind = match target {
         "couch" => Some(WaypointKind::Couch),
         "sofa" => Some(WaypointKind::MeetingSofa),
-        "stand" => Some(WaypointKind::MeetingStand),
+        "stand" => Some(WaypointKind::MeetingChair),
         "pantry" => Some(WaypointKind::Pantry),
         "island" => Some(WaypointKind::Island),
         "snackshelf" => Some(WaypointKind::SnackShelf),
@@ -761,7 +761,7 @@ mod tests {
             assert!(
                 matches!(
                     wp.kind,
-                    WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                    WaypointKind::MeetingSofa | WaypointKind::MeetingChair
                 ),
                 "destination must be a meeting slot, got {:?}",
                 wp.kind

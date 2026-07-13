@@ -287,7 +287,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
             // Seats on meeting furniture: no obstacle of their own
             // (footprint: None); their containment is the pos-in-room check
             // in `every_meeting_slot_sits_in_its_room`.
-            WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {}
+            WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {}
             WaypointKind::Pantry => {
                 // Runtime-sized: geometry comes from the shared
                 // pantry_ground_rect, not the (deliberately empty) table row.

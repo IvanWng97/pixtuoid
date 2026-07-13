@@ -199,7 +199,7 @@ pub fn supports_chitchat(kind: WaypointKind) -> bool {
             | WaypointKind::VendingMachine
             | WaypointKind::Printer
             | WaypointKind::MeetingSofa
-            | WaypointKind::MeetingStand
+            | WaypointKind::MeetingChair
             | WaypointKind::Island
             | WaypointKind::SnackShelf
     )
@@ -550,7 +550,7 @@ mod tests {
         assert!(supports_chitchat(WaypointKind::VendingMachine));
         assert!(supports_chitchat(WaypointKind::Printer));
         assert!(supports_chitchat(WaypointKind::MeetingSofa));
-        assert!(supports_chitchat(WaypointKind::MeetingStand));
+        assert!(supports_chitchat(WaypointKind::MeetingChair));
         assert!(!supports_chitchat(WaypointKind::PhoneBooth));
         assert!(!supports_chitchat(WaypointKind::StandingDesk));
     }
