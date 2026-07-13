@@ -170,6 +170,14 @@ pub struct SceneLayout {
     pub reachable: ReachSet,
 }
 
+/// Integer percentage of `v` (floor semantics — `pct(40, 65) == 26`); the
+/// layout code's one percent helper, shared by placement (`compute`) and the
+/// wall resolver so their arithmetic can't diverge. Computed in u32: a bare
+/// `buf_h * 30` overflows u16 once `buf_h > 2184`.
+pub(crate) fn pct(v: u16, n: u16) -> u16 {
+    ((v as u32 * n as u32) / 100) as u16
+}
+
 /// Padding (in pixels) added around every obstacle when building the
 /// walkable mask. Reserves a buffer zone so characters route AROUND
 /// furniture rather than scraping along its edge.

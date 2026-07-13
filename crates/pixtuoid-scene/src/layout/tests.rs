@@ -208,6 +208,62 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
 }
 
 #[test]
+fn dense_inter_meeting_wall_is_solid_with_a_corridor_door_each() {
+    // #557 door policy (owner call): two stacked meeting rooms do NOT
+    // interconnect — their shared wall renders as ONE solid segment — while
+    // each room keeps its own centered corridor door in the east wall (the
+    // connectivity the sweep's BFS pins). The golden named "dense_seed6" is
+    // actually a Senior floor (from_seed(6)), so this REAL dual-floor pin
+    // lives here instead of a snapshot.
+    let mut saw_dual = false;
+    for seed in 0..10u64 {
+        let l = SceneLayout::compute_with_seed(192, 160, Some(8), seed).expect("fits");
+        if l.meeting_rooms.len() < 2 {
+            continue;
+        }
+        saw_dual = true;
+        let split_y = l.meeting_rooms[1].bounds.y;
+        let h: Vec<_> = l
+            .room_walls
+            .iter()
+            .filter(|w| w.start.y == split_y && w.end.y == split_y)
+            .collect();
+        assert_eq!(h.len(), 1, "seed {seed}: ONE solid shared wall, got {h:?}");
+        assert_eq!(
+            (h[0].start.x, h[0].end.x),
+            (0, l.meeting_rooms[1].bounds.width),
+            "seed {seed}: no inter-meeting door gap"
+        );
+        // Each room's east wall still carries a real (non-degenerate) gap.
+        for (id, room) in l.meeting_rooms.iter().enumerate() {
+            let b = room.bounds;
+            let vx = b.x + b.width;
+            let mut v: Vec<_> = l
+                .room_walls
+                .iter()
+                .filter(|w| {
+                    w.start.x == vx
+                        && w.end.x == vx
+                        && w.start.y >= b.y
+                        && w.end.y <= b.y + b.height
+                })
+                .collect();
+            v.sort_by_key(|w| w.start.y);
+            assert_eq!(
+                v.len(),
+                2,
+                "seed {seed} room {id}: east wall split by its door"
+            );
+            assert!(
+                v[0].end.y < v[1].start.y,
+                "seed {seed} room {id}: the corridor door gap must be real"
+            );
+        }
+    }
+    assert!(saw_dual, "192x160 seeds 0..10 must reach a dual floor");
+}
+
+#[test]
 fn meeting_rooms_vec_indexes_are_the_waypoint_room_ids() {
     // The join-key pin (#557): a room's index in `meeting_rooms` IS the
     // `room_id` its waypoints carry — bounds and trio live in ONE element,

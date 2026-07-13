@@ -5,15 +5,6 @@
 use super::mask;
 use super::*;
 
-/// `n`% of a dimension, computed in u32 to avoid u16 overflow on very large
-/// terminals — a bare `buf_h * 30` overflows u16 once `buf_h > 2184` (and the
-/// derived sub-region multiplies overflow at the same extreme sizes). Truncating
-/// division, matching the original `v * n / 100`.
-#[inline]
-fn pct(v: u16, n: u16) -> u16 {
-    ((v as u32 * n as u32) / 100) as u16
-}
-
 /// Counter width that marks the LARGE (detailed kitchen) pantry sprite. The size
 /// producer emits this width when the pantry room is wide enough; consumers test
 /// `>= PANTRY_COUNTER_LARGE_W` rather than the bare `32` literal (`pub` + re-exported
@@ -64,9 +55,8 @@ pub(super) fn compute_with_seed(
     // repetition, not a bug).
     let variant = FloorVariant::from_seed(floor_seed);
     let has_meeting = variant.has_meeting();
-    // (The vertical-wall presence == has_meeting; open-plan OpenPlan/Lounge floors
-    // skip it — the pantry counter is the boundary. compute_room_walls reads it
-    // off `geom`, so no separate local here.)
+    // (Open-plan OpenPlan/Lounge floors have no walls at all — the pantry
+    // counter is the boundary; in wall-request terms nobody asks for one.)
     // Dense: two meeting rooms stacked vertically, ONLY when tall enough for two
     // rooms with furniture + door gaps. This is the ONE size-dependent bit; every
     // other geometry choice is a const of the variant.
@@ -291,7 +281,12 @@ pub(super) fn compute_with_seed(
         meeting_rooms.push(MeetingRoom { bounds: mr, trio });
     }
 
-    let room_walls = compute_room_walls(geom, mid_x, mid_y_split, top_margin, usable_h);
+    // Walls are a FUNCTION of the rooms: each room requests its enclosure
+    // edges + doors, the resolver merges shared boundaries and cuts gaps
+    // (rooms/walls.rs). The committed room_walls goldens pin the non-dense
+    // output byte-identical to the old scalar-derived fn; dense's
+    // inter-meeting wall deliberately went solid (#557 door policy).
+    let room_walls = super::rooms::walls::derive_room_walls(&meeting_rooms, pantry_room);
 
     let Point {
         x: couch_x,
@@ -857,8 +852,8 @@ impl FloorVariant {
 }
 
 /// The resolved floor geometry: the `variant` plus the ONE size-dependent bit,
-/// `has_dual_meeting` (a Dense floor tall enough for two meeting rooms). Drives
-/// [`compute_room_walls`]'s segment set; the `has_pantry` / `mid_x_pct` accessors
+/// `has_dual_meeting` (a Dense floor tall enough for two meeting rooms). The
+/// `has_pantry` / `mid_x_pct` accessors
 /// fold in the Dense-degrade (a too-short Dense floor gains a pantry and widens to
 /// the Standard column). Replaced the 4 mutually-constrained bools + debug_asserts.
 #[derive(Clone, Copy)]
@@ -1110,118 +1105,6 @@ pub(super) fn compute_pod_decor(
         }
     }
     pod_decor
-}
-
-/// Wall segments with door gaps for meeting/pantry rooms. Branches on the
-/// [`FloorGeometry`] (variant + `has_dual_meeting`); every wall condition folds
-/// from the variant's consts, so the old debug_asserts guarding the bool tuple
-/// (`has_pantry || has_dual_meeting` when `has_meeting`) are now structural.
-pub(super) fn compute_room_walls(
-    geom: FloorGeometry,
-    mid_x: u16,
-    mid_y_split: u16,
-    top_margin: u16,
-    usable_h: u16,
-) -> Vec<WallSegment> {
-    let has_vertical_wall = geom.has_vertical_wall();
-    let has_dual_meeting = geom.has_dual_meeting;
-    let has_meeting = geom.has_meeting();
-    let has_pantry = geom.has_pantry();
-    // Doorway widths are ABSOLUTE pixels — using percentages here makes
-    // the gap shrink to zero on smaller terminals, which after the
-    // 2-px wall obstacle padding leaves no walkable cell for A* and
-    // disconnects the meeting room from the rest of the office.
-    //
-    // Minimums: 14 px gives ≥10 px effective gap after padding, which
-    // is wide enough that the coarsened 4×4 router grid has at least
-    // one row of walkable cells through the doorway.
-    const DOOR_GAP_V: u16 = 14;
-    const DOOR_GAP_H: u16 = 14;
-    let mut room_walls = Vec::new();
-    // Vertical wall: only when we have enclosed rooms (meeting or
-    // meeting+pantry). Open-plan/lounge pantry-only floors skip it
-    // — the counter is the visual boundary.
-    if has_vertical_wall {
-        // has_vertical_wall == has_meeting, and a meeting-bearing variant always
-        // shares the left column with the pantry or a second meeting room (structural
-        // in `FloorVariant`: Standard/Senior carry a pantry, Dense either has dual
-        // meetings or degrades to has_pantry) — so the vertical wall always stops at
-        // the mid-height split. The full-usable_h else-arm is dead by construction.
-        let v_x = mid_x;
-        let v_top = top_margin;
-        let v_bot = mid_y_split;
-        let v_door_center = top_margin + (v_bot - v_top) / 2;
-        let v_door_top = v_door_center.saturating_sub(DOOR_GAP_V / 2);
-        let v_door_bot = (v_door_center + DOOR_GAP_V / 2).min(v_bot);
-        room_walls.push(WallSegment {
-            start: Point { x: v_x, y: v_top },
-            end: Point {
-                x: v_x,
-                y: v_door_top,
-            },
-        });
-        room_walls.push(WallSegment {
-            start: Point {
-                x: v_x,
-                y: v_door_bot,
-            },
-            end: Point { x: v_x, y: v_bot },
-        });
-        // Second meeting room or pantry below: extend wall with
-        // its own door gap.
-        if has_dual_meeting {
-            // Second meeting room: extend wall below horizontal.
-            // Start below the horizontal wall's mask footprint — the offset IS
-            // the wall thickness (horizontal walls stamp with pad 0), so read
-            // it from WALL_THICK_H rather than a second copy of the value.
-            // This keeps the offset within the renderer's bridge-up tolerance
-            // by construction (`WALL_THICK_H_PX + 2` in `stitch_vertical_wall`,
-            // where WALL_THICK_H_PX is defined AS this const) — a hardcoded 6
-            // would leave this segment rendering as a detached strip if the
-            // wall face were ever thinned.
-            let v2_top = mid_y_split + super::WALL_THICK_H;
-            let v2_bot = top_margin + usable_h;
-            let v2_center = v2_top + (v2_bot - v2_top) / 2;
-            let v2_door_top = v2_center.saturating_sub(DOOR_GAP_V / 2);
-            let v2_door_bot = (v2_center + DOOR_GAP_V / 2).min(v2_bot);
-            room_walls.push(WallSegment {
-                start: Point { x: v_x, y: v2_top },
-                end: Point {
-                    x: v_x,
-                    y: v2_door_top,
-                },
-            });
-            room_walls.push(WallSegment {
-                start: Point {
-                    x: v_x,
-                    y: v2_door_bot,
-                },
-                end: Point { x: v_x, y: v2_bot },
-            });
-        }
-    }
-    // Horizontal wall: separates meeting from pantry, or two meetings.
-    let h_y = mid_y_split;
-    let h_door_center = pct(mid_x, 60);
-    let h_door_left = h_door_center.saturating_sub(DOOR_GAP_H / 2);
-    let h_door_right = (h_door_center + DOOR_GAP_H / 2).min(mid_x);
-    if (has_meeting && has_pantry) || has_dual_meeting {
-        room_walls.push(WallSegment {
-            start: Point { x: 0, y: h_y },
-            end: Point {
-                x: h_door_left,
-                y: h_y,
-            },
-        });
-        room_walls.push(WallSegment {
-            start: Point {
-                x: h_door_right,
-                y: h_y,
-            },
-            end: Point { x: mid_x, y: h_y },
-        });
-    }
-    room_walls
 }
 
 /// Waypoints: couch, pantry, pod-decor-promoted (PhoneBooth/StandingDesk),
