@@ -991,10 +991,12 @@ mod tests {
     #[test]
     fn floor_range_clamps_oob_index() {
         let s = SceneState::uniform(4);
-        // floor_idx >= MAX_FLOORS should clamp to last floor
         let last = s.floor_range(MAX_FLOORS - 1);
         let oob = s.floor_range(MAX_FLOORS + 10);
-        assert_eq!(last, oob);
+        assert_eq!(
+            last, oob,
+            "an OOB floor index clamps to the last floor's range"
+        );
     }
 
     #[test]

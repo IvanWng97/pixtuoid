@@ -231,7 +231,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     // Burn-tier effort observation (CC): tool-context hook payloads carry an
     // `effort: {level}` object (documented in hooks.md — low/medium/high/
     // xhigh/max; ULTRACODE mode "is not a distinct level and reports as
-    // xhigh", also exported as $CLAUDE_EFFORT — live-verified 2026-07-10).
+    // xhigh", also exported as $CLAUDE_EFFORT).
     // Codex hook payloads carry no such field — absent = emit nothing. This
     // is the primary CC effort channel (per tool event, verbatim vocabulary);
     // the transcript's periodic ultra attachment markers are the JSONL twin.
@@ -496,7 +496,7 @@ mod tests {
     #[test]
     fn tool_hooks_surface_the_effort_level() {
         // hooks.md: tool-context payloads carry `effort:{level}`; ultracode
-        // reports as "xhigh" (live-verified via $CLAUDE_EFFORT 2026-07-10).
+        // reports as "xhigh" (exported via $CLAUDE_EFFORT).
         for event in ["PreToolUse", "PostToolUse"] {
             let v = serde_json::json!({
                 "hook_event_name": event,
@@ -1067,9 +1067,9 @@ mod tests {
         // notification_decodes_to_identity_plus_waiting above ("permission?").
     }
 
-    // Review round (lens-1/lens-2 converged): the cwd is transcript/hook
-    // content too, and a SLASHLESS crafted value makes the whole string the
-    // basename — the chokepoint shared by all three derivers must cap it.
+    // The cwd is transcript/hook content too, and a SLASHLESS crafted value
+    // makes the whole string the basename — the chokepoint shared by all three
+    // derivers must cap it.
     #[test]
     fn cwd_basename_label_caps_a_content_derived_basename() {
         let long = "é".repeat(MAX_DECODED_FIELD_CHARS * 10);
@@ -1182,9 +1182,9 @@ mod tests {
         );
     }
 
-    // Review round (lens-3): tool_name is wire/transcript content landing in
-    // Active.detail → the unbounded headless summary — capped in the Generic
-    // display like its target.
+    // tool_name is wire/transcript content landing in Active.detail → the
+    // unbounded headless summary — capped in the Generic display like its
+    // target.
     #[test]
     fn generic_tool_name_is_capped_in_the_display() {
         let long = "T".repeat(MAX_DECODED_FIELD_CHARS * 10);

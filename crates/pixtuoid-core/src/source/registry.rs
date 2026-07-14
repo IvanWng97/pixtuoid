@@ -475,7 +475,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
 /// `DEEPSEEK_*` env vars the shim folds into `cwd`/`tool`/`tool_args`), so the
 /// custom decoder claims every event and the shared id-key branch is never
 /// reached. Keyed on cwd because `session_id` is inconsistent across events
-/// (live-verified 2026-06-12) — see `source/codewhale.rs`.
+/// — see `source/codewhale.rs`.
 const CODEWHALE: SourceDescriptor = SourceDescriptor {
     name: codewhale::SOURCE_NAME,
     label_prefix: "cw",
@@ -489,7 +489,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
         },
         caps: SourceCaps {
             // session_end fires on a clean TUI quit carrying DEEPSEEK_WORKSPACE
-            // (verified live 2026-06-12) — best-effort counts.
+            // — best-effort counts.
             has_exit_signal: true,
             // message_submit re-emits SessionStart (the decode maps it so) —
             // a swept-but-live session walks back in on the next prompt.
@@ -553,7 +553,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
 const OPENCLAW: SourceDescriptor = SourceDescriptor {
     name: openclaw::SOURCE_NAME,
     label_prefix: "ok",
-    // Byte-real capture anchor (2026-06-15): `openclaw 2026.6.6`.
+    // Byte-real capture anchor: `openclaw 2026.6.6`.
     verified_version: "2026.6.6",
     version_probe: Some(&["openclaw", "--version"]),
     kind: SourceKind::Daemon {
@@ -619,8 +619,8 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
             custom: Some(cursor::decode_cursor_hook_custom),
         },
         caps: SourceCaps {
-            // `sessionEnd` FIRES on clean completion (capture-verified 2026-06-14:
-            // `reason:"completed"`) — best-effort counts, CC/Reasonix class. Abrupt
+            // `sessionEnd` FIRES on clean completion (`reason:"completed"`) —
+            // best-effort counts, CC/Reasonix class. Abrupt
             // exits (no PID exposed) fall to the generic stale-sweep.
             has_exit_signal: true,
             // Each `cursor-agent` invocation is a NEW session_id, so a stale-swept
@@ -651,7 +651,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
 const HERMES: SourceDescriptor = SourceDescriptor {
     name: hermes::SOURCE_NAME,
     label_prefix: "hm",
-    verified_version: "0.18.0", // `Hermes Agent v0.18.0 (2026.7.1)`; wire captured 2026-07-03
+    verified_version: "0.18.0", // captured banner: `Hermes Agent v0.18.0 (2026.7.1)`
     version_probe: Some(&["hermes", "--version"]),
     kind: SourceKind::Agent {
         transcript: None, // hook-only: no transcript for the walker to watch
@@ -686,7 +686,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
 const OMP: SourceDescriptor = SourceDescriptor {
     name: omp::SOURCE_NAME,
     label_prefix: "om",
-    // Byte-real capture anchor (2026-07-10): `omp/16.4.0` (`omp --version`);
+    // Byte-real capture anchor: `omp/16.4.0` (`omp --version`);
     // the omp fixtures are sanitized captures from that install.
     verified_version: "16.4.0",
     version_probe: Some(&["omp", "--version"]),

@@ -936,31 +936,16 @@ impl Reducer {
                 // silently dropped it).
                 fsm::resurrect_in_place(slot, now);
                 // Evict the dead life's correlation state, exactly as
-                // `sweep_exited` would have if the corpse had GC'd
-                // before this start — per map:
-                // - active_tasks: a leftover tuid can NEVER drain (its
-                //   End belongs to the dead life), so it would keep
-                //   suppress_subagent_leak eating every hook event of
-                //   the new life. On a #228 false-exit resurrect the
-                //   old delegation may still be live, but its subtree
-                //   was already cascade_exit'd by the SessionEnd (only
-                //   the root resurrects); an out-of-window JSONL
-                //   replay of its Start re-inserts (a fresh first
-                //   insert) and its End then drains + re-arms b1 —
-                //   safe: the fire-time emptiness check holds and the
-                //   old subtree is already exiting. A transient hook
-                //   misattribution beats permanent suppression.
-                // - gated_before_waiting: a dead life's gate could
-                //   false-resolve a future Waiting via resolves_wait.
-                // - pending_b1_cascades: an armed cascade from the old
-                //   drain would fire into the NEW life's fresh subtree.
-                // recent_proof_of_life deliberately SURVIVES: a vouch
-                // asserts the owning process is alive, and a
-                // resurrecting slot is the one case where that is true
-                // by definition (sweep_exited evicts it only because
-                // the SLOT is gone). The hook-recency maps
-                // (recent_hook_tool_uses / _session_ends) are
-                // TTL-bounded and not per-slot state — gc owns them.
+                // `sweep_exited` would have if the corpse had GC'd before this
+                // start: a leftover active_tasks entry keeps
+                // suppress_subagent_leak eating the new life's hooks, a stale
+                // gate could false-resolve a future Waiting, and an armed b1
+                // cascade would fire into the fresh subtree. recent_proof_of_life
+                // deliberately SURVIVES — a resurrecting slot is by definition
+                // still alive; the TTL-bounded hook-recency maps are gc's, not
+                // per-slot. Pinned by
+                // resurrect_in_place_clears_stale_active_tasks_so_fresh_session_hooks_apply
+                // + resurrect_in_place_cancels_stale_pending_b1_cascade.
                 self.corr.active_tasks.remove(&agent_id);
                 self.corr.gated_before_waiting.remove(&agent_id);
                 self.pending_b1_cascades.remove(&agent_id);
