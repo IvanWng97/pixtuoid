@@ -1,10 +1,10 @@
-pub fn is_newer_version(current: &str, last_seen: &str) -> bool {
+fn is_newer_version(current: &str, last_seen: &str) -> bool {
     parse_semver(current)
         .zip(parse_semver(last_seen))
         .is_some_and(|(c, l)| c > l)
 }
 
-pub fn is_valid_version(s: &str) -> bool {
+fn is_valid_version(s: &str) -> bool {
     parse_semver(s).is_some()
 }
 
@@ -22,7 +22,7 @@ pub struct BootDecision {
 /// - First-time install (no recorded version yet).
 /// - The recorded version is unparseable — overwrite to recover, otherwise a
 ///   corrupted/hand-edited value silently disables the popup forever.
-pub fn boot_decision(current_ver: &str, last_seen: Option<&str>) -> BootDecision {
+pub(crate) fn boot_decision(current_ver: &str, last_seen: Option<&str>) -> BootDecision {
     let last_seen_parseable = last_seen.is_some_and(is_valid_version);
     let should_show_popup = match last_seen {
         Some(last) if last_seen_parseable => {
@@ -52,7 +52,7 @@ fn parse_semver(v: &str) -> Option<(u64, u64, u64, u8)> {
     Some((major, minor, patch_num, is_release))
 }
 
-pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
+pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
     match version {
         // `just bump` injects the new version's arm right after the marker below;
         // anchoring on a marker is whitespace-independent — matching the `match`
@@ -179,8 +179,8 @@ mod tests {
     /// drift out of sync with the arms the way the old hand-maintained array did.
     const SHIPPED_VERSIONS: &[&str] = &[
         // [bump-version-list-here]
-        "0.14.0", "0.13.0", "0.12.0", "0.11.1", "0.11.0", "0.10.0", "0.9.0", "0.8.0", "0.7.0",
-        "0.6.1", "0.6.0", "0.5.0", "0.4.1",
+        "0.15.0", "0.14.0", "0.13.0", "0.12.0", "0.11.1", "0.11.0", "0.10.0", "0.9.0", "0.8.0",
+        "0.7.0", "0.6.1", "0.6.0", "0.5.0", "0.4.1",
     ];
 
     #[test]
@@ -264,6 +264,22 @@ mod tests {
         assert!(
             release_notes(current).is_some(),
             "release_notes({current:?}) returned None — add an arm for the current version"
+        );
+    }
+
+    /// The INVERSE of `release_notes_present_for_every_shipped_version`: `just
+    /// bump` injects the new version at BOTH `[bump-inject-here]` (the arm) and
+    /// `[bump-version-list-here]` (this list). An arm added without the list
+    /// entry — the 0.15.0 drift the forward test can't see — makes that release a
+    /// permanent gap once the next bump prepends over it. Pin the current version
+    /// into the list so the miss fails fast.
+    #[test]
+    fn current_version_is_in_shipped_versions() {
+        let current = env!("CARGO_PKG_VERSION");
+        assert!(
+            SHIPPED_VERSIONS.contains(&current),
+            "CARGO_PKG_VERSION {current:?} is missing from SHIPPED_VERSIONS \
+             (the `just bump` [bump-version-list-here] injection was skipped)"
         );
     }
 

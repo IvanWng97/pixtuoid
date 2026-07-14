@@ -235,6 +235,13 @@ mutants *args:
     base="${MUTANTS_BASE:-origin/main}"
     mkdir -p target
     git diff "$base...HEAD" > target/mutants.diff
+    # An empty diff (e.g. dispatched from `main`, where HEAD == origin/main) makes
+    # `--in-diff` test ZERO mutants and exit 0 — a vacuous green that reads as
+    # "assertions have teeth" having checked nothing. Fail loudly instead.
+    if [ ! -s target/mutants.diff ]; then
+        echo "error: diff vs $base is empty — no mutants to test. Run from a feature branch, or set MUTANTS_BASE." >&2
+        exit 1
+    fi
     cargo mutants --in-diff target/mutants.diff --features {{ features }} {{ args }}
 
 # Never-panic fuzz the per-source decoders over a JSONL corpus DIR (on-demand;
