@@ -122,7 +122,7 @@ pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
 /// in the half-block flush, so these px widths ARE cell widths on the horizontal.
 ///
 /// The board's TEXT overlay lives in the dark INTERIOR (`NEON_PANEL_INNER_*` = the
-/// panel minus its frame): the binary's `tui::widgets::hud::paint_wall_display`
+/// panel minus its frame): the binary's `tui::widgets::wall_board::paint_wall_display`
 /// pins its cell-origin AND width to those, so the lit text can't overrun the
 /// glowing frame. Laying text to the full OUTER `NEON_PANEL_W` overran it by the
 /// border on each side (the board-overflow bug). Only the interior pair + the

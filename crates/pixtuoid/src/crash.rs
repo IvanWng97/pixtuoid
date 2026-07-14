@@ -118,7 +118,7 @@ fn build_issue_url(
          ```\n{bt_body}\n```\n"
     );
 
-    // Derive from the ONE repo-URL authority (the lib's hud.rs REPO_URL — the
+    // Derive from the ONE repo-URL authority (the lib's version_popup.rs REPO_URL — the
     // same const the version popup + bulletin board open; crash.rs is a BIN-crate
     // module, hence the `pixtuoid::` path). The test pins the expanded literal.
     format!(

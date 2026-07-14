@@ -3,34 +3,39 @@
 
 mod connection;
 mod dashboard;
+mod elevator;
+mod footer;
 mod help;
-mod hud;
 mod panel;
+mod theme_picker;
 mod tooltip;
+mod version_popup;
+mod wall_board;
 mod welcome;
 
 pub(super) use connection::paint_connection_panel;
 pub(super) use dashboard::paint_dashboard;
+pub(super) use elevator::paint_elevator_indicator;
+pub(super) use footer::{paint_footer, FooterStats};
 pub(super) use help::paint_help_overlay;
-pub(super) use hud::{
-    paint_elevator_indicator, paint_footer, paint_theme_picker, paint_version_popup,
-    paint_wall_display, star_hit_rect, version_popup_url_rect, FooterStats, VERSION_POPUP_URL,
-};
-// `pub`: the BIN crate's crash reporter (crash.rs, a main.rs module — a separate
-// crate) derives its issue-report URL from this one authority (same rationale as
-// source_warning_message below).
-pub use hud::REPO_URL;
 pub(crate) use panel::{borderless_panel, PANEL_PAD_X, PANEL_PAD_Y};
-pub(super) use welcome::paint_welcome;
-// `pub`: the snapshot example reuses the real formatter for its
-// --source-warning screenshots so the wording cannot drift from production
-// (the pixtuoid lib target is not a semver surface).
-pub use hud::source_warning_message;
+pub(super) use theme_picker::paint_theme_picker;
 pub use tooltip::paint_chitchat_bubbles;
 pub(super) use tooltip::{
     paint_coffee_tooltip, paint_furniture_tooltip, paint_mascot_tooltip, paint_pet_tooltip,
 };
 pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets};
+pub(super) use version_popup::{paint_version_popup, version_popup_url_rect, VERSION_POPUP_URL};
+pub(super) use wall_board::{paint_wall_display, star_hit_rect};
+pub(super) use welcome::paint_welcome;
+// `pub`: the snapshot example reuses the real formatter for its
+// --source-warning screenshots so the wording cannot drift from production
+// (the pixtuoid lib target is not a semver surface).
+pub use footer::source_warning_message;
+// `pub`: the BIN crate's crash reporter (crash.rs, a main.rs module — a separate
+// crate) derives its issue-report URL from this one authority (same rationale as
+// source_warning_message above).
+pub use version_popup::REPO_URL;
 
 use std::time::SystemTime;
 
@@ -352,11 +357,12 @@ fn marquee_or_truncate(s: &str, width: usize, selected: bool, now: SystemTime) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hud::{build_status_spans, build_status_summary, FooterStats, BOARD_W};
+    use footer::{build_status_spans, build_status_summary, FooterStats};
     use pixtuoid_core::state::ActivityState;
     use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
     use std::path::PathBuf;
     use std::sync::Arc;
+    use wall_board::BOARD_W;
 
     // --- scene_stats -------------------------------------------------------
 

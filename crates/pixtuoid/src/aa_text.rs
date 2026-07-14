@@ -162,7 +162,8 @@ mod tests {
         // An uncovered glyph would rasterize as the snapshot fallback block
         // and as tofu in floating.
         // HAND-MAINTAINED allowlist (no single machine-readable source of the
-        // render vocabulary exists to derive from): adding a glyph to hud.rs /
+        // render vocabulary exists to derive from): adding a glyph to footer.rs /
+        // wall_board.rs / theme_picker.rs / version_popup.rs / elevator.rs /
         // board.rs / overlay.rs / tooltip.rs / dashboard.rs means ADDING IT
         // HERE — and it must be Monaspace-covered, or the vocabulary changes.
         for ch in [

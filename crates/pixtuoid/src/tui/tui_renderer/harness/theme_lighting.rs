@@ -74,7 +74,7 @@ fn occupied_floor_stays_lit() {
 }
 
 // ===================================================================
-// Theme picker + version-popup PAINT (renderer.rs / hud.rs branches)
+// Theme picker + version-popup PAINT (renderer.rs / theme_picker.rs + version_popup.rs branches)
 // ===================================================================
 
 #[test]
