@@ -388,7 +388,7 @@ history:
   columns, popup copy — even a text-only diff) → render the COMPOSED frame
   before the verdict (the snapshot example with the relevant flag). A
   string-equality unit test is blind to the painter's framing: #308's
-  `footer_warning` embedded its own ⚠ while the hud.rs painter owns the glyph —
+  `footer_warning` embedded its own ⚠ while the footer painter (`footer.rs`) owns the glyph —
   its test asserted the string WITH the glyph, both review rounds passed it, and
   live rendered `⚠ ⚠` (caught post-merge only via `snapshot --drift-warning`,
   R0615-22); #315's new 2-col health flag shifted data rows but not the static
