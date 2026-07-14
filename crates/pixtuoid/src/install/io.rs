@@ -32,7 +32,7 @@ pub fn nonempty_env(name: &str) -> Option<String> {
 /// comparisons are STRUCTURAL (component-wise), never byte-wise on a `/`-vs-`\`
 /// string — the recurring `windows-test` failure mode. The join also preserves the
 /// home's `OsString` (no lossy round-trip).
-pub fn expand_tilde(value: &str, home: Option<&Path>) -> PathBuf {
+pub(crate) fn expand_tilde(value: &str, home: Option<&Path>) -> PathBuf {
     let v = value.trim();
     match home {
         Some(home) if v == "~" => home.to_path_buf(),
@@ -49,14 +49,14 @@ pub fn expand_tilde(value: &str, home: Option<&Path>) -> PathBuf {
 /// existence check is at worst a false positive. WRITE paths must use
 /// [`home_relative_checked`] — installing into `./.reasonix/...` produces a
 /// file the CLI's global-scope loader never reads.
-pub fn home_relative(rel: &str) -> PathBuf {
+pub(crate) fn home_relative(rel: &str) -> PathBuf {
     let home = pixtuoid_core::platform::user_home_opt().unwrap_or_else(|| ".".into());
     PathBuf::from(home).join(rel)
 }
 
 /// Resolve a `$HOME`-relative path, hard-erroring when no home dir is
 /// resolvable (instead of `home_relative`'s CWD fallback).
-pub fn home_relative_checked(rel: &str) -> Result<PathBuf> {
+pub(crate) fn home_relative_checked(rel: &str) -> Result<PathBuf> {
     checked_home_join(pixtuoid_core::platform::user_home_opt(), rel)
 }
 
@@ -72,7 +72,7 @@ fn checked_home_join(home: Option<String>, rel: &str) -> Result<PathBuf> {
 /// `--hook-path` and is handled by `resolve_hook_binary`'s absolutize-and-warn
 /// arm (returned verbatim from here, a relative value would get embedded into
 /// Codex/Reasonix configs and silently never fire from other cwds).
-pub fn default_hook_binary() -> Result<PathBuf> {
+pub(crate) fn default_hook_binary() -> Result<PathBuf> {
     if let Ok(p) = which::which("pixtuoid-hook") {
         return Ok(p);
     }
@@ -105,7 +105,7 @@ fn sibling(target: &Path, suffix: &str) -> PathBuf {
 /// empty file — the target's parser supplies the empty-document default.
 /// For a locked read→merge→write round use [`ConfigLock::read`] instead, so
 /// the read shares the guard's pinned resolution.
-pub fn read_config(path: &Path) -> Result<String> {
+pub(crate) fn read_config(path: &Path) -> Result<String> {
     read_resolved(&resolve_symlink(path))
 }
 
@@ -161,7 +161,7 @@ fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
 /// Residual: an external writer (Claude Code rewriting its own settings.json)
 /// can't honor this lock — it only serializes pixtuoid against pixtuoid.
 #[derive(Debug)]
-pub struct ConfigLock {
+pub(crate) struct ConfigLock {
     /// The symlink-resolved real target — writes go here, never the symlink.
     target: PathBuf,
     file: File,
@@ -172,7 +172,7 @@ pub struct ConfigLock {
 /// contention rather than block — `try_lock` returns
 /// `Err(TryLockError::WouldBlock)` when another install/uninstall holds it.
 /// std-native advisory lock (stable since 1.89, our MSRV).
-pub fn lock_config(path: &Path) -> Result<ConfigLock> {
+pub(crate) fn lock_config(path: &Path) -> Result<ConfigLock> {
     let target = resolve_symlink(path);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
@@ -191,7 +191,7 @@ pub fn lock_config(path: &Path) -> Result<ConfigLock> {
 
 impl ConfigLock {
     /// The symlink-resolved real config path this guard locks.
-    pub fn target(&self) -> &Path {
+    pub(crate) fn target(&self) -> &Path {
         &self.target
     }
 
@@ -202,17 +202,17 @@ impl ConfigLock {
     /// otherwise split them across two files — merge input from the NEW
     /// target, write onto the OLD — under a lock that excludes nobody at the
     /// new path.
-    pub fn read(&self) -> Result<String> {
+    pub(crate) fn read(&self) -> Result<String> {
         read_resolved(&self.target)
     }
 
     /// [`backup_once`] against the pinned resolution (see [`Self::read`]).
-    pub fn backup_once(&self, suffix: &str) -> Result<Option<PathBuf>> {
+    pub(crate) fn backup_once(&self, suffix: &str) -> Result<Option<PathBuf>> {
         backup_once_resolved(&self.target, suffix)
     }
 
     /// [`remove_backup`] against the pinned resolution (see [`Self::read`]).
-    pub fn remove_backup(&self, suffix: &str) -> Result<Option<PathBuf>> {
+    pub(crate) fn remove_backup(&self, suffix: &str) -> Result<Option<PathBuf>> {
         remove_backup_resolved(&self.target, suffix)
     }
 
@@ -227,7 +227,7 @@ impl ConfigLock {
     /// content is written — so a user-tightened settings.json (API keys) is
     /// never widened, and a fresh file defaults tight rather than
     /// umask-default. Windows is a no-op (ACLs inherit from the directory).
-    pub fn write_atomic(&self, contents: &str) -> Result<()> {
+    pub(crate) fn write_atomic(&self, contents: &str) -> Result<()> {
         let tmp = sibling(&self.target, "tmp");
         {
             let mut opts = OpenOptions::new();
@@ -267,11 +267,14 @@ impl Drop for ConfigLock {
 /// the write only — callers doing a read→merge→write round must instead take
 /// [`lock_config`] before the read and write via [`ConfigLock::write_atomic`].
 /// Format-agnostic (&str).
-pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
+pub(crate) fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
     lock_config(path)?.write_atomic(contents)
 }
 
-pub fn backup_once(path: &Path, suffix: &str) -> Result<Option<PathBuf>> {
+// Path-based wrapper (resolve + backup) — production backs up through the
+// held `ConfigLock` (already-resolved target); only tests want the combo.
+#[cfg(test)]
+fn backup_once(path: &Path, suffix: &str) -> Result<Option<PathBuf>> {
     backup_once_resolved(&resolve_symlink(path), suffix)
 }
 
@@ -304,7 +307,8 @@ fn backup_once_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>> 
     Ok(Some(bak))
 }
 
-pub fn remove_backup(path: &Path, suffix: &str) -> Result<Option<PathBuf>> {
+#[cfg(test)]
+fn remove_backup(path: &Path, suffix: &str) -> Result<Option<PathBuf>> {
     remove_backup_resolved(&resolve_symlink(path), suffix)
 }
 
@@ -320,14 +324,14 @@ fn remove_backup_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>
 /// Whether the bare `pixtuoid-hook` name resolves on PATH. settings.json stores
 /// the bare name for portability, and Claude Code spawns hooks via PATH — so if
 /// this is false the installed hooks silently never fire.
-pub fn hook_on_path() -> bool {
+pub(crate) fn hook_on_path() -> bool {
     which::which("pixtuoid-hook").is_ok()
 }
 
 /// Follow symlink chain to the final target, even if that target doesn't exist
 /// yet (stow creates the link before the dotfiles repo is fully set up).
 /// `canonicalize` fails on a dangling symlink, so we walk `read_link` manually.
-pub fn resolve_symlink(path: &Path) -> PathBuf {
+pub(crate) fn resolve_symlink(path: &Path) -> PathBuf {
     let mut cur = path.to_path_buf();
     for _ in 0..32 {
         match std::fs::symlink_metadata(&cur) {
