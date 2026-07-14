@@ -10,6 +10,9 @@ pub(crate) mod codex;
 pub(crate) mod cursor;
 pub(crate) mod hermes;
 mod hook_cmd;
+// io stays pub(crate) for a STRONGER reason than its siblings: it holds the
+// config-write authority (invariant #4), which must never be cross-crate
+// reachable — only its two env filters (below) are re-exported.
 pub(crate) mod io;
 pub use io::{nonempty, nonempty_env};
 pub(crate) mod merge;
