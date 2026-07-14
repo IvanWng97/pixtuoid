@@ -227,6 +227,12 @@ impl ConfigLock {
     /// content is written — so a user-tightened settings.json (API keys) is
     /// never widened, and a fresh file defaults tight rather than
     /// umask-default. Windows is a no-op (ACLs inherit from the directory).
+    ///
+    /// Security (Unix): the `.tmp` create uses `O_NOFOLLOW | O_EXCL`, so a symlink
+    /// an attacker with config-dir write pre-plants at `<target>.tmp` can't be
+    /// followed (that would clobber the link's target with our bytes); a legit
+    /// stale `.tmp` from a crash is reclaimed once. The final rename still follows
+    /// the resolved target's own symlink (invariant #4, deliberate).
     pub(crate) fn write_atomic(&self, contents: &str) -> Result<()> {
         let tmp = sibling(&self.target, "tmp");
         {
@@ -236,8 +242,20 @@ impl ConfigLock {
             {
                 use std::os::unix::fs::OpenOptionsExt;
                 opts.mode(0o600);
+                // Never follow a symlink planted at `.tmp` (see the "Security" doc).
+                opts.custom_flags(libc::O_NOFOLLOW | libc::O_EXCL);
             }
-            let mut f = opts.open(&tmp)?;
+            let mut f = match opts.open(&tmp) {
+                Ok(f) => f,
+                // Reclaim a pre-existing `.tmp` ONCE (crash residue, or a symlink
+                // O_NOFOLLOW rejected): unlink the entry itself, re-create fresh.
+                #[cfg(unix)]
+                Err(_) if tmp.symlink_metadata().is_ok() => {
+                    std::fs::remove_file(&tmp)?;
+                    opts.open(&tmp)?
+                }
+                Err(e) => return Err(e.into()),
+            };
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -527,6 +545,35 @@ mod tests {
         write_config_atomic(&link, "{\"a\":1}").unwrap();
         assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "{\"a\":1}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_refuses_a_symlink_planted_at_the_tmp() {
+        // An attacker with config-dir write pre-plants a symlink at `<target>.tmp`
+        // pointing at a victim file. write_atomic must NOT follow it (O_NOFOLLOW),
+        // so the victim keeps its content and the real target still gets the write.
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("settings.json");
+        std::fs::write(&target, "{}").unwrap();
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "PRECIOUS").unwrap();
+        std::os::unix::fs::symlink(&victim, sibling(&target, "tmp")).unwrap();
+
+        lock_config(&target)
+            .unwrap()
+            .write_atomic("{\"hooks\":{}}")
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&victim).unwrap(),
+            "PRECIOUS",
+            "the planted symlink must not be followed — victim untouched"
+        );
+        assert!(
+            std::fs::read_to_string(&target).unwrap().contains("hooks"),
+            "the real target still receives the write (the .tmp symlink was reclaimed)"
+        );
     }
 
     // --- ConfigLock: the read→merge→write guard (#7/#16) ------------------------
