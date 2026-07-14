@@ -798,6 +798,13 @@ mod tests {
         // compute — the memo is a pure cache, never a source of divergence.
         let a = ctx.frame_layout(192, 156, 0).unwrap();
         let b = ctx.frame_layout(192, 156, 0).unwrap();
+        // The memo HIT must hand out the SAME Arc (a refcount bump), not a fresh
+        // deep clone — pointer identity is the whole point of the change, and the
+        // value-equality below would still pass a reverted `Arc::new((**l).clone())`.
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "a memo hit must share the memoized Arc, not deep-clone it"
+        );
         for l in [&a, &b] {
             assert_eq!(l.walkable, fresh.walkable);
             assert_eq!(l.reachable, fresh.reachable);
