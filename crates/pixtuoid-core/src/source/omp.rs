@@ -291,6 +291,11 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 // A tool result closes its call.
                 Some("toolResult") => {
                     let Some(tool_call_id) = msg.get("toolCallId").and_then(|i| i.as_str()) else {
+                        // The ActivityEnd pairing key — its absence is drift on a
+                        // lifecycle event we're committed to decoding (mirror of the
+                        // toolCall `id` gate above), and an unkeyable End can never
+                        // close its Start (leaks Active forever). Breadcrumb, then drop.
+                        crate::source::drift::missing_field(source, "toolResult", "toolCallId");
                         return Ok(vec![]);
                     };
                     vec![AgentEvent::ActivityEnd {
@@ -784,6 +789,25 @@ mod tests {
         }
     }
 
+    /// A `toolResult` missing its `toolCallId` (the ActivityEnd pairing key) is
+    /// dropped — an unkeyable End can't close its Start — but must leave a
+    /// `missing_field` breadcrumb, the mirror of the `toolCall` `id` gate above.
+    /// It is NOT an ignorable line (it's a lifecycle event we decode), so it does
+    /// not belong in the "ignored, not panicked" bundle.
+    #[test]
+    fn toolresult_without_id_drops_with_a_drift_breadcrumb() {
+        let no_id = r#"{"type":"message","id":"m7","parentId":null,"timestamp":"t","message":{"role":"toolResult","toolName":"read","content":[],"timestamp":1}}"#;
+        let out = crate::test_capture::capture_logs(|| {
+            assert!(decode(no_id).is_empty(), "un-keyable toolResult → no event");
+        });
+        for needle in [crate::source::drift::TARGET, "missing_field", "toolResult"] {
+            assert!(
+                out.contains(needle),
+                "no toolResult breadcrumb: missing {needle:?}\n{out}"
+            );
+        }
+    }
+
     #[test]
     fn tool_execution_start_custom_entry_is_deliberately_ignored() {
         // Duplicates the assistant toolCall block with the SAME toolCallId
@@ -803,8 +827,6 @@ mod tests {
             r#"{"type":"session_init","id":"x","parentId":null,"timestamp":"t","systemPrompt":"…","task":"…","tools":[]}"#,
             r#"{"type":"message","id":"x","parentId":null,"timestamp":"t","message":{"role":"user","content":"hi","timestamp":1}}"#,
             r#"{"type":"message","id":"x","parentId":null,"timestamp":"t","message":{"role":"bashExecution","command":"ls","output":"","exitCode":0,"timestamp":1}}"#,
-            // toolResult without a toolCallId is un-keyable.
-            r#"{"type":"message","id":"x","parentId":null,"timestamp":"t","message":{"role":"toolResult","toolName":"read","content":[],"timestamp":1}}"#,
             // message entry with no message object.
             r#"{"type":"message","id":"x","parentId":null,"timestamp":"t"}"#,
             // custom entry of an unrelated customType.
