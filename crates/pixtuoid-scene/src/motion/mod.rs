@@ -41,17 +41,21 @@ pub struct WalkPathSnapshot {
     pub path: Vec<Point>,
 }
 
-/// Phase the wander cycle is currently in for a given agent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Phase the wander cycle is currently in for a given agent. The three walk
+/// phases CARRY their frozen `WalkProfile` so the type makes "in a walk leg
+/// with no profile" unrepresentable — the old `WanderState.profile: Option`
+/// + its "should be unreachable" recovery path are gone.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WanderPhase {
     /// Sitting at the desk between trips.
     Seated,
-    /// Walking from desk to the chosen waypoint.
-    WalkingOut,
-    /// Standing/sitting at the waypoint during the dwell beat.
-    AtWaypoint,
-    /// Walking from the waypoint back to the desk.
-    WalkingBack,
+    /// Walking from desk to the chosen waypoint, on this frozen out-leg profile.
+    WalkingOut(WalkProfile),
+    /// Standing/sitting at the waypoint during the dwell beat, holding the
+    /// pre-snapshotted return-leg profile (computed at out-leg arrival).
+    AtWaypoint(WalkProfile),
+    /// Walking from the waypoint back to the desk, on the return-leg profile.
+    WalkingBack(WalkProfile),
 }
 
 /// A one-shot walk leg (exit / snap-back): the wall-clock instant the leg
@@ -124,9 +128,6 @@ pub struct WanderState {
     /// leg has its own clock). Sentinel `UNIX_EPOCH` ⇒ a fresh agent `advance_wander`
     /// bootstraps.
     pub phase_started_at: SystemTime,
-    /// Walk profile for the current out-/back-leg, snapshotted at the phase
-    /// transition. `None` while `Seated` or `AtWaypoint`.
-    pub profile: Option<WalkProfile>,
     /// The current trip's resolved destination (dest cell + named/aimless kind +
     /// optional seat). Set on each new `WalkingOut`; its `kind` resets to
     /// `Aimless` when a cycle completes (`WalkingBack` cleanup).
@@ -171,13 +172,6 @@ pub struct MotionState {
     /// `None` while not walking. Re-snapshotted when the leg's `(from, to)`
     /// endpoints change. See [`WalkPathSnapshot`].
     pub walk_path: Option<WalkPathSnapshot>,
-
-    /// Latch for the "wander walk profile missing" warn: the Missing recover
-    /// path fires every frame while the corrupt state persists (the
-    /// WalkingOut/WalkingBack arms return early without restoring a profile),
-    /// so only the FIRST miss of an episode warns — repeats log at trace.
-    /// Reset as soon as the profile is readable again (episode over).
-    pub(crate) missing_profile_warned: bool,
 }
 
 impl MotionState {
@@ -197,7 +191,6 @@ impl MotionState {
                 cycle_n: 0,
                 phase: WanderPhase::Seated,
                 phase_started_at: SystemTime::UNIX_EPOCH,
-                profile: None,
                 // Placeholder — replaced on first WalkingOut transition.
                 target: WanderTarget {
                     dest: Point { x: 0, y: 0 },
@@ -206,7 +199,6 @@ impl MotionState {
                 last_advanced_at: SystemTime::UNIX_EPOCH,
             },
             walk_path: None,
-            missing_profile_warned: false,
         }
     }
 }
@@ -292,7 +284,6 @@ pub fn advance_wander(
         // teleport. The agent was unobserved before this frame, so starting
         // fresh-Seated is equally valid and leaves no dangling walk profile.
         ms.wander.phase = WanderPhase::Seated;
-        ms.wander.profile = None;
         ms.wander.cycle_n = elapsed_idle / cycle;
         ms.wander.phase_started_at = now;
     }
@@ -350,9 +341,8 @@ pub fn advance_wander(
                     let path = route_jittered(router, &layout.walkable, overlay, id, from, dest);
                     // Rise off the desk chair (start), glide onto the waypoint seat (end).
                     let len = measured_leg_len(&path, chair_settle, seat);
-                    ms.wander.profile = Some(walk_profile(len, WalkIntent::WanderOut, id));
-
-                    ms.wander.phase = WanderPhase::WalkingOut;
+                    ms.wander.phase =
+                        WanderPhase::WalkingOut(walk_profile(len, WalkIntent::WanderOut, id));
                     ms.wander.phase_started_at = ms
                         .wander
                         .phase_started_at
@@ -363,44 +353,31 @@ pub fn advance_wander(
             (ms.wander.phase, 0)
         }
 
-        WanderPhase::WalkingOut => {
-            match poll_walk_leg(
-                slot,
-                ms,
-                WanderPhase::WalkingOut,
-                elapsed_phase,
-                may_transition,
-            ) {
-                WalkLegStatus::Missing => return (WanderPhase::WalkingOut, 0),
-                WalkLegStatus::InFlight(t) => (WanderPhase::WalkingOut, t),
+        WanderPhase::WalkingOut(profile) => {
+            match poll_walk_leg(&profile, elapsed_phase, may_transition) {
+                WalkLegStatus::InFlight(t) => (WanderPhase::WalkingOut(profile), t),
                 WalkLegStatus::Arrived {
                     t_x1000,
                     walk_total,
                 } => {
                     // Divergent on-arrival: snapshot the walk-back profile (the
-                    // overlay may differ now) and store it for the AtWaypoint →
-                    // WalkingBack transition. `t_x1000` is 1000 at arrival (the
-                    // walk-out leg's terminal progress) — preserves the old
-                    // hardcoded `1000` return byte-for-byte.
+                    // overlay may differ now) into the AtWaypoint variant, which
+                    // carries it to the WalkingBack transition. `t_x1000` is 1000
+                    // at arrival (the walk-out leg's terminal progress) —
+                    // preserves the old hardcoded `1000` return byte-for-byte.
                     let back = snapshot_back_profile(slot, ms, layout, router, overlay);
-                    ms.wander.phase = WanderPhase::AtWaypoint;
-                    ms.wander.profile = Some(back);
+                    ms.wander.phase = WanderPhase::AtWaypoint(back);
                     advance_phase_clock(ms, walk_total, now);
-                    (WanderPhase::AtWaypoint, t_x1000)
+                    (WanderPhase::AtWaypoint(back), t_x1000)
                 }
             }
         }
 
-        WanderPhase::AtWaypoint => {
+        WanderPhase::AtWaypoint(back) => {
             if may_transition && elapsed_phase >= dwell_dur {
-                // Use the back-leg profile already snapshotted at WalkingOut arrival.
-                // If somehow missing (shouldn't happen), re-snapshot now.
-                if ms.wander.profile.is_none() {
-                    let back = snapshot_back_profile(slot, ms, layout, router, overlay);
-                    ms.wander.profile = Some(back);
-                }
-
-                ms.wander.phase = WanderPhase::WalkingBack;
+                // The return-leg profile rode the AtWaypoint variant from the
+                // out-leg's arrival — carry it straight into WalkingBack.
+                ms.wander.phase = WanderPhase::WalkingBack(back);
                 ms.wander.phase_started_at = ms
                     .wander
                     .phase_started_at
@@ -410,16 +387,9 @@ pub fn advance_wander(
             (ms.wander.phase, 0)
         }
 
-        WanderPhase::WalkingBack => {
-            match poll_walk_leg(
-                slot,
-                ms,
-                WanderPhase::WalkingBack,
-                elapsed_phase,
-                may_transition,
-            ) {
-                WalkLegStatus::Missing => return (WanderPhase::WalkingBack, 0),
-                WalkLegStatus::InFlight(t) => (WanderPhase::WalkingBack, t),
+        WanderPhase::WalkingBack(profile) => {
+            match poll_walk_leg(&profile, elapsed_phase, may_transition) {
+                WalkLegStatus::InFlight(t) => (WanderPhase::WalkingBack(profile), t),
                 WalkLegStatus::Arrived { walk_total, .. } => {
                     // Divergent on-arrival: a cycle completed — advance the cycle
                     // counter and clear the trip kind back to Aimless (drops the
@@ -428,7 +398,6 @@ pub fn advance_wander(
                     // it — matching the pre-`WanderTarget` fields, which reset
                     // kind/idx/seat but not `dest`).
                     ms.wander.cycle_n += 1;
-                    ms.wander.profile = None;
                     ms.wander.target.kind = WanderKind::Aimless;
                     ms.wander.phase = WanderPhase::Seated;
                     advance_phase_clock(ms, walk_total, now);
@@ -449,9 +418,6 @@ pub fn advance_wander(
 /// Status of an in-flight wander walk leg (`WalkingOut` / `WalkingBack`) for the
 /// current frame, the result of the scaffold those two arms share.
 enum WalkLegStatus {
-    /// The phase profile is missing (should be unreachable — it is snapshotted at
-    /// the entering transition). The caller logs + recovers in place.
-    Missing,
     /// Still walking: the physics progress `t_x1000` (0..1000).
     InFlight(u16),
     /// The walk (incl. its pause) has completed. `walk_total` = `duration_ms +
@@ -460,48 +426,14 @@ enum WalkLegStatus {
     Arrived { t_x1000: u16, walk_total: u64 },
 }
 
-/// The scaffold the `WalkingOut` and `WalkingBack` arms share: read the phase
-/// profile (warn on the unreachable missing case), compute physics progress, and
-/// classify the leg as in-flight or arrived. The arms run their OWN divergent
-/// on-arrival cleanup (WalkingOut: snapshot the back profile; WalkingBack: bump
-/// the cycle + reset `wander.target.kind` to Aimless) — only the read/progress/
-/// arrival check is factored here.
-fn poll_walk_leg(
-    slot: &AgentSlot,
-    ms: &mut MotionState,
-    phase: WanderPhase,
-    elapsed_phase: u64,
-    may_transition: bool,
-) -> WalkLegStatus {
-    let profile = match &ms.wander.profile {
-        Some(p) => p,
-        None => {
-            // Should be unreachable: an in-flight phase always has a profile
-            // snapshotted at its entering transition. Log + recover (project
-            // convention: never freeze silently). The Missing state persists
-            // across frames (the callers' early returns don't restore a
-            // profile), so the warn is LATCHED per agent per episode — the
-            // first miss warns, repeats trace — or a stuck agent floods the
-            // log at frame rate.
-            if ms.missing_profile_warned {
-                tracing::trace!(
-                    agent_id = ?slot.agent_id,
-                    ?phase,
-                    "wander walk profile still missing — recovering"
-                );
-            } else {
-                ms.missing_profile_warned = true;
-                tracing::warn!(
-                    agent_id = ?slot.agent_id,
-                    ?phase,
-                    "wander walk profile missing — recovering"
-                );
-            }
-            return WalkLegStatus::Missing;
-        }
-    };
-    // Profile readable again: the missing episode (if any) is over — re-arm.
-    ms.missing_profile_warned = false;
+/// The scaffold the `WalkingOut` and `WalkingBack` arms share: compute physics
+/// progress from the phase's frozen `profile` and classify the leg as in-flight
+/// or arrived. The arms run their OWN divergent on-arrival cleanup (WalkingOut:
+/// snapshot the back profile; WalkingBack: bump the cycle + reset
+/// `wander.target.kind` to Aimless) — only the progress/arrival check is here.
+/// The profile is the phase variant's payload, so the old "missing profile"
+/// recovery is gone — the type guarantees it.
+fn poll_walk_leg(profile: &WalkProfile, elapsed_phase: u64, may_transition: bool) -> WalkLegStatus {
     let t_x1000 = crate::physics::walk_progress(profile, elapsed_phase);
     if may_transition && walk_arrived(profile, elapsed_phase) {
         WalkLegStatus::Arrived {

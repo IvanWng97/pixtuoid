@@ -263,7 +263,11 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
     // Frame 1: Idle, seated AtWaypoint on a seat → records history at the SEAT.
     let idle = entry_slot(now - Duration::from_secs(60));
     let mut ms = MotionState::new(idle.agent_id);
-    ms.wander.phase = crate::motion::WanderPhase::AtWaypoint;
+    ms.wander.phase = crate::motion::WanderPhase::AtWaypoint(walk_profile(
+        100,
+        WalkIntent::WanderBack,
+        idle.agent_id,
+    ));
     ms.wander.phase_started_at = now;
     ms.wander.last_advanced_at = now; // pin the phase (advance_wander no-ops at now)
     ms.wander.target = crate::motion::WanderTarget {
@@ -1424,12 +1428,7 @@ fn nearer_desk_arrives_before_farther_desk() {
 
     // Advance time past the near desk's duration+pause but stay within
     // the far desk's window. Use the near desk's profile to compute exact time.
-    let near_profile = motion_near[&near.agent_id]
-        .entry
-        .as_ref()
-        .unwrap()
-        .1
-        .clone();
+    let near_profile = motion_near[&near.agent_id].entry.unwrap().1;
     // One ms past the near desk's full trip (duration + pause).
     let done_ms = near_profile.duration_ms + near_profile.pause_ms + 1;
     let t1 = now + Duration::from_millis(done_ms);

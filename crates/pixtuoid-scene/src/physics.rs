@@ -75,7 +75,7 @@ pub const PAUSE_MS_MAX: u64 = 400;
 // ── Profile ───────────────────────────────────────────────────────────────────
 
 /// Frozen kinematic profile for one walk leg, computed once at walk-start.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WalkProfile {
     /// Accel → cruise → decel total time, **excluding** arrival pause.
     pub duration_ms: u64,

@@ -270,7 +270,6 @@ pub fn derive_with_routing(
             });
         }
 
-        // Destructure without moving the non-Copy profile (Correction L).
         let e = mstate.exit.as_ref()?;
         let started_at = e.started_at;
         let profile = &e.profile;
@@ -366,11 +365,11 @@ pub fn derive_with_routing(
             mstate.entry = Some((slot.created_at, profile));
         }
 
-        if let Some((started_at, ref profile)) = mstate.entry.clone() {
+        if let Some((started_at, profile)) = mstate.entry {
             let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
 
-            if !walk_arrived(profile, elapsed_ms) {
-                let t_x1000 = walk_progress(profile, elapsed_ms);
+            if !walk_arrived(&profile, elapsed_ms) {
+                let t_x1000 = walk_progress(&profile, elapsed_ms);
                 let frame = walking_frame(elapsed_ms);
                 return route_walking_pose(
                     slot,
@@ -421,7 +420,7 @@ pub fn derive_with_routing(
             advance_wander(slot, now, layout, rctx.router, rctx.overlay, rctx.motion);
 
         match wander_phase {
-            WanderPhase::WalkingOut => {
+            WanderPhase::WalkingOut(_) => {
                 let ms = rctx.motion.get(&slot.agent_id)?;
                 let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
                 let dest = ms.wander.target.dest;
@@ -452,7 +451,7 @@ pub fn derive_with_routing(
                     settle,
                 );
             }
-            WanderPhase::AtWaypoint => {
+            WanderPhase::AtWaypoint(_) => {
                 let ms = rctx.motion.get(&slot.agent_id)?;
                 let pose = match ms.wander.target.kind {
                     WanderKind::Named { wp_idx, kind, .. } => Pose::AtWaypoint { wp: wp_idx, kind },
@@ -477,7 +476,7 @@ pub fn derive_with_routing(
                 rctx.history.record(slot.agent_id, pt, now);
                 return Some(pose);
             }
-            WanderPhase::WalkingBack => {
+            WanderPhase::WalkingBack(_) => {
                 let ms = rctx.motion.get(&slot.agent_id)?;
                 let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
                 // Copy the fields off `ms` so the immutable `motion` borrow ends
