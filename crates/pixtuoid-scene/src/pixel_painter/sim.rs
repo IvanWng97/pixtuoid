@@ -152,6 +152,12 @@ pub(crate) fn sim_step(
     // positions across frames, so the signature is stable and the cache hits.
     // Reads only the STATELESS `pose::derive` + stand_point (no dependency on
     // the seated map / ambient), so it's safe up here.
+    // The pack's character sprite width (8 bundled, 10 robot), resolved ONCE and
+    // shared by every anchor AND the occupancy reservation; pack-constant → cache-stable.
+    let char_w = pack
+        .animation("standing")
+        .and_then(|a| a.frames.first())
+        .map_or(CHARACTER_SPRITE_W, |f| f.width());
     stores.overlay.clear();
     for agent in &agents {
         let Some(pose) = pose::derive(agent, now, layout) else {
@@ -175,12 +181,12 @@ pub(crate) fn sim_step(
                     w.facing,
                     &layout.reachable,
                 );
-                // Reserve the character footprint from the SAME authorities the
-                // sprite anchor uses, not a re-hardcoded 8×12 (drifts on a wider pack).
+                // Reserve the pack-resolved footprint (char_w wide, WALKING_Y_OFF
+                // tall) — the SAME width the sprite anchor centers on, not a bare 8.
                 stores.overlay.add(
-                    stand.x.saturating_sub(CHARACTER_SPRITE_W / 2),
+                    stand.x.saturating_sub(char_w / 2),
                     stand.y.saturating_sub(WALKING_Y_OFF / 2),
-                    CHARACTER_SPRITE_W,
+                    char_w,
                     WALKING_Y_OFF,
                 );
             }
@@ -241,7 +247,7 @@ pub(crate) fn sim_step(
         .collect();
 
     let (characters, waypoint_visitors, new_coffee_carriers, occupied_waypoints) =
-        resolve_characters(&agents, &poses, layout, pack, coffee, now);
+        resolve_characters(&agents, &poses, layout, pack, char_w, coffee, now);
 
     let chitchat_bubbles =
         chitchat::update_and_collect(stores.chitchat, floor_idx, &waypoint_visitors, now);
@@ -269,6 +275,7 @@ fn resolve_characters(
     poses: &HashMap<AgentId, Option<Pose>>,
     layout: &Layout,
     pack: &Pack,
+    char_w: u16,
     coffee: &HashMap<AgentId, SystemTime>,
     now: SystemTime,
 ) -> (
@@ -286,15 +293,6 @@ fn resolve_characters(
     // like the meeting room, without overloading the meeting-only `room_id`
     // field (which indexes `meeting_rooms`). Pinned by
     // multi_slot_venues_collapse_to_first_of_their_own_kind.
-    // The pack's character sprite width (8 for the bundled pack, 10 for the
-    // robot pack). All character poses share one width, so resolve it ONCE from
-    // a reference pose and center every anchor on it — a non-8-wide pack would
-    // otherwise blit ~1px off (the anchors hardcoded 8). Fallback to the bundled
-    // default if the pack lacks the reference anim.
-    let char_w = pack
-        .animation("standing")
-        .and_then(|a| a.frames.first())
-        .map_or(CHARACTER_SPRITE_W, |f| f.width());
     for (agent_idx, agent) in agents.iter().enumerate() {
         let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
