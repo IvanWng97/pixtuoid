@@ -17,6 +17,7 @@
 //! which is why it moved here out of the binary's tui widgets.
 
 use std::collections::BTreeMap;
+use std::time::SystemTime;
 
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::{ActivityState, DaemonPresence, DaemonState, MAX_FLOORS};
@@ -100,6 +101,20 @@ pub fn gateway_rollup(daemons: &BTreeMap<String, DaemonPresence>) -> Option<Daem
         .values()
         .map(|p| p.display_state())
         .max_by_key(|s| severity(*s))
+}
+
+/// The oldest in-scene agent's age in seconds — every agent still in the scene
+/// (live or walking out; swept ones are gone). The board's uptime feeder,
+/// single-sourced beside `scene_stats`/`gateway_rollup` so the three painters
+/// (TUI/floating/web) can't drift.
+pub fn scene_uptime_secs(scene: &SceneState, now: SystemTime) -> u64 {
+    scene
+        .agents
+        .values()
+        .filter_map(|a| now.duration_since(a.created_at).ok())
+        .max()
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Format a duration in seconds as a compact `"{h}h{m}m"` / `"{m}m"` / `"<1m"`
@@ -268,7 +283,7 @@ pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
 }
 
 /// Assemble the whole board model. `counts` is the SAME `scene_stats` the footer
-/// reads; `uptime_secs` is the oldest live-or-exiting agent's age; `floor` is
+/// reads; `uptime_secs` is [`scene_uptime_secs`] (the oldest in-scene agent's age); `floor` is
 /// `(current, total_floors)` (a single-floor office passes `None`); `gateway` is
 /// the `gateway_rollup` (`None` suppresses the chip). The context separators
 /// (`"  "`) are baked into each following segment so painters just concatenate.
@@ -321,6 +336,47 @@ mod tests {
             board_brand(),
             format!("pixtuoid v{}", env!("CARGO_PKG_VERSION"))
         );
+    }
+
+    #[test]
+    fn uptime_is_the_oldest_in_scene_agent_in_whole_seconds() {
+        use pixtuoid_core::state::{ActivityState, GlobalDeskIndex};
+        use pixtuoid_core::AgentId;
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        use std::time::Duration;
+        fn slot(secs: u64) -> AgentSlot {
+            AgentSlot {
+                agent_id: AgentId::from_transcript_path(&format!("/p/{secs}.jsonl")),
+                source: Arc::from("claude-code"),
+                session_id: Arc::from("s"),
+                cwd: Arc::from(PathBuf::from("/p").as_path()),
+                label: "l".into(),
+                state: ActivityState::Idle,
+                state_started_at: SystemTime::UNIX_EPOCH,
+                last_event_at: SystemTime::UNIX_EPOCH,
+                created_at: SystemTime::UNIX_EPOCH + Duration::from_secs(secs),
+                exiting_at: None,
+                pending_idle_at: None,
+                desk_index: GlobalDeskIndex(0),
+                floor_idx: 0,
+                tool_call_count: 0,
+                active_ms: 0,
+                unknown_cwd: false,
+                parent_id: None,
+                pid: None,
+                model: None,
+                effort: None,
+            }
+        }
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let mut scene = SceneState::uniform(16);
+        for s in [slot(40), slot(10)] {
+            scene.agents.insert(s.agent_id, s);
+        }
+        // Oldest agent created at 10s → 90s uptime; an empty scene → 0.
+        assert_eq!(scene_uptime_secs(&scene, now), 90);
+        assert_eq!(scene_uptime_secs(&SceneState::uniform(16), now), 0);
     }
 
     #[test]

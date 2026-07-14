@@ -115,14 +115,9 @@ impl OfficeRenderer {
     /// cross-floor breadcrumb); uptime is the oldest live-or-exiting agent's age.
     pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
         let counts = pixtuoid_scene::board::scene_stats(scene);
-        let oldest = scene
-            .agents
-            .values()
-            .filter_map(|a| now.duration_since(a.created_at).ok())
-            .max()
-            .unwrap_or_default();
         let gateway = pixtuoid_scene::board::gateway_rollup(scene.daemons());
-        pixtuoid_scene::board::build_board(counts, oldest.as_secs(), None, gateway)
+        let uptime = pixtuoid_scene::board::scene_uptime_secs(scene, now);
+        pixtuoid_scene::board::build_board(counts, uptime, None, gateway)
     }
 }
 

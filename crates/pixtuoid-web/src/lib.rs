@@ -338,15 +338,9 @@ impl Office {
 
         // Board — the SAME `pixtuoid_scene::board` model the TUI + floating use.
         let counts = pixtuoid_scene::board::scene_stats(&self.scene);
-        let oldest = self
-            .scene
-            .agents
-            .values()
-            .filter_map(|a| now.duration_since(a.created_at).ok())
-            .max()
-            .unwrap_or_default();
         let gateway = pixtuoid_scene::board::gateway_rollup(self.scene.daemons());
-        let board = pixtuoid_scene::board::build_board(counts, oldest.as_secs(), None, gateway);
+        let uptime = pixtuoid_scene::board::scene_uptime_secs(&self.scene, now);
+        let board = pixtuoid_scene::board::build_board(counts, uptime, None, gateway);
 
         let mut out = String::from("{\"labels\":[");
         for (i, el) in labels.iter().enumerate() {

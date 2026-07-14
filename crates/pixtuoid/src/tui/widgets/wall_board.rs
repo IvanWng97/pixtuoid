@@ -67,15 +67,9 @@ pub(crate) fn paint_wall_display(
     // The board's TEXT is the backend-agnostic `pixtuoid_scene::board` model (so
     // floating/wasm build the SAME content); this painter only maps each tone to a
     // ratatui color + owns the cell-space L1 right-flush.
-    let oldest = scene
-        .agents
-        .values()
-        .filter_map(|a| now.duration_since(a.created_at).ok())
-        .max()
-        .unwrap_or_default();
     let model = pixtuoid_scene::board::build_board(
         counts,
-        oldest.as_secs(),
+        pixtuoid_scene::board::scene_uptime_secs(scene, now),
         floor_info.map(|fi| (fi.current, fi.total_floors)),
         gateway,
     );
