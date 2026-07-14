@@ -56,7 +56,7 @@ const HERMES_EVENTS: &[&str] = &[
 /// omitted). One named source of truth for both the writer and the verify check.
 const HOOK_TIMEOUT_SECS: i64 = 5;
 
-pub fn default_config_path() -> Result<PathBuf> {
+pub(crate) fn default_config_path() -> Result<PathBuf> {
     pixtuoid_core::source::hermes::hermes_home()
         .map(|d| d.join("config.yaml"))
         .ok_or_else(|| {
@@ -69,13 +69,13 @@ pub fn default_config_path() -> Result<PathBuf> {
 /// purely ours — probing the home DIR is the robust "is Hermes installed" signal
 /// (config.yaml may not exist until `hermes setup`). Mirrors the Cursor/Reasonix
 /// dir-probe rationale.
-pub fn detect_installed() -> bool {
+pub(crate) fn detect_installed() -> bool {
     pixtuoid_core::source::hermes::hermes_home().is_some_and(|d| d.exists())
 }
 
 /// Hermes ARGV-execs the command (no shell), so the bare `'<abs>' --source hermes` exec
 /// form on all platforms. Err on a non-UTF-8 path (prevents the lossy dead-hook).
-pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let p = crate::install::merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::exec_hook_command(p, "hermes")
 }
@@ -177,7 +177,7 @@ fn managed_command(entry: &YamlOwned) -> Option<String> {
     }
 }
 
-pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     let mut root = parse_root_mapping(content)?;
     let mut changed = false;
 
@@ -215,7 +215,7 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     })
 }
 
-pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     let mut root = parse_root_mapping(content)?;
     let hooks_key = ystr("hooks");
     let Some(YamlOwned::Mapping(hooks)) = root.get_mut(&hooks_key) else {
@@ -260,7 +260,7 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 /// rewrite) is the silent-dead class this catches. NOTE: the Hermes allowlist consent is
 /// deliberately out of scope here — it's the user's to grant in Hermes (module doc), not
 /// an install-soundness property pixtuoid owns.
-pub fn verify_schema(content: &str) -> SchemaParse {
+pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     let root = match parse_root_mapping(content) {
         Ok(r) => r,
         Err(_) => return SchemaParse::broken("config.yaml no longer parses as a YAML mapping"),

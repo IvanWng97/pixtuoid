@@ -63,7 +63,7 @@ const REASONIX_EVENTS: &[&str] = &[
 /// on Windows (pixtuoid's generic USERPROFILE-first path) lands the hooks where
 /// Reasonix never reads → installed, but no sprite — the same class as
 /// CodeWhale/OpenClaw but on the %APPDATA% (config-dir) axis, not HOME-vs-USERPROFILE.
-pub fn default_config_path() -> Result<PathBuf> {
+pub(crate) fn default_config_path() -> Result<PathBuf> {
     reasonix_home()
         .map(|h| h.join("settings.json"))
         .ok_or_else(|| {
@@ -121,7 +121,7 @@ fn resolve_reasonix_home(
 /// (`reasonix_home` — `%APPDATA%\reasonix` on Windows, `~/.reasonix` elsewhere,
 /// honoring `REASONIX_HOME`); hook/trust users additionally have a `~/.reasonix`
 /// even on Windows. Probe both.
-pub fn detect_installed() -> bool {
+pub(crate) fn detect_installed() -> bool {
     reasonix_home().is_some_and(|d| d.exists()) || io::home_relative(".reasonix").exists()
 }
 
@@ -187,7 +187,7 @@ fn user_config_dir_checked(
 ///   (#195) — a quoted path can't survive cmd /C.
 ///
 /// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
-pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Reasonix always
     // embeds the absolute path, so the flag changes nothing here.
     let p = merge::hook_path_str(resolved)?;
@@ -196,7 +196,7 @@ pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::hook_cmd::shell_hook_command(p, "reasonix")
 }
 
-pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     // Shared parse + non-object guard + semantic-`changed` + serialize wrapper
     // (the guard's one copy lives in merge.rs).
     merge::flat_json_merge_outcome_install(content, "settings", |doc| {
@@ -204,7 +204,7 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     })
 }
 
-pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     merge::flat_json_merge_outcome_uninstall(content, |doc| {
         merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
     })
@@ -221,7 +221,7 @@ fn managed_entry(hook_command: &str) -> Value {
 
 /// Install-schema verification (#309) — Reasonix's flat-JSON shape (shared with
 /// Cursor): `hooks.<event>` arrays of `{_pixtuoid, command}`.
-pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     crate::install::verify::flat_json_verify(content, REASONIX_EVENTS, SENTINEL_KEY)
 }
 

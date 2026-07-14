@@ -230,7 +230,7 @@ fn build_run_config(
 /// and the CLI report. Iterates TARGETS, not REGISTERED_SOURCES: only an
 /// install-bearing source can be install-BROKEN.
 fn warn_broken_installs(connected: &std::collections::HashSet<String>) {
-    for &t in install::target::TARGETS {
+    for &t in install::TARGETS {
         if !connected.contains(t.core_source) {
             continue;
         }

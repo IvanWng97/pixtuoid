@@ -1,21 +1,24 @@
-pub mod claude;
-pub mod codewhale;
-pub mod codex;
-pub mod cursor;
-pub mod hermes;
+// The per-CLI installers + merge/verify/target have no cross-crate/cross-target
+// consumers (all callers are in-lib via `crate::install::…`) EXCEPT the two `io`
+// env filters and `target::TARGETS` (the bin's registry walk), so they are
+// `pub(crate) mod` with just those items re-exported — making `unreachable_pub`
+// the compiler tooth for the rest of their item surface (extends #573's io-only
+// tooth). `pub mod install` (lib.rs) stays pub to carry the re-exports.
+pub(crate) mod claude;
+pub(crate) mod codewhale;
+pub(crate) mod codex;
+pub(crate) mod cursor;
+pub(crate) mod hermes;
 mod hook_cmd;
-// io is crate-private: its config-write authority (invariant #4) must never be
-// reachable cross-crate. Only the two env filters are re-exported below, so a
-// FUTURE stray `pub` in io trips unreachable_pub (-D warnings) — a compiler
-// tooth, not a review-practice backstop.
 pub(crate) mod io;
 pub use io::{nonempty, nonempty_env};
-pub mod merge;
-pub mod openclaw;
-pub mod opencode;
-pub mod reasonix;
-pub mod target;
-pub mod verify;
+pub(crate) mod merge;
+pub(crate) mod openclaw;
+pub(crate) mod opencode;
+pub(crate) mod reasonix;
+pub(crate) mod target;
+pub use target::TARGETS;
+pub(crate) mod verify;
 
 use std::path::PathBuf;
 

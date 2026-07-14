@@ -4,7 +4,7 @@ use anyhow::Result;
 
 /// Builds a target's extra wholly-owned artifacts (absolute path + content) from
 /// the resolved shim path — see `Target::extra_artifacts`.
-pub type ExtraArtifactsFn = fn(hook_path: &Path) -> Result<Vec<(PathBuf, String)>>;
+pub(crate) type ExtraArtifactsFn = fn(hook_path: &Path) -> Result<Vec<(PathBuf, String)>>;
 
 /// How a target resolves the hook binary into its config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,9 +103,9 @@ pub struct Target {
 }
 
 /// Backup suffix — the same constant for every target (not a per-target field).
-pub const BACKUP_SUFFIX: &str = "pixtuoid.bak";
+pub(crate) const BACKUP_SUFFIX: &str = "pixtuoid.bak";
 
-pub const CLAUDE: Target = Target {
+pub(crate) const CLAUDE: Target = Target {
     name: "claude",
     core_source: pixtuoid_core::source::claude_code::SOURCE_NAME,
     display_name: "Claude Code",
@@ -126,7 +126,7 @@ pub const CLAUDE: Target = Target {
     extra_artifacts: None,
 };
 
-pub const CODEX: Target = Target {
+pub(crate) const CODEX: Target = Target {
     name: "codex",
     core_source: pixtuoid_core::source::codex::SOURCE_NAME,
     display_name: "Codex",
@@ -140,7 +140,7 @@ pub const CODEX: Target = Target {
     extra_artifacts: None,
 };
 
-pub const REASONIX: Target = Target {
+pub(crate) const REASONIX: Target = Target {
     name: "reasonix",
     core_source: pixtuoid_core::source::reasonix::SOURCE_NAME,
     display_name: "Reasonix",
@@ -154,7 +154,7 @@ pub const REASONIX: Target = Target {
     extra_artifacts: None,
 };
 
-pub const CODEWHALE: Target = Target {
+pub(crate) const CODEWHALE: Target = Target {
     name: "codewhale",
     core_source: pixtuoid_core::source::codewhale::SOURCE_NAME,
     display_name: "CodeWhale",
@@ -168,7 +168,7 @@ pub const CODEWHALE: Target = Target {
     extra_artifacts: None,
 };
 
-pub const OPENCODE: Target = Target {
+pub(crate) const OPENCODE: Target = Target {
     name: "opencode",
     core_source: pixtuoid_core::source::opencode::SOURCE_NAME,
     display_name: "opencode",
@@ -187,7 +187,7 @@ pub const OPENCODE: Target = Target {
     extra_artifacts: None,
 };
 
-pub const CURSOR: Target = Target {
+pub(crate) const CURSOR: Target = Target {
     name: "cursor",
     core_source: pixtuoid_core::source::cursor::SOURCE_NAME,
     display_name: "Cursor CLI",
@@ -202,7 +202,7 @@ pub const CURSOR: Target = Target {
     extra_artifacts: None,
 };
 
-pub const HERMES: Target = Target {
+pub(crate) const HERMES: Target = Target {
     name: "hermes",
     core_source: pixtuoid_core::source::hermes::SOURCE_NAME,
     display_name: "Hermes Agent",
@@ -220,7 +220,7 @@ pub const HERMES: Target = Target {
     extra_artifacts: None,
 };
 
-pub const OPENCLAW: Target = Target {
+pub(crate) const OPENCLAW: Target = Target {
     name: "openclaw",
     core_source: pixtuoid_core::source::openclaw::SOURCE_NAME,
     display_name: "OpenClaw",
@@ -246,7 +246,10 @@ pub const TARGETS: &[&Target] = &[
     &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &HERMES, &OPENCLAW,
 ];
 
-pub fn by_name(name: &str) -> Option<&'static Target> {
+// Test-gated: lookup-by-CLI-name has no prod caller (prod joins on the source id
+// via `by_source`); kept for the target-registry tests. Un-gate if prod needs it.
+#[cfg(test)]
+pub(crate) fn by_name(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.name == name)
 }
 
@@ -254,7 +257,7 @@ pub fn by_name(name: &str) -> Option<&'static Target> {
 /// e.g. "claude-code"). This is the correct join for anything keyed on the
 /// source registry (the Sources panel) — `by_name` keys on the CLI-facing
 /// `--target` name, which differs from the source id for Claude.
-pub fn by_source(source_id: &str) -> Option<&'static Target> {
+pub(crate) fn by_source(source_id: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.core_source == source_id)
 }
 
@@ -262,11 +265,11 @@ pub fn by_source(source_id: &str) -> Option<&'static Target> {
 /// ~/.codex must NOT count as present. Exception: a target whose written file
 /// the CLI never creates itself (Reasonix) supplies a `presence_probe` over
 /// real install markers instead.
-pub fn config_present(path: &Path) -> bool {
+pub(crate) fn config_present(path: &Path) -> bool {
     crate::install::io::resolve_symlink(path).exists()
 }
 
-pub fn is_present(t: &Target) -> bool {
+pub(crate) fn is_present(t: &Target) -> bool {
     match t.presence_probe {
         Some(probe) => probe(),
         // An unresolvable default path (no home dir) means there is no config

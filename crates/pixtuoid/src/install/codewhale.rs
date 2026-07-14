@@ -95,7 +95,7 @@ const CODEWHALE_EVENTS: &[(&str, bool)] = &[
 /// cwd-relative value can't be reconciled between the two processes — only an
 /// absolute override is well-defined. (Upstream additionally rejects `..`; we keep
 /// the value verbatim — a user-set env override is trusted input.)
-pub fn default_config_path() -> Result<PathBuf> {
+pub(crate) fn default_config_path() -> Result<PathBuf> {
     // CodeWhale only TRIMS its overrides (`val.trim()` / `normalize_config_file_path`)
     // — it does NOT `~`-expand — so pass `home: None` (trim-only, #342).
     resolve_config_path(
@@ -162,7 +162,7 @@ fn resolve_config_path(
 /// `CODEWHALE_HOME` (verbatim) else `<HOME-first home>/.codewhale`, and the legacy
 /// `.deepseek` lives under that OS home — so a `HOME`-exporting (or `CODEWHALE_HOME`)
 /// Windows shell probes the dirs CodeWhale actually uses.
-pub fn detect_installed() -> bool {
+pub(crate) fn detect_installed() -> bool {
     let os_home = pixtuoid_core::platform::home_first_dir();
     let modern = match io::nonempty_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)) {
         Some(h) => Some(h),
@@ -181,18 +181,18 @@ pub fn detect_installed() -> bool {
 ///   `--source` flag; 8.3 short-name substitution for cmd-unsafe paths via the
 ///   shared `hook_cmd::windows`). Err on non-UTF-8 (prevents the
 ///   to_string_lossy dead-hook).
-pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — CodeWhale always
     // embeds the absolute path, so the flag changes nothing here.
     let p = crate::install::merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, "codewhale")
 }
 
-pub fn merge_install(content: &str, base_cmd: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_install(content: &str, base_cmd: &str) -> Result<MergeOutcome> {
     crate::install::merge::toml_merge_outcome(content, |doc| toml_merge_install(doc, base_cmd))
 }
 
-pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     crate::install::merge::toml_merge_outcome(content, toml_merge_uninstall)
 }
 
@@ -221,7 +221,7 @@ fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
 /// gates ALL hooks — `enabled = false` with entries present is a true
 /// silent-dead the other checks miss). Shim command is shell-form (with a
 /// per-entry ` --event <name>` tail that `shell_shim_ref` strips).
-pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
         return SchemaParse::broken("config.toml no longer parses as TOML");

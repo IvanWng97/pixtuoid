@@ -47,7 +47,10 @@ const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
 /// below, and the list `check_upstream_drift.py` reads for the CI upstream watch.
 /// A rename upstream makes that hook silently stop firing (the plugin registers
 /// by name), so this is the drift surface to watch (defense #4).
-pub const OPENCLAW_EVENTS: &[&str] = &[
+// Test-gated: no prod-Rust caller — its only readers are the consistency test
+// below and `check_upstream_drift.py`'s source-text parse (cfg-agnostic).
+#[cfg(test)]
+pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
     "gateway_start",
     "gateway_stop",
     "session_start",
@@ -137,7 +140,7 @@ fn resolve_openclaw_state_dir(
 /// processes) wins; else prefer an existing `openclaw.json` in the state dir, then
 /// the legacy `clawdbot.json`, else `openclaw.json` for a fresh install (never
 /// shadow a real `clawdbot.json` the gateway still reads).
-pub fn default_config_path() -> Result<PathBuf> {
+pub(crate) fn default_config_path() -> Result<PathBuf> {
     // OPENCLAW_CONFIG_PATH is `~`-expanded too (resolveUserPath, #342).
     let home = pixtuoid_core::platform::home_first_dir();
     Ok(resolve_openclaw_config_path(
@@ -178,7 +181,7 @@ fn plugin_dir() -> Result<PathBuf> {
 /// keying on our artifact would chicken-and-egg (opencode/Reasonix rationale).
 /// With `OPENCLAW_STATE_DIR` set that dir IS the state dir; else probe both the
 /// modern `.openclaw` and the legacy `.clawdbot` under the effective home.
-pub fn detect_installed() -> bool {
+pub(crate) fn detect_installed() -> bool {
     // Normalize the SAME env vars the SAME way `openclaw_state_dir()` does (#342/#344):
     // `~`-expand `OPENCLAW_STATE_DIR`/`OPENCLAW_HOME` against the same home base. Without
     // this, a `~`-prefixed override would install into the EXPANDED dir but probe the
@@ -215,13 +218,13 @@ fn resolve_openclaw_detect(
 
 /// The shim's absolute path, baked into the plugin (the gateway runs it under
 /// Node, no PATH reliance). Err on non-UTF-8 like opencode/Codex.
-pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
 
 /// The wholly-owned plugin dir files (manifest + package.json + entry module).
 /// `extra_artifacts` Target hook: written verbatim on install, shim path baked in.
-pub fn plugin_artifacts(hook_path: &Path) -> Result<Vec<(PathBuf, String)>> {
+pub(crate) fn plugin_artifacts(hook_path: &Path) -> Result<Vec<(PathBuf, String)>> {
     let dir = plugin_dir()?;
     let hook = hook_path
         .to_str()
@@ -249,7 +252,7 @@ fn obj_mut<'a>(v: &'a mut Value, key: &str) -> Result<&'a mut serde_json::Map<St
 /// {allowConversationAccess}}`. `changed` is a semantic (parsed) diff, so a
 /// same-state re-install is a no-op. `_hook_cmd` is unused — the shim path lives
 /// in the plugin file (an `extra_artifact`), not the config.
-pub fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutcome> {
     let dir = plugin_dir()?;
     let dir_str = dir
         .to_str()
@@ -290,7 +293,7 @@ pub fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutcome> {
 /// Remove our registration: drop the plugin-dir path from `plugins.load.paths`
 /// and REMOVE the `plugins.entries.pixtuoid` subtree (revoking the
 /// conversation-access grant — R-P1). A foreign plugin's entries/paths survive.
-pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     let dir = plugin_dir()?;
     let dir_str = dir.to_str().map(str::to_string);
     let mut root =
@@ -324,7 +327,7 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 /// enabled `entries.pixtuoid` entry + its `load.paths` dir registration (a
 /// removed/disabled entry = the gateway silently never loads us). Per-source
 /// format knowledge stays here (invariant #3).
-pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{SchemaParse, ShimRef};
     let Ok(root) = serde_json::from_str::<Value>(content) else {
         return SchemaParse::broken("openclaw.json is not valid JSON — reconnect openclaw");

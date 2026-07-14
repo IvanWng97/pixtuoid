@@ -22,7 +22,7 @@ const EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-pub fn default_config_path() -> Result<PathBuf> {
+pub(crate) fn default_config_path() -> Result<PathBuf> {
     if let Some(dir) = claude_config_dir() {
         return Ok(dir.join("settings.json"));
     }
@@ -40,7 +40,7 @@ pub fn default_config_path() -> Result<PathBuf> {
 /// through cmd.exe/PowerShell — unportable, PATHEXT-dependent). The orchestrator
 /// already hard-errors if resolution failed (`BinaryStrategy::EmbedAbsolute` on
 /// Windows), so `resolved` is guaranteed to be an absolute path here.
-pub fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
+pub(crate) fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     #[cfg(not(windows))]
     {
         if explicit {
@@ -68,7 +68,7 @@ pub fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
 /// The `_pixtuoid` sentinel and `matcher` live on the OUTER entry object, not here;
 /// detection/uninstall key on the sentinel, so the shape of this inner object is
 /// irrelevant to the matcher — no uninstall changes needed.
-pub fn hook_entry(cmd: &str, exec_form: bool) -> Value {
+pub(crate) fn hook_entry(cmd: &str, exec_form: bool) -> Value {
     if exec_form {
         json!({ "type": "command", "command": cmd, "args": [] })
     } else {
@@ -80,7 +80,7 @@ pub fn hook_entry(cmd: &str, exec_form: bool) -> Value {
 /// entry (sentinel-tagged), and the shim command is read back for the on-disk
 /// check. The command lives in the OUTER entry's `hooks[0].command` (Unix bare
 /// `pixtuoid-hook` → PATH-resolved soft check; explicit/Windows → absolute).
-pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{assemble, SchemaParse, ShimRef};
     let Ok(doc) = serde_json::from_str::<Value>(content) else {
         return SchemaParse::broken("settings.json no longer parses as JSON");
@@ -138,7 +138,7 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
     }
 }
 
-pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     // The parse + non-object guard + semantic-`changed` + serialize plumbing is
     // the shared wrapper (its guard is the ONE copy — see merge.rs). Claude's
     // per-event entry is NESTED (`{matcher, hooks:[…]}`) rather than flat, but
@@ -149,7 +149,7 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     })
 }
 
-pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     merge::flat_json_merge_outcome_uninstall(content, |doc| {
         merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
     })

@@ -89,7 +89,7 @@ fn config_dir_from(oc: Option<&str>, xdg: Option<&str>, home: Option<&str>) -> R
 /// `<config>/plugins/*.{ts,js}`; the anomalyco fork globs `{plugin,plugins}` (so
 /// both work there), but plural is the documented form and the only one canonical
 /// opencode scans, so it's correct for every install.
-pub fn default_config_path() -> Result<PathBuf> {
+pub(crate) fn default_config_path() -> Result<PathBuf> {
     Ok(opencode_config_dir()?.join("plugins").join("pixtuoid.ts"))
 }
 
@@ -101,7 +101,7 @@ pub fn default_config_path() -> Result<PathBuf> {
 /// Mirrors CodeWhale's CLI-dir probe. Uninstall keys on the plugin file existing
 /// (`config_present`, file-existence) and `merge_uninstall` on the
 /// `@pixtuoid-opencode-plugin` sentinel, so removal stays exact regardless.
-pub fn detect_installed() -> bool {
+pub(crate) fn detect_installed() -> bool {
     opencode_config_dir().map(|d| d.exists()).unwrap_or(false)
         || io::home_relative(".local/share/opencode").exists()
 }
@@ -111,14 +111,14 @@ pub fn detect_installed() -> bool {
 /// path, so it must be embedded (no PATH reliance) — Err on non-UTF-8 like
 /// Codex/Reasonix/CodeWhale. `_explicit` (Claude's bare-vs-absolute switch) is
 /// irrelevant: opencode always needs the absolute path.
-pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
 
 /// Render the plugin with the shim path baked in (JSON-encoded → a valid,
 /// escaped JS string literal, so a path with quotes/backslashes can't break the
 /// module). `changed` is a content diff: a same-path re-install is a no-op.
-pub fn merge_install(content: &str, hook_path: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_install(content: &str, hook_path: &str) -> Result<MergeOutcome> {
     let baked = render_plugin(hook_path)?;
     Ok(MergeOutcome {
         changed: content != baked,
@@ -129,7 +129,7 @@ pub fn merge_install(content: &str, hook_path: &str) -> Result<MergeOutcome> {
 /// Replace our plugin with the sentinel-free no-op stub. `changed` only when the
 /// current content is actually ours (carries the sentinel) — a foreign file, an
 /// already-removed stub, or empty content is a semantic no-op (left untouched).
-pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     let ours = content.contains(SENTINEL);
     Ok(MergeOutcome {
         changed: ours,
@@ -146,7 +146,7 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 /// substituted, (3) the baked `HOOK_PATH` literal readable for the on-disk stat.
 /// There is no per-event config to check (the forwarded EventV2 set lives in the
 /// plugin's own code).
-pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{SchemaParse, ShimRef};
     if !content.contains(SENTINEL) {
         return SchemaParse::broken(

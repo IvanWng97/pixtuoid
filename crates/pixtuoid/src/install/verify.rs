@@ -87,7 +87,7 @@ impl SchemaVerifyResult {
 /// online review). Mirrors `doctor`'s R0615-06 sanitize discipline. The
 /// Sources panel is already safe (ratatui renders control bytes as literals),
 /// but source-sanitizing it too is harmless + future-proof.
-pub fn display_safe(p: &std::path::Path) -> String {
+pub(crate) fn display_safe(p: &std::path::Path) -> String {
     crate::strip_control_chars(&p.display().to_string())
 }
 
@@ -96,7 +96,7 @@ pub fn display_safe(p: &std::path::Path) -> String {
 /// ref extracted from a managed command, and any target-specific extra issues
 /// (e.g. CodeWhale `enabled=false`). Centralizes the issue wording so every
 /// target reports consistently.
-pub fn assemble(
+pub(crate) fn assemble(
     missing_events: &[&str],
     any_managed: bool,
     shim: ShimRef,
@@ -123,7 +123,7 @@ pub fn assemble(
 /// array of `{_pixtuoid: true, command, …}` entries. Shared because the two
 /// targets use the IDENTICAL shape; each passes its own `events` + `sentinel`
 /// (the per-source knowledge), so this is shape-sharing, not a shared decoder.
-pub fn flat_json_verify(content: &str, events: &[&str], sentinel: &str) -> SchemaParse {
+pub(crate) fn flat_json_verify(content: &str, events: &[&str], sentinel: &str) -> SchemaParse {
     let Ok(doc) = serde_json::from_str::<serde_json::Value>(content) else {
         return SchemaParse::broken("hooks config no longer parses as JSON");
     };
@@ -163,7 +163,7 @@ pub fn flat_json_verify(content: &str, events: &[&str], sentinel: &str) -> Schem
 /// ` --event <name>` (CodeWhale). Returns `Absolute` for a real path, `Unknown`
 /// if nothing path-like can be peeled out. Mirrors the read-back
 /// `codex::command_basename_is_hook` already does.
-pub fn shell_shim_ref(command: &str) -> ShimRef {
+pub(crate) fn shell_shim_ref(command: &str) -> ShimRef {
     // Strip the trailing ` --event <name>` (CodeWhale bakes one per entry). Use
     // rsplit_once so a single-quoted PATH that literally contains " --event "
     // keeps that occurrence and only the genuinely-appended tail is removed —

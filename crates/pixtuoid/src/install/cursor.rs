@@ -64,7 +64,7 @@ const CURSOR_EVENTS: &[&str] = &[
 /// overridden dir while pixtuoid wrote `~/.cursor` (installed, but no sprite). The
 /// home base is `USERPROFILE`-first (Node `os.homedir`; `~/.cursor`, NOT the
 /// Electron IDE's `%APPDATA%\Cursor`).
-pub fn default_config_path() -> Result<PathBuf> {
+pub(crate) fn default_config_path() -> Result<PathBuf> {
     cursor_config_dir()
         .map(|d| d.join("hooks.json"))
         .ok_or_else(|| {
@@ -109,7 +109,7 @@ fn resolve_config_dir(
 /// Reasonix/CodeWhale/opencode probe their CLI dirs. Honors `CURSOR_CONFIG_DIR`/
 /// `XDG_CONFIG_HOME` like the write path, plus the plain `~/.cursor` as a lenient
 /// fallback.
-pub fn detect_installed() -> bool {
+pub(crate) fn detect_installed() -> bool {
     cursor_config_dir().is_some_and(|d| d.exists()) || io::home_relative(".cursor").exists()
 }
 
@@ -121,12 +121,12 @@ pub fn detect_installed() -> bool {
 ///   space/metacharacter path, else reject — #195).
 ///
 /// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
-pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let p = merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, "cursor")
 }
 
-pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     // Shared parse + non-object guard + semantic-`changed` + serialize wrapper
     // (the guard's one copy lives in merge.rs). Cursor's `version` field injection
     // rides inside `json_merge_install`.
@@ -135,7 +135,7 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     })
 }
 
-pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     // Shared flat-JSON uninstall: removes managed entries + drops empty event
     // keys / the `hooks` object. `version` is untouched (preserved by design).
     merge::flat_json_merge_outcome_uninstall(content, |doc| {
@@ -156,7 +156,7 @@ fn managed_entry(hook_command: &str) -> Value {
 /// it (module doc) — a hooks.json with intact managed entries but no numeric
 /// `version` loads NO hooks at all, the exact silent-dead class #309 exists to
 /// catch (the CodeWhale `[hooks].enabled = false` twin).
-pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     let mut parse = crate::install::verify::flat_json_verify(content, CURSOR_EVENTS, SENTINEL_KEY);
     // Only reachable on parseable JSON — an unparseable file is already a HARD
     // "no longer parses" issue from flat_json_verify.

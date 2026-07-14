@@ -17,7 +17,7 @@ const CODEX_EVENTS: &[&str] = &[
     "PermissionRequest",
 ];
 
-pub fn default_config_path() -> Result<PathBuf> {
+pub(crate) fn default_config_path() -> Result<PathBuf> {
     // Route through the SAME codex_home() the watcher uses, so the installed-hook
     // config and the watched sessions root can't disagree (and honors CODEX_HOME).
     // codex_home() always yields an absolute path (user_home falls back to the
@@ -51,7 +51,7 @@ pub fn default_config_path() -> Result<PathBuf> {
 ///   (`C:\PROGRA~1\…`, space/metachar-free) and only REJECTS if 8.3 generation is
 ///   disabled on the volume (#195). Ordinary install paths
 ///   (`%USERPROFILE%\.cargo\bin`, npm prefix) skip 8.3 entirely.
-pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Codex always
     // embeds the absolute path, so the flag changes nothing here.
     let p = crate::install::merge::hook_path_str(resolved)?;
@@ -62,11 +62,11 @@ pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::hook_cmd::shell_hook_command(p, "codex")
 }
 
-pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     crate::install::merge::toml_merge_outcome(content, |doc| toml_merge_install(doc, hook_cmd))
 }
 
-pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     crate::install::merge::toml_merge_outcome(content, toml_merge_uninstall)
 }
 
@@ -88,7 +88,7 @@ fn prune_managed_handlers(group: &mut toml::Value) {
 /// sentinel-tagged handler, and the shim command (shell form,
 /// `PIXTUOID_SOURCE=codex '<abs>'` / `<abs> --source codex`) is read back for
 /// the on-disk check.
-pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
         return SchemaParse::broken("config.toml no longer parses as TOML");

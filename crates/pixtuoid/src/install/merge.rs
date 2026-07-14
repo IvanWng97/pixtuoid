@@ -25,7 +25,7 @@ use serde_json::{json, Map, Value};
 /// Parse JSON config content, treating empty/whitespace-only as the empty
 /// document (`{}`) — the shared rule every JSON target's merge relies on (never
 /// error on empty). The caller wraps the parse error with the real config path.
-pub fn parse_json_or_empty(content: &str) -> anyhow::Result<Value> {
+pub(crate) fn parse_json_or_empty(content: &str) -> anyhow::Result<Value> {
     if content.trim().is_empty() {
         return Ok(json!({}));
     }
@@ -42,7 +42,7 @@ pub fn parse_json_or_empty(content: &str) -> anyhow::Result<Value> {
 /// Serializing a `&str` is infallible in practice, but propagate the error
 /// rather than default to a broken empty path if it ever weren't. `what` names
 /// the target for the error context.
-pub fn bake_hook_path(
+pub(crate) fn bake_hook_path(
     template: &str,
     placeholder: &str,
     hook_path: &str,
@@ -59,7 +59,7 @@ pub fn bake_hook_path(
 /// targets feed the `&str` into `hook_cmd::shell_hook_command`; the embed
 /// targets `.map(str::to_string)` it). A non-UTF-8 path is rejected rather than
 /// `to_string_lossy`'d into a silently-dead hook.
-pub fn hook_path_str(p: &std::path::Path) -> anyhow::Result<&str> {
+pub(crate) fn hook_path_str(p: &std::path::Path) -> anyhow::Result<&str> {
     use anyhow::anyhow;
     p.to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", p.display()))
@@ -67,7 +67,7 @@ pub fn hook_path_str(p: &std::path::Path) -> anyhow::Result<&str> {
 
 /// Parse TOML config content, treating empty/whitespace-only as the empty
 /// document. Shared by the TOML targets (Codex/CodeWhale); same empty rule.
-pub fn parse_toml_or_empty(content: &str) -> anyhow::Result<toml::Value> {
+pub(crate) fn parse_toml_or_empty(content: &str) -> anyhow::Result<toml::Value> {
     if content.trim().is_empty() {
         return Ok(toml::Value::Table(toml::value::Table::new()));
     }
@@ -85,7 +85,7 @@ pub fn parse_toml_or_empty(content: &str) -> anyhow::Result<toml::Value> {
 /// decoder. A non-object `hooks` / non-array event is coerced (defensive), matching
 /// the callers' prior inline behavior. Caller-set extras (Cursor's `version`) are
 /// applied before the call and pass through untouched.
-pub fn flat_json_merge_install(
+pub(crate) fn flat_json_merge_install(
     doc: Value,
     events: &[&str],
     sentinel: &str,
@@ -122,7 +122,7 @@ pub fn flat_json_merge_install(
 /// (the sentinel-keyed removal is shape-agnostic — it strips Claude's nested
 /// entries the same way). A target-specific key the install set (Cursor's
 /// `version`) is deliberately preserved — this only touches `hooks`.
-pub fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value {
+pub(crate) fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value {
     let Some(root) = doc.as_object_mut() else {
         return doc;
     };
@@ -163,7 +163,7 @@ fn is_flat_managed(entry: &Value, sentinel: &str) -> bool {
 /// names the config in the refusal message ("settings" / "hooks.json"). The
 /// non-object guard lives HERE, once, so a future flat-JSON target cannot forget
 /// it and silently re-open the drop-the-user's-document path.
-pub fn flat_json_merge_outcome_install(
+pub(crate) fn flat_json_merge_outcome_install(
     content: &str,
     what: &str,
     mutate: impl FnOnce(Value) -> Value,
@@ -184,7 +184,7 @@ pub fn flat_json_merge_outcome_install(
 /// Deliberately UNGUARDED on a non-object root — uninstall must stay a clean
 /// no-op on a foreign non-object document (`flat_json_merge_uninstall` returns it
 /// unchanged), never error.
-pub fn flat_json_merge_outcome_uninstall(
+pub(crate) fn flat_json_merge_outcome_uninstall(
     content: &str,
     mutate: impl FnOnce(Value) -> Value,
 ) -> anyhow::Result<MergeOutcome> {
@@ -200,7 +200,7 @@ pub fn flat_json_merge_outcome_uninstall(
 /// The TOML analog (Codex/CodeWhale): parse, run `mutate`, package with the same
 /// SEMANTIC `changed` rule. No non-object guard — a TOML root is always a table,
 /// which is why the TOML targets correctly lack the flat-JSON guard.
-pub fn toml_merge_outcome(
+pub(crate) fn toml_merge_outcome(
     content: &str,
     mutate: impl FnOnce(toml::Value) -> toml::Value,
 ) -> anyhow::Result<MergeOutcome> {
