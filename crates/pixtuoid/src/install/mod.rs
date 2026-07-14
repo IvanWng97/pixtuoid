@@ -4,7 +4,12 @@ pub mod codex;
 pub mod cursor;
 pub mod hermes;
 mod hook_cmd;
-pub mod io;
+// io is crate-private: its config-write authority (invariant #4) must never be
+// reachable cross-crate. Only the two env filters are re-exported below, so a
+// FUTURE stray `pub` in io trips unreachable_pub (-D warnings) — a compiler
+// tooth, not a review-practice backstop.
+pub(crate) mod io;
+pub use io::{nonempty, nonempty_env};
 pub mod merge;
 pub mod openclaw;
 pub mod opencode;

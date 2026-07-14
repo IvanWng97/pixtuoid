@@ -206,12 +206,12 @@ impl ConfigLock {
         read_resolved(&self.target)
     }
 
-    /// [`backup_once`] against the pinned resolution (see [`Self::read`]).
+    /// [`backup_once_resolved`] against the pinned resolution (see [`Self::read`]).
     pub(crate) fn backup_once(&self, suffix: &str) -> Result<Option<PathBuf>> {
         backup_once_resolved(&self.target, suffix)
     }
 
-    /// [`remove_backup`] against the pinned resolution (see [`Self::read`]).
+    /// [`remove_backup_resolved`] against the pinned resolution (see [`Self::read`]).
     pub(crate) fn remove_backup(&self, suffix: &str) -> Result<Option<PathBuf>> {
         remove_backup_resolved(&self.target, suffix)
     }

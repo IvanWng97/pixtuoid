@@ -35,7 +35,7 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) {
     // value would "enable" file mode with an unopenable path; treat it as unset
     // via the ONE empty-as-unset env filter (io::nonempty), the same trim
     // semantics XDG_STATE_HOME / XDG_CONFIG_HOME / PIXTUOID_HOOK already use.
-    let explicit_log_file = pixtuoid::install::io::nonempty_env("PIXTUOID_LOG").is_some();
+    let explicit_log_file = pixtuoid::install::nonempty_env("PIXTUOID_LOG").is_some();
 
     if tui_active {
         // Explicit verbosity keeps today's semantics (the full --log-level /
@@ -110,10 +110,10 @@ pub(crate) fn log_file_path() -> PathBuf {
     // shared io::nonempty semantics, kept in lockstep with the
     // `explicit_log_file` read in init() so "file mode enabled" and "which
     // file" can't disagree on a whitespace value.
-    if let Some(p) = pixtuoid::install::io::nonempty_env("PIXTUOID_LOG") {
+    if let Some(p) = pixtuoid::install::nonempty_env("PIXTUOID_LOG") {
         return PathBuf::from(p);
     }
-    if let Some(state) = pixtuoid::install::io::nonempty_env("XDG_STATE_HOME") {
+    if let Some(state) = pixtuoid::install::nonempty_env("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/log"));
     }
     if let Some(home) = pixtuoid_core::platform::user_home_opt() {
@@ -193,7 +193,7 @@ mod tests {
         // The shared io::nonempty filter backs XDG_STATE_HOME here: an
         // unfiltered empty value would route the crash log / runtime log to
         // the root-absolute `/pixtuoid/...`.
-        use pixtuoid::install::io::nonempty;
+        use pixtuoid::install::nonempty;
         assert_eq!(nonempty(None), None);
         assert_eq!(nonempty(Some(String::new())), None);
         assert_eq!(nonempty(Some("   ".into())), None);
