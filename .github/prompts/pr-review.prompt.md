@@ -142,7 +142,12 @@ given change/tree, say so, don't skip it.
   restating WHAT the code plainly does, or narrating an obvious step, is noise to
   cut — only a non-obvious WHY earns its place: a workaround, a load-bearing
   constraint, a surprising invariant; a NEW block of `//` narration added by the
-  diff that a reader could infer from the code is the smell); manifest-bridge (a
+  diff that a reader could infer from the code is the smell. Even a LEGITIMATE WHY
+  must be right-sized + right-placed: **fn-body comments ≤2 lines**, a longer
+  rationale relocated onto the DECLARATION it explains (a `const`/fn/module doc
+  carries a ≈25-word WHY fine) or a `CLAUDE.md` sharp edge, and any present-tense
+  code-state assertion moved into a test — the comment keeps only `pinned by
+  <test>`. A ≥3-line `//` run wedged inside a fn body is the flag); manifest-bridge (a
   `site/src/*.json` / generated schema vs its Rust source of truth).
 - **(D) Quality + tooling** — test-coverage gaps (changed/existing code with no
   exercising test); mutation-teeth (assertions that survive the mutation — and a
