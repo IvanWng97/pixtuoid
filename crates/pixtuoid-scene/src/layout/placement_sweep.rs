@@ -734,9 +734,8 @@ fn desk_capacity_obeys_the_request_law() {
 fn every_kind_is_placed_somewhere_in_the_sweep() {
     // Existential coverage: every registered role-enum variant must appear in
     // at least ONE swept layout — a kind that never places is dead weight (or
-    // a placement-site regression). Allowlist: BulletinBoard — owner ruled it
-    // stays unplaced (2026-07-13, B-3 mock round); registered for pack
-    // authors.
+    // a placement-site regression). Allowlist: BulletinBoard stays unplaced by
+    // design (registered for pack authors).
     use std::collections::BTreeSet;
     let mut seen: BTreeSet<String> = BTreeSet::new();
     sweep(|_, _, _, l| {

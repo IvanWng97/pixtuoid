@@ -343,8 +343,7 @@ fn frame_epilogue(
 /// the full live scene by contract); only a projected-scene consumer like the
 /// TUI slide still calls this fn raw and owns its own eviction.
 /// The IMMUTABLE per-frame render inputs — the read-only cluster threaded
-/// through [`render_floor`] / [`FloorSession::render`] (was a 9-arg positional
-/// tail behind the mutable stores). The MUTABLE per-floor stores
+/// through [`render_floor`] / [`FloorSession::render`]. The MUTABLE per-floor stores
 /// (`fctx`/`buf`/`coffee`/`chitchat`) stay SEPARATE params on `render_floor`: a
 /// painter that composes floors (the TUI) borrows those disjointly per floor via
 /// `split_at_mut`, so they can't fold into one bundle. `buf_w`/`buf_h` fold into
@@ -397,8 +396,8 @@ pub fn render_floor(
         chitchat_state: chitchat,
         debug_walkable,
     });
-    // The epilogue the consumers used to mirror by hand — now ONE definition
-    // (carrier stamping + the door-cosmetic clamp) shared with observe().
+    // The shared epilogue (carrier stamping + the door-cosmetic clamp) — ONE
+    // definition shared with observe().
     frame_epilogue(fctx, coffee, result.new_coffee_carriers, now);
     Some(layout)
 }
@@ -457,13 +456,11 @@ impl PerOffice {
     }
 }
 
-/// The OWNED painter session: the persistent bundle every painter used to
-/// hand-roll — {[`FloorCtx`], `RgbBuffer`, [`CoffeeState`], chitchat map} plus
-/// the dual `evict_missing` protocol — hoisted behind one type. Each painter
-/// drifted on exactly that convention once: the floating window never evicted
-/// (a slow per-agent leak for the window's lifetime) and the web hero shipped
-/// without eviction at all (the loop-2 teleport, #423). One floor + one
-/// office: the single-floor painters (`floating::offscreen::OfficeRenderer`,
+/// The OWNED painter session: bundles {[`FloorCtx`], `RgbBuffer`,
+/// [`CoffeeState`], chitchat map} plus the dual `evict_missing` protocol behind
+/// one type, so a painter can't hand-roll (and silently skip) the eviction — a
+/// skipped eviction leaks per-agent state or teleports a recurring agent. One
+/// floor + one office: the single-floor painters (`floating::offscreen::OfficeRenderer`,
 /// `pixtuoid-web::Office`) own a `FloorSession`; a multi-floor painter (the
 /// TUI) composes `Vec<`[`PerFloor`]`>` + one [`PerOffice`] and drives
 /// [`render_floor`] / `draw_scene` itself.
@@ -496,8 +493,7 @@ impl FloorSession {
     /// when the size can't lay out.
     ///
     /// `scene` MUST be the full live scene — the session evicts against it,
-    /// so a painter can no longer forget the eviction (the drift class behind
-    /// the floating leak and the web loop-2 teleport). A consumer rendering
+    /// so a painter can't skip the eviction. A consumer rendering
     /// PROJECTED single-floor scenes (the TUI floor slide) stays on
     /// [`render_floor`] directly and runs the eviction against the full scene
     /// itself.
@@ -719,11 +715,10 @@ pub fn num_floors(scene: &SceneState) -> usize {
 
 /// One agent projected onto a floor by [`build_floor_scene`]: the slot — its
 /// `desk_index` still the ORIGINAL global allocation — paired with its desk in
-/// the floor's OWN local space, typed as such (`FloorLocalDeskIndex`, the #209
-/// currency). The projection used to write the floor-local offset back into
-/// `AgentSlot.desk_index` mid-flight, making that field's GLOBAL type a lie
-/// until [`project_floor_scene`] re-hosted the slot; the pair keeps the
-/// currency honest up to the re-host.
+/// the floor's OWN local space, typed as such (`FloorLocalDeskIndex`). Holding
+/// the floor-local offset in a SEPARATE `desk` field, rather than writing it
+/// back into `AgentSlot.desk_index`, keeps that field's GLOBAL type honest
+/// until [`project_floor_scene`] re-hosts the slot.
 pub struct ProjectedSlot {
     pub slot: AgentSlot,
     pub desk: FloorLocalDeskIndex,
@@ -1490,11 +1485,10 @@ mod tests {
 
     #[test]
     fn floor_session_render_owns_the_dual_eviction() {
-        // The drift classes that actually shipped: the floating painter never
-        // evicted (per-agent motion/cache/coffee leaked for the window's
-        // lifetime) and the web hero forgot eviction entirely (the loop-2
-        // teleport). FloorSession::render runs BOTH halves itself, so a
-        // painter can no longer forget either one.
+        // FloorSession::render runs BOTH halves of the dual eviction itself —
+        // the render caches (motion/pose/frame) and the coffee cup — so a
+        // painter can't skip one and leak per-agent state or teleport a
+        // recurring agent.
         let pack = crate::embedded_pack::test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);

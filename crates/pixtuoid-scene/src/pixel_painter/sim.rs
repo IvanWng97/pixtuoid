@@ -276,10 +276,11 @@ fn resolve_characters(
     let mut new_coffee_carriers: Vec<AgentId> = Vec::new();
     let mut wp_rank: HashMap<usize, usize> = HashMap::new();
     let mut waypoint_visitors: Vec<chitchat::Visitor> = Vec::new();
-    // All 3 lounge-couch seat waypoints collapse to ONE chitchat venue (keyed
-    // on the first couch's index) so the couch hosts a single group
-    // conversation like the meeting room — without overloading the
-    // meeting-only `room_id` field (which indexes `meeting_rooms`).
+    // The lounge-couch seat waypoints collapse to ONE chitchat venue (keyed on
+    // the first couch's index) so the couch hosts a single group conversation
+    // like the meeting room, without overloading the meeting-only `room_id`
+    // field (which indexes `meeting_rooms`). Pinned by
+    // multi_slot_venues_collapse_to_first_of_their_own_kind.
     // The pack's character sprite width (8 for the bundled pack, 10 for the
     // robot pack). All character poses share one width, so resolve it ONCE from
     // a reference pose and center every anchor on it — a non-8-wide pack would

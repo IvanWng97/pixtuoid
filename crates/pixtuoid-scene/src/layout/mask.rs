@@ -186,29 +186,21 @@ pub(super) fn build_walkable_mask(
     let baseboard_top = buf_h.saturating_sub(BASEBOARD_H);
     mask.mark_blocked(0, baseboard_top, buf_w, BASEBOARD_H, 0);
 
-    // Interior walls. Stardew-style fake-3D perspective:
-    //   • horizontal walls (E-W) show their FACE — WALL_THICK_H px tall so the
-    //     wall reads as having real mass/height when viewed from the north
-    //     room (clearly thicker than the edge-on vertical).
-    //   • vertical walls (N-S) are seen EDGE-ON — WALL_THICK_V px thin footprint
-    //     (the renderer draws it 3 px wide; visual-wider-than-footprint per the
-    //     top-down ground-projection rule).
-    // Wall padding is ASYMMETRIC by orientation — driven by the coarse 4×4
-    // router grid (`pathfind::cell_walkable`: a cell is walkable when ≥8 of its
-    // 16 px are open), NOT by clearance:
-    //   • HORIZONTAL (E-W) walls are WALL_THICK_H=6 px tall. 6 contiguous blocked
-    //     px already fill a routing cell, so the wall is impassable with pad=0 —
-    //     and you stand FLUSH against its south face, so any pad is pure red bloat
-    //     (a 6px wall read as 10px). pad=0.
-    //   • VERTICAL (N-S) walls are WALL_THICK_V=1 px edge-on (top-down ground
-    //     projection, invariant #6). A 1px-wide blocked strip is INVISIBLE to the
-    //     coarse grid — every straddling cell keeps ≥12/16 px walkable, so A*
-    //     routes STRAIGHT THROUGH the wall. It needs OBSTACLE_PAD_PX (→5px blocked)
-    //     to drive the wall's whole cell-column under the threshold. This is the
-    //     original design: DOOR_GAP=14 is sized for "≥10px effective gap after
-    //     [this] padding" (see rooms/walls.rs). The 1px FOOTPRINT is unchanged
-    //     (characters still stand right next to the 3px visual); the pad is a
-    //     routing-only clearance band, not a wider wall.
+    // Interior walls, Stardew-style fake-3D: horizontal (E-W) walls show their
+    // FACE (WALL_THICK_H px tall, real mass viewed from the north room); vertical
+    // (N-S) walls are seen EDGE-ON (WALL_THICK_V px thin footprint, drawn wider
+    // than it blocks per the top-down ground-projection rule, invariant #6).
+    //
+    // Wall padding is ASYMMETRIC by orientation, driven by the coarse router grid
+    // (`pathfind::cell_walkable`), NOT by clearance:
+    //   • HORIZONTAL faces are thick enough to fill a routing cell on their own,
+    //     so they're impassable at pad=0 — and you stand FLUSH against the south
+    //     face, so any pad is pure red bloat.
+    //   • VERTICAL walls are a 1px edge-on strip the coarse grid can't see, so A*
+    //     would route STRAIGHT THROUGH; OBSTACLE_PAD_PX is a routing-only
+    //     clearance band (the FOOTPRINT stays 1px — characters still stand right
+    //     next to the 3px visual), sized against DOOR_GAP in rooms/walls.rs.
+    // Pinned by pathfind::vertical_wall_is_impassable_except_through_the_door.
     for seg in room_walls {
         let (origin, size) = wall_segment_rect(seg, top_margin);
         // Vertical walls are 1px edge-on — invisible to the coarse grid without

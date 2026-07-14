@@ -529,22 +529,19 @@ fn paint_frame(
     // Procedural room fill — small pixel items that make rooms feel lived-in.
     // Ground footprint rule: walkable mask is NOT affected by these (they're
     // small items characters can walk around or over).
-    // EVERY meeting room (#555: dense room 1 used to render bare — the
-    // decor all keyed room 0).
+    // Per-room decor: EVERY meeting room, keyed by its own bounds (not room 0).
     for mr in ctx.layout.meeting_rooms.iter().map(|r| r.bounds) {
         furniture::paint_notice_board(ctx.buf, mr, ctx.theme);
 
-        // Coat rack is now a y-sorted DrawableKind::CoatRack (pushed in the
-        // drawable pass) so characters in front occlude it / behind it are
-        // occluded — was painted here in the background pass, always under
-        // every character.
+        // Coat rack is a y-sorted DrawableKind::CoatRack (pushed in the drawable
+        // pass) so characters in front occlude it and those behind are occluded.
 
         furniture::paint_doormat(ctx.buf, mr, ctx.theme);
     }
     // Soft goods (decor arc) paint FIRST: floor-level mats sit under every
     // upright pantry fixture — on a narrow pantry the entry mat's box reaches
-    // the water-cooler column, and mats-after-cooler clipped the cooler's
-    // west edge (lens-1 catch at 120x160).
+    // the water-cooler column, and mats-after-cooler would clip the cooler's
+    // west edge.
     furniture::paint_pantry_entry_mat(ctx.buf, ctx.layout, ctx.theme);
     furniture::paint_island_bar_mat(ctx.buf, ctx.layout, ctx.theme);
     if let Some(pr) = ctx.layout.pantry.map(|p| p.bounds) {

@@ -43,10 +43,6 @@ pub fn anchored_top_left(anchor: Anchor, pos: Point, w: u16, h: u16) -> Point {
     }
 }
 
-/// The y-sort key for a sprite of height `h` anchored at `pos`: its south
-/// (front) base ROW. Derived from [`anchored_top_left`] so it can NEVER drift
-/// from where the sprite actually blits (`origin.y + h - 1`). For `Center` this
-/// equals the legacy `pos.y + center_pin_south_offset(h)` (i.e. `(h-1)/2`).
 /// Half-open AABB intersection of two `(top_left, size)` rects. Lives here —
 /// the geometry-primitive module — so the placement sweep's overlap invariant
 /// and production collision checks (the whiteboard-vs-desk drop in compute.rs)
@@ -89,6 +85,10 @@ pub(super) fn overlaps_within_clearance(
     rects_overlap(probe, (grown_tl, grown))
 }
 
+/// The y-sort key for a sprite of height `h` anchored at `pos`: its south
+/// (front) base ROW. Derived from [`anchored_top_left`] so it can NEVER drift
+/// from where the sprite actually blits (`origin.y + h - 1`). For `Center` this
+/// equals the legacy `pos.y + center_pin_south_offset(h)` (i.e. `(h-1)/2`).
 pub fn z_sort_row(anchor: Anchor, pos: Point, h: u16) -> u16 {
     anchored_top_left(anchor, pos, 0, h)
         .y

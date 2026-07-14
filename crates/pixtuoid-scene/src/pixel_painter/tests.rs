@@ -778,9 +778,9 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
                 );
             }
             // The chair occupant SITS (SeatView::Front), so its settle/render
-            // pair with the SEAT anchor like the sofas — the stands-era
-            // waypoint_anchor pairing left the seated sprite hovering 5 rows
-            // above its chair (lens-1 frame-census catch, PR #561).
+            // pair with the SEAT anchor like the sofas: pairing it with the
+            // waypoint anchor instead would leave the seated sprite hovering
+            // rows above its chair.
             let s = seated_foot_cell(Furniture::MeetingChair, pos).expect("occupies_pos seat");
             assert_eq!(
                 walking_anchor(s, w),
@@ -2545,8 +2545,8 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     // seat render anchor (pos.y − SEAT_RENDER_Y_OFF) + the REAL seated
     // sprite's height − 1 must land exactly on SeatView::Front's z-key row
     // (pos.y + 2) — which sits INSIDE the 7-row chair body, so the sitter
-    // visibly occupies the cushion. The z-key tests alone passed while the
-    // sprite hovered 5 rows above the chair (lens-1 frame-census catch).
+    // visibly occupies the cushion. The z-key tests alone pass even when the
+    // sprite hovers rows above the chair, so this pins the full identity.
     use crate::layout::{Facing, Point, WaypointKind, SEAT_RENDER_Y_OFF};
     let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
     let view = SeatView::of(WaypointKind::MeetingChair, Facing::West);

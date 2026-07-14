@@ -464,13 +464,16 @@ pub(super) fn recolor_frame(frame: &Frame, pal: &Palette, base_pal: &Palette) ->
 /// toward grey, bias toward a dull blood-red, then dim. Transparent stays
 /// transparent (handled by `degraded_frame`).
 pub(super) fn degraded_pixel(c: Rgb) -> Rgb {
+    // Fraction of saturation drained toward grey — enough to read as UNWELL
+    // without going fully monochrome (the dull-red bias below still shows).
+    const SATURATION_DRAIN: f32 = 0.55;
     let lum = ((c.r as f32) * 0.30 + (c.g as f32) * 0.59 + (c.b as f32) * 0.11) as u8;
     let gray = Rgb {
         r: lum,
         g: lum,
         b: lum,
     };
-    let desat = blend_rgb(c, gray, 0.55); // drain saturation
+    let desat = blend_rgb(c, gray, SATURATION_DRAIN);
     let sick = Rgb {
         r: 150,
         g: 40,
