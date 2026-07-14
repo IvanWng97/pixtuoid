@@ -210,9 +210,8 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
 /// so `resolve_characters` still finds every pose; only `standing.sprite` is swapped.
 #[cfg(test)]
 pub(crate) fn test_wide_pack() -> Pack {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    // No TEST_ENV_LOCK: unlike test_default_pack, this builds via the pure
+    // load_pack_from_strings and never reads XDG_CONFIG_HOME.
     // The bundled 8x12 standing pose padded to 10 wide with transparent columns
     // (same palette keys). char_w = this frame's width = 10.
     const WIDE_STANDING: &str = "\

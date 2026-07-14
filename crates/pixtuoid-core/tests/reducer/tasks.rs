@@ -1876,13 +1876,13 @@ fn real_codewhale_subagent_payload_nests_the_child_under_its_workspace_parent() 
 
 // A Hook Task dispatch for an UNKNOWN id under desk exhaustion: `synthesize_hook_
 // registration` can't seat it (desks full), so `track_active_tasks` leaves an
-// un-gated `active_tasks` orphan. It is harmless + self-correcting — no ghost
-// slot is minted, and the next `tick`'s `active_tasks.retain(contains_key)` reaps
-// it. (#612 FIND-03; #613's lens-2 disproved the "orphan is load-bearing" claim:
-// gated vs un-gated is byte-identical, so this pins the OBSERVABLE contract —
-// no ghost, no panic — not the private reap.)
+// un-gated `active_tasks` orphan. It is harmless + self-correcting — no ghost slot
+// is minted, and the next `tick` stays clean. This pins the OBSERVABLE contract
+// (no ghost, no panic before OR after tick); the private-map reap itself is
+// unobservable and byte-identical (#612 FIND-03; #613's lens-2 disproved the
+// "orphan is load-bearing" claim — see the pixtuoid-core sharp edge).
 #[test]
-fn desk_exhausted_task_dispatch_leaves_no_ghost_and_tick_reaps_the_orphan() {
+fn desk_exhausted_task_dispatch_leaves_no_ghost_slot() {
     let mut scene = SceneState::new([1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     let mut r = Reducer::new();
     let seated = AgentId::from_transcript_path("/proj/seated.jsonl");
@@ -1891,8 +1891,9 @@ fn desk_exhausted_task_dispatch_leaves_no_ghost_and_tick_reaps_the_orphan() {
 
     let t0 = SystemTime::now();
     let orphan = AgentId::from_transcript_path("/proj/orphan.jsonl");
-    // Inline (not `act_start`): a `ToolDetail::Task` enum detail the &str DSL
-    // can't express, and a Hook transport so hook-wins/synthesize run.
+    // Inline `r.apply` (over `act_start(.., Some("Agent"), ..)`, which would map
+    // to Task too): spell the `ToolDetail::Task` detail explicitly + Hook transport
+    // so the hook-wins/synthesize path is unambiguous at the call site.
     r.apply(
         &mut scene,
         AgentEvent::ActivityStart {
@@ -1913,10 +1914,12 @@ fn desk_exhausted_task_dispatch_leaves_no_ghost_and_tick_reaps_the_orphan() {
         "the orphan never registered a session"
     );
 
+    // tick stays clean — it introduces no ghost for the orphan (the private
+    // active_tasks reap is unobservable from here; see the test's header note).
     r.tick(&mut scene, t0 + Duration::from_secs(2));
     assert!(
         !scene.agents.contains_key(&orphan),
-        "tick reaped the orphan without minting a ghost"
+        "tick introduced no ghost slot for the orphan"
     );
     assert_eq!(scene.agents.len(), 1, "the seated agent is untouched");
 }
