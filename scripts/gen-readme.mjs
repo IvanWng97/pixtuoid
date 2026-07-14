@@ -46,7 +46,7 @@ for (const f of features) {
   if (f.pix && !existsSync(join(root, 'docs', 'images', 'pix-icons', `${f.pix}.png`))) {
     errors.push(
       `feature "${f.name}" declares pix "${f.pix}" but docs/images/pix-icons/${f.pix}.png is missing — ` +
-        `add "${f.pix}" to gen-pix-icons.py's ICONS and run \`just gen-media\`.`
+        `add "${f.pix}" to gen-pix-icons.py's ICONS and run \`just gen-icons\`.`
     );
   }
 }
