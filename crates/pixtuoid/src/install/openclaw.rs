@@ -13,7 +13,7 @@
 //!      `plugins.load.paths += [<plugin-dir>]` and `plugins.entries.pixtuoid =
 //!      { enabled: true, hooks: { allowConversationAccess: true } }`.
 //!
-//! Capture-confirmed (2026-06-15): `openclaw plugins install --link <dir>` +
+//! Capture-confirmed: `openclaw plugins install --link <dir>` +
 //! `enable` writes EXACTLY those config keys to openclaw.json (no separate
 //! registry), so the install is a pure `ConfigLock` write — no subprocess. The
 //! `allowConversationAccess` grant un-gates `before_agent_run`/`agent_end` (the

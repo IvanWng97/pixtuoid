@@ -189,7 +189,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     }
 
     // Burn-tier effort observation: CC stamps a PERIODIC reminder attachment
-    // while ultra-class effort is active (verified live 2026-07-10: re-fires
+    // while ultra-class effort is active (re-fires
     // every ~dozen prompts for the whole ultra span) plus an EXIT marker on
     // leaving it — the wire carries no effort VALUE, so the arm synthesizes
     // each marker's own label. The `/effort` picker's chosen level is
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn ultra_effort_attachments_become_effort_observations() {
         // The periodic ultra reminder carries no wire VALUE — the arm
-        // synthesizes the marker's own label (verified live 2026-07-10).
+        // synthesizes the marker's own label.
         for (kind, label) in [
             ("ultra_effort_enter", "ultra"),
             ("ultrathink_effort", "ultrathink"),

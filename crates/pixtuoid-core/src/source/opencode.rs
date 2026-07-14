@@ -394,7 +394,7 @@ mod tests {
             .expect("at least one event")
     }
 
-    // Real shape, captured from opencode.db's event table (PONG run 2026-06-13):
+    // Real shape, captured from opencode.db's event table:
     // session.created.1 → {sessionID, info:{id, slug, projectID, directory, …}}.
     #[test]
     fn session_created_keys_on_stable_session_id() {

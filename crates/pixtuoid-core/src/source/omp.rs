@@ -7,11 +7,11 @@
 //! Sources panel shows `om·` as a no-target flag-flip row.
 //!
 //! Grounded in the upstream source @ v16.3.12 (`can1357/oh-my-pi`, commit
-//! ff1fe5f, 2026-07-09) — pin comments below cite the upstream files —
-//! and byte-real anchored against a live omp 16.4.0 install (2026-07-10):
+//! ff1fe5f) — pin comments below cite the upstream files —
+//! and byte-real anchored against a live omp 16.4.0 install:
 //! the conformance fixtures under `tests/sources/fixtures/omp/` are
 //! sanitized captures (a real `omp -p` run and a real `task`-subagent child
-//! file at 16.4.0; a real interactive ask round captured 2026-07-05), and
+//! file at 16.4.0; a real interactive ask round), and
 //! the registry row's `verified_version` is that install's `omp --version`.
 //!
 //! Wire shape (upstream `packages/coding-agent/src/session/`):

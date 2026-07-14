@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn execution_complete_surfaces_the_per_tool_model() {
-        // Byte-real shape (capture 2026-05-22): data.model rides every
+        // Byte-real shape (from a real capture): data.model rides every
         // tool.execution_complete.
         let line = r#"{"type":"tool.execution_complete","data":{"toolCallId":"t1","model":"claude-haiku-4.5","success":true},"id":"e1","timestamp":"ts","parentId":null}"#;
         let evs = decode_copilot_line(

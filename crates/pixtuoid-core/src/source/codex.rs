@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn turn_context_surfaces_model_and_effort_verbatim() {
-        // Shape sanitized from a LIVE rollout (2026-07-10); effort appears
+        // Shape sanitized from a LIVE rollout; effort appears
         // only on reasoning turns.
         let v = serde_json::json!({
             "type": "turn_context",

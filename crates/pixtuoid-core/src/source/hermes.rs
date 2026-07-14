@@ -12,7 +12,7 @@
 //! - **Hermes shell hooks** (`~/.hermes/config.yaml`, or `$HERMES_HOME/config.yaml`)
 //!   — shell commands fired on lifecycle/tool events, JSON on stdin. THIS is the
 //!   seam: connecting Hermes in the Connection panel (`s`) registers the shim under
-//!   the `hooks:` block. Wire shape verified against a real capture (2026-07-03):
+//!   the `hooks:` block. Wire shape verified against a real capture:
 //!
 //! ```json
 //! {"hook_event_name":"pre_tool_call","tool_name":"terminal",

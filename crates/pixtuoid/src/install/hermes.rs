@@ -3,7 +3,7 @@
 //! Writes the `hooks:` block into `<hermes-home>/config.yaml` (`~/.hermes/config.yaml`
 //! by default; `HERMES_HOME` relocates it verbatim — see
 //! `pixtuoid_core::source::hermes::hermes_home`). Hermes runs each hook `command` by
-//! ARGV-EXEC (quote-aware word-split, NO shell — capture-verified 2026-07-03: the
+//! ARGV-EXEC (quote-aware word-split, NO shell — capture-verified: the
 //! env-prefix form yields "command not found", and `|`/`>` arrive as literal argv), so
 //! the command is the bare `'<abs>' --source hermes` exec form on all platforms (via
 //! `hook_cmd::exec_hook_command`), NOT Codex's Unix env-prefix.

@@ -7,7 +7,7 @@
 //! the shim there. But CodeWhale's hooks DON'T hand the command a CC-shaped JSON payload
 //! on stdin — identity travels as `DEEPSEEK_*` ENV VARS (verified against
 //! `crates/tui/src/hooks.rs::HookContext::to_env_vars` @0.8.59, and a live
-//! capture 2026-06-12), and only `message_submit`/`turn_end`/`subagent_*` pass
+//! capture), and only `message_submit`/`turn_end`/`subagent_*` pass
 //! any stdin at all. So the shim runs in **env-mode** (`pixtuoid-hook --event
 //! <name>`): it reads the env vars and synthesizes this envelope, which arrives
 //! on the shared hook socket stamped `_pixtuoid_source: "codewhale"`:

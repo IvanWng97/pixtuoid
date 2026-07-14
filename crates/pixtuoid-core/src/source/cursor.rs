@@ -19,7 +19,7 @@
 //! here (the custom decoder runs FIRST, before the shared CC-shaped field
 //! requirements). Cursor's envelope reuses CC's `hook_event_name` field NAME
 //! but with **camelCase values** — wire shape verified against a real
-//! `cursor-agent -p` capture (2026-06-14):
+//! `cursor-agent -p` capture shape:
 //!
 //! ```json
 //! {"hook_event_name":"preToolUse","session_id":"c7cef226-…","cwd":"",
@@ -98,7 +98,7 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("cursor payload missing hook_event_name"))?;
     // The workspace path: the top-level `cwd` is EMPTY/absent in CLI hook
-    // payloads (capture-verified 2026-06-14) — `workspace_roots[0]` is the real
+    // payloads (from a real capture) — `workspace_roots[0]` is the real
     // one. Used for the label + the SessionStart/Identity cwd, NOT the AgentId key.
     let workspace = obj
         .get("cwd")
@@ -204,7 +204,7 @@ pub(crate) fn decode_cursor_hook_custom(v: &Value) -> Result<Option<Vec<AgentEve
 /// renders session-only (no in-CLI delegation signal).
 fn cursor_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     // Subagent dispatch: Cursor's `Task` tool carries a `subagent_type`
-    // (capture-verified 2026-06-14, e.g. "code-explorer") — the SAME stable
+    // (from a real capture, e.g. "code-explorer") — the SAME stable
     // semantic signal CC's `make_tool_detail` keys on. Show "Delegating" on the
     // parent while the children work. (The children run as INDEPENDENT sessions
     // with no parent-link in the stream — see the module doc — so this is the

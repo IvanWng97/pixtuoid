@@ -204,7 +204,7 @@ pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &T
 /// The Top-tier flame crown (`burn::BurnTier::Top`) — a 2-frame flicker above
 /// the sprite's hair, painted AFTER the character blit so it rides every pose
 /// (seated/walking/standing) through the one `paint_character_at` seam. The
-/// aesthetic is the user-ratified mockup (2026-07-10): tips capped ≤2 px above
+/// aesthetic is the user-ratified mockup: tips capped ≤2 px above
 /// the hair top so the flame never collides with the name-badge row; the
 /// asymmetric two-frame flicker is what reads as fire, not a hat. INTEGER
 /// phase division before any float (the epoch-ms-as-f32 freeze sharp edge).
