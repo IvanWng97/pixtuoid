@@ -8,7 +8,7 @@ use super::decor::GroundAlign;
 use super::{
     anchored_top_left, furniture_def, Anchor, Furniture, MeetingRoom, PlantItem, PodDecorItem,
     Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
-    PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN,
+    PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN, WAYPOINT_STAMP_PAD_PX,
 };
 use pixtuoid_core::walkable::WalkableMask;
 
@@ -328,10 +328,11 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         else {
             continue;
         };
-        // Pad=1 (not OBSTACLE_PAD_PX=2) — waypoint furniture paints in
-        // Pass 1.5 (after characters) so a visitor's body is occluded
-        // by the sprite. We don't need extra clearance around the
-        // sprite footprint; the render order handles overlap correctly.
+        // WAYPOINT_STAMP_PAD_PX (=1, not OBSTACLE_PAD_PX=2) — waypoint furniture
+        // paints in Pass 1.5 (after characters) so a visitor's body is occluded
+        // by the sprite. We don't need extra clearance around the sprite
+        // footprint; the render order handles overlap correctly. The #566
+        // couch↔door clearance gate reads the SAME const so it can't diverge.
         if matches!(wp.kind, WaypointKind::Pantry) {
             // The counter sprite (h px tall) is centered on pos, but only its
             // SOUTH base sits on the floor — the receding cabinet tops +
@@ -343,7 +344,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
             // couch-style. `stand_point` uses the FULL `visual` so the USER parks
             // clear of the whole counter, not inside the upper sprite.
             let (tl, sz) = pantry_ground_rect(wp.pos, Size { w, h });
-            mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 1);
+            mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, WAYPOINT_STAMP_PAD_PX);
             continue;
         }
         // Anchoring is the table's declared ground alignment: booth/standing-
@@ -358,7 +359,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
             def.visual,
             def.ground_x,
             def.ground_y,
-            1,
+            WAYPOINT_STAMP_PAD_PX,
         );
     }
 

@@ -658,10 +658,14 @@ fn no_furniture_ground_overlaps_a_wall() {
     assert_no_violations("wall-overlap", v);
 }
 
-/// The strongest connectivity truth: every walkable pixel is reachable from the
-/// door threshold by a 4-connected flood, and the threshold itself is walkable.
-/// Extracted so BOTH the discrete `SWEEP_SIZES` pass and the narrow-band
-/// step-1 boundary scan assert the same thing.
+/// The strongest connectivity truth: the door threshold is walkable AND every
+/// walkable pixel is reachable from it (4-connected). Reuses the PRODUCTION
+/// `compute::unreachable_walkable_cells` — the SAME flood the #566 connectivity
+/// guard runs — so the guard and its strongest test can't drift (the two-copies
+/// class the module doc + `ground_rect` warn about). The threshold-walkable
+/// assert is SEPARATE + first: `unreachable_walkable_cells` returns empty on a
+/// BLOCKED seed (a no-op failsafe), so without it a sealed CLASS-A threshold
+/// would pass vacuously.
 fn assert_walkable_connected(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     let Some(start) = l.door_threshold else {
         panic!("{w}x{h} seed {seed}: layout has no door threshold");
@@ -670,39 +674,13 @@ fn assert_walkable_connected(w: u16, h: u16, seed: u64, l: &SceneLayout) {
         l.walkable.is_walkable(start.x, start.y),
         "{w}x{h} seed {seed}: door threshold {start:?} is not walkable"
     );
-    let total: usize = (0..l.buf_h)
-        .map(|y| {
-            (0..l.buf_w)
-                .filter(|&x| l.walkable.is_walkable(x, y))
-                .count()
-        })
-        .sum();
-    let mut seen = vec![false; l.buf_w as usize * l.buf_h as usize];
-    let idx = |x: u16, y: u16| y as usize * l.buf_w as usize + x as usize;
-    let mut stack = vec![start];
-    seen[idx(start.x, start.y)] = true;
-    let mut reached = 0usize;
-    while let Some(p) = stack.pop() {
-        reached += 1;
-        let (px, py) = (p.x as i32, p.y as i32);
-        for (dx, dy) in [(0, -1), (0, 1), (-1, 0), (1, 0)] {
-            let (nx, ny) = (px + dx, py + dy);
-            if nx < 0 || ny < 0 || nx >= l.buf_w as i32 || ny >= l.buf_h as i32 {
-                continue;
-            }
-            let (nx, ny) = (nx as u16, ny as u16);
-            if !seen[idx(nx, ny)] && l.walkable.is_walkable(nx, ny) {
-                seen[idx(nx, ny)] = true;
-                stack.push(Point { x: nx, y: ny });
-            }
-        }
-    }
-    assert_eq!(
-        reached,
-        total,
-        "{w}x{h} seed {seed}: {} of {total} walkable px unreachable from the door \
-         (a sealed pocket)",
-        total - reached
+    let pocket = super::compute::unreachable_walkable_cells(&l.walkable, start);
+    assert!(
+        pocket.is_empty(),
+        "{w}x{h} seed {seed}: {} walkable px unreachable from the door (a sealed \
+         pocket), e.g. {:?}",
+        pocket.len(),
+        pocket.first()
     );
 }
 
@@ -717,8 +695,11 @@ fn walkable_is_one_connected_region() {
 /// grid structurally skips (#566). A step-1 scan here can't hide a sealed pocket
 /// at a width the grid happens to miss (door_threshold sealed by the lounge couch
 /// at a band split to exactly 30; the appliance strip sealed by a scatter plant
-/// on the sole inter-pod drain at a single-pod-column band).
-const NARROW_BAND: std::ops::RangeInclusive<u16> = 32..=64;
+/// on the sole inter-pod drain at a single-pod-column band). Upper bound 76 (not
+/// 64) covers the FULL single-pod-column window: the desk grid stays one column
+/// through buf_w≈70 and only splits to two (two drains, robust) at ≈71, so 65-76
+/// must be swept too — the discrete grid's nearest points are 64 and 96.
+const NARROW_BAND: std::ops::RangeInclusive<u16> = 32..=76;
 
 #[test]
 fn narrow_band_connectivity_boundary_scan() {
@@ -727,7 +708,7 @@ fn narrow_band_connectivity_boundary_scan() {
     // shipped silently before #566. Heights span the tall floors where the
     // aisle-seal manifests; all 12 seeds reach every FloorVariant.
     for w in NARROW_BAND {
-        for &h in &[80u16, 120, 160] {
+        for &h in &[80u16, 100, 120, 160] {
             for seed in SWEEP_SEEDS {
                 if let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) {
                     assert_walkable_connected(w, h, seed, &l);
@@ -762,15 +743,19 @@ fn appliance_strip_not_sealed_at_a_single_pod_band() {
 
 #[test]
 fn couch_survives_a_narrow_band_that_clears_the_door() {
-    // Over-drop guard for the CLASS A gate: an over-conservative couch-east-edge
-    // estimate would silently vanish the couch at widths that DO clear the door.
-    // 48x160 seed 0 clears — the couch must stay (the boundary scan can't catch
-    // an over-drop; dropping the couch only IMPROVES connectivity).
-    let l = SceneLayout::compute_with_seed(48, 160, None, 0).expect("48x160 lays out");
-    assert!(
-        l.couch_sprite_center.is_some(),
-        "the lounge couch must survive a band wide enough to clear the door threshold"
-    );
+    // Over-drop guard for the CLASS A gate (the boundary scan can't catch an
+    // over-drop — dropping the couch only IMPROVES connectivity). 40x160 seed 1
+    // is the KNIFE-EDGE: door_threshold.x == couch_x+11 (the real east edge), so
+    // the couch clears by exactly 1 px — this pins couch_east_ground on the seat
+    // pad (WAYPOINT_STAMP_PAD_PX=1), not OBSTACLE_PAD_PX=2 (which over-dropped it).
+    // 48x160 seed 0 is a comfortable clearer.
+    for &(w, h, seed) in &[(40u16, 160u16, 1u64), (48, 160, 0)] {
+        let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
+        assert!(
+            l.couch_sprite_center.is_some(),
+            "{w}x{h} seed {seed}: the lounge couch must survive a band that clears the door"
+        );
+    }
 }
 
 #[test]

@@ -352,24 +352,24 @@ pub(super) fn compute_with_seed(
         x: couch_x,
         y: couch_y,
     } = couch_pos(&cubicle_band, top_margin);
-    // The whole lounge vignette (couch + floor lamp + side table) is one
-    // authored cluster ~23 px wide; on a band narrower than this floor the
-    // padded couch blocked the door threshold itself (placement-sweep catch).
-    // Below the gate the lounge degrades away entirely — the
-    // `couch_sprite_center: None` case the field always documented.
-    // 30 = the vignette's blocked span (side-table west edge couch_x−13 →
-    // lamp east edge couch_x+10) + OBSTACLE_PAD_PX each side + walk clearance.
+    // The whole lounge vignette (couch + floor lamp + side table) is one authored
+    // cluster ~23 px wide; below this WEST-side fit the lounge degrades away
+    // entirely — the `couch_sprite_center: None` case the field always documented.
+    // 30 = the vignette's blocked span (side-table west edge couch_x−13 → lamp
+    // east edge couch_x+10) + OBSTACLE_PAD_PX each side + walk clearance. (The
+    // EAST-side door-threshold seal at band.width==30 is a SEPARATE mechanism —
+    // see `couch_clears_door` below.)
     const LOUNGE_MIN_BAND_W: u16 = 30;
-    // EAST-side twin of the width gate (#566): the east couch seat's padded
-    // ground (couch_x + max SEAT_DX + Couch half-footprint + OBSTACLE_PAD_PX)
-    // must stay strictly WEST of door_threshold.x, else the couch seals the
-    // spawn threshold's own column (sealed at band.width==30 for buf_w with a
-    // band split to exactly 30). Derived from the SAME geometry the mask stamps
-    // — no hardcoded span. Skipped when there's no door.
+    // EAST-side twin of the width gate (#566): the east couch seat's padded ground
+    // must stay at-or-west of door_threshold.x, else the couch seals the spawn
+    // threshold's own column (sealed at band.width==30 for a band split to exactly
+    // 30). Uses WAYPOINT_STAMP_PAD_PX (=1) — the pad the mask's SEAT stamp uses,
+    // NOT the OBSTACLE_PAD_PX (=2) routing pad; derived from the SAME geometry the
+    // mask stamps, no hardcoded span. Skipped when there's no door.
     let couch_east_ground = couch_x
         + SEAT_DX[SEAT_DX.len() - 1] as u16
         + furniture_def(Furniture::Couch).footprint.map_or(0, |f| f.w) / 2
-        + OBSTACLE_PAD_PX;
+        + WAYPOINT_STAMP_PAD_PX;
     // `couch_east_ground` is the EXCLUSIVE east edge (first walkable column east
     // of the pad), so the couch clears iff it is at-or-west of door_threshold.x.
     let couch_clears_door = door_threshold.is_none_or(|dt| couch_east_ground <= dt.x);
@@ -587,6 +587,11 @@ pub(super) fn compute_with_seed(
     // sealing the appliance strip off from the door. A decorative plant may NEVER
     // disconnect the office — if the mask has a pocket, drop the aisle-resident
     // plants and rebuild (the boundary-scan test gates any residual). Bounded.
+    // The flood runs on EVERY compute (not gated to narrow bands): the check IS
+    // the guard — a generic net for ANY future sealing decor, not just this class
+    // — and compute is resize/floor-change-gated (not per-frame), sub-ms even at
+    // the hero ceiling, so the O(w·h) cost on an obviously-connected wide floor is
+    // an accepted trade for never shipping a pocket.
     if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
         // The seal-causer is a scatter plant that `settle_plant` RELOCATED off its
         // authored corridor-edge row (aisle.y − 4) DOWN onto an obstacle's row —
@@ -1024,7 +1029,7 @@ fn overlaps_a_desk_ground(r: (Point, Size), home_desks: &[Point]) -> bool {
 /// falsely condemning every cell). The #566 connectivity guard's pixel truth —
 /// the same BFS `walkable_is_one_connected_region` asserts, run inline so a decor
 /// piece can be dropped before the layout ships instead of only red-flagged.
-fn unreachable_walkable_cells(mask: &WalkableMask, seed: Point) -> Vec<Point> {
+pub(super) fn unreachable_walkable_cells(mask: &WalkableMask, seed: Point) -> Vec<Point> {
     let (w, h) = (mask.width(), mask.height());
     if !mask.is_walkable(seed.x, seed.y) {
         return Vec::new();

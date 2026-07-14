@@ -195,6 +195,14 @@ pub(crate) fn pct(v: u16, n: u16) -> u16 {
 /// furniture rather than scraping along its edge.
 pub const OBSTACLE_PAD_PX: u16 = 2;
 
+/// The SMALLER mask pad the waypoint (seat/appliance) stamp uses — a walkable
+/// seat/venue sits IN the open floor and only needs a 1px cushion, not the full
+/// `OBSTACLE_PAD_PX` routing buffer. THE single source for that pad, read by
+/// `mask.rs`'s waypoint stamp AND the #566 couch↔door clearance gate
+/// (`compute.rs`), so the gate can never assume a different pad than the mask
+/// actually stamps.
+pub(super) const WAYPOINT_STAMP_PAD_PX: u16 = 1;
+
 /// The north wall+window band's visual bottom sits this many px ABOVE
 /// `top_margin`; the rows in between (`[top_margin - this, top_margin)`) render
 /// as carpet apron, not wall. The mask therefore blocks only down to the band
