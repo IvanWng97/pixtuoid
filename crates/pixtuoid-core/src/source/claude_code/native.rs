@@ -50,8 +50,12 @@ impl ClaudeCodeSource {
         }
         #[cfg(unix)]
         {
+            // XDG spec: absolute-only. Empty → `/pixtuoid.sock` (fatal bind); relative →
+            // shim/daemon cwd mis-rendezvous → treated as unset. Parity with paths.rs.
             if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-                return PathBuf::from(format!("{dir}/pixtuoid.sock"));
+                if !dir.trim().is_empty() && std::path::Path::new(&dir).is_absolute() {
+                    return PathBuf::from(format!("{dir}/pixtuoid.sock"));
+                }
             }
             // No XDG_RUNTIME_DIR (macOS, bare Linux): a per-user SUBDIR the bind
             // creates 0700-owned-by-us (`hook::unix::ensure_owned_socket_dir`),

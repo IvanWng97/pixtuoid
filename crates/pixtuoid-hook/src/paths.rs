@@ -18,8 +18,12 @@ pub(crate) fn default_socket_path() -> String {
     }
     #[cfg(unix)]
     {
+        // XDG spec: absolute-only. Empty → `/pixtuoid.sock` (fatal bind); relative →
+        // shim/daemon cwd mis-rendezvous. Non-absolute is invalid → treated as unset.
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-            return format!("{dir}/pixtuoid.sock");
+            if !dir.trim().is_empty() && std::path::Path::new(&dir).is_absolute() {
+                return format!("{dir}/pixtuoid.sock");
+            }
         }
         // No XDG_RUNTIME_DIR (macOS, bare Linux): the socket lives in a per-user
         // subdir the daemon creates 0700-owned-by-us, NOT a flat, world-writable-

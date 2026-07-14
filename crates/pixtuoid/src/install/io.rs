@@ -211,12 +211,16 @@ pub(crate) fn lock_config(path: &Path) -> Result<ConfigLock> {
         std::fs::create_dir_all(parent)?;
     }
     let lock_path = sibling(&target, "lock");
-    let file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)?;
+    let mut opts = OpenOptions::new();
+    opts.create(true).read(true).write(true).truncate(false);
+    // Parity with the hook socket-lock (hook/unix.rs): a symlink pre-planted at
+    // `<target>.lock` must fail the open, not make us flock an arbitrary file.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = opts.open(&lock_path)?;
     file.try_lock()
         .map_err(|e| anyhow!("could not lock {}: {e}", lock_path.display()))?;
     Ok(ConfigLock { target, file })
@@ -439,6 +443,24 @@ mod tests {
         rename_with_retry(&from, &to).unwrap();
         assert!(!from.exists());
         assert_eq!(std::fs::read_to_string(&to).unwrap(), "hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_config_refuses_a_symlinked_lock_file() {
+        // An attacker who can write the config DIR pre-plants `<target>.lock` as a
+        // symlink to a decoy; O_NOFOLLOW must refuse it, not flock the decoy.
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("settings.json");
+        std::fs::write(&target, "{}").unwrap();
+        let lock_path = sibling(&target, "lock");
+        let decoy = dir.path().join("decoy");
+        std::fs::write(&decoy, "x").unwrap();
+        std::os::unix::fs::symlink(&decoy, &lock_path).unwrap();
+        assert!(
+            lock_config(&target).is_err(),
+            "a symlinked <target>.lock must be refused, not followed"
+        );
     }
 
     #[test]

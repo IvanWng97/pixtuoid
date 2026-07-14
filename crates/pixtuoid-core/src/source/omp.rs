@@ -79,7 +79,7 @@ pub const SOURCE_NAME: &str = "omp";
 /// relocates to `~/.omp/profiles/<name>/agent` — both deliberately unmirrored
 /// (opt-in minority setups; the watcher just sees an empty default dir).
 pub fn omp_agent_dir() -> PathBuf {
-    match std::env::var_os("PI_CODING_AGENT_DIR").filter(|v| !v.is_empty()) {
+    match crate::platform::nonempty(std::env::var("PI_CODING_AGENT_DIR").ok()) {
         Some(v) => PathBuf::from(v),
         None => PathBuf::from(crate::platform::user_home())
             .join(".omp")
@@ -864,13 +864,16 @@ mod tests {
         std::env::set_var("PI_CODING_AGENT_DIR", "/custom/agent");
         assert_eq!(omp_agent_dir(), PathBuf::from("/custom/agent"));
 
-        // Set-but-empty is treated as unset.
-        std::env::set_var("PI_CODING_AGENT_DIR", "");
-        let dflt = omp_agent_dir();
-        assert!(
-            dflt.ends_with(Path::new(".omp/agent")),
-            "empty override → ~/.omp/agent fallback, got {dflt:?}"
-        );
+        // Set-but-empty OR whitespace-only is treated as unset (trim-based, the
+        // #172 policy — a `"  "` value must not resolve the dir to a relative "  ").
+        for blank in ["", "   "] {
+            std::env::set_var("PI_CODING_AGENT_DIR", blank);
+            let dflt = omp_agent_dir();
+            assert!(
+                dflt.ends_with(Path::new(".omp/agent")),
+                "blank override {blank:?} → ~/.omp/agent fallback, got {dflt:?}"
+            );
+        }
 
         std::env::remove_var("PI_CODING_AGENT_DIR");
         assert!(omp_agent_dir().ends_with(Path::new(".omp/agent")));
