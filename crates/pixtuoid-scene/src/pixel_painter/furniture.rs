@@ -1,5 +1,6 @@
 //! Standalone furniture paint helpers — meeting table, area rug,
-//! side table, kitchen island, and the procedural
+//! side table, kitchen island, fish tank, meeting chair, the corridor
+//! appliances (vending machine, printer, coat rack), and the procedural
 //! room-fill decor (notice board, doormat, water cooler, trash bin).
 //!
 //! Extracted from `mod.rs` to keep the orchestrator focused on

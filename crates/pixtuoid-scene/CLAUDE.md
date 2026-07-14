@@ -212,7 +212,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
                     the per-pose anchor fns take `sprite_w` — the pack's character width,
                     resolved ONCE per frame [8 bundled / 10 robot] — so a non-8-wide pack centers correctly),
                     furniture.rs (meeting table, area rug + entry/bar mats, side table,
-                                  kitchen island, fish tank, meeting chair),
+                                  kitchen island, fish tank, meeting chair, corridor
+                                  appliances: vending machine/printer/coat rack),
                     glass.rs (frosted-glass room-divider walls: consts + stitch + paint_glass_wall_h/v),
                     seat.rs (SeatView orientation single-source + seat_sprite + settle_seat_view + paint_character_at),
                     debug_overlay.rs (#[cfg(debug_assertions)] mask/approach/route overlay — the `w` toggle),
