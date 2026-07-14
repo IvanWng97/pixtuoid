@@ -15,7 +15,6 @@
 
 mod script;
 
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use wasm_bindgen::prelude::*;
@@ -31,7 +30,7 @@ use crate::script::{hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, 
 
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession, FrameInputs};
-use pixtuoid_scene::layout::{Layout, Size, CHARACTER_SPRITE_W};
+use pixtuoid_scene::layout::{Size, CHARACTER_SPRITE_W};
 use pixtuoid_scene::theme::{Theme, ALL_THEMES};
 
 /// A scheduled one-shot event for a visitor hire — an absolute-time
@@ -170,10 +169,6 @@ pub struct Office {
     /// Applied each `step` (see the force_weather invariant) so two Offices sharing
     /// the one wasm module never fight over the thread-local override.
     weather_override: Option<String>,
-    /// The layout the LAST `render` computed — captured so `overlay_json` builds
-    /// the name-badge overlay against the SAME geometry the sprite pass used
-    /// (labels align 1:1 with the painted characters). `None` before the first step.
-    last_layout: Option<Arc<Layout>>,
 }
 
 #[wasm_bindgen]
@@ -204,7 +199,6 @@ impl Office {
             last_now: None,
             caps_size: None,
             weather_override: None,
-            last_layout: None,
         })
     }
 
@@ -326,21 +320,10 @@ impl Office {
         };
         let theme = self.theme;
 
-        // Labels — built against the LAST render's layout + this session's route
-        // state (disjoint field borrows of `self`), so they align 1:1 with the sprites.
-        let labels = match self.last_layout.as_deref() {
-            Some(layout) => {
-                let mut rctx = self.session.floor.ctx.route_ctx();
-                pixtuoid_scene::overlay::build_overlay(&self.scene, layout, now, &mut rctx, None)
-            }
-            None => Vec::new(),
-        };
-
-        // Board — the SAME `pixtuoid_scene::board` model the TUI + floating use.
-        let counts = pixtuoid_scene::board::scene_stats(&self.scene);
-        let gateway = pixtuoid_scene::board::gateway_rollup(self.scene.daemons());
-        let uptime = pixtuoid_scene::board::scene_uptime_secs(&self.scene, now);
-        let board = pixtuoid_scene::board::build_board(counts, uptime, None, gateway);
+        // Labels + board — both delegated to the session, which owns the layout
+        // the sprite pass used + the route state (shared with the floating painter).
+        let labels = self.session.overlay(&self.scene, now, None);
+        let board = self.session.board(&self.scene, now, None);
 
         let mut out = String::from("{\"labels\":[");
         for (i, el) in labels.iter().enumerate() {
@@ -480,7 +463,7 @@ impl Office {
             floor_seed: self.seed,
             ..FloorMeta::for_floor(0, 1)
         };
-        self.last_layout = self.session.render(FrameInputs {
+        self.session.render(FrameInputs {
             scene: &self.scene,
             pack: &self.pack,
             theme: self.theme,

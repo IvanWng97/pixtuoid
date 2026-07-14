@@ -306,8 +306,10 @@ fn frame_prologue(
 
 /// The shared per-frame EPILOGUE: stamp this frame's new coffee carriers and
 /// refresh the door-cosmetic clamp. Same ONE-definition rationale as
-/// [`frame_prologue`].
-fn frame_epilogue(
+/// [`frame_prologue`] — `pub` so the TUI's `draw_scene` (on the raw
+/// `render_to_rgb_buffer` path, which can't call `render_floor`/`observe`) runs
+/// THIS seam instead of re-inlining the two operations (the #423 drift class).
+pub fn frame_epilogue(
     fctx: &mut FloorCtx,
     coffee: &mut CoffeeState,
     carriers: impl IntoIterator<Item = pixtuoid_core::AgentId>,
@@ -472,6 +474,10 @@ impl PerOffice {
 pub struct FloorSession {
     pub floor: PerFloor,
     pub office: PerOffice,
+    /// The layout the last `render` laid out — [`FloorSession::overlay`] builds
+    /// labels against IT (not a caller-supplied one), so a painter can't pass a
+    /// layout that disagrees with the sprite pass.
+    last_layout: Option<Arc<crate::layout::Layout>>,
 }
 
 impl FloorSession {
@@ -479,6 +485,7 @@ impl FloorSession {
         Self {
             floor: PerFloor::new(),
             office: PerOffice::default(),
+            last_layout: None,
         }
     }
 
@@ -504,12 +511,49 @@ impl FloorSession {
     /// itself.
     pub fn render(&mut self, inputs: FrameInputs) -> Option<Arc<crate::layout::Layout>> {
         self.evict_missing(inputs.scene);
-        render_floor(
+        let layout = render_floor(
             &mut self.floor.ctx,
             &mut self.floor.buf,
             &mut self.office.coffee,
             &mut self.office.chitchat,
             inputs,
+        );
+        self.last_layout = layout.clone();
+        layout
+    }
+
+    /// Agent labels for the LAST rendered frame, built against THIS session's
+    /// layout + route state — a painter can't hand a mismatched layout/route_ctx
+    /// pair (the coherence the seam otherwise proves by hand, per painter). Empty
+    /// before the first `render`. `hovered` highlights one agent; the single-floor
+    /// painters pass `None`.
+    pub fn overlay(
+        &mut self,
+        scene: &SceneState,
+        now: SystemTime,
+        hovered: Option<AgentId>,
+    ) -> Vec<crate::overlay::LabelElement> {
+        let Some(layout) = self.last_layout.as_deref() else {
+            return Vec::new();
+        };
+        let mut rctx = self.floor.ctx.route_ctx();
+        crate::overlay::build_overlay(scene, layout, now, &mut rctx, hovered)
+    }
+
+    /// The neon wall-board model for `scene` — the same `board` feeders the TUI
+    /// footer reads, single-sourced. `floor` is `(current, total)`, or `None` for
+    /// a single-floor office (no cross-floor breadcrumb).
+    pub fn board(
+        &self,
+        scene: &SceneState,
+        now: SystemTime,
+        floor: Option<(usize, usize)>,
+    ) -> crate::board::BoardModel {
+        crate::board::build_board(
+            crate::board::scene_stats(scene),
+            crate::board::scene_uptime_secs(scene, now),
+            floor,
+            crate::board::gateway_rollup(scene.daemons()),
         )
     }
 

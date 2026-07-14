@@ -772,11 +772,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let new_coffee_carriers = std::mem::take(&mut draw_ctx.new_coffee_carriers);
         // drop draw_ctx here so we can re-borrow the floors freely.
         drop(draw_ctx);
-        // Recompute door_anim_max_ms from the motion map for the NEXT frame.
-        self.floors[self.current_floor]
-            .ctx
-            .recompute_door_anim_max_ms(now);
-        self.office.coffee.record(new_coffee_carriers, now);
+        // The shared after-frame seam (coffee stamp + door-anim clamp) — the same
+        // frame_epilogue render_floor/observe run, not a hand-copy (#423).
+        pixtuoid_scene::floor::frame_epilogue(
+            &mut self.floors[self.current_floor].ctx,
+            &mut self.office.coffee,
+            new_coffee_carriers,
+            now,
+        );
         if let Ok(ref layout_opt) = result {
             self.cached_layout = layout_opt.clone();
             // Ok(None) = draw_scene painted footer-only (compute failed at this

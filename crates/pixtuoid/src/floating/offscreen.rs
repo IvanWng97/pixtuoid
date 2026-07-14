@@ -11,14 +11,13 @@
 //! per-frame caches + persistent office state — coffee cups, group chitchat — plus the
 //! dual eviction) across frames so motion stays continuous.
 
-use std::sync::Arc;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
 use pixtuoid_core::state::SceneState;
 
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs};
-use pixtuoid_scene::layout::{Layout, Size};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
 
 /// Pack an `Rgb` into the softbuffer word format, `0x00RRGGBB` (XRGB) — the ONE
@@ -39,17 +38,12 @@ pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
 /// continuous (no walk-flash).
 pub struct OfficeRenderer {
     session: FloorSession,
-    /// The layout the LAST `render` computed — captured so `labels` can build the
-    /// name-badge overlay against the SAME geometry the sprite pass used (labels
-    /// align 1:1 with the painted characters). `None` before the first render.
-    last_layout: Option<Arc<Layout>>,
 }
 
 impl OfficeRenderer {
     pub fn new() -> Self {
         Self {
             session: FloorSession::new(),
-            last_layout: None,
         }
     }
 
@@ -75,12 +69,11 @@ impl OfficeRenderer {
         // per-agent eviction (this painter historically never evicted — a
         // slow per-agent leak, invisible in pixels because gone agents aren't
         // painted — now structural: render() runs it), then buffer sizing,
-        // layout, the pixel pass, and the coffee/door-anim epilogue. The
-        // returned layout is captured for `labels` — the name-badge overlay
-        // must be built against the SAME geometry the sprite pass used.
-        // active_pet stays None: click-to-pet needs window pointer
-        // hit-testing (deferred); the WANDERING floor pet is wired.
-        self.last_layout = self.session.render(FrameInputs {
+        // layout, the pixel pass, the coffee/door-anim epilogue, AND capturing
+        // the layout so `labels` builds the overlay against the SAME geometry
+        // the sprite pass used. active_pet stays None: click-to-pet needs window
+        // pointer hit-testing (deferred); the WANDERING floor pet is wired.
+        self.session.render(FrameInputs {
             scene,
             pack,
             theme,
@@ -102,22 +95,14 @@ impl OfficeRenderer {
         scene: &SceneState,
         now: SystemTime,
     ) -> Vec<pixtuoid_scene::overlay::LabelElement> {
-        let Some(layout) = self.last_layout.as_deref() else {
-            return Vec::new();
-        };
-        let mut rctx = self.session.floor.ctx.route_ctx();
-        pixtuoid_scene::overlay::build_overlay(scene, layout, now, &mut rctx, None)
+        // Floating has no agent-hover yet → hovered = None.
+        self.session.overlay(scene, now, None)
     }
 
-    /// Build the neon wall-board model for the current scene — the SAME
-    /// backend-agnostic `pixtuoid_scene::board` model the TUI footer/board and the
-    /// wasm hero use. Floating shows one floor at a time, so `floor = None` (no
-    /// cross-floor breadcrumb); uptime is `board::scene_uptime_secs`.
+    /// The neon wall-board model for the current scene — one floor, so `floor =
+    /// None`. Delegates to `FloorSession::board` (shared with the web painter).
     pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
-        let counts = pixtuoid_scene::board::scene_stats(scene);
-        let gateway = pixtuoid_scene::board::gateway_rollup(scene.daemons());
-        let uptime = pixtuoid_scene::board::scene_uptime_secs(scene, now);
-        pixtuoid_scene::board::build_board(counts, uptime, None, gateway)
+        self.session.board(scene, now, None)
     }
 }
 
