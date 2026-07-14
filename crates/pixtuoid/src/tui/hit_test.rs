@@ -61,7 +61,13 @@ pub(crate) fn hit_test_agent(
 /// multi-floor `desk_index` was exactly the global/local confusion the
 /// `GlobalDeskIndex` newtype exists to prevent: while viewing floor ≥ 1 it
 /// could pin an invisible agent from another floor.)
-pub fn hit_test_from_tui(scene: &SceneState, layout: &Layout, mx: u16, my: u16) -> Option<AgentId> {
+#[cfg(test)]
+pub(crate) fn hit_test_from_tui(
+    scene: &SceneState,
+    layout: &Layout,
+    mx: u16,
+    my: u16,
+) -> Option<AgentId> {
     const SPRITE_W: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_W;
     const SPRITE_H_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS;
     for agent in scene.agents.values() {

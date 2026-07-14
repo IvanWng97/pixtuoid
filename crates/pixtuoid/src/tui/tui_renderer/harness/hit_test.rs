@@ -251,7 +251,7 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
     let desk = r.cached_layout().expect("layout").home_desks[0];
     let (dx, dy) = (desk.x + 2, desk.y.saturating_sub(4) / 2 + 1);
     // Seated: click and hover hit-tests AGREE at the desk box (no seated regression).
-    assert_eq!(r.hit_test_agent_at(&scene, dx, dy), Some(id));
+    assert_eq!(r.hit_test_agent_at(&scene, t0(), dx, dy), Some(id));
     let layout = r.cached_layout().unwrap();
     assert_eq!(
         crate::tui::hit_test::hit_test_from_tui(&scene, layout, dx, dy),
@@ -262,15 +262,15 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
     s.exiting_at = Some(t0());
     let scene = scene_with(vec![s], 16);
     // Mid-exit-walk (EXIT_GRACE_WINDOW is 4.5s) — off the desk box, not yet GC'd.
-    r.render(&scene, &pack(), t0() + Duration::from_millis(1500))
-        .unwrap();
+    let walk_now = t0() + Duration::from_millis(1500);
+    r.render(&scene, &pack(), walk_now).unwrap();
 
     // The click hit-test finds the LIVE sprite cell; scan for it (idempotent per
-    // the cached frame `now`, so repeated calls are stable).
+    // `now`, so repeated calls are stable).
     let mut live = None;
     'scan: for my in 0..80u16 {
         for mx in 0..192u16 {
-            if r.hit_test_agent_at(&scene, mx, my) == Some(id) {
+            if r.hit_test_agent_at(&scene, walk_now, mx, my) == Some(id) {
                 live = Some((mx, my));
                 break 'scan;
             }

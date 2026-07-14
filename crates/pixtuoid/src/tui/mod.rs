@@ -9,7 +9,7 @@ pub mod widgets;
 
 use std::io::{stdout, Stdout};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use crossterm::event::{
@@ -144,12 +144,13 @@ fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static
     focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     col: u16,
     row: u16,
+    now: SystemTime,
 ) {
     let snap = scene_rx.borrow().clone();
     // Project to the VISIBLE floor first — hit_test_agent_at → character_anchor
     // reads floor-local desk indices; the click now follows the LIVE sprite (like hover).
     let floor_scene = floor::project_floor_scene(&snap, renderer.current_floor());
-    let hit = renderer.hit_test_agent_at(&floor_scene, col, row);
+    let hit = renderer.hit_test_agent_at(&floor_scene, now, col, row);
     if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
         crate::focus::focus_slot(slot, focus_roots);
     }
@@ -996,6 +997,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                         &focus_roots,
                                         m.column,
                                         m.row,
+                                        now,
                                     );
                                 }
                             } else {
@@ -1005,6 +1007,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     &focus_roots,
                                     m.column,
                                     m.row,
+                                    now,
                                 );
                             }
                         }
