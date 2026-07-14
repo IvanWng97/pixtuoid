@@ -1026,12 +1026,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
 #[cfg(test)]
 mod runtime_model {
-    // Empirically pins WHY #603 removed the panel/onboarding `block_in_place`
-    // wraps: on the `block_on` thread of a multi-thread runtime (the exact shape
-    // `driver.rs` builds, where `run_tui` is the awaited root future),
-    // `block_in_place` is INERT — it runs the closure inline with zero scheduling
-    // effect, and the spawned reducer/sources analogs make progress regardless of
-    // the loop thread blocking. Deterministic: worker_threads(1) + a std channel
+    // Pins WHY #603 removed the wraps — see the tui/CLAUDE.md `block_on` sharp
+    // edge for the full model. Deterministic: worker_threads(1) + a std channel
     // happens-before, no sleeps.
     #[test]
     fn block_in_place_is_inert_on_the_block_on_thread() {
