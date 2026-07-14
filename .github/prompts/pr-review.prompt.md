@@ -145,7 +145,7 @@ given change/tree, say so, don't skip it.
   diff that a reader could infer from the code is the smell. Even a LEGITIMATE WHY
   must be right-sized + right-placed: **fn-body comments ≤2 lines**, a longer
   rationale relocated onto the DECLARATION it explains (a `const`/fn/module doc
-  carries a ≈25-word WHY fine) or a `CLAUDE.md` sharp edge, and any present-tense
+  can carry a ≈25-word rationale) or a `CLAUDE.md` sharp edge, and any present-tense
   code-state assertion moved into a test — the comment keeps only `pinned by
   <test>`. A ≥3-line `//` run wedged inside a fn body is the flag); manifest-bridge (a
   `site/src/*.json` / generated schema vs its Rust source of truth).
