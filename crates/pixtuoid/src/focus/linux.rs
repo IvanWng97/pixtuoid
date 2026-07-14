@@ -14,6 +14,32 @@
 
 use super::ProcessTable;
 
+// The two IPC-compositor env markers — the SINGLE source `detect_channel`
+// (below) and doctor's `activation_backend` read, so an upstream rename can't
+// drift one of the three copies.
+pub(crate) const SWAY_ENV: &str = "SWAYSOCK";
+pub(crate) const HYPRLAND_ENV: &str = "HYPRLAND_INSTANCE_SIGNATURE";
+
+/// Which pid-addressable focus channel this environment implies. Read ONCE so
+/// `focusable` and `activate_os` can't diverge — a 4th compositor added to one
+/// but missed in the other would report a pid focusable, then silently no-op on
+/// activate.
+enum LinuxFocusChannel {
+    Sway,
+    Hyprland,
+    X11,
+}
+
+fn detect_channel() -> LinuxFocusChannel {
+    if std::env::var_os(SWAY_ENV).is_some() {
+        LinuxFocusChannel::Sway
+    } else if std::env::var_os(HYPRLAND_ENV).is_some() {
+        LinuxFocusChannel::Hyprland
+    } else {
+        LinuxFocusChannel::X11
+    }
+}
+
 pub(crate) struct OsProcessTable;
 
 impl ProcessTable for OsProcessTable {
@@ -26,13 +52,11 @@ impl ProcessTable for OsProcessTable {
     }
 
     fn focusable(&self, pid: i32) -> bool {
-        if std::env::var_os("SWAYSOCK").is_some() {
-            return tree_lists_pid("swaymsg", &["-t", "get_tree"], pid);
+        match detect_channel() {
+            LinuxFocusChannel::Sway => tree_lists_pid("swaymsg", &["-t", "get_tree"], pid),
+            LinuxFocusChannel::Hyprland => tree_lists_pid("hyprctl", &["clients", "-j"], pid),
+            LinuxFocusChannel::X11 => x11_window_of(pid).is_some(),
         }
-        if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
-            return tree_lists_pid("hyprctl", &["clients", "-j"], pid);
-        }
-        x11_window_of(pid).is_some()
     }
 }
 
@@ -99,21 +123,19 @@ fn x11_window_of(pid: i32) -> Option<u32> {
 /// sway/hyprland IPC (pid-addressed) when the env marker is present, else
 /// EWMH `_NET_ACTIVE_WINDOW`.
 pub(crate) fn activate_os(pid: i32) -> bool {
-    if std::env::var_os("SWAYSOCK").is_some() {
-        return std::process::Command::new("swaymsg")
+    match detect_channel() {
+        LinuxFocusChannel::Sway => std::process::Command::new("swaymsg")
             .arg(format!("[pid={pid}] focus"))
             .status()
             .map(|s| s.success())
-            .unwrap_or(false);
-    }
-    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
-        return std::process::Command::new("hyprctl")
+            .unwrap_or(false),
+        LinuxFocusChannel::Hyprland => std::process::Command::new("hyprctl")
             .args(["dispatch", "focuswindow", &format!("pid:{pid}")])
             .status()
             .map(|s| s.success())
-            .unwrap_or(false);
+            .unwrap_or(false),
+        LinuxFocusChannel::X11 => x11_activate(pid).unwrap_or(false),
     }
-    x11_activate(pid).unwrap_or(false)
 }
 
 fn x11_activate(pid: i32) -> Option<bool> {

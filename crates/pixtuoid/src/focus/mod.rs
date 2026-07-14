@@ -28,6 +28,8 @@ use pixtuoid_core::AgentSlot;
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "linux")]
+pub(crate) use linux::{HYPRLAND_ENV, SWAY_ENV};
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(windows)]

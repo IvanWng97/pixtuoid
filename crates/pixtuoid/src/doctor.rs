@@ -556,8 +556,8 @@ fn activation_backend() -> String {
     #[cfg(target_os = "linux")]
     {
         linux_activation_backend(
-            std::env::var_os("SWAYSOCK").is_some(),
-            std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some(),
+            std::env::var_os(crate::focus::SWAY_ENV).is_some(),
+            std::env::var_os(crate::focus::HYPRLAND_ENV).is_some(),
             std::env::var_os("WAYLAND_DISPLAY").is_some(),
             std::env::var_os("DISPLAY").is_some(),
         )
