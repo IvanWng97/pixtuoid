@@ -550,9 +550,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn write_atomic_refuses_a_symlink_planted_at_the_tmp() {
-        // An attacker with config-dir write pre-plants a symlink at `<target>.tmp`
-        // pointing at a victim file. write_atomic must NOT follow it (O_NOFOLLOW),
-        // so the victim keeps its content and the real target still gets the write.
+        // A symlink pre-planted at `<target>.tmp` must NOT be followed: the victim
+        // keeps its content and the real target still receives the write.
         let dir = TempDir::new().unwrap();
         let target = dir.path().join("settings.json");
         std::fs::write(&target, "{}").unwrap();
