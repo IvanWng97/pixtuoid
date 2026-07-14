@@ -497,9 +497,35 @@ and the fan-out change. Shape (prescribed; degradable to sequential/parallel
      schemas), hand-CSP soundness, a11y, `knip` dead-code, the site/raycast npm
      deps' freshness, and `just site-check` / `site-e2e` gate liveness — the
      cargo-centric sweeps below don't reach a Node project).
-   - *Whole-tree specialist sweeps*, one FACTOR each across all crates —
-     arch-invariants, concurrency/liveness seams, security, drift — the
-     aggregate-only lenses a per-subsystem finder structurally can't run.
+   - *Whole-tree specialist DEEP-sweeps*, one FACTOR each across all crates,
+     each run at DEPTH as its OWN finder — NOT folded into a subsystem finder.
+     (The 2026-07 v1 whole-codebase audit under-ran these by folding
+     concurrency/security into the subsystem sweeps and surfaced almost
+     nothing on them; a dedicated deep pass per factor is required, because a
+     subsystem finder juggling six lenses structurally can't hunt a
+     cross-transport race or a threat-model to depth.) The set:
+       - **arch-invariants** — the 6 workspace invariants + crate DAG +
+         unreachable_pub hygiene.
+       - **concurrency & liveness** — races, lock-order, lost wakeups,
+         Send/Sync, the multi-transport hook-wins dedup / child-ledger /
+         un-claim side-channel, `block_in_place`, the watchdog threads, task
+         lifecycle + ordering across the one mpsc seam.
+       - **security threat-model** — untrusted input in the jsonl/hook
+         decoders + shim stdin, path-traversal (the #23 class), TOCTOU on the
+         config lock, command-injection in the OS focus glue (spawns
+         swaymsg/hyprctl/wmctrl), env-var + deserialization handling.
+       - **performance** — the per-frame paint path (recolor / frame_cache /
+         allocation hotspots), reducer per-event cost, A\* pathfind.
+       - **test-assurance depth** — actually RUN `cargo-mutants` on the hot
+         logic (reducer / decoder / layout) and report survivors; map coverage
+         gaps; flag teeth-less assertions (`just mutants` is diff-scoped — the
+         audit runs it broader on the hot modules).
+       - **error-handling / silent-failure** — swallowed errors + inappropriate
+         fallbacks (EXCLUDING documented-deliberate ones: the shim's always-
+         exit-0, the watcher's log-and-continue).
+       - **drift** — cross-PR docs/comment/wire drift (bare `rg` skips hidden
+         dirs — sweep `.github/`/`.claude/` too).
+       - **deep-modules** — shallow-module / deepening-opportunity scan.
 3. **Verify — adversarially, default REFUTE.** Each finding gets an independent
    skeptic prompted to refute it: read the cited code + callers, check it against
    the per-crate `CLAUDE.md` "Known sharp edges" (a documented sharp edge → REFUTE
@@ -507,11 +533,23 @@ and the fan-out change. Shape (prescribed; degradable to sequential/parallel
    refute. A slightly-off `file:line` is not grounds to refute a real defect —
    locate the real line. (Unbiased candidate recall first, verification second:
    many finders, then the skeptics — never one pass doing both.)
-4. **Dedup + rank** the survivors (a defect two cells find is one finding); ship a
+   **Vote weight scales with blast radius.** A security or concurrency-
+   correctness finding gets 2–3 INDEPENDENT skeptics with DIFFERENTIATED lenses
+   (does-it-repro / does-a-sharp-edge-excuse-it / is-the-race-actually-
+   reachable), confirmed only on a majority — a lone skeptic's miss on a safety
+   finding is the expensive class. **The security + concurrency sweeps run
+   LOOP-UNTIL-DRY**: re-fan each until two consecutive rounds surface nothing
+   new — the tail of a race/vuln hunt is exactly where the real one hides, and
+   a single round systematically misses it.
+4. **Completeness critic** (before the report): one agent asks "what modality
+   did we NOT run — a sweep skipped, a claim unverified, a hot file unread, a
+   non-Rust surface un-rendered, a `cargo-mutants` module not run?" Its answer
+   is the next round of finders, not a footnote to the report.
+5. **Dedup + rank** the survivors (a defect two cells find is one finding); ship a
    report ranked by corrected severity, grouped by factor family, and KEEP the
    refuted-as-deliberate list in it — it proves coverage and keeps the next
    agent's sharp-edge context accurate.
-5. **Disposition sweep** — the shared terminal-state rule below (FIXED /
+6. **Disposition sweep** — the shared terminal-state rule below (FIXED /
    REFUTED-with-sharp-edge / ISSUE-FILED); apply small fixes in-arc, defer only
    big/refactor; end with the repo-wide stale-phrase sweep == 0 (`rg --hidden`
    or `grep -rn` — bare `rg` silently skips `.github/`/`.claude/`).
