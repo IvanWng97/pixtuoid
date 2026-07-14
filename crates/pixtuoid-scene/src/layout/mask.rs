@@ -143,24 +143,50 @@ pub(super) fn wall_segment_rect(seg: &WallSegment, top_margin: u16) -> (Point, S
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_walkable_mask(
-    buf_w: u16,
-    buf_h: u16,
-    top_margin: u16,
-    door: Option<Point>,
-    home_desks: &[Point],
-    meeting_rooms: &[MeetingRoom],
-    kitchen_island: Option<Point>,
-    waypoints: &[Waypoint],
-    plants: &[PlantItem],
-    floor_lamp: Option<Point>,
-    lounge_side_table: Option<Point>,
-    fish_tank: Option<Point>,
-    wall_decor: &[WallDecorItem],
-    pod_decor: &[PodDecorItem],
-    room_walls: &[WallSegment],
-    pantry_counter_size: Size,
-) -> WalkableMask {
+/// The placed-piece inventory the mask stamps — a NAMED input so the five
+/// interchangeable `Option<Point>` pieces (door/kitchen_island/floor_lamp/
+/// lounge_side_table/fish_tank) can't be positionally swapped, and so
+/// `build_walkable_mask` destructures it with NO `..` (a new field added here
+/// must then be handled by the mask, not silently walked through).
+pub(super) struct MaskObstacles<'a> {
+    pub(super) buf_w: u16,
+    pub(super) buf_h: u16,
+    pub(super) top_margin: u16,
+    pub(super) door: Option<Point>,
+    pub(super) home_desks: &'a [Point],
+    pub(super) meeting_rooms: &'a [MeetingRoom],
+    pub(super) kitchen_island: Option<Point>,
+    pub(super) waypoints: &'a [Waypoint],
+    pub(super) plants: &'a [PlantItem],
+    pub(super) floor_lamp: Option<Point>,
+    pub(super) lounge_side_table: Option<Point>,
+    pub(super) fish_tank: Option<Point>,
+    pub(super) wall_decor: &'a [WallDecorItem],
+    pub(super) pod_decor: &'a [PodDecorItem],
+    pub(super) room_walls: &'a [WallSegment],
+    pub(super) pantry_counter_size: Size,
+}
+
+pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
+    let &MaskObstacles {
+        buf_w,
+        buf_h,
+        top_margin,
+        door,
+        home_desks,
+        meeting_rooms,
+        kitchen_island,
+        waypoints,
+        plants,
+        floor_lamp,
+        lounge_side_table,
+        fish_tank,
+        wall_decor,
+        pod_decor,
+        room_walls,
+        pantry_counter_size,
+    } = obs;
+
     let mut mask = WalkableMask::new_open(buf_w, buf_h);
 
     // Block the north wall band down to the WALL VISUAL bottom (top_wall_h),
@@ -558,24 +584,24 @@ mod tests {
             kind: WallDecor::Whiteboard,
             pos,
         }];
-        let mask = build_walkable_mask(
-            120,
-            96,
-            20,
-            None,
-            &[],
-            &[],
-            None,
-            &[],
-            &[],
-            None,
-            None,
-            None,
-            &wall_decor,
-            &[],
-            &[],
-            Size { w: 20, h: 8 },
-        );
+        let mask = build_walkable_mask(&MaskObstacles {
+            buf_w: 120,
+            buf_h: 96,
+            top_margin: 20,
+            door: None,
+            home_desks: &[],
+            meeting_rooms: &[],
+            kitchen_island: None,
+            waypoints: &[],
+            plants: &[],
+            floor_lamp: None,
+            lounge_side_table: None,
+            fish_tank: None,
+            wall_decor: &wall_decor,
+            pod_decor: &[],
+            room_walls: &[],
+            pantry_counter_size: Size { w: 20, h: 8 },
+        });
         let def = furniture_def(Furniture::Whiteboard);
         let sprite_h = def.visual.h; // 11
         let base = pos.y + sprite_h - 1; // TopLeft south row

@@ -535,24 +535,24 @@ pub(super) fn compute_with_seed(
         .filter_map(|p| settle_plant(p, &home_desks, &waypoints, &singleton_rects, &cubicle_band))
         .collect();
 
-    let walkable = mask::build_walkable_mask(
+    let walkable = mask::build_walkable_mask(&mask::MaskObstacles {
         buf_w,
         buf_h,
         top_margin,
         door,
-        &home_desks,
-        &meeting_rooms,
+        home_desks: &home_desks,
+        meeting_rooms: &meeting_rooms,
         kitchen_island,
-        &waypoints,
-        &plants,
+        waypoints: &waypoints,
+        plants: &plants,
         floor_lamp,
         lounge_side_table,
         fish_tank,
-        &wall_decor,
-        &pod_decor,
-        &room_walls,
+        wall_decor: &wall_decor,
+        pod_decor: &pod_decor,
+        room_walls: &room_walls,
         pantry_counter_size,
-    );
+    });
 
     // Coarse reachable component, seeded from the door (where agents enter, so
     // always in the main component); fall back to a home desk, then buffer
