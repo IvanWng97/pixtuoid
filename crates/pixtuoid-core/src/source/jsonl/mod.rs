@@ -326,7 +326,13 @@ impl JsonlWatcher {
         let _exit_keepalive = exit_watch.is_none().then(|| exit_tx.clone());
         drop(exit_tx);
 
-        let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
+        // Bound on buffered notify PATHS (#585): a reducer stall stops the select
+        // loop draining this arm, so unbounded would grow without limit. Dropping
+        // a PATH is safe (the cursor re-walks it via poll); a dropped decoded
+        // event would gap the tail-follow — hence that send stays blocking.
+        const NOTIFY_PATH_CHANNEL_CAP: usize = 1024;
+        let (notify_tx, mut notify_rx) =
+            tokio::sync::mpsc::channel::<PathBuf>(NOTIFY_PATH_CHANNEL_CAP);
         let mut notify_health = FailureLatch::default();
         let event_handler = move |res: notify::Result<notify::Event>| match res {
             Ok(event) => {
@@ -335,7 +341,12 @@ impl JsonlWatcher {
                 }
                 for path in event.paths {
                     if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
-                        let _ = notify_tx.send(path);
+                        // try_send off notify's own thread; Full → poll recovers.
+                        if let Err(tokio::sync::mpsc::error::TrySendError::Full(p)) =
+                            notify_tx.try_send(path)
+                        {
+                            tracing::debug!(path = ?p, "notify path channel full under load; the poll backstop will re-walk");
+                        }
                     }
                 }
             }
