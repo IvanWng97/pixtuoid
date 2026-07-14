@@ -282,7 +282,9 @@ fn centered_in(bounds: Rect, desired_w: u16, desired_h: u16) -> Rect {
 
 /// Truncate to `max` characters (char-safe), appending `…` when clipped. Shared
 /// by the dashboard + connection popup row painters (display-column safe — never
-/// slices a multi-byte glyph).
+/// slices a multi-byte glyph). Budget: the `…` is INCLUDED, so the clipped
+/// output is EXACTLY `max` chars — unlike `decoder::ellipsize`, which excludes
+/// it (N+1).
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();

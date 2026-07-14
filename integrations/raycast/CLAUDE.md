@@ -56,9 +56,12 @@ the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
 - **Toolchain bumps must stay within what Raycast DECLARES — check the peers,
   don't guess.** `eslint`/`typescript` are gated by `@raycast/eslint-config`'s
   peerDependencies (2.2.0 declares `eslint ^10`, `typescript <6.1.0` — so
-  eslint 10 + TS 6.0 are in-range); `@types/node` stays on the `22.x` line
-  because `@raycast/api` peers it EXACTLY (22.19.17; Raycast's runtime is
-  Node 22) — dependabot ignores its majors (`.github/dependabot.yml`). And
+  eslint 10 + TS 6.0 are in-range); `@types/node` stays on the `22.x` MAJOR
+  (dependabot bumps minors within it — `.github/dependabot.yml` ignores only
+  the major — so the manifest floats at `^22.x`, currently `^22.20.1`).
+  `@raycast/api`'s exact peer (22.19.17; Raycast's runtime is Node 22) is a
+  warning-level mismatch npm tolerates under the committed lockfile, not a hard
+  pin the manifest must equal. And
   `ray build` type-checks with its OWN bundled tsc (5.6 as of api 1.104.21),
   so `tsconfig.json` must stay parseable by BOTH that and the local TS: the
   TS 6 migration was `moduleResolution: "Bundler"` + an explicit

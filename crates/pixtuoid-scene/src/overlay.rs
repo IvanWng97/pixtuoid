@@ -111,7 +111,9 @@ pub fn build_overlay(
 /// disambiguation suffix that the reducer appends to colliding cwds.
 /// Truncates from the base (left side of the `·`), not from the suffix —
 /// otherwise the disambig becomes useless ("TikTok-Android·a" tells us
-/// nothing the base alone wouldn't).
+/// nothing the base alone wouldn't). Budget: fits to EXACTLY `budget` chars,
+/// and the no-`·` fallback plain-truncates with NO ellipsis — distinct from
+/// `decoder::ellipsize` (N+1) and `widgets::truncate` (N, ellipsis-included).
 pub(crate) fn truncate_label(label: &str, budget: usize) -> std::borrow::Cow<'_, str> {
     use std::borrow::Cow;
     if label.chars().count() <= budget {

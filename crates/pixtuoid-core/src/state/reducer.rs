@@ -693,7 +693,7 @@ impl Reducer {
                 // first-sight replay can stamp a HISTORICAL effort marker
                 // with apply-time `now` — a session that used max effort
                 // earlier (but no longer) flames for up to the scene's
-                // EFFORT_TTL (10 min) after attach, then self-heals. Purely
+                // EFFORT_TTL_SECS (10 min) after attach, then self-heals. Purely
                 // cosmetic; model is immune (last-seen-wins, no freshness).
                 // `model` writes only on change (Arc churn); `effort`
                 // re-stamps `now` per sighting — the freshness the scene

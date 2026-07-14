@@ -31,9 +31,10 @@ pub struct Doorway {
 /// Doorway width in ABSOLUTE pixels — a percentage shrinks to zero on small
 /// terminals, which after the 2-px wall padding leaves no walkable cell for
 /// A* and disconnects the room (the documented lesson behind the old
-/// `DOOR_GAP_V`/`DOOR_GAP_H` pair; one value, one name). 14 gives ≥10 px
-/// effective gap after padding — wide enough that the coarse 4×4 router
-/// grid keeps at least one walkable row through the doorway.
+/// `DOOR_GAP_V`/`DOOR_GAP_H` pair; one value, one name). 14 opens a 13-px gap
+/// (the segment cuts are endpoint-inclusive, so the opening is `ge-gs-1`), and
+/// after the 2-px vertical-wall padding each side that's a 9-px effective gap —
+/// still wide enough that the coarse 4×4 router keeps ≥1 walkable row through it.
 const DOOR_GAP: u16 = 14;
 
 /// Where along its wall run a door sits.

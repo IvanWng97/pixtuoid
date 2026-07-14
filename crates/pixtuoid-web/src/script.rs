@@ -41,10 +41,10 @@ pub(crate) const LOOP_MS: u64 = 120_000;
 /// `SOURCE_NAME` consts — a hand-typed string here silently misses the
 /// registry and the label falls back to the RAW string (`claude_code·api`
 /// instead of `cc·api` — a review-caught, test-invisible defect class).
-/// Every slot carries a DISTINCT CLI (8 of the registry's 9 non-daemon
-/// sources — Reasonix is the one omitted; OpenClaw is the 10th, rendered
+/// Every slot carries a DISTINCT CLI (8 of the registry's 10 non-daemon
+/// sources — Reasonix and omp are omitted; OpenClaw is the 11th, rendered
 /// separately as the lobster mascot via `lobster_beats`, never a cast
-/// member): the hero's ten CLI-name chips and the badged sprites below are
+/// member): the hero's CLI-name chips and the badged sprites below are
 /// meant to ECHO each other ("we support these agents"), so the cast should
 /// span the roster instead of repeating one CLI across most of the slots.
 const CAST: &[(&str, &str, &str)] = &[

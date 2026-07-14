@@ -40,9 +40,9 @@ use super::epoch_ms;
 use super::palette::{blend, blend_rgb, mix_lab};
 
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`, decoded
-/// via chrono. Shared by the day-ramp / sunset / window-look timers. NB:
-/// `sun_on_wall` keeps its own fallible `.ok()?` decode because it returns an
-/// `Option`; this infallible form (`unwrap_or_default`) suits the rest.
+/// via chrono. THE clock-decode funnel: the day-ramp / sunset / window-look
+/// timers and `sun_on_wall` (via `emitter`) all route through here, so there is
+/// no second decode path.
 fn local_hour_frac(now: std::time::SystemTime) -> f32 {
     use chrono::Timelike;
     let unix_now = now

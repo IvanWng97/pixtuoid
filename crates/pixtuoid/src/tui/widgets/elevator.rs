@@ -16,11 +16,9 @@ pub(crate) fn paint_elevator_indicator(
     use ratatui::text::Line;
 
     let label = format!(" \u{25b2} F{current_floor} \u{25bc} ");
-    // Measure in display COLUMNS, not bytes: the ▲/▼ arrows are 3-byte
-    // single-column glyphs, so byte length over-counts by 4 — shifting the
-    // label off the door's center and over-widening the clip rect. Matches
-    // the footer's chars().count() convention.
-    let label_w = label.chars().count() as u16;
+    // Display COLUMNS via `display_width` (the width authority, shared with the
+    // footer): the ▲/▼ arrows are 3-byte single-column glyphs (byte len over-counts).
+    let label_w = super::display_width(&label) as u16;
     let door_cell_x = door.x + 8u16.saturating_sub(label_w / 2);
     let door_cell_y = door.y / 2;
     let indicator_y = door_cell_y.saturating_sub(1);

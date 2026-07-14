@@ -131,12 +131,12 @@ the provider-prefixed `model_change` entry are deliberately NOT decoded: the
 bare field matches TOP_MODELS' prefix vocabulary and every turn re-stamps it).
 The reducer caches `slot.model` (last-seen-wins — a mid-session `/model`
 switch tracks) + `slot.effort: EffortObservation{value, seen_at}` (re-stamped
-per sighting; the scene's EFFORT_TTL turns Codex's per-turn field and CC's
+per sighting; the scene's EFFORT_TTL_SECS turns Codex's per-turn field and CC's
 periodic marker into ONE freshness semantic). Unknown id = no-op (a model
 line never registers a session); legitimate on BOTH transports (wire data,
 not liveness). Bounded residual: recent/live-probed files replay from the
 TOP on first sight, so a historical effort marker reads fresh for up to
-EFFORT_TTL (10 min) after attach before decaying — cosmetic, accepted.
+EFFORT_TTL_SECS (10 min) after attach before decaying — cosmetic, accepted.
 Both fields serde-skipped.
 
 **Focus-jump plumbing (#focus-jump):** the shim fills `_pid` (getppid) into the

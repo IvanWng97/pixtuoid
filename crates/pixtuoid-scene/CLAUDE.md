@@ -112,7 +112,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 ├── burn.rs         burn tier (model gate × effort split, USER-PINNED): TOP_MODELS prefix table
 │                   (claude-fable/claude-mythos/gpt-5.6-sol — source-verified slugs) × MAX_EFFORTS
 │                   ({ultra,ultrathink,xhigh,max}) → BurnTier{Normal,Premium,Top}; fresh_effort =
-│                   the ONE EFFORT_TTL freshness rule (tier + dossier share it), and it ALSO drops
+│                   the ONE EFFORT_TTL_SECS freshness rule (tier + dossier share it), and it ALSO drops
 │                   CC's decoder-synthesized ultra_exit exit-sentinel so the internal token never
 │                   reaches the dossier — the one source-specific special-case in this otherwise
 │                   source-agnostic table (string = core-owned claude_code::ULTRA_EXIT_LABEL,

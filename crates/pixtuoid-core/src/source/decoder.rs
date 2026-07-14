@@ -478,7 +478,8 @@ pub(crate) const MAX_DECODED_FIELD_CHARS: usize = 80;
 /// — where the content ENTERS (CONTRIBUTING pitfall 3), on char boundaries,
 /// never bytes (pitfall 1). Shared by the tool-target cap above and the
 /// Waiting-reason / Rename-label caps (CC + Reasonix) so the sites can't
-/// drift apart.
+/// drift apart. Budget: the `…` is EXCLUDED, so a clipped result is
+/// `max_chars + 1` chars — unlike `widgets::truncate`, which counts it (N).
 pub(crate) fn ellipsize(s: &str, max_chars: usize) -> String {
     let mut out: String = s.chars().take(max_chars).collect();
     if s.chars().count() > max_chars {
