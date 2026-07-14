@@ -750,12 +750,22 @@ mod tests {
 
     #[test]
     fn tool_call_without_id_is_dropped_and_without_name_still_starts() {
-        // No block id → un-keyable (its result could never close it) → drop.
+        // No block id → un-keyable (its result could never close it) → drop,
+        // but the drop must leave a `missing_field` breadcrumb (`id` is a
+        // REQUIRED pairing key on a block we're committed to decoding).
         let no_id = r#"{"type":"message","id":"m5","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","name":"bash","arguments":{}}],"timestamp":1}}"#;
-        assert!(decode(no_id).is_empty(), "un-keyable toolCall → no event");
+        let out = crate::test_capture::capture_logs(|| {
+            assert!(decode(no_id).is_empty(), "un-keyable toolCall → no event");
+        });
+        for needle in [crate::source::drift::TARGET, "missing_field", "toolCall"] {
+            assert!(
+                out.contains(needle),
+                "no id breadcrumb: missing {needle:?}\n{out}"
+            );
+        }
         // Missing name → drift breadcrumb + empty name; "" is not "task".
         let no_name = r#"{"type":"message","id":"m6","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"t6","arguments":{}}],"timestamp":1}}"#;
-        match &decode(no_name)[..] {
+        let out = crate::test_capture::capture_logs(|| match &decode(no_name)[..] {
             [AgentEvent::ActivityStart {
                 tool_use_id,
                 detail: Some(d),
@@ -765,6 +775,12 @@ mod tests {
                 assert!(!d.is_task());
             }
             other => panic!("expected one ActivityStart, got {other:?}"),
+        });
+        for needle in [crate::source::drift::TARGET, "missing_field", "toolCall"] {
+            assert!(
+                out.contains(needle),
+                "no name breadcrumb: missing {needle:?}\n{out}"
+            );
         }
     }
 
