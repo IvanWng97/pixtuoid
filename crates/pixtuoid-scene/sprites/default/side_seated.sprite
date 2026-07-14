@@ -1,0 +1,18 @@
+# 8x10 seated person in PROFILE, facing EAST (flip mirrors west). Same
+# height/bottom-row geometry as the front `seated` sprite so the chair
+# anchor + z-key math is unchanged. Profile torso is NARROWER than the
+# front view (5px, back edge under the hair mass) so it reads as a person
+# seen from the side, not a slab; hair mass at the back, single profile
+# eye + mouth at the front edge, forward arm with a skin hand toward the
+# table, pants lap strip on the cushion row.
+@frame 0
+. . n H H H n .
+. n H H H H H n
+. H H H S S S .
+. H H S S e S .
+. H H S S S m .
+. . n S S n . .
+. . B B B B S .
+. . B B B B S .
+. . B B B B B .
+. . P P P P P .

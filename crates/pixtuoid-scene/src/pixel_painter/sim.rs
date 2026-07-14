@@ -38,7 +38,7 @@ use super::anchors::{
     back_couch_anchor, seated_anchor, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
     waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
 };
-use super::seat::{seat_sprite, settle_seat_view, SeatView};
+use super::seat::{seat_sprite_in_pack, settle_seat_view, SeatView};
 
 /// The mutable world state one [`sim_step`] advances — every `&mut` store the
 /// fused pass used to hide inside `PixelCtx`. `render_to_rgb_buffer` builds
@@ -401,12 +401,12 @@ fn resolve_characters(
                         WaypointKind::Couch
                         | WaypointKind::MeetingSofa
                         | WaypointKind::MeetingChair => {
-                            let (anim, flip) = seat_sprite(kind, wp_obj.facing);
+                            let (anim, flip) = seat_sprite_in_pack(pack, kind, wp_obj.facing);
                             (anim, back_couch_anchor(stand, char_w), 9u16, flip)
                         }
                         // Island stander anchors on the waypoint cell itself.
                         WaypointKind::Island => {
-                            let (anim, flip) = seat_sprite(kind, wp_obj.facing);
+                            let (anim, flip) = seat_sprite_in_pack(pack, kind, wp_obj.facing);
                             (anim, waypoint_anchor(stand, char_w), 12u16, flip)
                         }
                         // PhoneBooth + StandingDesk → agent just stands at the

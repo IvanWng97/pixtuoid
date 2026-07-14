@@ -2,7 +2,7 @@ use super::anchors::{
     back_couch_anchor, seated_anchor, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
     CHARACTER_SPRITE_W,
 };
-use super::seat::{seat_sprite, settle_seat_view, SeatView, DESK_SEAT_Z_OFF};
+use super::seat::{seat_sprite, seat_sprite_in_pack, settle_seat_view, SeatView, DESK_SEAT_Z_OFF};
 use super::*;
 // Formerly reached via `super::*` off mod.rs's imports — now that PixelCtx no
 // longer names them (it borrows the FloorCtx group), import them directly.
@@ -221,15 +221,42 @@ fn seat_sprite_maps_facing_to_sprite_and_flip() {
         seat_sprite(WaypointKind::MeetingSofa, Facing::South),
         ("seated", false)
     );
-    // Head-of-table chairs sit Front regardless of end (no side-facing
-    // seated sprite; the chair body carries the E/W orientation).
+    // Head-of-table chairs sit in PROFILE facing the table: the base
+    // side_seated sprite faces East (west chair), the east chair mirrors.
     assert_eq!(
         seat_sprite(WaypointKind::MeetingChair, Facing::East),
-        ("seated", false)
+        ("side_seated", false)
     );
     assert_eq!(
         seat_sprite(WaypointKind::MeetingChair, Facing::West),
-        ("seated", false)
+        ("side_seated", true)
+    );
+}
+
+#[test]
+fn seat_sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
+    // Character anims are never inherited from the embedded default
+    // (merge_from is furniture-only), so a pre-side_seated custom pack must
+    // show the front pose — a missing animation must never mean an
+    // invisible sitter.
+    use crate::layout::{Facing, WaypointKind};
+    let full = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+    assert_eq!(
+        seat_sprite_in_pack(&full, WaypointKind::MeetingChair, Facing::West),
+        ("side_seated", true),
+        "a pack WITH the profile sprite uses it"
+    );
+    // The charpack fixture predates side_seated — a real pre-F custom pack.
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
+    let old_pack = crate::embedded_pack::load_sprite_pack(Some(fixture)).expect("fixture pack");
+    assert!(
+        old_pack.animation("side_seated").is_none(),
+        "fixture must lack the profile sprite for this test to bite"
+    );
+    assert_eq!(
+        seat_sprite_in_pack(&old_pack, WaypointKind::MeetingChair, Facing::West),
+        ("seated", false),
+        "a pack WITHOUT it degrades to the front pose"
     );
 }
 
@@ -974,8 +1001,11 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
 
         // (1) Behavior-preserving: equals the historical seated AtWaypoint key.
         let historical = match view {
-            // back_couch_anchor.y + sprite_h(9) = (pos.y - 7) + 9
-            SeatView::Front | SeatView::Back => back_couch_anchor(w.pos, CHARACTER_SPRITE_W).y + 9,
+            // back_couch_anchor.y + sprite_h(9) = (pos.y - 7) + 9. SideSeated
+            // shares Front's seat anchor + bottom-row geometry by design.
+            SeatView::Front | SeatView::Back | SeatView::SideSeated { .. } => {
+                back_couch_anchor(w.pos, CHARACTER_SPRITE_W).y + 9
+            }
             // waypoint_anchor.y + sprite_h(12) + 3 = (pos.y - 12) + 12 + 3
             SeatView::Side { .. } => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12 + 3,
             // waypoint_anchor.y + sprite_h(12) = pos.y — the AtWaypoint
@@ -2516,16 +2546,18 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     // (pos.y + 2) — which sits INSIDE the 7-row chair body, so the sitter
     // visibly occupies the cushion. The z-key tests alone passed while the
     // sprite hovered 5 rows above the chair (lens-1 frame-census catch).
-    use crate::layout::{Point, SEAT_RENDER_Y_OFF};
+    use crate::layout::{Facing, Point, WaypointKind, SEAT_RENDER_Y_OFF};
     let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
-    let seated_h = pack.animation("seated").expect("seated sprite").frames[0].height();
+    let view = SeatView::of(WaypointKind::MeetingChair, Facing::West);
+    let (anim, _) = view.seated_sprite();
+    let seated_h = pack.animation(anim).expect("chair sprite").frames[0].height();
     let pos = Point { x: 40, y: 30 };
     let anchor_y = pos.y - SEAT_RENDER_Y_OFF;
     let bottom = anchor_y + seated_h - 1;
     assert_eq!(
         bottom,
-        SeatView::Front.z_key_for_seat(pos),
-        "seated sprite bottom row must land on the Front z-key row"
+        view.z_key_for_seat(pos),
+        "the chair sprite's bottom row must land on its seat z-key row"
     );
     let chair = crate::layout::furniture_def(crate::layout::Furniture::MeetingChair).visual;
     let chair_top = pos.y - chair.h / 2;

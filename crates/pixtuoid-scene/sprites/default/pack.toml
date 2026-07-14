@@ -52,6 +52,10 @@ version = "1"
 frames   = ["seated.sprite"]
 frame_ms = 600
 
+[animations.side_seated]
+frames   = ["side_seated.sprite"]
+frame_ms = 600
+
 [animations.typing]
 frames   = ["typing_0.sprite", "typing_1.sprite"]
 frame_ms = 140

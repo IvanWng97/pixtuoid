@@ -24,6 +24,10 @@ K = "#667788"       # Mid-tone detail
 frames = ["seated.sprite"]
 frame_ms = 500
 
+[animations.side_seated]
+frames = ["side_seated.sprite"]
+frame_ms = 500
+
 [animations.typing]
 frames = ["typing_0.sprite", "typing_1.sprite"]
 frame_ms = 400

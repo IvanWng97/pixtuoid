@@ -77,6 +77,23 @@ pub(super) fn seat_sprite(
     SeatView::of(kind, facing).seated_sprite()
 }
 
+/// [`seat_sprite`] resolved against a PACK: character animations are never
+/// inherited from the embedded default (`merge_from` is furniture-only), so a
+/// pre-`side_seated` custom pack degrades to the front pose — a missing
+/// animation must never mean an invisible sitter.
+pub(super) fn seat_sprite_in_pack(
+    pack: &Pack,
+    kind: crate::layout::WaypointKind,
+    facing: crate::layout::Facing,
+) -> (&'static str, bool) {
+    let (anim, flip) = seat_sprite(kind, facing);
+    if pack.animation(anim).is_some() {
+        (anim, flip)
+    } else {
+        ("seated", false)
+    }
+}
+
 /// The single orientation a seat occupant is shown in — the ONE source BOTH the
 /// seated render (`AtWaypoint`, via [`seat_sprite`]) and the sit-down WALK glide
 /// onto the seat derive from, so the two can never disagree.
@@ -106,6 +123,10 @@ pub(super) enum SeatView {
     Back,
     /// Faces sideways; `flip` mirrors east↔west.
     Side { flip: bool },
+    /// SITS sideways — the head-of-table chairs. Same seat anchor + z-key as
+    /// `Front` (the profile sprite shares the front `seated` sprite's 8x10
+    /// bottom-row geometry); only the sprite + mirror differ.
+    SideSeated { flip: bool },
     /// An upright stander at the plain feet-row z (no `Side`-style table
     /// clearance): the island slots. The bartender pair stands INSIDE the
     /// island body, so its z must stay BELOW the island's south-row key for
@@ -127,12 +148,12 @@ impl SeatView {
                 Facing::North => SeatView::Back,
                 _ => SeatView::Front,
             },
-            // Head-of-table chairs (decor arc): the occupant SITS. No side-
-            // facing seated sprite exists, so both ends use the front `seated`
-            // render — the pixel-office convention the north-sofa sitters
-            // already follow; the chair body painted under them carries the
-            // E/W orientation.
-            WaypointKind::MeetingChair => SeatView::Front,
+            // Head-of-table chairs: the occupant SITS in PROFILE, facing the
+            // table. The base `side_seated` sprite faces East (the west
+            // chair's view); the east chair looks West, so it mirrors.
+            WaypointKind::MeetingChair => SeatView::SideSeated {
+                flip: matches!(facing, Facing::West),
+            },
             // Island slots (flanks + the in-body bartender pair) stand at the
             // plain feet-row z — see the `Stander` variant's WHY.
             WaypointKind::Island => SeatView::Stander {
@@ -157,6 +178,7 @@ impl SeatView {
         match self {
             SeatView::Front => ("seated", false),
             SeatView::Back => ("back_couch", false),
+            SeatView::SideSeated { flip } => ("side_seated", flip),
             SeatView::Side { flip } | SeatView::Stander { flip } => ("standing", flip),
         }
     }
@@ -169,7 +191,9 @@ impl SeatView {
         match self {
             SeatView::Front => (false, false),
             SeatView::Back => (true, false),
-            SeatView::Side { flip } | SeatView::Stander { flip } => (false, flip),
+            SeatView::SideSeated { flip }
+            | SeatView::Side { flip }
+            | SeatView::Stander { flip } => (false, flip),
         }
     }
 
@@ -191,7 +215,7 @@ impl SeatView {
         match self {
             // Behind a couch/sofa back (furniture sorts at pos+3) or tied with a
             // front sofa (pos+2, insertion order puts the sitter on top).
-            SeatView::Front | SeatView::Back => wp_pos.y + 2,
+            SeatView::Front | SeatView::Back | SeatView::SideSeated { .. } => wp_pos.y + 2,
             // Stand-beside-the-table clearance (+3 over the table's y+2).
             // No seat kind routes Side today (the head-of-table chairs went
             // Front) and the non-seat obstacle kinds never settle onto a

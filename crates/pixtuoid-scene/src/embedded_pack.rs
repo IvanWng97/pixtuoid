@@ -149,6 +149,7 @@ fn load_embedded_pack() -> Result<Pack> {
         include_str!("../sprites/default/pack.toml"),
         embedded_sprites![
             "seated.sprite",
+            "side_seated.sprite",
             "typing_0.sprite",
             "typing_1.sprite",
             "standing.sprite",
