@@ -528,4 +528,32 @@ mod tests {
             crate::layout::desk_furniture_def().visual.w
         );
     }
+
+    #[test]
+    fn pet_hitboxes_track_the_embedded_pack() {
+        // PetKind::hitbox returns a hardcoded Size per pose that MUST match the
+        // embedded pet sprite frames — nothing else pins it (unlike the desk
+        // width above). hitbox drives hit_test_pet (click-to-pet); a resized
+        // *_walk/*_sit/*_sleep sprite would drift the click target off the pet.
+        use crate::pet::PetKind;
+        let pack = test_default_pack();
+        for &kind in PetKind::ALL {
+            for anim in [kind.walk_anim(), kind.sit_anim(), kind.sleep_anim()] {
+                let frame = pack
+                    .animation(anim)
+                    .and_then(|a| a.frames.first())
+                    .unwrap_or_else(|| panic!("embedded pack carries a '{anim}' sprite"));
+                let hb = kind.hitbox(anim);
+                assert_eq!(
+                    (hb.w, hb.h),
+                    (frame.width(), frame.height()),
+                    "{anim} hitbox {}x{} != sprite {}x{} — a pet-sprite resize drifted the click target",
+                    hb.w,
+                    hb.h,
+                    frame.width(),
+                    frame.height()
+                );
+            }
+        }
+    }
 }

@@ -926,9 +926,12 @@ impl Reducer {
             // conjuncts are load-bearing (`resurrect_in_place` has no exiting
             // guard, so a `&&`→`||` here WOULD reset a LIVE root — NOT an
             // equivalent mutant): the exiting conjunct is pinned by
-            // `duplicate_root_session_start_does_not_resurrect_a_live_session`,
-            // the two root-gate conjuncts by the exiting-slot / exiting-subagent
-            // resurrect tests.
+            // `duplicate_root_session_start_does_not_resurrect_a_live_session`;
+            // the INCOMING-parent conjunct (`parent_id.is_none()`) by the
+            // exiting-SUBAGENT resurrect test, which feeds a PARENTED duplicate.
+            // The slot-parent conjunct is belt-and-braces: no apply() path sets
+            // `slot.parent_id` without the paired ledger link, so no single test
+            // isolates it (see #612 for a parentless-revival combined-path pin).
             if slot.exiting_at.is_some() && slot.parent_id.is_none() && parent_id.is_none() {
                 // Route through fsm so an in-flight Active span is folded
                 // into active_ms before the reset (every other
@@ -1249,6 +1252,10 @@ impl Reducer {
                 // Delegating for a Task that already completed. `gc` (run at
                 // apply-top with this same `now`) already pruned expired
                 // tombstones, so membership means fresh.
+                //
+                // Deliberately NOT slot-gated (unlike the hook-wins dedup record) —
+                // a slot-less orphan is load-bearing across desk exhaustion; see
+                // pixtuoid-core CLAUDE.md "active_tasks insert is not slot-gated".
                 if self
                     .corr
                     .active_tasks
