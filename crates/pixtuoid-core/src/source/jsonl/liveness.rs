@@ -312,16 +312,26 @@ pub(super) async fn refresh_probe_snapshot(
     // stalling the render loop, input, and every source task sharing the runtime
     // on a low-core host (this fn runs on the watcher's select loop every seed /
     // 250ms rescan / 60s poll). Offload to the blocking pool — the probe is an
-    // `Arc<dyn Fn + Send + Sync>`, cheap to clone. A `JoinError` (the blocking
-    // task panicked) folds into the same "probe failed → change nothing" path.
+    // `Arc<dyn Fn + Send + Sync>`, cheap to clone. `spawn_blocking` (not
+    // `block_in_place`) because this crate's tokio has no `rt-multi-thread` and
+    // the watcher's own tests run on a current-thread runtime, where
+    // `block_in_place` panics. Every outcome stays fail-safe (change nothing) —
+    // both a probe failure and a probe panic keep the previous snapshot — but a
+    // panic is surfaced at `warn` (an fd_probe BUG, not a transient enumeration
+    // miss) so a recurring crash isn't buried at debug.
     let probe = Arc::clone(probe);
-    let Some(snap) = tokio::task::spawn_blocking(move || probe())
-        .await
-        .ok()
-        .flatten()
-    else {
-        debug!("liveness probe failed (or its blocking task panicked); keeping the previous snapshot (failure changes nothing)");
-        return false;
+    let snap = match tokio::task::spawn_blocking(move || probe()).await {
+        Ok(Some(snap)) => snap,
+        Ok(None) => {
+            debug!(
+                "liveness probe failed; keeping the previous snapshot (failure changes nothing)"
+            );
+            return false;
+        }
+        Err(join_err) => {
+            tracing::warn!(%join_err, "liveness probe task panicked; keeping the previous snapshot");
+            return false;
+        }
     };
     *ctx.live.lock().await = snap.pid_of.keys().cloned().collect();
     vouch.observe(&snap, decoders, ctx, pid_bindings).await;
