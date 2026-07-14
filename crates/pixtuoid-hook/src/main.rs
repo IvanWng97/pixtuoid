@@ -664,12 +664,21 @@ mod tests {
         std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
         assert_eq!(default_socket_path(), "/run/user/1000/pixtuoid.sock");
 
+        // Arm 2b: set-but-empty / relative XDG_RUNTIME_DIR is invalid (XDG
+        // absolute-only) -> treated as unset -> the /tmp subdir, never
+        // "/pixtuoid.sock" or a cwd-relative path (parity with native.rs).
+        // Safety: getuid is always safe on Unix.
+        let uid = unsafe { libc::getuid() };
+        let tmp_fallback = format!("/tmp/pixtuoid-{uid}/pixtuoid.sock");
+        for invalid in ["", "   ", "relative/run"] {
+            std::env::set_var("XDG_RUNTIME_DIR", invalid);
+            assert_eq!(default_socket_path(), tmp_fallback);
+        }
+
         // Arm 3: neither set -> "/tmp/pixtuoid-{uid}/pixtuoid.sock" (#485: the
         // per-user 0700 SUBDIR, not a flat squattable name).
         std::env::remove_var("PIXTUOID_SOCKET");
         std::env::remove_var("XDG_RUNTIME_DIR");
-        // Safety: getuid is always safe on Unix.
-        let uid = unsafe { libc::getuid() };
         assert_eq!(
             default_socket_path(),
             format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")
