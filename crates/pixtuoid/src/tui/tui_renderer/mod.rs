@@ -5,6 +5,7 @@
 //! forwards to `draw_scene`, which recomputes its own layout per frame from
 //! `terminal.size()` because the user can resize at any time.
 
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::Result;
@@ -74,7 +75,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     mouse_pos: Option<(u16, u16)>,
     theme: &'static pixtuoid_scene::theme::Theme,
     theme_picker: Option<usize>,
-    cached_layout: Option<Layout>,
+    cached_layout: Option<Arc<Layout>>,
     active_pet: Option<PetState>,
     last_pet_pos: Option<PetFrame>,
     /// Configured pets (kind + resolved display name), in order. Resolved once
@@ -262,7 +263,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     pub fn cached_layout(&self) -> Option<&Layout> {
-        self.cached_layout.as_ref()
+        self.cached_layout.as_deref()
     }
 
     pub fn current_floor_seed(&self) -> u64 {

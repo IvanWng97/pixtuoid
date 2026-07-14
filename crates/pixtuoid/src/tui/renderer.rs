@@ -21,6 +21,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::Terminal;
 
+use std::sync::Arc;
+
 use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
@@ -212,7 +214,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     pack: &Pack,
     now: SystemTime,
     ctx: &mut DrawCtx<'_>,
-) -> Result<Option<Layout>> {
+) -> Result<Option<Arc<Layout>>> {
     let term_size = term.size()?;
     let full_rect = Rect {
         x: 0,

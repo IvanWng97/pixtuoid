@@ -10,6 +10,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::physics::{walk_arrived, WalkProfile};
@@ -111,7 +112,7 @@ pub struct FloorCtx {
     /// area. One entry: a resize / floor switch changes the key and recomputes;
     /// memory cost is one `Layout`. Private — everything rides
     /// [`FloorCtx::frame_layout`].
-    layout_memo: Option<((u16, u16, u64), crate::layout::Layout)>,
+    layout_memo: Option<((u16, u16, u64), Arc<crate::layout::Layout>)>,
 }
 
 impl Default for FloorCtx {
@@ -136,22 +137,26 @@ impl FloorCtx {
 
     /// The per-frame layout — memoized `compute_with_seed(w, h, None, seed)` +
     /// the router corridor re-point, the ONE frame prologue the engine
-    /// (`render_floor`/`observe`) and the TUI painter both ride. Returns a clone
-    /// (callers hold it across later `&mut self` uses; the clone is a plain
-    /// memcpy, dwarfed by the mask-stamp + BFS a hit skips). A too-small buffer
-    /// returns `None` without poisoning the memo.
+    /// (`render_floor`/`observe`) and the TUI painter both ride. Returns a cheap
+    /// `Arc` handle — a refcount bump, NOT a deep copy of the mask + reach-set +
+    /// layout Vecs — so callers hold it across later `&mut self` uses (the paint
+    /// pass reads through the `Arc` while the disjoint router/cache/motion stores
+    /// are `&mut`-borrowed) without re-cloning the whole `Layout` every frame.
+    /// A too-small buffer returns `None` without poisoning the memo.
     pub fn frame_layout(
         &mut self,
         buf_w: u16,
         buf_h: u16,
         floor_seed: u64,
-    ) -> Option<crate::layout::Layout> {
+    ) -> Option<Arc<crate::layout::Layout>> {
         let key = (buf_w, buf_h, floor_seed);
         let layout = match &self.layout_memo {
-            Some((k, l)) if *k == key => l.clone(),
+            Some((k, l)) if *k == key => Arc::clone(l),
             _ => {
-                let l = crate::layout::Layout::compute_with_seed(buf_w, buf_h, None, floor_seed)?;
-                self.layout_memo = Some((key, l.clone()));
+                let l = Arc::new(crate::layout::Layout::compute_with_seed(
+                    buf_w, buf_h, None, floor_seed,
+                )?);
+                self.layout_memo = Some((key, Arc::clone(&l)));
                 l
             }
         };
@@ -295,7 +300,7 @@ fn frame_prologue(
     buf_w: u16,
     buf_h: u16,
     floor_seed: u64,
-) -> Option<crate::layout::Layout> {
+) -> Option<Arc<crate::layout::Layout>> {
     fctx.frame_layout(buf_w, buf_h, floor_seed)
 }
 
@@ -366,7 +371,7 @@ pub fn render_floor(
     coffee: &mut CoffeeState,
     chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
     inputs: FrameInputs,
-) -> Option<crate::layout::Layout> {
+) -> Option<Arc<crate::layout::Layout>> {
     let FrameInputs {
         scene,
         pack,
@@ -497,7 +502,7 @@ impl FloorSession {
     /// PROJECTED single-floor scenes (the TUI floor slide) stays on
     /// [`render_floor`] directly and runs the eviction against the full scene
     /// itself.
-    pub fn render(&mut self, inputs: FrameInputs) -> Option<crate::layout::Layout> {
+    pub fn render(&mut self, inputs: FrameInputs) -> Option<Arc<crate::layout::Layout>> {
         self.evict_missing(inputs.scene);
         render_floor(
             &mut self.floor.ctx,

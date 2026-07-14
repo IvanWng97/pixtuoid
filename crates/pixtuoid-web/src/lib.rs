@@ -15,6 +15,7 @@
 
 mod script;
 
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use wasm_bindgen::prelude::*;
@@ -172,7 +173,7 @@ pub struct Office {
     /// The layout the LAST `render` computed — captured so `overlay_json` builds
     /// the name-badge overlay against the SAME geometry the sprite pass used
     /// (labels align 1:1 with the painted characters). `None` before the first step.
-    last_layout: Option<Layout>,
+    last_layout: Option<Arc<Layout>>,
 }
 
 #[wasm_bindgen]
@@ -327,7 +328,7 @@ impl Office {
 
         // Labels — built against the LAST render's layout + this session's route
         // state (disjoint field borrows of `self`), so they align 1:1 with the sprites.
-        let labels = match self.last_layout.as_ref() {
+        let labels = match self.last_layout.as_deref() {
             Some(layout) => {
                 let mut rctx = self.session.floor.ctx.route_ctx();
                 pixtuoid_scene::overlay::build_overlay(&self.scene, layout, now, &mut rctx, None)

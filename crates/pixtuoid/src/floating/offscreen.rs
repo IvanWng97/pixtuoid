@@ -11,6 +11,7 @@
 //! per-frame caches + persistent office state — coffee cups, group chitchat — plus the
 //! dual eviction) across frames so motion stays continuous.
 
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
@@ -41,7 +42,7 @@ pub struct OfficeRenderer {
     /// The layout the LAST `render` computed — captured so `labels` can build the
     /// name-badge overlay against the SAME geometry the sprite pass used (labels
     /// align 1:1 with the painted characters). `None` before the first render.
-    last_layout: Option<Layout>,
+    last_layout: Option<Arc<Layout>>,
 }
 
 impl OfficeRenderer {
@@ -101,7 +102,7 @@ impl OfficeRenderer {
         scene: &SceneState,
         now: SystemTime,
     ) -> Vec<pixtuoid_scene::overlay::LabelElement> {
-        let Some(layout) = self.last_layout.as_ref() else {
+        let Some(layout) = self.last_layout.as_deref() else {
             return Vec::new();
         };
         let mut rctx = self.session.floor.ctx.route_ctx();
