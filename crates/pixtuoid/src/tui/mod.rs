@@ -283,8 +283,10 @@ fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
 }
 
 /// Pure key-dispatch: resolve a key press to a `KeyAction` given the current
-/// modal + floor state. Modal precedence (highest first): help overlay,
-/// version popup, theme picker, then the normal scene.
+/// modal + floor state. Modal precedence (highest first): onboarding > help >
+/// version popup > connection > dashboard > theme picker > normal scene (the
+/// same chain the `ModalState` doc above pins — the body's early-returns are its
+/// single source of truth).
 fn dispatch_key(
     code: KeyCode,
     mods: KeyModifiers,

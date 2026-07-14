@@ -27,9 +27,12 @@ given change/tree, say so, don't skip it.
 - **(A) Correctness + architecture** — logic/off-by-one/inverted-condition;
   concurrency & liveness (races, lock-order, lost wakeups, stale state, the
   no-scan-the-history rule; blocking I/O or lock acquisition on an async worker /
-  the render loop — sync flock/fsync/FS probes need `block_in_place` or an
-  off-loop task, the Sources-panel ConfigLock stall escaped as a dropped #283
-  bot MEDIUM; creation POLARITY — only a proof-of-LIFE event may create/resurrect
+  the render loop — sync flock/fsync/FS probes on a tokio WORKER thread starve
+  co-scheduled tasks (off-load via `spawn_blocking`); on the block_on ROOT future
+  (`run_tui`) they are an accepted brief INLINE stall — `block_in_place` is INERT
+  there (not a worker, #617), and the Sources-panel ConfigLock stall's earlier
+  `block_in_place` "fix" for a dropped #283 bot MEDIUM was proven inert and
+  removed; creation POLARITY — only a proof-of-LIFE event may create/resurrect
   an entry for an unknown id, a death/exit/TTL signal for an absent id must
   no-op, never synthesize: a shared `or_insert` before the match minted a
   phantom mascot from `PidExited` (fbe26049); lifecycle-AUTHORITY —

@@ -267,7 +267,7 @@ impl SourceDiagnostics {
     /// The single worst issue as a one-line, glyph-prefixed summary for the
     /// Sources panel detail + the boot warning. `None` = nothing to flag.
     /// Priority: install-broken (hooks can't fire) > decode-drift.
-    pub fn summary(&self) -> Option<String> {
+    pub(crate) fn summary(&self) -> Option<String> {
         if let Some(i) = &self.install {
             if !i.is_sound() {
                 return Some(format!("⚠ install broken: {}", i.issues.join("; ")));

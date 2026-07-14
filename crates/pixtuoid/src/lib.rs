@@ -23,7 +23,7 @@ pub mod version;
 /// stdout report, the Sources-panel path). Untrusted wire values (agent labels,
 /// sampled CLI output, config paths) can carry control bytes that would
 /// reposition the cursor or inject escapes; one chokepoint so the policy can't
-/// drift between the three call sites (R0615-06).
+/// drift across its call sites (R0615-06).
 pub(crate) fn strip_control_chars(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control() && !is_bidi_control(*c))
