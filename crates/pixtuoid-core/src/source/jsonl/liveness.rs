@@ -305,8 +305,22 @@ pub(super) async fn refresh_probe_snapshot(
     let Some(probe) = probe else {
         return false;
     };
-    let Some(snap) = probe() else {
-        debug!("liveness probe failed; keeping the previous snapshot (failure changes nothing)");
+    // The probe walks the OS process table + each agent process's open fds
+    // (fd_probe: `read_dir("/proc")` + a per-pid `comm` read on Linux;
+    // `proc_listallpids`/`proc_name` per pid on macOS) — blocking std::fs/libproc
+    // that would occupy a tokio worker for the walk's duration if run inline,
+    // stalling the render loop, input, and every source task sharing the runtime
+    // on a low-core host (this fn runs on the watcher's select loop every seed /
+    // 250ms rescan / 60s poll). Offload to the blocking pool — the probe is an
+    // `Arc<dyn Fn + Send + Sync>`, cheap to clone. A `JoinError` (the blocking
+    // task panicked) folds into the same "probe failed → change nothing" path.
+    let probe = Arc::clone(probe);
+    let Some(snap) = tokio::task::spawn_blocking(move || probe())
+        .await
+        .ok()
+        .flatten()
+    else {
+        debug!("liveness probe failed (or its blocking task panicked); keeping the previous snapshot (failure changes nothing)");
         return false;
     };
     *ctx.live.lock().await = snap.pid_of.keys().cloned().collect();
