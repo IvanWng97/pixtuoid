@@ -322,9 +322,18 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id() as i32;
-        let found = pids_by_name("sleep")
-            .expect("a healthy system's proc-table enumeration must succeed")
-            .contains(&pid);
+        // A just-spawned child isn't always named in the proc-table at the first
+        // probe (/proc/<pid>/comm materializes a beat after spawn) — poll ≤500ms.
+        let found = (0..50).any(|_| {
+            if pids_by_name("sleep")
+                .expect("a healthy system's proc-table enumeration must succeed")
+                .contains(&pid)
+            {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            false
+        });
         let _ = child.kill();
         let _ = child.wait();
         assert!(found, "expected spawned sleep (pid {pid}) in pids_by_name");
