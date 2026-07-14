@@ -1,6 +1,6 @@
 // The per-CLI installers + merge/verify/target have no cross-crate/cross-target
-// consumers (all callers are in-lib via `crate::install::…`) EXCEPT the two `io`
-// env filters and `target::TARGETS` (the bin's registry walk), so they are
+// consumers (all callers are in-lib via `crate::install::…`) EXCEPT the three
+// `io` env filters and `target::TARGETS` (the bin's registry walk), so they are
 // `pub(crate) mod` with just those items re-exported — making `unreachable_pub`
 // the compiler tooth for the rest of their item surface (extends #573's io-only
 // tooth). `pub mod install` (lib.rs) stays pub to carry the re-exports.
@@ -12,7 +12,7 @@ pub(crate) mod hermes;
 mod hook_cmd;
 // io stays pub(crate) for a STRONGER reason than its siblings: it holds the
 // config-write authority (invariant #4), which must never be cross-crate
-// reachable — only its two env filters (below) are re-exported.
+// reachable — only its three env filters (below) are re-exported.
 pub(crate) mod io;
 pub use io::{nonempty, nonempty_abs_env, nonempty_env};
 pub(crate) mod merge;

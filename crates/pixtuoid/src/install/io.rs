@@ -437,6 +437,29 @@ mod tests {
         assert_eq!(expand_tilde("~", None), PathBuf::from("~"));
     }
 
+    #[test]
+    fn nonempty_abs_env_requires_an_absolute_path() {
+        // A private key (not a real XDG var) avoids colliding with other env
+        // tests; TEST_ENV_LOCK serializes the mutation (same lock as config.rs).
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        const KEY: &str = "PIXTUOID_TEST_NONEMPTY_ABS_ENV";
+        let saved = std::env::var_os(KEY);
+        for unset in ["", "   ", "rel/x", "~/x"] {
+            std::env::set_var(KEY, unset);
+            assert_eq!(nonempty_abs_env(KEY), None, "{unset:?} must read as unset");
+        }
+        std::env::set_var(KEY, "/abs/x");
+        assert_eq!(nonempty_abs_env(KEY), Some("/abs/x".to_string()));
+        std::env::remove_var(KEY);
+        assert_eq!(nonempty_abs_env(KEY), None, "a missing var is unset");
+        match saved {
+            Some(v) => std::env::set_var(KEY, v),
+            None => std::env::remove_var(KEY),
+        }
+    }
+
     // rename_with_retry: the retry loop's Windows sharing-violation path is not
     // cheaply testable cross-platform (triggering os error 32 requires another
     // process holding the file). The success path is tested here on all
