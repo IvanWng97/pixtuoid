@@ -315,6 +315,39 @@ pub(super) fn compute_with_seed(
     let (room_walls, doorways) =
         super::rooms::walls::derive_room_walls(&meeting_rooms, pantry_room);
 
+    // Elevator door — 16×14 sprite mounted in the back wall, slotted
+    // into the rightmost window position and BOTTOM-aligned with the
+    // floor-to-ceiling windows so both sit on the same wall plane.
+    // Windows span y=1 to y=top_wall_h-3 inside the wall band; the
+    // elevator's bottom row lands at that same y. (`top_wall_h =
+    // top_margin - WALL_BAND_TO_TOP_MARGIN`, the one const the renderer's
+    // pre-pass and the mask both read so they can't drift.) Requires ≥ 20 px
+    // of width to even fit the sprite + margin. ELEVATOR_W / ELEVATOR_H are the
+    // shared core consts (read by the renderer too — see layout/mod.rs).
+    // Computed HERE (above the lounge gate) so the gate can check couch↔door
+    // clearance; the lounge vignette below still reads `door` for its east limit.
+    let top_wall_h = top_margin.saturating_sub(super::WALL_BAND_TO_TOP_MARGIN);
+    let window_bottom_y = top_wall_h.saturating_sub(3); // matches paint_floor_and_walls' window_h
+    let door = if buf_w >= ELEVATOR_W + 4 && window_bottom_y + 1 >= ELEVATOR_H {
+        Some(Point {
+            x: buf_w.saturating_sub(ELEVATOR_W + 2),
+            // +2 nudge: drops the elevator bottom 2 px below the
+            // window line so it visually rests against the floor
+            // instead of floating mid-wall.
+            y: window_bottom_y + 1 - ELEVATOR_H + 2,
+        })
+    } else {
+        None
+    };
+    // Spawn point on the floor right outside the elevator's centre:
+    // characters walk from here to their desk. Y is 4 px south of
+    // the wall edge so the character clears the elevator threshold
+    // before pathing.
+    let door_threshold = door.map(|d| Point {
+        x: d.x + ELEVATOR_W / 2,
+        y: top_margin + 4,
+    });
+
     let Point {
         x: couch_x,
         y: couch_y,
@@ -327,7 +360,20 @@ pub(super) fn compute_with_seed(
     // 30 = the vignette's blocked span (side-table west edge couch_x−13 →
     // lamp east edge couch_x+10) + OBSTACLE_PAD_PX each side + walk clearance.
     const LOUNGE_MIN_BAND_W: u16 = 30;
-    let lounge_fits = cubicle_band.width >= LOUNGE_MIN_BAND_W;
+    // EAST-side twin of the width gate (#566): the east couch seat's padded
+    // ground (couch_x + max SEAT_DX + Couch half-footprint + OBSTACLE_PAD_PX)
+    // must stay strictly WEST of door_threshold.x, else the couch seals the
+    // spawn threshold's own column (sealed at band.width==30 for buf_w with a
+    // band split to exactly 30). Derived from the SAME geometry the mask stamps
+    // — no hardcoded span. Skipped when there's no door.
+    let couch_east_ground = couch_x
+        + SEAT_DX[SEAT_DX.len() - 1] as u16
+        + furniture_def(Furniture::Couch).footprint.map_or(0, |f| f.w) / 2
+        + OBSTACLE_PAD_PX;
+    // `couch_east_ground` is the EXCLUSIVE east edge (first walkable column east
+    // of the pad), so the couch clears iff it is at-or-west of door_threshold.x.
+    let couch_clears_door = door_threshold.is_none_or(|dt| couch_east_ground <= dt.x);
+    let lounge_fits = cubicle_band.width >= LOUNGE_MIN_BAND_W && couch_clears_door;
 
     let (mut waypoints, couch_sprite_center) = compute_waypoints(
         &cubicle_band,
@@ -397,39 +443,9 @@ pub(super) fn compute_with_seed(
     }))
     .collect();
 
-    // Elevator door — 16×14 sprite mounted in the back wall, slotted
-    // into the rightmost window position and BOTTOM-aligned with the
-    // floor-to-ceiling windows so both sit on the same wall plane.
-    // Windows span y=1 to y=top_wall_h-3 inside the wall band; the
-    // elevator's bottom row lands at that same y. (`top_wall_h =
-    // top_margin - WALL_BAND_TO_TOP_MARGIN`, the one const the renderer's
-    // pre-pass and the mask both read so they can't drift.) Requires ≥ 20 px
-    // of width to even fit the sprite + margin. ELEVATOR_W / ELEVATOR_H are the
-    // shared core consts (read by the renderer too — see layout/mod.rs).
-    let top_wall_h = top_margin.saturating_sub(super::WALL_BAND_TO_TOP_MARGIN);
-    let window_bottom_y = top_wall_h.saturating_sub(3); // matches paint_floor_and_walls' window_h
-    let door = if buf_w >= ELEVATOR_W + 4 && window_bottom_y + 1 >= ELEVATOR_H {
-        Some(Point {
-            x: buf_w.saturating_sub(ELEVATOR_W + 2),
-            // +2 nudge: drops the elevator bottom 2 px below the
-            // window line so it visually rests against the floor
-            // instead of floating mid-wall.
-            y: window_bottom_y + 1 - ELEVATOR_H + 2,
-        })
-    } else {
-        None
-    };
-    // Spawn point on the floor right outside the elevator's centre:
-    // characters walk from here to their desk. Y is 4 px south of
-    // the wall edge so the character clears the elevator threshold
-    // before pathing.
-    let door_threshold = door.map(|d| Point {
-        x: d.x + ELEVATOR_W / 2,
-        y: top_margin + 4,
-    });
-
     // Lounge vignette (lamp + side table + aquarium) — computed AFTER `door`
-    // because the tank prices its east limit against the elevator column.
+    // (moved above the lounge gate) because the tank prices its east limit
+    // against the elevator column.
     let LoungeVignette {
         floor_lamp,
         side_table: lounge_side_table,
@@ -530,42 +546,70 @@ pub(super) fn compute_with_seed(
             })
         }))
         .collect();
-    let plants: Vec<PlantItem> = plant_candidates
+    let mut plants: Vec<PlantItem> = plant_candidates
         .into_iter()
         .filter_map(|p| settle_plant(p, &home_desks, &waypoints, &singleton_rects, &cubicle_band))
         .collect();
 
-    let walkable = mask::build_walkable_mask(&mask::MaskObstacles {
-        buf_w,
-        buf_h,
-        top_margin,
-        door,
-        home_desks: &home_desks,
-        meeting_rooms: &meeting_rooms,
-        kitchen_island,
-        waypoints: &waypoints,
-        plants: &plants,
-        floor_lamp,
-        lounge_side_table,
-        fish_tank,
-        wall_decor: &wall_decor,
-        pod_decor: &pod_decor,
-        room_walls: &room_walls,
-        pantry_counter_size,
-    });
+    let build_mask = |plants: &[PlantItem]| {
+        mask::build_walkable_mask(&mask::MaskObstacles {
+            buf_w,
+            buf_h,
+            top_margin,
+            door,
+            home_desks: &home_desks,
+            meeting_rooms: &meeting_rooms,
+            kitchen_island,
+            waypoints: &waypoints,
+            plants,
+            floor_lamp,
+            lounge_side_table,
+            fish_tank,
+            wall_decor: &wall_decor,
+            pod_decor: &pod_decor,
+            room_walls: &room_walls,
+            pantry_counter_size,
+        })
+    };
+    // Seed for BOTH the connectivity guard and the ReachSet: the door (where
+    // agents enter, so always in the main component), fall back to a home desk,
+    // then buffer centre.
+    let conn_seed = door_threshold
+        .or_else(|| home_desks.first().copied())
+        .unwrap_or(Point {
+            x: buf_w / 2,
+            y: buf_h / 2,
+        });
 
-    // Coarse reachable component, seeded from the door (where agents enter, so
-    // always in the main component); fall back to a home desk, then buffer
-    // centre. ReachSet's seed snap pulls a blocked seed into the adjacent component.
-    let reachable = ReachSet::from_mask(
-        &walkable,
-        door_threshold
-            .or_else(|| home_desks.first().copied())
-            .unwrap_or(Point {
-                x: buf_w / 2,
-                y: buf_h / 2,
-            }),
-    );
+    let mut walkable = build_mask(&plants);
+    // Connectivity guard (#566 CLASS B): a scatter plant can settle onto the
+    // aisle floor and plug the SOLE inter-pod drain at a single-pod-column band,
+    // sealing the appliance strip off from the door. A decorative plant may NEVER
+    // disconnect the office — if the mask has a pocket, drop the aisle-resident
+    // plants and rebuild (the boundary-scan test gates any residual). Bounded.
+    if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
+        // The seal-causer is a scatter plant that `settle_plant` RELOCATED off its
+        // authored corridor-edge row (aisle.y − 4) DOWN onto an obstacle's row —
+        // into the aisle floor itself, where its footprint plugs the drain. The
+        // pocket cells sit ACROSS the drain from the plant (not 4-adjacent to it),
+        // so target by "settled into the aisle", not "borders the pocket".
+        plants.retain(|p| !plant_ground_in_bounds(p, &cubicle_aisle));
+        walkable = build_mask(&plants);
+        // Last resort — decor may NEVER disconnect the office: if a pocket somehow
+        // survives (a non-aisle plant), drop every remaining scatter plant.
+        if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
+            plants.clear();
+            walkable = build_mask(&plants);
+        }
+        debug_assert!(
+            unreachable_walkable_cells(&walkable, conn_seed).is_empty(),
+            "#566 connectivity guard: even dropping all scatter plants left a pocket — \
+             a NON-plant seal cause needs its own fix"
+        );
+    }
+
+    // ReachSet's seed snap pulls a blocked seed into the adjacent component.
+    let reachable = ReachSet::from_mask(&walkable, conn_seed);
 
     Some(SceneLayout {
         buf_w,
@@ -972,6 +1016,69 @@ fn overlaps_a_desk_ground(r: (Point, Size), home_desks: &[Point]) -> bool {
             super::placement::rects_overlap(r, desk_ground)
         })
     })
+}
+
+/// Walkable cells NOT reachable from `seed` by 4-connected flood (a sealed
+/// pocket). Empty when the office is one region OR when `seed` itself is blocked
+/// (a bad seed can't judge connectivity, so the guard stays a no-op rather than
+/// falsely condemning every cell). The #566 connectivity guard's pixel truth —
+/// the same BFS `walkable_is_one_connected_region` asserts, run inline so a decor
+/// piece can be dropped before the layout ships instead of only red-flagged.
+fn unreachable_walkable_cells(mask: &WalkableMask, seed: Point) -> Vec<Point> {
+    let (w, h) = (mask.width(), mask.height());
+    if !mask.is_walkable(seed.x, seed.y) {
+        return Vec::new();
+    }
+    let idx = |x: u16, y: u16| y as usize * w as usize + x as usize;
+    let mut seen = vec![false; w as usize * h as usize];
+    let mut stack = vec![seed];
+    seen[idx(seed.x, seed.y)] = true;
+    while let Some(p) = stack.pop() {
+        for (dx, dy) in [(0i32, -1i32), (0, 1), (-1, 0), (1, 0)] {
+            let (nx, ny) = (p.x as i32 + dx, p.y as i32 + dy);
+            if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                continue;
+            }
+            let (nx, ny) = (nx as u16, ny as u16);
+            if !seen[idx(nx, ny)] && mask.is_walkable(nx, ny) {
+                seen[idx(nx, ny)] = true;
+                stack.push(Point { x: nx, y: ny });
+            }
+        }
+    }
+    (0..h)
+        .flat_map(|y| (0..w).map(move |x| Point { x, y }))
+        .filter(|p| mask.is_walkable(p.x, p.y) && !seen[idx(p.x, p.y)])
+        .collect()
+}
+
+/// Does scatter plant `p`'s ground rect fall inside `b` (the cubicle aisle)? A
+/// plant `settle_plant` relocated onto an obstacle's aisle row lands here and can
+/// plug the drain; authored corridor-edge plants sit above the aisle. THE seal-
+/// causer selector for the #566 connectivity guard.
+fn plant_ground_in_bounds(p: &PlantItem, b: &Bounds) -> bool {
+    let def = furniture_def(p.kind.furniture());
+    let Some(fp) = def.footprint else {
+        return false;
+    };
+    let ground = mask::ground_rect(
+        Anchor::Center,
+        p.pos,
+        fp,
+        def.visual,
+        def.ground_x,
+        def.ground_y,
+    );
+    super::placement::rects_overlap(
+        ground,
+        (
+            Point { x: b.x, y: b.y },
+            Size {
+                w: b.width,
+                h: b.height,
+            },
+        ),
+    )
 }
 
 /// 2×2-pod grid geometry shared by [`compute_pod_desks`] + [`compute_pod_decor`].
