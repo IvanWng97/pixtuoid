@@ -164,9 +164,8 @@ mod tests {
             PathBuf::from("/run/user/1000/pixtuoid.sock")
         );
 
-        // Set-but-empty / relative XDG_RUNTIME_DIR is invalid per the XDG spec
-        // (absolute-only) — treated as unset, falls to the /tmp subdir, never
-        // `/pixtuoid.sock` (empty) or a cwd-relative path (parity with paths.rs).
+        // Invalid (empty/whitespace/relative) XDG_RUNTIME_DIR is unset per the
+        // XDG absolute-only spec -> /tmp subdir (parity with paths.rs / the shim).
         let uid = rustix::process::getuid().as_raw();
         let tmp_fallback = PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"));
         for invalid in ["", "   ", "relative/run"] {
