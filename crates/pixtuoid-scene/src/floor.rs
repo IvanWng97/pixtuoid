@@ -315,10 +315,10 @@ fn frame_epilogue(
 /// THE shared headless frame seam: scene → `RgbBuffer`, one floor, one frame —
 /// prologue (buffer sizing, layout, router zone), the pixel pass, and the
 /// bookkeeping epilogue (coffee-carrier persistence + the door-anim clamp
-/// refresh) in ONE compiler-owned place. Before this seam the epilogue was
-/// mirrored by convention across the consumers and drifted twice for real
-/// (a dropped-carriers bug in the TUI transition path; the web hero shipping
-/// without eviction at all — the loop-2 teleport, #423).
+/// refresh) in ONE compiler-owned place, because a convention-mirrored
+/// epilogue drifts across consumers — the #423 class, concrete enough to
+/// have bitten twice (a dropped-carriers bug in the TUI transition path; the
+/// web hero without eviction — the loop-2 teleport).
 ///
 /// Consumers: the TUI floor-slide (`TuiRenderer::render_transition`), the
 /// floating window (`OfficeRenderer::render`), and the web hero
