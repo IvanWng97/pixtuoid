@@ -157,9 +157,9 @@ fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> usize {
 }
 
 fn crash_log_path() -> PathBuf {
-    // Empty XDG_STATE_HOME = unset (see io::nonempty_env) — left unfiltered,
-    // "" yields the root-absolute `/pixtuoid/...` (unwritable for non-root).
-    if let Some(state) = pixtuoid::install::nonempty_env("XDG_STATE_HOME") {
+    // Empty or RELATIVE XDG_STATE_HOME = unset (XDG spec; nonempty_abs_env) — an
+    // unfiltered "" yields root `/pixtuoid/...`, a relative one lands CWD-relative.
+    if let Some(state) = pixtuoid::install::nonempty_abs_env("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/crash.log"));
     }
     if let Some(home) = pixtuoid_core::platform::user_home_opt() {

@@ -14,7 +14,7 @@ mod hook_cmd;
 // config-write authority (invariant #4), which must never be cross-crate
 // reachable — only its two env filters (below) are re-exported.
 pub(crate) mod io;
-pub use io::{nonempty, nonempty_env};
+pub use io::{nonempty, nonempty_abs_env, nonempty_env};
 pub(crate) mod merge;
 pub(crate) mod openclaw;
 pub(crate) mod opencode;

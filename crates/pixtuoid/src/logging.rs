@@ -113,7 +113,7 @@ pub(crate) fn log_file_path() -> PathBuf {
     if let Some(p) = pixtuoid::install::nonempty_env("PIXTUOID_LOG") {
         return PathBuf::from(p);
     }
-    if let Some(state) = pixtuoid::install::nonempty_env("XDG_STATE_HOME") {
+    if let Some(state) = pixtuoid::install::nonempty_abs_env("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/log"));
     }
     if let Some(home) = pixtuoid_core::platform::user_home_opt() {

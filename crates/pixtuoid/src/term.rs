@@ -135,7 +135,7 @@ pub fn color_preflight(
 /// covers depth — no extra line needed); `Some(reason)` when color is disabled or
 /// force-overridden, so a "the office is monochrome / won't launch" report is
 /// self-diagnosable. Pure (takes the decision) — covered via `doctor::run`.
-pub fn color_status_row(pf: ColorPreflight) -> Option<&'static str> {
+pub(crate) fn color_status_row(pf: ColorPreflight) -> Option<&'static str> {
     match pf {
         ColorPreflight::Proceed => None,
         ColorPreflight::ForceColor => {
@@ -181,7 +181,7 @@ fn parse_decrqss_truecolor(resp: &[u8]) -> Option<bool> {
 /// when doctor isn't attached to a tty). Pure (takes its inputs) so the row logic
 /// is unit-tested; `doctor::run` returns its report string, so it's covered
 /// end-to-end too. Untrusted env values are stripped of control chars.
-pub fn terminal_diagnostic_row(
+pub(crate) fn terminal_diagnostic_row(
     term: Option<&str>,
     colorterm: Option<&str>,
     probe: Option<bool>,

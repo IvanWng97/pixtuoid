@@ -133,12 +133,9 @@ pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Op
 }
 
 pub fn config_path() -> PathBuf {
-    // Empty XDG_CONFIG_HOME = unset (see io::nonempty_env). Without the
-    // filter, `PathBuf::from("")` yields the CWD-relative
-    // `pixtuoid/config.toml` — the real ~/.config copy is silently bypassed
-    // every boot and a theme save scatters orphan configs into whatever cwd
-    // pixtuoid was launched from.
-    let xdg = crate::install::io::nonempty_env("XDG_CONFIG_HOME");
+    // Empty/relative XDG_CONFIG_HOME is invalid (XDG spec) → `nonempty_abs_env`
+    // falls to $HOME/.config, never a CWD-relative `pixtuoid/config.toml`.
+    let xdg = crate::install::io::nonempty_abs_env("XDG_CONFIG_HOME");
     if let Some(base) = xdg {
         return PathBuf::from(base).join("pixtuoid").join("config.toml");
     }
@@ -242,13 +239,13 @@ where
     lock.write_atomic(&doc.to_string())
 }
 
-pub fn save(path: &Path, theme_name: &str) -> Result<()> {
+pub(crate) fn save(path: &Path, theme_name: &str) -> Result<()> {
     update_config(path, |doc| {
         doc["theme"] = toml_edit::value(theme_name);
     })
 }
 
-pub fn save_version(path: &Path, version: &str) -> Result<()> {
+pub(crate) fn save_version(path: &Path, version: &str) -> Result<()> {
     update_config(path, |doc| {
         doc["last-seen-version"] = toml_edit::value(version);
     })
@@ -257,7 +254,11 @@ pub fn save_version(path: &Path, version: &str) -> Result<()> {
 /// Persist a single source's connection flag, auto-vivifying the `[sources]`
 /// table, through the comment/unknown-key-preserving `update_config` path. The
 /// `s` Sources panel calls this on every connect/disconnect toggle.
-pub fn save_source_connected(path: &Path, source_id: &'static str, connected: bool) -> Result<()> {
+pub(crate) fn save_source_connected(
+    path: &Path,
+    source_id: &'static str,
+    connected: bool,
+) -> Result<()> {
     update_config(path, |doc| {
         doc["sources"][source_id] = toml_edit::value(connected);
     })
@@ -270,7 +271,7 @@ pub fn save_source_connected(path: &Path, source_id: &'static str, connected: bo
 /// `setup::is_first_run` empty-table signal intact). Drops an emptied
 /// `[sources]` table so a rolled-back first connect leaves the config exactly
 /// as it was.
-pub fn remove_source_connected(path: &Path, source_id: &str) -> Result<()> {
+pub(crate) fn remove_source_connected(path: &Path, source_id: &str) -> Result<()> {
     update_config(path, |doc| {
         let emptied = match doc.get_mut("sources").and_then(|s| s.as_table_like_mut()) {
             Some(t) => {
@@ -288,7 +289,7 @@ pub fn remove_source_connected(path: &Path, source_id: &str) -> Result<()> {
 /// Persist the `pixtuoid floating` window geometry into the `[floating]` table (size always;
 /// position when the OS reported it). Same `toml_edit` ConfigLock round as
 /// `save_source_connected`, so the user's other settings + hand-formatting survive.
-pub fn save_floating(
+pub(crate) fn save_floating(
     path: &Path,
     width: u32,
     height: u32,
@@ -556,19 +557,16 @@ mod tests {
             PathBuf::from("/xdg/base/pixtuoid/config.toml")
         );
 
-        // Set-but-empty (and whitespace-only) XDG is UNSET per the basedir
-        // spec — it must fall through to $HOME/.config, never become the
-        // CWD-relative `pixtuoid/config.toml`.
-        std::env::set_var("XDG_CONFIG_HOME", "");
-        assert_eq!(
-            config_path(),
-            PathBuf::from("/home/u/.config/pixtuoid/config.toml")
-        );
-        std::env::set_var("XDG_CONFIG_HOME", "   ");
-        assert_eq!(
-            config_path(),
-            PathBuf::from("/home/u/.config/pixtuoid/config.toml")
-        );
+        // Empty/whitespace/relative XDG is invalid (XDG spec) → falls to
+        // $HOME/.config, never the CWD-relative `pixtuoid/config.toml`.
+        for invalid in ["", "   ", "rel/xdg"] {
+            std::env::set_var("XDG_CONFIG_HOME", invalid);
+            assert_eq!(
+                config_path(),
+                PathBuf::from("/home/u/.config/pixtuoid/config.toml"),
+                "invalid XDG_CONFIG_HOME {invalid:?} must fall to $HOME/.config"
+            );
+        }
 
         // No XDG → fall back to $HOME/.config.
         std::env::remove_var("XDG_CONFIG_HOME");

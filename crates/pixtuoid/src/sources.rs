@@ -313,7 +313,7 @@ pub enum Action {
 /// Disconnect; otherwise NoOp. Ids outside `REGISTERED_SOURCES` are ignored
 /// here (the I/O wrapper validates them up front so an unknown id is a loud
 /// error, not a silent drop).
-pub fn plan_reconcile(
+pub(crate) fn plan_reconcile(
     current: &HashSet<String>,
     desired: &HashSet<String>,
 ) -> Vec<(&'static str, Action)> {
