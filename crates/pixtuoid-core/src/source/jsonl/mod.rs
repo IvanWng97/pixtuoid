@@ -111,6 +111,37 @@ struct WatchCtx<'a> {
     live: &'a Arc<Mutex<HashSet<String>>>,
 }
 
+/// The persistent scan-state bundle threaded through every `run_scan_pass`
+/// (initial seed / 250ms rescan / 60s poll). Created once in `run` and borrowed
+/// `&mut` by each pass; the vouch and pid-binding maps also serve the
+/// instant-exit arm directly (see `run`'s `exit_rx` branch).
+struct ScanState {
+    /// Negative-vouch confirmations: a probe-missing id must stay missing for
+    /// `NEGATIVE_VOUCH_MIN_SPAN` before its exit is emitted (guards a probe
+    /// blip from ending a live session).
+    vouch: NegativeVouch,
+    /// pid → the session ids a healthy probe snapshot bound to it
+    /// (`ProbeSnapshot::pid_of` folded by `refresh_probe_snapshot`) — the
+    /// join the instant-exit arm uses to translate an OS exit into
+    /// SessionEnds. Entries leave on exit (whole pid), negative-vouch
+    /// confirm (single id, see `unbind_session`), or a rebind migration
+    /// (the snapshot observes the id under a different pid).
+    pid_bindings: HashMap<i32, HashSet<String>>,
+    /// Latches the root-scan's persistent-error breadcrumb (warn once per
+    /// failure streak, info on recovery — the `FailureLatch` convention).
+    root_health: FailureLatch,
+}
+
+impl ScanState {
+    fn new(negative_vouch_min_span: Duration) -> Self {
+        Self {
+            vouch: NegativeVouch::new(negative_vouch_min_span),
+            pid_bindings: HashMap::new(),
+            root_health: FailureLatch::default(),
+        }
+    }
+}
+
 pub struct JsonlWatcher {
     root: PathBuf,
     initial_window: Duration,
@@ -230,13 +261,10 @@ impl JsonlWatcher {
     /// healthy. The initial seed + the 250ms rescan + the 60s poll all run this
     /// SAME sequence; only the seed skips the un-claim drain (`drain = false` —
     /// nothing has been pushed at startup). `decoders` is `Copy`.
-    #[allow(clippy::too_many_arguments)]
     async fn run_scan_pass(
         &self,
         ctx: &WatchCtx<'_>,
-        vouch: &mut NegativeVouch,
-        pid_bindings: &mut HashMap<i32, HashSet<String>>,
-        root_health: &mut FailureLatch,
+        scan_state: &mut ScanState,
         exit_watch: Option<&ExitWatch>,
         unclaims: Option<&ChildEndUnclaims>,
         decoders: SourceDecoders,
@@ -244,8 +272,8 @@ impl JsonlWatcher {
     ) {
         let healthy = refresh_probe_snapshot(
             self.liveness_probe.as_ref(),
-            vouch,
-            pid_bindings,
+            &mut scan_state.vouch,
+            &mut scan_state.pid_bindings,
             exit_watch,
             decoders,
             ctx,
@@ -254,7 +282,7 @@ impl JsonlWatcher {
         if drain {
             drain_child_end_unclaims(unclaims, decoders, ctx).await;
         }
-        scan_root(&self.root, decoders, ctx, root_health).await;
+        scan_root(&self.root, decoders, ctx, &mut scan_state.root_health).await;
         if healthy {
             emit_proof_of_life(ctx.live, ctx.source, ctx.tx).await;
         }
@@ -269,7 +297,10 @@ impl JsonlWatcher {
         // the latest snapshot. Starts empty — the seed refresh fills it before
         // the first scan.
         let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-        let mut vouch = NegativeVouch::new(self.negative_vouch_min_span);
+        // The persistent scan-state bundle (vouch + pid→ids bindings + root-scan
+        // health latch), threaded `&mut` through every `run_scan_pass` and read
+        // directly by the instant-exit arm below.
+        let mut scan_state = ScanState::new(self.negative_vouch_min_span);
 
         // Instant exit (#223 rung 2): a probed watcher spawns ONE detached
         // ExitWatch thread (kqueue NOTE_EXIT / pidfd+poll) so a bound OS
@@ -294,14 +325,6 @@ impl JsonlWatcher {
         // reintroduce the wasted poll; that residual is accepted.)
         let _exit_keepalive = exit_watch.is_none().then(|| exit_tx.clone());
         drop(exit_tx);
-        // pid → the session ids a healthy probe snapshot bound to it
-        // (`ProbeSnapshot::pid_of` folded by `refresh_probe_snapshot`) — the
-        // join the instant-exit arm uses to translate an OS exit into
-        // SessionEnds. Entries leave on exit (whole pid), negative-vouch
-        // confirm (single id, see `unbind_session`), or a rebind migration
-        // (the snapshot observes the id under a different pid).
-        let mut pid_bindings: HashMap<i32, HashSet<String>> = HashMap::new();
-        let mut root_health = FailureLatch::default();
 
         let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
         let mut notify_health = FailureLatch::default();
@@ -374,9 +397,7 @@ impl JsonlWatcher {
             };
             self.run_scan_pass(
                 &ctx,
-                &mut vouch,
-                &mut pid_bindings,
-                &mut root_health,
+                &mut scan_state,
                 exit_watch.as_ref(),
                 unclaims.as_ref(),
                 decoders,
@@ -427,13 +448,13 @@ impl JsonlWatcher {
                 _ = &mut rescan_delay, if !rescan_done => {
                     rescan_done = true;
                     self.run_scan_pass(
-                        &ctx, &mut vouch, &mut pid_bindings, &mut root_health,
+                        &ctx, &mut scan_state,
                         exit_watch.as_ref(), unclaims.as_ref(), decoders, true,
                     ).await;
                 }
                 _ = poll.tick() => {
                     self.run_scan_pass(
-                        &ctx, &mut vouch, &mut pid_bindings, &mut root_health,
+                        &ctx, &mut scan_state,
                         exit_watch.as_ref(), unclaims.as_ref(), decoders, true,
                     ).await;
                 }
@@ -442,14 +463,14 @@ impl JsonlWatcher {
                     // died. Translate through the pid→ids binding; an
                     // unknown pid (already unbound by a negative-vouch
                     // confirm, or a duplicate event) is a no-op.
-                    if let Some(ids) = pid_bindings.remove(&pid) {
+                    if let Some(ids) = scan_state.pid_bindings.remove(&pid) {
                         for id in ids {
                             debug!("instant exit: pid {pid} died; emitting SessionEnd for {id}");
                             emit_session_exit(&id, decoders, &ctx).await;
                             // The next healthy snapshot will see the id gone
                             // anyway; forget it NOW so the negative vouch
                             // can't re-confirm the exit we just emitted.
-                            vouch.forget(&id);
+                            scan_state.vouch.forget(&id);
                         }
                     }
                 }
