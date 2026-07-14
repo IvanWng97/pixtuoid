@@ -142,7 +142,6 @@ pub(super) fn wall_segment_rect(seg: &WallSegment, top_margin: u16) -> (Point, S
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 /// The placed-piece inventory the mask stamps — a NAMED input so the five
 /// interchangeable `Option<Point>` pieces (door/kitchen_island/floor_lamp/
 /// lounge_side_table/fish_tank) can't be positionally swapped, and so
