@@ -2479,9 +2479,10 @@ fn fish_tank_paints_water_fish_and_cabinet_from_the_furniture_row() {
 
 #[test]
 fn meeting_chairs_paint_with_backrests_toward_the_table_ends() {
-    // The chair body carries the E/W orientation its Front-seated occupant
-    // lost (no side-facing seated sprite): backrest bar on the OUTER side,
-    // cushion from the chair_* theme family shared with the desk chairs.
+    // The chair body's backrest bar rides the OUTER side — reinforcing the
+    // profile sitter's orientation, carrying it alone when the chair is
+    // empty; cushion from the chair_* theme family shared with the desk
+    // chairs.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let floor = Rgb {
         r: 150,

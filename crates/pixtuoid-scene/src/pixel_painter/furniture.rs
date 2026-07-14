@@ -482,8 +482,9 @@ pub(super) fn paint_fish_tank(
 
 /// Head-of-table meeting chair (decor arc): a 7x7 cushion-and-backrest body
 /// centered on its MeetingChair waypoint. The backrest bar rides the OUTER
-/// side (`back_west`), carrying the E/W orientation the Front-seated occupant
-/// can't (no side-facing seated sprite). Colors reuse the desk-chair family.
+/// side (`back_west`), reinforcing the profile sitter's orientation — and
+/// carrying it alone when the chair is empty. Colors reuse the desk-chair
+/// family.
 pub(super) fn paint_meeting_chair(
     buf: &mut RgbBuffer,
     pos: crate::layout::Point,

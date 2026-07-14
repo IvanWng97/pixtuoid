@@ -306,6 +306,20 @@ mod tests {
     }
 
     #[test]
+    fn embedded_default_pack_animations_are_all_in_the_registry() {
+        // The scene-side half of the registry bridge: every animation the
+        // EMBEDDED pack ships must be registry-known, or validate-pack
+        // falsely reports it "unused by renderer" (the side_seated drift).
+        let pack = load_sprite_pack(None).expect("embedded pack");
+        let report = pixtuoid_core::sprite::format::validate_pack_animations(&pack);
+        assert!(
+            report.unknown.is_empty(),
+            "embedded animation missing from the registry: {:?}",
+            report.unknown
+        );
+    }
+
+    #[test]
     fn custom_pack_missing_required_pose_loads_with_a_load_time_warning() {
         // A --pack-dir pack missing a required character pose must (a) still
         // LOAD — warn, not fail — and (b) be LOUD about the gap at load time:

@@ -195,6 +195,14 @@ fn robot_pack_passes_validation() {
         "insufficient frames: {:?}",
         report.insufficient_frames
     );
+    // The bridge the side_seated drift slipped through: every animation a
+    // bundled pack ships must be IN the registry, or validate-pack falsely
+    // reports it "unused by renderer" to every pack author.
+    assert!(
+        report.unknown.is_empty(),
+        "bundled-pack animation missing from the registry: {:?}",
+        report.unknown
+    );
 }
 
 #[test]
@@ -205,6 +213,11 @@ fn skeleton_pack_passes_validation() {
         report.missing_required.is_empty(),
         "missing required: {:?}",
         report.missing_required
+    );
+    assert!(
+        report.unknown.is_empty(),
+        "bundled-pack animation missing from the registry: {:?}",
+        report.unknown
     );
 }
 

@@ -67,9 +67,9 @@ pub(super) fn paint_character_at(
 /// from the approach side). A `Facing::North` sitter shows its back (`back_couch`):
 /// the lounge couch (always looks at the window/North) and the south-side meeting
 /// sofa; other meeting-sofa seats face the viewer across the table (front
-/// `seated`), and the head-of-table chairs sit the same way — the painted
-/// chair body carries their E/W orientation. Extracted so the facing→sprite
-/// mapping is unit-testable.
+/// `seated`); the head-of-table chairs sit in PROFILE facing the table
+/// (`side_seated`, mirrored for the east chair). Extracted so the
+/// facing→sprite mapping is unit-testable.
 pub(super) fn seat_sprite(
     kind: crate::layout::WaypointKind,
     facing: crate::layout::Facing,
@@ -217,9 +217,10 @@ impl SeatView {
             // front sofa (pos+2, insertion order puts the sitter on top).
             SeatView::Front | SeatView::Back | SeatView::SideSeated { .. } => wp_pos.y + 2,
             // Stand-beside-the-table clearance (+3 over the table's y+2).
-            // No seat kind routes Side today (the head-of-table chairs went
-            // Front) and the non-seat obstacle kinds never settle onto a
-            // seat, so this arm is a defensive default, not a live seat key.
+            // No seat kind routes Side (the head-of-table chairs SIT via
+            // SideSeated above) and the non-seat obstacle kinds never settle
+            // onto a seat, so this arm is a defensive default, not a live
+            // seat key.
             SeatView::Side { .. } => wp_pos.y + 3,
             // Plain feet-row key — the AtWaypoint default for a stander. The
             // bartender's pos row sits INSIDE the island body, below the

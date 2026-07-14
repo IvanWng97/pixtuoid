@@ -383,7 +383,9 @@ pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
     "back_couch",
 ];
 
-pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &["walking_coffee"];
+// side_seated is optional-by-design: the chair render degrades to the front
+// `seated` pose when a pack lacks it (seat_sprite_in_pack), never invisible.
+pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &["walking_coffee", "side_seated"];
 
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
@@ -408,6 +410,7 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "pantry_small",
     "whiteboard",
     "bookshelf",
+    "snack_shelf",
     "tv_stand",
     "phone_booth",
     "standing_desk",

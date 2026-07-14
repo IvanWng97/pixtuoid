@@ -394,7 +394,8 @@ fn resolve_characters(
                         // Lounge couch + meeting sofa + head-of-table chair:
                         // the sprite follows the SEATED facing (couch always
                         // North/window → back_couch; the sofa's two seats face
-                        // each other across the table; the chair sits Front).
+                        // each other across the table; the chair sits in
+                        // PROFILE facing the table — SideSeated).
                         // All reuse the seat anchor — pairing the chair with
                         // the stand-era waypoint_anchor left its 10-row seated
                         // sprite hovering 5 rows above the chair body.

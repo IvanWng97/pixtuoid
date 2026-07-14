@@ -1209,9 +1209,9 @@ fn enqueue_floor_fixtures<'a>(
         .filter(|w| w.kind == crate::layout::WaypointKind::MeetingChair)
     {
         drawables.push(Drawable {
-            // One row UNDER the sitter's z — derived from the SAME seat key
-            // the occupant sorts by, so the pair can't drift apart.
-            anchor_y: seat::SeatView::Front.z_key_for_seat(wp.pos) - 1,
+            // One row UNDER the sitter's z — derived from the occupant's
+            // OWN view's seat key, so the pair can't drift apart.
+            anchor_y: seat::SeatView::of(wp.kind, wp.facing).z_key_for_seat(wp.pos) - 1,
             kind: DrawableKind::MeetingChair {
                 pos: wp.pos,
                 // The backrest rides the side AWAY from the table: a chair
