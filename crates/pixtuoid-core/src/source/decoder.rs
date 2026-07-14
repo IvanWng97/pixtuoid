@@ -1203,6 +1203,186 @@ mod tests {
         }
     }
 
+    // Every non-daemon source's REAL decoder must route its tool display through
+    // the shared cap chokepoints (`generic_tool_display`/`ellipsize`), so an
+    // over-cap tool name/target can never leak past the bound. The documented
+    // residual (#272) is a per-decoder BYPASS — a display minted from raw wire
+    // content without `ellipsize` (3 hook-only decoders, copilot twice). Before
+    // this, only CC had a firing cap test; the other 9 were unpinned. The
+    // completeness assert vs REGISTERED_SOURCES-minus-daemons makes a NEW source
+    // fail until it gets a cap row (#612 FIND-36).
+    #[test]
+    fn every_agent_decoder_caps_its_tool_display() {
+        use crate::source::{
+            antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, omp, opencode,
+            reasonix, registry,
+        };
+        use serde_json::json;
+        use std::collections::HashSet;
+
+        let name_s = "N".repeat(MAX_DECODED_FIELD_CHARS * 2);
+        let tgt_s = "T".repeat(MAX_TOOL_TARGET_CHARS * 5);
+        // codewhale's `tool_args` is a JSON STRING, not an object — embed the
+        // over-cap target inside it so its target chokepoint is exercised too.
+        let cw_args_s = format!("{{\"command\":\"{tgt_s}\"}}");
+        // Borrow as &str (Copy) so each row's closure captures by copy — a String
+        // would be MOVED into its first json! and break the `Fn` table.
+        let (name, tgt, cw_args) = (name_s.as_str(), tgt_s.as_str(), cw_args_s.as_str());
+        // Widest a capped display can be: capped name + ": " + capped target,
+        // each gaining one '…'. A raw-content bypass (200+ chars) blows past it.
+        let bound = MAX_DECODED_FIELD_CHARS + 1 + ": ".len() + MAX_TOOL_TARGET_CHARS + 1;
+
+        type Row<'a> = (&'static str, Box<dyn Fn() -> Vec<AgentEvent> + 'a>);
+        let table: Vec<Row> = vec![
+            (
+                claude_code::SOURCE_NAME,
+                Box::new(|| {
+                    claude_code::decode_cc_line(
+                        "/p/ses-a.jsonl",
+                        "claude-code",
+                        json!({"type":"assistant","message":{"content":[
+                            {"type":"tool_use","id":"t1","name":name,"input":{"file_path":tgt}}]}}),
+                    )
+                    .expect("cc decodes")
+                }),
+            ),
+            (
+                codex::SOURCE_NAME,
+                Box::new(|| {
+                    codex::decode_codex_line(
+                        "/p/rollout.jsonl",
+                        "codex",
+                        json!({"type":"response_item","payload":{"type":"function_call","name":name}}),
+                    )
+                    .expect("codex decodes")
+                }),
+            ),
+            (
+                antigravity::SOURCE_NAME,
+                Box::new(|| {
+                    antigravity::decode_ag_line(
+                        "/x/transcript.jsonl",
+                        "antigravity",
+                        json!({"type":"PLANNER_RESPONSE","step_index":0,"tool_calls":[
+                            {"name":name,"args":{"CommandLine":tgt}}]}),
+                    )
+                    .expect("antigravity decodes")
+                }),
+            ),
+            (
+                copilot::SOURCE_NAME,
+                Box::new(|| {
+                    copilot::decode_copilot_line(
+                        "/c/id/events.jsonl",
+                        "copilot",
+                        json!({"type":"tool.execution_start","data":{
+                            "toolCallId":"tc1","toolName":name,"arguments":{"command":tgt}}}),
+                    )
+                    .expect("copilot decodes")
+                }),
+            ),
+            (
+                omp::SOURCE_NAME,
+                Box::new(|| {
+                    omp::decode_omp_line(
+                        "/o/s.jsonl",
+                        "omp",
+                        json!({"type":"message","message":{"role":"assistant","content":[
+                            {"type":"toolCall","id":"t1","name":name,"arguments":{"command":tgt}}]}}),
+                    )
+                    .expect("omp decodes")
+                }),
+            ),
+            (
+                reasonix::SOURCE_NAME,
+                Box::new(|| {
+                    reasonix::decode_rx_hook_custom(&json!({
+                        "event":"PreToolUse","cwd":"/r","toolName":name,"toolArgs":{"command":tgt}}))
+                    .expect("reasonix decodes")
+                    .expect("reasonix claims the event")
+                }),
+            ),
+            (
+                codewhale::SOURCE_NAME,
+                Box::new(|| {
+                    codewhale::decode_cw_hook_custom(&json!({
+                        "event":"tool_call_before","cwd":"/r","tool":name,"tool_args":cw_args}))
+                    .expect("codewhale decodes")
+                    .expect("codewhale claims the event")
+                }),
+            ),
+            (
+                opencode::SOURCE_NAME,
+                Box::new(|| {
+                    opencode::decode_oc_hook_custom(&json!({
+                        "type":"message.part.updated","properties":{"sessionID":"ses-1","part":{
+                            "type":"tool","callID":"c1","tool":name,
+                            "state":{"status":"running","input":{"command":tgt}}}}}))
+                    .expect("opencode decodes")
+                    .expect("opencode claims the event")
+                }),
+            ),
+            (
+                cursor::SOURCE_NAME,
+                Box::new(|| {
+                    cursor::decode_cursor_hook_custom(&json!({
+                        "hook_event_name":"preToolUse","session_id":"s",
+                        "tool_name":name,"tool_input":{"command":tgt}}))
+                    .expect("cursor decodes")
+                    .expect("cursor claims the event")
+                }),
+            ),
+            (
+                hermes::SOURCE_NAME,
+                Box::new(|| {
+                    hermes::decode_hermes_hook_custom(&json!({
+                        "hook_event_name":"pre_tool_call","session_id":"s","cwd":"/r",
+                        "tool_name":name,"tool_input":{"command":tgt}}))
+                    .expect("hermes decodes")
+                    .expect("hermes claims the event")
+                }),
+            ),
+        ];
+
+        for (src, decode) in &table {
+            let evs = decode();
+            let display = evs
+                .iter()
+                .find_map(|e| match e {
+                    AgentEvent::ActivityStart {
+                        detail: Some(d), ..
+                    } => Some(d.display().to_string()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{src}: decoder emitted no ActivityStart with a detail"));
+            assert!(
+                display.chars().count() <= bound,
+                "{src}: tool display {} chars > cap bound {bound} — a chokepoint bypass leaks raw content",
+                display.chars().count()
+            );
+            // '…' proves the cap FIRED (a decoder that silently dropped the
+            // over-cap field would pass the length check vacuously).
+            assert!(
+                display.ends_with('…'),
+                "{src}: display {display:?} did not end with the ellipsis — cap did not fire"
+            );
+        }
+
+        // Completeness (anti-drift teeth): the table must cover EXACTLY the
+        // non-daemon registered sources — a new one reds until it gets a row.
+        let covered: HashSet<&str> = table.iter().map(|(n, _)| *n).collect();
+        for &s in crate::source::REGISTERED_SOURCES {
+            let daemon = registry::descriptor_for(s).is_some_and(|d| d.is_daemon());
+            if !daemon {
+                assert!(covered.contains(s), "add {s} to the decoder cap table");
+            }
+        }
+        for &c in &covered {
+            let daemon = registry::descriptor_for(c).is_some_and(|d| d.is_daemon());
+            assert!(!daemon, "{c} is a daemon — remove it from the cap table");
+        }
+    }
+
     // A DAEMON source's payload decodes to ZERO AgentEvents — the `is_daemon()`
     // short-circuit that replaced the deleted `decode_openclaw_hook_custom`. Pins
     // that a daemon envelope (alien `{type:…}`, no `hook_event_name`) never reaches

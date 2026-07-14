@@ -133,71 +133,111 @@ pub(crate) fn test_default_pack() -> Pack {
 }
 
 fn load_embedded_pack() -> Result<Pack> {
-    // Embed each default sprite ONCE by filename. The macro expands every entry
-    // to `("<name>", include_str!(concat!("../sprites/default/", "<name>")))`, so
-    // a new sprite is a SINGLE line here — not a `let`-binding AND a matching
-    // tuple entry that can silently drift out of sync. Byte-identical to the
-    // hand-listed form (`concat!` folds to the same path literal at compile
-    // time); `build.rs` still emits the per-file `rerun-if-changed`.
-    macro_rules! embedded_sprites {
-        ($($name:literal),+ $(,)?) => {
-            &[$(($name, include_str!(concat!("../sprites/default/", $name)))),+]
-        };
-    }
-
     load_pack_from_strings(
         include_str!("../sprites/default/pack.toml"),
-        embedded_sprites![
-            "seated.sprite",
-            "side_seated.sprite",
-            "typing_0.sprite",
-            "typing_1.sprite",
-            "standing.sprite",
-            "walking_0.sprite",
-            "walking_1.sprite",
-            "walking_back_0.sprite",
-            "walking_back_1.sprite",
-            "walking_coffee_0.sprite",
-            "walking_coffee_1.sprite",
-            "desk.sprite",
-            "plant.sprite",
-            "plant_tall.sprite",
-            "plant_flower.sprite",
-            "plant_succulent.sprite",
-            "floor_lamp.sprite",
-            "door.sprite",
-            "door_half.sprite",
-            "door_open.sprite",
-            "bulletin_board.sprite",
-            "exit_sign.sprite",
-            "filing_cabinet.sprite",
-            "cat_walk_0.sprite",
-            "cat_walk_1.sprite",
-            "cat_sit.sprite",
-            "cat_sleep.sprite",
-            "dog_walk_0.sprite",
-            "dog_walk_1.sprite",
-            "dog_sit.sprite",
-            "dog_sleep.sprite",
-            "lobster_walk_0.sprite",
-            "lobster_walk_1.sprite",
-            "lobster_rest.sprite",
-            "meeting_sofa.sprite",
-            "meeting_screen.sprite",
-            "back_couch.sprite",
-            "seated_sleeping.sprite",
-            "seated_sleeping_alt.sprite",
-            "holding_coffee.sprite",
-            "pantry.sprite",
-            "pantry_small.sprite",
-            "whiteboard.sprite",
-            "bookshelf.sprite",
-            "snack_shelf.sprite",
-            "tv_stand.sprite",
-            "phone_booth.sprite",
-            "standing_desk.sprite",
-        ],
+        &embedded_sprite_srcs(),
     )
+}
+
+/// Every default sprite as `(filename, source)`. The macro expands each entry to
+/// `("<name>", include_str!(concat!("../sprites/default/", "<name>")))`, so a new
+/// sprite is a SINGLE line — not a `let`-binding AND a matching tuple entry that
+/// can silently drift. Extracted (vs inlined in [`load_embedded_pack`]) so the
+/// wide-pack test fixture ([`test_wide_pack`]) reuses the EXACT sprite set and
+/// only overrides `standing.sprite`; `build.rs` still emits per-file rerun-if-changed.
+fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
+    macro_rules! embedded_sprites {
+        ($($name:literal),+ $(,)?) => {
+            vec![$(($name, include_str!(concat!("../sprites/default/", $name)))),+]
+        };
+    }
+    embedded_sprites![
+        "seated.sprite",
+        "side_seated.sprite",
+        "typing_0.sprite",
+        "typing_1.sprite",
+        "standing.sprite",
+        "walking_0.sprite",
+        "walking_1.sprite",
+        "walking_back_0.sprite",
+        "walking_back_1.sprite",
+        "walking_coffee_0.sprite",
+        "walking_coffee_1.sprite",
+        "desk.sprite",
+        "plant.sprite",
+        "plant_tall.sprite",
+        "plant_flower.sprite",
+        "plant_succulent.sprite",
+        "floor_lamp.sprite",
+        "door.sprite",
+        "door_half.sprite",
+        "door_open.sprite",
+        "bulletin_board.sprite",
+        "exit_sign.sprite",
+        "filing_cabinet.sprite",
+        "cat_walk_0.sprite",
+        "cat_walk_1.sprite",
+        "cat_sit.sprite",
+        "cat_sleep.sprite",
+        "dog_walk_0.sprite",
+        "dog_walk_1.sprite",
+        "dog_sit.sprite",
+        "dog_sleep.sprite",
+        "lobster_walk_0.sprite",
+        "lobster_walk_1.sprite",
+        "lobster_rest.sprite",
+        "meeting_sofa.sprite",
+        "meeting_screen.sprite",
+        "back_couch.sprite",
+        "seated_sleeping.sprite",
+        "seated_sleeping_alt.sprite",
+        "holding_coffee.sprite",
+        "pantry.sprite",
+        "pantry_small.sprite",
+        "whiteboard.sprite",
+        "bookshelf.sprite",
+        "snack_shelf.sprite",
+        "tv_stand.sprite",
+        "phone_booth.sprite",
+        "standing_desk.sprite",
+    ]
+}
+
+/// The default pack with a 10px-wide `standing` frame (robot packs go up to 10)
+/// so the pack-resolved `char_w` differs from the bundled 8-wide `CHARACTER_SPRITE_W`
+/// — the only way to drive `sim_step`/`resolve_characters` occupancy + anchors
+/// end-to-end at a non-default width (#609). Reuses the FULL default sprite set
+/// so `resolve_characters` still finds every pose; only `standing.sprite` is swapped.
+#[cfg(test)]
+pub(crate) fn test_wide_pack() -> Pack {
+    let _env = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    // The bundled 8x12 standing pose padded to 10 wide with transparent columns
+    // (same palette keys). char_w = this frame's width = 10.
+    const WIDE_STANDING: &str = "\
+@frame 0
+. . n H H H H n . .
+. n H H H H H H n .
+. H H S S S S H H .
+. H S e S S e S H .
+. . S S S m S S . .
+. . n S S S S n . .
+. . B B B B B B . .
+. B B B B B B B B .
+. S B B B B B B S .
+. . P P P P P P . .
+. . P P P P P P . .
+. . P . . . . P . .
+";
+    let mut srcs = embedded_sprite_srcs();
+    for entry in &mut srcs {
+        if entry.0 == "standing.sprite" {
+            entry.1 = WIDE_STANDING;
+        }
+    }
+    load_pack_from_strings(include_str!("../sprites/default/pack.toml"), &srcs)
+        .expect("wide test pack loads")
 }
 
 #[cfg(test)]

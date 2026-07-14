@@ -2130,6 +2130,91 @@ fn sim_rig() -> (SceneState, Layout, pixtuoid_core::AgentId, SystemTime, Pack) {
     (scene, layout, id, now0, pack)
 }
 
+// The x-span of the overlay's blocked cells (one AtWaypoint agent ⇒ one rect,
+// so the bbox width IS char_w). None when nothing is reserved.
+fn reserved_bbox_width(overlay: &OccupancyOverlay, w: u16, h: u16) -> Option<u16> {
+    let (mut lo, mut hi) = (None, None);
+    for y in 0..h {
+        for x in 0..w {
+            if overlay.blocks(x, y) {
+                lo = Some(lo.map_or(x, |m: u16| m.min(x)));
+                hi = Some(hi.map_or(x, |m: u16| m.max(x)));
+            }
+        }
+    }
+    Some(hi? - lo? + 1)
+}
+
+// A wide (10px) `standing` pack makes char_w=10 ≠ the bundled CHARACTER_SPRITE_W=8,
+// so the AtWaypoint occupancy reservation must span 10, not the const (#606's fix;
+// #609 — the 8-wide bundled pack can't tell them apart, so a revert to the const
+// survives every existing sim_step test).
+#[test]
+fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
+    use crate::layout::TEST_DEFAULT_DESKS;
+    use crate::pose::Pose;
+    use std::time::Duration;
+
+    let wide = crate::embedded_pack::test_wide_pack();
+    let default = crate::embedded_pack::test_default_pack();
+    assert_eq!(
+        wide.animation("standing").expect("standing").frames[0].width(),
+        10,
+        "the wide fixture's standing frame drives char_w"
+    );
+    assert_eq!(
+        default.animation("standing").expect("standing").frames[0].width(),
+        CHARACTER_SPRITE_W,
+    );
+
+    let layout =
+        Layout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), 0).expect("240x160 lays out");
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let (bw, bh) = (layout.walkable.width(), layout.walkable.height());
+
+    // `pose::derive` is pack-INDEPENDENT (pose only), so the AtWaypoint `now` it finds
+    // is stationary for BOTH packs. Scan idle agents × a window (some cycles roll Aimless).
+    let mut found = None;
+    'search: for aid in 0..8u32 {
+        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/p/wp-{aid}.jsonl"));
+        let mut slot = make_slot(id, ActivityState::Idle);
+        slot.created_at = now0;
+        slot.state_started_at = now0;
+        slot.last_event_at = now0;
+        for secs in 1..1800u64 {
+            let now = now0 + Duration::from_secs(secs);
+            if matches!(
+                pose::derive(&slot, now, &layout),
+                Some(Pose::AtWaypoint { .. })
+            ) {
+                found = Some((slot.clone(), now));
+                break 'search;
+            }
+        }
+    }
+    let (slot, now) = found.expect("an idle agent visits a Named waypoint within the scan window");
+
+    let mut scene = SceneState::uniform(16);
+    scene.agents.insert(slot.agent_id, slot);
+    let coffee = HashMap::new();
+
+    let reserve = |pack: &Pack| {
+        let mut owned = OwnedSimStores::new();
+        sim_step(&mut owned.stores(), &scene, &layout, pack, &coffee, 0, now);
+        reserved_bbox_width(&owned.overlay, bw, bh)
+    };
+    assert_eq!(
+        reserve(&wide),
+        Some(10),
+        "wide pack reserves char_w=10 at the AtWaypoint stand cell"
+    );
+    assert_eq!(
+        reserve(&default),
+        Some(CHARACTER_SPRITE_W),
+        "default pack reserves the bundled char_w=8 — the differential that pins char_w",
+    );
+}
+
 #[test]
 fn sim_step_advances_motion_without_painting() {
     // The whole point of the split: the world advances with NO pixel buffer
