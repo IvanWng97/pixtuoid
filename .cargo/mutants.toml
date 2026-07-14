@@ -54,14 +54,17 @@ exclude_re = [
     'cc_probe\.rs.*replace pid_start_time_secs',
     # `plant_ground_in_bounds` selects which scatter plants the #566 connectivity
     # guard drops (aisle-resident sealers) vs the `plants.clear()` last resort.
-    # Proven UNOBSERVABLE by a full narrow-band scan (32..=76 × {80,100,120,160} ×
-    # seeds 0..11): at EVERY config where the guard fires (a real pocket — the
-    # 59-60×160 single-pod-column seals), BOTH corridor plants are already aisle-
-    # resident, so the targeted retain empties the list identically to clear-all;
-    # the configs that DO keep a plant (38-42×160) never seal, so the guard never
-    # runs there. No reachable layout distinguishes the selector from clear-all —
-    # the targeted path is intent-revealing future-proofing (a hypothetical future
-    # seal with a non-aisle survivor), and the never-ship-a-pocket invariant IS
-    # pinned (appliance_strip_not_sealed_at_a_single_pod_band + the boundary scan).
+    # Within the SWEPT space (narrow-band 32..=76 × {80,100,120,160} × seeds 0..11)
+    # the mutant is UNOBSERVABLE: at every config where the guard fires (the
+    # 59-60×160 single-pod-column seals) BOTH corridor plants are already aisle-
+    # resident, so the targeted retain empties the list identically to clear-all,
+    # and the configs that keep a plant (38-42×160) never seal. The targeted path
+    # is NOT dead, though — `plants` can also carry meeting-room + Ficus plants
+    # (compute.rs) that sit far from `cubicle_aisle`, so a seal involving one
+    # (outside the swept space) is exactly where `plant_ground_in_bounds` protects
+    # it from the clear-all sledgehammer: genuine future-proofing. The
+    # never-ship-a-pocket invariant IS pinned (appliance_strip_not_sealed_at_a_
+    # single_pod_band + the boundary scan), so only the unobservable culprit-vs-
+    # blanket distinction survives — an equivalent mutant within reach today.
     'compute\.rs.*plant_ground_in_bounds',
 ]

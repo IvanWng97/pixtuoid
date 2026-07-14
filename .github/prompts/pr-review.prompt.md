@@ -30,7 +30,7 @@ given change/tree, say so, don't skip it.
   the render loop — sync flock/fsync/FS probes on a tokio WORKER thread starve
   co-scheduled tasks (off-load via `spawn_blocking`); on the block_on ROOT future
   (`run_tui`) they are an accepted brief INLINE stall — `block_in_place` is INERT
-  there (not a worker, #617), and the Sources-panel ConfigLock stall's earlier
+  there (not a worker, #603), and the Sources-panel ConfigLock stall's earlier
   `block_in_place` "fix" for a dropped #283 bot MEDIUM was proven inert and
   removed; creation POLARITY — only a proof-of-LIFE event may create/resurrect
   an entry for an unknown id, a death/exit/TTL signal for an absent id must
