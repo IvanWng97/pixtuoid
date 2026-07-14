@@ -62,11 +62,10 @@ const CODA_FONT_PX: f32 = 12.0;
 const CODA_LINE_H: u32 = 18;
 const CODA_PAD: u32 = 10;
 // The "captured"/"happened in a terminal" framing (here + the `~ captured
-// claude code session` panel title below) is owner-adjudicated DELIBERATE
-// (PR #512 disposition): the timeline is authored — the statusline-ticker
-// disjointness pin REQUIRES authored strings — and the load-bearing half of
-// the claim is engine truth (the right pane replays through the real
-// decode_cc_line → Reducer → renderer). Don't re-flag as an overclaim.
+// claude code session` panel title below) is DELIBERATE: the timeline is
+// authored — the statusline-ticker disjointness pin REQUIRES authored strings
+// — and the load-bearing half of the claim is engine truth (the right pane
+// replays through the real decode_cc_line → Reducer → renderer).
 const CODA_TEXT: &str = "the left pane happened in a terminal. the right pane is the same \
 event stream, drawn by the same engine -- nothing is mocked.";
 

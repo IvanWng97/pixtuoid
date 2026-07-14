@@ -1023,11 +1023,10 @@ mod hud_tests {
         assert!(!any_glyph, "dismissed popup must paint nothing");
     }
 
-    // Regression: the elevator indicator measured its label by BYTE length.
-    // " ▲ F1 ▼ " is 8 display columns but 12 bytes (the arrows are 3-byte
-    // single-column glyphs), so the centering anchor `door.x + 8 - w/2`
-    // landed 2 cells left of the door's center. Same byte-vs-column class
-    // already fixed in the footer / tooltips (PR #210); this site was missed.
+    // The elevator indicator must center by DISPLAY COLUMNS, not byte length:
+    // " ▲ F1 ▼ " is 8 columns but 12 bytes (the arrows are 3-byte single-column
+    // glyphs), so a byte-length anchor `door.x + 8 - w/2` lands 2 cells left of
+    // the door's center.
     #[test]
     fn elevator_indicator_centers_by_display_columns_not_bytes() {
         use ratatui::backend::TestBackend;

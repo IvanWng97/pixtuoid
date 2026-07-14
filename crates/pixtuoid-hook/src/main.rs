@@ -76,8 +76,8 @@ fn main() -> Result<()> {
         // stdin — a blind `read_to_string(stdin)` would BLOCK (and tool_call_before
         // runs synchronously, freezing the user's tool call until the hook
         // timeout). So when `--event` is present we build the envelope from env
-        // and NEVER touch stdin. Verified against CodeWhale 0.8.59
-        // hooks.rs::execute_sync_inner + a live capture (2026-06-12).
+        // and NEVER touch stdin. Mirrors CodeWhale 0.8.59's
+        // `hooks.rs::execute_sync_inner`.
         Some(event) => Value::Object(env_payload(&event)),
         None => {
             let mut buf = String::new();
@@ -205,10 +205,9 @@ fn env_payload_from(
     // CodeWhale runs the hook with current_dir = its working dir (= the
     // workspace), and DEEPSEEK_WORKSPACE is UNSET for a fresh `codewhale`
     // launched without `-C` until the workspace resolves — so `session_start`
-    // would otherwise carry no cwd and never register a sprite (caught by live
-    // testing 2026-06-13; the `-C` capture + unit tests masked it). The
-    // fallback resolves to the same path the workspace eventually does, so all
-    // of a session's events coalesce on one AgentId.
+    // would otherwise carry no cwd and never register a sprite. The fallback
+    // resolves to the same path the workspace eventually does, so all of a
+    // session's events coalesce on one AgentId.
     if let Some(cwd) = get("DEEPSEEK_WORKSPACE")
         .filter(|v| !v.is_empty())
         .or_else(|| cwd_fallback.filter(|v| !v.is_empty()))
@@ -598,10 +597,10 @@ mod tests {
 
     #[test]
     fn env_payload_falls_back_to_cwd_when_workspace_unset() {
-        // The live-testing bug (2026-06-13): a fresh `codewhale` without `-C` has
-        // no DEEPSEEK_WORKSPACE at session_start, so the cwd-less envelope was
-        // dropped (no sprite). CodeWhale runs the hook with current_dir = its
-        // working dir, so the shim must fall back to that. R0613-05.
+        // A fresh `codewhale` without `-C` has no DEEPSEEK_WORKSPACE at
+        // session_start, so a cwd-less envelope would be dropped (no sprite).
+        // CodeWhale runs the hook with current_dir = its working dir, so the
+        // shim must fall back to that.
         let no_ws: std::collections::HashMap<&str, String> =
             [("DEEPSEEK_TOOL_NAME", "exec_shell".to_string())]
                 .into_iter()

@@ -242,9 +242,9 @@ fn win_path_eq(a: &str, b: &str) -> bool {
 
 /// Per-source diagnostics rollup — the SHARED source of truth the Connection
 /// panel (the board), the boot preflight, and `run` (the CLI report) all read,
-/// so the surfaces can't drift apart and no check runs twice (the
-/// health-consolidation arc / #309). Scope is the CHEAP signals: install-schema
-/// soundness (#309) + decode drift. Version skew stays report-only (the
+/// so the surfaces can't drift apart and no check runs twice. Scope is the
+/// CHEAP signals: install-schema soundness + decode drift. Version skew stays
+/// report-only (the
 /// `<cli> --version` probe, up to 5s each, is too costly for an interactive
 /// panel-open across N sources, and is advisory); live activity + transport
 /// death stay the panel's per-frame facets.
@@ -310,7 +310,7 @@ pub struct DoctorSourceRow {
     /// anchor), from the source's `SourceDescriptor`.
     pub verified_version: &'static str,
     pub scan: LogScanResult,
-    /// Install-schema soundness (#309) — `Some` only when hooks are installed;
+    /// Install-schema soundness — `Some` only when hooks are installed;
     /// `None` = not checked (no target / not installed). A non-sound result
     /// flips the verdict glyph to `⚠` and prints the reason on an indented `↳`
     /// continuation line.
@@ -318,7 +318,7 @@ pub struct DoctorSourceRow {
 }
 
 /// A dotted-run major at or above this looks like a YEAR/date token, not a semver
-/// major — used to skip a date prefix in favor of a real version (#307).
+/// major — used to skip a date prefix in favor of a real version.
 const IMPLAUSIBLE_MAJOR: u64 = 1000;
 
 /// Extract a `MAJOR.MINOR[.PATCH]` tuple from a `--version` banner. Tolerant:
@@ -326,7 +326,7 @@ const IMPLAUSIBLE_MAJOR: u64 = 1000;
 /// check then silently no-ops rather than alarming on garbage). A bare integer
 /// (`2026`) is NOT a version (needs at least `MAJOR.MINOR`).
 ///
-/// Banner-order robust (#307): a banner can print a dotted DATE/build token
+/// Banner-order robust: a banner can print a dotted DATE/build token
 /// before the semver (`Built 2026.06.04 — v1.2.3`). Selection order:
 ///   1. a `v`/`V`-prefixed run wins (an explicit version marker);
 ///   2. else the first run with a plausible (< `IMPLAUSIBLE_MAJOR`) major,
@@ -598,7 +598,7 @@ fn linux_activation_backend(sway: bool, hyprland: bool, wayland: bool, x11: bool
     }
 }
 
-/// The focus-jump block of the report (#526): the activation backend + which
+/// The focus-jump block of the report: the activation backend + which
 /// pid channel each source family rides, with the transcript-family probe
 /// roots checked on disk. Pure over the probed facts; the family buckets come
 /// straight from the registry (a new source lands in the right bucket with no
