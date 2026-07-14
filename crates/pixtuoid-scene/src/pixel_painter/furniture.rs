@@ -540,3 +540,185 @@ pub(super) const MEETING_FABRIC_LIT: Rgb = Rgb {
     g: 0x8e,
     b: 0x98,
 };
+
+/// Vending machine (centred at `pos`) — a 4×6 body: drinks panel on top, a 2×3
+/// grid of themed cans, and the pickup slot. When `busy` (an agent stands at
+/// the waypoint), a product cell darkens and its can lands in the pickup slot
+/// each cycle (feedback drop B-4). Pickup-slot cell reuses `VENDING_PICKUP_SLOT`
+/// — the one authority the pixel test also derives from.
+pub(super) fn paint_vending_machine(
+    buf: &mut RgbBuffer,
+    pos: crate::layout::Point,
+    busy: bool,
+    now: std::time::SystemTime,
+    theme: &crate::theme::Theme,
+) {
+    let body = theme.appliance.vending_body;
+    let panel = theme.appliance.vending_panel;
+    let drinks = theme.appliance.vending_drinks;
+    let vx = pos.x.saturating_sub(2);
+    let vy = pos.y.saturating_sub(3);
+    for dy in 0..6u16 {
+        for dx in 0..4u16 {
+            let px = vx + dx;
+            let py = vy + dy;
+            if px < buf.width() && py < buf.height() {
+                let color = if dy == 0 {
+                    panel
+                } else if (1..=3).contains(&dy) && (1..=2).contains(&dx) {
+                    let idx = ((dy - 1) * 2 + (dx - 1)) as usize;
+                    if idx < drinks.len() {
+                        drinks[idx]
+                    } else {
+                        body
+                    }
+                } else if (dx, dy) == super::drawable::VENDING_PICKUP_SLOT {
+                    theme.appliance.vending_trim
+                } else if dy == 5 {
+                    theme.appliance.vending_dark
+                } else {
+                    body
+                };
+                buf.put(px, py, color);
+            }
+        }
+    }
+
+    if busy {
+        // Feedback drop (B-4): a product cell goes dark and its can
+        // lands in the pickup slot; the product rotates per cycle.
+        const DROP_CYCLE_MS: u64 = 3_000;
+        const DROP_STEP_MS: u64 = 500;
+        let t = super::epoch_ms(now);
+        let phase = (t % DROP_CYCLE_MS) / DROP_STEP_MS; // 0..6
+        let pick = ((t / DROP_CYCLE_MS) % drinks.len() as u64) as u16;
+        let (ddx, ddy) = (1 + pick % 2, 1 + pick / 2);
+        let mut put = |x: u16, y: u16, c| {
+            if x < buf.width() && y < buf.height() {
+                buf.put(x, y, c);
+            }
+        };
+        if (1..=4).contains(&phase) {
+            put(vx + ddx, vy + ddy, theme.appliance.vending_dark);
+        }
+        if (2..=4).contains(&phase) {
+            let can = drinks[(pick as usize) % drinks.len()];
+            put(
+                vx + super::drawable::VENDING_PICKUP_SLOT.0,
+                vy + super::drawable::VENDING_PICKUP_SLOT.1,
+                can,
+            );
+        }
+    }
+}
+
+/// Printer (centred at `pos`) — a 5×4 body: dark lid with a glass strip, white
+/// chassis, and an output tray with paper. When `busy`, a page slides out below
+/// the tray, rests, then clears each cycle (feedback eject B-4).
+pub(super) fn paint_printer(
+    buf: &mut RgbBuffer,
+    pos: crate::layout::Point,
+    busy: bool,
+    now: std::time::SystemTime,
+    theme: &crate::theme::Theme,
+) {
+    let body_white = theme.appliance.printer_body;
+    let top_dark = theme.appliance.printer_top;
+    let glass = theme.appliance.printer_glass;
+    let paper = theme.appliance.printer_paper;
+    let tray = theme.appliance.printer_tray;
+    let px0 = pos.x.saturating_sub(2);
+    let py0 = pos.y.saturating_sub(2);
+    for dy in 0..4u16 {
+        for dx in 0..5u16 {
+            let px = px0 + dx;
+            let py = py0 + dy;
+            if px < buf.width() && py < buf.height() {
+                let color = if dy == 0 {
+                    if (1..=3).contains(&dx) {
+                        glass
+                    } else {
+                        top_dark
+                    }
+                } else if dy == 3 {
+                    if (1..=3).contains(&dx) {
+                        paper
+                    } else {
+                        tray
+                    }
+                } else if dx == 0 || dx == 4 {
+                    tray
+                } else {
+                    body_white
+                };
+                buf.put(px, py, color);
+            }
+        }
+    }
+
+    if busy {
+        // Feedback eject (B-4): a page slides out below the tray while
+        // an agent stands here, rests, then clears. One cell per step.
+        const PAGE_CYCLE_MS: u64 = 2_400;
+        const PAGE_STEP_MS: u64 = 300;
+        let phase = (super::epoch_ms(now) % PAGE_CYCLE_MS) / PAGE_STEP_MS; // 0..8
+        let rows = match phase {
+            1 => 1,
+            2..=6 => 2,
+            _ => 0,
+        };
+        for dy in 0..rows {
+            for dx in 1..=3u16 {
+                let px = px0 + dx;
+                let py = py0 + 4 + dy;
+                if px < buf.width() && py < buf.height() {
+                    buf.put(px, py, paper);
+                }
+            }
+        }
+    }
+}
+
+/// Meeting-room coat rack (centred on `pos`, the pole top): a 1px pole over a
+/// 3px base, with 2×2 coat blobs on alternating hooks. Pole/base reuse the wood
+/// family; the coats are their own themed accents.
+pub(super) fn paint_coat_rack(
+    buf: &mut RgbBuffer,
+    pos: crate::layout::Point,
+    theme: &crate::theme::Theme,
+) {
+    let (cx, cy) = (pos.x, pos.y);
+    let pole = theme.furniture.wood_trim;
+    let base = theme.furniture.wood_top;
+    let coats = theme.appliance.coats;
+    // Pole (1px wide, 8 tall).
+    for dy in 0..8u16 {
+        let py = cy + dy;
+        if py < buf.height() && cx < buf.width() {
+            buf.put(cx, py, pole);
+        }
+    }
+    // Base (3px wide) at the rack's south row.
+    let by = cy + 7;
+    for dx in 0..3u16 {
+        let px = cx.saturating_sub(1) + dx;
+        if px < buf.width() && by < buf.height() {
+            buf.put(px, by, base);
+        }
+    }
+    // Coat blobs (2×2 blocks on alternating hooks).
+    for (i, &coat_color) in coats.iter().enumerate() {
+        let hook_y = cy + 1 + (i as u16) * 2;
+        let side: i16 = if i % 2 == 0 { -1 } else { 1 };
+        let hx = (cx as i16 + side) as u16;
+        for dy in 0..2u16 {
+            for dx in 0..2u16 {
+                let px = hx.wrapping_add(if side < 0 { dx.wrapping_sub(1) } else { dx });
+                let py = hook_y + dy;
+                if px < buf.width() && py < buf.height() {
+                    buf.put(px, py, coat_color);
+                }
+            }
+        }
+    }
+}
