@@ -149,8 +149,12 @@ pub fn decode_copilot_line(
             }]
         }
         "tool.execution_start" => {
-            let Some(d) = data else { return Ok(vec![]) };
+            let Some(d) = data else {
+                crate::source::drift::missing_field(source, "tool.execution_start", "data");
+                return Ok(vec![]);
+            };
             let Some(tool_call_id) = str_at(d, "toolCallId") else {
+                crate::source::drift::missing_field(source, "tool.execution_start", "toolCallId");
                 return Ok(vec![]);
             };
             let tool_name = str_at(d, "toolName").unwrap_or_else(|| {
@@ -165,8 +169,16 @@ pub fn decode_copilot_line(
             }]
         }
         "tool.execution_complete" => {
-            let Some(d) = data else { return Ok(vec![]) };
+            let Some(d) = data else {
+                crate::source::drift::missing_field(source, "tool.execution_complete", "data");
+                return Ok(vec![]);
+            };
             let Some(tool_call_id) = str_at(d, "toolCallId") else {
+                crate::source::drift::missing_field(
+                    source,
+                    "tool.execution_complete",
+                    "toolCallId",
+                );
                 return Ok(vec![]);
             };
             let mut out = vec![AgentEvent::ActivityEnd {
@@ -382,6 +394,35 @@ mod tests {
                 assert_eq!(*agent_id, root(), "empty agentId must key to the root");
             }
             other => panic!("expected one ActivityStart, got {other:?}"),
+        }
+    }
+
+    /// A `tool.execution_start` whose `data` lacks the REQUIRED `toolCallId`
+    /// (the ActivityStart/End pairing key) is dropped — but must leave a
+    /// `missing_field` drift breadcrumb like its sibling gates (`session.start`
+    /// `sessionId`, `toolName`), so an upstream field rename surfaces in
+    /// `pixtuoid doctor` instead of a copilot sprite that connects but silently
+    /// never animates tools.
+    #[test]
+    fn missing_tool_call_id_drops_with_a_drift_breadcrumb() {
+        let out = crate::test_capture::capture_logs(|| {
+            let line = r#"{"type":"tool.execution_start","data":{"toolName":"bash"}}"#;
+            assert!(
+                decode(line).is_empty(),
+                "an unkeyable tool start yields no event"
+            );
+        });
+        for needle in [
+            crate::source::drift::TARGET,
+            "missing_field",
+            "tool.execution_start",
+            "toolCallId",
+            SOURCE_NAME,
+        ] {
+            assert!(
+                out.contains(needle),
+                "missing {needle:?} in captured log:\n{out}"
+            );
         }
     }
 

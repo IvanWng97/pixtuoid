@@ -259,8 +259,12 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                         .iter()
                         .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("toolCall"))
                     {
-                        // Un-keyable calls are dropped (can't be closed).
+                        // Un-keyable calls are dropped (can't be closed) — but
+                        // breadcrumb it: `id` is a REQUIRED pairing key on a
+                        // toolCall block we're committed to decoding, so its
+                        // absence is upstream drift, not a line we ignore.
                         let Some(id) = b.get("id").and_then(|i| i.as_str()) else {
+                            crate::source::drift::missing_field(source, "toolCall", "id");
                             continue;
                         };
                         let name = b.get("name").and_then(|n| n.as_str()).unwrap_or_else(|| {
