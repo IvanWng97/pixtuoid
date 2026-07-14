@@ -6,9 +6,10 @@
 //! ([`UiState::build_frames`] → [`RenderFrames`]). `run_tui` keeps the event
 //! loop, the terminal lifecycle, and every renderer/config/install side
 //! effect; the blocking-I/O sites (`build_rows`, connect/disconnect, the
-//! onboarding apply) stay at the loop under their documented
-//! `block_in_place` wrapping and reach the state through these methods'
-//! closure parameters or the `pub(crate)` fields.
+//! onboarding apply) stay at the loop as brief inline stalls (block_in_place
+//! removed in #603 — inert on the block_on thread; see the tui/CLAUDE.md sharp
+//! edge) and reach the state through these methods' closure parameters or the
+//! `pub(crate)` fields.
 
 use std::time::{Instant, SystemTime};
 
@@ -335,9 +336,9 @@ impl UiState {
     }
 
     /// `s` on a closed panel: open with the freshly rebuilt connection facet.
-    /// The rows' blocking I/O (`build_rows` — FS probes + per-source
-    /// `diagnose`) runs at the loop under its documented `block_in_place`
-    /// wrapping and is handed in; it happens ON OPEN only, never per frame.
+    /// The rows' blocking I/O (`build_rows` — FS probes + per-source `diagnose`)
+    /// runs at the loop inline (a brief stall, #603) and is handed in; it happens
+    /// ON OPEN only, never per frame.
     pub(crate) fn open_connection(&mut self, rows: Vec<ConnectionRow>) {
         self.connection.open = true;
         self.connection.confirm = None;

@@ -418,8 +418,9 @@ pub(crate) fn freeze_for_skip(
 /// install-state probe assembled HERE, so the install-layer access
 /// (`has_hooks`/`by_source`) stays funneled through this `sources` facade — the
 /// same layer that owns connect/disconnect's install calls — rather than reaching
-/// out of the TUI event loop. Does per-target config reads (`has_hooks`), so the
-/// caller wraps it in `block_in_place` like the rest of the skip I/O.
+/// out of the TUI event loop. Does per-target config reads (`has_hooks`), which
+/// the caller runs inline — a brief one-shot stall, like the rest of the skip I/O
+/// (block_in_place was removed in #603; see the tui/CLAUDE.md sharp edge).
 pub(crate) fn skip_freeze(
     detected: impl IntoIterator<Item = &'static str>,
     connected: &HashSet<String>,

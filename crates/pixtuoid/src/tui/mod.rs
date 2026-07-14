@@ -717,24 +717,12 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 if ui.connection.open {
                                     ui.close_connection();
                                 } else {
-                                    // Cached connection facet: FS reads + the
-                                    // connected-set snapshot happen HERE (on open)
-                                    // + after each toggle, never per frame.
-                                    // Off the executor: `build_rows` does FS probes
-                                    // + per-source `diagnose` config reads, and the
-                                    // toggle sites below take an advisory flock +
-                                    // fsync. `block_in_place` yields this tokio
-                                    // worker for the duration so the input/render
-                                    // tasks aren't starved under lock contention
-                                    // (census #266 escape #1; valid here because
-                                    // run_tui runs on the multi-thread runtime). All
-                                    // 5 panel-I/O sites are wrapped the same way.
-                                    let rows = tokio::task::block_in_place(|| {
-                                        connection::build_rows(
-                                            &connected.snapshot(),
-                                            &ui.read_conn_log(),
-                                        )
-                                    });
+                                    // FS reads + the connected-set snapshot happen on open
+                                    // + after each toggle, never per frame (a brief stall, #603).
+                                    let rows = connection::build_rows(
+                                        &connected.snapshot(),
+                                        &ui.read_conn_log(),
+                                    );
                                     ui.open_connection(rows);
                                 }
                             }
@@ -763,26 +751,20 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                             ui.connection.confirm = Some(ui.connection.selected);
                                         }
                                         // Unbound present CLI → connect immediately
-                                        // (additive, reversible): flip the flag, open the
-                                        // live gate, install hooks. block_in_place:
-                                        // connect_source takes a flock + fsync + FS reads.
+                                        // (additive, reversible: flag, live gate, install
+                                        // hooks). connect_source's flock+fsync+FS reads are
+                                        // a brief inline stall (#603).
                                         ToggleIntent::Connect => {
-                                            ui.connection.last_result =
-                                                Some(tokio::task::block_in_place(|| {
-                                                    connect_source(
-                                                        &config_path,
-                                                        &connected,
-                                                        source_id,
-                                                        name,
-                                                    )
-                                                }));
-                                            ui.connection.rows =
-                                                tokio::task::block_in_place(|| {
-                                                    connection::build_rows(
-                                                        &connected.snapshot(),
-                                                        &ui.read_conn_log(),
-                                                    )
-                                                });
+                                            ui.connection.last_result = Some(connect_source(
+                                                &config_path,
+                                                &connected,
+                                                source_id,
+                                                name,
+                                            ));
+                                            ui.connection.rows = connection::build_rows(
+                                                &connected.snapshot(),
+                                                &ui.read_conn_log(),
+                                            );
                                         }
                                         // Absent CLI, never connected → inert hint (the
                                         // "panel refuses an absent CLI" rule is CONNECT-side).
@@ -800,23 +782,18 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                         .get(idx)
                                         .map(|r| (r.source_id, r.display_name));
                                     if let Some((source_id, name)) = action {
-                                        // block_in_place: disconnect takes a
-                                        // flock + fsync + FS reads — off the executor.
-                                        ui.connection.last_result =
-                                            Some(tokio::task::block_in_place(|| {
-                                                disconnect_source(
-                                                    &config_path,
-                                                    &connected,
-                                                    source_id,
-                                                    name,
-                                                )
-                                            }));
-                                        ui.connection.rows = tokio::task::block_in_place(|| {
-                                            connection::build_rows(
-                                                &connected.snapshot(),
-                                                &ui.read_conn_log(),
-                                            )
-                                        });
+                                        // disconnect_source takes a flock + fsync + FS
+                                        // reads — a brief inline stall (#603).
+                                        ui.connection.last_result = Some(disconnect_source(
+                                            &config_path,
+                                            &connected,
+                                            source_id,
+                                            name,
+                                        ));
+                                        ui.connection.rows = connection::build_rows(
+                                            &connected.snapshot(),
+                                            &ui.read_conn_log(),
+                                        );
                                     }
                                 }
                                 ui.connection.confirm = None;
@@ -829,13 +806,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             KeyAction::OnboardingConfirm => {
                                 // Apply the roster: connect the checked, disconnect
                                 // the unchecked — SCOPED to the detected sources, so
-                                // an undetected source's flag is never written.
-                                // Blocking ConfigLock I/O → block_in_place (run_tui
-                                // is on the multi-thread runtime, like the panel).
+                                // an undetected source's flag is never written. The
+                                // ConfigLock I/O is a brief inline stall (#603).
                                 let choices = ui.onboarding_ui.decisions();
-                                let outcomes = tokio::task::block_in_place(|| {
-                                    crate::sources::apply_choices(&config_path, &choices)
-                                });
+                                let outcomes =
+                                    crate::sources::apply_choices(&config_path, &choices);
                                 // Reflect each into the LIVE connected-set off its
                                 // ACTUAL outcome (a failed connect must NOT go live;
                                 // a NoOp keeps the DESIRED state) — see the helper.
@@ -855,18 +830,14 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 // hook is a no-op), so `[sources]` becomes non-empty
                                 // (onboarding won't re-trigger) yet NO hooks are
                                 // added/removed. `skip_freeze` reads each target's
-                                // config (has_hooks) → block_in_place, like apply_choices;
-                                // it funnels the install-layer probe through the sources
-                                // facade so the event loop doesn't reach into install.
+                                // config (has_hooks) through the sources facade so the
+                                // event loop doesn't reach into install; a brief inline
+                                // stall, like apply_choices (#603).
                                 let snap = connected.snapshot();
                                 let ids: Vec<&'static str> =
                                     ui.onboarding_ui.rows.iter().map(|r| r.source_id).collect();
-                                let freeze = tokio::task::block_in_place(|| {
-                                    crate::sources::skip_freeze(ids, &snap)
-                                });
-                                let outcomes = tokio::task::block_in_place(|| {
-                                    crate::sources::apply_choices(&config_path, &freeze)
-                                });
+                                let freeze = crate::sources::skip_freeze(ids, &snap);
+                                let outcomes = crate::sources::apply_choices(&config_path, &freeze);
                                 // Reflect the freeze into the LIVE gate, exactly
                                 // like the Confirm arm — skip PERSISTS connected=true
                                 // for a pre-0.12 upgrader's hooked sources, so the
@@ -1051,6 +1022,45 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
     teardown_terminal(&mut renderer.terminal)?;
     result
+}
+
+#[cfg(test)]
+mod runtime_model {
+    // Empirically pins WHY #603 removed the panel/onboarding `block_in_place`
+    // wraps: on the `block_on` thread of a multi-thread runtime (the exact shape
+    // `driver.rs` builds, where `run_tui` is the awaited root future),
+    // `block_in_place` is INERT — it runs the closure inline with zero scheduling
+    // effect, and the spawned reducer/sources analogs make progress regardless of
+    // the loop thread blocking. Deterministic: worker_threads(1) + a std channel
+    // happens-before, no sleeps.
+    #[test]
+    fn block_in_place_is_inert_on_the_block_on_thread() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("multi-thread runtime");
+        rt.block_on(async {
+            // A spawned task = the reducer/sources analog on its OWN worker thread.
+            let (tx, rx) = std::sync::mpsc::channel::<u8>();
+            tokio::spawn(async move {
+                tx.send(1).expect("send");
+            });
+            // The block_on thread (= run_tui) blocks SYNCHRONOUSLY like an inline
+            // flock. WRAPPED in block_in_place: must not panic, returns the value.
+            let got = tokio::task::block_in_place(|| rx.recv().expect("recv"));
+            assert_eq!(
+                got, 1,
+                "the spawned worker progressed while the loop blocked"
+            );
+            // WITHOUT the wrap — observably identical, so the wrap is a no-op.
+            let (tx2, rx2) = std::sync::mpsc::channel::<u8>();
+            tokio::spawn(async move {
+                tx2.send(2).expect("send");
+            });
+            assert_eq!(rx2.recv().expect("recv"), 2);
+        });
+    }
 }
 
 #[cfg(test)]
