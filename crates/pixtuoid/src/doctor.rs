@@ -166,7 +166,7 @@ pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
 
 /// Source label-prefixes (e.g. `"cc"`) that have ANY decode-drift breadcrumb in
 /// the log — for the live footer nudge. Reuses `scan_log_for_source` (tested).
-pub fn drifted_sources(log: &str) -> Vec<String> {
+pub(crate) fn drifted_sources(log: &str) -> Vec<String> {
     REGISTERED_SOURCES
         .iter()
         .filter(|s| scan_log_for_source(log, s).total() > 0)
