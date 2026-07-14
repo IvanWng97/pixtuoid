@@ -2,7 +2,7 @@
 
 Thanks for your interest! PRs are welcome — especially **new themes**, sprite and
 decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
-(the ten already wired up are listed in the README).
+(the ten agent CLIs plus the OpenClaw gateway already wired up are listed in the README).
 
 Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the nested
 `crates/*/CLAUDE.md` for the crate you touch). It holds the architecture
