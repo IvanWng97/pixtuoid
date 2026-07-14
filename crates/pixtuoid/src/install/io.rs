@@ -7,9 +7,11 @@ use anyhow::{anyhow, Context, Result};
 /// The ONE empty-as-unset filter for env values, trim-based: empty means
 /// unset (the #172 RUST_LOG policy; the XDG basedir spec says the same), and
 /// a whitespace-only value can never be the absolute path the env contracts
-/// here require, so it counts as unset too. Used for `XDG_CONFIG_HOME`
-/// (config.rs), `XDG_STATE_HOME` (main.rs log paths), and `PIXTUOID_HOOK` —
-/// keep new env reads on this helper so the workspace has one semantics.
+/// here require, so it counts as unset too. Backs `XDG_CONFIG_HOME` (config.rs)
+/// and `XDG_STATE_HOME` (crash.rs/logging.rs) via [`nonempty_abs_env`], which
+/// ALSO requires an absolute path, and directly backs `PIXTUOID_HOOK` (which may
+/// be relative) — keep new env reads on this helper so the workspace has one
+/// semantics.
 pub fn nonempty(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.trim().is_empty())
 }
@@ -23,7 +25,11 @@ pub fn nonempty_env(name: &str) -> Option<String> {
 /// (`XDG_CONFIG_HOME`/`XDG_STATE_HOME`): the XDG spec says a relative value is
 /// invalid and must be ignored (else config/log/pack land CWD-relative, silently
 /// bypassing `~/.config`). NOT for user-chosen paths like `PIXTUOID_LOG`, which
-/// may legitimately be relative.
+/// may legitimately be relative. `pixtuoid-scene`'s `embedded_pack::xdg_config_base`
+/// applies the SAME `is_absolute()` basedir rule inline — scene can't reach this
+/// bin module and core's `platform::nonempty` is `pub(crate)`, so the two are
+/// per-crate copies (the same convention as `nonempty` ↔ `platform::nonempty`);
+/// keep them in step.
 pub fn nonempty_abs_env(name: &str) -> Option<String> {
     nonempty_env(name).filter(|v| std::path::Path::new(v).is_absolute())
 }
@@ -450,8 +456,11 @@ mod tests {
             std::env::set_var(KEY, unset);
             assert_eq!(nonempty_abs_env(KEY), None, "{unset:?} must read as unset");
         }
-        std::env::set_var(KEY, "/abs/x");
-        assert_eq!(nonempty_abs_env(KEY), Some("/abs/x".to_string()));
+        // The absolute-ACCEPT value is platform-specific — a leading-slash path
+        // is NOT absolute on Windows (no drive prefix).
+        let abs = if cfg!(windows) { "C:/abs/x" } else { "/abs/x" };
+        std::env::set_var(KEY, abs);
+        assert_eq!(nonempty_abs_env(KEY), Some(abs.to_string()));
         std::env::remove_var(KEY);
         assert_eq!(nonempty_abs_env(KEY), None, "a missing var is unset");
         match saved {

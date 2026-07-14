@@ -549,12 +549,18 @@ mod tests {
         // need it absent to assert their branches.
         std::env::remove_var("USERPROFILE");
 
-        // XDG_CONFIG_HOME wins when set.
-        std::env::set_var("XDG_CONFIG_HOME", "/xdg/base");
+        // XDG_CONFIG_HOME wins when set to an ABSOLUTE path — platform-specific,
+        // since a leading-slash path is not absolute on Windows (no drive prefix).
+        let abs_xdg = if cfg!(windows) {
+            "C:/xdg/base"
+        } else {
+            "/xdg/base"
+        };
+        std::env::set_var("XDG_CONFIG_HOME", abs_xdg);
         std::env::set_var("HOME", "/home/u");
         assert_eq!(
             config_path(),
-            PathBuf::from("/xdg/base/pixtuoid/config.toml")
+            PathBuf::from(abs_xdg).join("pixtuoid").join("config.toml")
         );
 
         // Empty/whitespace/relative XDG is invalid (XDG spec) → falls to

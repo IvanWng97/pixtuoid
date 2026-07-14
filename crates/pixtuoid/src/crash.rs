@@ -236,4 +236,37 @@ mod tests {
         // URL should stay under GitHub's 8191 byte limit
         assert!(url.len() < 8191);
     }
+
+    #[test]
+    fn crash_log_path_rejects_a_relative_xdg_state_home() {
+        // Sibling of log_file_path's test — same nonempty_abs_env call site: a
+        // relative/empty XDG_STATE_HOME → ~/.cache fallback (shares the bin ENV_LOCK).
+        let _env = crate::logging::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved_xdg = std::env::var_os("XDG_STATE_HOME");
+        let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
+        let cache = PathBuf::from(home)
+            .join(".cache")
+            .join("pixtuoid")
+            .join("crash.log");
+        for rel in ["", "   ", "rel/state", "~/state"] {
+            std::env::set_var("XDG_STATE_HOME", rel);
+            assert_eq!(
+                crash_log_path(),
+                cache,
+                "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
+            );
+        }
+        let abs = if cfg!(windows) { "C:/state" } else { "/state" };
+        std::env::set_var("XDG_STATE_HOME", abs);
+        assert_eq!(
+            crash_log_path(),
+            PathBuf::from(format!("{abs}/pixtuoid/crash.log"))
+        );
+        match saved_xdg {
+            Some(v) => std::env::set_var("XDG_STATE_HOME", v),
+            None => std::env::remove_var("XDG_STATE_HOME"),
+        }
+    }
 }

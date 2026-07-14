@@ -170,6 +170,13 @@ impl std::io::Write for MutexFileWriter {
     }
 }
 
+/// Serializes the bin crate's env-mutating tests. `crash.rs` and `logging.rs`
+/// both drive `XDG_STATE_HOME`/`HOME` to pin their XDG path fallbacks, and the
+/// bin's unit-test target runs in ONE process under plain `cargo test`, so a
+/// single shared lock keeps the two suites from racing on that global env.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,14 +197,56 @@ mod tests {
 
     #[test]
     fn nonempty_treats_empty_and_whitespace_as_unset() {
-        // The shared io::nonempty filter backs XDG_STATE_HOME here: an
-        // unfiltered empty value would route the crash log / runtime log to
-        // the root-absolute `/pixtuoid/...`.
+        // `io::nonempty` directly backs the `PIXTUOID_LOG` read (which may be a
+        // relative path); XDG_STATE_HOME instead routes through `nonempty_abs_env`
+        // (see `log_file_path_rejects_a_relative_xdg_state_home`).
         use pixtuoid::install::nonempty;
         assert_eq!(nonempty(None), None);
         assert_eq!(nonempty(Some(String::new())), None);
         assert_eq!(nonempty(Some("   ".into())), None);
         assert_eq!(nonempty(Some("/state".into())), Some("/state".to_string()));
+    }
+
+    #[test]
+    fn log_file_path_rejects_a_relative_xdg_state_home() {
+        // Pins the CALL SITE (not just the primitive): a relative/empty
+        // XDG_STATE_HOME → ~/.cache fallback, so a revert to plain `nonempty_env`
+        // here would leak a relative log path and red this test.
+        let _env = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved_log = std::env::var_os("PIXTUOID_LOG");
+        let saved_xdg = std::env::var_os("XDG_STATE_HOME");
+        std::env::remove_var("PIXTUOID_LOG");
+        // Expected fallback: the SAME user_home_opt + joins the impl uses (no
+        // hardcoded separator — Windows-safe per the path-string sharp edge).
+        let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
+        let cache = PathBuf::from(home)
+            .join(".cache")
+            .join("pixtuoid")
+            .join("log");
+        for rel in ["", "   ", "rel/state", "~/state"] {
+            std::env::set_var("XDG_STATE_HOME", rel);
+            assert_eq!(
+                log_file_path(),
+                cache,
+                "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
+            );
+        }
+        // Absolute wins (platform-specific — leading-slash isn't absolute on
+        // Windows). The impl composes it via `format!`, so mirror that.
+        let abs = if cfg!(windows) { "C:/state" } else { "/state" };
+        std::env::set_var("XDG_STATE_HOME", abs);
+        assert_eq!(
+            log_file_path(),
+            PathBuf::from(format!("{abs}/pixtuoid/log"))
+        );
+        match saved_log {
+            Some(v) => std::env::set_var("PIXTUOID_LOG", v),
+            None => std::env::remove_var("PIXTUOID_LOG"),
+        }
+        match saved_xdg {
+            Some(v) => std::env::set_var("XDG_STATE_HOME", v),
+            None => std::env::remove_var("XDG_STATE_HOME"),
+        }
     }
 
     #[test]

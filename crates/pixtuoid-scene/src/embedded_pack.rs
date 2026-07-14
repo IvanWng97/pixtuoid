@@ -48,6 +48,9 @@ fn xdg_pack_dir() -> Option<PathBuf> {
 /// CWD-RELATIVE `pixtuoid/sprites` path, silently loading an untrusted pack from
 /// the launch directory while ignoring the user's real `~/.config`. Pure (the env
 /// value is passed in) so the precedence is unit-testable without mutating env.
+/// Mirrors the binary's `install::io::nonempty_abs_env` `is_absolute()` rule,
+/// kept inline per the per-crate-copy convention (scene can't depend on the
+/// binary; core's `platform::nonempty` is `pub(crate)`).
 fn xdg_config_base(xdg: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
     xdg.filter(|v| std::path::Path::new(v).is_absolute())
         .map(PathBuf::from)
@@ -224,12 +227,15 @@ mod tests {
 
     #[test]
     fn xdg_config_base_prefers_a_set_value_over_home() {
+        // An ABSOLUTE value wins over home. The absolute form is platform-specific
+        // — a leading-slash path is NOT absolute on Windows (no drive prefix).
+        let abs = if cfg!(windows) { "C:/xdg" } else { "/xdg" };
         assert_eq!(
             xdg_config_base(
-                Some(std::ffi::OsString::from("/xdg")),
+                Some(std::ffi::OsString::from(abs)),
                 Some(PathBuf::from("/home/u")),
             ),
-            Some(PathBuf::from("/xdg")),
+            Some(PathBuf::from(abs)),
         );
     }
 
