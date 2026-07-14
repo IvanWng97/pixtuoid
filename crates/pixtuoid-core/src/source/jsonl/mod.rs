@@ -326,14 +326,14 @@ impl JsonlWatcher {
         let _exit_keepalive = exit_watch.is_none().then(|| exit_tx.clone());
         drop(exit_tx);
 
-        // Bound on buffered notify PATHS (#585): a reducer stall stops the select
-        // loop draining this arm, so unbounded would grow without limit. Dropping
-        // a PATH is safe (the cursor re-walks it via poll); a dropped decoded
-        // event would gap the tail-follow — hence that send stays blocking.
+        // Bound on buffered notify PATHS (#585) so a reducer stall can't grow it
+        // without limit. 1024 = generous burst headroom (the loop drains ~instantly
+        // normally), ~256KB-capped; drop-on-Full is safe — see the sharp edge.
         const NOTIFY_PATH_CHANNEL_CAP: usize = 1024;
         let (notify_tx, mut notify_rx) =
             tokio::sync::mpsc::channel::<PathBuf>(NOTIFY_PATH_CHANNEL_CAP);
         let mut notify_health = FailureLatch::default();
+        let mut notify_backpressure = FailureLatch::default();
         let event_handler = move |res: notify::Result<notify::Event>| match res {
             Ok(event) => {
                 if notify_health.on_success() {
@@ -341,11 +341,22 @@ impl JsonlWatcher {
                 }
                 for path in event.paths {
                     if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
-                        // try_send off notify's own thread; Full → poll recovers.
-                        if let Err(tokio::sync::mpsc::error::TrySendError::Full(p)) =
-                            notify_tx.try_send(path)
-                        {
-                            tracing::debug!(path = ?p, "notify path channel full under load; the poll backstop will re-walk");
+                        // try_send off notify's own thread. Full → drop (the poll
+                        // re-walks), latched so a sustained stall warns once, not per path.
+                        match notify_tx.try_send(path) {
+                            Ok(()) => {
+                                if notify_backpressure.on_success() {
+                                    tracing::info!("notify path channel draining again");
+                                }
+                            }
+                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                if notify_backpressure.on_failure() {
+                                    tracing::warn!(
+                                        "notify path channel saturated under load — dropping paths; the 60s poll re-walks them"
+                                    );
+                                }
+                            }
+                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
                         }
                     }
                 }
