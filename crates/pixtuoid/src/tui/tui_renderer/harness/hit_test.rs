@@ -238,3 +238,55 @@ fn hovering_an_agent_marks_its_label() {
         "hovering an agent should add the ▸ marker to its label; frame:\n{text}"
     );
 }
+
+// FIND-22: the CLICK path (hit_test_agent_at) follows the LIVE walking sprite,
+// where the old home-desk-only hit_test_from_tui missed it (hoverable-not-clickable).
+#[test]
+fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
+    let id = pixtuoid_core::AgentId::from_transcript_path("/w/0.jsonl");
+    let mut s = idle("/w/0.jsonl", 0, t0() - Duration::from_secs(300));
+    let scene = scene_with(vec![s.clone()], 16);
+    let mut r = build(192, 80, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let desk = r.cached_layout().expect("layout").home_desks[0];
+    let (dx, dy) = (desk.x + 2, desk.y.saturating_sub(4) / 2 + 1);
+    // Seated: click and hover hit-tests AGREE at the desk box (no seated regression).
+    assert_eq!(r.hit_test_agent_at(&scene, dx, dy), Some(id));
+    let layout = r.cached_layout().unwrap();
+    assert_eq!(
+        crate::tui::hit_test::hit_test_from_tui(&scene, layout, dx, dy),
+        Some(id)
+    );
+
+    // Now the agent EXITS: its sprite walks off the desk toward the door.
+    s.exiting_at = Some(t0());
+    let scene = scene_with(vec![s], 16);
+    // Mid-exit-walk (EXIT_GRACE_WINDOW is 4.5s) — off the desk box, not yet GC'd.
+    r.render(&scene, &pack(), t0() + Duration::from_millis(1500))
+        .unwrap();
+
+    // The click hit-test finds the LIVE sprite cell; scan for it (idempotent per
+    // the cached frame `now`, so repeated calls are stable).
+    let mut live = None;
+    'scan: for my in 0..80u16 {
+        for mx in 0..192u16 {
+            if r.hit_test_agent_at(&scene, mx, my) == Some(id) {
+                live = Some((mx, my));
+                break 'scan;
+            }
+        }
+    }
+    let (lx, ly) = live.expect("hit_test_agent_at must find the walking sprite");
+    assert_ne!(
+        (lx, ly),
+        (dx, dy),
+        "the sprite moved off its desk during the exit walk"
+    );
+    // The GAP: at the sprite's LIVE cell the home-desk-only test MISSES it.
+    let layout = r.cached_layout().unwrap();
+    assert_eq!(
+        crate::tui::hit_test::hit_test_from_tui(&scene, layout, lx, ly),
+        None,
+        "hit_test_from_tui (home-desk-only) misses the walked-off sprite — the FIND-22 gap"
+    );
+}

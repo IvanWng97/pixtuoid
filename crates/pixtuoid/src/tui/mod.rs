@@ -146,14 +146,10 @@ fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static
     row: u16,
 ) {
     let snap = scene_rx.borrow().clone();
-    // Project to the VISIBLE floor first: `hit_test_from_tui` requires a
-    // single-floor scene matching `cached_layout` (a raw multi-floor
-    // snapshot would test other floors' agents against this floor's
-    // desks — the global/local desk-index confusion, see its doc).
+    // Project to the VISIBLE floor first — hit_test_agent_at → character_anchor
+    // reads floor-local desk indices; the click now follows the LIVE sprite (like hover).
     let floor_scene = floor::project_floor_scene(&snap, renderer.current_floor());
-    let hit = renderer
-        .cached_layout()
-        .and_then(|layout| renderer::hit_test_from_tui(&floor_scene, layout, col, row));
+    let hit = renderer.hit_test_agent_at(&floor_scene, col, row);
     if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
         crate::focus::focus_slot(slot, focus_roots);
     }

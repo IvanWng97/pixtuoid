@@ -113,6 +113,11 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// they always move together). Kept here, disjoint from the floor buffers, for
     /// borrow-free `DrawCtx` assembly.
     onboarding: crate::tui::welcome::OnboardingFrame,
+    /// The `now` passed to the most recent `render()`. The click hit-test
+    /// (`hit_test_agent_at`) reads it so a wandering-agent click resolves against
+    /// the DRAWN frame's clock, not a fresh `SystemTime::now()` — same discipline
+    /// as `PopupState.last_scale` / `cached_layout`.
+    last_render_now: Option<SystemTime>,
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
@@ -141,6 +146,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             dashboard: Default::default(),
             connection: Default::default(),
             onboarding: crate::tui::welcome::OnboardingFrame::default(),
+            last_render_now: None,
         }
     }
 
@@ -264,6 +270,30 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     pub fn cached_layout(&self) -> Option<&Layout> {
         self.cached_layout.as_deref()
+    }
+
+    /// The click twin of the hover hit-test (`renderer.rs`): anchors on
+    /// `character_anchor`, so it follows a walking / wandering / entry / exit
+    /// sprite — unlike home-desk-only `hit_test_from_tui`. Reuses the DRAWN
+    /// frame's clock (`last_render_now`) so it reproduces that frame's already-run
+    /// derivation (idempotent per `now`). Not byte-identical to that frame,
+    /// though: the click reads a FRESH scene snapshot against this cached clock +
+    /// last frame's motion, so a just-exiting / brand-new agent may skew ≤1 frame
+    /// (benign for hit-testing). `floor_scene` must be projected to the visible
+    /// floor (its `desk_index.single_floor_local()` reads need floor-local
+    /// indices). `None` before the first render or on a too-small/transition frame.
+    pub(crate) fn hit_test_agent_at(
+        &mut self,
+        floor_scene: &SceneState,
+        col: u16,
+        row: u16,
+    ) -> Option<pixtuoid_core::AgentId> {
+        let now = self.last_render_now?;
+        // Arc-clone releases the `&self.cached_layout` borrow so the `&mut floors`
+        // route_ctx borrow below is disjoint.
+        let layout = self.cached_layout.clone()?;
+        let mut rctx = self.floors[self.current_floor].ctx.route_ctx();
+        crate::tui::hit_test::hit_test_agent(floor_scene, &layout, now, &mut rctx, col, row)
     }
 
     pub fn current_floor_seed(&self) -> u64 {
@@ -678,6 +708,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// The production terminal flush — was the core `Renderer` trait impl,
     /// retired inherent in #483.
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
+        // Stamp the frame clock for the click hit-test (hit_test_agent_at). Usable
+        // only once cached_layout is Some, so a too-small/transition frame is safe.
+        self.last_render_now = Some(now);
         // Auto-expire pet state.
         if self.active_pet.as_ref().is_some_and(|p| !p.is_active(now)) {
             self.active_pet = None;

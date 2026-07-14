@@ -47,8 +47,12 @@ pub(crate) fn hit_test_agent(
     None
 }
 
-/// Lightweight hit-test for click-to-pin without needing router/overlay state.
-/// Uses home desk positions only (no walking agents).
+/// Home-desk-only agent hit-test (no router/overlay state). The production CLICK
+/// path now uses `TuiRenderer::hit_test_agent_at` (live-sprite — follows a walking
+/// agent, FIND-22); this is RETAINED as the deterministic seated-agent locator for
+/// the test harness (`harness::hover_agent`) + its unit tests: a seated agent's
+/// `character_anchor` == its desk box, so the harness finds the hover cell without
+/// a populated `route_ctx`. Uses home desk positions only (no walking agents).
 ///
 /// `scene` must be a SINGLE-FLOOR scene matching `layout` — the caller
 /// projects the live scene via `project_floor_scene(scene, current_floor)`
@@ -128,7 +132,7 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
 pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static str> {
     use pixtuoid_scene::layout::{
         furniture_def, Furniture, PlantItem, PlantKind, PodDecor, PodDecorItem, WallDecor,
-        WallDecorItem, WaypointKind, DESK_H, DESK_W, ELEVATOR_H, ELEVATOR_W,
+        WallDecorItem, WaypointKind, ELEVATOR_H, ELEVATOR_W,
     };
     // Hover boxes derive from the one furniture table — `.visual` (the visible
     // sprite) for what the user points at, `.footprint` where the obstacle is
@@ -141,9 +145,11 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         px >= x && px < x.saturating_add(w) && py >= y && py < y.saturating_add(h)
     };
 
-    // Home desks
+    // Home desks: derive the box from the table's `visual` like every sibling arm
+    // (top-left-anchored at desk.{x,y}); the old hardcoded DESK_W+2 clipped 2px.
+    let desk_vis = visual(Furniture::Desk);
     for desk in &layout.home_desks {
-        if hit(desk.x, desk.y, DESK_W + 2, DESK_H) {
+        if hit(desk.x, desk.y, desk_vis.w, desk_vis.h) {
             return Some("Desk");
         }
     }
@@ -473,6 +479,16 @@ mod tests {
         assert_eq!(
             hit_test_furniture(&layout, desk.x + 2, cell_y),
             Some("Desk")
+        );
+        // The east overhang column the OLD DESK_W+2 box CLIPPED — derive from the
+        // table so the test can't re-hardcode the width (desk.x + visual.w - 1).
+        let vis_w = pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture::Desk)
+            .visual
+            .w;
+        assert_eq!(
+            hit_test_furniture(&layout, desk.x + vis_w - 1, cell_y),
+            Some("Desk"),
+            "the desk's east overhang column must hover it (old DESK_W+2 box clipped it)"
         );
     }
 
