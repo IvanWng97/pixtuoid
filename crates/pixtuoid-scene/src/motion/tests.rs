@@ -319,13 +319,6 @@ fn seated_transitions_to_walking_out_on_trip_cycle() {
         "after seated dwell on trip cycle, expected WalkingOut, got {:?}",
         ms.wander.phase
     );
-    assert!(
-        matches!(
-            ms.wander.phase,
-            WanderPhase::WalkingOut(_) | WanderPhase::AtWaypoint(_) | WanderPhase::WalkingBack(_)
-        ),
-        "walk-out profile must be snapshotted"
-    );
 }
 
 // -----------------------------------------------------------------------
@@ -484,13 +477,6 @@ fn at_waypoint_transitions_to_walking_back_after_dwell() {
         matches!(ms.wander.phase, WanderPhase::WalkingBack(_)),
         "expected WalkingBack after dwell, got {:?}",
         ms.wander.phase
-    );
-    assert!(
-        matches!(
-            ms.wander.phase,
-            WanderPhase::WalkingOut(_) | WanderPhase::AtWaypoint(_) | WanderPhase::WalkingBack(_)
-        ),
-        "walk-back profile must be snapshotted"
     );
 }
 
