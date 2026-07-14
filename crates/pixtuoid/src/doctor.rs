@@ -23,7 +23,7 @@ use pixtuoid_core::source::{drift, registry, REGISTERED_SOURCES};
 /// Per-source drift tallied from the log, by `kind`, plus a sanitized sample of
 /// the distinctive values (new event/tool names) and the most recent timestamp.
 #[derive(Default, Debug, PartialEq, Eq)]
-pub struct LogScanResult {
+pub(crate) struct LogScanResult {
     pub unknown_event: u64,
     pub missing_field: u64,
     pub unknown_dispatch: u64,
@@ -36,7 +36,7 @@ pub struct LogScanResult {
 }
 
 impl LogScanResult {
-    pub fn total(&self) -> u64 {
+    pub(crate) fn total(&self) -> u64 {
         self.unknown_event + self.missing_field + self.unknown_dispatch + self.shape_drift
     }
 }
@@ -134,7 +134,7 @@ fn push_sample(samples: &mut Vec<String>, v: Option<&str>) {
 /// tallying by `kind`. Pure (takes the log text) so it's testable against real
 /// fmt output. Source/kind values are matched, never re-emitted raw; the sampled
 /// names ARE sanitized (they're untrusted wire content).
-pub fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
+pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
     let mut r = LogScanResult::default();
     let marker = format!("{}: ", drift::TARGET);
     for line in log.lines() {
@@ -206,7 +206,7 @@ pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<
 /// non-Windows or when the two homes are equivalent (the common case, where
 /// nothing can diverge). Pure (env + platform injected) so it unit-tests on any
 /// host.
-pub fn home_split_advisory(
+pub(crate) fn home_split_advisory(
     is_windows: bool,
     home: Option<&str>,
     userprofile: Option<&str>,
@@ -254,7 +254,7 @@ pub struct SourceDiagnostics {
     /// the target's config; `None` = not checked (no target / not installed).
     pub install: Option<crate::install::verify::SchemaVerifyResult>,
     /// Decode-drift tally from the warn-floor log.
-    pub drift: LogScanResult,
+    pub(crate) drift: LogScanResult,
 }
 
 impl SourceDiagnostics {
@@ -296,7 +296,7 @@ pub fn diagnose(source: &str, log: &str) -> SourceDiagnostics {
 }
 
 /// One source's diagnosis row (plain data, so `format_doctor_row` is pure/tested).
-pub struct DoctorSourceRow {
+pub(crate) struct DoctorSourceRow {
     pub prefix: &'static str,
     /// The REGISTERED_SOURCES id (e.g. "claude-code"), NOT a display name — it's
     /// the registry key, distinct from `install::Target.name`/`display_name`.
@@ -333,7 +333,7 @@ const IMPLAUSIBLE_MAJOR: u64 = 1000;
 ///      skipping a year-like date prefix;
 ///   3. else the first run — so a genuine CalVer (`2026.06.04`, e.g. cursor)
 ///      still parses rather than vanishing.
-pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     let bytes = s.as_bytes();
     // (v_prefixed, (major, minor, patch)) for every dotted-number run.
     let mut runs: Vec<(bool, (u64, u64, u64))> = Vec::new();
@@ -369,7 +369,7 @@ pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
 /// The version segment for a doctor row. Skew is flagged ONLY when both the
 /// installed and the (non-`unknown`) verified version parse — otherwise it just
 /// shows the installed version (still useful) with no alarm.
-pub fn version_status(installed: Option<&str>, verified: &str) -> String {
+pub(crate) fn version_status(installed: Option<&str>, verified: &str) -> String {
     // Show the RAW probe string (what the CLI actually reports) — honest, not a
     // lossy reformat (cursor's `2026.06.04-5fd875e` isn't semver). The skew
     // check still parses internally.
@@ -442,7 +442,7 @@ fn drift_detail(s: &LogScanResult) -> String {
 /// state + version), plus an indented `↳` continuation line per problem (broken
 /// install / soft note / decode drift) so the long detail never wrecks the
 /// table's column alignment. Pure — the test seam (like `runtime::summarize`).
-pub fn format_doctor_row(row: &DoctorSourceRow) -> String {
+pub(crate) fn format_doctor_row(row: &DoctorSourceRow) -> String {
     let conn = if row.connected {
         "connected"
     } else {
