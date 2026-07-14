@@ -65,14 +65,8 @@ impl OfficeRenderer {
         floor_meta: FloorMeta,
         floor_pet: Option<&pixtuoid_scene::pet::Pet>,
     ) -> &RgbBuffer {
-        // The session owns the whole frame (#423 → FloorSession): the dual
-        // per-agent eviction (this painter historically never evicted — a
-        // slow per-agent leak, invisible in pixels because gone agents aren't
-        // painted — now structural: render() runs it), then buffer sizing,
-        // layout, the pixel pass, the coffee/door-anim epilogue, AND capturing
-        // the layout so `labels` builds the overlay against the SAME geometry
-        // the sprite pass used. active_pet stays None: click-to-pet needs window
-        // pointer hit-testing (deferred); the WANDERING floor pet is wired.
+        // active_pet stays None: click-to-pet needs window pointer hit-testing
+        // (deferred); the WANDERING floor pet is wired. The rest is the session's.
         self.session.render(FrameInputs {
             scene,
             pack,
@@ -95,7 +89,6 @@ impl OfficeRenderer {
         scene: &SceneState,
         now: SystemTime,
     ) -> Vec<pixtuoid_scene::overlay::LabelElement> {
-        // Floating has no agent-hover yet → hovered = None.
         self.session.overlay(scene, now, None)
     }
 

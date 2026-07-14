@@ -229,7 +229,12 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 > compiler-owned "scene → RgbBuffer" frame: prologue (buffer sizing, layout,
 > router zone), the pixel pass (itself two-phase: `sim_step` → paint, see
 > `pixel_painter/sim.rs` above), and the bookkeeping epilogue (`CoffeeState`
-> carrier persistence + the door-anim clamp). The persistent bundle every
+> carrier persistence + the door-anim clamp). It also single-sources the
+> label-overlay (`overlay`) and wall-board (`board`) derivations: `render`
+> captures the frame's `Layout` internally so `overlay` builds against the SAME
+> geometry the sprite pass used — a mismatched layout/route pair is
+> unrepresentable, not merely discouraged, and the web + floating painters drop
+> their duplicated `last_layout` capture. The persistent bundle every
 > painter used to hand-roll — {FloorCtx, RgbBuffer, CoffeeState, chitchat} +
 > the dual `evict_missing` protocol — is now the `FloorSession` type
 > (`PerFloor` + `PerOffice` halves): each painter drifted on exactly that
@@ -252,7 +257,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 > `tui::renderer::draw_scene` (the terminal half-block flush): it needs the
 > full `PixelPassResult` (pet/mascot positions, chitchat bubbles) and holds
 > only immutable coffee borrows mid-flush, routing its bookkeeping through the
-> same `CoffeeState`/`FloorCtx::evict_missing` types. A FOURTH painter starts
+> pub `frame_epilogue` seam (the same `CoffeeState`/door-anim step the session
+> runs — no longer hand-copied, closing the #423 drift class). A FOURTH painter starts
 > from `FloorSession`, not by re-rolling the bundle. The terminal flush +
 > widgets + footer live in the binary's `tui/`; the chunky-upscale blit is the
 > binary's `floating/`; the RGBA blit to canvas is `pixtuoid-web`'s. Keep
