@@ -22,11 +22,6 @@ pub static GRUVBOX: Theme = Theme {
             g: 73,
             b: 69,
         },
-        baseboard: Rgb {
-            r: 29,
-            g: 32,
-            b: 33,
-        },
         carpet_base: Rgb {
             r: 60,
             g: 56,
@@ -54,11 +49,6 @@ pub static GRUVBOX: Theme = Theme {
         },
     },
     office: OfficeColors {
-        room_wall_body: Rgb {
-            r: 60,
-            g: 56,
-            b: 54,
-        },
         room_wall_trim_light: Rgb {
             r: 102,
             g: 92,
@@ -251,11 +241,6 @@ pub static GRUVBOX: Theme = Theme {
             r: 66,
             g: 82,
             b: 76,
-        },
-        chair_seat: Rgb {
-            r: 65,
-            g: 60,
-            b: 56,
         },
         chair_trim: Rgb {
             r: 45,

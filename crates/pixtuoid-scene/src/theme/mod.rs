@@ -42,7 +42,6 @@ pub struct Theme {
 pub struct SurfaceColors {
     pub wall: Rgb,
     pub wall_trim: Rgb,
-    pub baseboard: Rgb,
     pub carpet_base: Rgb,
     pub carpet_light: Rgb,
     pub carpet_dark: Rgb,
@@ -52,7 +51,6 @@ pub struct SurfaceColors {
 
 #[derive(Debug, Clone)]
 pub struct OfficeColors {
-    pub room_wall_body: Rgb,
     pub room_wall_trim_light: Rgb,
     pub room_wall_trim_dark: Rgb,
     pub cubicle_divider: Rgb,
@@ -101,7 +99,6 @@ pub struct FurnitureColors {
     pub rug_accent: Rgb,
     pub magazine: Rgb,
     pub magazine_trim: Rgb,
-    pub chair_seat: Rgb,
     pub chair_trim: Rgb,
     pub coffee_cup: Rgb,
     pub coffee_cup_shadow: Rgb,

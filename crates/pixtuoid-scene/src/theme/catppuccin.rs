@@ -24,11 +24,6 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 71,
             b: 90,
         },
-        baseboard: Rgb {
-            r: 24,
-            g: 24,
-            b: 37,
-        },
         carpet_base: Rgb {
             r: 49,
             g: 50,
@@ -56,11 +51,6 @@ pub static CATPPUCCIN: Theme = Theme {
         },
     },
     office: OfficeColors {
-        room_wall_body: Rgb {
-            r: 49,
-            g: 50,
-            b: 68,
-        },
         room_wall_trim_light: Rgb {
             r: 69,
             g: 71,
@@ -252,11 +242,6 @@ pub static CATPPUCCIN: Theme = Theme {
             r: 68,
             g: 90,
             b: 125,
-        },
-        chair_seat: Rgb {
-            r: 54,
-            g: 55,
-            b: 72,
         },
         chair_trim: Rgb {
             r: 39,

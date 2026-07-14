@@ -16,11 +16,6 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 72,
             b: 104,
         },
-        baseboard: Rgb {
-            r: 18,
-            g: 18,
-            b: 28,
-        },
         carpet_base: Rgb {
             r: 36,
             g: 40,
@@ -48,11 +43,6 @@ pub static TOKYO_NIGHT: Theme = Theme {
         },
     },
     office: OfficeColors {
-        room_wall_body: Rgb {
-            r: 36,
-            g: 40,
-            b: 59,
-        },
         room_wall_trim_light: Rgb {
             r: 65,
             g: 72,
@@ -244,11 +234,6 @@ pub static TOKYO_NIGHT: Theme = Theme {
             r: 60,
             g: 80,
             b: 124,
-        },
-        chair_seat: Rgb {
-            r: 42,
-            g: 46,
-            b: 64,
         },
         chair_trim: Rgb {
             r: 28,

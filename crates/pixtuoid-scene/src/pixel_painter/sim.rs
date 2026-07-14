@@ -175,9 +175,14 @@ pub(crate) fn sim_step(
                     w.facing,
                     &layout.reachable,
                 );
-                stores
-                    .overlay
-                    .add(stand.x.saturating_sub(4), stand.y.saturating_sub(6), 8, 12);
+                // Reserve the character footprint from the SAME authorities the
+                // sprite anchor uses, not a re-hardcoded 8×12 (drifts on a wider pack).
+                stores.overlay.add(
+                    stand.x.saturating_sub(CHARACTER_SPRITE_W / 2),
+                    stand.y.saturating_sub(WALKING_Y_OFF / 2),
+                    CHARACTER_SPRITE_W,
+                    WALKING_Y_OFF,
+                );
             }
         }
     }

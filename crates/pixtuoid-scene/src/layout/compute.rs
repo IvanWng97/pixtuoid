@@ -1425,8 +1425,13 @@ pub(super) fn compute_waypoints(
 
     // Corridor appliances — stored as centre points (same convention
     // as Pantry/Couch). Painter derives top-left via sub(w/2, h/2).
-    // Sizes: vending 4×6, printer 5×4.
-    if cubicle_aisle.height >= 10 && cubicle_aisle.width > 30 {
+    // Sizes: vending 4×6, printer 5×4. Both gates read `cubicle_aisle.{h,w}`
+    // (== right_{h,w}) so the two siblings can't drift to different identifiers.
+    const VENDING_MIN_AISLE_H: u16 = 10;
+    const VENDING_MIN_AISLE_W: u16 = 30;
+    const PRINTER_MIN_AISLE_H: u16 = 9;
+    const PRINTER_MIN_AISLE_W: u16 = 40;
+    if cubicle_aisle.height >= VENDING_MIN_AISLE_H && cubicle_aisle.width > VENDING_MIN_AISLE_W {
         waypoints.push(Waypoint {
             pos: Point {
                 x: right_x + 5,
@@ -1437,7 +1442,7 @@ pub(super) fn compute_waypoints(
             room_id: None,
         });
     }
-    if cubicle_aisle.height >= 9 && right_w > 40 {
+    if cubicle_aisle.height >= PRINTER_MIN_AISLE_H && cubicle_aisle.width > PRINTER_MIN_AISLE_W {
         waypoints.push(Waypoint {
             pos: Point {
                 x: right_x + right_w.saturating_sub(10),

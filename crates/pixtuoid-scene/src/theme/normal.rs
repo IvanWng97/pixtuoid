@@ -16,11 +16,6 @@ pub static NORMAL: Theme = Theme {
             g: 80,
             b: 100,
         },
-        baseboard: Rgb {
-            r: 40,
-            g: 40,
-            b: 52,
-        },
         carpet_base: Rgb {
             r: 150,
             g: 110,
@@ -48,11 +43,6 @@ pub static NORMAL: Theme = Theme {
         },
     },
     office: OfficeColors {
-        room_wall_body: Rgb {
-            r: 72,
-            g: 74,
-            b: 90,
-        },
         room_wall_trim_light: Rgb {
             r: 110,
             g: 112,
@@ -245,11 +235,6 @@ pub static NORMAL: Theme = Theme {
             r: 50,
             g: 60,
             b: 92,
-        },
-        chair_seat: Rgb {
-            r: 96,
-            g: 68,
-            b: 44,
         },
         chair_trim: Rgb {
             r: 60,

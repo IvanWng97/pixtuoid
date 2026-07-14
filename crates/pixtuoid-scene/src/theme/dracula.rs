@@ -16,11 +16,6 @@ pub static DRACULA: Theme = Theme {
             g: 71,
             b: 90,
         },
-        baseboard: Rgb {
-            r: 30,
-            g: 31,
-            b: 40,
-        },
         carpet_base: Rgb {
             r: 52,
             g: 45,
@@ -48,11 +43,6 @@ pub static DRACULA: Theme = Theme {
         },
     },
     office: OfficeColors {
-        room_wall_body: Rgb {
-            r: 50,
-            g: 52,
-            b: 68,
-        },
         room_wall_trim_light: Rgb {
             r: 68,
             g: 71,
@@ -244,11 +234,6 @@ pub static DRACULA: Theme = Theme {
             r: 70,
             g: 116,
             b: 126,
-        },
-        chair_seat: Rgb {
-            r: 55,
-            g: 56,
-            b: 72,
         },
         chair_trim: Rgb {
             r: 38,

@@ -16,11 +16,6 @@ pub static CYBERPUNK: Theme = Theme {
             g: 40,
             b: 70,
         },
-        baseboard: Rgb {
-            r: 15,
-            g: 12,
-            b: 25,
-        },
         carpet_base: Rgb {
             r: 45,
             g: 42,
@@ -48,11 +43,6 @@ pub static CYBERPUNK: Theme = Theme {
         },
     },
     office: OfficeColors {
-        room_wall_body: Rgb {
-            r: 35,
-            g: 28,
-            b: 55,
-        },
         room_wall_trim_light: Rgb {
             r: 70,
             g: 55,
@@ -228,11 +218,6 @@ pub static CYBERPUNK: Theme = Theme {
             r: 30,
             g: 90,
             b: 130,
-        },
-        chair_seat: Rgb {
-            r: 45,
-            g: 40,
-            b: 58,
         },
         chair_trim: Rgb {
             r: 28,
