@@ -15,7 +15,7 @@
 // runs in the main CI — so the marketing list can never claim "supported" for a
 // source that isn't actually wired (and a newly-wired source forces a manifest
 // update). This script only owns rendering + README/site parity.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -34,6 +34,22 @@ const SITE = 'https://pixtuoid.dev';
 const check = process.argv.includes('--check');
 let readme = readFileSync(readmePath, 'utf8');
 const errors = [];
+
+// Every feature `pix` must resolve to a committed pixel-icon PNG. The site's
+// PixIcon.astro throws at build ONLY for icons rendered through the roster
+// (no-channel rows); a channel-bearing feature reaches this README `<img>` but
+// never PixIcon, so a typo'd / ungenerated `pix` would ship a 404 image past
+// the site build, gen-pix-icons --check (ICONS-only), AND gen-readme-check
+// (README-vs-JSON, not img existence). One existsSync loop closes it for every
+// row regardless of channel routing.
+for (const f of features) {
+  if (f.pix && !existsSync(join(root, 'docs', 'images', 'pix-icons', `${f.pix}.png`))) {
+    errors.push(
+      `feature "${f.name}" declares pix "${f.pix}" but docs/images/pix-icons/${f.pix}.png is missing — ` +
+        `add "${f.pix}" to gen-pix-icons.py's ICONS and run \`just gen-media\`.`
+    );
+  }
+}
 
 // Neutralize only what breaks a GFM table row: `|` splits columns (use the
 // HTML entity — backslash-escaping would itself need backslash escaping first,
@@ -98,11 +114,14 @@ const runsOn = (s) =>
   OS_ORDER.filter((os) => s.platforms?.[os] === 'yes' || s.platforms?.[os] === 'experimental')
     .map((os) => (s.platforms[os] === 'experimental' ? `${OS_LABELS[os]}\\*` : OS_LABELS[os]))
     .join(' · ');
-const hasExperimental = sources.some(
-  (s) => s.status === 'supported' && Object.values(s.platforms || {}).includes('experimental')
-);
-
 const featured = sources.filter((s) => s.status === 'supported' && s.featured);
+// Compute over the population that actually RENDERS the `\*` marker (the
+// featured table, via runsOn), NOT all supported sources — else the footnote
+// could appear with no `\*` referent (a non-featured experimental source would
+// set the flag while the featured table shows no marker).
+const hasExperimental = featured.some((s) =>
+  Object.values(s.platforms || {}).includes('experimental')
+);
 const otherSupported = sources.filter((s) => s.status === 'supported' && !s.featured);
 const planned = sources.filter((s) => s.status === 'planned');
 const link = (s) => `[${cell(s.name)}](${s.url})`;
