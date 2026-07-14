@@ -462,6 +462,33 @@ mod tests {
         assert_eq!(s.len(), 3);
     }
 
+    // A DIAGONAL run (nonzero dx AND dy) exercises the collinearity determinant's
+    // x-delta terms, which an axis-aligned run zeroes out (dy_in=dy_out=0 makes
+    // the determinant 0 regardless of dx). Off-origin so the `here.x - prev.x`
+    // subtraction can't be hidden by a `prev` of 0. A 3-point input also pins the
+    // `len < 3` boundary: a `<= 3`/`== 3` early-return would leave this uncollapsed.
+    #[test]
+    fn simplify_collapses_diagonal_collinear() {
+        let pts = vec![
+            Point { x: 1, y: 1 },
+            Point { x: 3, y: 3 },
+            Point { x: 5, y: 5 },
+        ];
+        assert_eq!(simplify_polyline(pts).len(), 2);
+    }
+
+    // The complement: a genuine 3-point corner must SURVIVE (determinant != 0),
+    // so the collapse above can't be a degenerate "always drops the midpoint".
+    #[test]
+    fn simplify_keeps_genuine_corner() {
+        let pts = vec![
+            Point { x: 0, y: 0 },
+            Point { x: 2, y: 0 },
+            Point { x: 2, y: 2 },
+        ];
+        assert_eq!(simplify_polyline(pts).len(), 3);
+    }
+
     #[test]
     fn routes_around_meeting_room_wall() {
         let l = make_layout();
@@ -845,6 +872,47 @@ mod tests {
             height: 10,
         };
         assert!(!cell_in_zone(Some(zone), 20, 20));
+    }
+
+    // A cell center landing EXACTLY on the exclusive far edge (x+width / y+height)
+    // is OUTSIDE — the bound is a strict `<`. The zone edge is derived from
+    // `cell_center` so the alignment holds regardless of CELL_SIZE. Without this,
+    // a `<`->`<=` mutation is invisible (no on-edge cell is ever tested).
+    #[test]
+    fn cell_in_zone_false_on_exclusive_edges() {
+        let right_edge = cell_center(2, 1).x;
+        let zone_x = Bounds {
+            x: 0,
+            y: 0,
+            width: right_edge,
+            height: 40,
+        };
+        assert!(!cell_in_zone(Some(zone_x), 2, 1));
+
+        let bottom_edge = cell_center(1, 2).y;
+        let zone_y = Bounds {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: bottom_edge,
+        };
+        assert!(!cell_in_zone(Some(zone_y), 1, 2));
+    }
+
+    // Inside on ONE axis but outside on the other is OUTSIDE — the four bounds
+    // are AND-joined. The both-axes-outside test above leaves an `&&`->`||`
+    // mutation on the middle joins invisible (F||F is still F); a single-axis
+    // miss (T on one pair, F on the other) is what makes the conjunction observable.
+    #[test]
+    fn cell_in_zone_false_when_outside_on_one_axis_only() {
+        let zone = Bounds {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        };
+        assert!(!cell_in_zone(Some(zone), 20, 1)); // outside x, inside y
+        assert!(!cell_in_zone(Some(zone), 1, 20)); // inside x, outside y
     }
 
     #[test]
