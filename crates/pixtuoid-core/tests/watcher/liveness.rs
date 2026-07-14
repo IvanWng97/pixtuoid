@@ -445,6 +445,74 @@ async fn probe_failure_changes_nothing() {
     handle.abort();
 }
 
+/// A probe that PANICS (not merely returns `None`) must not crash the watcher:
+/// `spawn_blocking`'s `JoinError` folds into the same fail-safe as a `None` —
+/// the previous snapshot keeps vouching and no exit is confirmed. Covers the
+/// `Err(join_err) => warn!` arm that the `None` path never reaches.
+#[tokio::test]
+async fn probe_panic_changes_nothing() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let dir = TempDir::new().unwrap();
+    let uuid = "01000000-0000-7000-8000-0000000000b1";
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("proj-panic");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let stale = project_dir.join(format!("{uuid}.jsonl"));
+    write_lines(&stale, &[cc_session_start_line(uuid, "/repo")]).await;
+    backdate(&stale, 7200);
+
+    // Healthy until `boom` flips; then every probe call panics inside the
+    // blocking task.
+    let boom = std::sync::Arc::new(AtomicBool::new(false));
+    let probe_boom = boom.clone();
+    let snap = vouch_snapshot(&[uuid]);
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let watcher = cc_watcher(projects_root)
+        .with_initial_window(Duration::from_secs(60))
+        .with_poll_interval(Duration::from_millis(100))
+        .with_liveness_probe(std::sync::Arc::new(move || {
+            if probe_boom.load(Ordering::SeqCst) {
+                panic!("probe boom");
+            }
+            snap.clone()
+        }));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let expected = AgentId::from_parts("claude-code", uuid);
+    let mut registered = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if agent_id == expected {
+                registered = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        registered,
+        "the probe-vouched stale transcript must register while the probe is healthy"
+    );
+
+    // The probe now panics on every poll — the watcher must survive and never
+    // confirm an exit (a panic is not an observation, just a harsher failure).
+    boom.store(true, Ordering::SeqCst);
+    assert_no_session_end_within(
+        &mut rx,
+        expected,
+        Duration::from_millis(1500),
+        "a probe panic must fold into the fail-safe, never confirm an exit",
+    )
+    .await;
+    assert!(
+        !handle.is_finished(),
+        "a probe panic must not crash the watcher task"
+    );
+    handle.abort();
+}
+
 // ── Instant exit (#223 rung 2): a bound pid dying IS the session's end ──────
 
 /// THE instant-exit pin: a probe snapshot binds the vouched session id to its
