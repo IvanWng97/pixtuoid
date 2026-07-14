@@ -915,6 +915,22 @@ mod tests {
         assert!(!cell_in_zone(Some(zone), 1, 20)); // inside x, outside y
     }
 
+    // The complement of the exclusive-edge test: a cell center landing EXACTLY
+    // on the INCLUSIVE near edge (x / y) is INSIDE — the lower bound is `>=`.
+    // Without this a `>=`->`>` mutation on either lower bound survives (the
+    // mirror of the `<`->`<=` gap above; sibling-set-spans-axes).
+    #[test]
+    fn cell_in_zone_true_on_inclusive_lower_edges() {
+        let near = cell_center(1, 1);
+        let zone = Bounds {
+            x: near.x,
+            y: near.y,
+            width: 40,
+            height: 40,
+        };
+        assert!(cell_in_zone(Some(zone), 1, 1));
+    }
+
     #[test]
     fn cell_walkable_on_open_mask() {
         let mask = WalkableMask::new_open(100, 100);
