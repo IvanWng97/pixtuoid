@@ -289,11 +289,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         row: u16,
     ) -> Option<pixtuoid_core::AgentId> {
         let now = self.last_render_now?;
-        // Arc-clone releases the `&self.cached_layout` borrow so the `&mut floors`
-        // route_ctx borrow below is disjoint.
-        let layout = self.cached_layout.clone()?;
+        // cached_layout / floors / current_floor are disjoint struct fields, so
+        // this shared layout borrow coexists with the &mut route_ctx below.
+        let layout = self.cached_layout.as_deref()?;
         let mut rctx = self.floors[self.current_floor].ctx.route_ctx();
-        crate::tui::hit_test::hit_test_agent(floor_scene, &layout, now, &mut rctx, col, row)
+        crate::tui::hit_test::hit_test_agent(floor_scene, layout, now, &mut rctx, col, row)
     }
 
     pub fn current_floor_seed(&self) -> u64 {
