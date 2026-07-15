@@ -8,6 +8,14 @@ updates:
       rust-deps:
         patterns: ["*"]
     open-pull-requests-limit: 5
+    ignore:
+      # objc2-app-kit MUST track winit's stack (see crates/pixtuoid/Cargo.toml):
+      # winit 0.30.x still pulls 0.2.x on objc2 0.5.x, so a 0.3+ bump would build
+      # a SECOND objc2 stack beside winit's AND break the activate API. Allow only
+      # 0.2.x patch bumps until winit itself moves to objc2 0.6.
+      - dependency-name: "objc2-app-kit"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

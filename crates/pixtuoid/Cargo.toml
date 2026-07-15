@@ -70,9 +70,14 @@ libc = "0.2"
 # Focus-jump activation (focus/macos.rs): NSRunningApplication activate — plain
 # Cocoa, zero TCC. Pinned to the SAME objc2 stack winit already pulls (0.2.x on
 # objc2 0.5.2 per Cargo.lock) so the bindings don't double-compile — the same
-# discipline pixtuoid-hook's windows-sys comment enshrines.
+# discipline pixtuoid-hook's windows-sys comment enshrines. This MUST track
+# winit's objc2-app-kit major, not float ahead: a lone bump to 0.3.x drags in a
+# whole SECOND objc2 stack (0.6 core + 0.3 app-kit/foundation/quartz) beside
+# winit's, regressing exactly that no-double-compile invariant AND breaking the
+# activate API — so dependabot is told to ignore it (.github/dependabot.yml)
+# until winit itself moves.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3.2", features = ["NSRunningApplication", "libc"] }
+objc2-app-kit = { version = "0.2.2", features = ["NSRunningApplication", "libc"] }
 
 # Focus-jump on Linux (focus/linux.rs): the EWMH _NET_ACTIVE_WINDOW protocol
 # needs an X11 client; x11rb is already in-tree transitively via winit.
