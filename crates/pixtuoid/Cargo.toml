@@ -44,7 +44,7 @@ toml_edit          = { workspace = true }
 # is the maintained yaml-rust successor (serde_yaml/serde_yml are both abandoned);
 # it data-preserves a user's other config keys on merge but does NOT round-trip
 # comments (a YAML-ecosystem limitation — see install/hermes.rs). Binary-only.
-saphyr             = "0.0.9"
+saphyr             = "0.0.11"
 anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -72,7 +72,7 @@ libc = "0.2"
 # objc2 0.5.2 per Cargo.lock) so the bindings don't double-compile — the same
 # discipline pixtuoid-hook's windows-sys comment enshrines.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.2.2", features = ["NSRunningApplication", "libc"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSRunningApplication", "libc"] }
 
 # Focus-jump on Linux (focus/linux.rs): the EWMH _NET_ACTIVE_WINDOW protocol
 # needs an X11 client; x11rb is already in-tree transitively via winit.
