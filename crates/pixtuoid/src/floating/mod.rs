@@ -28,7 +28,7 @@ use winit::event_loop::EventLoop;
 use crate::config;
 use crate::runtime::driver::{build_source_set, reducer_task};
 use crate::runtime::{ConnectedSources, RunConfig};
-use window::{FloatingApp, FloatingEvent};
+use window::FloatingApp;
 
 /// The not-yet-surfaced tail of the grow-only `SourceDeath` watch Vec, advancing
 /// `seen` past it — the pure half of the health-bridge dedup ("tracked by count:
@@ -113,7 +113,9 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     let _source_handles = manager.spawn_with_health(tx, health_tx);
 
     // --- the window event loop (main thread) ---
-    let mut builder = EventLoop::<FloatingEvent>::with_user_event();
+    // winit 0.31: no typed user-event loop — `EventLoop::builder()` + a payload-free
+    // proxy `wake_up()`.
+    let mut builder = EventLoop::builder();
     #[cfg(target_os = "macos")]
     {
         // Accessory: no Dock icon, doesn't steal focus — an ambient companion.
@@ -125,15 +127,13 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         .context("building the floating event loop")?;
     let proxy = event_loop.create_proxy();
 
-    // Bridge: a new scene → a repaint. Breaks cleanly when the window closes
-    // (`send_event` → `EventLoopClosed`) or the reducer drops its sender — never unwraps.
+    // Bridge: a new scene → a repaint. `wake_up()` is infallible (a no-op once the loop
+    // closes), so the task ends when the reducer drops its sender or the runtime shuts down.
     {
         let mut scene_rx = scene_rx.clone();
         rt.spawn(async move {
             while scene_rx.changed().await.is_ok() {
-                if proxy.send_event(FloatingEvent::SceneChanged).is_err() {
-                    break;
-                }
+                proxy.wake_up();
             }
         });
     }
@@ -155,7 +155,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         });
     }
 
-    let mut app = FloatingApp::new(
+    let app = FloatingApp::new(
         floating_cfg,
         theme,
         pack,
@@ -164,8 +164,9 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         scene_rx,
         floor_caps,
     );
+    // winit 0.31: run_app takes the handler BY VALUE (was `&mut app`).
     event_loop
-        .run_app(&mut app)
+        .run_app(app)
         .context("running the floating window event loop")?;
     Ok(())
 }

@@ -1,12 +1,12 @@
 //! The `winit` + `softbuffer` window for `pixtuoid floating`.
 //!
-//! `FloatingApp` is the `ApplicationHandler`: on `Resumed` it creates ONE frameless,
+//! `FloatingApp` is the `ApplicationHandler`: on `can_create_surfaces` it creates ONE frameless,
 //! always-on-top window + a `softbuffer` surface; it renders the latest `watch`ed scene
 //! to a DOWNSCALED office `RgbBuffer` via [`OfficeRenderer`] (~window/SCALE) then
 //! nearest-neighbor upscales it into the surface (CPU, `0x00RRGGBB`) so the pixel-art
-//! office stays chunky/legible instead of 1:1-tiny. Redraw is event-driven (a
-//! `FloatingEvent::SceneChanged` from the pipeline
-//! bridge) plus a ~30fps animation tick WHILE agents OR a live gateway daemon (the OpenClaw
+//! office stays chunky/legible instead of 1:1-tiny. Redraw is event-driven (a proxy
+//! `wake_up()` from the pipeline bridge on each scene change)
+//! plus a ~30fps animation tick WHILE agents OR a live gateway daemon (the OpenClaw
 //! lobster mascot in `scene.daemons`) are present (motion is time-driven); with no agents and
 //! every daemon Down it drops to a slow ~1fps ambient tick (keeping the time-driven
 //! clock/weather/lightning/day-night/pet alive without the 30fps cost), never fully idle.
@@ -26,23 +26,16 @@ use pixtuoid_core::state::{DaemonLiveness, SceneState, MAX_FLOORS};
 use tokio::sync::watch;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ButtonSource, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
+use winit::window::{ResizeDirection, Window, WindowAttributes, WindowId, WindowLevel};
 
 use super::offscreen::OfficeRenderer;
 use crate::config::{self, FloatingConfig};
 use pixtuoid_scene::floor::FloorMeta;
 use pixtuoid_scene::theme::Theme;
 
-/// Wake reasons delivered to the winit loop from the background tokio pipeline.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum FloatingEvent {
-    /// The reducer published a new scene — repaint.
-    SceneChanged,
-}
-
-/// The floating window app: window + surface (created lazily on `Resumed`), the office
+/// The floating window app: window + surface (created lazily on `can_create_surfaces`), the office
 /// renderer (owns cross-frame caches), the live scene receiver, and the per-floor desk
 /// capacity atomics it keeps in sync with the rendered office.
 pub(crate) struct FloatingApp {
@@ -60,10 +53,11 @@ pub(crate) struct FloatingApp {
     last_caps_size: Option<(u16, u16)>,
     /// Latest cursor position (physical px) — for the corner resize hit-test on click.
     cursor: PhysicalPosition<f64>,
-    window: Option<Rc<Window>>,
+    // winit 0.31: `Window` is a trait (per-platform impls), so hold it as `Rc<dyn Window>`.
+    window: Option<Rc<dyn Window>>,
     // softbuffer's `Context` must outlive the `Surface` it spawned, so keep both.
-    context: Option<softbuffer::Context<Rc<Window>>>,
-    surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
+    context: Option<softbuffer::Context<Rc<dyn Window>>>,
+    surface: Option<softbuffer::Surface<Rc<dyn Window>, Rc<dyn Window>>>,
 }
 
 /// Click within this many physical px of the bottom-right corner = resize, else move.
@@ -110,7 +104,9 @@ impl FloatingApp {
         let Some(window) = &self.window else {
             return;
         };
-        let logical = window.inner_size().to_logical::<f64>(window.scale_factor());
+        let logical = window
+            .surface_size()
+            .to_logical::<f64>(window.scale_factor());
         let pos = window.outer_position().ok();
         if let Err(e) = config::save_floating(
             &self.config_path,
@@ -132,7 +128,7 @@ impl FloatingApp {
         let Some(window) = self.window.clone() else {
             return;
         };
-        let size = window.inner_size();
+        let size = window.surface_size();
         let (win_w, win_h) = (size.width, size.height);
         let (Some(nw), Some(nh)) = (NonZeroU32::new(win_w), NonZeroU32::new(win_h)) else {
             return; // a 0-area window: nothing to draw
@@ -232,31 +228,36 @@ fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u1
 /// Does the saved window rect `(x, y, w, h)` overlap ANY currently-connected monitor?
 /// Thin winit binding over the pure [`super::geometry::window_visible_on_monitors`] (the
 /// overlap logic + empty-list guard is unit-tested there; this just pulls the monitor rects).
-fn position_on_a_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32, w: u32, h: u32) -> bool {
+fn position_on_a_monitor(event_loop: &dyn ActiveEventLoop, x: i32, y: i32, w: u32, h: u32) -> bool {
     super::geometry::window_visible_on_monitors(
         (x, y, w, h),
-        event_loop.available_monitors().map(|m| {
-            let (pos, size) = (m.position(), m.size());
-            (pos.x, pos.y, size.width, size.height)
+        // winit 0.31: MonitorHandle::position is now Option, and the pixel size comes
+        // from the current video mode — skip any monitor missing either (Web/headless).
+        event_loop.available_monitors().filter_map(|m| {
+            let pos = m.position()?;
+            let size = m.current_video_mode()?.size();
+            Some((pos.x, pos.y, size.width, size.height))
         }),
     )
 }
 
-impl ApplicationHandler<FloatingEvent> for FloatingApp {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+impl ApplicationHandler for FloatingApp {
+    // winit 0.31 moved window/surface creation out of `resumed` into the required
+    // `can_create_surfaces` (called once it's safe to spawn a surface-backed window).
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
         if self.window.is_some() {
-            return; // already created — a re-resume must not spawn a second window
+            return; // already created — a re-call must not spawn a second window
         }
-        let mut attrs = Window::default_attributes()
+        let mut attrs = WindowAttributes::default()
             .with_title("pixtuoid")
             .with_decorations(false)
             .with_resizable(true)
             .with_window_level(WindowLevel::AlwaysOnTop)
-            .with_inner_size(LogicalSize::new(
+            .with_surface_size(LogicalSize::new(
                 self.cfg.width as f64,
                 self.cfg.height as f64,
             ))
-            .with_min_inner_size(LogicalSize::new(
+            .with_min_surface_size(LogicalSize::new(
                 config::FLOATING_MIN_W as f64,
                 config::FLOATING_MIN_H as f64,
             ));
@@ -271,17 +272,28 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         }
         #[cfg(target_os = "macos")]
         {
-            use winit::platform::macos::WindowAttributesExtMacOS;
-            attrs = attrs.with_has_shadow(true).with_titlebar_hidden(true);
+            // winit 0.31: per-platform attrs are a struct attached via
+            // `with_platform_attributes`, not extension methods on WindowAttributes.
+            use winit::platform::macos::WindowAttributesMacOS;
+            attrs = attrs.with_platform_attributes(Box::new(
+                WindowAttributesMacOS::default()
+                    .with_has_shadow(true)
+                    .with_titlebar_hidden(true),
+            ));
         }
         #[cfg(target_os = "windows")]
         {
             // No taskbar button — it's an ambient overlay, not a primary window.
-            use winit::platform::windows::WindowAttributesExtWindows;
-            attrs = attrs.with_skip_taskbar(true);
+            // winit 0.31: `WindowAttributesWindows::with_skip_taskbar` (source-verified
+            // against winit-win32 0.31.0-beta.2); attached via `with_platform_attributes`
+            // like macOS. Compiled only by the `windows-check`/`windows-test` CI gates.
+            use winit::platform::windows::WindowAttributesWindows;
+            attrs = attrs.with_platform_attributes(Box::new(
+                WindowAttributesWindows::default().with_skip_taskbar(true),
+            ));
         }
-        let window = match event_loop.create_window(attrs) {
-            Ok(w) => Rc::new(w),
+        let window: Rc<dyn Window> = match event_loop.create_window(attrs) {
+            Ok(w) => Rc::from(w),
             Err(e) => {
                 tracing::error!("pixtuoid floating: failed to create window: {e}");
                 event_loop.exit();
@@ -304,7 +316,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 return;
             }
         };
-        // `cfg.opacity` is parsed + clamped but NOT applied in v1: winit 0.30 exposes no
+        // `cfg.opacity` is parsed + clamped but NOT applied in v1: winit 0.31 exposes no
         // per-window opacity, and softbuffer writes opaque XRGB (no alpha). Honest no-op —
         // real translucency needs a native shim or a wgpu surface (deferred, see spec §11).
         window.request_redraw();
@@ -313,19 +325,17 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         self.surface = Some(surface);
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: FloatingEvent) {
-        match event {
-            FloatingEvent::SceneChanged => {
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
-            }
+    // winit 0.31: the typed user-event channel is gone — a proxy `wake_up()` (no payload)
+    // wakes the loop here. Our only wake reason is "scene changed → repaint".
+    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         _window_id: WindowId,
         event: WindowEvent,
     ) {
@@ -335,22 +345,22 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => self.redraw(),
-            WindowEvent::Resized(_) => {
+            WindowEvent::SurfaceResized(_) => {
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
             }
-            WindowEvent::CursorMoved { position, .. } => self.cursor = position,
-            WindowEvent::MouseInput {
+            WindowEvent::PointerMoved { position, .. } => self.cursor = position,
+            WindowEvent::PointerButton {
                 state: ElementState::Pressed,
-                button: MouseButton::Left,
+                button: ButtonSource::Mouse(MouseButton::Left),
                 ..
             } => {
                 // Frameless: a left-press drags the window, EXCEPT near the bottom-right
                 // corner, which resizes (the OS takes over until release). Errors are
                 // non-fatal (some platforms refuse outside a real press).
                 if let Some(window) = &self.window {
-                    let size = window.inner_size();
+                    let size = window.surface_size();
                     let near_corner = super::geometry::near_resize_corner(
                         (self.cursor.x, self.cursor.y),
                         (size.width, size.height),
@@ -367,7 +377,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         // Agents animate continuously (walk/breathe — time-driven), so tick ~30fps WHILE
         // any agent is present. When the office is EMPTY we don't go fully idle: the
         // time-driven AMBIENT layer (clock hands, weather cycle, lightning, day/night
