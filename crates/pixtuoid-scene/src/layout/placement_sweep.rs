@@ -641,7 +641,7 @@ fn no_furniture_ground_overlaps_a_wall() {
         let walls: Vec<(Point, Size)> = l
             .room_walls
             .iter()
-            .map(|seg| super::mask::wall_segment_rect(seg, l.top_margin))
+            .map(|seg| super::rooms::walls::wall_segment_rect(seg, l.top_margin, &l.room_walls))
             .collect();
         for p in pieces(l) {
             let Some(g) = p.ground else { continue };
@@ -689,6 +689,49 @@ fn walkable_is_one_connected_region() {
     // ONE pixel-BFS (the strongest connectivity truth), swept across the full
     // grid — retires the two hand-rolled BFS copies that each swept a slice.
     sweep(assert_walkable_connected);
+}
+
+#[test]
+fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
+    // A divider crossed by an E-W wall is TWO vertical segments (upper room's
+    // east wall, lower room's / pantry's) meeting at the cross wall. The honest
+    // 4px wall + the render's stitch each open a gap the mask must also close, or
+    // the walkable map shows a bite out of the corner (a walker could stand IN
+    // the divider): (a) the lower segment's north walk-behind cap left a notch
+    // ABOVE it, and (b) the upper segment's south end left the L-notch on the
+    // wall's east columns UNfilled. Both are gone now that `wall_segment_rect`
+    // shares `stitch_vertical_wall` with the painter — assert every corner row is
+    // solid across the wall's whole width.
+    sweep(|w, h, seed, l| {
+        let h_walls: Vec<_> = l
+            .room_walls
+            .iter()
+            .filter(|s| s.start.y == s.end.y)
+            .collect();
+        for v in l.room_walls.iter().filter(|s| s.start.x == s.end.x) {
+            let vtop = v.start.y.min(v.end.y);
+            for hw in &h_walls {
+                let (hx0, hx1) = (hw.start.x.min(hw.end.x), hw.start.x.max(hw.end.x));
+                let hr = hw.start.y;
+                // Only the crossing that actually trims this segment's north end.
+                if hr < vtop
+                    && vtop - hr <= super::WALL_THICK_H + super::rooms::walls::WALL_BRIDGE_SLACK_PX
+                    && (hx0..=hx1).contains(&v.start.x)
+                {
+                    for y in hr..vtop {
+                        for dx in 0..super::WALL_THICK_V {
+                            assert!(
+                                !l.is_walkable(v.start.x + dx, y),
+                                "{w}x{h} seed {seed}: walkable HOLE at ({},{y}) in the \
+                                 divider corner between H wall @{hr} and V wall @{vtop}",
+                                v.start.x + dx,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Widths inside the narrow-band DEGRADATION zone the discrete `SWEEP_SIZES`
@@ -739,6 +782,32 @@ fn appliance_strip_not_sealed_at_a_single_pod_band() {
     // connectivity guard drops the aisle-resident plant.
     let l = SceneLayout::compute_with_seed(59, 160, None, 3).expect("59x160 lays out");
     assert_walkable_connected(59, 160, 3, &l);
+}
+
+#[test]
+fn free_standing_whiteboard_yields_when_it_seals_the_west_aisle() {
+    // #566 CLASS C pin (honest-wall follow-up): at 32x120 seed 3 the divider is
+    // two stacked 7px meeting rooms whose east wall is the vertical divider. The
+    // free-standing whiteboard sits +3px east of that wall — fine against the old
+    // 1px wall (the N-S drain ran through the cols the thin wall left open), but
+    // the honest 4px wall now sits flush against the board's west edge, and the
+    // desk column closes the east side, sealing the entire south (~985 px). The
+    // whiteboard is decor: the connectivity guard drops it and the office
+    // reconnects — WITHOUT sacrificing the (innocent, far-south) scatter plants.
+    let l = SceneLayout::compute_with_seed(32, 120, None, 3).expect("32x120 lays out");
+    assert_walkable_connected(32, 120, 3, &l);
+    assert!(
+        !l.wall_decor
+            .iter()
+            .any(|d| matches!(d.kind, super::WallDecor::Whiteboard)),
+        "the sealing whiteboard must be dropped, not merely un-blocked (else the \
+         painter draws a whiteboard a walker passes straight through)"
+    );
+    assert_eq!(
+        l.plants.len(),
+        2,
+        "the two innocent far-south plants survive — only the whiteboard yields"
+    );
 }
 
 #[test]

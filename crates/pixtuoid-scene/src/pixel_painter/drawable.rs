@@ -199,6 +199,21 @@ pub(super) enum DrawableKind<'a> {
         jamb_left: bool,
         jamb_right: bool,
     },
+    /// Vertical (N-S, edge-on) frosted-glass room divider, y-sorted at its raw
+    /// south end (see `enqueue_room_walls_v`) like the horizontal wall — so a
+    /// character standing north of the wall's north cap (the visual-only overhang
+    /// above the blocked footprint) is composited behind the frosted glass.
+    /// `y_top`/`y_bot` are the stitched PAINT extent (`stitch_vertical_wall`); the
+    /// z-key is the raw end so a corner-extended `y_bot` doesn't flip H-over-V.
+    RoomWallV {
+        x: u16,
+        y_top: u16,
+        y_bot: u16,
+        /// This segment's north/south end abuts a doorway ⇒ paint its dark jamb
+        /// on that cut end (#559). Flagged at enqueue (no layout in the paint pass).
+        jamb_north: bool,
+        jamb_south: bool,
+    },
     /// Meeting-room coat rack (pole + base + coat blobs), y-sorted at its base
     /// row so a character walking in front of it occludes it (and one behind
     /// is occluded BY it) — was painted in the background pass, always under
@@ -940,6 +955,30 @@ pub(super) fn paint_drawable(
                     theme,
                     x1.saturating_sub(super::DOOR_JAMB_PX - 1),
                     *y_top,
+                );
+            }
+        }
+        DrawableKind::RoomWallV {
+            x,
+            y_top,
+            y_bot,
+            jamb_north,
+            jamb_south,
+        } => {
+            super::paint_glass_wall_v(buf, theme, *x, *y_top, *y_bot);
+            // Jambs ride the y-sorted glass (same z as the strip). The post sits
+            // ON this segment's cut end: north jamb from the top row down, south
+            // jamb ending on the bottom row (both `DOOR_JAMB_PX` deep) — the exact
+            // rows the old background `paint_door_frame_v` covered.
+            if *jamb_north {
+                super::paint_door_jamb_v(buf, theme, *x, *y_top);
+            }
+            if *jamb_south {
+                super::paint_door_jamb_v(
+                    buf,
+                    theme,
+                    *x,
+                    y_bot.saturating_sub(super::DOOR_JAMB_PX - 1),
                 );
             }
         }

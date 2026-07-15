@@ -521,7 +521,7 @@ pub(super) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
 }
 
 /// Composite `tint` over the existing buffer pixel at `(x, y)` by `t`. The
-/// frosted-glass / haze / overlay primitive (was glass.rs's private `glass_over`).
+/// frosted-glass / haze / overlay primitive (was the wall module's private `glass_over`).
 pub(super) fn blend_over(buf: &RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32) -> Rgb {
     blend_rgb(buf.get(x, y), tint, t)
 }

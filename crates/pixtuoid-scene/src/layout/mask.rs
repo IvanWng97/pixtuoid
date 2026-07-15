@@ -92,55 +92,23 @@ pub(super) fn pantry_ground_rect(pos: Point, counter: Size) -> (Point, Size) {
     )
 }
 
-/// Walkable footprint (and render face height) of a horizontal (E-W) interior
-/// wall, in px. The renderer derives `WALL_THICK_H_PX` from this so the visible
-/// glass face and the blocked ground footprint can never drift apart.
-pub const WALL_THICK_H: u16 = 6;
-/// Walkable footprint of a vertical (N-S) interior wall — seen edge-on, so 1px
-/// (the renderer draws it 3px wide, visual-wider-than-footprint per the
-/// top-down ground-projection rule). Single source: mask + the placement test
-/// read this rather than re-typing `1`.
-pub const WALL_THICK_V: u16 = 1;
+// Wall dimensions + footprint geometry (WALL_THICK_H/V, WallDef, WALL_H/V,
+// stitch_vertical_wall, wall_segment_rect) live in `rooms::walls` — the wall's
+// own module, alongside its segment/door derivation. This mask module only
+// STAMPS the footprint; the routing-margin policy below is the one wall constant
+// that IS a mask-time concern, so it stays here.
+use super::rooms::walls::wall_segment_rect;
 
-/// A wall segment's PHYSICAL blocked rect (origin + size), shared by the mask
-/// stamp and the placement sweep so the two can't disagree on wall geometry.
-/// Vertical segments plugging into the north window band get their top raised
-/// by WALL_BAND_TO_TOP_MARGIN — the stitch that keeps A* from threading the
-/// wall top (regression: vertical_wall_is_impassable_except_through_the_door);
-/// a hand-rolled copy omits it, so both callers derive from HERE.
-pub(super) fn wall_segment_rect(seg: &WallSegment, top_margin: u16) -> (Point, Size) {
-    let (start, end) = (seg.start, seg.end);
-    if start.x == end.x {
-        let seg_top = start.y.min(end.y);
-        let seg_bot = start.y.max(end.y);
-        let seg_top = if seg_top == top_margin {
-            top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
-        } else {
-            seg_top
-        };
-        (
-            Point {
-                x: start.x,
-                y: seg_top,
-            },
-            Size {
-                w: WALL_THICK_V,
-                h: seg_bot - seg_top + 1,
-            },
-        )
-    } else {
-        (
-            Point {
-                x: start.x.min(end.x),
-                y: start.y,
-            },
-            Size {
-                w: start.x.abs_diff(end.x) + 1,
-                h: WALL_THICK_H,
-            },
-        )
-    }
-}
+/// WEST-only routing clearance stamped onto a vertical wall's footprint (NOT part
+/// of the physical footprint — the placement sweep reads the un-margined rect).
+/// The coarse 4×4 router (`pathfind::cell_walkable`, ≥8/16 px walkable) can't see
+/// a barrier thinner than a cell: a bare `WALL_THICK_V` (4) at a 2-mod-4 offset
+/// splits into two cells at exactly the 8/16 threshold → both stay walkable →
+/// A* threads through. `WALL_THICK_V + this` = 5px drops a full cell column under
+/// the threshold at every 4-alignment. Stamped toward the WEST (room side) so the
+/// east (band-facing) mask edge stays flush with the visual — the vertical twin
+/// of the horizontal face already filling its own routing cell.
+const WALL_ROUTING_MARGIN_X: u16 = 1;
 
 /// The placed-piece inventory the mask stamps — a NAMED input so the five
 /// interchangeable `Option<Point>` pieces (door/kitchen_island/floor_lamp/
@@ -211,32 +179,36 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     let baseboard_top = buf_h.saturating_sub(BASEBOARD_H);
     mask.mark_blocked(0, baseboard_top, buf_w, BASEBOARD_H, 0);
 
-    // Interior walls, Stardew-style fake-3D: horizontal (E-W) walls show their
-    // FACE (WALL_THICK_H px tall, real mass viewed from the north room); vertical
-    // (N-S) walls are seen EDGE-ON (WALL_THICK_V px thin footprint, drawn wider
-    // than it blocks per the top-down ground-projection rule, invariant #6).
+    // Interior walls, Stardew-style fake-3D. Both orientations block their FULL
+    // visual footprint (`wall_segment_rect` → the shared `ground_rect`, same
+    // formula furniture rides): horizontal (E-W) walls the `WALL_THICK_H` face,
+    // vertical (N-S) walls the `WALL_THICK_V` edge-on thickness. The blocked
+    // ground == what you see (invariant #6), plus a FREE vertical terminus
+    // overhangs its north cap (walk-behind).
     //
-    // Wall padding is ASYMMETRIC by orientation, driven by the coarse router grid
-    // (`pathfind::cell_walkable`), NOT by clearance:
-    //   • HORIZONTAL faces are thick enough to fill a routing cell on their own,
-    //     so they're impassable at pad=0 — and you stand FLUSH against the south
-    //     face, so any pad is pure red bloat.
-    //   • VERTICAL walls are a 1px edge-on strip the coarse grid can't see, so A*
-    //     would route STRAIGHT THROUGH; OBSTACLE_PAD_PX is a routing-only
-    //     clearance band (the FOOTPRINT stays 1px — characters still stand right
-    //     next to the 3px visual), sized against DOOR_GAP in rooms/walls.rs.
-    // Pinned by pathfind::vertical_wall_is_impassable_except_through_the_door.
+    // The only extra is the coarse-router clearance, ASYMMETRIC by orientation
+    // (`pathfind::cell_walkable`):
+    //   • HORIZONTAL faces already fill a routing cell on their own → no margin
+    //     (you stand FLUSH against the south face; a pad would be pure red bloat).
+    //   • VERTICAL walls are thinner than a coarse cell → `WALL_ROUTING_MARGIN_X`
+    //     widens the STAMP (not the physical footprint the sweep reads) across the
+    //     THIN axis only, and toward the WEST (the room side) so the east mask
+    //     edge stays FLUSH with the visual — no band-facing phantom, no N/S bloat.
+    //     Pinned by pathfind::vertical_wall_is_impassable_except_through_the_door.
     for seg in room_walls {
-        let (origin, size) = wall_segment_rect(seg, top_margin);
-        // Vertical walls are 1px edge-on — invisible to the coarse grid without
-        // OBSTACLE_PAD_PX; horizontal faces already fill their routing cells
-        // (pad would only bloat, see the block comment above).
-        let pad = if seg.start.x == seg.end.x {
-            OBSTACLE_PAD_PX
+        let (origin, size) = wall_segment_rect(seg, top_margin, room_walls);
+        let mx = if seg.start.x == seg.end.x {
+            WALL_ROUTING_MARGIN_X
         } else {
             0
         };
-        mask.mark_blocked(origin.x, origin.y, size.w, size.h, pad);
+        mask.mark_blocked(
+            origin.x.saturating_sub(mx),
+            origin.y,
+            size.w.saturating_add(mx),
+            size.h,
+            0,
+        );
     }
 
     for desk in home_desks {
@@ -498,7 +470,32 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::z_sort_row;
+    // The pure wall_segment_rect geometry tests live in `rooms::walls` beside the
+    // fn; the mask tests here exercise the STAMPED result (is_walkable) end-to-end.
+    use crate::layout::{z_sort_row, WALL_THICK_V};
+
+    #[test]
+    fn vertical_wall_blocks_its_whole_visual_width_in_the_mask() {
+        // The user-reported drift: the painted glass east column used to stay
+        // walkable (feet-in-wall) while 2px west sat blocked-but-empty. Now the
+        // mask blocks the FULL visual width (plus a symmetric routing margin).
+        let l = crate::layout::SceneLayout::compute_with_seed(200, 130, Some(8), 0).unwrap();
+        let seg = l
+            .room_walls
+            .iter()
+            .find(|w| w.start.x == w.end.x)
+            .copied()
+            .expect("a vertical wall");
+        let (o, s) = wall_segment_rect(&seg, l.top_margin, &l.room_walls);
+        let y = o.y + s.h / 2; // deep in the wall body, clear of any north overhang
+        for dx in 0..WALL_THICK_V {
+            assert!(
+                !l.is_walkable(seg.start.x + dx, y),
+                "visual column {} must be blocked (no feet-in-wall)",
+                seg.start.x + dx
+            );
+        }
+    }
 
     #[test]
     fn ground_rect_matches_what_stamp_ground_blocks() {

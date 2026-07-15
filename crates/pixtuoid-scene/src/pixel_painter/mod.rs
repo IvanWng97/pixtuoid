@@ -27,8 +27,8 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 use crate::floor::LightingState;
 use crate::frame_cache::FrameCache;
 use crate::layout::{
-    z_sort_row, Anchor, Layout, PlantItem, PodDecorItem, Point, Size, WallDecorItem, WallSegment,
-    DESK_W, ELEVATOR_H, ELEVATOR_W,
+    z_sort_row, Anchor, Layout, PlantItem, PodDecorItem, Point, Size, WallDecorItem, DESK_W,
+    ELEVATOR_H, ELEVATOR_W,
 };
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
@@ -82,10 +82,10 @@ mod debug_overlay;
 mod drawable;
 mod effects;
 mod furniture;
-mod glass;
 mod palette;
 mod seat;
 mod sim;
+mod wall;
 
 pub use anchors::character_anchor;
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with, so a
@@ -159,12 +159,12 @@ use background::{
 use drawable::{
     gateway_mascot_def, mascot_position, paint_drawable, pet_position, Drawable, DrawableKind,
 };
-use glass::{
-    paint_door_frame_v, paint_door_jamb_h, paint_glass_wall_h, paint_glass_wall_v,
-    stitch_vertical_wall, DOOR_JAMB_PX, WALL_THICK_H_PX,
-};
 use palette::{agent_palette, outfit_seed_for, recolor_frame};
 use seat::paint_character_at;
+use wall::{
+    enqueue_room_walls_h, enqueue_room_walls_v, paint_door_jamb_h, paint_door_jamb_v,
+    paint_glass_wall_h, paint_glass_wall_v, DOOR_JAMB_PX,
+};
 
 /// The weather names accepted by [`force_weather`], canonical order — for
 /// `--weather` error text and the manifest drift-guard test. (The gallery
@@ -487,40 +487,10 @@ fn paint_frame(
         paint_corridor_runner(ctx.buf, corridor, ctx.theme);
     }
     // Room dividers — frosted-glass partitions (see the module-level glass
-    // helpers + WALL_THICK_*_PX). The VERTICAL (N-S, edge-on) wall paints here
-    // in the background; the HORIZONTAL (E-W, face-on) wall is emitted into the
-    // y-sorted drawable pass below so it composites over a walker standing
-    // behind it. Stitch the vertical's joints (the layout emits geometry only;
-    // the render thicknesses/offsets that open the gaps live here):
-    //   • Top: a segment starting at top_margin abuts the north wall band,
-    //     which ends 4 px higher at top_wall_h — raise it so no floor shows
-    //     between window and wall. A segment just below a horizontal wall (the
-    //     dual-meeting layout offsets it ~6 px to clear the cross wall) is
-    //     bridged up to meet it.
-    //   • Bottom: where the vertical meets a horizontal wall, extend it down by
-    //     the horizontal's thickness to fill the inside corner (else its right
-    //     columns leave an L-notch beside the horizontal run).
-    let h_rows: Vec<u16> = ctx
-        .layout
-        .room_walls
-        .iter()
-        .filter(|w| w.start.y == w.end.y)
-        .map(|w| w.start.y)
-        .collect();
-    for &WallSegment { start, end } in &ctx.layout.room_walls {
-        if start.x != end.x {
-            continue; // horizontal walls paint in the drawable pass
-        }
-        let (y_top, y_bot) =
-            stitch_vertical_wall(start.y, end.y, ctx.layout.top_margin, top_wall_h, &h_rows);
-        paint_glass_wall_v(ctx.buf, ctx.theme, start.x, y_top, y_bot.min(buf_h - 1));
-    }
-    // Door frames on VERTICAL walls paint here, over the strips above;
-    // horizontal walls' frames ride their y-sorted RoomWallH drawable (the
-    // background pass would be overpainted by it).
-    for dw in ctx.layout.doorways.iter().filter(|d| d.start.x == d.end.x) {
-        paint_door_frame_v(ctx.buf, ctx.theme, dw.start, dw.end);
-    }
+    // helpers + WALL_THICK_*_PX). BOTH orientations now join the y-sorted
+    // drawable pass below (`enqueue_room_walls_h`/`_v`), anchored at their south
+    // base so a walker standing behind either wall's north cap composites behind
+    // the frosted glass. Nothing wall-scale paints in this background pass.
 
     // Meeting sofas + table and the kitchen island paint in the y-sorted
     // Drawable pass below — nothing room-scale belongs in this background
@@ -709,6 +679,13 @@ fn paint_frame(
 
     enqueue_characters(ctx, frame, &mut drawables);
 
+    // V before H: at an inside corner the vertical's stitched `y_bot` (extended
+    // down into the crossing wall to fill the L-notch) ties the horizontal's
+    // south-base anchor. Old behavior painted the vertical in the BACKGROUND and
+    // the horizontal over it; inserting V first keeps H winning that tie (stable
+    // sort), so the corner pixels don't churn. Both come after the characters, so
+    // either wall still occludes a walker tied with its row.
+    enqueue_room_walls_v(ctx.layout, top_wall_h, &mut drawables);
     enqueue_room_walls_h(ctx.layout, &mut drawables);
 
     // Stable sort (Rust's `sort_by_key` is stable) — ties preserve
@@ -771,40 +748,6 @@ fn enqueue_characters<'a>(
                 walking_dust_frame: p.walking_dust_frame,
             },
         });
-    }
-}
-
-/// Horizontal (E-W) room dividers join the y-sort, anchored at their south
-/// (front) edge so a character standing behind (north of) the wall is
-/// composited over by the frosted glass rather than painting on top of it.
-/// The vertical (edge-on) dividers already painted in the background pass.
-/// Emitted LAST so a character tied with a wall row still paints behind it.
-fn enqueue_room_walls_h<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
-    for &WallSegment { start, end } in &layout.room_walls {
-        if start.y == end.y {
-            let (x0, x1) = (start.x.min(end.x), start.x.max(end.x));
-            // A cut end abutting a doorway gets a jamb — flagged HERE because
-            // the paint pass has no layout access. gap.start == this
-            // segment's x1 (the run was cut there), gap.end == a segment x0.
-            let jamb_right = layout
-                .doorways
-                .iter()
-                .any(|d| d.start.y == start.y && d.end.y == start.y && d.start.x == x1);
-            let jamb_left = layout
-                .doorways
-                .iter()
-                .any(|d| d.start.y == start.y && d.end.y == start.y && d.end.x == x0);
-            drawables.push(Drawable {
-                anchor_y: start.y + (WALL_THICK_H_PX - 1),
-                kind: DrawableKind::RoomWallH {
-                    x0,
-                    x1,
-                    y_top: start.y,
-                    jamb_left,
-                    jamb_right,
-                },
-            });
-        }
     }
 }
 

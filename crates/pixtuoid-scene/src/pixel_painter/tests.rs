@@ -3,9 +3,11 @@ use super::anchors::{
     CHARACTER_SPRITE_W,
 };
 use super::seat::{seat_sprite, seat_sprite_in_pack, settle_seat_view, SeatView, DESK_SEAT_Z_OFF};
+use super::wall::WALL_THICK_H_PX;
 use super::*;
 // Formerly reached via `super::*` off mod.rs's imports — now that PixelCtx no
 // longer names them (it borrows the FloorCtx group), import them directly.
+use crate::layout::stitch_vertical_wall;
 use crate::pose;
 use pixtuoid_core::sprite::{Frame, Palette};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
@@ -54,25 +56,24 @@ fn stitch_vertical_wall_connects_each_joint() {
     assert_eq!((yt4, yb4), (60, 80), "no joints → unchanged");
 }
 
-// The vertical-wall top raise lives in TWO crates — the renderer
-// (stitch_vertical_wall, here) and the mask (build_walkable_mask, core).
-// The mask raises a top_margin-rooted segment to
-// `top_margin - WALL_BAND_TO_TOP_MARGIN`; the renderer raises it to
-// `top_wall_h`, which the binary derives from the SAME const. If they ever
-// disagree a walkable slot opens at the wall top (the regression
-// `vertical_wall_is_impassable_except_through_the_door` guards). Extracting
-// the rule into core would drag tui wall constants across the crate
-// boundary (invariant #1); this test pins the agreement instead.
+// The vertical-wall top raise is now ONE shared fn — `stitch_vertical_wall` in
+// `layout::rooms::walls` — that BOTH the mask footprint (`wall_segment_rect`) and
+// this painter's `enqueue_room_walls_v` call, so glass and blocked ground can't
+// disagree by construction (pre-consolidation the raise was DUPLICATED
+// renderer-vs-mask, which is what this "agreement" test originally guarded). It
+// survives as a smoke test that the shared raise of a `top_margin`-rooted
+// segment lands on the band row (`top_margin - WALL_BAND_TO_TOP_MARGIN`) the
+// caller passes as `top_wall_h` — a mismatch opens a walkable slot at the wall top.
 #[test]
-fn vertical_wall_top_raise_agrees_between_renderer_and_mask() {
+fn vertical_wall_top_raise_lands_on_the_band_row() {
     let top_margin = 48u16;
     let tbm = crate::layout::WALL_BAND_TO_TOP_MARGIN;
-    let top_wall_h = top_margin - tbm; // what the binary passes the renderer
-    let mask_raise = top_margin.saturating_sub(tbm); // what mask.rs computes
-    let (renderer_raise, _) = stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
+    let top_wall_h = top_margin - tbm; // the band row the caller passes
+    let band_row = top_margin.saturating_sub(tbm);
+    let (stitch_raise, _) = stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
     assert_eq!(
-        renderer_raise, mask_raise,
-        "renderer + mask must raise the vertical wall top to the same row"
+        stitch_raise, band_row,
+        "the shared stitch must raise a band-rooted vertical wall top to the band row"
     );
 }
 
@@ -83,7 +84,6 @@ fn v_door_jambs_sit_flush_on_both_cut_ends() {
     // must COVER its cut end, or a 1px glass sliver survives between post
     // and opening (the #560 review's empirically-confirmed off-by-one: the
     // top post originally excluded start.y while the bottom one was flush).
-    use crate::layout::Point;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let floor = Rgb {
         r: 150,
@@ -92,14 +92,13 @@ fn v_door_jambs_sit_flush_on_both_cut_ends() {
     };
     let mut buf = RgbBuffer::filled(20, 60, floor);
     // Wall segments [10, 24] + [38, 52] flanking the opening (24, 38).
-    glass::paint_glass_wall_v(&mut buf, theme, 5, 10, 24);
-    glass::paint_glass_wall_v(&mut buf, theme, 5, 38, 52);
-    glass::paint_door_frame_v(
-        &mut buf,
-        theme,
-        Point { x: 5, y: 24 },
-        Point { x: 5, y: 38 },
-    );
+    wall::paint_glass_wall_v(&mut buf, theme, 5, 10, 24);
+    wall::paint_glass_wall_v(&mut buf, theme, 5, 38, 52);
+    // Per-segment jambs (the y-sorted RoomWallV arm's job): the top segment's
+    // SOUTH cut end (y_bot=24) → post starts DOOR_JAMB_PX-1 rows up so it ends
+    // on 24; the bottom segment's NORTH cut end (y_top=38) → post starts at 38.
+    wall::paint_door_jamb_v(&mut buf, theme, 5, 24 - (wall::DOOR_JAMB_PX - 1));
+    wall::paint_door_jamb_v(&mut buf, theme, 5, 38);
     let dark = theme.office.room_wall_trim_dark;
     for y in [23, 24, 38, 39] {
         assert_eq!(
@@ -160,6 +159,57 @@ fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
 }
 
 #[test]
+fn v_wall_jamb_flags_and_south_anchor_on_the_doorway_cut_ends() {
+    // Vertical twin of the H test: a doorway splits a N-S run into a top
+    // segment (ends at the opening's north edge → jamb on its SOUTH cut end)
+    // and a bottom segment (starts at the opening's south edge → jamb on its
+    // NORTH cut end). The top segment's south end is the DOOR (a free terminus,
+    // no corner extend), so its z-anchor equals y_bot — the south-base anchor
+    // that puts a walker behind the north cap. (A segment ending on a crossing
+    // H wall anchors at its RAW end, < the corner-extended y_bot, so H stays on
+    // top — asserted separately in the mask suite; not universal here.)
+    use crate::layout::TEST_DEFAULT_DESKS;
+    let l = Layout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let dw = l
+        .doorways
+        .iter()
+        .find(|d| d.start.x == d.end.x)
+        .expect("the meeting room's centered vertical door");
+    let mut drawables = Vec::new();
+    enqueue_room_walls_v(&l, l.wall_band_h(), &mut drawables);
+    let walls: Vec<_> = drawables
+        .iter()
+        .filter_map(|d| match d.kind {
+            DrawableKind::RoomWallV {
+                x,
+                y_top,
+                y_bot,
+                jamb_north,
+                jamb_south,
+            } if x == dw.start.x => Some((d.anchor_y, y_top, y_bot, jamb_north, jamb_south)),
+            _ => None,
+        })
+        .collect();
+    let top = walls
+        .iter()
+        .find(|(_, _, y_bot, ..)| *y_bot == dw.start.y)
+        .expect("segment north of the door");
+    assert_eq!(
+        top.0, top.2,
+        "the door-terminus (top) segment y-sorts at its south base"
+    );
+    assert!(top.4 && !top.3, "top segment: jamb on its SOUTH end only");
+    let bottom = walls
+        .iter()
+        .find(|(_, y_top, ..)| *y_top == dw.end.y)
+        .expect("segment south of the door");
+    assert!(
+        bottom.3 && !bottom.4,
+        "bottom segment: jamb on its NORTH end only"
+    );
+}
+
+#[test]
 fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     // Occlusion: the horizontal wall's frosted glass rises GLASS_CAP_PX
     // north of its footprint, y-sorted at the south base — so a character
@@ -195,6 +245,45 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     }
     paint_glass_wall_h(&mut buf, theme, 0, 47, y_top);
     let after = buf.get(8, cap_row);
+    assert_ne!(after, character, "glass must composite over the character");
+    assert!(
+        after.r < character.r && after.b > character.b,
+        "frosted glass should cool the occluded pixel (red↓ blue↑): {after:?}"
+    );
+}
+
+#[test]
+fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
+    // Occlusion twin of the H test, now that the vertical wall is a y-sorted
+    // RoomWallV anchored at its SOUTH base (`y_bot`): a character standing just
+    // north of the wall's north cap (the visual-only overhang the mask leaves
+    // walkable) is drawn earlier, and the frosted glass composites over them.
+    // Stand in with a vivid warm pixel in the cap's own column; the glass must
+    // cool it (red↓ blue↑) rather than leave it untouched.
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let (x_left, y_top, y_bot) = (10u16, 20u16, 40u16);
+    // The cap overhang is the top WALL_TOP_OVERHANG_PX rows (visual-only floor a
+    // walker can stand on). Row y_top is a seam glint (bright specular); probe
+    // the next cap row at the soft east edge, the coolest column of the strip.
+    let probe_col = x_left + crate::layout::WALL_THICK_V - 1;
+    let probe_row = y_top + 1;
+    let character = Rgb {
+        r: 220,
+        g: 40,
+        b: 40,
+    };
+    let mut buf = RgbBuffer::filled(
+        48,
+        48,
+        Rgb {
+            r: 150,
+            g: 110,
+            b: 72,
+        },
+    ); // carpet
+    buf.put(probe_col, probe_row, character);
+    paint_glass_wall_v(&mut buf, theme, x_left, y_top, y_bot);
+    let after = buf.get(probe_col, probe_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
         after.r < character.r && after.b > character.b,

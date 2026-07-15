@@ -506,13 +506,13 @@ mod tests {
 
     #[test]
     fn vertical_wall_is_impassable_except_through_the_door() {
-        // Regression: a vertical (N-S) room divider has a 1px walkable
-        // footprint (WALL_THICK_V, edge-on top-down rule). With NO clearance
-        // pad that 1px strip is invisible to the coarse 4×4 router — only
-        // 1 of a cell's 4 columns is blocked, so the cell keeps ≥12/16 px
-        // walkable and stays "walkable", letting A* route STRAIGHT THROUGH
-        // the wall. OBSTACLE_PAD_PX drives the wall's whole cell-column under
-        // the threshold; this test pins that the wall is a real barrier.
+        // Regression: a vertical (N-S) room divider blocks its full
+        // `WALL_THICK_V` (4px) footprint, but 4px at a bad 4-alignment still
+        // splits into two coarse cells at exactly the 8/16 threshold — both
+        // stay "walkable" and A* threads STRAIGHT THROUGH. The X-only
+        // `WALL_ROUTING_MARGIN_X` widens the stamp to 6px so a full cell column
+        // drops under the threshold; this test pins that the wall is a real
+        // barrier (crossable only through the door gap).
         let l = make_layout();
         let overlay = OccupancyOverlay::new();
         let WallSegment { start, end } = l

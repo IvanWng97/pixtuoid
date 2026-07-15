@@ -35,11 +35,18 @@ pub use decor::{
     DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
     DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
 };
-pub use mask::{WALL_THICK_H, WALL_THICK_V};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
-pub use rooms::walls::Doorway;
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
+// Wall geometry half (`rooms::walls`): the thickness consts + `Doorway`, plus
+// the vertical-wall joint solver `stitch_vertical_wall` and its shared input
+// `crossing_h_rows` — the last two SHARED with the pixel painter's
+// `enqueue_room_walls_v`, so the blocked ground and the drawn glass meet the band
+// / crossing walls at the same joints AND over the same crossing-wall inputs
+// (cross-module, not cross-crate, hence pub(crate)). Kept as its own
+// comment-delimited group so rustfmt's import sort can't orphan this note.
+pub(crate) use rooms::walls::{crossing_h_rows, stitch_vertical_wall};
+pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 // The shared coarse routing-grid primitives (crate-internal — no semver surface):
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{cell_walkable, snap, COARSE_CELL_SIZE, NEIGHBORS_8};

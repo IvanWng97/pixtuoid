@@ -38,9 +38,17 @@ pub(super) const PLANT_OBSTACLE_CLEARANCE_PX: u16 = 3;
 /// gate test references THE value instead of a re-typed copy.
 pub(super) const FISH_TANK_ELEVATOR_CLEARANCE: u16 = 2;
 
-fn couch_pos(cubicle_band: &Bounds, top_margin: u16) -> Point {
+fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point {
+    // The westmost couch seat's ground (footprint centred on `couch_x + SEAT_DX[0]`)
+    // must stay east of any divider wall to its west, now the wall's footprint is
+    // the honest full `WALL_THICK_V` (was a 1px line the 35%-of-band spot cleared
+    // for free). Shift the whole vignette east if the authored spot would bury the
+    // seat in the wall; `west_clear_x` is the wall's east edge (== band start when
+    // there is no wall, so the clamp is a no-op).
+    let couch_west_reach =
+        (-SEAT_DX[0]) as u16 + furniture_def(Furniture::Couch).footprint.map_or(0, |f| f.w) / 2;
     Point {
-        x: cubicle_band.x + pct(cubicle_band.width, 35),
+        x: (cubicle_band.x + pct(cubicle_band.width, 35)).max(west_clear_x + couch_west_reach),
         y: top_margin + 3,
     }
 }
@@ -210,6 +218,16 @@ pub(super) fn compute_with_seed(
 
     let right_x = mid_x + 1;
     let right_w = buf_w.saturating_sub(right_x);
+    // East edge of the meeting-room divider wall (the honest `WALL_THICK_V`
+    // footprint stamped at `mid_x`) — the west bound lounge furniture must clear.
+    // When the wall was a 1px line the band-relative spots cleared it for free;
+    // the 4px footprint now reaches `mid_x + WALL_THICK_V`. No meeting room ⇒ no
+    // wall ⇒ the clamp collapses to the band start (a no-op).
+    let lounge_west_clear = if has_meeting {
+        mid_x + super::WALL_THICK_V
+    } else {
+        right_x
+    };
     let cubicle_aisle_h = (usable_h / 10).max(8);
     let cubicle_h = usable_h.saturating_sub(cubicle_aisle_h);
     let cubicle_band = Bounds {
@@ -351,7 +369,7 @@ pub(super) fn compute_with_seed(
     let Point {
         x: couch_x,
         y: couch_y,
-    } = couch_pos(&cubicle_band, top_margin);
+    } = couch_pos(&cubicle_band, top_margin, lounge_west_clear);
     // The whole lounge vignette (couch + floor lamp + side table) is one authored
     // cluster ~23 px wide; below this WEST-side fit the lounge degrades away
     // entirely — the `couch_sprite_center: None` case the field always documented.
@@ -384,6 +402,7 @@ pub(super) fn compute_with_seed(
         &cubicle_aisle,
         &meeting_rooms,
         lounge_fits,
+        lounge_west_clear,
     );
 
     // Plants scatter through the cubicle corridor edges + pantry.
@@ -450,7 +469,14 @@ pub(super) fn compute_with_seed(
         floor_lamp,
         side_table: lounge_side_table,
         fish_tank,
-    } = place_lounge_vignette(couch_x, couch_y, right_x, buf_w, door, lounge_fits);
+    } = place_lounge_vignette(
+        couch_x,
+        couch_y,
+        lounge_west_clear,
+        buf_w,
+        door,
+        lounge_fits,
+    );
 
     // The two owner-ratified Ficus spots (B-3): a greeting plant west of the
     // elevator door, and the lounge's west flank. Each rides its anchor's own
@@ -470,17 +496,25 @@ pub(super) fn compute_with_seed(
             });
         }
         if lounge_fits {
+            // Ground centred on `pos`, so keep its west edge east of the divider
+            // wall (same `lounge_west_clear` bound the couch/side-table clear).
+            let ficus_half_w = furniture_def(PlantKind::Ficus.furniture())
+                .footprint
+                .map_or(0, |f| f.w)
+                / 2;
             plant_candidates.push(PlantItem {
                 kind: PlantKind::Ficus,
                 pos: Point {
-                    x: couch_x.saturating_sub(17),
+                    x: couch_x
+                        .saturating_sub(17)
+                        .max(lounge_west_clear + ficus_half_w),
                     y: couch_y,
                 },
             });
         }
     }
 
-    let wall_decor = place_wall_decor(
+    let mut wall_decor = place_wall_decor(
         buf_w,
         top_margin,
         usable_h,
@@ -551,7 +585,7 @@ pub(super) fn compute_with_seed(
         .filter_map(|p| settle_plant(p, &home_desks, &waypoints, &singleton_rects, &cubicle_band))
         .collect();
 
-    let build_mask = |plants: &[PlantItem]| {
+    let build_mask = |plants: &[PlantItem], wall_decor: &[WallDecorItem]| {
         mask::build_walkable_mask(&mask::MaskObstacles {
             buf_w,
             buf_h,
@@ -565,7 +599,7 @@ pub(super) fn compute_with_seed(
             floor_lamp,
             lounge_side_table,
             fish_tank,
-            wall_decor: &wall_decor,
+            wall_decor,
             pod_decor: &pod_decor,
             room_walls: &room_walls,
             pantry_counter_size,
@@ -581,7 +615,7 @@ pub(super) fn compute_with_seed(
             y: buf_h / 2,
         });
 
-    let mut walkable = build_mask(&plants);
+    let mut walkable = build_mask(&plants, &wall_decor);
     // Connectivity guard (#566 CLASS B): a scatter plant can settle onto the
     // aisle floor and plug the SOLE inter-pod drain at a single-pod-column band,
     // sealing the appliance strip off from the door. A decorative plant may NEVER
@@ -599,17 +633,29 @@ pub(super) fn compute_with_seed(
         // pocket cells sit ACROSS the drain from the plant (not 4-adjacent to it),
         // so target by "settled into the aisle", not "borders the pocket".
         plants.retain(|p| !plant_ground_in_bounds(p, &cubicle_aisle));
-        walkable = build_mask(&plants);
+        walkable = build_mask(&plants, &wall_decor);
+        // Next rung — the free-standing whiteboard (NON-plant seal cause). It's
+        // placed a fixed +3 px east of the divider (mid_x); the honest 4 px
+        // vertical wall can now sit flush against its west edge, eating the N-S
+        // drain that used to run between the thin wall and the board. It's the
+        // one wall-decor kind with a floor footprint that juts into an aisle
+        // (the bookshelf/screen sit up in the already-blocked north band), so
+        // drop THAT before the drastic clear-all-plants — plants here are usually
+        // innocent, and losing a whiteboard beats losing every plant.
+        if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
+            wall_decor.retain(|d| d.kind != WallDecor::Whiteboard);
+            walkable = build_mask(&plants, &wall_decor);
+        }
         // Last resort — decor may NEVER disconnect the office: if a pocket somehow
         // survives (a non-aisle plant), drop every remaining scatter plant.
         if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
             plants.clear();
-            walkable = build_mask(&plants);
+            walkable = build_mask(&plants, &wall_decor);
         }
         debug_assert!(
             unreachable_walkable_cells(&walkable, conn_seed).is_empty(),
-            "#566 connectivity guard: even dropping all scatter plants left a pocket — \
-             a NON-plant seal cause needs its own fix"
+            "#566 connectivity guard: a pocket survived dropping every scatter plant \
+             AND the free-standing whiteboard — a new NON-decor seal cause needs its own fix"
         );
     }
 
@@ -829,7 +875,7 @@ struct LoungeVignette {
 fn place_lounge_vignette(
     couch_x: u16,
     couch_y: u16,
-    right_x: u16,
+    west_clear_x: u16,
     buf_w: u16,
     door: Option<Point>,
     lounge_fits: bool,
@@ -841,8 +887,11 @@ fn place_lounge_vignette(
     let side_half_w = furniture_def(Furniture::LoungeSideTable)
         .footprint
         .map_or(0, |s| s.w / 2);
+    // West edge (`center − side_half_w`) must clear `west_clear_x` (the divider
+    // wall's east edge, or the band start when there's no wall), else at the
+    // minimum band width `couch_x − 10` drops the table onto the wall.
     let side_table = lounge_fits.then_some(Point {
-        x: couch_x.saturating_sub(10).max(right_x + side_half_w + 1),
+        x: couch_x.saturating_sub(10).max(west_clear_x + side_half_w),
         y: couch_y + 2,
     });
     let fish_tank = floor_lamp.and_then(|lamp| {
@@ -1445,13 +1494,14 @@ pub(super) fn compute_waypoints(
     cubicle_aisle: &Bounds,
     meeting_rooms: &[MeetingRoom],
     lounge_fits: bool,
+    west_clear_x: u16,
 ) -> (Vec<Waypoint>, Option<Point>) {
     let right_x = cubicle_band.x;
     let right_w = cubicle_band.width;
     let Point {
         x: couch_x,
         y: couch_y,
-    } = couch_pos(cubicle_band, top_margin);
+    } = couch_pos(cubicle_band, top_margin, west_clear_x);
     // Lounge couch: 3 seats across the 20px sofa (dx ∈ {-6, 0, +6}), matching
     // the meeting sofa. room_id stays None — the lounge's group-chat grouping
     // is keyed at the chitchat venue layer (all couch seats share one venue),
