@@ -32,30 +32,26 @@ impl ProcessTable for OsProcessTable {
     fn focusable(&self, pid: i32) -> bool {
         // A REGULAR activation policy = a real Dock app (the terminal);
         // shells/daemons have no NSRunningApplication or are Prohibited.
-        // SAFETY: plain Cocoa class-method calls on valid arguments; objc2's
-        // 0.2-generation bindings mark every msg-send unsafe.
-        unsafe {
-            NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
-                .is_some_and(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
-        }
+        // objc2 0.6 marks these plain class-method calls safe (0.2 required `unsafe`).
+        NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+            .is_some_and(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
     }
 }
 
 /// Bring the app owning `pid` to the foreground. Returns whether macOS
 /// accepted the request (a `false` is the caller's silent-no-op path).
 pub(crate) fn activate_os(pid: i32) -> bool {
-    // SAFETY: plain Cocoa calls on a valid pid; see `focusable`.
-    unsafe {
-        NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
-            .map(|app| {
-                // ActivateIgnoringOtherApps is deprecated on 14+ but still
-                // honored; the plain no-options activate() is "cooperative"
-                // and drops the request while the user interacts elsewhere.
-                #[allow(deprecated)]
-                app.activateWithOptions(
-                    objc2_app_kit::NSApplicationActivationOptions::NSApplicationActivateIgnoringOtherApps,
-                )
-            })
-            .unwrap_or(false)
-    }
+    // objc2 0.6 marks these calls safe (0.2 required `unsafe`).
+    NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+        .map(|app| {
+            // ActivateIgnoringOtherApps is deprecated on 14+ but still
+            // honored; the plain no-options activate() is "cooperative"
+            // and drops the request while the user interacts elsewhere.
+            // (objc2 0.6 dropped the redundant `NSApplication…` const prefix.)
+            #[allow(deprecated)]
+            app.activateWithOptions(
+                objc2_app_kit::NSApplicationActivationOptions::ActivateIgnoringOtherApps,
+            )
+        })
+        .unwrap_or(false)
 }

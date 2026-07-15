@@ -56,7 +56,11 @@ open               = "5"
 # invariant #1). winit = the frameless always-on-top window + main-thread event loop;
 # softbuffer = CPU blit of the office RgbBuffer into it (no GPU). Both rust-windowing,
 # share raw-window-handle 0.6, MSRV ≤ 1.89.
-winit              = "0.30"
+# NOTE: 0.31 is still BETA (per-platform crate split; `Window`/`ActiveEventLoop` are
+# traits now, pointer events, `can_create_surfaces`). Adopted here to unify the objc2
+# stack (winit-appkit 0.31 = objc2 0.6 / app-kit 0.3), collapsing #441's duplicate
+# families. Move to the plain "0.31" caret once it ships stable.
+winit              = "0.31.0-beta.2"
 softbuffer         = "0.4"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
@@ -68,16 +72,13 @@ clap_mangen = "0.3.0"
 libc = "0.2"
 
 # Focus-jump activation (focus/macos.rs): NSRunningApplication activate — plain
-# Cocoa, zero TCC. Pinned to the SAME objc2 stack winit already pulls (0.2.x on
-# objc2 0.5.2 per Cargo.lock) so the bindings don't double-compile — the same
-# discipline pixtuoid-hook's windows-sys comment enshrines. This MUST track
-# winit's objc2-app-kit major, not float ahead: a lone bump to 0.3.x drags in a
-# whole SECOND objc2 stack (0.6 core + 0.3 app-kit/foundation/quartz) beside
-# winit's, regressing exactly that no-double-compile invariant AND breaking the
-# activate API — so dependabot is told to ignore it (.github/dependabot.yml)
-# until winit itself moves.
+# Cocoa, zero TCC. Pinned to the SAME objc2 stack winit pulls (0.3.x on objc2 0.6
+# via winit-appkit 0.31) so the bindings don't double-compile — the same discipline
+# pixtuoid-hook's windows-sys comment enshrines. Keep this in lockstep with winit's
+# objc2-app-kit major (the #624 dependabot-ignore + 0.2.x hold is dropped on this
+# branch now that winit itself has moved).
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.2.2", features = ["NSRunningApplication", "libc"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSRunningApplication", "libc"] }
 
 # Focus-jump on Linux (focus/linux.rs): the EWMH _NET_ACTIVE_WINDOW protocol
 # needs an X11 client; x11rb is already in-tree transitively via winit.
