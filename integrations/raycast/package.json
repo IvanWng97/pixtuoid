@@ -52,17 +52,17 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^1.104.21",
+    "@raycast/api": "^1.104.22",
     "@raycast/utils": "^2.2.7"
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.2.0",
     "@types/node": "^22.20.1",
     "@types/react": "^19.0.10",
-    "eslint": "^10.6.0",
+    "eslint": "^10.7.0",
     "json-schema-to-typescript": "^15.0.4",
-    "prettier": "^3.9.4",
-    "typescript": "^6.0.3"
+    "prettier": "^3.9.5",
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "esbuild": "0.28.1"
