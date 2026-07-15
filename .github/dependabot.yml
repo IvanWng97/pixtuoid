@@ -54,3 +54,8 @@ updates:
       # Bump only when @raycast/api's own peer pin moves.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # typescript major (→7) is peer-rejected by @raycast/eslint-config's
+      # typescript-eslint (peers typescript <6.1.0), so `npm ci` ERESOLVEs. Stay
+      # on 6.x until the eslint toolchain supports TS7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
