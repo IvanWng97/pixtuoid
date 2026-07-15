@@ -39,6 +39,17 @@ updates:
       site-deps:
         patterns: ["*"]
     open-pull-requests-limit: 5
+    ignore:
+      # typescript major (→7) is peer-rejected by @astrojs/check (peers
+      # typescript ^5||^6) and typescript-eslint (<6.1.0), so `npm ci` ERESOLVEs.
+      # Stay on 6.x until the astro-check + eslint toolchain supports TS7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # eslint-plugin-astro major (→3) changes the flat-config parser wiring
+      # (astro.configs.recommended), which our eslint.config.mjs must migrate —
+      # a code change, not a drive-by bump. Held until that migration (#626).
+      - dependency-name: "eslint-plugin-astro"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /integrations/raycast
