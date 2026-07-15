@@ -165,7 +165,7 @@ jobs:
       # No rust-toolchain: this only exercises the Node generator's unit test —
       # the same `just npm-check` release.yml gates `npm publish` on, run here at
       # PR time so a generate.mjs regression can't first surface at tag-push.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: extractions/setup-just@v4
@@ -181,7 +181,7 @@ jobs:
       # fails if the committed README drifted from site/src/*.json. Lives HERE
       # (not the path-filtered `site` workflow) because ci.yml runs on every PR —
       # so it's safe to mark required without deadlocking PRs that don't touch site/.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: extractions/setup-just@v4
@@ -388,7 +388,7 @@ jobs:
       # README sections + every still. node is for gen-readme-check. gifsicle is
       # NOT needed: --check presence-checks the gif/clip jobs (gen-media.py skips
       # them before any gifsicle call); ffmpeg IS required (the site `space` crop).
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install ffmpeg

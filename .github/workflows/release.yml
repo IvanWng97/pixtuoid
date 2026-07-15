@@ -421,7 +421,7 @@ jobs:
       id-token: write # npm provenance (`npm publish --provenance`)
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
