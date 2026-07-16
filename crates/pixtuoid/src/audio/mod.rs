@@ -266,3 +266,179 @@ mod tests {
         assert!(rec.one_shots >= 2, "the two frame events played");
     }
 }
+
+/// The LISTEN gate (plan §7 — the audio twin of render-and-WATCH): renders
+/// each busy-ness tier through the REAL mixer/schedulers/synth into wav
+/// files for the owner's audition. `#[ignore]` — run explicitly:
+/// `cargo test -p pixtuoid --lib audio::listen_gate -- --ignored --nocapture`
+#[cfg(test)]
+mod listen_gate {
+    use super::*;
+    use pixtuoid_scene::audio::StemLevels;
+    use std::io::Write;
+
+    /// Offline sink: sample-accurate mixdown of loops (per-step gain) and
+    /// scheduled one-shots into one master buffer.
+    struct OfflineSink {
+        master: Vec<f32>,
+        loops: Vec<(Arc<Vec<f32>>, f32)>, // (samples, current gain)
+        loop_ids: Vec<LoopStem>,
+        cursor: usize, // master write position (samples)
+    }
+
+    impl OfflineSink {
+        fn new(secs: f32) -> Self {
+            Self {
+                master: vec![0.0; (secs * dsp::SAMPLE_RATE as f32) as usize],
+                loops: Vec::new(),
+                loop_ids: Vec::new(),
+                cursor: 0,
+            }
+        }
+
+        /// Advance offline time by `n` samples, mixing every loop at its
+        /// current gain into the master.
+        fn advance(&mut self, n: usize) {
+            for i in 0..n {
+                let at = self.cursor + i;
+                if at >= self.master.len() {
+                    return;
+                }
+                for (samples, gain) in &self.loops {
+                    self.master[at] += samples[at % samples.len()] * gain;
+                }
+            }
+            self.cursor += n;
+        }
+    }
+
+    impl AudioSink for OfflineSink {
+        fn start_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>) {
+            self.loops.push((samples, 0.0));
+            self.loop_ids.push(stem);
+        }
+        fn set_loop_gain(&mut self, stem: LoopStem, gain: f32) {
+            if let Some(i) = self.loop_ids.iter().position(|s| *s == stem) {
+                self.loops[i].1 = gain;
+            }
+        }
+        fn play_once(&mut self, samples: Arc<Vec<f32>>, gain: f32) {
+            for (i, &s) in samples.iter().enumerate() {
+                if let Some(slot) = self.master.get_mut(self.cursor + i) {
+                    *slot += s * gain;
+                }
+            }
+        }
+    }
+
+    fn write_wav(path: &std::path::Path, samples: &[f32]) {
+        let mut bytes = Vec::with_capacity(44 + samples.len() * 2);
+        let data_len = (samples.len() * 2) as u32;
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // mono
+        bytes.extend_from_slice(&dsp::SAMPLE_RATE.to_le_bytes());
+        bytes.extend_from_slice(&(dsp::SAMPLE_RATE * 2).to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        for &s in samples {
+            let clipped = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
+            bytes.extend_from_slice(&clipped.to_le_bytes());
+        }
+        std::fs::File::create(path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
+    }
+
+    fn render_tier(
+        bank: &AssetBank,
+        stems: StemLevels,
+        events_at: &[(f32, OneShot)],
+        secs: f32,
+    ) -> Vec<f32> {
+        let mut sink = OfflineSink::new(secs);
+        sink.start_loop(LoopStem::Rain, Arc::clone(&bank.rain_bed));
+        sink.start_loop(LoopStem::Texture, Arc::clone(&bank.texture_bed));
+        let mut mixer = Mixer::new(1.0);
+        mixer.set_target(stems);
+        let mut typing = TypingScheduler::new(0xBEEF);
+        let mut drops = DropScheduler::new(0xFACE);
+        let mut pick = dsp::NoiseStream::new(0xDEAD);
+        let step_s = 0.05f32;
+        let step_n = (step_s * dsp::SAMPLE_RATE as f32) as usize;
+        let mut fired = vec![false; events_at.len()];
+        let mut now_s = 0.0f64;
+        while now_s < secs as f64 {
+            for (stem, gain) in mixer.step(step_s) {
+                sink.set_loop_gain(stem, gain);
+            }
+            for (i, (at, ev)) in events_at.iter().enumerate() {
+                if !fired[i] && now_s >= *at as f64 {
+                    fired[i] = true;
+                    sink.play_once(bank.one_shot(*ev), ONE_SHOT_GAIN);
+                }
+            }
+            for _ in 0..typing.tick(now_s, stems.typing) {
+                let idx =
+                    (pick.unit() * bank.keystrokes.len() as f32) as usize % bank.keystrokes.len();
+                sink.play_once(Arc::clone(&bank.keystrokes[idx]), KEYSTROKE_GAIN);
+            }
+            for _ in 0..drops.tick(now_s, stems.rain) {
+                let idx = (pick.unit() * bank.drops.len() as f32) as usize % bank.drops.len();
+                sink.play_once(Arc::clone(&bank.drops[idx]), DROP_GAIN * stems.rain);
+            }
+            sink.advance(step_n);
+            now_s += step_s as f64;
+        }
+        sink.master
+    }
+
+    #[test]
+    #[ignore = "the LISTEN gate: renders audition wavs for the owner's ears"]
+    fn render_listen_gate_wavs() {
+        let out = std::env::temp_dir().join("pixtuoid-audio-audition");
+        std::fs::create_dir_all(&out).unwrap();
+        let bank = AssetBank::build();
+        let quiet = StemLevels {
+            texture: 0.28,
+            ..Default::default()
+        };
+        let moderate = StemLevels {
+            texture: 0.30,
+            typing: 0.5,
+            ..Default::default()
+        };
+        let busy = StemLevels {
+            texture: 0.28,
+            typing: 0.8,
+            ..Default::default()
+        };
+        let rainy = StemLevels { rain: 0.55, ..busy };
+        // the busy tier carries a scripted one-shot volley (incl. the
+        // un-auditioned vending drop — flagged in the synth doc)
+        let volley = [
+            (5.0, OneShot::DoorChime),
+            (10.0, OneShot::PrinterWhir),
+            (15.0, OneShot::VendingDrop),
+            (20.0, OneShot::CoolerGlug),
+            (25.0, OneShot::ElevatorDing),
+        ];
+        for (name, stems, events) in [
+            ("tier_1_empty", quiet, &[][..]),
+            ("tier_2_moderate", moderate, &[][..]),
+            ("tier_3_busy_oneshot_volley", busy, &volley[..]),
+            ("tier_4_rainy_busy", rainy, &[][..]),
+        ] {
+            let buf = render_tier(&bank, stems, events, 30.0);
+            assert!(buf.iter().any(|&s| s.abs() > 0.01), "{name} is silent");
+            write_wav(&out.join(format!("{name}.wav")), &buf);
+        }
+        println!("LISTEN GATE wavs at: {}", out.display());
+    }
+}

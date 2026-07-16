@@ -473,8 +473,6 @@ pub fn resolve_pets(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn audio_resolve_clamps_and_defaults() {
         // absent table → disabled, full volume
