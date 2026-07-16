@@ -119,6 +119,11 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// the same handle from the event loop.
     audio: crate::audio::AudioHandle,
     audio_cues: pixtuoid_scene::audio::AudioCueTracker,
+    /// The floor the cue tracker's occupancy set belongs to. Waypoint
+    /// indices are FLOOR-LOCAL, so a floor switch must re-prime the tracker
+    /// — diffing floor N's occupied set against floor M's would fire
+    /// phantom appliance cues (self-audit catch).
+    audio_floor: Option<usize>,
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
@@ -149,6 +154,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             onboarding: crate::tui::welcome::OnboardingFrame::default(),
             audio: crate::audio::AudioHandle::disabled(),
             audio_cues: pixtuoid_scene::audio::AudioCueTracker::new(),
+            audio_floor: None,
         }
     }
 
@@ -813,6 +819,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // levels from the FULL scene's stats + live weather, one-shots from
         // the cue tracker's edges. The disabled handle makes this free.
         if self.audio.is_enabled() {
+            if self.audio_floor != Some(self.current_floor) {
+                // fresh tracker primes silently next observe — no cue volley
+                self.audio_cues = pixtuoid_scene::audio::AudioCueTracker::new();
+                self.audio_floor = Some(self.current_floor);
+            }
             let counts = crate::tui::widgets::scene_stats(scene);
             let precipitation = pixtuoid_scene::pixel_painter::precipitation_level(now);
             let events = self.audio_cues.observe(

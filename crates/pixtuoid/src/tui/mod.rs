@@ -679,7 +679,13 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         match dispatch_key(k.code, k.modifiers, ui.modal(), floor) {
                             KeyAction::None => {}
                             KeyAction::Quit => quit = true,
-                            KeyAction::TogglePause => ui.toggle_pause(),
+                            KeyAction::TogglePause => {
+                                ui.toggle_pause();
+                                // pause holds the SOUND too (the frozen office
+                                // must not keep clacking); unpause restores the
+                                // user's own m-key state rather than clobbering it
+                                audio.set_muted(ui.paused() || audio_muted);
+                            }
                             KeyAction::ToggleHelp => ui.toggle_help(),
                             KeyAction::CloseHelp => ui.close_help(),
                             KeyAction::DismissVersionPopup => ui.dismiss_version_popup(),
@@ -705,7 +711,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             }
                             KeyAction::ToggleAudioMute => {
                                 audio_muted = !audio_muted;
-                                audio.set_muted(audio_muted);
+                                audio.set_muted(ui.paused() || audio_muted);
                             }
                             KeyAction::ToggleWalkableDebug => {
                                 let on = renderer.debug_walkable();

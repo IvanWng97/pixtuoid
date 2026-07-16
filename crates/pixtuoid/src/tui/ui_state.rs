@@ -223,6 +223,10 @@ impl UiState {
         self.paused = !self.paused;
     }
 
+    pub(crate) fn paused(&self) -> bool {
+        self.paused
+    }
+
     pub(crate) fn toggle_help(&mut self) {
         self.help_open = !self.help_open;
     }
