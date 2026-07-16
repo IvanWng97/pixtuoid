@@ -334,7 +334,7 @@ pub(crate) fn rain_drop(rng: &mut NoiseStream) -> Vec<f32> {
 /// per-stem hiss stacking bug lives in the spec's cautionary tales.
 /// UNWIRED until Phase 2's music lands (owner call: no floor noise without
 /// music) — the expect flips to an error the moment Phase 2 reconnects it.
-#[expect(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))] // tests exercise it; prod re-wires at Phase 2
 pub(crate) fn texture_bed(rng: &mut NoiseStream) -> Vec<f32> {
     let n = BED_LOOP_SAMPLES;
     let raw: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
