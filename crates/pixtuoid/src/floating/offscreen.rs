@@ -41,7 +41,10 @@ pub struct OfficeRenderer {
     /// Ambient-audio gateway + cue tracker (#633). Inert unless installed.
     /// Floating v1 feeds stems + the door cue; the appliance one-shots are
     /// TUI-only for now (FloorSession doesn't surface waypoint occupancy —
-    /// a deliberate Phase 1 scope cut, not an oversight).
+    /// a deliberate Phase 1 scope cut, not an oversight). The window always
+    /// renders `FloorMeta::ground()`, so no cross-floor re-prime exists here —
+    /// if floating ever gains floor nav, mirror the TUI's `audio_floor` guard
+    /// or switching floors fires a chime volley for the new floor's agents.
     audio: crate::audio::AudioHandle,
     audio_cues: pixtuoid_scene::audio::AudioCueTracker,
 }
@@ -604,6 +607,171 @@ mod tests {
         assert!(
             tiny.iter().all(|&p| p == 0),
             "a scale-1 office suppresses the sub-legible board"
+        );
+    }
+
+    /// Local twin of the TUI harness's `active_on` — `tui` and `floating` are
+    /// sibling painters that don't share code, test helpers included.
+    fn active_on(path: &str, floor_idx: usize, desk: usize) -> pixtuoid_core::state::AgentSlot {
+        use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, ToolKind};
+        use std::sync::Arc;
+        let started = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        AgentSlot {
+            agent_id: pixtuoid_core::AgentId::from_transcript_path(path),
+            source: Arc::from("cc"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(std::path::Path::new("/repo")),
+            label: "a".into(),
+            state: ActivityState::Active {
+                tool_use_id: Some(Arc::from("t")),
+                detail: Some(Arc::from("Edit")),
+                kind: ToolKind::from_display("Edit"),
+            },
+            state_started_at: started,
+            created_at: started,
+            last_event_at: started,
+            exiting_at: None,
+            pending_idle_at: None,
+            desk_index: GlobalDeskIndex(desk),
+            floor_idx,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+            pid: None,
+            model: None,
+            effort: None,
+        }
+    }
+
+    fn scene_with(agents: Vec<pixtuoid_core::state::AgentSlot>, cap: usize) -> SceneState {
+        let mut s = SceneState::uniform(cap);
+        for a in agents {
+            s.agents.insert(a.agent_id, a);
+        }
+        s
+    }
+
+    #[test]
+    fn floating_stems_count_only_the_rendered_floor() {
+        // The floating twin of the TUI harness's floor-scoping pin: 1 active on
+        // the rendered ground floor vs 3 on floor 1 must read MODERATE typing,
+        // not the BUSY a global count would produce.
+        let cap = 16;
+        let scene = scene_with(
+            vec![
+                active_on("/a/f0.jsonl", 0, 0),
+                active_on("/a/f1a.jsonl", 1, cap),
+                active_on("/a/f1b.jsonl", 1, cap + 1),
+                active_on("/a/f1c.jsonl", 1, cap + 2),
+            ],
+            cap,
+        );
+        let pack =
+            pixtuoid_scene::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut renderer = OfficeRenderer::new();
+        let (handle, rx) = crate::audio::AudioHandle::test_pair();
+        renderer.set_audio(handle);
+        renderer.render(
+            &scene,
+            &pack,
+            theme,
+            now,
+            160,
+            96,
+            FloorMeta::ground(),
+            None,
+        );
+        let frames = crate::audio::drain_frames(&rx);
+        assert!(!frames.is_empty(), "an enabled handle receives frames");
+        let stems = frames.last().unwrap().stems;
+        let moderate = pixtuoid_scene::audio::stem_levels(
+            &pixtuoid_scene::board::StateCounts {
+                active: 1,
+                waiting: 0,
+                idle: 0,
+                exiting: 0,
+                total: 1,
+            },
+            0.0,
+        );
+        assert_eq!(
+            stems.typing, moderate.typing,
+            "typing level must reflect the RENDERED floor's 1 active, not all 4"
+        );
+    }
+
+    #[test]
+    fn floating_door_chime_fires_only_for_rendered_floor_arrivals() {
+        let cap = 16;
+        let pack =
+            pixtuoid_scene::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let mut now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut renderer = OfficeRenderer::new();
+        let (handle, rx) = crate::audio::AudioHandle::test_pair();
+        renderer.set_audio(handle);
+
+        let mut agents = vec![active_on("/d/f0.jsonl", 0, 0)];
+        let scene = scene_with(agents.clone(), cap);
+        renderer.render(
+            &scene,
+            &pack,
+            theme,
+            now,
+            160,
+            96,
+            FloorMeta::ground(),
+            None,
+        );
+        crate::audio::drain_frames(&rx); // discard the priming frames
+
+        // an arrival on ANOTHER floor: silent in the ground-floor window
+        agents.push(active_on("/d/f1-new.jsonl", 1, cap));
+        let scene = scene_with(agents.clone(), cap);
+        now += std::time::Duration::from_millis(33);
+        renderer.render(
+            &scene,
+            &pack,
+            theme,
+            now,
+            160,
+            96,
+            FloorMeta::ground(),
+            None,
+        );
+        let off_floor: Vec<_> = crate::audio::drain_frames(&rx)
+            .into_iter()
+            .flat_map(|f| f.events)
+            .collect();
+        assert!(
+            off_floor.is_empty(),
+            "a floor-1 walk-in must not chime the ground-floor window: {off_floor:?}"
+        );
+
+        // an arrival on the rendered floor chimes
+        agents.push(active_on("/d/f0-new.jsonl", 0, 1));
+        let scene = scene_with(agents, cap);
+        now += std::time::Duration::from_millis(33);
+        renderer.render(
+            &scene,
+            &pack,
+            theme,
+            now,
+            160,
+            96,
+            FloorMeta::ground(),
+            None,
+        );
+        let on_floor: Vec<_> = crate::audio::drain_frames(&rx)
+            .into_iter()
+            .flat_map(|f| f.events)
+            .collect();
+        assert!(
+            on_floor.contains(&pixtuoid_scene::audio::OneShot::DoorChime),
+            "a ground-floor walk-in must chime the floating window: {on_floor:?}"
         );
     }
 
