@@ -529,5 +529,10 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 0xc8,
             b: 0x32,
         }, // omp lime (brand-constant; clears antigravity-green + codewhale-teal + claude-amber on every theme)
+        grok: Rgb {
+            r: 0xe6,
+            g: 0xe6,
+            b: 0xe6,
+        }, // grok silver (X monochrome, brand-constant; min Manhattan 108 vs every theme's hues — cursor-slate nearest)
     },
 };

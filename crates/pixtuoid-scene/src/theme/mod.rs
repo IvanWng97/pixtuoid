@@ -194,6 +194,7 @@ pub struct SourceColors {
     pub openclaw: Rgb,
     pub hermes: Rgb,
     pub omp: Rgb,
+    pub grok: Rgb,
 }
 
 impl SourceColors {
@@ -201,7 +202,7 @@ impl SourceColors {
     /// guard and the count-pin test share, so adding a source forces a new field
     /// HERE (caught by `source_colors_cover_every_registered_source`) instead of
     /// silently escaping the per-theme distinctness check.
-    pub fn all(&self) -> [Rgb; 11] {
+    pub fn all(&self) -> [Rgb; 12] {
         [
             self.claude_code,
             self.codex,
@@ -214,6 +215,7 @@ impl SourceColors {
             self.openclaw,
             self.hermes,
             self.omp,
+            self.grok,
         ]
     }
 
@@ -236,6 +238,7 @@ impl SourceColors {
             "ok" => self.openclaw,
             "hm" => self.hermes,
             "om" => self.omp,
+            "gk" => self.grok,
             _ => return None,
         })
     }

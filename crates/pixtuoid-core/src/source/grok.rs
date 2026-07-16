@@ -226,10 +226,13 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                         },
                     ])
                 }
-                // The 60s-idle nudge: the session is idle, not blocked — a
-                // Waiting here would misrender every lunch break as a
-                // permission prompt.
-                "idle_prompt" => Ok(vec![]),
+                // Known non-waiting types: `idle_prompt` is the 60s-idle nudge
+                // (the session is idle, not blocked — a Waiting would misrender
+                // every lunch break as a permission prompt); `agent_error` is
+                // the API-retry-exhausted error toast (hook_dispatch.rs) — an
+                // errored TURN, whose state signal is the `stop_failure` arm.
+                // Explicitly matched so neither spams the drift breadcrumb.
+                "idle_prompt" | "agent_error" => Ok(vec![]),
                 other => {
                     // Sub-type drift breadcrumb (composed name — the event
                     // itself is known, the TYPE vocabulary drifted).
@@ -361,6 +364,190 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     ];
     let target = args.and_then(|a| crate::source::decoder::first_present_str(a, KEYS));
     generic_tool_display(tool, target)
+}
+
+// ---------------------------------------------------------------------------
+// Transcript decoding (updates.jsonl)
+// ---------------------------------------------------------------------------
+
+/// Decode one `updates.jsonl` line. Envelope (storage/mod.rs
+/// `SessionUpdateEnvelope`): `{"timestamp":<unix-secs>,"method":…,"params":
+/// {"sessionId":…,"update":{"sessionUpdate":"<tag>",…},"_meta":…}}`.
+///
+/// Two method namespaces share the file:
+/// - `"session/update"` — ACP notifications (agent-client-protocol schema,
+///   camelCase fields, snake_case `sessionUpdate` tags): `tool_call` →
+///   `ActivityStart{toolCallId}` (a FRESH line OMITS `status` — Pending is the
+///   serde skip-default), `tool_call_update` with terminal `status`
+///   (`completed`/`failed`) → `ActivityEnd{toolCallId}`; `in_progress` and the
+///   message/thought/plan chunks decode to nothing (a chunk has no paired end,
+///   and the coalescer may even land an xAI line BEFORE the buffered text that
+///   preceded it — chunk ordering is not activity truth).
+/// - `"_x.ai/session/update"` — xAI extension updates (variant tags snake_case;
+///   FIELDS verbatim snake_case Rust names — `rename_all` covers only the tag):
+///   `subagent_spawned` → child `SessionStart{parent_id}` (+`Rename` from
+///   `description`/`subagent_type`), `subagent_finished` → child
+///   `SessionEnd{as_child: true}` (the JSONL twin of the `subagent_stop` hook —
+///   copilot precedent for a JSONL `as_child` constructor), `model_changed` →
+///   `ModelInfo{model_id, reasoning_effort}`, `hook_execution` with
+///   `event_name == "session_end"` → root `SessionEnd` (present only when a
+///   SessionEnd hook is registered — ours is — and best-effort: it races
+///   process exit and TUI quit skips it; the liveness ladder is the real exit
+///   authority). Every other tag decodes to nothing — grok emits many
+///   cosmetic updates (diff_review, compaction, rewind_marker, …) and, like
+///   the codex rollout decoder, an unknown tag is a silent skip covered
+///   one-directionally by the upstream drift watch.
+///
+/// The agent id is derived from the PATH (`grok_id_from_path` — the parent-dir
+/// name), NEVER the line's `sessionId`: the path is the watcher's id space,
+/// and the two are equal by construction (upstream `session_dir(info)` joins
+/// the id). The hook transport keys on the same string, so cross-transport
+/// dedup (hook `toolUseId` == ACP `toolCallId` == the model call id,
+/// tool_calls.rs) actually fires.
+pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
+    let agent_id = AgentId::from_parts(source, &grok_id_from_path(Path::new(path)));
+    let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
+        return Ok(vec![]);
+    };
+    let Some(update) = v.pointer("/params/update").and_then(|u| u.as_object()) else {
+        return Ok(vec![]);
+    };
+    let Some(tag) = update.get("sessionUpdate").and_then(|t| t.as_str()) else {
+        return Ok(vec![]);
+    };
+    let str_field = |key: &str| update.get(key).and_then(|s| s.as_str());
+    let tool_call_id = || str_field("toolCallId").map(String::from);
+
+    match (method, tag) {
+        ("session/update", "tool_call") => Ok(vec![AgentEvent::ActivityStart {
+            agent_id,
+            tool_use_id: tool_call_id(),
+            detail: Some(grok_transcript_tool_detail(
+                str_field("title").unwrap_or("?"),
+                update.get("rawInput"),
+            )),
+        }]),
+        ("session/update", "tool_call_update") => {
+            // `status` is one of pending/in_progress/completed/failed — only
+            // the two terminal ones end the activity; a status-less update
+            // (content/locations delta) is not a completion either.
+            match str_field("status") {
+                Some("completed") | Some("failed") => Ok(vec![AgentEvent::ActivityEnd {
+                    agent_id,
+                    tool_use_id: tool_call_id(),
+                }]),
+                _ => Ok(vec![]),
+            }
+        }
+        ("_x.ai/session/update", "subagent_spawned") => {
+            let Some(child_key) =
+                str_field("child_session_id").or_else(|| str_field("subagent_id"))
+            else {
+                crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
+                return Ok(vec![]);
+            };
+            let child = AgentId::from_parts(SOURCE_NAME, child_key);
+            let mut evs = vec![AgentEvent::SessionStart {
+                agent_id: child,
+                source: SOURCE_NAME.to_string(),
+                session_id: child_key.to_string(),
+                // The line carries no cwd; the child's own flat transcript
+                // first-sight (path-derived cwd) or its tool hooks back-fill.
+                cwd: PathBuf::new(),
+                parent_id: Some(agent_id),
+            }];
+            if let Some(label) = str_field("description")
+                .filter(|s| !s.is_empty())
+                .or_else(|| str_field("subagent_type"))
+                .filter(|s| !s.is_empty())
+            {
+                evs.push(AgentEvent::Rename {
+                    agent_id: child,
+                    label: ellipsize(label, MAX_DECODED_FIELD_CHARS),
+                });
+            }
+            Ok(evs)
+        }
+        ("_x.ai/session/update", "subagent_finished") => {
+            let Some(child_key) =
+                str_field("child_session_id").or_else(|| str_field("subagent_id"))
+            else {
+                crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
+                return Ok(vec![]);
+            };
+            Ok(vec![AgentEvent::SessionEnd {
+                agent_id: AgentId::from_parts(SOURCE_NAME, child_key),
+                as_child: true,
+            }])
+        }
+        ("_x.ai/session/update", "model_changed") => {
+            let model = str_field("model_id")
+                .filter(|s| !s.is_empty())
+                .map(|m| ellipsize(m, MAX_DECODED_FIELD_CHARS));
+            let effort = str_field("reasoning_effort")
+                .filter(|s| !s.is_empty())
+                .map(|e| ellipsize(e, MAX_DECODED_FIELD_CHARS));
+            if model.is_none() && effort.is_none() {
+                return Ok(vec![]);
+            }
+            Ok(vec![AgentEvent::ModelInfo {
+                agent_id,
+                model,
+                effort,
+            }])
+        }
+        ("_x.ai/session/update", "hook_execution") => {
+            if str_field("event_name") == Some("session_end") {
+                Ok(vec![AgentEvent::SessionEnd {
+                    agent_id,
+                    as_child: false,
+                }])
+            } else {
+                Ok(vec![])
+            }
+        }
+        _ => Ok(vec![]),
+    }
+}
+
+/// Transcript tool detail: the ACP `tool_call` carries no tool NAME — `title`
+/// is grok's pre-composed human label ("Run cargo test"), so it IS the display
+/// (still routed through the `generic_tool_display` cap chokepoint, no `:
+/// target` suffix). Task detection reads `rawInput` (the tool's args object)
+/// with the SAME blocking-only rule as the hook side — see
+/// [`grok_tool_detail`] for the b1 WHY.
+fn grok_transcript_tool_detail(title: &str, raw_input: Option<&Value>) -> ToolDetail {
+    if let Some(args) = raw_input {
+        if args.get("subagent_type").is_some()
+            && args.get("background").and_then(Value::as_bool) == Some(false)
+        {
+            return ToolDetail::Task;
+        }
+    }
+    generic_tool_display(title, None)
+}
+
+/// The first-sight gate's session-ended checker over the transcript's tail
+/// bytes: an ended grok session is recognizable ONLY by the best-effort
+/// `hook_execution{event_name:"session_end"}` line our own installed hook
+/// causes (see [`decode_grok_line`]). STRUCTURAL parse per complete line —
+/// never a substring scan, which user-controllable content (a tool result
+/// QUOTING this marker inside a JSON string) could false-positive; a parsed
+/// line's method/tag/field structure can't be forged from inside a string
+/// field. A torn first line in the tail window fails the parse and is skipped.
+pub fn grok_session_ended(tail: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(tail);
+    text.lines().any(|line| {
+        serde_json::from_str::<Value>(line).is_ok_and(|v| {
+            v.get("method").and_then(|m| m.as_str()) == Some("_x.ai/session/update")
+                && v.pointer("/params/update/sessionUpdate")
+                    .and_then(|t| t.as_str())
+                    == Some("hook_execution")
+                && v.pointer("/params/update/event_name")
+                    .and_then(|e| e.as_str())
+                    == Some("session_end")
+        })
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -734,9 +921,10 @@ mod tests {
 
     #[test]
     fn idle_prompt_and_unknown_notification_types_decode_to_nothing() {
-        // idle_prompt = the 60s-idle nudge, NOT a blocked state; an unknown
-        // type must not invent a Waiting either (drift breadcrumb only).
-        for kind in ["idle_prompt", "some_future_nudge"] {
+        // idle_prompt = the 60s-idle nudge and agent_error = the retry-
+        // exhausted toast — neither is a blocked state; an unknown type must
+        // not invent a Waiting either (drift breadcrumb only).
+        for kind in ["idle_prompt", "agent_error", "some_future_nudge"] {
             let mut v = envelope("notification");
             v["notificationType"] = json!(kind);
             assert!(
@@ -885,6 +1073,282 @@ mod tests {
                 "{ev} must bail"
             );
         }
+    }
+
+    // ---- transcript decoding (updates.jsonl) ----
+
+    const TRANSCRIPT: &str =
+        "/home/u/.grok/sessions/%2Fhome%2Fu%2Fproj/0197fa30-sess/updates.jsonl";
+
+    fn decode_line(v: Value) -> Vec<AgentEvent> {
+        decode_grok_line(TRANSCRIPT, SOURCE_NAME, v).expect("decodes")
+    }
+
+    fn acp_line(update: Value) -> Value {
+        json!({"timestamp": 1721131200u64, "method": "session/update",
+               "params": {"sessionId": "0197fa30-sess", "update": update}})
+    }
+
+    fn xai_line(update: Value) -> Value {
+        json!({"timestamp": 1721131200u64, "method": "_x.ai/session/update",
+               "params": {"sessionId": "0197fa30-sess", "update": update,
+                          "_meta": {"eventId": "s-1"}}})
+    }
+
+    #[test]
+    fn fresh_tool_call_line_is_activity_start_keyed_by_path() {
+        // A FRESH tool_call OMITS `status` (Pending is the serde skip-default,
+        // agent-client-protocol schema) — absence must still decode as a Start.
+        let evs = decode_line(acp_line(json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call_42",
+            "title": "Run cargo test",
+            "kind": "execute",
+            "rawInput": {"command": "cargo test"}
+        })));
+        assert_eq!(evs.len(), 1);
+        match &evs[0] {
+            AgentEvent::ActivityStart {
+                agent_id,
+                tool_use_id,
+                detail,
+            } => {
+                assert_eq!(
+                    *agent_id,
+                    AgentId::from_parts(SOURCE_NAME, "0197fa30-sess"),
+                    "keyed by the PATH's parent-dir name, coalescing with hooks"
+                );
+                assert_eq!(tool_use_id.as_deref(), Some("call_42"));
+                assert_eq!(
+                    detail.as_ref().unwrap().display(),
+                    "Run cargo test",
+                    "title IS the display (ACP carries no tool name)"
+                );
+            }
+            other => panic!("expected ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn terminal_tool_call_updates_end_the_activity_others_do_not() {
+        for status in ["completed", "failed"] {
+            let evs = decode_line(acp_line(json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_42",
+                "status": status
+            })));
+            assert!(
+                matches!(&evs[..], [AgentEvent::ActivityEnd { tool_use_id: Some(id), .. }]
+                    if id == "call_42"),
+                "{status} must end call_42"
+            );
+        }
+        // in_progress and a status-less content delta are NOT completions.
+        for update in [
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "c", "status": "in_progress"}),
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "c",
+                   "content": [{"type": "content"}]}),
+        ] {
+            assert!(decode_line(acp_line(update)).is_empty());
+        }
+    }
+
+    #[test]
+    fn transcript_blocking_spawn_is_task_background_is_not() {
+        // Same b1 rule as the hook side, read from rawInput (no tool name on
+        // the wire — the semantic subagent_type field carries detection).
+        let blocking = decode_line(acp_line(json!({
+            "sessionUpdate": "tool_call", "toolCallId": "c1",
+            "title": "Spawn subagent",
+            "rawInput": {"subagent_type": "explore", "background": false, "prompt": "dig"}
+        })));
+        assert!(
+            matches!(&blocking[..], [AgentEvent::ActivityStart { detail: Some(d), .. }] if d.is_task())
+        );
+        let background = decode_line(acp_line(json!({
+            "sessionUpdate": "tool_call", "toolCallId": "c2",
+            "title": "Spawn subagent",
+            "rawInput": {"subagent_type": "explore", "prompt": "dig"}
+        })));
+        assert!(
+            matches!(&background[..], [AgentEvent::ActivityStart { detail: Some(d), .. }] if !d.is_task()),
+            "default (background) spawn must NOT be Task — b1 would evict the live child"
+        );
+    }
+
+    #[test]
+    fn message_chunks_plan_and_cosmetic_updates_decode_to_nothing() {
+        for update in [
+            json!({"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "hi"}}),
+            json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "yo"}}),
+            json!({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "hm"}}),
+            json!({"sessionUpdate": "plan", "entries": []}),
+            json!({"sessionUpdate": "available_commands_update", "availableCommands": []}),
+        ] {
+            assert!(decode_line(acp_line(update)).is_empty());
+        }
+        for update in [
+            json!({"sessionUpdate": "rewind_marker"}),
+            json!({"sessionUpdate": "diff_review"}),
+            json!({"sessionUpdate": "task_backgrounded", "task_id": "t"}),
+            json!({"sessionUpdate": "task_completed", "task_id": "t"}),
+        ] {
+            assert!(decode_line(xai_line(update)).is_empty());
+        }
+    }
+
+    #[test]
+    fn subagent_spawned_line_registers_child_under_parent() {
+        // Byte shape from the verification report (fields snake_case verbatim —
+        // rename_all covers only the variant tag).
+        let evs = decode_line(xai_line(json!({
+            "sessionUpdate": "subagent_spawned",
+            "subagent_id": "0197fa31-child",
+            "parent_session_id": "0197fa30-sess",
+            "child_session_id": "0197fa31-child",
+            "subagent_type": "general-purpose",
+            "description": "Investigate the bug"
+        })));
+        assert_eq!(evs.len(), 2);
+        match &evs[0] {
+            AgentEvent::SessionStart {
+                agent_id,
+                parent_id,
+                session_id,
+                ..
+            } => {
+                assert_eq!(
+                    *agent_id,
+                    AgentId::from_parts(SOURCE_NAME, "0197fa31-child")
+                );
+                assert_eq!(session_id, "0197fa31-child");
+                assert_eq!(
+                    *parent_id,
+                    Some(AgentId::from_parts(SOURCE_NAME, "0197fa30-sess")),
+                    "parent = the transcript's own (path-derived) id"
+                );
+            }
+            other => panic!("expected child SessionStart, got {other:?}"),
+        }
+        assert!(matches!(&evs[1], AgentEvent::Rename { label, .. }
+            if label == "Investigate the bug"));
+    }
+
+    #[test]
+    fn subagent_finished_line_ends_the_child_as_child() {
+        let evs = decode_line(xai_line(json!({
+            "sessionUpdate": "subagent_finished",
+            "subagent_id": "0197fa31-child",
+            "child_session_id": "0197fa31-child",
+            "status": "completed",
+            "tool_calls": 3, "turns": 2, "duration_ms": 4200
+        })));
+        assert!(
+            matches!(&evs[..], [AgentEvent::SessionEnd { agent_id, as_child: true }]
+                if *agent_id == AgentId::from_parts(SOURCE_NAME, "0197fa31-child"))
+        );
+    }
+
+    #[test]
+    fn model_changed_line_is_a_model_and_effort_observation() {
+        let evs = decode_line(xai_line(json!({
+            "sessionUpdate": "model_changed",
+            "model_id": "grok-4-code",
+            "reasoning_effort": "high"
+        })));
+        assert!(
+            matches!(&evs[..], [AgentEvent::ModelInfo { model: Some(m), effort: Some(e), .. }]
+                if m == "grok-4-code" && e == "high")
+        );
+        // Effort is optional on the wire; empty payload emits nothing.
+        assert!(decode_line(xai_line(json!({"sessionUpdate": "model_changed"}))).is_empty());
+    }
+
+    #[test]
+    fn hook_execution_session_end_is_the_persisted_end_marker() {
+        // Byte shape from the verification report — present only when a
+        // SessionEnd hook is registered (ours is).
+        let end = xai_line(json!({
+            "sessionUpdate": "hook_execution",
+            "event_name": "session_end",
+            "runs": [{"name": "pixtuoid", "status": {"status": "success", "elapsedMs": 12}}]
+        }));
+        let evs = decode_line(end.clone());
+        assert!(matches!(
+            &evs[..],
+            [AgentEvent::SessionEnd {
+                as_child: false,
+                ..
+            }]
+        ));
+        // Other hook_execution events (stop, pre_tool_use) are not ends.
+        for name in ["stop", "pre_tool_use"] {
+            let evs = decode_line(xai_line(json!({
+                "sessionUpdate": "hook_execution", "event_name": name, "runs": []
+            })));
+            assert!(
+                evs.is_empty(),
+                "hook_execution {name} must decode to nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_transcript_lines_never_panic_and_decode_to_nothing() {
+        for v in [
+            json!("just a string"),
+            json!({"timestamp": 1}),
+            json!({"method": "session/update"}),
+            json!({"method": "session/update", "params": {"sessionId": "s"}}),
+            json!({"method": "session/update", "params": {"update": "not an object"}}),
+            json!({"method": "session/update", "params": {"update": {"noTag": true}}}),
+            json!({"method": "bogus/method", "params": {"update": {"sessionUpdate": "tool_call"}}}),
+        ] {
+            assert!(decode_grok_line(TRANSCRIPT, SOURCE_NAME, v)
+                .unwrap()
+                .is_empty());
+        }
+    }
+
+    // ---- session-ended checker ----
+
+    #[test]
+    fn session_ended_checker_matches_only_the_structural_marker() {
+        let end_line = serde_json::to_string(&xai_line(json!({
+            "sessionUpdate": "hook_execution",
+            "event_name": "session_end",
+            "runs": []
+        })))
+        .unwrap();
+        let stop_line = serde_json::to_string(&xai_line(json!({
+            "sessionUpdate": "hook_execution",
+            "event_name": "stop",
+            "runs": []
+        })))
+        .unwrap();
+        assert!(grok_session_ended(end_line.as_bytes()));
+        assert!(!grok_session_ended(stop_line.as_bytes()));
+        // Multi-line tail with the marker mid-window.
+        let tail = format!("{stop_line}\n{end_line}\n");
+        assert!(grok_session_ended(tail.as_bytes()));
+        // A torn leading line must not break the scan.
+        let torn = format!("truncated-garbage}}\n{end_line}\n");
+        assert!(grok_session_ended(torn.as_bytes()));
+    }
+
+    #[test]
+    fn session_ended_checker_is_immune_to_quoted_content() {
+        // A tool result QUOTING the marker inside a string field — the
+        // structural parse must not fire (user-controllable content must
+        // never drive lifecycle).
+        let quoted = serde_json::to_string(&acp_line(json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "c",
+            "rawOutput": {"text":
+                "{\"method\":\"_x.ai/session/update\",\"params\":{\"update\":{\"sessionUpdate\":\"hook_execution\",\"event_name\":\"session_end\"}}}"}
+        })))
+        .unwrap();
+        assert!(!grok_session_ended(quoted.as_bytes()));
     }
 
     // ---- path derivers ----
