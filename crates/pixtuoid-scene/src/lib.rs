@@ -21,6 +21,7 @@
 // painter plumbing, not a stable engine API.
 #[doc(hidden)]
 pub mod anim;
+#[doc(hidden)] // shared workspace model (the overlay/board pattern), not stable engine API
 pub mod audio;
 // The neon wall-board MODEL + shared scene-stats tally the three in-workspace
 // painters consume — their shared single source of truth, not a stable engine API.

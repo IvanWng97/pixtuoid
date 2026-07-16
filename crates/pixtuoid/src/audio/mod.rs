@@ -7,33 +7,50 @@
 //! (Phase 2's AI-generated stem ASSETS will live in `crates/pixtuoid/
 //! sounds/`, the `sprites/` twin; Phase 1 ships zero asset files.)
 
+// Everything below the handle/spawn seam is feature-gated WITH the rodio
+// dep (lens-2 MEDIUM: an ungated pure half is ~40 dead_code warnings in
+// every --no-default-features build — the shipped Linux artifacts).
+#[cfg(feature = "audio")]
 pub(crate) mod dsp;
+#[cfg(feature = "audio")]
 pub(crate) mod mixer;
+#[cfg(feature = "audio")]
 pub(crate) mod sink;
+#[cfg(feature = "audio")]
 pub(crate) mod synth;
 
 use std::sync::mpsc;
+#[cfg(feature = "audio")]
 use std::sync::Arc;
+#[cfg(feature = "audio")]
 use std::time::Instant;
 
+#[cfg(feature = "audio")]
 use mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
 use pixtuoid_scene::audio::{AudioFrame, OneShot};
+#[cfg(feature = "audio")]
 use sink::AudioSink;
 
 /// Per-key / per-drop pre-rendered variant pools: playback picks randomly so
 /// typing/rain never sound repeated, while runtime stays synthesis-free.
+#[cfg(feature = "audio")]
 const KEYSTROKE_POOL: usize = 16;
+#[cfg(feature = "audio")]
 const DROP_POOL: usize = 12;
 
 /// One-shot playback gains relative to master — the loudness-matched Phase 0
 /// unit levels (±2.2dB across the set), with typing under the beds.
+#[cfg(feature = "audio")]
 const KEYSTROKE_GAIN: f32 = 0.35;
+#[cfg(feature = "audio")]
 const ONE_SHOT_GAIN: f32 = 0.5;
 /// Foreground raindrops sit 12-14dB ABOVE the wash per the reference — the
 /// bed peaks well under 1.0, so drops ride at the rain level itself.
+#[cfg(feature = "audio")]
 const DROP_GAIN: f32 = 0.9;
 
 /// Everything the audio thread plays, synthesized once at spawn.
+#[cfg(feature = "audio")]
 struct AssetBank {
     keystrokes: Vec<Arc<Vec<f32>>>,
     drops: Vec<Arc<Vec<f32>>>,
@@ -45,6 +62,7 @@ struct AssetBank {
     rain_bed: Arc<Vec<f32>>,
 }
 
+#[cfg(feature = "audio")]
 impl AssetBank {
     fn build() -> Self {
         // fixed seed: assets are identical run-to-run (reproducible audio)
@@ -76,6 +94,9 @@ impl AssetBank {
     }
 }
 
+// without the audio feature the handle's tx is always None, so the
+// payloads are provably unread — not a bug, the inert path
+#[cfg_attr(not(feature = "audio"), allow(dead_code))]
 enum Msg {
     Frame(AudioFrame),
     Muted(bool),
@@ -125,6 +146,7 @@ impl AudioHandle {
 
 /// How often the audio thread wakes to ramp gains / run schedulers when no
 /// frames arrive (frames themselves also wake it).
+#[cfg(feature = "audio")]
 const TICK_MS: u64 = 50;
 
 /// Spawn the audio thread. `volume` arrives pre-clamped from config
@@ -155,6 +177,7 @@ pub(crate) fn spawn(volume: f32) -> AudioHandle {
 
 /// The audio thread body — device-agnostic over [`AudioSink`], so the test
 /// probe and the LISTEN-gate wav renderer drive the SAME loop.
+#[cfg(feature = "audio")]
 fn run_loop(rx: mpsc::Receiver<Msg>, mut device: Box<dyn AudioSink>, volume: f32) {
     let bank = AssetBank::build();
     device.start_loop(LoopStem::Rain, Arc::clone(&bank.rain_bed));
@@ -211,7 +234,7 @@ fn run_loop(rx: mpsc::Receiver<Msg>, mut device: Box<dyn AudioSink>, volume: f32
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "audio"))]
 mod tests {
     use super::*;
     use pixtuoid_scene::audio::StemLevels;
@@ -274,7 +297,7 @@ mod tests {
 /// each busy-ness tier through the REAL mixer/schedulers/synth into wav
 /// files for the owner's audition. `#[ignore]` — run explicitly:
 /// `cargo test -p pixtuoid --lib audio::listen_gate -- --ignored --nocapture`
-#[cfg(test)]
+#[cfg(all(test, feature = "audio"))]
 mod listen_gate {
     use super::*;
     use pixtuoid_scene::audio::StemLevels;

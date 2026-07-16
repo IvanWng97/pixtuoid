@@ -58,6 +58,9 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.16.0" => Some(&[
+            "The office you can hear — opt-in ambient sound (`[audio] enabled = true`): typing that tracks how busy your agents are, gentle rain when the office weather rains, and little moments — a door chime when someone walks in, the elevator ding, the printer, the vending machine; press m to mute",
+        ]),
         "0.15.0" => Some(&[
             "A busier, better-looking office — denser desk pods that pack the grid at every size, agents walking behind their desks, and a full interior-decor pass: glass walls with door jambs and mullions, a lounge aquarium, real head-of-table meeting chairs, greenery (two ficus trees) and mats",
             "Pantry v2 — a kitchen island with bartender slots and a snack shelf join the pantry; per-desk trash bins retire (the pantry keeps the office's one bin)",
@@ -180,8 +183,8 @@ mod tests {
     /// drift out of sync with the arms the way the old hand-maintained array did.
     const SHIPPED_VERSIONS: &[&str] = &[
         // [bump-version-list-here]
-        "0.15.0", "0.14.0", "0.13.0", "0.12.0", "0.11.1", "0.11.0", "0.10.0", "0.9.0", "0.8.0",
-        "0.7.0", "0.6.1", "0.6.0", "0.5.0", "0.4.1",
+        "0.16.0", "0.15.0", "0.14.0", "0.13.0", "0.12.0", "0.11.1", "0.11.0", "0.10.0", "0.9.0",
+        "0.8.0", "0.7.0", "0.6.1", "0.6.0", "0.5.0", "0.4.1",
     ];
 
     #[test]
