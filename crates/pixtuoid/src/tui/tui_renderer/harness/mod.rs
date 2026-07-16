@@ -182,6 +182,7 @@ pub(super) fn two_floor_scene() -> SceneState {
     )
 }
 
+mod audio;
 mod coffee_pets;
 mod dashboard;
 mod edge_cases;

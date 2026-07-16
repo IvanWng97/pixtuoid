@@ -91,7 +91,7 @@ impl AssetBank {
 // without the audio feature the handle's tx is always None, so the
 // payloads are provably unread — not a bug, the inert path
 #[cfg_attr(not(feature = "audio"), allow(dead_code))]
-enum Msg {
+pub(crate) enum Msg {
     Frame(AudioFrame),
     Muted(bool),
 }
@@ -127,6 +127,27 @@ impl AudioHandle {
             let _ = tx.try_send(Msg::Muted(muted));
         }
     }
+
+    /// Test seam: a live handle whose receiver the test drains — the ONE
+    /// way to observe what the render path actually feeds the audio thread
+    /// (the online-review HIGH: the floor-scoping wiring needs a pin).
+    #[cfg(test)]
+    pub(crate) fn test_pair() -> (Self, mpsc::Receiver<Msg>) {
+        let (tx, rx) = mpsc::sync_channel(256);
+        (Self { tx: Some(tx) }, rx)
+    }
+}
+
+/// Drain every queued frame, returning them in order (test helper).
+#[cfg(test)]
+pub(crate) fn drain_frames(rx: &mpsc::Receiver<Msg>) -> Vec<AudioFrame> {
+    let mut out = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        if let Msg::Frame(f) = msg {
+            out.push(f);
+        }
+    }
+    out
 }
 
 /// How often the audio thread wakes to ramp gains / run schedulers when no
