@@ -2912,3 +2912,33 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
         "occupied printer waypoint must enqueue busy=true"
     );
 }
+
+#[test]
+fn precipitation_level_maps_audible_rain_and_honors_the_override() {
+    // The audio model's weather feed: storm=1.0, rain=in-between, everything
+    // else (incl. snow — precipitation you can't HEAR) = 0.0. Runs through
+    // the same force_weather override as rendering; thread-local, so reset
+    // to None at the end (the sibling-test leak rule above).
+    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
+
+    force_weather(Some("storm")).expect("storm is known");
+    assert_eq!(precipitation_level(t), 1.0, "storm is full precipitation");
+
+    force_weather(Some("rain")).expect("rain is known");
+    let rain = precipitation_level(t);
+    assert!(
+        rain > 0.0 && rain < 1.0,
+        "rain sits strictly between clear and storm, got {rain}"
+    );
+
+    for quiet in ["clear", "snow", "fog", "overcast", "windy", "smog"] {
+        force_weather(Some(quiet)).expect("known name");
+        assert_eq!(
+            precipitation_level(t),
+            0.0,
+            "{quiet} must be silent precipitation"
+        );
+    }
+
+    force_weather(None).expect("restore");
+}

@@ -199,6 +199,23 @@ pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
     }
 }
 
+/// How hard it is raining, as a scalar (0.0 clear … 1.0 storm) — the audio
+/// model's weather feed (`crate::audio::stem_levels`). A deliberate SCALAR
+/// query so the module-private [`background::Weather`] enum never widens:
+/// consumers get "how much rain", not the weather vocabulary. Snow/fog/etc.
+/// are 0.0 — precipitation you can HEAR, not precipitation per se. Honors
+/// the same per-thread [`force_weather`] override as every render.
+pub fn precipitation_level(now: std::time::SystemTime) -> f32 {
+    // rain at the ratified demo level, storm at full — the gap is audible
+    // "getting heavier", not a new mix profile
+    const RAIN_LEVEL: f32 = 0.6;
+    match background::weather_state(now) {
+        background::Weather::Storm => 1.0,
+        background::Weather::Rain => RAIN_LEVEL,
+        _ => 0.0,
+    }
+}
+
 /// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24), per the
 /// engine's own `SUN_RISE_H`/`SUN_SET_H` window (`background/sky.rs`). Exposed so
 /// the wasm painter's `Office::is_day` can hand the site's sky-slider the SAME
