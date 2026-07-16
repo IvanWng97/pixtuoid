@@ -197,7 +197,7 @@ pub(crate) fn printer_whir(rng: &mut NoiseStream) -> Vec<f32> {
 }
 
 /// Vending machine: mechanism click → beat → the can DROPS (meaty low thud
-/// + two smaller settle bounces). The ONE unit with no Phase 0 audition —
+/// plus two smaller settle bounces). The ONE unit with no Phase 0 audition;
 /// flagged for the LISTEN gate.
 pub(crate) fn vending_drop(rng: &mut NoiseStream) -> Vec<f32> {
     let mut buf = vec![0.0f32; n_samples(0.7)];

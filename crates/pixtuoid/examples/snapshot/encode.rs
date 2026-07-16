@@ -477,6 +477,7 @@ pub(crate) fn save_as_gif(
             chitchat_bubbles: Vec::new(),
             coffee: &std::collections::HashMap::new(),
             new_coffee_carriers: Vec::new(),
+            occupied_waypoints: Default::default(),
             popup_scale: 0.0,
             help_open: false,
             source_warning: None,

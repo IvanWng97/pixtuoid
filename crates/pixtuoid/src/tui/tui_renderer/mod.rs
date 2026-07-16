@@ -154,7 +154,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// Install the ambient-audio gateway (inert by default — the disabled
     /// handle swallows everything, so render code never needs a cfg/if).
-    pub fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
+    pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
         self.audio = audio;
     }
 

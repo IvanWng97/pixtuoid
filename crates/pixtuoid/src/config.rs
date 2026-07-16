@@ -482,11 +482,13 @@ mod tests {
         assert_eq!(a.volume, 1.0);
 
         // explicit enable + out-of-range volumes clamp BOTH sides
-        let mut cfg = AppConfig::default();
-        cfg.audio = Some(AudioConfigRaw {
-            enabled: Some(true),
-            volume: Some(-0.5),
-        });
+        let mut cfg = AppConfig {
+            audio: Some(AudioConfigRaw {
+                enabled: Some(true),
+                volume: Some(-0.5),
+            }),
+            ..Default::default()
+        };
         let a = resolve_audio(&cfg);
         assert!(a.enabled);
         assert_eq!(a.volume, 0.0, "negative volume clamps up");

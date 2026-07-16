@@ -18,6 +18,7 @@ pub(crate) trait AudioSink: Send {
 }
 
 /// Records calls instead of making sound — the CI/test double.
+#[cfg(test)]
 #[derive(Default)]
 pub(crate) struct NullSink {
     pub(crate) loops_started: Vec<LoopStem>,
@@ -25,6 +26,7 @@ pub(crate) struct NullSink {
     pub(crate) one_shots: usize,
 }
 
+#[cfg(test)]
 impl AudioSink for NullSink {
     fn start_loop(&mut self, stem: LoopStem, _samples: Arc<Vec<f32>>) {
         self.loops_started.push(stem);

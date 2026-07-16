@@ -71,10 +71,6 @@ impl Mixer {
         self.muted = muted;
     }
 
-    pub(crate) fn muted(&self) -> bool {
-        self.muted
-    }
-
     /// The scalar every one-shot's gain multiplies through — mute silences
     /// them instantly (one-shots are transient; no ramp needed).
     pub(crate) fn one_shot_gain(&self) -> f32 {
