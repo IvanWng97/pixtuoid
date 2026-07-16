@@ -212,7 +212,7 @@ mod tests {
     use crate::layout::WaypointKind;
     use pixtuoid_core::AgentId;
     use std::collections::HashSet;
-    use std::time::{Duration, SystemTime};
+    use std::time::SystemTime;
 
     fn aid(n: usize) -> AgentId {
         AgentId::from_parts("test", &n.to_string())

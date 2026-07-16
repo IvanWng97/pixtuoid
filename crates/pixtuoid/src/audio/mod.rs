@@ -122,15 +122,6 @@ impl AudioHandle {
         }
     }
 
-    /// Fire a painter-local one-shot (e.g. the TUI's elevator ding on
-    /// floor navigation) through the same gateway.
-    pub(crate) fn one_shot(&self, event: OneShot) {
-        self.frame(AudioFrame {
-            events: vec![event],
-            ..Default::default()
-        });
-    }
-
     pub(crate) fn set_muted(&self, muted: bool) {
         if let Some(tx) = &self.tx {
             let _ = tx.try_send(Msg::Muted(muted));
@@ -237,8 +228,10 @@ mod tests {
     fn disabled_handle_swallows_everything() {
         let h = AudioHandle::disabled();
         assert!(!h.is_enabled());
-        h.frame(AudioFrame::default());
-        h.one_shot(OneShot::DoorChime);
+        h.frame(AudioFrame {
+            events: vec![OneShot::DoorChime],
+            ..Default::default()
+        });
         h.set_muted(true); // no panic, no effect — the inert path
     }
 
