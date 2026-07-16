@@ -63,7 +63,8 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
             "Pantry v2 — a kitchen island with bartender slots and a snack shelf join the pantry; per-desk trash bins retire (the pantry keeps the office's one bin)",
             "Appliances come alive — the printer ejects pages and the vending machine drops a can while an agent stands there; the water cooler glugs on its own",
             "The web hero zooms in — the landing-page office renders at a closer camera (and the app's own 1F layout), so sprites finally read at a glance",
-            "Sturdier under the hood — furniture declares how each piece meets the floor in one place (a sprite resize can't drift a walkable edge), and a generative placement sweep guards every size the office lays out",
+            "Rock-solid placement — furniture now declares how it meets the floor in one place (a sprite resize can't drift a walkable edge), and a generative placement sweep guards every size the office lays out, so nothing lands on a wall or blocks a path",
+            "Sturdier and safer under the hood — a sustained whole-codebase review sweep (correctness, security, performance) with symlink-race-safe config writes and stricter environment-path handling; the office looks the same, just harder to knock over",
         ]),
         "0.14.0" => Some(&[
             "Click an agent, land in its terminal — clicking a sprite (or pressing f on the dashboard's selected agent) brings that session's terminal app to the foreground on macOS, Windows and Linux; it's located through the session's own process, so a stale or reused pid never yanks the wrong window forward",
