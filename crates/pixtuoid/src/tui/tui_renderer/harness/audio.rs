@@ -96,3 +96,59 @@ fn door_chime_fires_only_for_viewed_floor_arrivals() {
         "a floor-0 walk-in must chime while viewing floor 0: {on_floor:?}"
     );
 }
+
+#[test]
+fn floor_switch_reprimes_without_a_chime_volley() {
+    // Riding the elevator to a floor full of EXISTING agents must not fire
+    // their door chimes: the switch installs a fresh tracker whose first
+    // observe only primes. (Completes lens-1 F3: the enabled-path wiring
+    // through an actual floor change.)
+    let cap = 16;
+    let scene = scene_with(
+        vec![
+            active_on("/s/f0.jsonl", 0, 0),
+            active_on("/s/f1a.jsonl", 1, cap),
+            active_on("/s/f1b.jsonl", 1, cap + 1),
+        ],
+        cap,
+    );
+    let mut r = build(80, 40, vec![]);
+    let (handle, rx) = AudioHandle::test_pair();
+    r.set_audio(handle);
+    let pack = pack();
+    let mut now = t0();
+    r.render(&scene, &pack, now).expect("prime on floor 0");
+    drain_frames(&rx);
+
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, &pack, &mut now, 1);
+    let after_switch: Vec<_> = drain_frames(&rx)
+        .into_iter()
+        .flat_map(|f| f.events)
+        .collect();
+    assert!(
+        after_switch.is_empty(),
+        "arriving on floor 1 must not chime its existing agents: {after_switch:?}"
+    );
+
+    // …but a GENUINE arrival on the new floor still chimes
+    let scene = scene_with(
+        vec![
+            active_on("/s/f0.jsonl", 0, 0),
+            active_on("/s/f1a.jsonl", 1, cap),
+            active_on("/s/f1b.jsonl", 1, cap + 1),
+            active_on("/s/f1-new.jsonl", 1, cap + 2),
+        ],
+        cap,
+    );
+    now += std::time::Duration::from_millis(33);
+    r.render(&scene, &pack, now).expect("render");
+    let arrivals: Vec<_> = drain_frames(&rx)
+        .into_iter()
+        .flat_map(|f| f.events)
+        .collect();
+    assert!(
+        arrivals.contains(&pixtuoid_scene::audio::OneShot::DoorChime),
+        "a real floor-1 arrival chimes after the re-prime: {arrivals:?}"
+    );
+}

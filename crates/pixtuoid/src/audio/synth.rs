@@ -94,9 +94,8 @@ fn midi_freq(m: f32) -> f32 {
 }
 
 /// Door chime — a DESCENDING ding-dong (E5 → C5), warm harmonic bells with
-/// slow decay: deliberately DISTINCT from the elevator's bright inharmonic
-/// strike (centroid ~556Hz vs ~872Hz — one-shots must be spectrally
-/// distinct per cue role).
+/// slow decay (centroid ~556Hz, the ratified warm-bell character — pinned
+/// by the spectral test below).
 pub(crate) fn door_chime() -> Vec<f32> {
     let mut buf = vec![0.0f32; n_samples(2.0)];
     let tau = std::f32::consts::TAU;
