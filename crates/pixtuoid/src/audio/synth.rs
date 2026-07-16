@@ -332,6 +332,9 @@ pub(crate) fn rain_drop(rng: &mut NoiseStream) -> Vec<f32> {
 /// The vinyl/room texture bed: tape hiss + a faint warm room hum + sparse
 /// soft crackle. Mixed 25-35dB below the music (the noise-floor rule); the
 /// per-stem hiss stacking bug lives in the spec's cautionary tales.
+/// UNWIRED until Phase 2's music lands (owner call: no floor noise without
+/// music) — the expect flips to an error the moment Phase 2 reconnects it.
+#[expect(dead_code)]
 pub(crate) fn texture_bed(rng: &mut NoiseStream) -> Vec<f32> {
     let n = BED_LOOP_SAMPLES;
     let raw: Vec<f32> = (0..n).map(|_| rng.norm()).collect();

@@ -43,7 +43,6 @@ struct AssetBank {
     vending_drop: Arc<Vec<f32>>,
     cooler_glug: Arc<Vec<f32>>,
     rain_bed: Arc<Vec<f32>>,
-    texture_bed: Arc<Vec<f32>>,
 }
 
 impl AssetBank {
@@ -63,7 +62,6 @@ impl AssetBank {
             vending_drop: Arc::new(synth::vending_drop(&mut rng)),
             cooler_glug: Arc::new(synth::cooler_glug(&mut rng)),
             rain_bed: Arc::new(synth::rain_bed(&mut rng)),
-            texture_bed: Arc::new(synth::texture_bed(&mut rng)),
         }
     }
 
