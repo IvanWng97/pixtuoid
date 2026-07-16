@@ -61,6 +61,18 @@ softbuffer         = "0.4"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
 
+# Ambient office audio (#633): rodio's playback half only (cpal underneath) —
+# no decoder features, every sound is synthesized into raw sample buffers at
+# startup (src/audio/synth.rs). Optional behind the default-on `audio`
+# feature: `--no-default-features` builds a silent binary (and skips cpal's
+# Linux ALSA system-header requirement).
+rodio = { version = "0.22.2", default-features = false, features = ["playback"], optional = true }
+
+[features]
+default = ["audio"]
+# Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
+audio = ["dep:rodio"]
+
 # termios/poll for the truecolor preflight's DECRQSS terminal query (term.rs):
 # raw-mode the controlling tty + timed read of the reply. Unix-only — Windows
 # hard-gates VT separately. Same 0.2 as pixtuoid-core/hook — no second build.
