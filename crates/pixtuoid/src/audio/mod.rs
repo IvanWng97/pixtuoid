@@ -160,9 +160,11 @@ pub(crate) fn spawn(volume: f32) -> AudioHandle {
 fn run_loop(rx: mpsc::Receiver<Msg>, mut device: Box<dyn AudioSink>, volume: f32) {
     let bank = AssetBank::build();
     device.start_loop(LoopStem::Rain, Arc::clone(&bank.rain_bed));
-    device.start_loop(LoopStem::Texture, Arc::clone(&bank.texture_bed));
-    // pad/sparkle/keys/drums await their Phase 2 assets — levels are
-    // computed and ramped, but no loop is registered yet.
+    // pad/sparkle/keys/drums AND texture await Phase 2: the vinyl/room
+    // texture only makes sense UNDER music ("底噪没有音乐" — owner call),
+    // so Phase 1's sound is entirely event-driven (typing/rain/one-shots)
+    // and an empty office is truly silent. Levels still compute and ramp;
+    // no loop is registered to hear them.
 
     let mut mixer = Mixer::new(volume);
     let mut typing = TypingScheduler::new(0xBEEF);
@@ -259,9 +261,12 @@ mod tests {
 
         let rec = recorder.lock().unwrap();
         assert!(
-            rec.loops_started.contains(&LoopStem::Rain)
-                && rec.loops_started.contains(&LoopStem::Texture),
-            "both Phase 1 beds registered"
+            rec.loops_started.contains(&LoopStem::Rain),
+            "the rain bed registered"
+        );
+        assert!(
+            !rec.loops_started.contains(&LoopStem::Texture),
+            "texture waits for Phase 2's music (owner call: no floor noise without music)"
         );
         assert!(rec.one_shots >= 2, "the two frame events played");
     }
@@ -364,7 +369,6 @@ mod listen_gate {
     ) -> Vec<f32> {
         let mut sink = OfflineSink::new(secs);
         sink.start_loop(LoopStem::Rain, Arc::clone(&bank.rain_bed));
-        sink.start_loop(LoopStem::Texture, Arc::clone(&bank.texture_bed));
         let mut mixer = Mixer::new(1.0);
         mixer.set_target(stems);
         let mut typing = TypingScheduler::new(0xBEEF);
@@ -429,14 +433,20 @@ mod listen_gate {
             (20.0, OneShot::CoolerGlug),
             (25.0, OneShot::ElevatorDing),
         ];
-        for (name, stems, events) in [
-            ("tier_1_empty", quiet, &[][..]),
-            ("tier_2_moderate", moderate, &[][..]),
-            ("tier_3_busy_oneshot_volley", busy, &volley[..]),
-            ("tier_4_rainy_busy", rainy, &[][..]),
+        for (name, stems, events, expect_sound) in [
+            // Phase 1: an empty office is truly SILENT (texture waits for
+            // Phase 2's music — owner call)
+            ("tier_1_empty", quiet, &[][..], false),
+            ("tier_2_moderate", moderate, &[][..], true),
+            ("tier_3_busy_oneshot_volley", busy, &volley[..], true),
+            ("tier_4_rainy_busy", rainy, &[][..], true),
         ] {
             let buf = render_tier(&bank, stems, events, 30.0);
-            assert!(buf.iter().any(|&s| s.abs() > 0.01), "{name} is silent");
+            assert_eq!(
+                buf.iter().any(|&s| s.abs() > 0.01),
+                expect_sound,
+                "{name}: unexpected audibility"
+            );
             write_wav(&out.join(format!("{name}.wav")), &buf);
         }
         println!("LISTEN GATE wavs at: {}", out.display());
