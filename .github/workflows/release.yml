@@ -112,7 +112,10 @@ jobs:
         run: sudo apt-get install -y musl-tools
 
       - name: Build
-        run: just build-target ${{ matrix.target }} ${{ matrix.cross }}
+        # Linux artifacts build WITHOUT the audio feature: musl can't link
+        # ALSA statically and the aarch64 cross image has no ALSA headers.
+        # Prebuilt Linux = silent; from-source Linux gets audio (#633).
+        run: just build-target ${{ matrix.target }} ${{ matrix.cross }} "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
@@ -181,7 +184,10 @@ jobs:
         uses: taiki-e/install-action@cargo-deb
 
       - name: Build
-        run: just build-target ${{ matrix.target }} ${{ matrix.cross }}
+        # Linux artifacts build WITHOUT the audio feature: musl can't link
+        # ALSA statically and the aarch64 cross image has no ALSA headers.
+        # Prebuilt Linux = silent; from-source Linux gets audio (#633).
+        run: just build-target ${{ matrix.target }} ${{ matrix.cross }} "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
 
       - name: Build .deb packages
         run: just deb ${{ matrix.target }}

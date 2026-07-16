@@ -95,8 +95,9 @@ deny:
 arch:
     #!/usr/bin/env bash
     set -euo pipefail
-    # The backend-agnostic layers — neither may pull a terminal (ratatui/crossterm)
-    # OR window (winit/softbuffer) crate; the tui + floating painters own those. The
+    # The backend-agnostic layers — neither may pull a terminal (ratatui/crossterm),
+    # window (winit/softbuffer), OR audio-device (rodio/cpal) crate; the binary's
+    # painters + audio gateway own those. The
     # crate boundary already makes this a COMPILER fact; this pins it at the dep-tree
     # level too (a transitive pull-in via a feature would slip past the boundary).
     for crate in pixtuoid-core pixtuoid-scene; do
@@ -104,7 +105,7 @@ arch:
         # recipe via set -e, instead of reading as "no match" inside the if —
         # which would print the green line without having checked anything.
         deps="$(cargo tree -p "$crate" --edges normal --prefix none)"
-        if grep -qE '^(ratatui|crossterm|winit|softbuffer)' <<<"$deps"; then
+        if grep -qE '^(ratatui|crossterm|winit|softbuffer|rodio|cpal)' <<<"$deps"; then
             echo "ARCH VIOLATION: $crate depends on a terminal/window crate (CLAUDE.md invariant #1)"; exit 1
         fi
     done
@@ -282,14 +283,18 @@ build *args:
 # (CI installs it via taiki-e/install-action@cross).
 [group('rust')]
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
-build-target target cross="false":
+build-target target cross="false" flags="":
     #!/usr/bin/env bash
     set -euo pipefail
     use_cross="{{ cross }}"
+    # flags: extra cargo flags — release.yml passes --no-default-features for
+    # every LINUX artifact (musl can't link ALSA statically; the aarch64 cross
+    # image has no ALSA headers), so prebuilt Linux binaries ship SILENT and
+    # Linux audio is a from-source feature (#633; see docs/CONFIGURATION.md).
     if [ "$use_cross" = "true" ]; then
-        cross build --release --target "{{ target }}"
+        cross build --release --target "{{ target }}" {{ flags }}
     else
-        cargo build --release --target "{{ target }}"
+        cargo build --release --target "{{ target }}" {{ flags }}
     fi
 
 # Package the .deb for ONE already-built target (release.yml's deb job, hence

@@ -213,6 +213,24 @@ src/
 │                       OTF/CFF outlines rasterize fine through ab_glyph). The wasm/site painter does its own
 │                       AA via DOM spans, not this. Snapshot cell text renders at CELL_FONT_PX=14.7 (Monaspace
 │                       advance 7.96 ≤ the 8px cell; line_height rounds to the 16px cell — test-pinned).
+├── audio/              ambient office sound (#633) — THE one consumer of pixtuoid_scene::audio's model and
+│                       the only owner of rodio/cpal (behind the default-on `audio` cargo feature; Linux
+│                       PREBUILTS ship without it — ALSA can't link into musl/cross builds — so Linux audio
+│                       is from-source). mod.rs (AudioHandle: clone-cheap try_send gateway — disabled handle
+│                       is inert everywhere, so callers never cfg; AssetBank pre-synthesizes EVERY buffer at
+│                       spawn on a fixed seed; run_loop = the device-agnostic thread body), dsp.rs (radix-2
+│                       FFT + brickwall bands + spectral-envelope noise shaping [circularly seamless bed
+│                       loops] + splitmix64 NoiseStream), synth.rs (the Phase 0 OWNER-RATIFIED recipes 1:1 —
+│                       change docs/superpowers/specs/2026-07-16-ambient-sound-phase0/ first, re-audition,
+│                       then mirror; spectral-sanity tests pin the fingerprints), mixer.rs (pure gain ramps
+│                       ~2s crossfade + typing-burst/raindrop schedulers — level-driven, no backlog replay),
+│                       sink.rs (AudioSink seam: NullSink for CI/no-device, RodioSink = rodio 0.22 Player
+│                       glue, codecov-excluded winit-class). Audio NEVER blocks render: bounded channel,
+│                       drop-on-backpressure. TUI feeds one AudioFrame per rendered frame (renderer-side
+│                       cue tracker + DrawCtx.occupied_waypoints out-param); m toggles mute; both
+│                       navigate_floor sites ding. Floating feeds stems+door/glug only (FloorSession
+│                       doesn't surface occupancy — deliberate Phase 1 cut). [audio] config: enabled
+│                       default FALSE (strictly opt-in), volume clamped [0,1].
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM
 │                       from githubnext/monaspace v1.400 static — unmodified, so the OFL Reserved-Font-Name
 │                       clause is never triggered)

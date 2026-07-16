@@ -40,6 +40,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to
+      # BUILD on Linux (#633) — the runner has no sound card; tests never
+      # open a device (the AudioSink seam).
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -138,6 +143,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to
+      # BUILD on Linux (#633) — the runner has no sound card; tests never
+      # open a device (the AudioSink seam).
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       # `just msrv` reads rust-version from Cargo.toml and self-installs that
       # pinned toolchain via the runner's rustup, so the floor lives in one place.
       # No rust-cache: it keys on the runner's stable, but this job builds on the
@@ -193,6 +203,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to
+      # BUILD on Linux (#633) — the runner has no sound card; tests never
+      # open a device (the AudioSink seam).
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -298,6 +313,11 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to
+      # BUILD on Linux (#633) — the runner has no sound card; tests never
+      # open a device (the AudioSink seam).
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
@@ -336,6 +356,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to
+      # BUILD on Linux (#633) — the runner has no sound card; tests never
+      # open a device (the AudioSink seam).
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -362,6 +387,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to
+      # BUILD on Linux (#633) — the runner has no sound card; tests never
+      # open a device (the AudioSink seam).
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

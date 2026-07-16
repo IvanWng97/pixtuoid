@@ -48,6 +48,13 @@ vocabulary across 400+ sites for zero behavior change.)
 src/                (the pixtuoid-scene crate root; default pack at ../sprites/default/, embedded via its own build.rs)
 ├── anim.rs         centralized easing curves + eased_progress(start, duration_ms, easing, now) free function —
 │                   used by floor slide, A* walk path ease, and version popup entrance/dismissal animations
+├── audio.rs        backend-agnostic ambient-audio MODEL (#633) — the sound twin of overlay/board: StemLevels
+│                   (owner-ratified tier gains: empty/moderate/busy × pad/sparkle/keys/drums/texture/rain/typing;
+│                   rain scales on pixel_painter::precipitation_level) + OneShot events + AudioCueTracker
+│                   (cross-frame edge emitter: door chime capped 1/frame, printer/vending off the SAME
+│                   occupancy edges as the #567 anims, sparse 75s cooler glug — deliberately NOT the 2s
+│                   visual bubble). NO audio deps in this crate (the rodio/cpal ban is in `just arch`);
+│                   the binary's audio/ gateway is the consumer, WebAudio can ride the same model later
 ├── layout/             zone-based office geometry (terminal-agnostic; moved from pixtuoid-core —
 │                       the engine owns its geometry; `Layout` = compat alias for SceneLayout;
 │                       the WalkableMask VOCABULARY it stamps stays in core, coherence-bound to Grid):
