@@ -145,6 +145,24 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         return Ok(vec![]);
     }
 
+    // CROSS-FIRE guard: grok scans `~/.claude/settings.json` AND
+    // `~/.cursor/hooks.json` BY DEFAULT (Claude/Cursor compat, xai-grok-hooks
+    // discovery) and executes the shim commands pixtuoid installed THERE with
+    // its OWN envelope — which then arrives tagged `claude-code`/`cursor`
+    // while a grok-tagged duplicate arrives via our native `~/.grok/hooks`
+    // file. The `hookEventName` KEY (camelCase name, vs CC/cursor's
+    // `hook_event_name`) is grok's envelope fingerprint; a mis-tagged copy is
+    // a known duplicate, not drift — drop it QUIETLY (trace, not warn: it
+    // recurs on every tool call of every grok session once CC hooks are
+    // installed) BEFORE the per-source custom decoders, which would otherwise
+    // Err per event (CC falls through to the shared arms' missing-
+    // `hook_event_name` bail; cursor's claims-all errors on the same absent
+    // field).
+    if source != crate::source::grok::SOURCE_NAME && obj.contains_key("hookEventName") {
+        tracing::trace!(source, "dropping grok cross-fired hook envelope");
+        return Ok(vec![]);
+    }
+
     // A source's own hook arms run FIRST — before the shared field
     // requirements below — so an alien envelope (Reasonix: camelCase, `event`
     // discriminator, no `session_id` at all) or a subject-changing event
@@ -1214,8 +1232,8 @@ mod tests {
     #[test]
     fn every_agent_decoder_caps_its_tool_display() {
         use crate::source::{
-            antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, omp, opencode,
-            reasonix, registry,
+            antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, omp,
+            opencode, reasonix, registry,
         };
         use serde_json::json;
         use std::collections::HashSet;
@@ -1342,6 +1360,17 @@ mod tests {
                     .expect("hermes claims the event")
                 }),
             ),
+            (
+                grok::SOURCE_NAME,
+                Box::new(|| {
+                    grok::decode_grok_hook_custom(&json!({
+                        "hookEventName":"pre_tool_use","sessionId":"s","cwd":"/r",
+                        "workspaceRoot":"/r","toolName":name,"toolUseId":"c1",
+                        "toolInput":{"command":tgt},"toolInputTruncated":false}))
+                    .expect("grok decodes")
+                    .expect("grok claims the event")
+                }),
+            ),
         ];
 
         for (src, decode) in &table {
@@ -1396,5 +1425,73 @@ mod tests {
             evs.is_empty(),
             "a daemon source decodes to zero AgentEvents (presence rides the sibling channel), got {evs:?}"
         );
+    }
+
+    // ---- the grok cross-fire guard ----
+
+    /// One grok envelope, byte-identical except for the shim's source tag.
+    fn grok_envelope(tag: &str) -> Value {
+        json!({
+            "_pixtuoid_source": tag,
+            "hookEventName": "pre_tool_use",
+            "sessionId": "0197fa30-sess",
+            "cwd": "/repo",
+            "workspaceRoot": "/repo",
+            "timestamp": "2026-07-16T12:00:00Z",
+            "toolName": "run_terminal_command",
+            "toolUseId": "call_1",
+            "toolInput": {"command": "ls"},
+            "toolInputTruncated": false
+        })
+    }
+
+    #[test]
+    fn grok_tagged_grok_envelope_decodes_via_the_custom_decoder() {
+        let evs = decode_hook_payload(grok_envelope("grok")).expect("decodes");
+        assert_eq!(evs.len(), 2, "Identity + ActivityStart");
+        assert!(evs
+            .iter()
+            .all(|e| e.agent_id() == crate::AgentId::from_parts("grok", "0197fa30-sess")));
+    }
+
+    #[test]
+    fn cross_fired_grok_envelopes_are_dropped_quietly() {
+        // grok executes the hook commands pixtuoid installed in
+        // ~/.claude/settings.json and ~/.cursor/hooks.json (compat scan, on by
+        // default) — the SAME grok envelope then arrives tagged as those
+        // sources. The `hookEventName` key is grok's envelope fingerprint;
+        // mis-tagged copies are known duplicates of the grok-tagged one and
+        // must decode to NOTHING (Ok, not Err — an Err would warn on every
+        // tool call of every grok session).
+        for tag in ["claude-code", "cursor"] {
+            let evs = decode_hook_payload(grok_envelope(tag))
+                .unwrap_or_else(|e| panic!("{tag}: cross-fired envelope must be Ok, got {e}"));
+            assert!(
+                evs.is_empty(),
+                "{tag}: cross-fired grok envelope must decode to zero events, got {evs:?}"
+            );
+        }
+        // An UNTAGGED grok envelope (a user wired the bare shim command into
+        // grok's hooks by hand): the missing tag defaults to claude-code —
+        // same quiet drop, never a ghost.
+        let mut untagged = grok_envelope("x");
+        untagged.as_object_mut().unwrap().remove("_pixtuoid_source");
+        assert!(decode_hook_payload(untagged).expect("Ok").is_empty());
+    }
+
+    #[test]
+    fn cc_envelopes_still_decode_normally_despite_the_guard() {
+        // The guard keys on the `hookEventName` KEY, which no CC/cursor
+        // envelope carries — a real CC payload must be untouched by it.
+        let evs = decode_hook_payload(json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "cc-sess",
+            "cwd": "/repo",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_1",
+            "tool_input": {"command": "ls"}
+        }))
+        .expect("decodes");
+        assert!(!evs.is_empty());
     }
 }

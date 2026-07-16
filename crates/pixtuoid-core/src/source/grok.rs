@@ -52,6 +52,11 @@ use crate::source::decoder::{ellipsize, generic_tool_display, MAX_DECODED_FIELD_
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
+#[cfg(feature = "native")]
+mod native;
+#[cfg(feature = "native")]
+pub use native::{live_grok_session_ids, GrokSource};
+
 pub const SOURCE_NAME: &str = "grok";
 
 /// Decode one grok hook payload (already identified by
@@ -508,6 +513,16 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
         }
         _ => Ok(vec![]),
     }
+}
+
+/// The registry's `Transcript::cwd_extractor` slot: grok transcript lines
+/// carry NO cwd anywhere in their content (the envelope is
+/// `{timestamp,method,params:{sessionId,update}}` — the cwd exists only as the
+/// URL-encoded GROUP-DIR name one level up), so the content head-scan always
+/// yields nothing and the watcher's `with_cwd_deriver` PATH fallback
+/// ([`grok_cwd_from_path`], wired in the native half) is the real cwd source.
+pub(crate) fn extract_grok_cwd(_v: &Value) -> Option<PathBuf> {
+    None
 }
 
 /// Transcript tool detail: the ACP `tool_call` carries no tool NAME — `title`

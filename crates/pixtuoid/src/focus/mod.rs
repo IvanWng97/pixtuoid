@@ -80,6 +80,11 @@ pub(crate) struct FocusPaths<'a> {
     pub cc_projects_root: Option<&'a Path>,
     /// Codex's sessions root (rollout tree) for the fd probe.
     pub codex_sessions_root: Option<&'a Path>,
+    /// grok's home root (`active_sessions.json`'s parent). Unlike the CC/Codex
+    /// roots there is NO CLI override to thread from the driver — `focus_slot`
+    /// resolves it from the one `grok_home()` authority at click time; the
+    /// field exists so `resolve_pid` tests inject it like the other two.
+    pub grok_root: Option<&'a Path>,
 }
 
 /// Resolve the agent's OS pid. Precedence: the slot's cached pid (hook-family
@@ -134,6 +139,9 @@ pub(crate) fn resolve_pid(
         s if s == pixtuoid_core::source::codex::SOURCE_NAME => paths
             .codex_sessions_root
             .and_then(|d| pixtuoid_core::source::codex_pid_for_session(d, &slot.session_id)),
+        s if s == pixtuoid_core::source::grok::SOURCE_NAME => paths
+            .grok_root
+            .and_then(|d| pixtuoid_core::source::grok_pid_for_session(d, &slot.session_id)),
         _ => None,
     }
 }
@@ -148,9 +156,14 @@ pub(crate) fn focus_slot(
     slot: &AgentSlot,
     roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
 ) {
+    // grok's root has no CLI override (the tuple exists for --projects-root /
+    // --codex-sessions-root), so it resolves here from the one `grok_home()`
+    // authority instead of threading a third always-Some element through.
+    let grok_home = pixtuoid_core::source::grok::grok_home();
     let paths = FocusPaths {
         cc_projects_root: roots.0.as_deref(),
         codex_sessions_root: roots.1.as_deref(),
+        grok_root: Some(&grok_home),
     };
     focus_agent(slot, &paths, &OsProcessTable, activate_os);
 }
@@ -315,6 +328,7 @@ mod tests {
     const NO_PATHS: FocusPaths<'static> = FocusPaths {
         cc_projects_root: None,
         codex_sessions_root: None,
+        grok_root: None,
     };
 
     fn empty_table() -> MockTable {
@@ -391,6 +405,7 @@ mod tests {
         let wired = [
             pixtuoid_core::source::claude_code::SOURCE_NAME,
             pixtuoid_core::source::codex::SOURCE_NAME,
+            pixtuoid_core::source::grok::SOURCE_NAME,
         ];
         for &src in pixtuoid_core::source::REGISTERED_SOURCES {
             let Some(d) = pixtuoid_core::source::registry::descriptor_for(src) else {

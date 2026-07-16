@@ -75,5 +75,12 @@
     "display_name": "OpenClaw",
     "health": null,
     "id": "openclaw"
+  },
+  {
+    "cli_present": false,
+    "connected": false,
+    "display_name": "Grok Build",
+    "health": null,
+    "id": "grok"
   }
 ]

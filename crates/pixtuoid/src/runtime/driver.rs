@@ -22,6 +22,7 @@ use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::copilot::CopilotSource;
 use pixtuoid_core::source::daemon::{self, PresenceMsg};
+use pixtuoid_core::source::grok::GrokSource;
 use pixtuoid_core::source::hook::HookRouter;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::manager::SourceManager;
@@ -195,6 +196,12 @@ pub(crate) fn build_source_set(
     cc_src.child_end_unclaims = Some(child_end_unclaims.clone());
     codex_src.child_end_unclaims = Some(child_end_unclaims.clone());
 
+    // grok consumes too: its subagent_stop/subagent_end hooks decode to
+    // Hook-transport `SessionEnd{as_child:true}` (the tee's trigger), and the
+    // grok watcher releases the ended child's flat-sibling transcript claim.
+    let mut grok_src = GrokSource::default_paths();
+    grok_src.child_end_unclaims = Some(child_end_unclaims.clone());
+
     // The HookRouter owns the ONE shared hook socket every source's hooks ride;
     // it is the tee producer + the daemon-presence demux. CC/Codex are now pure
     // transcript watchers (consumers of the un-claim handle).
@@ -209,6 +216,7 @@ pub(crate) fn build_source_set(
         Box::new(codex_src),
         Box::new(copilot_src),
         Box::new(omp_src),
+        Box::new(grok_src),
     ]
 }
 

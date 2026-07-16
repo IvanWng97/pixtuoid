@@ -1,0 +1,45 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- ActivityStart:
+    agent_id: 3721754798848384957
+    tool_use_id: call_1
+    detail:
+      Generic:
+        display: Run cargo test
+- ActivityEnd:
+    agent_id: 3721754798848384957
+    tool_use_id: call_1
+- ModelInfo:
+    agent_id: 3721754798848384957
+    model: grok-4-code
+    effort: high
+- SessionStart:
+    agent_id: 3721754798848384957
+    source: grok
+    session_id: tool-run
+    cwd: /Users/dev/proj
+    parent_id: ~
+- Identity:
+    agent_id: 3721754798848384957
+    source: grok
+    session_id: tool-run
+    cwd: /Users/dev/proj
+- ActivityStart:
+    agent_id: 3721754798848384957
+    tool_use_id: call_1
+    detail:
+      Generic:
+        display: "run_terminal_command: cargo test"
+- Identity:
+    agent_id: 3721754798848384957
+    source: grok
+    session_id: tool-run
+    cwd: /Users/dev/proj
+- ActivityEnd:
+    agent_id: 3721754798848384957
+    tool_use_id: call_1
+- ActivityEnd:
+    agent_id: 3721754798848384957
+    tool_use_id: ~

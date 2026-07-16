@@ -1,0 +1,34 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- ActivityStart:
+    agent_id: 4803028814931694407
+    tool_use_id: call_3
+    detail:
+      Generic:
+        display: Read README.md
+- ActivityEnd:
+    agent_id: 4803028814931694407
+    tool_use_id: call_3
+- SessionEnd:
+    agent_id: 4803028814931694407
+    as_child: false
+- SessionStart:
+    agent_id: 4803028814931694407
+    source: grok
+    session_id: clean-exit
+    cwd: /Users/dev/proj
+    parent_id: ~
+- SessionStart:
+    agent_id: 4803028814931694407
+    source: grok
+    session_id: clean-exit
+    cwd: /Users/dev/proj
+    parent_id: ~
+- ActivityEnd:
+    agent_id: 4803028814931694407
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 4803028814931694407
+    as_child: false

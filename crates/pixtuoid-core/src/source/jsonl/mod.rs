@@ -73,6 +73,20 @@ fn accept_all_paths(_p: &Path) -> bool {
     true
 }
 
+/// Derives a first-sight cwd from the transcript PATH when the content
+/// head-scan yields none — the fallback runs inside `emit_first_sight`, so
+/// every registration path (tail, oversized, revival) applies it identically.
+/// The default (`no_cwd_from_path`) changes nothing for content-carrying
+/// sources. **grok** overrides it with `grok_cwd_from_path`: its transcript
+/// lines carry NO cwd anywhere — the cwd lives in the URL-encoded group-dir
+/// name — and without a path-derived cwd every grok registration would start
+/// empty-cwd and ride the reducer's ~3-min unknown-cwd reap.
+pub type CwdDeriver = fn(&Path) -> Option<PathBuf>;
+
+fn no_cwd_from_path(_p: &Path) -> Option<PathBuf> {
+    None
+}
+
 /// The per-source decode/label/end/id fn-pointers (the invariant-#3 seam)
 /// bundled so the seed/scan/walk helpers thread ONE Copy value, not four.
 #[derive(Clone, Copy)]
@@ -82,6 +96,7 @@ struct SourceDecoders {
     check_ended: SessionEndChecker,
     id_derive: IdDeriver,
     path_filter: PathFilter,
+    cwd_derive: CwdDeriver,
 }
 
 /// Shared per-run watch state, borrowed by the scan/walk helpers.
@@ -151,6 +166,7 @@ pub struct JsonlWatcher {
     check_session_ended: SessionEndChecker,
     id_derive: IdDeriver,
     path_filter: PathFilter,
+    cwd_derive: CwdDeriver,
     liveness_probe: Option<LivenessProbe>,
     poll_interval: Duration,
     negative_vouch_min_span: Duration,
@@ -192,6 +208,7 @@ impl JsonlWatcher {
             check_session_ended,
             id_derive: default_id_from_path,
             path_filter: accept_all_paths,
+            cwd_derive: no_cwd_from_path,
             liveness_probe: None,
             poll_interval: DEFAULT_POLL_INTERVAL,
             negative_vouch_min_span: NEGATIVE_VOUCH_MIN_SPAN,
@@ -227,6 +244,14 @@ impl JsonlWatcher {
 
     pub fn with_id_deriver(mut self, id_derive: IdDeriver) -> Self {
         self.id_derive = id_derive;
+        self
+    }
+
+    /// Derive a first-sight cwd from the transcript PATH when the content
+    /// head-scan yields none (default: never). See [`CwdDeriver`] — grok uses
+    /// it because its transcript content carries no cwd at all.
+    pub fn with_cwd_deriver(mut self, cwd_derive: CwdDeriver) -> Self {
+        self.cwd_derive = cwd_derive;
         self
     }
 
@@ -402,6 +427,7 @@ impl JsonlWatcher {
             check_ended: self.check_session_ended,
             id_derive: self.id_derive,
             path_filter: self.path_filter,
+            cwd_derive: self.cwd_derive,
         };
 
         // Initial seed: the same `scan_root` → `walk_jsonl` path every later scan

@@ -261,7 +261,7 @@ fn parse_registry_entry(bytes: &[u8]) -> RegistryParse {
 /// module load before the stamp), so 10s is ~8× margin while still being far
 /// below any plausible pid-recycling interval.
 #[cfg(unix)]
-const PID_START_TOLERANCE_SECS: u64 = 10;
+pub(crate) const PID_START_TOLERANCE_SECS: u64 = 10;
 
 /// Kernel-reported process start time in epoch seconds — the identity half of
 /// the PID-reuse guard. macOS: `proc_pidinfo(PROC_PIDTBSDINFO)` →
@@ -271,14 +271,14 @@ const PID_START_TOLERANCE_SECS: u64 = 10;
 /// now and Linux returns `None` (pid-alive-only, today's behavior). `None` on
 /// failure (pid gone mid-probe, EPERM) — never an error: the check is additive.
 #[cfg(target_os = "macos")]
-fn pid_start_time_secs(pid: i32) -> Option<u64> {
+pub(crate) fn pid_start_time_secs(pid: i32) -> Option<u64> {
     // On macOS the shared start MARKER (`proc_start`) is exactly epoch
     // seconds (pbi_start_tvsec), so this wall-clock check can ride it.
     super::proc_start::pid_start_marker(pid)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn pid_start_time_secs(_pid: i32) -> Option<u64> {
+pub(crate) fn pid_start_time_secs(_pid: i32) -> Option<u64> {
     // The Linux MARKER is ticks-since-boot — NOT epoch — so this wall-clock
     // comparison must not ride it; epoch conversion stays deferred (#220).
     None
@@ -289,7 +289,7 @@ fn pid_start_time_secs(_pid: i32) -> Option<u64> {
 /// else) = no such process. Registry pids are always > 0; a 0 pid (which
 /// `Pid::from_raw` rejects) short-circuits to `false` before reaching `kill`.
 #[cfg(unix)]
-fn pid_alive(pid: i32) -> bool {
+pub(crate) fn pid_alive(pid: i32) -> bool {
     let Some(pid) = rustix::process::Pid::from_raw(pid) else {
         return false;
     };

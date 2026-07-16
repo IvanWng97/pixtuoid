@@ -1,0 +1,4 @@
+{"timestamp":1721131400,"method":"session/update","params":{"sessionId":"clean-exit","update":{"sessionUpdate":"tool_call","toolCallId":"call_3","title":"Read README.md","kind":"read","rawInput":{"path":"README.md"}}}}
+{"timestamp":1721131401,"method":"session/update","params":{"sessionId":"clean-exit","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_3","status":"completed"}}}
+{"timestamp":1721131402,"method":"_x.ai/session/update","params":{"sessionId":"clean-exit","update":{"sessionUpdate":"hook_execution","event_name":"stop","runs":[{"name":"pixtuoid","status":{"status":"success","elapsedMs":8}}]},"_meta":{"eventId":"clean-exit-3"}}}
+{"timestamp":1721131403,"method":"_x.ai/session/update","params":{"sessionId":"clean-exit","update":{"sessionUpdate":"hook_execution","event_name":"session_end","runs":[{"name":"pixtuoid","status":{"status":"success","elapsedMs":11}}]},"_meta":{"eventId":"clean-exit-4"}}}

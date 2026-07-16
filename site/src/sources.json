@@ -163,5 +163,20 @@
       "linux": "yes",
       "windows": "experimental"
     }
+  },
+  {
+    "id": "grok",
+    "badge": "gk·",
+    "badge_color": "#e6e6e6",
+    "name": "Grok Build",
+    "url": "https://github.com/xai-org/grok-build",
+    "status": "supported",
+    "featured": false,
+    "transport": "hooks (~/.grok/hooks/) + session transcripts (~/.grok/sessions/, updates.jsonl)",
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   }
 ]

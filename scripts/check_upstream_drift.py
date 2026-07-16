@@ -31,6 +31,12 @@ and compares against the live upstream:
   * CodeWhale hooks    -> `CODEWHALE_EVENTS` in crates/pixtuoid/src/install/codewhale.rs
                           vs the snake_case `HookEvent` enum in
                           Hmbown/CodeWhale crates/tui/src/hooks.rs
+  * grok hooks/wire    -> `GROK_EVENTS` in crates/pixtuoid/src/install/grok.rs
+                          vs the `HookEventName` enum + envelope/payload serde in
+                          xai-org/grok-build xai-grok-hooks/src/event.rs, PLUS the
+                          transcript xAI-update vocabulary (extensions/
+                          notification.rs) and the active_sessions.json registry
+                          struct (the liveness ladder's parse surface)
   * burn-tier fields   -> codex turn_context.{model,effort} (TurnContextItem,
                         protocol.rs) + copilot data.model (schema) + opencode
                         info.model (session.ts) + CC ultra attachment markers
@@ -395,6 +401,63 @@ HERMES_SHELL_HOOK_URL = (
 # dict-key literals in _serialize_payload; ONE-DIRECTIONAL (a depended field gone).
 HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
 
+# grok (Grok Build, xai-org/grok-build) is open Rust with THREE depended
+# surfaces in three files: the hook event enum + payload serde (event.rs), the
+# transcript xAI-extension vocabulary (extensions/notification.rs — the ACP
+# half lives in the external agent-client-protocol crate and is deliberately
+# not fetched: a versioned protocol, pinned in-repo by grok's own wire_tags
+# guard test), and the active_sessions.json liveness-registry struct.
+GROK_HOOK_URL = (
+    "https://raw.githubusercontent.com/xai-org/grok-build/main/"
+    "crates/codegen/xai-grok-hooks/src/event.rs"
+)
+GROK_NOTIFICATION_URL = (
+    "https://raw.githubusercontent.com/xai-org/grok-build/main/"
+    "crates/codegen/xai-grok-shell/src/extensions/notification.rs"
+)
+GROK_ACTIVE_SESSIONS_URL = (
+    "https://raw.githubusercontent.com/xai-org/grok-build/main/"
+    "crates/codegen/xai-grok-shell/src/active_sessions.rs"
+)
+# grok hook events we DELIBERATELY do not register: compaction internals, not
+# agent activity (the CC/Codex PreCompact/PostCompact precedent). SubagentEnd
+# IS registered (upstream's finish site fires the alias, docs name SubagentStop
+# — we register both spellings, so neither appears here).
+GROK_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
+# Hook fields decode_grok_hook_payload reads, split by serde origin in
+# event.rs: the ENVELOPE fields are camelCase via struct-level rename_all (the
+# wire name never appears literally — check the `pub <ident>:` declarations),
+# while the PAYLOAD fields carry explicit `rename = "<camel>"` attrs (check the
+# rename literals), and two payload fields are un-renamed snake_case idents.
+GROK_ENVELOPE_IDENTS = {"hook_event_name", "session_id", "cwd", "workspace_root"}
+GROK_PAYLOAD_RENAMES = {
+    "toolName",
+    "toolUseId",
+    "toolInput",
+    "notificationType",
+    "subagentId",
+    "subagentType",
+    "modelId",
+}
+GROK_PAYLOAD_IDENTS = {"message", "description"}
+# Transcript vocabulary decode_grok_line reads from the xAI SessionUpdate enum
+# (variant IDENTS — the snake_case tags derive via rename_all, so the wire
+# string never appears literally) + its field idents (verbatim snake_case).
+GROK_XAI_VARIANTS = {"SubagentSpawned", "SubagentFinished", "ModelChanged", "HookExecution"}
+GROK_XAI_FIELDS = {
+    "subagent_id",
+    "child_session_id",
+    "model_id",
+    "reasoning_effort",
+    "event_name",
+    "subagent_type",
+    "description",
+}
+# The active_sessions.json registry struct grok_ids_from_registry parses (no
+# rename_all — field idents ARE the wire names). A rename silently degrades the
+# whole liveness ladder (probe → instant exit → negative vouch) to mtime gating.
+GROK_ACTIVE_SESSION_FIELDS = {"session_id", "pid", "cwd", "opened_at"}
+
 # Oh My Pi (omp) is TRANSCRIPT-ONLY: the decoder tails the session JSONL, so the
 # depended names are the entry `type` discriminators (source/omp.rs `match kind`)
 # plus a handful of field literals, split across the upstream files that define
@@ -714,6 +777,28 @@ def read_hermes_events() -> set[str]:
     return set(re.findall(r'"(\w+)"', m.group(1)))
 
 
+def read_grok_events() -> set[str]:
+    """The grok hook events we register/decode, read from the `GROK_EVENTS`
+    const in install/grok.rs — pinned to the decoder arms by
+    `every_registered_grok_event_decodes`, so this is a leak-free source of
+    truth (mirrors read_cursor_events / read_hermes_events)."""
+    src = (REPO / "crates/pixtuoid/src/install/grok.rs").read_text()
+    m = re.search(r"const GROK_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate GROK_EVENTS in install/grok.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
+
+
+def upstream_grok_hooks(text: str) -> set[str] | None:
+    """The HookEventName enum variants (bare Rust idents — registration keys
+    accept the PascalCase spelling, so these ARE the names we register)."""
+    m = re.search(r"pub enum HookEventName \{(.*?)\n\}", text, re.S)
+    if not m:
+        return None
+    found = set(re.findall(r"(?m)^\s*([A-Z]\w+),", m.group(1)))
+    return found or None
+
+
 def upstream_copilot_events(text: str) -> set[str] | None:
     """The per-event `type` consts from the @github/copilot session-events JSON
     schema. Each event is a `definitions.<Name>` object whose `properties.type`
@@ -816,6 +901,7 @@ def run_checks(
     cursor_ours: set[str] | None,
     openclaw_ours: set[str] | None,
     hermes_ours: set[str] | None,
+    grok_ours: set[str] | None,
     breaking: list[str],
     review: list[str],
     errors: list[str],
@@ -1031,6 +1117,80 @@ def run_checks(
                         f"from the schema Struct defs — likely renamed; the plugin still "
                         f"forwards the event but the decoder reads None (wrong-register / "
                         f"no-link / no-activity)."
+                    )
+
+    # --- grok hook events + payload/transcript/registry names (FETCH transient)
+    if grok_ours is not None:
+        text = try_fetch(GROK_HOOK_URL, "grok hooks source", breaking, errors)
+        if text is not None:
+            upstream = upstream_grok_hooks(text)
+            if upstream is None:
+                breaking.append(
+                    "grok `pub enum HookEventName` not found at the pinned path "
+                    "(xai-grok-hooks/src/event.rs) — upstream moved it; update "
+                    "GROK_HOOK_URL / the parser."
+                )
+            else:
+                for ev in sorted(grok_ours):
+                    if ev not in upstream:
+                        breaking.append(
+                            f"grok hook `{ev}` (registered in GROK_EVENTS) is GONE from "
+                            f"upstream event.rs — likely renamed; the registered key "
+                            f"stops matching and that event silently never fires."
+                        )
+                for ev in sorted(upstream - grok_ours - GROK_KNOWN_OMITTED):
+                    review.append(
+                        f"new grok hook `{ev}` upstream — we neither register nor "
+                        f"intentionally omit it (add a decoder arm + GROK_EVENTS, or "
+                        f"add it to GROK_KNOWN_OMITTED)."
+                    )
+            for ident in sorted(GROK_ENVELOPE_IDENTS):
+                if not re.search(rf"(?m)^\s*pub {ident}:", text):
+                    breaking.append(
+                        f"grok envelope field `{ident}` is GONE from HookEventEnvelope "
+                        f"in event.rs — renamed; its camelCase wire name shifts and "
+                        f"decode_grok_hook_payload reads None (no key / no cwd)."
+                    )
+            for rename in sorted(GROK_PAYLOAD_RENAMES):
+                if f'rename = "{rename}"' not in text:
+                    breaking.append(
+                        f"grok payload rename `{rename}` is GONE from event.rs — the "
+                        f"wire field decode_grok_hook_payload reads was renamed; the "
+                        f"decode silently zeroes (no tool label / no child key)."
+                    )
+            for ident in sorted(GROK_PAYLOAD_IDENTS):
+                if not re.search(rf"(?m)^\s*{ident}:", text):
+                    breaking.append(
+                        f"grok payload field `{ident}` is GONE from event.rs — renamed; "
+                        f"the decoder's fallback reads None (Waiting reason / child "
+                        f"label degrade)."
+                    )
+        text = try_fetch(GROK_NOTIFICATION_URL, "grok notification source", breaking, errors)
+        if text is not None:
+            for variant in sorted(GROK_XAI_VARIANTS):
+                if not re.search(rf"(?m)^\s*{variant}\b", text):
+                    breaking.append(
+                        f"grok xAI update variant `{variant}` is GONE from "
+                        f"extensions/notification.rs — its snake_case sessionUpdate tag "
+                        f"shifts and decode_grok_line maps the line to nothing "
+                        f"(no subagent link / no model info / no end marker)."
+                    )
+            for ident in sorted(GROK_XAI_FIELDS):
+                if not re.search(rf"(?m)^\s*(pub )?{ident}:", text):
+                    breaking.append(
+                        f"grok xAI update field `{ident}` is GONE from "
+                        f"extensions/notification.rs — renamed; decode_grok_line reads "
+                        f"None (child un-keyed / model dropped / end marker missed)."
+                    )
+        text = try_fetch(GROK_ACTIVE_SESSIONS_URL, "grok active-sessions source", breaking, errors)
+        if text is not None:
+            for ident in sorted(GROK_ACTIVE_SESSION_FIELDS):
+                if not re.search(rf"(?m)^\s*(pub )?{ident}:", text):
+                    breaking.append(
+                        f"grok active_sessions field `{ident}` is GONE from "
+                        f"active_sessions.rs — renamed; grok_ids_from_registry stops "
+                        f"parsing and the WHOLE liveness ladder (probe / instant exit / "
+                        f"negative vouch / focus) degrades to mtime gating."
                     )
 
     # --- Copilot event types (only the FETCH is transient) -----------------
@@ -1277,6 +1437,7 @@ def main() -> int:
     cursor_ours = None
     openclaw_ours = None
     hermes_ours = None
+    grok_ours = None
     try:
         codex_ours = read_codex_events()
         codex_rollout = read_codex_rollout_types()
@@ -1290,6 +1451,7 @@ def main() -> int:
         cursor_ours = read_cursor_events()
         openclaw_ours = read_openclaw_events()
         hermes_ours = read_hermes_events()
+        grok_ours = read_grok_events()
     except Exception as e:  # noqa: BLE001
         breaking.append(
             f"drift-watch cannot read our own source ({e}) — the parsers in "
@@ -1311,6 +1473,7 @@ def main() -> int:
             cursor_ours,
             openclaw_ours,
             hermes_ours,
+            grok_ours,
             breaking,
             review,
             errors,

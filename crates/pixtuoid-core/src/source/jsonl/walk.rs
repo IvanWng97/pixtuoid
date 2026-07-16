@@ -471,7 +471,12 @@ async fn emit_first_sight(
     // constant `roll`).
     let session_id = (decoders.id_derive)(&id_path(path));
     let id = AgentId::from_parts(source, &session_id);
-    let cwd = cwd.unwrap_or_default();
+    // Content-derived cwd wins; the PATH deriver is the fallback for sources
+    // whose transcript content carries none (grok's URL-encoded group dir) —
+    // an empty cwd here would put the slot on the unknown-cwd short reap.
+    let cwd = cwd
+        .or_else(|| (decoders.cwd_derive)(path))
+        .unwrap_or_default();
     let parent_id = detect_parent_id(path, source);
     let _ = tx
         .send((

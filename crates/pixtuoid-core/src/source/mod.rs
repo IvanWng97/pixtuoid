@@ -33,6 +33,7 @@ pub const REGISTERED_SOURCES: &[&str] = &[
     hermes::SOURCE_NAME,
     omp::SOURCE_NAME,
     openclaw::SOURCE_NAME,
+    grok::SOURCE_NAME,
 ];
 
 #[cfg(test)]
@@ -336,6 +337,18 @@ pub fn codex_pid_for_session(sessions_root: &std::path::Path, uuid: &str) -> Opt
     codex::live_codex_rollout_ids(sessions_root)?
         .pid_of
         .get(uuid)
+        .copied()
+}
+
+/// grok twin, keyed by the session id (== the transcript's parent-dir name)
+/// against grok's own `active_sessions.json` registry under `grok_root`
+/// (= `grok_home()`, the registry file's parent) — recycle-guarded by the
+/// `opened_at` identity check inside the probe.
+#[cfg(feature = "native")]
+pub fn grok_pid_for_session(grok_root: &std::path::Path, session_id: &str) -> Option<i32> {
+    grok::live_grok_session_ids(grok_root)?
+        .pid_of
+        .get(session_id)
         .copied()
 }
 

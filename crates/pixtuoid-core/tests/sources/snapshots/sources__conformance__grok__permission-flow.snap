@@ -1,0 +1,43 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- ActivityStart:
+    agent_id: 1497707818132825839
+    tool_use_id: call_9
+    detail:
+      Generic:
+        display: Delete scratch directory
+- SessionStart:
+    agent_id: 1497707818132825839
+    source: grok
+    session_id: permission-flow
+    cwd: /Users/dev/proj
+    parent_id: ~
+- Identity:
+    agent_id: 1497707818132825839
+    source: grok
+    session_id: permission-flow
+    cwd: /Users/dev/proj
+- ActivityStart:
+    agent_id: 1497707818132825839
+    tool_use_id: call_9
+    detail:
+      Generic:
+        display: "run_terminal_command: rm -rf scratch"
+- Identity:
+    agent_id: 1497707818132825839
+    source: grok
+    session_id: permission-flow
+    cwd: /Users/dev/proj
+- Waiting:
+    agent_id: 1497707818132825839
+    reason: Tool permission requested
+- Identity:
+    agent_id: 1497707818132825839
+    source: grok
+    session_id: permission-flow
+    cwd: /Users/dev/proj
+- ActivityEnd:
+    agent_id: 1497707818132825839
+    tool_use_id: call_9

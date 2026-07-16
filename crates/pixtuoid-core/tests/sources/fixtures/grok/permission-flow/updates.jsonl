@@ -1,0 +1,1 @@
+{"timestamp":1721131300,"method":"session/update","params":{"sessionId":"permission-flow","update":{"sessionUpdate":"tool_call","toolCallId":"call_9","title":"Delete scratch directory","kind":"delete","rawInput":{"command":"rm -rf scratch"}}}}

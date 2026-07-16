@@ -152,6 +152,11 @@ enum SeedStart {
     /// SessionStart in production; this seed stands in for that registration so
     /// the transcript path is exercised in isolation.
     CodexUuid,
+    /// Seed a `SessionStart` keyed the grok way (`grok_id_from_path`, the
+    /// transcript's parent-DIR name). Grok's line decoder emits only activity
+    /// for the root session (subagent lines register children) — the watcher's
+    /// first-sight (or any hook) registers the root in production.
+    GrokDir,
 }
 
 struct WireCase {
@@ -179,6 +184,10 @@ fn seed_session_start(seed: &SeedStart, source: &str, logical: &str) -> Option<A
         SeedStart::CodexUuid => {
             use pixtuoid_core::source::codex::codex_id_from_path;
             AgentId::from_parts(source, &codex_id_from_path(Path::new(logical)))
+        }
+        SeedStart::GrokDir => {
+            use pixtuoid_core::source::grok::grok_id_from_path;
+            AgentId::from_parts(source, &grok_id_from_path(Path::new(logical)))
         }
     };
     Some(AgentEvent::SessionStart {
@@ -320,6 +329,17 @@ fn agent_cases() -> Vec<WireCase> {
             transport: Transport::Jsonl,
             // The session header line carries its own SessionStart.
             seed: SeedStart::None,
+        },
+        WireCase {
+            name: "grok",
+            source: "grok",
+            fixture: "grok/tool-run/updates.jsonl",
+            decode: DecodeKind::Transcript,
+            transport: Transport::Jsonl,
+            // updates.jsonl carries only activity for the root (the watcher
+            // first-sight or any hook registers it in production) → seed keyed
+            // the grok_id_from_path (parent-dir) way.
+            seed: SeedStart::GrokDir,
         },
         // ---- hook-only sources (decode_hook_payload, Hook transport) ----
         // A hook event for an unknown session id REGISTERS it (hooks are proof
@@ -465,6 +485,11 @@ fn copilot_transcript_line_renders_a_painted_sprite() {
 #[test]
 fn omp_transcript_line_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("omp"));
+}
+
+#[test]
+fn grok_transcript_line_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_case("grok"));
 }
 
 #[test]

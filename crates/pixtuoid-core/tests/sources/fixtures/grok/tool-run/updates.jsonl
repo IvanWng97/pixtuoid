@@ -1,0 +1,5 @@
+{"timestamp":1721131200,"method":"session/update","params":{"sessionId":"tool-run","update":{"sessionUpdate":"tool_call","toolCallId":"call_1","title":"Run cargo test","kind":"execute","rawInput":{"command":"cargo test"}}}}
+{"timestamp":1721131201,"method":"session/update","params":{"sessionId":"tool-run","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"in_progress"}}}
+{"timestamp":1721131205,"method":"session/update","params":{"sessionId":"tool-run","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"completed"}}}
+{"timestamp":1721131206,"method":"_x.ai/session/update","params":{"sessionId":"tool-run","update":{"sessionUpdate":"model_changed","model_id":"grok-4-code","reasoning_effort":"high"},"_meta":{"eventId":"tool-run-4"}}}
+{"timestamp":1721131207,"method":"session/update","params":{"sessionId":"tool-run","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Done — tests pass."}}}}

@@ -332,6 +332,7 @@ async fn walk_once_with(
         check_ended,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
     };
     let live = Arc::new(Mutex::new(HashSet::new()));
     let ctx = WatchCtx {
@@ -349,6 +350,63 @@ async fn walk_once_with(
         events.push(ev);
     }
     events
+}
+
+/// The `with_cwd_deriver` seam (grok): a first-sight whose CONTENT head-scan
+/// yields no cwd must fall back to the PATH deriver — without it the
+/// registration lands empty-cwd and rides the reducer's unknown-cwd short
+/// reap. Content, when present, still wins (the deriver is a fallback only).
+#[tokio::test]
+async fn first_sight_cwd_falls_back_to_the_path_deriver_when_content_has_none() {
+    fn derived_cwd(_p: &Path) -> Option<PathBuf> {
+        Some(PathBuf::from("/derived/proj"))
+    }
+    async fn first_sight_cwd(line: &str) -> PathBuf {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("updates.jsonl");
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+        let source: Arc<str> = Arc::from("test");
+        let decoders = SourceDecoders {
+            decode_line: t_decode,
+            derive_label: t_label,
+            check_ended: t_ended,
+            id_derive: default_id_from_path,
+            path_filter: accept_all_paths,
+            cwd_derive: derived_cwd,
+        };
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+        let live = Arc::new(Mutex::new(HashSet::new()));
+        let ctx = WatchCtx {
+            source: &source,
+            cursors: &cursors,
+            seen: &seen,
+            tx: &tx,
+            window: Duration::from_secs(3600),
+            live: &live,
+        };
+        walk_jsonl(&path, decoders, &ctx).await;
+        drop(tx);
+        while let Ok((_, ev)) = rx.try_recv() {
+            if let AgentEvent::SessionStart { cwd, .. } = ev {
+                return cwd;
+            }
+        }
+        panic!("no SessionStart emitted for {line:?}");
+    }
+
+    // No content cwd → the path deriver fills it.
+    assert_eq!(
+        first_sight_cwd(r#"{"x":1}"#).await,
+        PathBuf::from("/derived/proj")
+    );
+    // A content cwd (the shared top-level extractor's shape for the
+    // unregistered "test" source) still WINS over the deriver.
+    assert_eq!(
+        first_sight_cwd(r#"{"cwd":"/content/proj"}"#).await,
+        PathBuf::from("/content/proj")
+    );
 }
 
 /// `walk_once` against a NON-EMPTY liveness snapshot, using the CC stem
@@ -371,6 +429,7 @@ async fn walk_once_live(
         check_ended: t_ended,
         id_derive: crate::source::claude_code::cc_id_from_path,
         path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -482,6 +541,7 @@ async fn walk_jsonl_honors_the_path_filter() {
         check_ended: t_ended,
         id_derive: default_id_from_path,
         path_filter: skip_full,
+        cwd_derive: no_cwd_from_path,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -685,6 +745,7 @@ async fn session_exit_drains_pending_bytes_so_a_straggler_walk_cannot_resurrect(
         check_ended: t_ended,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
     };
     let live = Arc::new(Mutex::new(HashSet::new()));
     let ctx = WatchCtx {
@@ -770,6 +831,7 @@ async fn session_exit_purges_live_so_a_probe_failure_pass_cannot_revouch() {
         check_ended: t_ended,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -830,6 +892,7 @@ fn t_decoders() -> SourceDecoders {
         check_ended: t_ended,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
     }
 }
 
@@ -1255,6 +1318,7 @@ async fn known_oversized_tail_emits_session_end_if_the_skipped_span_ended() {
         check_ended: t_ended,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
     };
     let live = Arc::new(Mutex::new(HashSet::new()));
     let ctx = WatchCtx {
@@ -1552,6 +1616,7 @@ async fn scan_pass_re_vouches_a_transiently_gated_live_file() {
         check_ended: t_ended,
         id_derive: crate::source::claude_code::cc_id_from_path,
         path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -2779,6 +2844,7 @@ async fn revouch_pass_prunes_deleted_files_from_cursors() {
         check_ended: t_ended,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
     };
     let ctx = WatchCtx {
         source: &source,

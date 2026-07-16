@@ -8,6 +8,7 @@ pub(crate) mod claude;
 pub(crate) mod codewhale;
 pub(crate) mod codex;
 pub(crate) mod cursor;
+pub(crate) mod grok;
 pub(crate) mod hermes;
 mod hook_cmd;
 // io stays pub(crate) for a STRONGER reason than its siblings: it holds the

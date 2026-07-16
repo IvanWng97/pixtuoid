@@ -22,8 +22,8 @@ use serde_json::Value;
 
 use crate::source::decoder::{extract_top_level_cwd, CwdExtractor, LineDecoder};
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, omp, openclaw, opencode,
-    reasonix, AgentEvent,
+    antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, omp, openclaw,
+    opencode, reasonix, AgentEvent,
 };
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for
@@ -304,6 +304,7 @@ pub const REGISTRY: &[SourceDescriptor] = &[
     HERMES,
     OMP,
     OPENCLAW,
+    GROK,
 ];
 
 /// Linear scan — at most a handful of entries, called on slot creation and
@@ -675,6 +676,60 @@ const HERMES: SourceDescriptor = SourceDescriptor {
     },
 };
 
+/// Grok Build (`grok`, xai-org/grok-build). TRANSCRIPT-BEARING **with** a hook
+/// target — the CC/Codex class, and the FIRST row combining a transcript with
+/// a claims-all custom hook decoder (grok's envelope is camelCase-keyed
+/// `hookEventName`, alien to the shared arms). Coalescing rests on
+/// `sessionId == the transcript's parent-dir name` (upstream joins the id into
+/// `session_dir`), mirrored by `grok_id_from_path`. Transcript =
+/// `{grok_home}/sessions/<enc-cwd>/<session-id>/updates.jsonl`, append-only;
+/// content carries NO cwd (path-derived via the watcher's cwd deriver — see
+/// `extract_grok_cwd`). Wire facts repo-derived @ 0.1.220-alpha.4 c68e39f6;
+/// `verified_version` stays "unknown" until a byte-real capture anchors it.
+const GROK: SourceDescriptor = SourceDescriptor {
+    name: grok::SOURCE_NAME,
+    label_prefix: "gk",
+    verified_version: "unknown",
+    version_probe: Some(&["grok", "--version"]),
+    kind: SourceKind::Agent {
+        transcript: Some(Transcript {
+            line_decoder: grok::decode_grok_line,
+            // Always-None: grok lines carry no cwd — the PATH carries it
+            // (URL-encoded group dir), applied via the watcher's cwd deriver.
+            cwd_extractor: grok::extract_grok_cwd,
+        }),
+        hook: HookDecoding {
+            id_key: IdKey::SessionId, // inert: custom claims all
+            custom: Some(grok::decode_grok_hook_custom),
+        },
+        caps: SourceCaps {
+            // grok's `session_end` hook does NOT fire on a plain TUI quit (the
+            // event loop breaks without draining the session actor — verified
+            // vs run_loop/dispatch @ c68e39f6), i.e. the DOMINANT exit path is
+            // signal-less; the hook_execution transcript marker is equally
+            // best-effort. The reliable exit authority is the liveness ladder
+            // over grok's own `active_sessions.json` (native half), which
+            // synthesizes SessionEnd — a probe, not a wire signal.
+            has_exit_signal: false,
+            // Every prompt fires `user_prompt_submit` (decoded → SessionStart,
+            // the Codex-class carrier), so a stale-swept LIVE session walks
+            // back in on its next prompt. Together with !has_exit_signal this
+            // opts grok into the short idle reap — correct for its untracked
+            // one-shot headless sessions, while live TUI sessions are
+            // vouch-exempt via the probe.
+            resurrects_on_prompt: true,
+            // A BLOCKING spawn's Task detail gets its post_tool_use at
+            // completion (background spawns never mint Task — the b1 note in
+            // `grok_tool_detail`), so delegations are not hook-silent.
+            delegations_are_hook_silent: false,
+        },
+        // First-party pid registry (`active_sessions.json`: session_id → pid,
+        // recycle-guarded by `opened_at`) — the probe answers focus clicks;
+        // a shim stamp would shadow it with an unguarded getppid (#527).
+        focus: FocusChannel::TranscriptProbe,
+    },
+};
+
 /// Oh My Pi (`omp`, omp.sh). TRANSCRIPT-ONLY (Copilot/Antigravity-class): the
 /// whole lifecycle is persisted to
 /// `<omp_agent_dir>/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl` (assistant
@@ -810,9 +865,10 @@ mod tests {
         assert_eq!(HERMES.name, hermes::SOURCE_NAME);
         assert_eq!(OMP.name, omp::SOURCE_NAME);
         assert_eq!(OPENCLAW.name, openclaw::SOURCE_NAME);
+        assert_eq!(GROK.name, grok::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 11, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 12, "new row? add its name-pin assert above");
     }
 
     #[test]
@@ -867,16 +923,20 @@ mod tests {
         );
     }
 
-    // The short-idle policy must fire for Codex ONLY: it is the one source
-    // that both lacks an exit signal AND self-heals on the next prompt.
-    // Antigravity lacks the signal but cannot resurrect — sweeping it short
-    // would make a live-but-idle ag session vanish permanently.
+    // The short-idle policy must fire for EXACTLY the sources that both lack
+    // an exit signal AND self-heal on the next prompt: Codex (the original
+    // carve-out) and grok (session_end doesn't fire on TUI quit; every prompt's
+    // `user_prompt_submit` re-registers — and grok's probe vouch additionally
+    // exempts live TUI sessions, so the reap effectively owns only the
+    // untracked headless one-shots and probe blind spots). Antigravity lacks
+    // the signal but cannot resurrect — sweeping it short would make a
+    // live-but-idle ag session vanish permanently.
     #[test]
-    fn short_idle_reap_fires_for_codex_only() {
+    fn short_idle_reap_fires_for_codex_and_grok_only() {
         for d in REGISTRY {
             assert_eq!(
                 d.caps().short_idle_reap(),
-                d.name == codex::SOURCE_NAME,
+                d.name == codex::SOURCE_NAME || d.name == grok::SOURCE_NAME,
                 "short_idle_reap mismatch for {:?}",
                 d.name
             );

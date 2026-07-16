@@ -187,6 +187,26 @@ pub(crate) const OPENCODE: Target = Target {
     extra_artifacts: None,
 };
 
+pub(crate) const GROK: Target = Target {
+    name: "grok",
+    core_source: pixtuoid_core::source::grok::SOURCE_NAME,
+    display_name: "Grok Build",
+    default_config_path: crate::install::grok::default_config_path,
+    hook_command: crate::install::grok::hook_command,
+    merge_install: crate::install::grok::merge_install,
+    merge_uninstall: crate::install::grok::merge_uninstall,
+    verify_schema: crate::install::grok::verify_schema,
+    // The drop-in file embeds the absolute shim path (grok direct-execs an
+    // argument-less command; attribution rides the handler env map), so an
+    // unresolvable binary is fatal.
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
+    // The hooks file we WRITE is ours alone (grok never creates it), and a
+    // post-uninstall stub still exists — probe grok's OWN root (bin/sessions)
+    // instead, the opencode/Reasonix rule.
+    presence_probe: Some(crate::install::grok::detect_installed),
+    extra_artifacts: None,
+};
+
 pub(crate) const CURSOR: Target = Target {
     name: "cursor",
     core_source: pixtuoid_core::source::cursor::SOURCE_NAME,
@@ -243,7 +263,7 @@ pub(crate) const OPENCLAW: Target = Target {
 };
 
 pub const TARGETS: &[&Target] = &[
-    &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &HERMES, &OPENCLAW,
+    &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &HERMES, &OPENCLAW, &GROK,
 ];
 
 // Test-gated: lookup-by-CLI-name has no prod caller (prod joins on the source id
