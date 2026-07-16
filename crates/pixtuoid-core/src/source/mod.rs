@@ -364,6 +364,7 @@ pub mod drift;
 pub(crate) mod exit_watch;
 #[cfg(feature = "native")]
 pub(crate) mod fd_probe;
+pub mod grok;
 pub mod hermes;
 #[cfg(feature = "native")]
 pub mod hook;

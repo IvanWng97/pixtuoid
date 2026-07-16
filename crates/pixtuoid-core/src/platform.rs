@@ -52,6 +52,27 @@ pub(crate) fn codex_home() -> PathBuf {
     resolve_codex_home(std::env::var("CODEX_HOME").ok(), user_home())
 }
 
+/// The grok home dir, matching grok-build's own resolution (`xai-grok-config`
+/// `paths.rs::grok_home`): `GROK_HOME` UNCONDITIONALLY when set (upstream takes
+/// the env var without an exists-check and `create_dir_all`s it — the opposite
+/// of codex's existing-dir gate), else `<home>/.grok` on EVERY OS (no XDG, no
+/// APPDATA). Upstream resolves home via the re-stabilized
+/// `std::env::home_dir()` (USERPROFILE on Windows, `$HOME` never consulted
+/// there) — [`user_home`]'s USERPROFILE-first order is the faithful mirror.
+/// Used for the sessions root, the installer's `hooks/pixtuoid.json` path, AND
+/// the `active_sessions.json` liveness probe, so the three can never disagree.
+pub(crate) fn grok_home() -> PathBuf {
+    resolve_grok_home(std::env::var("GROK_HOME").ok(), user_home())
+}
+
+/// Pure precedence core, separated so it's unit-testable without env mutation.
+fn resolve_grok_home(grok_home_env: Option<String>, home: String) -> PathBuf {
+    match nonempty(grok_home_env) {
+        Some(p) => PathBuf::from(p),
+        None => PathBuf::from(home).join(".grok"),
+    }
+}
+
 /// An env var value counts as UNSET when it's empty or whitespace-only — a
 /// whitespace-only path is never a valid home/config dir. The ONE spelling of
 /// that "empty env == unset" rule, shared by every resolver below (the module's
@@ -316,6 +337,37 @@ mod tests {
         assert_eq!(
             resolve_user_config_dir("freebsd", None, s("/xdg/cfg"), Path::new("/home/u")),
             PathBuf::from("/xdg/cfg")
+        );
+    }
+
+    #[test]
+    fn grok_home_takes_env_unconditionally_even_when_missing() {
+        // The deliberate difference from codex: grok honors GROK_HOME with NO
+        // exists-check (upstream create_dir_all's it), so a not-yet-created
+        // GROK_HOME must still win — the watcher/installer/probe will all
+        // point where grok is ABOUT to write.
+        let missing = std::env::temp_dir().join("pixtuoid-grok-home-missing-xyz");
+        let _ = std::fs::remove_dir_all(&missing);
+        assert_eq!(
+            resolve_grok_home(
+                Some(missing.to_string_lossy().into_owned()),
+                "/home/u".into()
+            ),
+            missing
+        );
+    }
+
+    #[test]
+    fn grok_home_falls_back_to_dot_grok_when_env_unset_or_empty() {
+        let expected = PathBuf::from("/home/u").join(".grok");
+        assert_eq!(resolve_grok_home(None, "/home/u".into()), expected);
+        assert_eq!(
+            resolve_grok_home(Some(String::new()), "/home/u".into()),
+            expected
+        );
+        assert_eq!(
+            resolve_grok_home(Some("   ".into()), "/home/u".into()),
+            expected
         );
     }
 
