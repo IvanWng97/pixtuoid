@@ -211,42 +211,6 @@ pub(crate) fn vending_drop(rng: &mut NoiseStream) -> Vec<f32> {
     out
 }
 
-/// Water-cooler glug — Minnaert bubble physics: three large bubbles, each a
-/// damped sine near its resonance whose pitch bends UP as it rises, the
-/// sequence stepping up as the air column shortens; a quiet pour wash.
-pub(crate) fn cooler_glug(rng: &mut NoiseStream) -> Vec<f32> {
-    let dur = 0.85;
-    let n = n_samples(dur);
-    let mut buf = vec![0.0f32; n];
-    let tau = std::f32::consts::TAU;
-    let f_base = 340.0;
-    for (i, &at) in [0.02f32, 0.28, 0.55].iter().enumerate() {
-        let d = 0.16;
-        let bn = n_samples(d);
-        let f0 = f_base * (1.0 + 0.18 * i as f32);
-        let env = env_ar(bn, 0.004, 0.05);
-        let mut phase = 0.0f32;
-        let bubble: Vec<f32> = (0..bn)
-            .map(|k| {
-                let t = k as f32 / SR;
-                let f = f0 * (1.0 + 0.12 * t / d);
-                phase += tau * f / SR;
-                phase.sin() * (-t * 22.0).exp() * env(k)
-            })
-            .collect();
-        place(&mut buf, &bubble, at, 0.9 - 0.1 * i as f32);
-    }
-    let raw: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
-    let pour = bandpass(&raw, 600.0, 2000.0);
-    let env_p = env_ar(n, 0.1, 0.3);
-    for (i, b) in buf.iter_mut().enumerate() {
-        *b += pour[i] * env_p(i) * 0.06;
-    }
-    let mut out = lowpass(&buf, 3500.0);
-    normalize(&mut out, 0.55);
-    out
-}
-
 // -------------------------------------------------------------------- beds
 
 /// The gentle-rain octave-band envelope, measured from the owner's chosen
@@ -361,13 +325,6 @@ mod tests {
             c_chime < 700.0,
             "door chime centroid {c_chime} must stay the warm low bell (~556Hz ratified)"
         );
-
-        let glug = cooler_glug(&mut rng);
-        let c_glug = centroid_hz(&glug);
-        assert!(
-            c_glug < 700.0,
-            "glug centroid {c_glug} must be a low bubble"
-        );
     }
 
     #[test]
@@ -391,7 +348,6 @@ mod tests {
             ("chime", door_chime()),
             ("printer", printer_whir(&mut rng)),
             ("vending", vending_drop(&mut rng)),
-            ("glug", cooler_glug(&mut rng)),
             ("drop", rain_drop(&mut rng)),
             ("texture", texture_bed(&mut rng)),
         ] {

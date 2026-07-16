@@ -39,7 +39,7 @@ pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
 pub struct OfficeRenderer {
     session: FloorSession,
     /// Ambient-audio gateway + cue tracker (#633). Inert unless installed.
-    /// Floating v1 feeds stems + door/glug cues; the appliance one-shots are
+    /// Floating v1 feeds stems + the door cue; the appliance one-shots are
     /// TUI-only for now (FloorSession doesn't surface waypoint occupancy —
     /// a deliberate Phase 1 scope cut, not an oversight).
     audio: crate::audio::AudioHandle,

@@ -57,7 +57,6 @@ struct AssetBank {
     door_chime: Arc<Vec<f32>>,
     printer_whir: Arc<Vec<f32>>,
     vending_drop: Arc<Vec<f32>>,
-    cooler_glug: Arc<Vec<f32>>,
     rain_bed: Arc<Vec<f32>>,
 }
 
@@ -76,7 +75,6 @@ impl AssetBank {
             door_chime: Arc::new(synth::door_chime()),
             printer_whir: Arc::new(synth::printer_whir(&mut rng)),
             vending_drop: Arc::new(synth::vending_drop(&mut rng)),
-            cooler_glug: Arc::new(synth::cooler_glug(&mut rng)),
             rain_bed: Arc::new(synth::rain_bed(&mut rng)),
         }
     }
@@ -86,7 +84,6 @@ impl AssetBank {
             OneShot::DoorChime => Arc::clone(&self.door_chime),
             OneShot::PrinterWhir => Arc::clone(&self.printer_whir),
             OneShot::VendingDrop => Arc::clone(&self.vending_drop),
-            OneShot::CoolerGlug => Arc::clone(&self.cooler_glug),
         }
     }
 }
@@ -448,7 +445,6 @@ mod listen_gate {
             (5.0, OneShot::DoorChime),
             (10.0, OneShot::PrinterWhir),
             (15.0, OneShot::VendingDrop),
-            (20.0, OneShot::CoolerGlug),
         ];
         for (name, stems, events, expect_sound) in [
             // Phase 1: an empty office is truly SILENT (texture waits for

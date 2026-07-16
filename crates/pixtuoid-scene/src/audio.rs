@@ -47,7 +47,6 @@ pub enum OneShot {
     DoorChime,
     PrinterWhir,
     VendingDrop,
-    CoolerGlug,
 }
 
 /// One frame of audio intent: target stem levels + the events that fired.
@@ -56,12 +55,6 @@ pub struct AudioFrame {
     pub stems: StemLevels,
     pub events: Vec<OneShot>,
 }
-
-/// How often the water cooler's AUDIO glug fires while the office is
-/// occupied. Deliberately NOT the visual bubble's 2s `GLUG_CYCLE_MS`
-/// (furniture.rs) — voicing that 1:1 would be a metronome; the sound is a
-/// sparse ambient accent, the visual is a continuous shimmer.
-const COOLER_GLUG_AUDIO_PERIOD_MS: u128 = 75_000;
 
 /// Cross-frame cue state — the audio twin of the painter session halves
 /// (`PerOffice` pattern). Diffs identity/occupancy sets frame-to-frame and
@@ -74,7 +67,6 @@ pub struct AudioCueTracker {
     primed: bool,
     seen_agents: std::collections::HashSet<pixtuoid_core::AgentId>,
     occupied: std::collections::HashSet<usize>,
-    last_glug_cycle: u128,
 }
 
 impl AudioCueTracker {
@@ -95,19 +87,14 @@ impl AudioCueTracker {
     ) -> Vec<OneShot> {
         use crate::layout::WaypointKind;
 
+        let _ = now; // kept in the signature: future time-keyed cues re-use it
         let ids: std::collections::HashSet<pixtuoid_core::AgentId> =
             agent_ids.into_iter().cloned().collect();
-        let glug_cycle = now
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            / COOLER_GLUG_AUDIO_PERIOD_MS;
 
         if !self.primed {
             self.primed = true;
             self.seen_agents = ids;
             self.occupied = occupied_waypoints.clone();
-            self.last_glug_cycle = glug_cycle;
             return Vec::new();
         }
 
@@ -132,12 +119,6 @@ impl AudioCueTracker {
             }
         }
         self.occupied = occupied_waypoints.clone();
-
-        // Sparse ambient cooler glug, only while someone is in the office.
-        if glug_cycle != self.last_glug_cycle && !self.seen_agents.is_empty() {
-            events.push(OneShot::CoolerGlug);
-        }
-        self.last_glug_cycle = glug_cycle;
 
         events
     }
@@ -306,25 +287,6 @@ mod tests {
             tr.observe(&ids, &occupied, kinds, T0),
             vec![OneShot::VendingDrop]
         );
-    }
-
-    #[test]
-    fn cooler_glug_fires_on_the_sparse_period_only_with_agents_present() {
-        let mut tr = AudioCueTracker::new();
-        let none = HashSet::new();
-        let period = Duration::from_millis(COOLER_GLUG_AUDIO_PERIOD_MS as u64);
-        tr.observe(&[aid(1)], &none, kinds, T0); // prime
-                                                 // same cycle → nothing
-        assert!(tr
-            .observe(&[aid(1)], &none, kinds, T0 + Duration::from_millis(10))
-            .is_empty());
-        // next cycle with an agent present → one glug
-        assert_eq!(
-            tr.observe(&[aid(1)], &none, kinds, T0 + period),
-            vec![OneShot::CoolerGlug]
-        );
-        // the cycle after that with an EMPTY office → silence
-        assert!(tr.observe(&[], &none, kinds, T0 + period * 2).is_empty());
     }
 
     #[test]

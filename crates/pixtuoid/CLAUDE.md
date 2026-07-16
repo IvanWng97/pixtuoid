@@ -220,7 +220,7 @@ src/
 │                       is inert everywhere, so callers never cfg; AssetBank pre-synthesizes EVERY buffer at
 │                       spawn on a fixed seed; run_loop = the device-agnostic thread body), dsp.rs (radix-2
 │                       FFT + brickwall bands + spectral-envelope noise shaping [circularly seamless bed
-│                       loops] + splitmix64 NoiseStream), synth.rs (the Phase 0 OWNER-RATIFIED recipes 1:1 —
+│                       loops] + splitmix64 NoiseStream), synth.rs (the Phase 0 OWNER-RATIFIED recipes 1:1 — elevator ding + cooler glug were later owner-CUT (dogfood round), the spec keeps their recipes —
 │                       change docs/superpowers/specs/2026-07-16-ambient-sound-phase0/ first, re-audition,
 │                       then mirror; spectral-sanity tests pin the fingerprints), mixer.rs (pure gain ramps
 │                       ~2s crossfade + typing-burst/raindrop schedulers — level-driven, no backlog replay),
@@ -231,7 +231,7 @@ src/
 │                       FLOOR-SCOPED (owner call): stems + door/appliance cues come from the floor
 │                       being VIEWED (per_floor_counts + floor_idx-filtered ids; tracker re-primes on
 │                       floor switch); rain stays global (weather, not agent activity). No elevator
-│                       ding (owner-cut). Floating feeds stems+door/glug only, scoped to its rendered
+│                       ding (owner-cut). Floating feeds stems + the door cue only, scoped to its rendered
 │                       floor (FloorSession doesn't surface occupancy — deliberate Phase 1 cut).
 │                       [audio] config: enabled default FALSE (strictly opt-in), volume clamped [0,1].
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM
