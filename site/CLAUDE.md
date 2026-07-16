@@ -17,8 +17,13 @@ Full detail: [`README.md`](README.md).
 `astro build` reads **six files from OUTSIDE `site/`** at build time, and a
 rename/move of any of them FAILS the build:
 
-- the workspace `Cargo.toml` → the displayed version (via `vite.define` in
-  `astro.config.mjs`).
+- the workspace `Cargo.toml` → the displayed version's FALLBACK only: the
+  primary source is the latest RELEASE tag (`git describe --tags --abbrev=0`
+  via `config/released-version.mjs` — main's Cargo.toml runs AHEAD of the
+  released version between a mid-cycle bump and its tag, and the site must
+  advertise what users can actually install). Both CI workflows checkout
+  with `fetch-depth: 0` so the tag path is the one real deploys take;
+  unit-tested in `config/released-version.test.mjs`.
 - `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING,
   KNOWLEDGE-ENGINEERING, PARALLEL-DELIVERY}.md` → rendered as `/config`,
   `/architecture`, `/contributing`, `/knowledge-base`,

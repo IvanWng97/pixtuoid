@@ -28,6 +28,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          # full history: the displayed version = latest release TAG
+          # (astro.config.mjs via config/released-version.mjs); a shallow
+          # tag-less checkout would silently fall back to Cargo.toml
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 26

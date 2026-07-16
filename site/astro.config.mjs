@@ -9,18 +9,28 @@ import { unified } from '@astrojs/markdown-remark';
 import { rewriteCspMeta } from './config/csp-hashes.mjs';
 import rehypeCallouts from './config/rehype-callouts.mjs';
 import { fetchStarCount } from './config/gh-stars.mjs';
+import { latestReleaseTag, resolveDisplayedVersion } from './config/released-version.mjs';
 
-// Single-source the displayed version from the workspace Cargo.toml so the boot
-// intro never goes stale on a release bump. Scope the match to the
-// [workspace.package] table so a dependency's line-anchored `version = "…"` (in a
-// [dependencies.x] sub-table) can't be picked up — and throw rather than silently
-// shipping a bogus version if the parse ever fails.
+// The DISPLAYED version is the latest RELEASE tag — what `cargo install`/brew
+// actually serve — not main's Cargo.toml, which runs AHEAD of the released
+// version between a mid-cycle bump and its release tag (see
+// config/released-version.mjs). The Cargo.toml parse survives as the
+// FALLBACK for tag-less builds (pages.yml/site.yml fetch full history so
+// real deploys never take it). Scope the match to the [workspace.package]
+// table so a dependency's line-anchored `version = "…"` (in a
+// [dependencies.x] sub-table) can't be picked up — and throw rather than
+// silently shipping a bogus fallback if the parse ever fails.
 const cargoToml = readFileSync(fileURLToPath(new URL('../Cargo.toml', import.meta.url)), 'utf8');
 const pkgSection = cargoToml.match(/\[workspace\.package\]([\s\S]*?)(?:\n\[|$)/)?.[1] ?? '';
-const version = pkgSection.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
-if (!version) {
+const cargoVersion = pkgSection.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+if (!cargoVersion) {
   throw new Error('astro.config: could not parse [workspace.package] version from ../Cargo.toml');
 }
+const { version, source: versionSource } = resolveDisplayedVersion(
+  latestReleaseTag(),
+  cargoVersion
+);
+console.log(`[pixtuoid] displayed version ${version} (from ${versionSource})`);
 
 // Build-time star count (§2): baked like the version — the CSP forbids a
 // runtime fetch. null on any failure; consumers omit the count (never fail).
