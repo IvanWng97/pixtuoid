@@ -12,6 +12,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("q", "quit"),
     ("Ctrl+C", "quit"),
     ("p", "pause / resume"),
+    ("m", "mute ambient sound"),
     ("t", "themes"),
     ("Tab", "agent dashboard"),
     ("s", "sources (connect / health)"),

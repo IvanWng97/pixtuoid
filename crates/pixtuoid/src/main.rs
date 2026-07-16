@@ -219,6 +219,7 @@ fn build_run_config(
         connected,
         log_path: Some(logging::log_file_path()),
         first_run,
+        audio: config::resolve_audio(&cfg),
     })
 }
 

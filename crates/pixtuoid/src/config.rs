@@ -56,6 +56,12 @@ pub struct AppConfig {
     /// stay last (a table written after an AoT would re-parent under it).
     #[serde(rename = "floating", default, skip_serializing_if = "Option::is_none")]
     pub floating: Option<FloatingConfigRaw>,
+    /// Ambient office sound — a single `[audio]` table (#633). Absent ⇒
+    /// DISABLED (sound is strictly opt-in; a terminal app must never speak
+    /// uninvited). Resolved by [`resolve_audio`]. Keep BEFORE `pets` (the
+    /// table-before-array-of-tables rule above).
+    #[serde(rename = "audio", default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AudioConfigRaw>,
     /// The office's pets — one `[[pets]]` stanza each (`kind` + optional
     /// `name`). Absent = all kinds with default names; `pets = []` = no pets;
     /// an unknown `kind` is warn-skipped (non-fatal). Resolved into the runtime
@@ -115,6 +121,32 @@ pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
         x: raw.x,
         y: raw.y,
         opacity: raw.opacity.unwrap_or(1.0).clamp(FLOATING_MIN_OPACITY, 1.0),
+    }
+}
+
+/// Raw `[audio]` table as parsed — both fields optional; [`resolve_audio`]
+/// applies the defaults + the volume clamp.
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AudioConfigRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f32>,
+}
+
+/// Resolved ambient-audio settings: enabled defaults FALSE (#633 — strictly
+/// opt-in), volume clamped to `[0.0, 1.0]`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AudioConfig {
+    pub enabled: bool,
+    pub volume: f32,
+}
+
+pub fn resolve_audio(config: &AppConfig) -> AudioConfig {
+    let raw = config.audio.clone().unwrap_or_default();
+    AudioConfig {
+        enabled: raw.enabled.unwrap_or(false),
+        volume: raw.volume.unwrap_or(1.0).clamp(0.0, 1.0),
     }
 }
 
@@ -441,6 +473,47 @@ pub fn resolve_pets(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_resolve_clamps_and_defaults() {
+        // absent table → disabled, full volume
+        let cfg = AppConfig::default();
+        let a = resolve_audio(&cfg);
+        assert!(!a.enabled, "audio is strictly opt-in (#633)");
+        assert_eq!(a.volume, 1.0);
+
+        // explicit enable + out-of-range volumes clamp BOTH sides
+        let mut cfg = AppConfig::default();
+        cfg.audio = Some(AudioConfigRaw {
+            enabled: Some(true),
+            volume: Some(-0.5),
+        });
+        let a = resolve_audio(&cfg);
+        assert!(a.enabled);
+        assert_eq!(a.volume, 0.0, "negative volume clamps up");
+        cfg.audio = Some(AudioConfigRaw {
+            enabled: Some(true),
+            volume: Some(1.5),
+        });
+        assert_eq!(resolve_audio(&cfg).volume, 1.0, "over-1 clamps down");
+        // partial table: enabled without volume keeps the default
+        cfg.audio = Some(AudioConfigRaw {
+            enabled: Some(true),
+            volume: None,
+        });
+        assert_eq!(resolve_audio(&cfg).volume, 1.0);
+    }
+
+    #[test]
+    fn audio_table_round_trips_through_toml() {
+        let toml = "[audio]\nenabled = true\nvolume = 0.4\n";
+        let cfg: AppConfig = toml::from_str(toml).expect("parses");
+        let a = resolve_audio(&cfg);
+        assert!(a.enabled);
+        assert!((a.volume - 0.4).abs() < 1e-6);
+    }
+
     use super::*;
 
     #[test]

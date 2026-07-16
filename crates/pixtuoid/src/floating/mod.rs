@@ -58,8 +58,15 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         pets,
         connected,
         config_path,
+        audio,
         ..
     } = cfg;
+    // Ambient audio (#633): same opt-in gate as the TUI runtime.
+    let audio_handle = if audio.enabled {
+        crate::audio::spawn(audio.volume)
+    } else {
+        crate::audio::AudioHandle::disabled()
+    };
 
     let app_config = config::load(&config_path, &mut Vec::new());
     let floating_cfg = config::resolve_floating(&app_config);
@@ -164,6 +171,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         scene_rx,
         floor_caps,
     );
+    app.set_audio(audio_handle);
     event_loop
         .run_app(&mut app)
         .context("running the floating window event loop")?;

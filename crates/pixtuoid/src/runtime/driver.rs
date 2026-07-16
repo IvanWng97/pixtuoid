@@ -58,7 +58,15 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         connected,
         log_path,
         first_run,
+        audio,
     } = cfg;
+    // Ambient audio (#633): spawn only when the user opted in — a disabled
+    // handle is inert everywhere else. The ONE audio gateway.
+    let audio_handle = if audio.enabled && !headless {
+        crate::audio::spawn(audio.volume)
+    } else {
+        crate::audio::AudioHandle::disabled()
+    };
     // Focus-jump pid point-query roots (cloned: build_source_set consumes the
     // originals). CC = projects root (sessions registry derived in-core);
     // Codex = the rollout tree the fd probe walks.
@@ -144,6 +152,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             log_path,
             first_run,
             focus_roots,
+            audio: audio_handle,
         })
         .await
     }

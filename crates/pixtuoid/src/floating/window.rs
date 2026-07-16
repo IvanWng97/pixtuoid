@@ -397,3 +397,10 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         }
     }
 }
+
+impl FloatingApp {
+    /// Install the ambient-audio gateway on the offscreen renderer (#633).
+    pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
+        self.renderer.set_audio(audio);
+    }
+}

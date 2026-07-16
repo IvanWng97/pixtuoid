@@ -38,13 +38,25 @@ pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
 /// continuous (no walk-flash).
 pub struct OfficeRenderer {
     session: FloorSession,
+    /// Ambient-audio gateway + cue tracker (#633). Inert unless installed.
+    /// Floating v1 feeds stems + door/glug cues; the appliance one-shots are
+    /// TUI-only for now (FloorSession doesn't surface waypoint occupancy —
+    /// a deliberate Phase 1 scope cut, not an oversight).
+    audio: crate::audio::AudioHandle,
+    audio_cues: pixtuoid_scene::audio::AudioCueTracker,
 }
 
 impl OfficeRenderer {
     pub fn new() -> Self {
         Self {
             session: FloorSession::new(),
+            audio: crate::audio::AudioHandle::disabled(),
+            audio_cues: pixtuoid_scene::audio::AudioCueTracker::new(),
         }
+    }
+
+    pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
+        self.audio = audio;
     }
 
     /// Render `scene`'s floor (per `floor_meta`) into the owned buffer at `buf_w`×`buf_h`
@@ -78,6 +90,20 @@ impl OfficeRenderer {
             floor_pet,
             debug_walkable: false,
         });
+        if self.audio.is_enabled() {
+            let counts = pixtuoid_scene::board::scene_stats(scene);
+            let precipitation = pixtuoid_scene::pixel_painter::precipitation_level(now);
+            let events = self.audio_cues.observe(
+                scene.agents.keys(),
+                &Default::default(), // no waypoint feed here (see the field doc)
+                |_| None,
+                now,
+            );
+            self.audio.frame(pixtuoid_scene::audio::AudioFrame {
+                stems: pixtuoid_scene::audio::stem_levels(&counts, precipitation),
+                events,
+            });
+        }
         self.session.buf()
     }
 

@@ -109,6 +109,9 @@ pub struct DrawCtx<'a> {
     /// New coffee carriers detected this frame — caller records these into
     /// the persistent `CoffeeState`.
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
+    /// Waypoint occupancy this frame (out-param like the carriers) — the
+    /// audio cue tracker's appliance feed (#633).
+    pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
     /// Drives entrance (EaseOutCubic/200ms) and dismissal (EaseInQuad/120ms).
     pub popup_scale: f32,
@@ -292,6 +295,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     ctx.last_mascot_pos = pixel_result.mascot_pos;
     ctx.chitchat_bubbles = pixel_result.chitchat_bubbles;
     ctx.new_coffee_carriers = pixel_result.new_coffee_carriers;
+    ctx.occupied_waypoints = pixel_result.occupied_waypoints;
 
     let mouse_pos = ctx.mouse_pos;
     let hovered = mouse_pos.and_then(|(mx, my)| {

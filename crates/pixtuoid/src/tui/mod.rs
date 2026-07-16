@@ -84,6 +84,8 @@ enum KeyAction {
     ThemeCancel,
     /// Navigate to this (already validated, in-range, no-transition) floor.
     NavigateFloor(usize),
+    /// Toggle ambient-audio mute (`m`, #633). A no-op on the disabled handle.
+    ToggleAudioMute,
     /// Toggle the live walkable / approach / route debug layer (`w`).
     /// Dev-only: the `w` dispatch arm is `#[cfg(debug_assertions)]`-gated, so in
     /// release this variant is never constructed — silence the dead-code lint
@@ -378,6 +380,7 @@ fn dispatch_key(
     }
     match code {
         KeyCode::Char('p') => KeyAction::TogglePause,
+        KeyCode::Char('m') => KeyAction::ToggleAudioMute,
         KeyCode::Char('t') => KeyAction::OpenThemePicker,
         KeyCode::Char('?') => KeyAction::ToggleHelp,
         KeyCode::Tab => KeyAction::ToggleDashboard,
@@ -508,6 +511,10 @@ pub(crate) struct TuiSession {
     /// The warn-floor log path — throttle-scanned for decode-drift breadcrumbs to
     /// drive the footer nudge (`main` owns the resolution; `None` = no surfacing).
     pub log_path: Option<std::path::PathBuf>,
+    /// The ambient-audio gateway (#633) — inert unless `[audio] enabled`.
+    /// The TUI feeds per-frame `AudioFrame`s (renderer-side) and fires the
+    /// painter-local elevator ding on floor navigation; `m` toggles mute.
+    pub audio: crate::audio::AudioHandle,
     /// Focus-jump pid point-query roots: (CC projects root, Codex sessions
     /// root) — threaded from RunConfig so a sprite click can resolve a
     /// transcript-family agent's pid at click time.
@@ -531,10 +538,13 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         log_path,
         focus_roots,
         first_run,
+        audio,
     } = session;
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
+    renderer.set_audio(audio.clone());
+    let mut audio_muted = false;
     // First-run onboarding "move-in" overlay (TOP of the modal precedence chain).
     // The roster is built only on first run; if no agent CLIs are detected there's
     // nothing to connect, so it stays closed and the office shows normally.
@@ -691,6 +701,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             }
                             KeyAction::NavigateFloor(target) => {
                                 renderer.navigate_floor(target, now);
+                                audio.one_shot(pixtuoid_scene::audio::OneShot::ElevatorDing);
+                            }
+                            KeyAction::ToggleAudioMute => {
+                                audio_muted = !audio_muted;
+                                audio.set_muted(audio_muted);
                             }
                             KeyAction::ToggleWalkableDebug => {
                                 let on = renderer.debug_walkable();
@@ -706,6 +721,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             KeyAction::DashboardJump => {
                                 if let Some(floor) = ui.dashboard_jump(&snapshot) {
                                     renderer.navigate_floor(floor, now);
+                                    audio.one_shot(pixtuoid_scene::audio::OneShot::ElevatorDing);
                                 }
                             }
                             KeyAction::DashboardFocus => {
@@ -1133,6 +1149,10 @@ mod dispatch_tests {
         assert_eq!(
             dispatch_key(KeyCode::Char('p'), NONE, modal(), nav()),
             KeyAction::TogglePause
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('m'), NONE, modal(), nav()),
+            KeyAction::ToggleAudioMute
         );
         assert_eq!(
             dispatch_key(KeyCode::Char('t'), NONE, modal(), nav()),

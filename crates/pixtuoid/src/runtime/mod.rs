@@ -61,6 +61,9 @@ pub struct RunConfig {
     /// one-time onboarding "move-in" overlay. Computed by `main` via
     /// `setup::is_first_run`; ignored by headless + `floating`.
     pub first_run: bool,
+    /// Resolved `[audio]` settings (#633) — enabled defaults FALSE, volume
+    /// pre-clamped by `config::resolve_audio`. Headless ignores it.
+    pub audio: crate::config::AudioConfig,
 }
 
 /// A live, shared set of connected source ids — the runtime mirror of the

@@ -113,6 +113,12 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// they always move together). Kept here, disjoint from the floor buffers, for
     /// borrow-free `DrawCtx` assembly.
     onboarding: crate::tui::welcome::OnboardingFrame,
+    /// Ambient-audio gateway + the per-office cue tracker (#633). draw_scene
+    /// feeds one `AudioFrame` per rendered frame (stem levels from the scene's
+    /// stats/weather + edge-detected one-shots); floor navigation dings via
+    /// the same handle from the event loop.
+    audio: crate::audio::AudioHandle,
+    audio_cues: pixtuoid_scene::audio::AudioCueTracker,
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
@@ -141,7 +147,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             dashboard: Default::default(),
             connection: Default::default(),
             onboarding: crate::tui::welcome::OnboardingFrame::default(),
+            audio: crate::audio::AudioHandle::disabled(),
+            audio_cues: pixtuoid_scene::audio::AudioCueTracker::new(),
         }
+    }
+
+    /// Install the ambient-audio gateway (inert by default — the disabled
+    /// handle swallows everything, so render code never needs a cfg/if).
+    pub fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
+        self.audio = audio;
     }
 
     /// Mirror the dashboard frame the event loop built this tick (a pre-built row
@@ -779,6 +793,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             chitchat_bubbles: Vec::new(),
             coffee: self.office.coffee.map(),
             new_coffee_carriers: Vec::new(),
+            occupied_waypoints: Default::default(),
             popup_scale,
             help_open: self.help_open,
             source_warning: self.source_warning.as_deref(),
@@ -791,8 +806,31 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // Consume draw_ctx fields before the mutable borrow of self.floors below.
         // std::mem::take avoids a partial move so drop(draw_ctx) can follow.
         let new_coffee_carriers = std::mem::take(&mut draw_ctx.new_coffee_carriers);
+        let occupied_waypoints = std::mem::take(&mut draw_ctx.occupied_waypoints);
         // drop draw_ctx here so we can re-borrow the floors freely.
         drop(draw_ctx);
+        // Ambient audio (#633): one AudioFrame per rendered frame — stem
+        // levels from the FULL scene's stats + live weather, one-shots from
+        // the cue tracker's edges. The disabled handle makes this free.
+        if self.audio.is_enabled() {
+            let counts = crate::tui::widgets::scene_stats(scene);
+            let precipitation = pixtuoid_scene::pixel_painter::precipitation_level(now);
+            let events = self.audio_cues.observe(
+                scene.agents.keys(),
+                &occupied_waypoints,
+                |idx| {
+                    self.cached_layout
+                        .as_deref()
+                        .and_then(|l| l.waypoints.get(idx))
+                        .map(|w| w.kind)
+                },
+                now,
+            );
+            self.audio.frame(pixtuoid_scene::audio::AudioFrame {
+                stems: pixtuoid_scene::audio::stem_levels(&counts, precipitation),
+                events,
+            });
+        }
         // The shared after-frame seam (coffee stamp + door-anim clamp) — the same
         // frame_epilogue render_floor/observe run, not a hand-copy (#423).
         pixtuoid_scene::floor::frame_epilogue(
