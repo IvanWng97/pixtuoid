@@ -167,7 +167,7 @@
   {
     "id": "grok",
     "badge": "gk·",
-    "badge_color": "#e6e6e6",
+    "badge_color": "#30d0e8",
     "name": "Grok Build",
     "url": "https://github.com/xai-org/grok-build",
     "status": "supported",

@@ -304,7 +304,7 @@ test('elevator shaft: the ding pulse joins the pix:paused set', async ({ page })
   ).toBe(false);
 });
 
-test('scroll budget: the page fits ~8.6 viewport-heights at 1440×900', async ({ browser }) => {
+test('scroll budget: the page fits ~8.75 viewport-heights at 1440×900', async ({ browser }) => {
   // The spec's original compression target (§4) was 6.5vh — a plan-authoring
   // proxy that turned out to bake in assumptions three LOCKED design
   // decisions invalidate: hold #1 stays full-viewport, the hero stays
@@ -343,12 +343,21 @@ test('scroll budget: the page fits ~8.6 viewport-heights at 1440×900', async ({
   // in absolute terms than Task 4's 0.27vh margin, but this floor's content
   // is now real (an image + real copy, not a placeholder), so a future
   // regression here is a real ballooning, not slack being eaten.
+  //
+  // The grok source (12th supported CLI, PR #640) moved the pin once more:
+  // sources.json grew a row, which is one more tools-table row plus one more
+  // hero badge chip — per-source content the page exists to show, not
+  // padding. Measured after the row landed: 8.637vh (was 8.472 at 11
+  // sources — ~0.165vh per the row + the chip row's wrap). 8.75 = that
+  // measured value plus ~0.11vh of headroom, the same order as Task 7's
+  // margin; the pin keeps catching section ballooning while scaling with
+  // the source roster it deliberately tracks.
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   await page.waitForLoadState('networkidle');
   const vh = await page.evaluate(() => document.documentElement.scrollHeight / window.innerHeight);
-  expect(vh).toBeLessThanOrEqual(8.6);
+  expect(vh).toBeLessThanOrEqual(8.75);
   await ctx.close();
 });
