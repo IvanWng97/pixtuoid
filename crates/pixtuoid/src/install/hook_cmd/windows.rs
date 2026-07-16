@@ -86,7 +86,7 @@ fn resolve_windows_command(
 /// a volume with 8.3 generation disabled (then the API yields the long path,
 /// which the caller re-checks).
 #[cfg(windows)]
-fn short_path_windows(long: &str) -> Option<String> {
+pub(super) fn short_path_windows(long: &str) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
 

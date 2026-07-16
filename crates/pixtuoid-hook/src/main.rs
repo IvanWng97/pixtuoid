@@ -99,7 +99,9 @@ fn main() -> Result<()> {
     if let Value::Object(map) = &mut payload {
         // Source precedence: the `--source <name>` argv flag (the Windows install
         // form — cmd.exe /C can't express a POSIX `VAR=value cmd` env-prefix) wins,
-        // then the `PIXTUOID_SOURCE` env var (the Unix install form). Either way the
+        // then the `PIXTUOID_SOURCE` env var (the Unix env-prefix form; grok
+        // delivers the SAME var via its handler `env` map instead of a shell
+        // prefix — this arm serves both). Either way the
         // daemon only ever sees the resulting `_pixtuoid_source` stamp. NB:
         // `--event` (env-mode) is orthogonal to source — CodeWhale's Unix install
         // resolves source via the env-prefix arm, its Windows install via `--source`;

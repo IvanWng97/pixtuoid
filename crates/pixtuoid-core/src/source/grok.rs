@@ -256,11 +256,15 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
             tool_use_id: None,
         }]),
         "subagent_start" => {
-            let child = subagent_child_id(obj, event)?;
+            let Some(child_session_id) = child_key(obj) else {
+                crate::source::drift::missing_field(SOURCE_NAME, event, "subagentId");
+                bail!("grok {event} payload missing subagentId")
+            };
+            let child = AgentId::from_parts(SOURCE_NAME, &child_session_id);
             let mut evs = vec![AgentEvent::SessionStart {
                 agent_id: child,
                 source: SOURCE_NAME.to_string(),
-                session_id: child_key(obj).unwrap_or_default(),
+                session_id: child_session_id,
                 // The envelope cwd is the PARENT's — correct for the default
                 // (inherited-cwd) child. A worktree-ISOLATED child actually
                 // runs elsewhere; its label is still fixed by the Rename below
@@ -346,16 +350,10 @@ fn subagent_child_id(obj: &serde_json::Map<String, Value>, event: &str) -> Resul
 /// of the two jobs `active_tasks` exists for applies.
 fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     let is_spawn = tool == "spawn_subagent" || args.and_then(|a| a.get("subagent_type")).is_some();
-    if is_spawn {
-        let blocking = args
-            .and_then(|a| a.get("background"))
-            .and_then(Value::as_bool)
-            == Some(false);
-        if blocking {
-            return ToolDetail::Task;
-        }
-        // Background (or default) spawn: fall through to a generic display —
-        // the `description` key below gives it a human-readable target.
+    // A background/default spawn falls through to the generic display (the
+    // `description` key below gives it a human-readable target).
+    if is_spawn && spawn_is_blocking(args) {
+        return ToolDetail::Task;
     }
     // Per-source target vocabulary; assembly + caps live in
     // `generic_tool_display` (the chokepoint — pitfall 3).
@@ -532,14 +530,31 @@ pub(crate) fn extract_grok_cwd(_v: &Value) -> Option<PathBuf> {
 /// with the SAME blocking-only rule as the hook side — see
 /// [`grok_tool_detail`] for the b1 WHY.
 fn grok_transcript_tool_detail(title: &str, raw_input: Option<&Value>) -> ToolDetail {
-    if let Some(args) = raw_input {
-        if args.get("subagent_type").is_some()
-            && args.get("background").and_then(Value::as_bool) == Some(false)
-        {
-            return ToolDetail::Task;
-        }
+    if raw_input.is_some_and(|a| a.get("subagent_type").is_some()) && spawn_is_blocking(raw_input) {
+        return ToolDetail::Task;
     }
     generic_tool_display(title, None)
+}
+
+/// Whether spawn args explicitly request a BLOCKING run (`false`), under
+/// EITHER spelling of the flag — the bool travels under two names by
+/// serialization layer (both verified upstream @ c68e39f6): the HOOK's
+/// `toolInput` is the model's RAW client-form args, where the model-facing
+/// schema renames `run_in_background` → `background` (xai-grok-agent
+/// config.rs `task_tool_config`); the ACP `tool_call`'s `rawInput` is the
+/// parsed `ToolInput` RE-serialized with the struct's own field names
+/// (`send_tool_call_start` → `serde_json::to_value`), i.e.
+/// `run_in_background` (xai-tool-types task.rs carries no serde rename).
+/// Reading both keys on both transports also survives either layer dropping
+/// its rename. (Upstream parses the flag LENIENTLY — a model-emitted
+/// `"false"` STRING still runs blocking — which this `as_bool` read misses
+/// toward the SAFE side only: a missed `false` skips the Task detail, never
+/// over-mints it into the b1 machinery.)
+fn spawn_is_blocking(args: Option<&Value>) -> bool {
+    ["background", "run_in_background"]
+        .iter()
+        .find_map(|k| args.and_then(|a| a.get(k)).and_then(Value::as_bool))
+        == Some(false)
 }
 
 /// The first-sight gate's session-ended checker over the transcript's tail
@@ -838,8 +853,10 @@ mod tests {
 
     #[test]
     fn blocking_spawn_is_task_background_and_default_are_not() {
-        // background:false (blocking) → PostToolUse == completion → CC Task
-        // semantics hold → ToolDetail::Task.
+        // The HOOK transport's toolInput carries the model's client-form args,
+        // where the schema renames the flag to `background` (upstream
+        // task_tool_config). background:false (blocking) → PostToolUse ==
+        // completion → CC Task semantics hold → ToolDetail::Task.
         let blocking = grok_tool_detail(
             "spawn_subagent",
             Some(&json!({"subagent_type": "explore", "background": false})),
@@ -870,6 +887,33 @@ mod tests {
             renamed.is_task(),
             "semantic detection still applies when blocking"
         );
+    }
+
+    #[test]
+    fn blocking_flag_reads_both_wire_spellings_on_both_transports() {
+        // The flag travels under TWO names by serialization layer (see
+        // `spawn_is_blocking`): hook toolInput = client-form `background`,
+        // transcript rawInput = canonical `run_in_background`. Each fn must
+        // accept EITHER so a layer dropping its rename can't kill the
+        // blocking detection (or worse, resurrect the b1 hazard unnoticed).
+        for key in ["background", "run_in_background"] {
+            let blocking = json!({"subagent_type": "explore", key: false});
+            assert!(
+                grok_tool_detail("spawn_subagent", Some(&blocking)).is_task(),
+                "hook side must read {key}"
+            );
+            assert!(
+                grok_transcript_tool_detail("Spawn subagent", Some(&blocking)).is_task(),
+                "transcript side must read {key}"
+            );
+            let background = json!({"subagent_type": "explore", key: true});
+            assert!(!grok_tool_detail("spawn_subagent", Some(&background)).is_task());
+            assert!(!grok_transcript_tool_detail("Spawn subagent", Some(&background)).is_task());
+        }
+        // A model-emitted STRING "false" (upstream parses leniently) is missed
+        // toward the SAFE side: no Task detail, never an over-mint.
+        let lenient = json!({"subagent_type": "explore", "background": "false"});
+        assert!(!grok_tool_detail("spawn_subagent", Some(&lenient)).is_task());
     }
 
     #[test]
@@ -1170,12 +1214,15 @@ mod tests {
 
     #[test]
     fn transcript_blocking_spawn_is_task_background_is_not() {
-        // Same b1 rule as the hook side, read from rawInput (no tool name on
-        // the wire — the semantic subagent_type field carries detection).
+        // Same b1 rule as the hook side, read from rawInput — which is the
+        // parsed ToolInput RE-serialized (internally tagged `variant` +
+        // canonical field names, so the flag is `run_in_background` here,
+        // NOT the hook side's client-form `background`).
         let blocking = decode_line(acp_line(json!({
             "sessionUpdate": "tool_call", "toolCallId": "c1",
             "title": "Spawn subagent",
-            "rawInput": {"subagent_type": "explore", "background": false, "prompt": "dig"}
+            "rawInput": {"variant": "Task", "subagent_type": "explore",
+                         "run_in_background": false, "prompt": "dig"}
         })));
         assert!(
             matches!(&blocking[..], [AgentEvent::ActivityStart { detail: Some(d), .. }] if d.is_task())
@@ -1183,7 +1230,7 @@ mod tests {
         let background = decode_line(acp_line(json!({
             "sessionUpdate": "tool_call", "toolCallId": "c2",
             "title": "Spawn subagent",
-            "rawInput": {"subagent_type": "explore", "prompt": "dig"}
+            "rawInput": {"variant": "Task", "subagent_type": "explore", "prompt": "dig"}
         })));
         assert!(
             matches!(&background[..], [AgentEvent::ActivityStart { detail: Some(d), .. }] if !d.is_task()),

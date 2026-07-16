@@ -16,9 +16,13 @@
 //! grok's shell heuristic entirely in the common case (a command string with no
 //! space/metachar is DIRECT-exec'd — no `sh -c`, no PowerShell). A path that
 //! DOES carry a space or metachar takes the shell route, so `hook_command`
-//! quotes it per-platform: single-quoted for Unix `sh -c`, `& '…'` for grok's
-//! default PowerShell on Windows (a `GROK_SHELL=cmd` user with a spacey shim
-//! path is an accepted residual — cmd can't call a quoted path portably here).
+//! quotes it per-platform: the shared POSIX single-quote for Unix `sh -c`; on
+//! Windows the DOS 8.3 short name first (metachar-free → back to direct exec,
+//! shell-agnostic — the #195 trick), falling back to the PowerShell
+//! call-operator `& '…'` only when 8.3 is disabled on the volume (then a
+//! Git-Bash-detected or `GROK_SHELL=cmd` setup is the accepted residual). A
+//! path containing `$` is REJECTED at install: grok env-expands command
+//! strings at LOAD time, before quoting can protect anything.
 //!
 //! grok dispatches hooks SEQUENTIALLY and AWAITED INLINE on the session actor,
 //! so every entry pins `timeout: 2` (seconds) — the shim's own bound is 200ms,
@@ -78,11 +82,32 @@ pub(crate) const GROK_EVENTS: &[&str] = &[
 
 /// `{grok_home}/hooks/pixtuoid.json` — the SAME `grok_home()` resolution the
 /// watcher's sessions root and the liveness probe ride (GROK_HOME
-/// unconditional, else `~/.grok`), so the three can never disagree.
+/// unconditional, else `~/.grok`), so the three can never disagree. HARD
+/// error when neither GROK_HOME nor a home dir resolves: grok's hook
+/// DISCOVERY gates on the fallible `user_grok_home()` (scans NOTHING in that
+/// environment — util/hooks.rs), so writing into `grok_home()`'s degenerate
+/// fallback would land hooks grok never reads (the home-anchored targets'
+/// rule: error with "pass --config" instead).
 pub(crate) fn default_config_path() -> Result<PathBuf> {
+    if !home_resolvable(
+        crate::install::io::nonempty_env("GROK_HOME").as_deref(),
+        pixtuoid_core::platform::user_home_opt().as_deref(),
+    ) {
+        anyhow::bail!(
+            "cannot resolve the home directory (HOME/USERPROFILE unset) and GROK_HOME is \
+             unset — grok would not read hooks written to a fallback path; pass --config <path>"
+        );
+    }
     Ok(pixtuoid_core::source::grok::grok_home()
         .join("hooks")
         .join("pixtuoid.json"))
+}
+
+/// Mirrors upstream `user_grok_home()`'s resolvability gate (`GROK_HOME` set
+/// OR a real home dir exists) — the condition under which grok's hook
+/// discovery actually scans `{grok_home}/hooks`.
+fn home_resolvable(grok_home_env: Option<&str>, home: Option<&str>) -> bool {
+    grok_home_env.is_some() || home.is_some()
 }
 
 /// Presence probe for auto-detect: grok's OWN root (`grok_home()` — grok
@@ -117,20 +142,45 @@ fn needs_shell_route(cmd: &str) -> bool {
 /// `--source` argument is deliberately absent — attribution rides the handler
 /// `env` map, keeping the command argument-less (and therefore direct-exec'd)
 /// on every platform.
+///
+/// A path containing `$` is REJECTED outright: grok env-expands `$VAR`/`${VAR}`
+/// in the command string at LOAD time (before any quoting applies), so no
+/// quoting can protect it — the expansion mangles the path (or refuses the
+/// spawn) and the hooks silently never fire. Better a loud install error than
+/// an installed-but-no-sprite.
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let path = crate::install::merge::hook_path_str(resolved)?;
+    if path.contains('$') {
+        anyhow::bail!(
+            "the hook binary path {path:?} contains '$' — grok env-expands hook command \
+             strings at load time, so this path cannot be installed faithfully; move the \
+             shim or pass --hook-path"
+        );
+    }
     if !needs_shell_route(path) {
         return Ok(path.to_string());
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        // POSIX single-quoting (sh -c route): ' → '\''.
-        Ok(format!("'{}'", path.replace('\'', r"'\''")))
+        // The sh -c route: POSIX single-quoting (the shared helper — one
+        // spelling of the escaping across all shell-quoting targets).
+        Ok(crate::install::hook_cmd::unix::shell_single_quote(path))
     }
     #[cfg(windows)]
     {
-        // grok's default Windows shell is pwsh/powershell (cmd only via
-        // GROK_SHELL=cmd): the call operator runs a quoted path; ' → ''.
+        // Prefer the DOS 8.3 short name: metachar-free by construction, so
+        // the command drops back to the argument-less direct-exec path — no
+        // shell at all, immune to grok's shell cascade (pwsh vs Git Bash vs
+        // GROK_SHELL=cmd all moot). The #195 trick Codex/Reasonix use.
+        if let Some(short) = crate::install::hook_cmd::windows_short_path(path) {
+            if !needs_shell_route(&short) {
+                return Ok(short);
+            }
+        }
+        // 8.3 unavailable (disabled on the volume): PowerShell call-operator
+        // form — correct for grok's DEFAULT shells (pwsh → powershell.exe);
+        // a Git-Bash-detected or GROK_SHELL=cmd setup with a spacey shim
+        // path on an 8.3-less volume is the accepted residual (module doc).
         Ok(format!("& '{}'", path.replace('\'', "''")))
     }
 }
@@ -166,9 +216,10 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 fn render_hooks_file(hook_cmd: &str) -> Value {
     let mut hooks = serde_json::Map::new();
     for event in GROK_EVENTS {
-        // NO `matcher` key on ANY group: lifecycle events (SessionStart,
-        // SessionEnd, Stop, UserPromptSubmit) REJECT a matcher as a load
-        // error upstream, and absent == match-all for the tool events.
+        // NO `matcher` key on ANY group: upstream rejects a matcher on a
+        // lifecycle event (SessionStart, SessionEnd, Stop, UserPromptSubmit)
+        // as a per-GROUP load error — that group's hooks silently never fire
+        // — and absent == match-all for the tool events.
         hooks.insert(
             (*event).to_string(),
             json!([{
@@ -187,9 +238,9 @@ fn render_hooks_file(hook_cmd: &str) -> Value {
 /// Install-schema verification (#309): sentinel present, EVERY registered
 /// event still carries a managed handler (catches an older install missing
 /// newly-registered events), the attribution env intact, no stray matcher (a
-/// hand-added matcher on a lifecycle event is an upstream LOAD error — the
-/// whole file would stop firing), and the shim path extracted for the on-disk
-/// stat.
+/// hand-added matcher on a lifecycle event is rejected per-GROUP upstream —
+/// that event's hook silently never fires, the half-dead class), and the shim
+/// path extracted for the on-disk stat.
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     let Ok(doc) = serde_json::from_str::<Value>(content.trim()) else {
         return SchemaParse::broken("~/.grok/hooks/pixtuoid.json does not parse as JSON");
@@ -212,8 +263,8 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
         for group in groups {
             if group.get("matcher").is_some() {
                 issues.push(format!(
-                    "grok event {event} carries a matcher — lifecycle events reject matchers \
-                     upstream (the file stops loading); reconnect grok"
+                    "grok event {event} carries a matcher — upstream rejects the group \
+                     (that event's hook never fires); reconnect grok"
                 ));
             }
             for handler in group
@@ -332,9 +383,11 @@ mod tests {
             hook_command(Path::new("/opt/bin/pixtuoid-hook"), false).unwrap(),
             "/opt/bin/pixtuoid-hook"
         );
-        // A spacey path takes the shell route → per-platform quoting.
+        // A spacey path takes the shell route → per-platform quoting. (On
+        // Windows the 8.3 short name is preferred first, but this fixture
+        // path doesn't exist → GetShortPathNameW fails → the `& '…'` form.)
         let spacey = hook_command(Path::new("/Users/Foo Bar/bin/pixtuoid-hook"), false).unwrap();
-        #[cfg(not(windows))]
+        #[cfg(unix)]
         assert_eq!(spacey, "'/Users/Foo Bar/bin/pixtuoid-hook'");
         #[cfg(windows)]
         assert_eq!(spacey, "& '/Users/Foo Bar/bin/pixtuoid-hook'");
@@ -343,6 +396,25 @@ mod tests {
             let cmd = hook_command(Path::new(p), false).unwrap();
             assert_eq!(extract_shim_path(&cmd), Some(PathBuf::from(p)), "{cmd}");
         }
+    }
+
+    #[test]
+    fn hook_command_rejects_a_dollar_path_loudly() {
+        // grok env-expands $VAR in command strings at LOAD time — quoting
+        // can't protect a `$`-carrying path, so installing it would be the
+        // silent installed-but-no-sprite class. Loud install error instead.
+        assert!(hook_command(Path::new("/opt/$weird/pixtuoid-hook"), false).is_err());
+    }
+
+    #[test]
+    fn config_path_requires_a_resolvable_home_or_grok_home() {
+        // Mirrors upstream user_grok_home(): grok's hook discovery scans
+        // NOTHING when neither resolves — an install must error, not write a
+        // file grok never reads.
+        assert!(home_resolvable(Some("/custom"), None));
+        assert!(home_resolvable(None, Some("/home/u")));
+        assert!(home_resolvable(Some("/custom"), Some("/home/u")));
+        assert!(!home_resolvable(None, None));
     }
 
     #[test]

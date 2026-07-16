@@ -16,6 +16,16 @@ pub(crate) mod unix;
 // `#[cfg(windows)]`.
 mod windows;
 
+/// The DOS 8.3 short name for an existing path (metachar-free by construction)
+/// — `None` when 8.3 generation is disabled on the volume. Exposed for targets
+/// whose hook runner is NOT cmd.exe (grok's pwsh/Git-Bash cascade): a short
+/// name needs no quoting under ANY shell, and an argument-less short path is
+/// direct-exec'd by grok without a shell at all.
+#[cfg(windows)]
+pub(crate) fn windows_short_path(long: &str) -> Option<String> {
+    windows::short_path_windows(long)
+}
+
 /// The shim's source/event flag tokens — the ONE spelling shared by the WRITERS
 /// (this module's exec/bare hook commands + CodeWhale's per-event tail) and the
 /// READERS (`verify::shell_shim_ref`, `hermes::exec_shim_ref`). Both surrounding
