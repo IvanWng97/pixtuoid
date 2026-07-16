@@ -58,6 +58,92 @@ pub struct AudioFrame {
     pub events: Vec<OneShot>,
 }
 
+/// How often the water cooler's AUDIO glug fires while the office is
+/// occupied. Deliberately NOT the visual bubble's 2s `GLUG_CYCLE_MS`
+/// (furniture.rs) — voicing that 1:1 would be a metronome; the sound is a
+/// sparse ambient accent, the visual is a continuous shimmer.
+const COOLER_GLUG_AUDIO_PERIOD_MS: u128 = 75_000;
+
+/// Cross-frame cue state — the audio twin of the painter session halves
+/// (`PerOffice` pattern). Diffs identity/occupancy sets frame-to-frame and
+/// emits each [`OneShot`] exactly once on the EDGE (a 30fps rebuild never
+/// re-fires; state updates as frames arrive — never derived by scanning
+/// backward). The FIRST observe only primes: attaching to a full office
+/// must not fire a door-chime volley.
+#[derive(Debug, Default)]
+pub struct AudioCueTracker {
+    primed: bool,
+    seen_agents: std::collections::HashSet<pixtuoid_core::AgentId>,
+    occupied: std::collections::HashSet<usize>,
+    last_glug_cycle: u128,
+}
+
+impl AudioCueTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Feed one frame's observations; returns the events that fired on this
+    /// frame's edges. `waypoint_kind` resolves an occupied-waypoint index to
+    /// its kind (painters pass a closure over `layout.waypoints`) so the
+    /// tracker never holds a `Layout` borrow and tests need no layout at all.
+    pub fn observe<'a>(
+        &mut self,
+        agent_ids: impl IntoIterator<Item = &'a pixtuoid_core::AgentId>,
+        occupied_waypoints: &std::collections::HashSet<usize>,
+        waypoint_kind: impl Fn(usize) -> Option<crate::layout::WaypointKind>,
+        now: std::time::SystemTime,
+    ) -> Vec<OneShot> {
+        use crate::layout::WaypointKind;
+
+        let ids: std::collections::HashSet<pixtuoid_core::AgentId> =
+            agent_ids.into_iter().cloned().collect();
+        let glug_cycle = now
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            / COOLER_GLUG_AUDIO_PERIOD_MS;
+
+        if !self.primed {
+            self.primed = true;
+            self.seen_agents = ids;
+            self.occupied = occupied_waypoints.clone();
+            self.last_glug_cycle = glug_cycle;
+            return Vec::new();
+        }
+
+        let mut events = Vec::new();
+
+        // Door chime: an id we have never seen walked in. Capped at ONE per
+        // frame — a workflow fleet arriving together is one door moment, not
+        // a chime chord.
+        if ids.difference(&self.seen_agents).next().is_some() {
+            events.push(OneShot::DoorChime);
+        }
+        self.seen_agents = ids;
+
+        // Appliance cues: a waypoint BECOMING occupied is the moment the
+        // matching feedback animation starts (sim.rs keys the printer-eject /
+        // vending-drop anims on this same set).
+        for &idx in occupied_waypoints.difference(&self.occupied) {
+            match waypoint_kind(idx) {
+                Some(WaypointKind::Printer) => events.push(OneShot::PrinterWhir),
+                Some(WaypointKind::VendingMachine) => events.push(OneShot::VendingDrop),
+                _ => {}
+            }
+        }
+        self.occupied = occupied_waypoints.clone();
+
+        // Sparse ambient cooler glug, only while someone is in the office.
+        if glug_cycle != self.last_glug_cycle && !self.seen_agents.is_empty() {
+            events.push(OneShot::CoolerGlug);
+        }
+        self.last_glug_cycle = glug_cycle;
+
+        events
+    }
+}
+
 /// The busy-ness tier index for the gain tables: 0 empty, 1 moderate, 2 busy.
 fn tier(counts: &StateCounts) -> usize {
     if counts.active >= BUSY_ACTIVE_MIN {
@@ -141,6 +227,105 @@ mod tests {
         // out-of-range precipitation is clamped, both sides
         assert_eq!(stem_levels(&counts(0), -1.0).rain, 0.0);
         assert_eq!(stem_levels(&counts(0), 2.0).rain, RAIN_GAIN);
+    }
+
+    use crate::layout::WaypointKind;
+    use pixtuoid_core::AgentId;
+    use std::collections::HashSet;
+    use std::time::{Duration, SystemTime};
+
+    fn aid(n: usize) -> AgentId {
+        AgentId::from_parts("test", &n.to_string())
+    }
+
+    /// A fixed waypoint-kind table: 5 = printer, 7 = vending, else couch.
+    fn kinds(idx: usize) -> Option<WaypointKind> {
+        match idx {
+            5 => Some(WaypointKind::Printer),
+            7 => Some(WaypointKind::VendingMachine),
+            _ => Some(WaypointKind::Couch),
+        }
+    }
+
+    const T0: SystemTime = SystemTime::UNIX_EPOCH;
+
+    #[test]
+    fn tracker_primes_silently_then_chimes_once_per_new_agent_wave() {
+        let mut tr = AudioCueTracker::new();
+        let none = HashSet::new();
+        // priming frame: an already-full office fires NOTHING (mid-attach)
+        assert!(tr.observe(&[aid(1)], &none, kinds, T0).is_empty());
+        // a new agent walks in → exactly one chime…
+        assert_eq!(
+            tr.observe(&[aid(1), aid(2)], &none, kinds, T0),
+            vec![OneShot::DoorChime]
+        );
+        // …and the same roster next frame re-fires nothing
+        assert!(tr.observe(&[aid(1), aid(2)], &none, kinds, T0).is_empty());
+        // THREE simultaneous arrivals = one door moment, not a chord
+        assert_eq!(
+            tr.observe(&[aid(1), aid(2), aid(3), aid(4), aid(5)], &none, kinds, T0),
+            vec![OneShot::DoorChime]
+        );
+        // an exit fires nothing; the SAME id returning chimes again
+        assert!(tr.observe(&[aid(1)], &none, kinds, T0).is_empty());
+        assert_eq!(
+            tr.observe(&[aid(1), aid(2)], &none, kinds, T0),
+            vec![OneShot::DoorChime]
+        );
+    }
+
+    #[test]
+    fn tracker_emits_printer_whir_exactly_once_per_animation() {
+        let mut tr = AudioCueTracker::new();
+        let ids = [aid(1)];
+        tr.observe(&ids, &HashSet::new(), kinds, T0); // prime
+        let at_printer: HashSet<usize> = [5].into();
+        assert_eq!(
+            tr.observe(&ids, &at_printer, kinds, T0),
+            vec![OneShot::PrinterWhir]
+        );
+        // still standing there N frames later → silence
+        assert!(tr.observe(&ids, &at_printer, kinds, T0).is_empty());
+        assert!(tr.observe(&ids, &at_printer, kinds, T0).is_empty());
+        // leaves, comes back → the animation restarts → a second whir
+        assert!(tr.observe(&ids, &HashSet::new(), kinds, T0).is_empty());
+        assert_eq!(
+            tr.observe(&ids, &at_printer, kinds, T0),
+            vec![OneShot::PrinterWhir]
+        );
+    }
+
+    #[test]
+    fn tracker_maps_vending_and_ignores_non_appliance_waypoints() {
+        let mut tr = AudioCueTracker::new();
+        let ids = [aid(1)];
+        tr.observe(&ids, &HashSet::new(), kinds, T0); // prime
+                                                      // couch (idx 2) is not an appliance; vending (idx 7) drops a can
+        let occupied: HashSet<usize> = [2, 7].into();
+        assert_eq!(
+            tr.observe(&ids, &occupied, kinds, T0),
+            vec![OneShot::VendingDrop]
+        );
+    }
+
+    #[test]
+    fn cooler_glug_fires_on_the_sparse_period_only_with_agents_present() {
+        let mut tr = AudioCueTracker::new();
+        let none = HashSet::new();
+        let period = Duration::from_millis(COOLER_GLUG_AUDIO_PERIOD_MS as u64);
+        tr.observe(&[aid(1)], &none, kinds, T0); // prime
+                                                 // same cycle → nothing
+        assert!(tr
+            .observe(&[aid(1)], &none, kinds, T0 + Duration::from_millis(10))
+            .is_empty());
+        // next cycle with an agent present → one glug
+        assert_eq!(
+            tr.observe(&[aid(1)], &none, kinds, T0 + period),
+            vec![OneShot::CoolerGlug]
+        );
+        // the cycle after that with an EMPTY office → silence
+        assert!(tr.observe(&[], &none, kinds, T0 + period * 2).is_empty());
     }
 
     #[test]

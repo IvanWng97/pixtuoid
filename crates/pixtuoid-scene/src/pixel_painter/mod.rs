@@ -55,6 +55,10 @@ pub struct PixelPassResult {
     /// frame. The caller inserts them into the persistent
     /// `CoffeeState` (carrier + steam-window stamp in one map).
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
+    /// Waypoint indices with an occupant this tick (the same sim observation
+    /// that drives the appliance feedback animations) — the audio cue
+    /// tracker's appliance feed (`crate::audio::AudioCueTracker::observe`).
+    pub occupied_waypoints: std::collections::HashSet<usize>,
 }
 
 /// The gateway mascot's screen frame — enough to hover-identify it (which
@@ -349,6 +353,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         mascot_pos,
         chitchat_bubbles: frame.chitchat_bubbles,
         new_coffee_carriers: frame.new_coffee_carriers,
+        occupied_waypoints: frame.occupied_waypoints,
     }
 }
 
