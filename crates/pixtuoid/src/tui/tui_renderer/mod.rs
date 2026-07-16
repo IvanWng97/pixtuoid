@@ -114,9 +114,9 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// borrow-free `DrawCtx` assembly.
     onboarding: crate::tui::welcome::OnboardingFrame,
     /// Ambient-audio gateway + the per-office cue tracker (#633). draw_scene
-    /// feeds one `AudioFrame` per rendered frame (stem levels from the scene's
-    /// stats/weather + edge-detected one-shots); floor navigation dings via
-    /// the same handle from the event loop.
+    /// feeds one `AudioFrame` per rendered frame — stem levels from the VIEWED
+    /// floor's stats + weather, plus edge-detected one-shots (#636 scoped both
+    /// to `current_floor`).
     audio: crate::audio::AudioHandle,
     audio_cues: pixtuoid_scene::audio::AudioCueTracker,
     /// The floor the cue tracker's occupancy set belongs to. Waypoint
