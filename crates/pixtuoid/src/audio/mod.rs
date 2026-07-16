@@ -27,7 +27,9 @@ use std::time::Instant;
 
 #[cfg(feature = "audio")]
 use mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
-use pixtuoid_scene::audio::{AudioFrame, OneShot};
+use pixtuoid_scene::audio::AudioFrame;
+#[cfg(feature = "audio")]
+use pixtuoid_scene::audio::OneShot;
 #[cfg(feature = "audio")]
 use sink::AudioSink;
 

@@ -87,7 +87,7 @@ impl AudioCueTracker {
     ) -> Vec<OneShot> {
         use crate::layout::WaypointKind;
 
-        let _ = now; // kept in the signature: future time-keyed cues re-use it
+        let _ = now; // per-frame clock; unused since the glug cut, kept for edge-cue timing
         let ids: std::collections::HashSet<pixtuoid_core::AgentId> =
             agent_ids.into_iter().cloned().collect();
 

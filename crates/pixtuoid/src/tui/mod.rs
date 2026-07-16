@@ -512,8 +512,8 @@ pub(crate) struct TuiSession {
     /// drive the footer nudge (`main` owns the resolution; `None` = no surfacing).
     pub log_path: Option<std::path::PathBuf>,
     /// The ambient-audio gateway (#633) — inert unless `[audio] enabled`.
-    /// The TUI feeds per-frame `AudioFrame`s (renderer-side) and fires the
-    /// painter-local elevator ding on floor navigation; `m` toggles mute.
+    /// The TUI feeds per-frame `AudioFrame`s (renderer-side, floor-scoped);
+    /// `m` toggles mute.
     pub audio: crate::audio::AudioHandle,
     /// Focus-jump pid point-query roots: (CC projects root, Codex sessions
     /// root) — threaded from RunConfig so a sprite click can resolve a
