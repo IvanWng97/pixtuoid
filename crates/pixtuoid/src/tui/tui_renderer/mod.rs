@@ -824,10 +824,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 self.audio_cues = pixtuoid_scene::audio::AudioCueTracker::new();
                 self.audio_floor = Some(self.current_floor);
             }
-            let counts = crate::tui::widgets::scene_stats(scene);
+            // You hear the floor you're LOOKING AT (owner call): typing and
+            // door cues come from the CURRENT floor only — an agent typing
+            // two floors up is silent until you ride down to it. Rain stays
+            // global (weather is outside the windows, not agent activity).
+            let counts = crate::tui::widgets::per_floor_counts(scene)
+                [self.current_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)];
             let precipitation = pixtuoid_scene::pixel_painter::precipitation_level(now);
+            let floor_ids = scene
+                .agents
+                .iter()
+                .filter(|(_, slot)| slot.floor_idx == self.current_floor)
+                .map(|(id, _)| id);
             let events = self.audio_cues.observe(
-                scene.agents.keys(),
+                floor_ids,
                 &occupied_waypoints,
                 |idx| {
                     self.cached_layout

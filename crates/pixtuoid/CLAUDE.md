@@ -227,10 +227,13 @@ src/
 │                       sink.rs (AudioSink seam: NullSink for CI/no-device, RodioSink = rodio 0.22 Player
 │                       glue, codecov-excluded winit-class). Audio NEVER blocks render: bounded channel,
 │                       drop-on-backpressure. TUI feeds one AudioFrame per rendered frame (renderer-side
-│                       cue tracker + DrawCtx.occupied_waypoints out-param); m toggles mute; both
-│                       navigate_floor sites ding. Floating feeds stems+door/glug only (FloorSession
-│                       doesn't surface occupancy — deliberate Phase 1 cut). [audio] config: enabled
-│                       default FALSE (strictly opt-in), volume clamped [0,1].
+│                       cue tracker + DrawCtx.occupied_waypoints out-param); m toggles mute. Audio is
+│                       FLOOR-SCOPED (owner call): stems + door/appliance cues come from the floor
+│                       being VIEWED (per_floor_counts + floor_idx-filtered ids; tracker re-primes on
+│                       floor switch); rain stays global (weather, not agent activity). No elevator
+│                       ding (owner-cut). Floating feeds stems+door/glug only, scoped to its rendered
+│                       floor (FloorSession doesn't surface occupancy — deliberate Phase 1 cut).
+│                       [audio] config: enabled default FALSE (strictly opt-in), volume clamped [0,1].
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM
 │                       from githubnext/monaspace v1.400 static — unmodified, so the OFL Reserved-Font-Name
 │                       clause is never triggered)

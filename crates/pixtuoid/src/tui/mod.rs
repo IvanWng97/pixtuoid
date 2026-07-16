@@ -707,7 +707,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             }
                             KeyAction::NavigateFloor(target) => {
                                 renderer.navigate_floor(target, now);
-                                audio.one_shot(pixtuoid_scene::audio::OneShot::ElevatorDing);
                             }
                             KeyAction::ToggleAudioMute => {
                                 audio_muted = !audio_muted;
@@ -727,7 +726,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             KeyAction::DashboardJump => {
                                 if let Some(floor) = ui.dashboard_jump(&snapshot) {
                                     renderer.navigate_floor(floor, now);
-                                    audio.one_shot(pixtuoid_scene::audio::OneShot::ElevatorDing);
                                 }
                             }
                             KeyAction::DashboardFocus => {

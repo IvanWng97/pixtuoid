@@ -54,7 +54,6 @@ const DROP_GAIN: f32 = 0.9;
 struct AssetBank {
     keystrokes: Vec<Arc<Vec<f32>>>,
     drops: Vec<Arc<Vec<f32>>>,
-    elevator_ding: Arc<Vec<f32>>,
     door_chime: Arc<Vec<f32>>,
     printer_whir: Arc<Vec<f32>>,
     vending_drop: Arc<Vec<f32>>,
@@ -74,7 +73,6 @@ impl AssetBank {
             drops: (0..DROP_POOL)
                 .map(|_| Arc::new(synth::rain_drop(&mut rng)))
                 .collect(),
-            elevator_ding: Arc::new(synth::elevator_ding(&mut rng)),
             door_chime: Arc::new(synth::door_chime()),
             printer_whir: Arc::new(synth::printer_whir(&mut rng)),
             vending_drop: Arc::new(synth::vending_drop(&mut rng)),
@@ -85,7 +83,6 @@ impl AssetBank {
 
     fn one_shot(&self, event: OneShot) -> Arc<Vec<f32>> {
         match event {
-            OneShot::ElevatorDing => Arc::clone(&self.elevator_ding),
             OneShot::DoorChime => Arc::clone(&self.door_chime),
             OneShot::PrinterWhir => Arc::clone(&self.printer_whir),
             OneShot::VendingDrop => Arc::clone(&self.vending_drop),
@@ -452,7 +449,6 @@ mod listen_gate {
             (10.0, OneShot::PrinterWhir),
             (15.0, OneShot::VendingDrop),
             (20.0, OneShot::CoolerGlug),
-            (25.0, OneShot::ElevatorDing),
         ];
         for (name, stems, events, expect_sound) in [
             // Phase 1: an empty office is truly SILENT (texture waits for

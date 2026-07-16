@@ -44,7 +44,6 @@ pub struct StemLevels {
 /// consumers play it exactly once per emission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OneShot {
-    ElevatorDing,
     DoorChime,
     PrinterWhir,
     VendingDrop,

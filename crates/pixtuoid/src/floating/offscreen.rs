@@ -91,10 +91,18 @@ impl OfficeRenderer {
             debug_walkable: false,
         });
         if self.audio.is_enabled() {
-            let counts = pixtuoid_scene::board::scene_stats(scene);
+            // floor-scoped like the TUI: you hear the floor the window shows
+            let counts = pixtuoid_scene::board::per_floor_counts(scene)[floor_meta
+                .floor_idx
+                .min(pixtuoid_core::state::MAX_FLOORS - 1)];
             let precipitation = pixtuoid_scene::pixel_painter::precipitation_level(now);
+            let floor_ids = scene
+                .agents
+                .iter()
+                .filter(|(_, slot)| slot.floor_idx == floor_meta.floor_idx)
+                .map(|(id, _)| id);
             let events = self.audio_cues.observe(
-                scene.agents.keys(),
+                floor_ids,
                 &Default::default(), // no waypoint feed here (see the field doc)
                 |_| None,
                 now,

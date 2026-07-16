@@ -93,29 +93,6 @@ fn midi_freq(m: f32) -> f32 {
     MIDI_A4 * 2f32.powf((m - 69.0) / 12.0)
 }
 
-/// Elevator arrival — a struck chime bar: INHARMONIC transverse modes at
-/// 1 : 2.76 : 5.40 (glockenspiel ratios; a 1:2:3 harmonic stack reads
-/// "organ"), detuned fundamental pair for the slow beat, strike transient.
-pub(crate) fn elevator_ding(rng: &mut NoiseStream) -> Vec<f32> {
-    let dur = 1.6;
-    let n = n_samples(dur);
-    let f0 = 870.0;
-    let mut buf = vec![0.0f32; n];
-    let raw: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
-    let strike = bandpass(&raw, 2500.0, 7000.0);
-    let tau = std::f32::consts::TAU;
-    for (i, b) in buf.iter_mut().enumerate() {
-        let t = i as f32 / SR;
-        let bar = (tau * (f0 - 0.8) * t).sin() * (-t * 2.2).exp()
-            + (tau * (f0 + 0.8) * t).sin() * (-t * 2.2).exp()
-            + 0.55 * (tau * f0 * 2.76 * t).sin() * (-t * 8.0).exp()
-            + 0.25 * (tau * f0 * 5.40 * t).sin() * (-t * 16.0).exp();
-        *b = bar * 0.5 + strike[i] * (-t * 300.0).exp() * 0.3;
-    }
-    normalize(&mut buf, 0.6);
-    buf
-}
-
 /// Door chime — a DESCENDING ding-dong (E5 → C5), warm harmonic bells with
 /// slow decay: deliberately DISTINCT from the elevator's bright inharmonic
 /// strike (centroid ~556Hz vs ~872Hz — one-shots must be spectrally
@@ -378,12 +355,11 @@ mod tests {
             "keystroke centroid {c_key} outside the bright-clack band"
         );
 
-        let ding = elevator_ding(&mut rng);
         let chime = door_chime();
-        let (c_ding, c_chime) = (centroid_hz(&ding), centroid_hz(&chime));
+        let c_chime = centroid_hz(&chime);
         assert!(
-            c_chime < c_ding,
-            "door chime ({c_chime}) must sit warmer/lower than the elevator ding ({c_ding})"
+            c_chime < 700.0,
+            "door chime centroid {c_chime} must stay the warm low bell (~556Hz ratified)"
         );
 
         let glug = cooler_glug(&mut rng);
@@ -412,7 +388,6 @@ mod tests {
         let mut rng = NoiseStream::new(9);
         for (name, buf) in [
             ("keystroke", keystroke(&mut rng)),
-            ("ding", elevator_ding(&mut rng)),
             ("chime", door_chime()),
             ("printer", printer_whir(&mut rng)),
             ("vending", vending_drop(&mut rng)),
