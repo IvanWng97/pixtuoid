@@ -168,7 +168,7 @@ mod tests {
         // HERE — and it must be Monaspace-covered, or the vocabulary changes.
         for ch in [
             '●', '○', '◐', '◌', '▲', '▼', '▸', '▾', '★', '⬢', '▮', '▯', '↳', '◷', '▤', '↑', '↓',
-            '·', '×', '⚠', '…', '⋮', '─', '│', '█', '▓', '▒', '░', '▀', '✓', '└', '├',
+            '·', '×', '⚠', '…', '⋮', '─', '│', '█', '▓', '▒', '░', '▀', '✓', '└', '├', 'Σ',
         ] {
             assert!(has_glyph(ch), "Monaspace Neon does not cover {ch:?}");
         }

@@ -368,6 +368,9 @@ mod tests {
             pid: None,
             model: None,
             effort: None,
+            tokens_used: 0,
+            last_usage_delta: 0,
+            last_usage_at: None,
         }
     }
 

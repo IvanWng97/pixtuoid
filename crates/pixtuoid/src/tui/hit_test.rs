@@ -627,6 +627,9 @@ mod tests {
             pid: None,
             model: None,
             effort: None,
+            tokens_used: 0,
+            last_usage_delta: 0,
+            last_usage_at: None,
         };
         let mut scene = SceneState::uniform(16);
         scene.agents.insert(id, slot);

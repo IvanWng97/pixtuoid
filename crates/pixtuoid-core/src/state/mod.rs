@@ -385,6 +385,25 @@ pub struct AgentSlot {
     /// which is honest (an idle agent isn't burning). serde-skipped.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub effort: Option<EffortObservation>,
+    /// Session-cumulative FRESH tokens (new input + cache writes + output —
+    /// cache READS excluded) accumulated from `AgentEvent::Usage` deltas.
+    /// RAW counter; the tier thresholds live in
+    /// `pixtuoid-scene::token_meter` (the burn-tier posture). serde-skipped
+    /// at zero so sources with no usage wire stay out of the goldens.
+    #[serde(skip_serializing_if = "u64_is_zero", default)]
+    pub tokens_used: u64,
+    /// The most recent Usage delta + its apply time — the falling-sheet
+    /// window's inputs (`token_meter::sheet_fall_dist`). A pair on purpose:
+    /// the sheet only falls for a delta that clears the scene's minimum, so
+    /// the paint pass needs the SIZE and the AGE of the same reading.
+    #[serde(skip_serializing_if = "u64_is_zero", default)]
+    pub last_usage_delta: u64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_usage_at: Option<SystemTime>,
+}
+
+fn u64_is_zero(v: &u64) -> bool {
+    *v == 0
 }
 
 /// A RAW effort string + WHEN it was last observed — the freshness the scene
@@ -647,6 +666,9 @@ mod tests {
             pid: None,
             model: None,
             effort: None,
+            tokens_used: 0,
+            last_usage_delta: 0,
+            last_usage_at: None,
         }
     }
 

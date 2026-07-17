@@ -51,6 +51,7 @@ pub mod physics;
 pub mod pixel_painter;
 pub mod pose;
 pub mod theme;
+pub mod token_meter;
 
 /// Test-only mutex serializing tests that mutate process-global environment
 /// variables (`XDG_CONFIG_HOME`). The crate's unit tests share one test binary,

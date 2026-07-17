@@ -109,6 +109,10 @@ pub struct FurnitureColors {
     pub tank_fish: Rgb,
     pub tank_fish_alt: Rgb,
     pub tank_plant: Rgb,
+    /// Token-meter paper tower (#632): the sheet face + the every-other-row
+    /// ream shading that makes the block read as STACKED PAPER, not a slab.
+    pub paper: Rgb,
+    pub paper_shade: Rgb,
 }
 
 #[derive(Debug, Clone)]

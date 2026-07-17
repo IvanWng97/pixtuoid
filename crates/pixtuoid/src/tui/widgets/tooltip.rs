@@ -225,6 +225,15 @@ pub(crate) fn paint_hover_tooltip(
         compact_hms(session_secs),
         agent.tool_call_count
     );
+    // Token-meter row fold (#632): the session's cumulative FRESH spend —
+    // the exact number the desk's paper tower tiers on. Skipped at zero so
+    // sources with no usage wire keep their old dossier byte-for-byte.
+    if agent.tokens_used > 0 {
+        stats.push_str(&format!(
+            " \u{b7} \u{3a3} {} tok",
+            pixtuoid_scene::token_meter::compact_tokens(agent.tokens_used)
+        ));
+    }
     // Active-% meter folded into the stats line (height budget). Fresh agents show no
     // meter (the % is noise before ~5s of accounting); an exiting agent shows none
     // either (keyed off the exiting-first `kind`, matching the tool suppression).
@@ -628,6 +637,9 @@ mod tests {
             pid: None,
             model: None,
             effort: None,
+            tokens_used: 0,
+            last_usage_delta: 0,
+            last_usage_at: None,
         };
         let mut scene = SceneState::uniform(12);
         scene.agents.insert(id, slot);

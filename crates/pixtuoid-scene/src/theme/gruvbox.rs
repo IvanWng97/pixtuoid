@@ -282,6 +282,16 @@ pub static GRUVBOX: Theme = Theme {
             g: 0x97,
             b: 0x1a,
         },
+        paper: Rgb {
+            r: 0xeb,
+            g: 0xdb,
+            b: 0xb2,
+        },
+        paper_shade: Rgb {
+            r: 0xbd,
+            g: 0xae,
+            b: 0x93,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

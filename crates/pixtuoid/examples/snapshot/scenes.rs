@@ -249,6 +249,12 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 pid: None,
                 model: None,
                 effort: None,
+                // Token-meter gallery spread (#632): cycle the desks across
+                // all four tiers so the paper towers show in every capture —
+                // values one step past each tier threshold (250K/2M/16M ×8).
+                tokens_used: [0, 400_000, 3_000_000, 20_000_000][i % 4],
+                last_usage_delta: 0,
+                last_usage_at: None,
             },
         );
     }
@@ -457,6 +463,9 @@ pub(crate) fn meeting_scene(
                 pid: None,
                 model: None,
                 effort: None,
+                tokens_used: 0,
+                last_usage_delta: 0,
+                last_usage_at: None,
             },
         );
     }
@@ -570,6 +579,9 @@ pub(crate) fn dashboard_scene(now: SystemTime) -> SceneState {
                 pid: None,
                 model: None,
                 effort: None,
+                tokens_used: 0,
+                last_usage_delta: 0,
+                last_usage_at: None,
             },
         );
     }
@@ -718,6 +730,9 @@ pub(crate) fn anim_scene(
             pid: None,
             model: None,
             effort: None,
+            tokens_used: 0,
+            last_usage_delta: 0,
+            last_usage_at: None,
         },
     );
     (s, skip_ms)

@@ -242,6 +242,26 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 effort: None,
             });
         }
+        // Token-meter usage observation (#632): every assistant line carries
+        // `message.usage` for its API call. FRESH spend only — new input +
+        // cache WRITES + output; `cache_read_input_tokens` is re-served
+        // context, not new spend (and is ~95% of the raw total, so including
+        // it would drown the signal). Sidechain lines carry usage too and key
+        // to the same session id — the meter is the SESSION's total burn,
+        // inline Task subagents included. Zero readings are skipped so
+        // synthetic/tool turns don't churn the slot.
+        if let Some(usage) = message.get("usage").and_then(|u| u.as_object()) {
+            let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+            let fresh = field("input_tokens")
+                .saturating_add(field("cache_creation_input_tokens"))
+                .saturating_add(field("output_tokens"));
+            if fresh > 0 {
+                out.push(AgentEvent::Usage {
+                    agent_id,
+                    fresh_tokens: fresh,
+                });
+            }
+        }
     }
     let content = message.get("content");
     match (ty, content) {
@@ -380,6 +400,49 @@ mod tests {
         assert!(
             evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: None, .. } if m == "claude-fable-5")),
             "assistant model must surface, got {evs:?}"
+        );
+    }
+
+    #[test]
+    fn assistant_usage_becomes_a_fresh_token_observation() {
+        // Live-transcript shape (CC 2.x): fresh = input + cache WRITES +
+        // output; cache READS are re-served context and MUST be excluded
+        // (they are ~95% of the raw total and would drown the meter).
+        let v = json!({
+            "type": "assistant",
+            "message": {"model": "claude-fable-5", "content": [], "usage": {
+                "input_tokens": 1200, "cache_creation_input_tokens": 50000,
+                "cache_read_input_tokens": 940000, "output_tokens": 5300}}
+        });
+        let evs = decode_cc_line("/p/ses-1.jsonl", "claude-code", v).unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                AgentEvent::Usage {
+                    fresh_tokens: 56500,
+                    ..
+                }
+            )),
+            "expected fresh=1200+50000+5300 (cache reads excluded), got {evs:?}"
+        );
+    }
+
+    #[test]
+    fn usage_free_and_zero_usage_assistant_lines_stay_silent() {
+        // No usage object at all.
+        let v = json!({"type": "assistant", "message": {"content": []}});
+        let evs = decode_cc_line("/p/ses-1.jsonl", "claude-code", v).unwrap();
+        assert!(!evs.iter().any(|e| matches!(e, AgentEvent::Usage { .. })));
+        // An all-zero reading (synthetic/tool turns) must not churn the slot.
+        let v = json!({
+            "type": "assistant",
+            "message": {"content": [], "usage": {
+                "input_tokens": 0, "cache_read_input_tokens": 123456, "output_tokens": 0}}
+        });
+        let evs = decode_cc_line("/p/ses-1.jsonl", "claude-code", v).unwrap();
+        assert!(
+            !evs.iter().any(|e| matches!(e, AgentEvent::Usage { .. })),
+            "cache-read-only reading must be silent, got {evs:?}"
         );
     }
 

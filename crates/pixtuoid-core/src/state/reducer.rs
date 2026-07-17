@@ -712,6 +712,22 @@ impl Reducer {
                     }
                 }
             }
+            AgentEvent::Usage {
+                agent_id,
+                fresh_tokens,
+            } => {
+                // Pure counter accumulation — updates an EXISTING slot only
+                // (usage never registers a session; unknown id = no-op, the
+                // ModelInfo posture). Saturating: a hostile/corrupt transcript
+                // can't overflow the counter. The delta + apply-time stamp
+                // feed the scene's falling-sheet window; the cumulative total
+                // feeds its tier ladder.
+                if let Some(slot) = scene.agents.get_mut(&agent_id) {
+                    slot.tokens_used = slot.tokens_used.saturating_add(fresh_tokens);
+                    slot.last_usage_delta = fresh_tokens;
+                    slot.last_usage_at = Some(now);
+                }
+            }
         }
     }
 
@@ -1118,6 +1134,9 @@ impl Reducer {
                 pid: None,
                 model: None,
                 effort: None,
+                tokens_used: 0,
+                last_usage_delta: 0,
+                last_usage_at: None,
             },
         );
         true

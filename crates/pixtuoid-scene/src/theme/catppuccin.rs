@@ -283,6 +283,16 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 0xe3,
             b: 0xa1,
         },
+        paper: Rgb {
+            r: 0xf2,
+            g: 0xe9,
+            b: 0xde,
+        },
+        paper_shade: Rgb {
+            r: 0xc4,
+            g: 0xba,
+            b: 0xa8,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

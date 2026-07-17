@@ -197,6 +197,17 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   (the theme-PICKER UI — the [t] preview overlay — lives in tui/widgets/theme_picker.rs, not here)
 ├── pet.rs          PetKind (Cat, Dog) + per-kind static data; Pet{kind,name} (a configured office pet) + Pet::defaulted; select_pet_for_floor(u64,&[Pet])->Option<&Pet>; PetState (heart-anim interaction)
 ├── chitchat.rs     venue-keyed group/solo speech bubbles (VenueKey::Room vs ::Waypoint)
+├── token_meter.rs  token meter (#632) — burn.rs's sibling: RAW counters live on the slot
+│                   (AgentSlot::{tokens_used, last_usage_delta, last_usage_at}, core), ALL
+│                   interpretation here. token_tier (×TIER_FACTOR=8 geometric ladder off
+│                   TIER_BASE_TOKENS=250K → 250K/2M/16M, MAX_TIER=3 cap; two-population
+│                   calibration in the module doc), sheet_fall_dist (the falling-sheet window:
+│                   delta ≥ SHEET_MIN_DELTA_TOKENS=25K within SHEET_FALL_MS, integer ease-in —
+│                   never `epoch_ms as f32`), compact_tokens (the dossier Σ format). The paint
+│                   half is drawable.rs::paint_token_stack (paper tower on the desk's right
+│                   wing, 2px/ream, T3 teeters 1px east; theme colors FurnitureColors::{paper,
+│                   paper_shade} ×6 themes); tier-0 renders byte-identical to the pre-meter
+│                   desk (default-on safety, test-pinned)
 ├── embedded_pack.rs  include_str! the default character pack at compile time (from this crate's own
 │                   ../sprites/default/, watched by pixtuoid-scene's build.rs for rerun-if-changed) →
 │                   sprite::format::load_pack_from_strings; --pack-dir merges OPTIONAL_FURNITURE over it

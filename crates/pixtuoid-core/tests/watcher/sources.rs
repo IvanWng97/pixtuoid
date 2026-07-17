@@ -182,6 +182,68 @@ async fn claude_code_source_run_emits_session_start_from_jsonl() {
     handle.abort();
 }
 
+// #632: a usage-bearing assistant line must surface AgentEvent::Usage through
+// the REAL Source::run glue (the decoder unit test can't see a seam dropping
+// the new variant between the watcher and the channel).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn claude_code_source_run_emits_usage_from_jsonl() {
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().join("projects");
+    let project_dir = projects_root.join("proj-cu");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let transcript = project_dir.join("ses-cu.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let mut src = ClaudeCodeSource::default_paths();
+    src.projects_root = projects_root;
+    let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let line = serde_json::json!({
+        "type": "assistant",
+        "sessionId": "ses-cu",
+        "cwd": "/repo",
+        "message": {
+            "role": "assistant",
+            "content": [],
+            "usage": {
+                "input_tokens": 1200,
+                "cache_creation_input_tokens": 50000,
+                "cache_read_input_tokens": 940000,
+                "output_tokens": 5300
+            }
+        }
+    });
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut got_usage = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::Usage { fresh_tokens, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            assert_eq!(fresh_tokens, 56_500, "fresh = in + cache_create + out");
+            got_usage = true;
+            break;
+        }
+    }
+    assert!(
+        got_usage,
+        "ClaudeCodeSource::run should surface Usage from a usage-bearing line"
+    );
+    handle.abort();
+}
+
 // CopilotSource::run drives a JsonlWatcher over <sessions_root>/<id>/events.jsonl
 // with the parent-dir id-deriver. The e2e gap that unit tests can't cover: does
 // the real watcher RECURSE into the <sessionId>/ dir, pick up the constant-named

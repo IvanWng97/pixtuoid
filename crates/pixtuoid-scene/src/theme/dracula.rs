@@ -275,6 +275,16 @@ pub static DRACULA: Theme = Theme {
             g: 0xfa,
             b: 0x7a,
         },
+        paper: Rgb {
+            r: 0xf0,
+            g: 0xec,
+            b: 0xf4,
+        },
+        paper_shade: Rgb {
+            r: 0xc0,
+            g: 0xba,
+            b: 0xd0,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

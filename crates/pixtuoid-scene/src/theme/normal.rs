@@ -278,6 +278,16 @@ pub static NORMAL: Theme = Theme {
             g: 0x8f,
             b: 0x3a,
         },
+        paper: Rgb {
+            r: 0xe6,
+            g: 0xe2,
+            b: 0xd4,
+        },
+        paper_shade: Rgb {
+            r: 0xc2,
+            g: 0xbd,
+            b: 0xac,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

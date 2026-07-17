@@ -69,6 +69,13 @@ pub(super) enum DrawableKind<'a> {
         screen_glow: Option<Rgb>,
         has_coffee: bool,
         coffee_steam: bool,
+        /// Token-meter paper tower (#632): 0 = no tower (byte-identical to
+        /// the pre-meter desk), 1..=3 = ream count. Derived at enqueue via
+        /// `token_meter::token_tier(occupant.tokens_used)`.
+        token_tier: u8,
+        /// A falling sheet's distance FALLEN (px) when a big usage reading
+        /// is mid-drop (`token_meter::sheet_fall_dist`), else `None`.
+        sheet_fall: Option<u16>,
     },
     Character {
         agent: &'a AgentSlot,
@@ -687,6 +694,8 @@ pub(super) fn paint_drawable(
             screen_glow,
             has_coffee,
             coffee_steam,
+            token_tier,
+            sheet_fall,
         } => {
             let divider = theme.office.cubicle_divider;
             if !is_last_col {
@@ -717,6 +726,7 @@ pub(super) fn paint_drawable(
                 blit_frame(frame, desk.x, desk.y.saturating_sub(1), buf);
             }
             paint_desk_coffee(buf, *desk, *has_coffee, *coffee_steam, now, theme);
+            paint_token_stack(buf, *desk, *token_tier, *sheet_fall, theme);
             if let Some(tint) = screen_glow {
                 paint_screen_glow(buf, desk.x, desk.y, now, *tint, theme);
             }
@@ -1021,6 +1031,70 @@ fn paint_desk_coffee(
     }
 }
 
+/// Token-meter paper tower (#632): `tier` reams (2px each, 3px wide) stacked
+/// on the desk surface against the monitor's east side (sprite cols 11-13 —
+/// the right wood wing, the coffee cup's mirror), growing NORTH past the
+/// bezel at T3 so the silhouette reads across the room. The T3 top sheet
+/// teeters 1px east ("about to topple" = the maxed-out statement). Alternate
+/// rows use `paper_shade` so the block reads as stacked reams, not a slab.
+/// A `sheet_fall` mid-drop paints one loose sheet above the stack top —
+/// mock-verified at half-block scale before this implementation (the
+/// pin-visual round: the 3px-wide low "wing pile" variant was rejected as
+/// sub-legible; the vertical tower won on silhouette).
+fn paint_token_stack(
+    buf: &mut RgbBuffer,
+    desk: Point,
+    tier: u8,
+    sheet_fall: Option<u16>,
+    theme: &crate::theme::Theme,
+) {
+    if tier == 0 {
+        return;
+    }
+    let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
+        if x < buf.width() && y < buf.height() {
+            buf.put(x, y, c);
+        }
+    };
+    // Base row = the desk surface (same row the coffee cup's shadow sits on).
+    let base_y = desk.y + STACK_BASE_DY;
+    let h = tier as u16 * STACK_PX_PER_TIER;
+    for i in 0..h {
+        let y = base_y.saturating_sub(i);
+        let c = if i % 2 == 1 {
+            theme.furniture.paper_shade
+        } else {
+            theme.furniture.paper
+        };
+        let teeter = tier == crate::token_meter::MAX_TIER && i == h - 1;
+        let dx = u16::from(teeter);
+        for xoff in 0..STACK_W {
+            put(buf, desk.x + STACK_X_OFF + xoff + dx, y, c);
+        }
+    }
+    if let Some(dist) = sheet_fall {
+        // The loose sheet starts SHEET_FALL_PX above the stack top and has
+        // fallen `dist`; at landing it merges into the pile (not painted).
+        let stack_top = base_y.saturating_sub(h - 1);
+        let remaining = crate::token_meter::SHEET_FALL_PX.saturating_sub(dist);
+        if remaining > 0 {
+            let sy = stack_top.saturating_sub(remaining);
+            for xoff in 0..STACK_W {
+                put(buf, desk.x + STACK_X_OFF + xoff, sy, theme.furniture.paper);
+            }
+        }
+    }
+}
+
+/// Tower geometry, all relative to the 14×8 desk sprite: the stack hugs the
+/// monitor's east side on the right wood wing (cols 11-13), its base on the
+/// surface row `desk.y + 3`. 2px per ream: the beautify skill pins 1px
+/// vertical detail as sub-legible — a 2px step is the smallest that reads.
+const STACK_X_OFF: u16 = 11;
+const STACK_W: u16 = 3;
+const STACK_BASE_DY: u16 = 3;
+const STACK_PX_PER_TIER: u16 = 2;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1216,6 +1290,133 @@ mod tests {
         );
     }
 
+    fn desk_cubicle_drawable(
+        desk: Point,
+        token_tier: u8,
+        sheet_fall: Option<u16>,
+    ) -> Drawable<'static> {
+        Drawable {
+            anchor_y: desk.y
+                + crate::layout::furniture_def(crate::layout::Furniture::Desk)
+                    .visual
+                    .h,
+            kind: DrawableKind::DeskCubicle {
+                desk,
+                is_last_col: true,
+                has_cabinet: false,
+                screen_glow: None,
+                has_coffee: false,
+                coffee_steam: false,
+                token_tier,
+                sheet_fall,
+            },
+        }
+    }
+
+    fn paper_pixel_count(buf: &RgbBuffer, th: &crate::theme::Theme) -> usize {
+        let mut n = 0;
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
+                let c = buf.get(x, y);
+                if c == th.furniture.paper || c == th.furniture.paper_shade {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    #[test]
+    fn tier_zero_desk_paints_no_paper() {
+        // Default-on safety (#632): a desk with no usage renders byte-free of
+        // the paper palette — sources with no usage wire look exactly as
+        // before the meter existed.
+        let pack = test_pack();
+        let mut cache = FrameCache::new();
+        let th = theme();
+        let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
+        let d = desk_cubicle_drawable(Point { x: 40, y: 30 }, 0, None);
+        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        assert_eq!(paper_pixel_count(&buf, th), 0);
+    }
+
+    #[test]
+    fn token_stack_grows_two_px_per_tier_with_a_t3_teeter() {
+        let pack = test_pack();
+        let th = theme();
+        let desk = Point { x: 40, y: 30 };
+        let base_y = desk.y + STACK_BASE_DY;
+        let mut counts = Vec::new();
+        for tier in 1..=3u8 {
+            let mut cache = FrameCache::new();
+            let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
+            let d = desk_cubicle_drawable(desk, tier, None);
+            paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+            counts.push(paper_pixel_count(&buf, th));
+            // Base row always paints paper across the 3-wide stack column.
+            for xoff in 0..STACK_W {
+                assert_eq!(
+                    buf.get(desk.x + STACK_X_OFF + xoff, base_y),
+                    th.furniture.paper,
+                    "tier {tier} base row col {xoff}"
+                );
+            }
+            // The row just above the stack top stays unpainted (height pins
+            // the tier; the T3 teeter shifts east, it doesn't grow taller).
+            let top_y = base_y - (tier as u16 * STACK_PX_PER_TIER - 1);
+            let above = buf.get(desk.x + STACK_X_OFF, top_y - 1);
+            assert!(
+                above != th.furniture.paper && above != th.furniture.paper_shade,
+                "tier {tier} must top out at {top_y}"
+            );
+        }
+        // Strictly taller stacks per tier…
+        assert!(counts[0] < counts[1] && counts[1] < counts[2], "{counts:?}");
+        // …and the T3 top sheet teeters: its east overhang column is painted.
+        let mut cache = FrameCache::new();
+        let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
+        let d = desk_cubicle_drawable(desk, 3, None);
+        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        let t3_top = base_y - (3 * STACK_PX_PER_TIER - 1);
+        let overhang = buf.get(desk.x + STACK_X_OFF + STACK_W, t3_top);
+        assert!(
+            overhang == th.furniture.paper || overhang == th.furniture.paper_shade,
+            "T3 top sheet must overhang 1px east, got {overhang:?}"
+        );
+    }
+
+    #[test]
+    fn falling_sheet_paints_above_the_stack_and_lands_silently() {
+        let pack = test_pack();
+        let th = theme();
+        let desk = Point { x: 40, y: 30 };
+        let base_y = desk.y + STACK_BASE_DY;
+        let stack_top = base_y - (STACK_PX_PER_TIER - 1);
+        // Mid-fall: fallen 2 of SHEET_FALL_PX → the sheet paints at
+        // stack_top − (FALL_PX − 2).
+        let mut cache = FrameCache::new();
+        let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
+        let d = desk_cubicle_drawable(desk, 1, Some(2));
+        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        let sy = stack_top - (crate::token_meter::SHEET_FALL_PX - 2);
+        assert_eq!(buf.get(desk.x + STACK_X_OFF, sy), th.furniture.paper);
+        // Fully fallen: the sheet has merged into the pile — nothing paints
+        // above the stack top.
+        let mut cache = FrameCache::new();
+        let mut buf2 = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
+        let d = desk_cubicle_drawable(desk, 1, Some(crate::token_meter::SHEET_FALL_PX));
+        paint_drawable(&d, &mut buf2, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        for y in 0..stack_top {
+            for xoff in 0..STACK_W {
+                let c = buf2.get(desk.x + STACK_X_OFF + xoff, y);
+                assert!(
+                    c != th.furniture.paper && c != th.furniture.paper_shade,
+                    "landed sheet must not linger at ({xoff},{y})"
+                );
+            }
+        }
+    }
+
     fn theme() -> &'static crate::theme::Theme {
         crate::theme::theme_by_name("normal").expect("theme")
     }
@@ -1252,6 +1453,8 @@ mod tests {
                 screen_glow: None,
                 has_coffee: false,
                 coffee_steam: false,
+                token_tier: 0,
+                sheet_fall: None,
             },
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());

@@ -1346,6 +1346,65 @@ fn model_info_for_an_unknown_agent_never_registers() {
 }
 
 #[test]
+fn usage_accumulates_saturating_and_stamps_the_last_reading() {
+    // #632: Usage deltas accumulate onto the slot; each apply stamps the
+    // delta + its arrival time (the falling-sheet window's inputs).
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "ses_u");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "ses_u".into(),
+            cwd: PathBuf::from("/w"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Jsonl,
+    );
+    let usage = |fresh_tokens: u64| AgentEvent::Usage {
+        agent_id: id,
+        fresh_tokens,
+    };
+    r.apply(&mut scene, usage(56_500), t0, Transport::Jsonl);
+    let t1 = t0 + Duration::from_secs(30);
+    r.apply(&mut scene, usage(120_000), t1, Transport::Jsonl);
+    let slot = &scene.agents[&id];
+    assert_eq!(slot.tokens_used, 176_500);
+    assert_eq!(slot.last_usage_delta, 120_000);
+    assert_eq!(slot.last_usage_at, Some(t1));
+    // Saturating accumulation: a corrupt/hostile reading can't wrap the counter.
+    r.apply(&mut scene, usage(u64::MAX), t1, Transport::Jsonl);
+    assert_eq!(scene.agents[&id].tokens_used, u64::MAX);
+}
+
+#[test]
+fn usage_for_an_unknown_agent_never_registers() {
+    // Usage is a JSONL observation, not proof of life — the ModelInfo posture.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let ghost = AgentId::from_parts("claude-code", "ses_ghost_u");
+    for transport in [Transport::Jsonl, Transport::Hook] {
+        r.apply(
+            &mut scene,
+            AgentEvent::Usage {
+                agent_id: ghost,
+                fresh_tokens: 1_000_000,
+            },
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000),
+            transport,
+        );
+        assert!(
+            scene.agents.is_empty(),
+            "Usage must not synthesize a slot ({transport:?})"
+        );
+    }
+}
+
+#[test]
 fn hook_identity_registers_unknown_id_with_real_identity() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();

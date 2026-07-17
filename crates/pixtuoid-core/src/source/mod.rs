@@ -259,6 +259,23 @@ pub enum AgentEvent {
         /// synthesized `"ultra"`/`"ultrathink"` marker labels).
         effort: Option<String>,
     },
+    /// A FRESH-token spend observation from a source's wire (the #632 token
+    /// meter): CC assistant lines carry `message.usage` per API call (fresh =
+    /// `input_tokens + cache_creation_input_tokens + output_tokens` — cache
+    /// READS are re-served context, not new spend), Codex `token_count`
+    /// carries a per-turn `last_token_usage`. Each event is that reading's
+    /// DELTA; the reducer accumulates onto an EXISTING slot only (unknown id
+    /// = no-op — usage never registers a session) and stamps the delta +
+    /// arrival time the scene's falling-sheet window reads. JSONL-only (no
+    /// hook carries usage), so it never enters hook-wins dedup. Zero-delta
+    /// readings are skipped at decode. Interpretation (tier thresholds, the
+    /// sheet-fall window) lives in `pixtuoid-scene::token_meter` — the
+    /// RAW-store/interpret-at-paint posture `ModelInfo` documents.
+    Usage {
+        agent_id: AgentId,
+        /// Fresh tokens this reading: new input + cache writes + output.
+        fresh_tokens: u64,
+    },
 }
 
 /// A cached agent pid PLUS the kernel start marker read when it was stamped
@@ -301,6 +318,7 @@ impl AgentEvent {
             AgentEvent::ProofOfLife { agent_id, .. } => *agent_id,
             AgentEvent::Identity { agent_id, .. } => *agent_id,
             AgentEvent::ModelInfo { agent_id, .. } => *agent_id,
+            AgentEvent::Usage { agent_id, .. } => *agent_id,
         }
     }
 }

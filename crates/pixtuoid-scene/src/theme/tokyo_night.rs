@@ -275,6 +275,16 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 0xce,
             b: 0x6a,
         },
+        paper: Rgb {
+            r: 0xd5,
+            g: 0xdc,
+            b: 0xed,
+        },
+        paper_shade: Rgb {
+            r: 0xa5,
+            g: 0xad,
+            b: 0xc8,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

@@ -31,6 +31,9 @@ fn slot(state: ActivityState, age_ms: u64) -> (AgentSlot, SystemTime) {
         pid: None,
         model: None,
         effort: None,
+        tokens_used: 0,
+        last_usage_delta: 0,
+        last_usage_at: None,
     };
     (s, now)
 }
@@ -364,6 +367,9 @@ fn entry_animation_overrides_normal_pose_for_first_4s() {
         pid: None,
         model: None,
         effort: None,
+        tokens_used: 0,
+        last_usage_delta: 0,
+        last_usage_at: None,
     };
     let probe = now0 + Duration::from_millis(1500);
     let l = layout();
@@ -613,6 +619,9 @@ fn entry_walk_does_not_carry_coffee() {
         pid: None,
         model: None,
         effort: None,
+        tokens_used: 0,
+        last_usage_delta: 0,
+        last_usage_at: None,
     };
     let probe = now0 + Duration::from_millis(1500);
     let l = layout();
@@ -662,6 +671,9 @@ fn derive_state_only_skips_entry_override() {
         pid: None,
         model: None,
         effort: None,
+        tokens_used: 0,
+        last_usage_delta: 0,
+        last_usage_at: None,
     };
     let probe = now0 + Duration::from_millis(1500);
     let l = layout();

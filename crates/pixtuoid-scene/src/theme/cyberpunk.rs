@@ -259,6 +259,16 @@ pub static CYBERPUNK: Theme = Theme {
             g: 0xe0,
             b: 0x6a,
         },
+        paper: Rgb {
+            r: 0xd8,
+            g: 0xe4,
+            b: 0xea,
+        },
+        paper_shade: Rgb {
+            r: 0xa4,
+            g: 0xb4,
+            b: 0xc0,
+        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

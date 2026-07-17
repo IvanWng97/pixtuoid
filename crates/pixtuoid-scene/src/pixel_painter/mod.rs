@@ -820,6 +820,11 @@ fn enqueue_desk_cubicles<'a>(
                     .and_then(|t| ctx.now.duration_since(*t).ok())
                     .is_some_and(|d| d.as_secs() < COFFEE_STEAM_WINDOW_SECS)
             });
+        // Token meter (#632): the tower tracks the OCCUPANT's cumulative
+        // fresh-token counter; an exiting/empty desk shows no tower (the
+        // occupant filter above already excludes exiting slots).
+        let token_tier = occupant.map_or(0, |a| crate::token_meter::token_tier(a.tokens_used));
+        let sheet_fall = occupant.and_then(|a| crate::token_meter::sheet_fall_dist(a, ctx.now));
         drawables.push(Drawable {
             anchor_y: desk.y + desk_def.visual.h,
             kind: DrawableKind::DeskCubicle {
@@ -829,6 +834,8 @@ fn enqueue_desk_cubicles<'a>(
                 screen_glow,
                 has_coffee,
                 coffee_steam,
+                token_tier,
+                sheet_fall,
             },
         });
     }

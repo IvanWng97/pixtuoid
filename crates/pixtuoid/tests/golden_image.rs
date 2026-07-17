@@ -75,6 +75,9 @@ fn populated_scene(now: SystemTime) -> SceneState {
                 pid: None,
                 model: None,
                 effort: None,
+                tokens_used: 0,
+                last_usage_delta: 0,
+                last_usage_at: None,
             },
         );
     }

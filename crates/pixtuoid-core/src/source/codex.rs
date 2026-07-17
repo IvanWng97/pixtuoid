@@ -195,6 +195,38 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         ("event_msg", "task_complete")
         | ("event_msg", "turn_complete")
         | ("event_msg", "turn_aborted") => vec![end()],
+        // Token-meter usage observation (#632): `token_count` fires per turn
+        // with `info.last_token_usage` (that turn's reading — the cumulative
+        // twin `total_token_usage` is deliberately NOT read: the reducer
+        // accumulates deltas, and summing a running total would double-count).
+        // FRESH spend only: codex's `input_tokens` INCLUDES the cached share
+        // (`cached_input_tokens` ⊂ input, live-rollout-verified: total =
+        // input + output), so fresh input = input − cached (saturating —
+        // upstream reporting quirks must not wrap). `reasoning_output_tokens`
+        // is additive alongside `output_tokens` in codex's accounting.
+        // A `token_count` without `info` (rate-limit-only pings) emits
+        // nothing, as does a zero reading.
+        ("event_msg", "token_count") => {
+            let last = payload
+                .and_then(|p| p.get("info"))
+                .and_then(|i| i.get("last_token_usage"))
+                .and_then(|u| u.as_object());
+            let fresh = last.map_or(0, |u| {
+                let field = |k: &str| u.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+                field("input_tokens")
+                    .saturating_sub(field("cached_input_tokens"))
+                    .saturating_add(field("output_tokens"))
+                    .saturating_add(field("reasoning_output_tokens"))
+            });
+            if fresh > 0 {
+                vec![AgentEvent::Usage {
+                    agent_id,
+                    fresh_tokens: fresh,
+                }]
+            } else {
+                vec![]
+            }
+        }
         // Burn-tier observation: `turn_context` opens every turn carrying the
         // model + (on reasoning turns only) the effort — both RAW verbatim,
         // last-seen-wins downstream, so a mid-session model/effort switch
@@ -488,7 +520,55 @@ mod tests {
     #[test]
     fn session_meta_and_unknown_emit_nothing() {
         assert!(ev(json!({"type":"session_meta","payload":{"id":"u","cwd":"/r"}})).is_empty());
+        // A token_count without `info` (rate-limit-only ping) stays silent.
         assert!(ev(json!({"type":"event_msg","payload":{"type":"token_count"}})).is_empty());
+    }
+
+    #[test]
+    fn token_count_emits_fresh_usage_from_last_reading() {
+        // Live-rollout shape (codex 0.x, 2026-06): input INCLUDES the cached
+        // share, reasoning is additive. fresh = (11480−9088) + 87 + 15 = 2494.
+        let out = ev(
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{
+            "total_token_usage":{"input_tokens":999999,"cached_input_tokens":0,"output_tokens":999999},
+            "last_token_usage":{"input_tokens":11480,"cached_input_tokens":9088,
+                                 "output_tokens":87,"reasoning_output_tokens":15}}}}),
+        );
+        assert!(
+            matches!(
+                out.as_slice(),
+                [AgentEvent::Usage {
+                    fresh_tokens: 2494,
+                    ..
+                }]
+            ),
+            "expected fresh=2494 from last_token_usage (never the totals), got {out:?}"
+        );
+    }
+
+    #[test]
+    fn token_count_saturates_and_skips_zero() {
+        // cached > input (upstream reporting quirk) saturates to 0 input, not a wrap.
+        let out = ev(
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{
+            "last_token_usage":{"input_tokens":10,"cached_input_tokens":50,"output_tokens":7}}}}),
+        );
+        assert!(
+            matches!(
+                out.as_slice(),
+                [AgentEvent::Usage {
+                    fresh_tokens: 7,
+                    ..
+                }]
+            ),
+            "got {out:?}"
+        );
+        // An all-zero reading emits nothing (no slot churn).
+        let out = ev(
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{
+            "last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}}}),
+        );
+        assert!(out.is_empty(), "zero reading must be silent, got {out:?}");
     }
 
     #[test]

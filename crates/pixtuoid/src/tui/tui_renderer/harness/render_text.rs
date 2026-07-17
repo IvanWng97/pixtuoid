@@ -55,6 +55,33 @@ fn hovered_agent_renders_stats_tooltip() {
 }
 
 #[test]
+fn hovered_dossier_shows_token_usage_only_when_nonzero() {
+    // #632: the Σ row folds into the ◷ stats line iff the session has
+    // accumulated fresh tokens — a zero-usage source keeps the old dossier.
+    let a = AgentId::from_transcript_path("/toktip/0.jsonl");
+    let mut s = slot(a, 0, 0, t0() - Duration::from_secs(600));
+    let scene = scene_with(vec![s.clone()], 16);
+    let mut r = build(120, 44, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, &scene, a, 120, 44);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let without = frame_text(r.frame_buffer());
+    assert!(
+        !without.contains("tok"),
+        "zero-usage dossier must not show a Σ row"
+    );
+    s.tokens_used = 2_400_000;
+    let scene = scene_with(vec![s], 16);
+    super::hover_agent(&mut r, &scene, a, 120, 44);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let with = frame_text(r.frame_buffer());
+    assert!(
+        with.contains("Σ 2.4M tok"),
+        "dossier should fold the compact token total in; frame:\n{with}"
+    );
+}
+
+#[test]
 fn footer_shows_agent_count() {
     let scene = scene_with(
         vec![
