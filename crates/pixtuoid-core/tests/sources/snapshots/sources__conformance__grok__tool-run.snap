@@ -13,7 +13,7 @@ expression: events
     tool_use_id: call-f1963737-4e4d-426c-88a2-85e86077c30b-0
 - ModelInfo:
     agent_id: 3721754798848384957
-    model: grok-4-code
+    model: grok-4.5
     effort: high
 - ActivityEnd:
     agent_id: 3721754798848384957

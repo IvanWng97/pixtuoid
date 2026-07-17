@@ -691,8 +691,9 @@ const HERMES: SourceDescriptor = SourceDescriptor {
 /// across the version jump. 0.2.x deltas absorbed: a NEW `events.jsonl`
 /// sibling (the updates.jsonl path filter already excludes it), children now
 /// fire their own `session_end` (a harmless earlier exit — the ledger still
-/// rides the parent's `subagent_end`), a new `turn_completed` xAI tag
-/// (decoded → turn-end), and the transcript `rawInput` carries CLIENT-form
+/// rides the parent's `subagent_end`), the `turn_completed` xAI tag is now
+/// decoded (→ turn-end; the variant predates the sync, we hadn't mapped it),
+/// and the transcript `rawInput` carries CLIENT-form
 /// keys (`background`) — the both-keys `spawn_is_blocking` read covers it.
 const GROK: SourceDescriptor = SourceDescriptor {
     name: grok::SOURCE_NAME,

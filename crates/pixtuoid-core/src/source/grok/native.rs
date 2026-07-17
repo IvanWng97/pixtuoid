@@ -156,10 +156,7 @@ fn leader_socket_owner(sock: &Path) -> Option<i32> {
     let sock = sock.canonicalize().ok()?;
     for comm in ["grok", "agent", "xai-grok-pager"] {
         for pid in crate::source::fd_probe::pids_by_name(comm)? {
-            if crate::source::fd_probe::open_vnode_paths(pid)
-                .iter()
-                .any(|p| *p == sock)
-            {
+            if crate::source::fd_probe::open_vnode_paths(pid).contains(&sock) {
                 return Some(pid);
             }
         }

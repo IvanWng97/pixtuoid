@@ -502,10 +502,9 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                 effort,
             }])
         }
-        // Turn end — the transcript twin of the `stop` hook (a 0.2.x addition,
-        // capture-verified; absent from the c68e39f6 open sync, so it is NOT
-        // in the drift watch's variant set yet). Settles a tool-less turn to
-        // idle for transcript-only setups.
+        // Turn end — the transcript twin of the `stop` hook, settling a
+        // tool-less turn to idle for transcript-only setups. Drift-watched
+        // via the TurnCompleted arm of GROK_XAI_VARIANTS.
         ("_x.ai/session/update", "turn_completed") => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,
@@ -534,12 +533,14 @@ pub(crate) fn extract_grok_cwd(_v: &Value) -> Option<PathBuf> {
     None
 }
 
-/// Transcript tool detail: the ACP `tool_call` carries no tool NAME — `title`
-/// is grok's pre-composed human label ("Run cargo test"), so it IS the display
-/// (still routed through the `generic_tool_display` cap chokepoint, no `:
-/// target` suffix). Task detection reads `rawInput` (the tool's args object)
-/// with the SAME blocking-only rule as the hook side — see
-/// [`grok_tool_detail`] for the b1 WHY.
+/// Transcript tool detail: a FRESH `tool_call`'s `title` is the RAW tool name
+/// (`run_terminal_command` — capture-verified; the human label like
+/// "Execute `cat note.txt`" appears only on later `tool_call_update`s, which
+/// this fn never sees), so the title IS the display (still routed through the
+/// `generic_tool_display` cap chokepoint, no `: target` suffix). Task
+/// detection reads `rawInput` (the tool's args object) with the SAME
+/// blocking-only rule as the hook side — see [`grok_tool_detail`] for the b1
+/// WHY.
 fn grok_transcript_tool_detail(title: &str, raw_input: Option<&Value>) -> ToolDetail {
     if raw_input.is_some_and(|a| a.get("subagent_type").is_some()) && spawn_is_blocking(raw_input) {
         return ToolDetail::Task;
@@ -1169,12 +1170,14 @@ mod tests {
     fn fresh_tool_call_line_is_activity_start_keyed_by_path() {
         // A FRESH tool_call OMITS `status` (Pending is the serde skip-default,
         // agent-client-protocol schema) — absence must still decode as a Start.
+        // Shape per the 0.2.102 capture: a fresh tool_call's title is the RAW
+        // tool name (the human label appears only on later updates).
         let evs = decode_line(acp_line(json!({
             "sessionUpdate": "tool_call",
             "toolCallId": "call_42",
-            "title": "Run cargo test",
+            "title": "run_terminal_command",
             "kind": "execute",
-            "rawInput": {"command": "cargo test"}
+            "rawInput": {"command": "cat note.txt"}
         })));
         assert_eq!(evs.len(), 1);
         match &evs[0] {
@@ -1191,7 +1194,7 @@ mod tests {
                 assert_eq!(tool_use_id.as_deref(), Some("call_42"));
                 assert_eq!(
                     detail.as_ref().unwrap().display(),
-                    "Run cargo test",
+                    "run_terminal_command",
                     "title IS the display (ACP carries no tool name)"
                 );
             }

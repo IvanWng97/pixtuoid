@@ -443,7 +443,13 @@ GROK_PAYLOAD_IDENTS = {"message", "description"}
 # Transcript vocabulary decode_grok_line reads from the xAI SessionUpdate enum
 # (variant IDENTS — the snake_case tags derive via rename_all, so the wire
 # string never appears literally) + its field idents (verbatim snake_case).
-GROK_XAI_VARIANTS = {"SubagentSpawned", "SubagentFinished", "ModelChanged", "HookExecution"}
+GROK_XAI_VARIANTS = {
+    "SubagentSpawned",
+    "SubagentFinished",
+    "ModelChanged",
+    "HookExecution",
+    "TurnCompleted",
+}
 GROK_XAI_FIELDS = {
     "subagent_id",
     "child_session_id",
