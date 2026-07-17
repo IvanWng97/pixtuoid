@@ -165,6 +165,14 @@ pub(crate) fn save_audio_muted(path: &Path, muted: bool) -> Result<()> {
     })
 }
 
+/// Persist the `[audio] volume` level (the +/- nudge keys write through
+/// here, same ConfigLock round).
+pub(crate) fn save_audio_volume(path: &Path, volume: f32) -> Result<()> {
+    update_config(path, |doc| {
+        doc["audio"]["volume"] = toml_edit::value(volume as f64);
+    })
+}
+
 pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
     cli_pack_dir.or_else(|| {
         config.pack_dir.as_ref().map(|p| {
@@ -559,6 +567,18 @@ mod tests {
         save_audio_muted(&path, true).unwrap();
         let cfg: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(resolve_audio(&cfg).muted);
+    }
+
+    #[test]
+    fn save_audio_volume_persists_the_nudged_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[audio]\nmuted = false\n").unwrap();
+        save_audio_volume(&path, 0.65).unwrap();
+        let cfg: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let a = resolve_audio(&cfg);
+        assert!((a.volume - 0.65).abs() < 1e-6);
+        assert!(!a.muted, "the sibling muted key survives");
     }
 
     use super::*;

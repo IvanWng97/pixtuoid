@@ -465,6 +465,7 @@ pub(crate) fn save_as_gif(
             per_floor: Default::default(),
             gateway: None,
             audio_audible: false,
+            volume_flash: None,
             floor: {
                 let mut m = pixtuoid_scene::floor::FloorMeta::ground();
                 m.floor_seed = floor_seed;

@@ -64,7 +64,7 @@ pub(crate) mod rodio_sink {
         /// `None` when no output device is available (headless boxes) —
         /// callers degrade to silence, never error the office.
         pub(crate) fn open() -> Option<Self> {
-            match rodio::DeviceSinkBuilder::open_default_sink() {
+            match with_stderr_silenced(rodio::DeviceSinkBuilder::open_default_sink) {
                 Ok(mut stream) => {
                     stream.log_on_drop(false);
                     Some(Self {
@@ -84,6 +84,39 @@ pub(crate) mod rodio_sink {
             let rate = std::num::NonZero::new(super::super::dsp::SAMPLE_RATE).expect("44100 != 0");
             rodio::buffer::SamplesBuffer::new(mono, rate, samples.as_slice())
         }
+    }
+
+    /// Run `f` with fd 2 pointed at /dev/null (Unix): ALSA and friends
+    /// print raw diagnostics to stderr during device open, and with the
+    /// lazy spawn that happens MID-ALTSCREEN — one stray line corrupts the
+    /// TUI (lowfi's first-ever issue was exactly this). rodio's own logs
+    /// are already off via `log_on_drop(false)`.
+    #[cfg(unix)]
+    fn with_stderr_silenced<T>(f: impl FnOnce() -> T) -> T {
+        // SAFETY: plain dup/dup2 fd shuffling; restored before returning.
+        // A panic inside `f` would leak the redirect — acceptable for a
+        // device-open that must not unwind (rodio returns Result).
+        unsafe {
+            let saved = libc::dup(2);
+            if saved >= 0 {
+                let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+                if devnull >= 0 {
+                    libc::dup2(devnull, 2);
+                    libc::close(devnull);
+                }
+            }
+            let out = f();
+            if saved >= 0 {
+                libc::dup2(saved, 2);
+                libc::close(saved);
+            }
+            out
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn with_stderr_silenced<T>(f: impl FnOnce() -> T) -> T {
+        f()
     }
 
     impl AudioSink for RodioSink {

@@ -252,7 +252,11 @@ src/
 │                       the system LAZY-SPAWNS on the first unmute (muted = zero cost: no device/thread/
 │                       buffers) — run_tui swaps the fresh handle into the renderer; floating boot-spawns
 │                       iff !muted (no runtime toggle yet, #633). Footer shows ♩ iff enabled && !effective-
-│                       muted (m OR pause); onboarding carries the one-line m hint.
+│                       muted (m OR pause); onboarding carries the one-line m hint. +/- nudge volume ±0.05
+│                       (an AtomicU32-bits sibling of the mute atomic; mixer folds it per tick; persisted;
+│                       footer flashes `♩ N%` ~1s — the lowfi volume-timer pattern; + from muted unmutes).
+│                       RodioSink::open silences stderr around device open on Unix (ALSA prints raw lines;
+│                       lazy spawn = mid-altscreen open, one line corrupts the TUI — lowfi issue #1).
 │                       An EMPTY office now plays the quiet pad+sparkle+texture "radio on" floor (the
 │                       ratified demo_1) — Phase 1's empty-silent behavior ended when the music landed.
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM

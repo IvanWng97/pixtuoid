@@ -37,6 +37,7 @@ macro_rules! make_draw_ctx {
             per_floor: Default::default(),
             gateway: None,
             audio_audible: false,
+            volume_flash: None,
             floor: _floor,
             active_pet: None,
             last_pet_pos: None,

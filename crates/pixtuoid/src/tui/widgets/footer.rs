@@ -21,6 +21,9 @@ pub(crate) struct FooterStats<'a> {
     /// "You would hear sound right now": the audio system is live AND not
     /// effectively muted (m-state OR pause). Drives the ♩ suffix glyph.
     pub audio_audible: bool,
+    /// Transient +/- readout: `Some(percent)` for ~1s after a volume nudge
+    /// (the lowfi volume-timer pattern) — renders as `♩ N%`.
+    pub volume_flash: Option<u8>,
 }
 
 /// One-line footer warning for dead sources (#157); `None` while healthy.
@@ -242,8 +245,13 @@ fn status_segments(
         None => String::new(),
     };
     // ♩ rides the right-flushed suffix like the cross-floor cue (present at
-    // every tier that keeps the suffix); silent (the default) shows nothing
-    let audio_glyph = if stats.audio_audible { " \u{2669}" } else { "" };
+    // every tier that keeps the suffix); silent (the default) shows nothing;
+    // a volume nudge appends the percent for a beat
+    let audio_glyph = match (stats.audio_audible, stats.volume_flash) {
+        (true, Some(pct)) => format!(" \u{2669} {pct}%"),
+        (true, None) => " \u{2669}".to_string(),
+        (false, _) => String::new(),
+    };
     let quit = format!("{audio_glyph}{floor_suffix} [?]help [p]ause [t]heme [q]uit ");
 
     // --- tier builders --------------------------------------------------------
@@ -438,6 +446,7 @@ mod tests {
             per_floor: &pf,
             gateway: None,
             audio_audible: false,
+            volume_flash: None,
         };
         let line = build_status_summary(&scene, &stats, 200, None, None);
         assert!(
@@ -448,6 +457,35 @@ mod tests {
             line.contains("\u{25cf}1 A"),
             "active rung still shows: {line}"
         );
+    }
+
+    #[test]
+    fn audio_suffix_tracks_audibility_and_the_volume_flash() {
+        let scene = SceneState::uniform(16);
+        let pf = crate::tui::widgets::per_floor_counts(&scene);
+        let base = |audible, flash| FooterStats {
+            counts: crate::tui::widgets::scene_stats(&scene),
+            per_floor: &pf,
+            gateway: None,
+            audio_audible: audible,
+            volume_flash: flash,
+        };
+        // silent (the default) shows nothing — the quiet footer
+        let line = build_status_summary(&scene, &base(false, None), 200, None, None);
+        assert!(!line.contains('\u{2669}'), "muted shows no note: {line}");
+        // audible shows ♩
+        let line = build_status_summary(&scene, &base(true, None), 200, None, None);
+        assert!(line.contains('\u{2669}'), "audible shows ♩: {line}");
+        assert!(!line.contains('%'), "no percent outside the flash: {line}");
+        // a volume nudge appends the percent for the flash window
+        let line = build_status_summary(&scene, &base(true, Some(65)), 200, None, None);
+        assert!(
+            line.contains("\u{2669} 65%"),
+            "the flash appends the percent: {line}"
+        );
+        // muted + flash stays silent (a '-' while muted gives no phantom note)
+        let line = build_status_summary(&scene, &base(false, Some(65)), 200, None, None);
+        assert!(!line.contains('\u{2669}'), "muted never shows ♩: {line}");
     }
 
     // Footer tier-selection + padding must measure DISPLAY COLUMNS, not bytes:
@@ -495,6 +533,7 @@ mod tests {
             per_floor: &pf,
             gateway: None,
             audio_audible: false,
+            volume_flash: None,
         };
         let segs = status_segments(&scene, &stats, width, None, None);
         let cols: usize = segs.iter().map(|(s, _)| display_width(s)).sum();
@@ -549,6 +588,7 @@ mod tests {
             per_floor: &pf,
             gateway: None,
             audio_audible: false,
+            volume_flash: None,
         };
         // A warning long enough that the body must truncate at this width.
         let warn = "transport pixtuoid-hook died: connection refused after 3 retries";

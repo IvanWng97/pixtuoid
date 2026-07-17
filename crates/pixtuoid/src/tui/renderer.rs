@@ -89,6 +89,8 @@ pub struct DrawCtx<'a> {
     pub gateway: Option<pixtuoid_core::state::DaemonState>,
     /// "You would hear sound right now" — drives the footer's ♩ glyph.
     pub audio_audible: bool,
+    /// Transient +/- volume readout (percent) — appended to ♩ for ~1s.
+    pub volume_flash: Option<u8>,
     pub floor: pixtuoid_scene::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
@@ -244,6 +246,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         per_floor: &footer_per_floor,
         gateway: ctx.gateway,
         audio_audible: ctx.audio_audible,
+        volume_flash: ctx.volume_flash,
     };
 
     if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {

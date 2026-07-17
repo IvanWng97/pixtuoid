@@ -119,6 +119,9 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// to `current_floor`).
     audio: crate::audio::AudioHandle,
     audio_cues: pixtuoid_scene::audio::AudioCueTracker,
+    /// Transient +/- volume readout (percent), pushed per frame by the
+    /// event loop; `None` outside the ~1s flash window.
+    volume_flash: Option<u8>,
     /// The floor the cue tracker's occupancy set belongs to. Waypoint
     /// indices are FLOOR-LOCAL, so a floor switch must re-prime the tracker
     /// — diffing floor N's occupied set against floor M's would fire
@@ -154,6 +157,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             onboarding: crate::tui::welcome::OnboardingFrame::default(),
             audio: crate::audio::AudioHandle::disabled(),
             audio_cues: pixtuoid_scene::audio::AudioCueTracker::new(),
+            volume_flash: None,
             audio_floor: None,
         }
     }
@@ -162,6 +166,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// handle swallows everything, so render code never needs a cfg/if).
     pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
         self.audio = audio;
+    }
+
+    /// Per-frame mirror of the transient +/- readout: `Some(percent)` for
+    /// ~1s after a volume nudge, else `None` (the footer appends it to ♩).
+    pub(crate) fn set_volume_flash(&mut self, flash: Option<u8>) {
+        self.volume_flash = flash;
     }
 
     /// Mirror the dashboard frame the event loop built this tick (a pre-built row
@@ -512,6 +522,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 per_floor: &per_floor,
                 gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
                 audio_audible: self.audio.is_enabled() && !self.audio.is_muted(),
+                volume_flash: self.volume_flash,
             };
             crate::tui::renderer::draw_footer_only_frame(
                 &mut self.terminal,
@@ -676,6 +687,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             per_floor: &transition_per_floor,
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
             audio_audible: self.audio.is_enabled() && !self.audio.is_muted(),
+            volume_flash: self.volume_flash,
         };
 
         self.terminal.draw(|f| {
@@ -789,6 +801,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             per_floor: crate::tui::widgets::per_floor_counts(scene),
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
             audio_audible: self.audio.is_enabled() && !self.audio.is_muted(),
+            volume_flash: self.volume_flash,
             floor: floor_meta,
             active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,
