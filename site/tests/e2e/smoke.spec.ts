@@ -311,6 +311,81 @@ test('the hero pause switch freezes the office and resumes it seamlessly', async
   expect(errors()).toEqual([]);
 });
 
+test('the hero ♩ sound toggle: muted by default, gesture-gated, no AudioContext until clicked', async ({
+  page,
+}) => {
+  // #633 web-audio. Muted-by-default + browser autoplay policy: NO AudioContext
+  // may be constructed before a user gesture. Instrument the constructor (the
+  // only observable proof) before the page's own script runs.
+  await page.addInitScript(() => {
+    (window as unknown as { __acCount: number }).__acCount = 0;
+    const Real =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Real) return;
+    const Wrapped = function (this: unknown, ...args: unknown[]) {
+      (window as unknown as { __acCount: number }).__acCount++;
+      return new (Real as new (..._a: unknown[]) => AudioContext)(...args);
+    } as unknown as typeof AudioContext;
+    Wrapped.prototype = Real.prototype;
+    window.AudioContext = Wrapped;
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext = Wrapped;
+  });
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  const btn = page.locator('#office-audio');
+  const acCount = () => page.evaluate(() => (window as unknown as { __acCount: number }).__acCount);
+  // un-hidden only once a live office exists to sound
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  // default: muted + ZERO AudioContexts — the autoplay-policy contract (no
+  // sound machinery may spin up before a user gesture).
+  await expect(btn).toHaveAttribute('aria-pressed', 'false');
+  expect(await acCount()).toBe(0);
+  // one click = one gesture = exactly one AudioContext constructed. Then wait
+  // through the warmup + several ticks: on a real audio device it plays; in
+  // headless (no backend) createBuffer throws and the ♩ degrades GRACEFULLY
+  // (audioDisable → hidden), never an uncaught page error. Either way: no throw.
+  await btn.click();
+  await expect.poll(acCount).toBe(1);
+  await page.waitForTimeout(3000); // beds synth (~1-2s) + live ticks
+  // playing (audio available) OR gracefully hidden (no backend) — never a
+  // second context, never a crash.
+  expect(await acCount()).toBe(1);
+  expect(errors()).toEqual([]);
+});
+
+test('a remembered ♩ choice never inverts a direct first click on the button', async ({ page }) => {
+  // Review HIGH: the remembered-"on" restore installs capture-phase
+  // pointerdown/keydown listeners; if the visitor's FIRST gesture is a direct
+  // click on ♩, a naive restore fires (→on) then the button's own click toggles
+  // (→off), silently muting despite the click. The restore must ignore a gesture
+  // ON the button and let its click own the toggle. The bug's signature is the
+  // button left VISIBLE-AND-MUTED after a direct click; the fix leaves it
+  // playing (aria-pressed true) — or, where WebAudio has no backend (headless),
+  // gracefully hidden. What must NEVER happen: visible + aria-pressed false.
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  await page.evaluate(() => localStorage.setItem('pix:audio', '1'));
+  await page.reload();
+  await expect(page.locator('.backdrop.is-live')).toBeAttached({ timeout: 15_000 });
+  const btn = page.locator('#office-audio');
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  await btn.click();
+  await expect
+    .poll(async () => {
+      const pressed = await btn.getAttribute('aria-pressed');
+      const hidden = await btn.evaluate((el) => (el as HTMLElement).hidden);
+      return (pressed === 'true' && !hidden) || (hidden && pressed === 'false');
+    })
+    .toBe(true);
+  // the inversion bug's exact signature — visible AND muted after the click:
+  const invertedBug =
+    (await btn.getAttribute('aria-pressed')) === 'false' &&
+    !(await btn.evaluate((el) => (el as HTMLElement).hidden));
+  expect(invertedBug).toBe(false);
+  expect(errors()).toEqual([]);
+});
+
 test('crisp AA captions overlay the live office (name badges + neon board)', async ({ page }) => {
   // The office canvas is a ~130px buffer CSS-upscaled with image-rendering:
   // pixelated, so text baked into it pixelates. Instead the engine exports the

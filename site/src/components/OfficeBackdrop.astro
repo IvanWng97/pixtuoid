@@ -742,6 +742,7 @@ import { asset, DIM_RESTING } from '../consts';
     let audioReady = false; // beds synthesized + buffers uploaded
     let audioPlaying = false; // the ♩ is on (context running)
     let audioBooting = false; // warmup pump in flight (ignore re-clicks)
+    let audioUnavailable = false; // WebAudio failed (no device / locked down) — ♩ disabled
     let loopGains = []; // 6 GainNodes (LoopStem::ALL order: 0=Pad … 5=Rain)
     let loopSources = []; // 6 looping AudioBufferSourceNodes
     let oneShotBufs = {}; // pool wire → [AudioBuffer]
@@ -829,43 +830,77 @@ import { asset, DIM_RESTING } from '../consts';
       // schedule any WebAudio (no gain ramps, no one-shot nodes queued against
       // a suspended context that would all fire on resume).
       if (!audioPlaying) return;
-      const now = audioCtx.currentTime;
-      // The mixer already crossfades (each gain is the RAMPED value this tick),
-      // so a short setTargetAtTime just de-zippers the ~30fps steps.
-      for (let i = 0; i < 6; i++) {
-        loopGains[i].gain.setTargetAtTime(cmd.gains[i], now, 0.03);
+      // A node op can still throw if the context died mid-session — degrade
+      // rather than spam the console every frame.
+      try {
+        const now = audioCtx.currentTime;
+        // The mixer already crossfades (each gain is the RAMPED value this tick),
+        // so a short setTargetAtTime just de-zippers the ~30fps steps.
+        for (let i = 0; i < 6; i++) {
+          loopGains[i].gain.setTargetAtTime(cmd.gains[i], now, 0.03);
+        }
+        if (cmd.swapped) audioSwapLoops();
+        for (const p of cmd.plays) {
+          const bank = oneShotBufs[p[0]];
+          const buf = bank && bank[p[1]];
+          if (!buf) continue;
+          const g = audioCtx.createGain();
+          g.gain.value = p[2];
+          g.connect(audioCtx.destination);
+          const s = audioCtx.createBufferSource();
+          s.buffer = buf;
+          s.connect(g);
+          s.start();
+        }
+      } catch (e) {
+        audioDisable();
       }
-      if (cmd.swapped) audioSwapLoops();
-      for (const p of cmd.plays) {
-        const bank = oneShotBufs[p[0]];
-        const buf = bank && bank[p[1]];
-        if (!buf) continue;
-        const g = audioCtx.createGain();
-        g.gain.value = p[2];
-        g.connect(audioCtx.destination);
-        const s = audioCtx.createBufferSource();
-        s.buffer = buf;
-        s.connect(g);
-        s.start();
+    }
+    // WebAudio can fail on a device/browser with no usable audio backend
+    // (headless CI, a locked-down browser, no output device): createBuffer /
+    // node ops throw. Degrade gracefully — tear the graph down, hide the ♩
+    // (nothing to offer here), and stop re-trying — never leave an uncaught
+    // throw or a "playing" button that makes no sound.
+    function audioDisable() {
+      audioReady = false;
+      audioPlaying = false;
+      audioBooting = false;
+      audioUnavailable = true;
+      if (audioCtx) {
+        try {
+          audioCtx.close();
+        } catch (e) {
+          /* already closed */
+        }
+        audioCtx = null;
+      }
+      if (audioBtn) {
+        audioBtn.setAttribute('aria-pressed', 'false');
+        audioBtn.hidden = true;
       }
     }
     // Pump the chunked synthesis off setTimeout(0) so the main thread never
     // blocks on the multi-second bank/rain/beds build in one go.
     function audioPumpWarmup() {
-      if (office.audio_warmup_step() > 0) {
-        setTimeout(audioPumpWarmup, 0);
-        return;
+      try {
+        if (office.audio_warmup_step() > 0) {
+          setTimeout(audioPumpWarmup, 0);
+          return;
+        }
+        audioUploadBuffers(); // createBuffer here — the usual failure point
+        audioReady = true;
+      } catch (e) {
+        audioDisable();
       }
-      audioUploadBuffers();
-      audioReady = true;
     }
     function audioStart() {
-      if (audioBooting || !office || !wasm) return;
+      if (audioBooting || audioUnavailable || !office || !wasm) return;
       audioBooting = true;
       try {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       } catch (e) {
         audioBooting = false;
+        audioUnavailable = true;
         return; // no WebAudio → the ♩ simply does nothing
       }
       office.audio_begin();
@@ -887,6 +922,7 @@ import { asset, DIM_RESTING } from '../consts';
     }
     if (audioBtn) {
       audioBtn.addEventListener('click', function () {
+        if (audioUnavailable) return; // WebAudio failed earlier — ♩ is a no-op
         if (!audioReady && !audioBooting) audioStart(); // first click: gesture-gated boot
         setAudioPlaying(!audioPlaying);
       });
