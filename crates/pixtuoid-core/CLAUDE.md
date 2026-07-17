@@ -165,7 +165,15 @@ observable intermediate frame an already-exiting slot (defense-in-depth).
 Payoff: an honest dossier Σ on the walk-out hover. `tokenDetails.input`
 already EXCLUDES cache reads (arithmetic pinned by the copilot shutdown
 usage test). The other
-8 sources genuinely carry no usage wire; their desks never grow paper. Both
+8 sources genuinely carry no usage wire; their desks never grow paper.
+Attach-time residual (deliberate): an OVERSIZED (>1 MiB) in-flight
+transcript first-sights with NO backlog replay (#204's bounded startup —
+identity from a head read, cursor at EOF), so for such a late attach
+`tokens_used` counts only post-attach burn — the tower reads "burn on my
+watch". Accepted: full replay would read N×10 MB files at boot, and the
+normal flow (the watcher running as sessions start) is complete from birth.
+Caught by the #632 live dogfood against a 13 MB session; do not "fix" by
+replaying the backlog. Both
 slot fields serde-skipped at zero/None (`tokens_used` flat like
 `tool_call_count`; the last reading bundled as `UsageObservation{delta,
 seen_at}` — the `EffortObservation` pattern, a half-stamped reading

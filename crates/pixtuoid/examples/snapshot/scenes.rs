@@ -24,8 +24,8 @@ pub(crate) async fn capture_live_scene(
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(1024);
     let tx_hook = tx.clone();
     let root = PathBuf::from(projects_root);
-    let watcher = JsonlWatcher::new(
-        root,
+    let mut watcher = JsonlWatcher::new(
+        root.clone(),
         pixtuoid_core::source::claude_code::SOURCE_NAME.to_string(),
         pixtuoid_core::source::claude_code::decode_cc_line,
         pixtuoid_core::source::claude_code::cc_derive_label,
@@ -37,6 +37,17 @@ pub(crate) async fn capture_live_scene(
     // coalesces and --live agents sit Idle/model-less forever (latent since
     // #203, exposed by the burn-tier replay).
     .with_id_deriver(pixtuoid_core::source::claude_code::cc_id_from_path);
+    // The SAME liveness probe as the real source: without it an in-flight
+    // session first-sights at EOF (no history replay), so session-cumulative
+    // state — tokens_used above all — reads ZERO from attach and a --live
+    // capture renders no paper tower for a session that burned millions
+    // (the #203 harness-vs-app drift class, second instance; caught by the
+    // #632 dogfood).
+    if let Some(sessions_dir) = pixtuoid_core::source::cc_registry_dir(&root) {
+        watcher = watcher.with_liveness_probe(std::sync::Arc::new(move || {
+            pixtuoid_core::source::claude_code::live_cc_session_ids(&sessions_dir)
+        }));
+    }
     let watcher_handle = tokio::spawn(async move { watcher.run(tx).await });
     // ALSO listen on the real hook socket: a live CC session's hooks carry
     // activity + the burn-tier effort level (hooks.md `effort:{level}`;
