@@ -217,12 +217,26 @@ src/
 │                       the only owner of rodio/cpal (behind the default-on `audio` cargo feature; Linux
 │                       PREBUILTS ship without it — ALSA can't link into musl/cross builds — so Linux audio
 │                       is from-source). mod.rs (AudioHandle: clone-cheap try_send gateway — disabled handle
-│                       is inert everywhere, so callers never cfg; AssetBank pre-synthesizes EVERY buffer at
-│                       spawn on a fixed seed; run_loop = the device-agnostic thread body), dsp.rs (radix-2
-│                       FFT + brickwall bands + spectral-envelope noise shaping [circularly seamless bed
-│                       loops] + splitmix64 NoiseStream), synth.rs (the Phase 0 OWNER-RATIFIED recipes 1:1 — elevator ding + cooler glug were later owner-CUT (dogfood round), the spec keeps their recipes —
+│                       is inert everywhere, so callers never cfg; AssetBank = the ONE-SHOT pools, LoopBeds =
+│                       the six loop buffers HANDED OFF at registration and dropped — RodioSink copies each
+│                       into its own SamplesBuffer, so retaining them would double the ~23MB bed RAM. Synthesis
+│                       at spawn on a fixed seed, MEASURED ~2s release / >10s debug on M-series: frames
+│                       try_sent in that window drop harmlessly (levels re-send every render frame) and MUTE
+│                       rides an AtomicBool on the handle — NOT the droppable frame channel — so an m/p press
+│                       mid-window can never be lost; run_loop = the device-agnostic thread body, registers
+│                       ALL six LoopStem beds),
+│                       dsp.rs (radix-2 FFT + brickwall bands + spectral-envelope noise shaping [circularly
+│                       seamless bed loops] + warp_resample [tape wow/flutter] + splitmix64 NoiseStream),
+│                       score.rs (the FROZEN 8-bar lofi composition — the ratified realization's events as
+│                       const tables; a regen via the spec's export_score is a NEW take → fresh LISTEN gate),
+│                       synth.rs (the Phase 0 OWNER-RATIFIED recipes 1:1 — elevator ding + cooler glug were later owner-CUT (dogfood round), the spec keeps their recipes —
 │                       change docs/superpowers/specs/2026-07-16-ambient-sound-phase0/ first, re-audition,
-│                       then mirror; spectral-sanity tests pin the fingerprints), mixer.rs (pure gain ramps
+│                       then mirror; spectral-sanity tests pin the fingerprints AGAINST THE FLOAT CHAIN,
+│                       never the audition wavs — write_wav's stereo interleave + soft clip once poisoned
+│                       the reference numbers; plus the Phase 2 musical stems: lofi_post tape chain +
+│                       stem_pad/sparkle/keys/drums, ALL-PROCEDURAL by owner decision — no committed
+│                       assets, no decoder dep; the four musical loops share one sample count and start
+│                       together = phase-locked), mixer.rs (pure gain ramps
 │                       ~2s crossfade + typing-burst/raindrop schedulers — level-driven, no backlog replay),
 │                       sink.rs (AudioSink seam: NullSink for CI/no-device, RodioSink = rodio 0.22 Player
 │                       glue, codecov-excluded winit-class). Audio NEVER blocks render: bounded channel,
@@ -233,7 +247,24 @@ src/
 │                       floor switch); rain stays global (weather, not agent activity). No elevator
 │                       ding (owner-cut). Floating feeds stems + the door cue only, scoped to its rendered
 │                       floor (FloorSession doesn't surface occupancy — deliberate Phase 1 cut).
-│                       [audio] config: enabled default FALSE (strictly opt-in), volume clamped [0,1].
+│                       [audio] config: ONE switch `muted` default TRUE (owner-cut the redundant enabled
+│                       knob; `m` = the whole opt-in, persisted via save_audio_muted) + volume clamped [0,1];
+│                       the system LAZY-SPAWNS on the first unmute (muted = zero cost: no device/thread/
+│                       buffers) — run_tui swaps the fresh handle into the renderer; floating boot-spawns
+│                       iff !muted (no runtime toggle yet, #633). Footer shows ♩ iff enabled && !effective-
+│                       muted (m OR pause); onboarding carries the one-line m hint. +/- nudge volume ±0.05
+│                       (an AtomicU32-bits sibling of the mute atomic; mixer folds it per tick; persisted;
+│                       footer flashes `♩ N%` ~1s — the lowfi volume-timer pattern; + from muted unmutes).
+│                       RodioSink::open silences stderr around device open on Unix (ALSA prints raw lines;
+│                       lazy spawn = mid-altscreen open, one line corrupts the TUI — lowfi issue #1).
+│                       Volume→amplitude is mixer::master_amp = user² × BUS_TRIM(0.35): a squared perceptual
+│                       curve under an ambient bus trim (dogfood: untrimmed linear was "too loud even at
+│                       5%") — the ONE mapping site; the footer keeps showing the user's linear percent.
+│                       Volume persist is DEBOUNCED to the ~1s flash expiry + the quit path (+/- is a
+│                       repeatable key — per-repeat ConfigLock rounds were the bot MEDIUM); the +/- arm
+│                       re-attempts the lazy spawn whenever unmuted-but-disabled ('+' is never a dead key).
+│                       An EMPTY office now plays the quiet pad+sparkle+texture "radio on" floor (the
+│                       ratified demo_1) — Phase 1's empty-silent behavior ended when the music landed.
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM
 │                       from githubnext/monaspace v1.400 static — unmodified, so the OFL Reserved-Font-Name
 │                       clause is never triggered)

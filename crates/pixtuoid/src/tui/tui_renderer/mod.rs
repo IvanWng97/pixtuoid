@@ -119,11 +119,23 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// to `current_floor`).
     audio: crate::audio::AudioHandle,
     audio_cues: pixtuoid_scene::audio::AudioCueTracker,
+    /// Transient +/- volume readout (percent), pushed per frame by the
+    /// event loop; `None` outside the ~1s flash window.
+    volume_flash: Option<u8>,
     /// The floor the cue tracker's occupancy set belongs to. Waypoint
     /// indices are FLOOR-LOCAL, so a floor switch must re-prime the tracker
     /// — diffing floor N's occupied set against floor M's would fire
     /// phantom appliance cues (self-audit catch).
     audio_floor: Option<usize>,
+}
+
+/// "You would hear sound right now": live handle, not effectively muted
+/// (m OR pause — the combined state on the handle), and volume above zero
+/// (a 0% ♩ would advertise sound that isn't playing). A free fn over the
+/// handle FIELD so call sites keep their disjoint borrows of the rest of
+/// the renderer (a `&self` method would borrow all of `*self`).
+fn audio_audible(audio: &crate::audio::AudioHandle) -> bool {
+    audio.is_enabled() && !audio.is_muted() && audio.volume() > 0.0
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
@@ -154,6 +166,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             onboarding: crate::tui::welcome::OnboardingFrame::default(),
             audio: crate::audio::AudioHandle::disabled(),
             audio_cues: pixtuoid_scene::audio::AudioCueTracker::new(),
+            volume_flash: None,
             audio_floor: None,
         }
     }
@@ -162,6 +175,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// handle swallows everything, so render code never needs a cfg/if).
     pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
         self.audio = audio;
+    }
+
+    /// Per-frame mirror of the transient +/- readout: `Some(percent)` for
+    /// ~1s after a volume nudge, else `None` (the footer appends it to ♩).
+    pub(crate) fn set_volume_flash(&mut self, flash: Option<u8>) {
+        self.volume_flash = flash;
     }
 
     /// Mirror the dashboard frame the event loop built this tick (a pre-built row
@@ -511,6 +530,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 counts: per_floor[to_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)],
                 per_floor: &per_floor,
                 gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+                audio_audible: audio_audible(&self.audio),
+                volume_flash: self.volume_flash,
             };
             crate::tui::renderer::draw_footer_only_frame(
                 &mut self.terminal,
@@ -674,6 +695,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             counts: crate::tui::widgets::scene_stats(&to_scene),
             per_floor: &transition_per_floor,
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+            audio_audible: audio_audible(&self.audio),
+            volume_flash: self.volume_flash,
         };
 
         self.terminal.draw(|f| {
@@ -786,6 +809,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             // the footer's cross-floor cue + gateway chip render even single-floor.
             per_floor: crate::tui::widgets::per_floor_counts(scene),
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+            audio_audible: audio_audible(&self.audio),
+            volume_flash: self.volume_flash,
             floor: floor_meta,
             active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,

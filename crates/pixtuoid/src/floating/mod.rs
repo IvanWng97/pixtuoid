@@ -61,8 +61,10 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         audio,
         ..
     } = cfg;
-    // Ambient audio (#633): same opt-in gate as the TUI runtime.
-    let audio_handle = if audio.enabled {
+    // Ambient audio (#633): boot-spawn iff the persisted state is unmuted.
+    // Floating has no runtime toggle yet (#633 deferred), so a muted config
+    // keeps the window silent for the whole run at zero cost.
+    let audio_handle = if !audio.muted {
         crate::audio::spawn(audio.volume)
     } else {
         crate::audio::AudioHandle::disabled()

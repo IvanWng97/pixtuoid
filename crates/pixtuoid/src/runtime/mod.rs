@@ -61,8 +61,9 @@ pub struct RunConfig {
     /// one-time onboarding "move-in" overlay. Computed by `main` via
     /// `setup::is_first_run`; ignored by headless + `floating`.
     pub first_run: bool,
-    /// Resolved `[audio]` settings (#633) — enabled defaults FALSE, volume
-    /// pre-clamped by `config::resolve_audio`. Headless ignores it.
+    /// Resolved `[audio]` settings (#633) — muted defaults TRUE (the lazy
+    /// spawn waits for the first `m`), volume pre-clamped by
+    /// `config::resolve_audio`. Headless ignores it.
     pub audio: crate::config::AudioConfig,
 }
 

@@ -12,7 +12,13 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("q", "quit"),
     ("Ctrl+C", "quit"),
     ("p", "pause / resume"),
-    ("m", "mute ambient sound"),
+    // Audio rows only exist on audio-capable builds (Linux prebuilts ship
+    // without the feature — advertising a dead key reads as broken). Both
+    // descriptions fit the 21-col budget (36 inner - 2 indent - 13 key col).
+    #[cfg(feature = "audio")]
+    ("m", "sound on/off"),
+    #[cfg(feature = "audio")]
+    ("+/-", "volume; + unmutes"),
     ("t", "themes"),
     ("Tab", "agent dashboard"),
     ("s", "sources (connect / health)"),

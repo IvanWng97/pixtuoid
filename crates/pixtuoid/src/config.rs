@@ -57,8 +57,8 @@ pub struct AppConfig {
     #[serde(rename = "floating", default, skip_serializing_if = "Option::is_none")]
     pub floating: Option<FloatingConfigRaw>,
     /// Ambient office sound — a single `[audio]` table (#633). Absent ⇒
-    /// DISABLED (sound is strictly opt-in; a terminal app must never speak
-    /// uninvited). Resolved by [`resolve_audio`]. Keep BEFORE `pets` (the
+    /// MUTED (the office starts silent; `m` is the whole opt-in and persists
+    /// here). Resolved by [`resolve_audio`]. Keep BEFORE `pets` (the
     /// table-before-array-of-tables rule above).
     #[serde(rename = "audio", default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<AudioConfigRaw>,
@@ -129,25 +129,52 @@ pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AudioConfigRaw {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
+    pub muted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub volume: Option<f32>,
 }
 
-/// Resolved ambient-audio settings: enabled defaults FALSE (#633 — strictly
-/// opt-in), volume clamped to `[0.0, 1.0]`.
+/// Resolved ambient-audio settings: the ONE sound switch is `muted`,
+/// default TRUE (#633 — the office starts silent; `m` unmutes and
+/// persists). The old dual `enabled` knob was owner-cut as redundant —
+/// muted-by-default + lazy spawn gives the same strict opt-in with one
+/// keypress instead of a config edit. (`enabled` never shipped in a
+/// release; a leftover key is silently ignored like any unknown key.)
+/// Volume clamped to `[0.0, 1.0]`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AudioConfig {
-    pub enabled: bool,
+    pub muted: bool,
     pub volume: f32,
 }
 
 pub fn resolve_audio(config: &AppConfig) -> AudioConfig {
     let raw = config.audio.clone().unwrap_or_default();
     AudioConfig {
-        enabled: raw.enabled.unwrap_or(false),
+        muted: raw.muted.unwrap_or(true),
         volume: raw.volume.unwrap_or(1.0).clamp(0.0, 1.0),
     }
+}
+
+/// Persist the `[audio] muted` flag (the `m` toggle writes through here —
+/// the theme-save precedent: ConfigLock round via `update_config`, comments
+/// and unknown keys survive, a malformed existing config is never
+/// rewritten).
+pub(crate) fn save_audio_muted(path: &Path, muted: bool) -> Result<()> {
+    update_config(path, |doc| {
+        doc["audio"]["muted"] = toml_edit::value(muted);
+    })
+}
+
+/// Persist the `[audio] volume` level (the +/- nudge keys write through
+/// here, same ConfigLock round).
+pub(crate) fn save_audio_volume(path: &Path, volume: f32) -> Result<()> {
+    // quantize to the footer's percent vocabulary before widening — a raw
+    // f32→f64 writes float noise (0.949999988079071) into a file the repo
+    // deliberately keeps human-edited
+    let percent = (volume * 100.0).round() / 100.0;
+    update_config(path, |doc| {
+        doc["audio"]["volume"] = toml_edit::value(percent as f64);
+    })
 }
 
 pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
@@ -475,31 +502,32 @@ pub fn resolve_pets(
 mod tests {
     #[test]
     fn audio_resolve_clamps_and_defaults() {
-        // absent table → disabled, full volume
+        // absent table → MUTED, full volume: the office starts silent and
+        // `m` is the one opt-in (#633 — the enabled knob was owner-cut)
         let cfg = AppConfig::default();
         let a = resolve_audio(&cfg);
-        assert!(!a.enabled, "audio is strictly opt-in (#633)");
+        assert!(a.muted, "audio starts muted (strictly opt-in via m)");
         assert_eq!(a.volume, 1.0);
 
-        // explicit enable + out-of-range volumes clamp BOTH sides
+        // explicit unmute + out-of-range volumes clamp BOTH sides
         let mut cfg = AppConfig {
             audio: Some(AudioConfigRaw {
-                enabled: Some(true),
+                muted: Some(false),
                 volume: Some(-0.5),
             }),
             ..Default::default()
         };
         let a = resolve_audio(&cfg);
-        assert!(a.enabled);
+        assert!(!a.muted);
         assert_eq!(a.volume, 0.0, "negative volume clamps up");
         cfg.audio = Some(AudioConfigRaw {
-            enabled: Some(true),
+            muted: Some(false),
             volume: Some(1.5),
         });
         assert_eq!(resolve_audio(&cfg).volume, 1.0, "over-1 clamps down");
-        // partial table: enabled without volume keeps the default
+        // partial table: muted without volume keeps the default
         cfg.audio = Some(AudioConfigRaw {
-            enabled: Some(true),
+            muted: Some(false),
             volume: None,
         });
         assert_eq!(resolve_audio(&cfg).volume, 1.0);
@@ -507,11 +535,54 @@ mod tests {
 
     #[test]
     fn audio_table_round_trips_through_toml() {
-        let toml = "[audio]\nenabled = true\nvolume = 0.4\n";
+        let toml = "[audio]\nmuted = false\nvolume = 0.4\n";
         let cfg: AppConfig = toml::from_str(toml).expect("parses");
         let a = resolve_audio(&cfg);
-        assert!(a.enabled);
+        assert!(!a.muted);
         assert!((a.volume - 0.4).abs() < 1e-6);
+
+        // the retired (never-released) `enabled` key is an unknown key:
+        // ignored like any other, and it does NOT unmute
+        let toml = "[audio]\nenabled = true\n";
+        let cfg: AppConfig = toml::from_str(toml).expect("unknown keys tolerated");
+        assert!(
+            resolve_audio(&cfg).muted,
+            "a leftover enabled=true stays muted"
+        );
+    }
+
+    #[test]
+    fn save_audio_muted_persists_and_preserves_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "# my config\ntheme = \"normal\"\n[audio]\nvolume = 0.4\n",
+        )
+        .unwrap();
+        save_audio_muted(&path, false).unwrap();
+        let s = std::fs::read_to_string(&path).unwrap();
+        assert!(s.contains("muted = false"));
+        assert!(s.contains("# my config"), "comments survive");
+        assert!(s.contains("volume = 0.4"), "sibling keys survive");
+        let cfg: AppConfig = toml::from_str(&s).unwrap();
+        assert!(!resolve_audio(&cfg).muted);
+        // flip back
+        save_audio_muted(&path, true).unwrap();
+        let cfg: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(resolve_audio(&cfg).muted);
+    }
+
+    #[test]
+    fn save_audio_volume_persists_the_nudged_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[audio]\nmuted = false\n").unwrap();
+        save_audio_volume(&path, 0.65).unwrap();
+        let cfg: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let a = resolve_audio(&cfg);
+        assert!((a.volume - 0.65).abs() < 1e-6);
+        assert!(!a.muted, "the sibling muted key survives");
     }
 
     use super::*;

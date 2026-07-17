@@ -120,6 +120,41 @@ pub(crate) fn lowpass(buf: &[f32], cutoff_hz: f32) -> Vec<f32> {
     bandpass(buf, 0.0, cutoff_hz)
 }
 
+pub(crate) fn highpass(buf: &[f32], cutoff_hz: f32) -> Vec<f32> {
+    bandpass(buf, cutoff_hz, SAMPLE_RATE as f32)
+}
+
+/// Tape wow/flutter — resample `buf` along a sinusoidally warped time axis
+/// (the Phase 0 `lofi_post` core, numpy `interp(t + warp, t, x)` semantics:
+/// linear interpolation, edge-clamped). Each `(hz, dev)` pair contributes a
+/// pitch deviation of ±`dev` (fractional) by displacing the read head
+/// `dev·SR/(2π·hz)` samples at rate `hz`.
+pub(crate) fn warp_resample(buf: &[f32], warps: &[(f32, f32)]) -> Vec<f32> {
+    let n = buf.len();
+    let amp: Vec<(f32, f32)> = warps
+        .iter()
+        .map(|&(hz, dev)| {
+            (
+                hz,
+                dev * SAMPLE_RATE as f32 / (2.0 * std::f32::consts::PI * hz),
+            )
+        })
+        .collect();
+    (0..n)
+        .map(|i| {
+            let mut p = i as f32;
+            for &(hz, a) in &amp {
+                p += a * (2.0 * std::f32::consts::PI * hz * i as f32 / SAMPLE_RATE as f32).sin();
+            }
+            let p = p.clamp(0.0, (n - 1) as f32);
+            let lo = p.floor() as usize;
+            let hi = (lo + 1).min(n - 1);
+            let frac = p - lo as f32;
+            buf[lo] * (1.0 - frac) + buf[hi] * frac
+        })
+        .collect()
+}
+
 /// A power-of-two block of noise FFT-shaped to a measured octave-band
 /// envelope — CIRCULARLY seamless by construction (FFT-domain shaping is
 /// periodic in the block), so the returned block loops without a click.
@@ -255,6 +290,26 @@ mod tests {
         let rms = |v: &[f32]| (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();
         assert!(rms(&kept) > 0.5, "in-band tone survives");
         assert!(rms(&killed) < 0.01, "out-of-band tone dies");
+    }
+
+    #[test]
+    fn warp_resample_preserves_a_tone_and_is_identity_at_zero_dev() {
+        let tone: Vec<f32> = (0..44_100)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / SAMPLE_RATE as f32).sin())
+            .collect();
+        // zero deviation = bit-exact identity (the read head never moves)
+        let same = warp_resample(&tone, &[(0.7, 0.0)]);
+        assert_eq!(same, tone);
+        // the ratified wow/flutter is a SUBTLE warble: the tone's centroid
+        // stays put and its power survives (no smearing to noise)
+        let warped = warp_resample(&tone, &[(0.7, 0.0025), (8.0, 0.0006)]);
+        let c = centroid_hz(&warped);
+        assert!((400.0..480.0).contains(&c), "centroid {c} strayed from 440");
+        let rms = |v: &[f32]| (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();
+        assert!(
+            rms(&warped) > 0.9 * rms(&tone),
+            "warble must not lose power"
+        );
     }
 
     #[test]

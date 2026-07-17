@@ -55,7 +55,9 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   occupancy edges as the #567 anims; the elevator-ding + audio-glug cues were
 │                   owner-CUT in the dogfood round — the 2s VISUAL glug bubble stays, unvoiced).
 │                   NO audio deps in this crate (the rodio/cpal ban is in `just arch`);
-│                   the binary's audio/ gateway is the consumer, WebAudio can ride the same model later
+│                   the binary's audio/ gateway is the consumer, WebAudio can ride the same model later.
+│                   Since Phase 2 (musical stems) every StemLevels lane is AUDIBLE — the binary
+│                   synthesizes the frozen 8-bar lofi composition at startup and loops all six beds
 ├── layout/             zone-based office geometry (terminal-agnostic; moved from pixtuoid-core —
 │                       the engine owns its geometry; `Layout` = compat alias for SceneLayout;
 │                       the WalkableMask VOCABULARY it stamps stays in core, coherence-bound to Grid):
