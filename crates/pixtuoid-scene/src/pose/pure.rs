@@ -488,6 +488,17 @@ impl SeatClaims {
 /// timeline is estimated rather than exact. The routed motion authority is what
 /// actually places agents, so it is the one that must not double-book.
 ///
+/// So the two DO diverge on a contested seat, and the consumer that sees it is
+/// the A\* occupancy prepass (`pixel_painter::sim::sim_step`, which reserves the
+/// stand cell of whatever the STATELESS `derive` returns) — not the label
+/// overlay, which rides the routed `derive_with_routing`. Cost: on a contested
+/// seat the prepass reserves the loser's cell and not the winner's, so a walker
+/// may clip a real sitter. That is the SAME trade the frozen-polyline sharp edge
+/// already buys (rare, cosmetic, legs are seconds), on a second axis — the two
+/// timelines were already allowed to disagree. What matters is preserved: the
+/// pure half stays a function of its snapshot inputs, so the overlay's cache
+/// signature is still frame-stable.
+///
 /// A named waypoint whose only reachable side is its excluded backrest (or a
 /// fully-blocked obstacle) yields `approach_point == wp.pos`, the "no valid
 /// approach" sentinel — this ambles aimlessly that cycle instead of routing into

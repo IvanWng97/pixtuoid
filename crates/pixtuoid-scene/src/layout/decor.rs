@@ -177,10 +177,12 @@ pub struct FurnitureDef {
     /// This flag is THE seat authority, read by three consumers that must not
     /// drift: `seated_foot_cell` (the settle cell), `pose::SeatClaims` (a seat
     /// is single-occupancy — see the scene guide's sharp edge), and
-    /// `waypoint_rank_offset_x` (a seat never steps aside). Setting it on a new
-    /// row opts that row into all three at once — which is the point; a
-    /// hand-listed kind set in any consumer would silently re-open the
-    /// two-agents-on-one-chair bug.
+    /// `waypoint_rank_offset_x` (a seat never steps aside). A new SEAT is a
+    /// `WaypointKind`, so setting the flag opts it into all three at once —
+    /// which is the point; a hand-listed kind set in any consumer would silently
+    /// re-open the two-agents-on-one-chair bug. (`Desk` is the lone non-waypoint
+    /// member: it reaches only `seated_foot_cell` and is single-occupancy by its
+    /// own per-agent home-desk assignment, never a shared wander destination.)
     pub occupies_pos: bool,
     /// Per-spot idle dwell window. `range_ms == 0` (the `DECOR` rows) marks a
     /// kind that is NOT a wander destination and is never fed to

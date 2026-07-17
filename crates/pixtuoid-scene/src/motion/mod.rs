@@ -494,9 +494,15 @@ fn pick_wander_dest(
 ///    counter, vending, printer, phone booth) are approached from a side and
 ///    stay shareable: the painter's rank offset is a genuine step-aside there.
 ///
-/// An agent that leaves the wander machine mid-trip (goes Active, or starts
-/// exiting) releases its claim in `pose::derive_with_routing`, so a typing agent
-/// can't hold a seat it isn't sitting in.
+/// An agent that goes Active mid-trip releases its claim in
+/// `pose::derive_with_routing`, so a typing agent can't hold a seat it isn't
+/// sitting in. The other two holds are bounded and deliberate: an EXITING agent
+/// keeps its seat for the ≤`EXIT_GRACE_WINDOW` walkout (it IS still on the seat
+/// until it rises) until eviction drops the whole `MotionState`; and a
+/// `SeatedThinking` agent keeps it for ≤`THINKING_WINDOW_SECS` — reachable
+/// without ever going Active, since a stale `ActivityEnd` stamps `last_event_at`
+/// with no state change — after which the stale-resume bootstrap re-seats the
+/// phase machine and the `phase != Seated` gate drops the claim.
 fn seat_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> SeatClaims {
     let mut claims = SeatClaims::default();
     for (id, ms) in motion {

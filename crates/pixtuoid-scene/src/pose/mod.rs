@@ -533,14 +533,19 @@ pub fn derive_with_routing(
         }
     }
 
-    // Reaching here means the agent left the wander machine (it went Active /
-    // Waiting, or started exiting) — the snap-back below rushes it home. Release
-    // any seat it had claimed: `advance_wander` stops running for a non-Idle
-    // agent, so its `wander.target` would otherwise freeze mid-trip and hold a
-    // seat it is no longer sitting in for the whole active burst. The claim
-    // re-forms from scratch on the next Idle trip (the bootstrap re-seats the
-    // phase machine), and nothing else reads `target` off the wander path — the
-    // snap-back/exit legs take their origin from `history`, not from here.
+    // Reaching here means the agent went Active/Waiting — the snap-back below
+    // rushes it home. Release any seat it had claimed: `advance_wander` stops
+    // running for a non-Idle agent, so its `wander.target` would otherwise
+    // freeze mid-trip and hold a seat it is no longer sitting in for the whole
+    // (unbounded) active burst. The claim re-forms on the next Idle trip, and
+    // nothing else reads `target` off this path — snap-back takes its origin
+    // from `history`. Idempotent, so the label-overlay / hit-test derives that
+    // share this `motion` map can run it in any order.
+    //
+    // NOT the exit path: the EXIT branch above returns on every arm, so an
+    // exiting agent never reaches here. Its claim rides the walkout (correct —
+    // it's still on the seat until it rises) and is dropped by
+    // `FloorCtx::evict_missing` once the ≤`EXIT_GRACE_WINDOW` walk GCs the slot.
     if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
         ms.wander.target.kind = WanderKind::Aimless;
     }

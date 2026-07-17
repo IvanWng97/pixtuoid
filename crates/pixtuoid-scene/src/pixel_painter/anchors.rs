@@ -108,14 +108,16 @@ const STEP_ASIDE_DX: i16 = 9;
 /// sits/stands ON this cell" — is the gate, so this holds for every current seat
 /// (couch / meeting sofa / meeting chair / island stand) AND for any seat added
 /// later, without a second list to keep in sync. Sliding a sitter sideways off a
-/// discrete slot renders them on thin air; ±9 is literally
-/// `MEETING_CHAIR_TABLE_DX`, so it parked the extra sitter on the meeting table.
-/// The offsets predate per-seat waypoints (one `Couch` waypoint used to spread 3
-/// sitters over the sofa — hence the old ±6 == `SEAT_DX`); seats are now
-/// single-occupancy at SELECTION (`pose::SeatClaims`), so `rank` is always 0
-/// here for them and the guard is belt-and-braces: on a seat, an exact overlap
-/// reads as one sprite, which is the honest render of a bug, not a plausible
-/// wrong one.
+/// discrete slot renders them on thin air — and the old fossil arm made that
+/// concrete: its generic +9 happened to equal `MEETING_CHAIR_TABLE_DX` (a
+/// chair's distance from the table centre — a coincidence of two unrelated 9s,
+/// NOT one value; `STEP_ASIDE_DX` is now obstacle-only and never touches a
+/// chair), so a second chair-sitter was parked ON the meeting table. The offsets
+/// predate per-seat waypoints (one `Couch` waypoint used to spread 3 sitters over
+/// the sofa — hence the old ±6 == `SEAT_DX`); seats are now single-occupancy at
+/// SELECTION (`pose::SeatClaims`), so `rank` is always 0 here for them and the
+/// guard is belt-and-braces: on a seat, an exact overlap reads as one sprite,
+/// which is the honest render of a bug, not a plausible wrong one.
 pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
     if crate::layout::furniture_def(kind.furniture()).occupies_pos {
         return 0;
