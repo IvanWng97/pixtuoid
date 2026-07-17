@@ -31,9 +31,8 @@ use anyhow::{bail, Context, Result};
 use target::{BinaryStrategy, Target, BACKUP_SUFFIX};
 
 /// The idempotency sentinel stamped on every hook entry pixtuoid installs — the
-/// five JSON/TOML-config targets (Claude/Codex/CodeWhale/Cursor/Reasonix)
-/// install/uninstall/detect key on this, not the command shape. (opencode and
-/// openclaw are code artifacts and use their own plugin-file sentinel.)
+/// six JSON/TOML/YAML-config targets (Claude/Codex/CodeWhale/Cursor/Reasonix/Hermes)
+/// install/uninstall/detect key on this, not the command shape. (opencode, openclaw and grok write their own wholly-owned files with their own sentinel.)
 pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 
 /// Whether `t`'s config currently bears pixtuoid hooks — the load-bearing gate

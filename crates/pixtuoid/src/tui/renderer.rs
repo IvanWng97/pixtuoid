@@ -365,10 +365,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         if hovered.is_none() {
             if let Some((mx, my)) = mouse_pos {
-                // Priority chain: coffee machine > pet (only when the cursor is
-                // over it) > furniture. `.filter` keeps the pet arm a single
-                // branch so a present-but-not-hit pet falls through to the ONE
-                // furniture fallthrough below (no per-branch duplication).
+                // Priority chain: coffee machine > pet (cursor-over only) >
+                // gateway mascot > furniture. `.filter` keeps the pet/mascot
+                // arms single branches so a present-but-not-hit hover falls
+                // through to the next arm (no per-branch duplication).
                 let pet_hit = ctx
                     .last_pet_pos
                     .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, mx, my));
