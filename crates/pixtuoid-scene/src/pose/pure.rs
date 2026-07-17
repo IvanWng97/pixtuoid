@@ -443,12 +443,50 @@ fn thinking_hold_ms(slot: &AgentSlot) -> u64 {
         .map_or(0, |d| d.as_millis() as u64)
 }
 
+/// The seat waypoints already spoken for — the input that makes a seat
+/// SINGLE-OCCUPANCY. A seat (`occupies_pos` furniture: couch / meeting sofa /
+/// meeting chair / island stand) is a discrete slot the agent sits or stands
+/// ON, and each one is already its OWN waypoint, so "two agents at the same
+/// seat waypoint" has no valid rendering — the painter's rank de-collision can
+/// only slide the second sitter sideways onto thin air (or, at ±9 ==
+/// `MEETING_CHAIR_TABLE_DX`, onto the meeting table). Claims are therefore
+/// resolved where the destination is CHOSEN, not where it is drawn.
+///
+/// Built by [`crate::motion::seat_claims`] from the live wander targets; small
+/// by construction (at most one entry per agent out on a seat trip), so a
+/// linear `contains` beats hashing.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct SeatClaims(Vec<usize>);
+
+impl SeatClaims {
+    /// Claim `wp_idx` for a seat trip. Idempotent — re-claiming is a no-op, so
+    /// an agent re-picking its own held seat can't grow the set.
+    pub(crate) fn claim(&mut self, wp_idx: usize) {
+        if !self.holds(wp_idx) {
+            self.0.push(wp_idx);
+        }
+    }
+
+    /// Whether some agent is already headed for (or sitting at) this seat.
+    /// Only seat waypoints are ever claimed, so this is always false for an
+    /// obstacle kind — a stand-beside spot stays shareable.
+    pub(crate) fn holds(&self, wp_idx: usize) -> bool {
+        self.0.contains(&wp_idx)
+    }
+}
+
 /// Resolve the wander destination for `(agent_id, cycle_n)` on `layout`, with
 /// `origin` (the home desk) as the approach-side tiebreaker. The ONE stateless
 /// wander-destination resolver: the stateful motion authority
 /// (`motion::advance_wander` via `pick_wander_dest`) delegates to it, and
 /// `idle_pose` calls it then maps the [`WanderTarget`] to a [`Pose`]. Was
 /// DUPLICATED across the two, kept in lockstep only by comment + test.
+///
+/// `claimed` is the seat-exclusion input (see [`SeatClaims`]): the two callers
+/// stay in lockstep for equal `claimed`, and `idle_pose` passes an EMPTY set
+/// because the pure half has no occupancy knowledge — the same reason its dwell
+/// timeline is estimated rather than exact. The routed motion authority is what
+/// actually places agents, so it is the one that must not double-book.
 ///
 /// A named waypoint whose only reachable side is its excluded backrest (or a
 /// fully-blocked obstacle) yields `approach_point == wp.pos`, the "no valid
@@ -459,6 +497,7 @@ pub(crate) fn resolve_wander_target(
     cycle_n: u64,
     layout: &SceneLayout,
     origin: Point,
+    claimed: &SeatClaims,
 ) -> WanderTarget {
     let amble = || WanderTarget {
         dest: pick_aimless_dest(layout, aimless_wander_seed(id, cycle_n), origin),
@@ -467,7 +506,21 @@ pub(crate) fn resolve_wander_target(
     if is_aimless_cycle(id, cycle_n) {
         return amble();
     }
-    let wp_idx = waypoint_index_for_cycle(id, cycle_n, layout.waypoints.len());
+    let n = layout.waypoints.len();
+    let first = waypoint_index_for_cycle(id, cycle_n, n);
+    // A claimed seat simply isn't a destination: probe forward to the next
+    // unclaimed waypoint. A venue's seats are CONTIGUOUS in `waypoints`
+    // (`compute_waypoints` pushes a sofa's 3 / a table's 2 in one run), so the
+    // probe lands on a neighbouring seat of the SAME venue first — "that chair's
+    // taken, I'll take the next one" — and only walks off to another spot once
+    // the venue is full. Non-seat waypoints are never claimed, so with no claims
+    // this resolves to `waypoints[first]` exactly as it did before.
+    let Some(wp_idx) = (0..n)
+        .map(|step| (first + step) % n)
+        .find(|i| !claimed.holds(*i))
+    else {
+        return amble();
+    };
     let wp = layout.waypoints[wp_idx];
     // Walk destination = the A*-reachable approach point on an allowed side (NOT
     // the raw blocked `wp.pos`, which made A* detour + the sprite pop). Same
@@ -534,8 +587,11 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     // to a pose. The per-cycle aimless-vs-waypoint roll, the weighted-zone aimless
     // pick, the reachable-approach selection, and the no-reachable-side amble
     // fallback all live in that resolver so the stateless overlay here and the
-    // stateful render can't drift.
-    let target = resolve_wander_target(slot.agent_id, cycle_n, layout, desk);
+    // stateful render can't drift. Seat claims are EMPTY here: this half has no
+    // occupancy knowledge (see `resolve_wander_target`), and its job is a
+    // cache-stable overlay estimate, not the authoritative placement.
+    let target =
+        resolve_wander_target(slot.agent_id, cycle_n, layout, desk, &SeatClaims::default());
     let dest = target.dest;
     let at_dest_pose: Pose = match target.kind {
         WanderKind::Named { wp_idx, kind, .. } => Pose::AtWaypoint { wp: wp_idx, kind },

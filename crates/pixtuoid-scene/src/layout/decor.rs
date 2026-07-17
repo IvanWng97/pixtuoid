@@ -170,7 +170,17 @@ pub struct FurnitureDef {
     /// true (the agent still occupies its `pos`). Opposite case (Pantry/
     /// vending/printer/phone-booth/standing-desk): `pos` = blocked obstacle
     /// CENTER, approached from a side. True set: {Couch, MeetingSofa,
-    /// MeetingChair}. (Desks are NOT rows here — home workstation is separate.)
+    /// MeetingChair, IslandStand, Desk} — the set `seated_foot_cell` switches
+    /// on (its `unreachable!` arm is the compile-adjacent tooth keeping the two
+    /// in step).
+    ///
+    /// This flag is THE seat authority, read by three consumers that must not
+    /// drift: `seated_foot_cell` (the settle cell), `pose::SeatClaims` (a seat
+    /// is single-occupancy — see the scene guide's sharp edge), and
+    /// `waypoint_rank_offset_x` (a seat never steps aside). Setting it on a new
+    /// row opts that row into all three at once — which is the point; a
+    /// hand-listed kind set in any consumer would silently re-open the
+    /// two-agents-on-one-chair bug.
     pub occupies_pos: bool,
     /// Per-spot idle dwell window. `range_ms == 0` (the `DECOR` rows) marks a
     /// kind that is NOT a wander destination and is never fed to

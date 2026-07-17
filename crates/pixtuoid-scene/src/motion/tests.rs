@@ -1112,7 +1112,7 @@ fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
         .expect("should find a directed-trip agent");
 
     let origin = l.home_desks[0];
-    let target = pick_wander_dest(id, 0, &l, origin);
+    let target = pick_wander_dest(id, 0, &l, origin, &SeatClaims::default());
 
     assert!(
         matches!(target.kind, WanderKind::Aimless),
@@ -1143,7 +1143,9 @@ fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
         if !takes_trip(id, 0) || is_aimless_cycle(id, 0) {
             continue;
         }
-        if let WanderKind::Named { kind, seat, .. } = pick_wander_dest(id, 0, &l, origin).kind {
+        if let WanderKind::Named { kind, seat, .. } =
+            pick_wander_dest(id, 0, &l, origin, &SeatClaims::default()).kind
+        {
             assert_eq!(
                 seat.is_some(),
                 furniture_def(kind.furniture()).occupies_pos,
@@ -1163,5 +1165,111 @@ fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
     assert!(
         saw_seat,
         "sweep must resolve at least one seat (seat:Some) waypoint"
+    );
+}
+
+// --- seat_claims: who actually holds a seat ---------------------------
+
+/// Build a motion state parked mid-trip at `wp_idx` of `kind`.
+fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> MotionState {
+    let mut ms = MotionState::new(id);
+    ms.wander.phase =
+        WanderPhase::AtWaypoint(crate::physics::walk_profile(100, WalkIntent::WanderOut, id));
+    ms.wander.target = WanderTarget {
+        dest: Point { x: 0, y: 0 },
+        kind: WanderKind::Named {
+            wp_idx,
+            kind,
+            seat: None,
+        },
+    };
+    ms
+}
+
+#[test]
+fn seat_claims_holds_only_seats_of_other_agents_out_on_a_trip() {
+    let me = AgentId::from_transcript_path("/p/claims-me.jsonl");
+    let sitter = AgentId::from_transcript_path("/p/claims-sitter.jsonl");
+    let stander = AgentId::from_transcript_path("/p/claims-stander.jsonl");
+    let mut motion = HashMap::new();
+    // Another agent sitting on a seat: claimed.
+    motion.insert(sitter, tripping_at(sitter, 3, WaypointKind::MeetingChair));
+    // Another agent at an obstacle it stands BESIDE: shareable, never claimed —
+    // the painter's ±9 step-aside is the intended affordance there.
+    motion.insert(stander, tripping_at(stander, 7, WaypointKind::Printer));
+    // This agent's OWN seat must not block its own re-pick.
+    motion.insert(me, tripping_at(me, 5, WaypointKind::Couch));
+
+    let claims = seat_claims(&motion, me);
+    assert!(claims.holds(3), "another agent's seat must be claimed");
+    assert!(!claims.holds(7), "an obstacle waypoint is shareable");
+    assert!(
+        !claims.holds(5),
+        "an agent must not claim a seat against itself"
+    );
+}
+
+/// The `phase != Seated` gate. `target.kind` is reset to `Aimless` on the normal
+/// walk-back arrival, but the bootstrap / stale-resume path re-seats an agent at
+/// its desk WITHOUT touching its target — so a stale `Named` seat would linger
+/// and block the seat for everyone. The phase, not the kind, is the honest "is
+/// this agent actually out at the seat" signal.
+#[test]
+fn seat_claims_ignores_a_seated_agents_stale_target() {
+    let me = AgentId::from_transcript_path("/p/claims-me.jsonl");
+    let resumed = AgentId::from_transcript_path("/p/claims-resumed.jsonl");
+    let mut ms = tripping_at(resumed, 3, WaypointKind::MeetingChair);
+    ms.wander.phase = WanderPhase::Seated; // what the stale-resume bootstrap does
+    let mut motion = HashMap::new();
+    motion.insert(resumed, ms);
+
+    assert!(
+        !seat_claims(&motion, me).holds(3),
+        "an agent re-seated at its desk must not keep holding a meeting seat"
+    );
+}
+
+/// The probe: a claimed seat is not a dead end. A venue's seats are CONTIGUOUS
+/// in `layout.waypoints` (`compute_waypoints` pushes a sofa's 3 / a table's 2 in
+/// one run), so probing forward from the hashed index lands on a neighbouring
+/// seat of the SAME venue — "that chair's taken, I'll take the next one" —
+/// instead of ambling away and leaving the room empty. Pins BOTH halves: the
+/// claimed seat is refused, and the replacement is still a seat in that venue.
+#[test]
+fn a_claimed_seat_sends_the_agent_to_the_next_seat_of_the_same_venue() {
+    let l = Layout::compute(240, 160, None).expect("fits");
+    let origin = l.home_desks[0];
+    // An agent whose cycle-0 pick is a MEETING seat, so the venue has siblings.
+    let (id, taken) = (0u64..5000)
+        .map(|i| AgentId::from_transcript_path(&format!("/p/probe_{i}.jsonl")))
+        .find_map(|id| {
+            if !takes_trip(id, 0) || is_aimless_cycle(id, 0) {
+                return None;
+            }
+            match pick_wander_dest(id, 0, &l, origin, &SeatClaims::default()).kind {
+                WanderKind::Named {
+                    wp_idx,
+                    kind: WaypointKind::MeetingSofa | WaypointKind::MeetingChair,
+                    ..
+                } => Some((id, wp_idx)),
+                _ => None,
+            }
+        })
+        .expect("some agent must pick a meeting seat on cycle 0");
+
+    let mut claims = SeatClaims::default();
+    claims.claim(taken);
+    let target = pick_wander_dest(id, 0, &l, origin, &claims);
+    let WanderKind::Named { wp_idx, kind, .. } = target.kind else {
+        panic!("a claimed seat must not strand the agent into an aimless amble");
+    };
+    assert_ne!(wp_idx, taken, "the claimed seat must be refused");
+    assert_eq!(
+        l.waypoints[wp_idx].room_id, l.waypoints[taken].room_id,
+        "the probe should land in the same meeting room, not walk off to another floor spot"
+    );
+    assert!(
+        matches!(kind, WaypointKind::MeetingSofa | WaypointKind::MeetingChair),
+        "the probe should find another meeting slot, got {kind:?}"
     );
 }

@@ -20,7 +20,7 @@ use crate::layout::{Layout, Point, WaypointKind};
 use crate::pathfind::Router;
 use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
 use crate::pose::{
-    dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip,
+    dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip, SeatClaims,
     WANDER_DWELL_EST_MS,
 };
 
@@ -231,6 +231,11 @@ pub fn advance_wander(
     motion: &mut HashMap<AgentId, MotionState>,
 ) -> (WanderPhase, u16) {
     let id = slot.agent_id;
+    // Snapshot the other agents' seat claims BEFORE taking this agent's `&mut`
+    // (the two borrows of `motion` can't overlap). Cheap: one pass over the
+    // floor's motion map, and the Vec stays empty unless someone is actually out
+    // on a seat trip.
+    let claimed = seat_claims(motion, id);
     let ms = motion.entry(id).or_insert_with(|| MotionState::new(id));
 
     // ---- INIT / BOOTSTRAP --------------------------------------------------
@@ -324,7 +329,7 @@ pub fn advance_wander(
                     // stateless/stateful destinations stay in lockstep).
                     let desk_pt = layout.home_desk(slot.desk_index.single_floor_local());
                     let origin = desk_pt.unwrap_or(Point { x: 0, y: 0 });
-                    let target = pick_wander_dest(id, ms.wander.cycle_n, layout, origin);
+                    let target = pick_wander_dest(id, ms.wander.cycle_n, layout, origin, &claimed);
                     ms.wander.target = target;
                     let dest = target.dest;
                     let seat = target.kind.seat();
@@ -461,10 +466,50 @@ fn advance_phase_clock(ms: &mut MotionState, walk_total: u64, now: SystemTime) {
 /// the ONE stateless resolver [`crate::pose::resolve_wander_target`], which
 /// `pose::pure::idle_pose` also calls, so the routed motion path and the
 /// stateless overlay can never drift to different destinations for the same
-/// `(agent, cycle)`. `origin` is the agent's home desk (the stand-side
-/// tiebreaker), kept identical to `idle_pose`'s `desk`.
-fn pick_wander_dest(id: AgentId, cycle_n: u64, layout: &Layout, origin: Point) -> WanderTarget {
-    crate::pose::resolve_wander_target(id, cycle_n, layout, origin)
+/// `(agent, cycle)` and equal claims. `origin` is the agent's home desk (the
+/// stand-side tiebreaker), kept identical to `idle_pose`'s `desk`.
+fn pick_wander_dest(
+    id: AgentId,
+    cycle_n: u64,
+    layout: &Layout,
+    origin: Point,
+    claimed: &SeatClaims,
+) -> WanderTarget {
+    crate::pose::resolve_wander_target(id, cycle_n, layout, origin, claimed)
+}
+
+/// The seat waypoints every OTHER agent on this floor is currently out on a trip
+/// to — the exclusion set that keeps a seat single-occupancy (see
+/// [`SeatClaims`]). Read from the live wander targets in `motion`, which is why
+/// it must be built BEFORE the caller takes its own `&mut MotionState`.
+///
+/// Two gates, both load-bearing:
+///  * **phase ≠ Seated** — a Seated agent is at its desk. `target.kind` is
+///    normally reset to `Aimless` on the walk-back's arrival, but the
+///    bootstrap / stale-resume path re-seats an agent WITHOUT touching its
+///    target, so the phase (not the kind) is the honest "is this agent actually
+///    out at the seat" signal.
+///  * **`occupies_pos`** — reuses the one authority for "the agent is ON this
+///    cell" rather than re-listing the seat kinds. Obstacle waypoints (pantry
+///    counter, vending, printer, phone booth) are approached from a side and
+///    stay shareable: the painter's rank offset is a genuine step-aside there.
+///
+/// An agent that leaves the wander machine mid-trip (goes Active, or starts
+/// exiting) releases its claim in `pose::derive_with_routing`, so a typing agent
+/// can't hold a seat it isn't sitting in.
+fn seat_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> SeatClaims {
+    let mut claims = SeatClaims::default();
+    for (id, ms) in motion {
+        if *id == exclude || matches!(ms.wander.phase, WanderPhase::Seated) {
+            continue;
+        }
+        if let WanderKind::Named { wp_idx, kind, .. } = ms.wander.target.kind {
+            if crate::layout::furniture_def(kind.furniture()).occupies_pos {
+                claims.claim(wp_idx);
+            }
+        }
+    }
+    claims
 }
 
 /// Snapshot the WanderBack `WalkProfile`: route `wander.target.dest → desk

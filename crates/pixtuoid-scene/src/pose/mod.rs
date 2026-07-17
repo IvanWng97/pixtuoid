@@ -31,9 +31,10 @@ pub use pure::{
     STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS, THINKING_WINDOW_SECS, TYPING_FRAMES,
     TYPING_FRAME_MS, WALKING_FRAMES, WALKING_FRAME_MS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS,
 };
-// `resolve_wander_target` stays crate-internal (the motion authority delegates to
-// it); a `pub use` would try to widen its `pub(crate)` visibility.
-pub(crate) use pure::resolve_wander_target;
+// `resolve_wander_target` + its `SeatClaims` input stay crate-internal (the
+// motion authority delegates to it and builds the claims); a `pub use` would try
+// to widen their `pub(crate)` visibility.
+pub(crate) use pure::{resolve_wander_target, SeatClaims};
 
 use crate::layout::{desk_walk_anchor, Layout, Point, WaypointKind};
 use crate::pathfind::Router;
@@ -530,6 +531,18 @@ pub fn derive_with_routing(
                 return Some(Pose::SeatedIdle);
             }
         }
+    }
+
+    // Reaching here means the agent left the wander machine (it went Active /
+    // Waiting, or started exiting) — the snap-back below rushes it home. Release
+    // any seat it had claimed: `advance_wander` stops running for a non-Idle
+    // agent, so its `wander.target` would otherwise freeze mid-trip and hold a
+    // seat it is no longer sitting in for the whole active burst. The claim
+    // re-forms from scratch on the next Idle trip (the bootstrap re-seats the
+    // phase machine), and nothing else reads `target` off the wander path — the
+    // snap-back/exit legs take their origin from `history`, not from here.
+    if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
+        ms.wander.target.kind = WanderKind::Aimless;
     }
 
     // ---- STATE-DRIVEN pose -------------------------------------------------

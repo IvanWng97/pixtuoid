@@ -95,20 +95,35 @@ pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
     }
 }
 
+/// How far a later arrival steps aside along x so two agents at one
+/// stand-beside spot don't render on top of each other. Sized to clear a
+/// character sprite (8 px bundled) with a pixel of daylight.
+const STEP_ASIDE_DX: i16 = 9;
+
 /// X-offset applied to a waypoint anchor when multiple agents land at the
 /// SAME waypoint in the same cycle. rank 0 = first arrival (no offset); later
-/// arrivals step aside. The lounge couch is now 3 distinct seat waypoints
-/// (20px sofa), so agents normally spread across seats at rank 0; the ±6
-/// offsets only fire as decollision when two pick the same seat.
+/// arrivals step aside.
+///
+/// A SEAT never steps aside. `occupies_pos` — the one authority for "the agent
+/// sits/stands ON this cell" — is the gate, so this holds for every current seat
+/// (couch / meeting sofa / meeting chair / island stand) AND for any seat added
+/// later, without a second list to keep in sync. Sliding a sitter sideways off a
+/// discrete slot renders them on thin air; ±9 is literally
+/// `MEETING_CHAIR_TABLE_DX`, so it parked the extra sitter on the meeting table.
+/// The offsets predate per-seat waypoints (one `Couch` waypoint used to spread 3
+/// sitters over the sofa — hence the old ±6 == `SEAT_DX`); seats are now
+/// single-occupancy at SELECTION (`pose::SeatClaims`), so `rank` is always 0
+/// here for them and the guard is belt-and-braces: on a seat, an exact overlap
+/// reads as one sprite, which is the honest render of a bug, not a plausible
+/// wrong one.
 pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
-    match (kind, rank) {
-        (_, 0) => 0,
-        (WaypointKind::Couch, 1) => 6,
-        (WaypointKind::Couch, 2) => -6,
-        (WaypointKind::Couch, _) => 0,
-        (_, 1) => 9,
-        (_, 2) => -9,
-        (_, _) => 0,
+    if crate::layout::furniture_def(kind.furniture()).occupies_pos {
+        return 0;
+    }
+    match rank {
+        1 => STEP_ASIDE_DX,
+        2 => -STEP_ASIDE_DX,
+        _ => 0,
     }
 }
 
