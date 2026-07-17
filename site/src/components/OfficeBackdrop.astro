@@ -83,6 +83,48 @@ import { asset, DIM_RESTING } from '../consts';
     <rect x="5" y="4" width="1" height="1"></rect>
   </svg>
 </button>
+{
+  /* The ♩ office-sound toggle (#633 web-audio). Starts OFF (muted-by-default +
+     browser autoplay policy: no sound without a gesture). aria-pressed = playing.
+     Shown only once the wasm engine goes live (JS un-hides it) — no engine, no
+     sound to offer. Pixel-SVG speaker icons on the 8×8 grid, same crispEdges
+     convention as the pause button. */
+}
+<button
+  id="office-audio"
+  class="office-ctl"
+  hidden
+  aria-pressed="false"
+  aria-label="Play the office ambient sound"
+>
+  <svg
+    class="office-ctl__soundon"
+    viewBox="0 0 8 8"
+    shape-rendering="crispEdges"
+    aria-hidden="true"
+  >
+    <rect x="1" y="3" width="1" height="2"></rect>
+    <rect x="2" y="2" width="1" height="4"></rect>
+    <rect x="3" y="1" width="1" height="6"></rect>
+    <rect x="5" y="2" width="1" height="1"></rect>
+    <rect x="6" y="3" width="1" height="2"></rect>
+    <rect x="5" y="5" width="1" height="1"></rect>
+  </svg>
+  <svg
+    class="office-ctl__soundoff"
+    viewBox="0 0 8 8"
+    shape-rendering="crispEdges"
+    aria-hidden="true"
+  >
+    <rect x="1" y="3" width="1" height="2"></rect>
+    <rect x="2" y="2" width="1" height="4"></rect>
+    <rect x="3" y="1" width="1" height="6"></rect>
+    <rect x="5" y="2" width="1" height="1"></rect>
+    <rect x="6" y="3" width="1" height="1"></rect>
+    <rect x="5" y="5" width="1" height="1"></rect>
+    <rect x="6" y="4" width="1" height="1"></rect>
+  </svg>
+</button>
 
 <style is:global>
   /* The fixed canvas sits at z:-1; the body's opaque background would hide
@@ -311,6 +353,32 @@ import { asset, DIM_RESTING } from '../consts';
     display: none;
   }
   .office-ctl[aria-pressed='true'] .office-ctl__play {
+    display: block;
+    color: var(--led);
+  }
+  /* The ♩ sound toggle (#office-audio) STACKS directly above the pause button
+     (same right edge, so the ≤760px container reservation still covers one
+     column). Its bottom mirrors .office-ctl at both breakpoints, lifted one
+     button-height + gap. */
+  #office-audio {
+    bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + 10px + var(--office-ctl-w) + 8px);
+  }
+  @media (max-width: 960px) {
+    #office-audio {
+      bottom: calc(
+        2rem + env(safe-area-inset-bottom, 0px) + var(--footer-h, 74px) + 10px +
+          var(--office-ctl-w) + 8px
+      );
+    }
+  }
+  /* muted (not pressed) shows the crossed speaker; playing shows the waves. */
+  .office-ctl .office-ctl__soundon {
+    display: none;
+  }
+  .office-ctl[aria-pressed='true'] .office-ctl__soundoff {
+    display: none;
+  }
+  .office-ctl[aria-pressed='true'] .office-ctl__soundon {
     display: block;
     color: var(--led);
   }
@@ -559,6 +627,7 @@ import { asset, DIM_RESTING } from '../consts';
         revealStartSim = nowMs; // sim-clock t0 → pause freezes the roll too
         wrap.classList.add('is-live');
         document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
+        showAudioBtn(); // a live office exists → offer the ♩ sound toggle
       }
       const rt = mq.matches ? 1 : (nowMs - revealStartSim) / REVEAL_MS;
       if (rt < 1) {
@@ -610,7 +679,12 @@ import { asset, DIM_RESTING } from '../consts';
         last = t;
         // Date.now(), NOT the rAF timestamp: the engine decodes now_ms as
         // calendar time (browser-local day/night + wall clock).
-        paint(Date.now() - pauseOffset);
+        const nowMs = Date.now() - pauseOffset;
+        paint(nowMs);
+        // Audio rides the SAME sim clock as the render (so pause freezes both);
+        // no-op until the ♩ toggle starts it. Ticks after paint so office.step
+        // has set the frame's clock the AudioFrame reads.
+        audioTick(nowMs);
       }
       raf = requestAnimationFrame(frame);
     }
@@ -630,6 +704,12 @@ import { asset, DIM_RESTING } from '../consts';
       // feed ticker and the hero dust — so ONE control governs page motion
       // (WCAG 2.2.2 covers the whole page, not just this canvas).
       document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: p } }));
+      // Keep the sound in lockstep: a paused (frozen-frame) office must not
+      // keep droning. Resume only when unpaused AND the ♩ is on.
+      if (audioCtx && audioPlaying) {
+        if (p) audioCtx.suspend();
+        else audioCtx.resume();
+      }
       if (p) {
         pausedAt = Date.now();
         stop();
@@ -651,6 +731,181 @@ import { asset, DIM_RESTING } from '../consts';
       if (pauseBtn) pauseBtn.hidden = mq.matches;
     }
     syncPauseBtn();
+
+    // --- Ambient office sound (#633 web-audio) -----------------------------
+    // The ♩ toggle drives a WebAudio graph fed by the Rust WebAudioDriver: the
+    // engine records per-tick gain/play/swap commands (office.audio_tick), JS is
+    // dumb glue. Muted-by-default + gesture-gated (browser autoplay policy).
+    const audioBtn = document.getElementById('office-audio');
+    const AUDIO_PREF = 'pix:audio'; // remembered CHOICE — never auto-plays without a gesture
+    let audioCtx = null;
+    let audioReady = false; // beds synthesized + buffers uploaded
+    let audioPlaying = false; // the ♩ is on (context running)
+    let audioBooting = false; // warmup pump in flight (ignore re-clicks)
+    let loopGains = []; // 6 GainNodes (LoopStem::ALL order: 0=Pad … 5=Rain)
+    let loopSources = []; // 6 looping AudioBufferSourceNodes
+    let oneShotBufs = {}; // pool wire → [AudioBuffer]
+    // Pool sizes must match bank::{KEYSTROKE_POOL, DROP_POOL} + the 3 singles.
+    const ONESHOT_POOLS = [
+      [0, 16],
+      [1, 12],
+      [2, 1],
+      [3, 1],
+      [4, 1],
+    ];
+
+    // Copy f32 samples OUT of wasm linear memory (a view would dangle on the
+    // next memory.grow — the frame_ptr contract) into an AudioBuffer.
+    function audioMakeBuffer(ptr, len) {
+      if (!len) return null;
+      const view = new Float32Array(wasm.memory.buffer, ptr, len);
+      const buf = audioCtx.createBuffer(1, len, office.audio_sample_rate());
+      buf.getChannelData(0).set(view);
+      return buf;
+    }
+    function audioLoopBuffer(i) {
+      return audioMakeBuffer(office.audio_loop_ptr(i), office.audio_loop_len(i));
+    }
+    function audioUploadBuffers() {
+      loopGains = [];
+      loopSources = [];
+      for (let i = 0; i < 6; i++) {
+        const g = audioCtx.createGain();
+        g.gain.value = 0;
+        g.connect(audioCtx.destination);
+        const s = audioCtx.createBufferSource();
+        s.buffer = audioLoopBuffer(i);
+        s.loop = true;
+        s.connect(g);
+        s.start();
+        loopGains[i] = g;
+        loopSources[i] = s;
+      }
+      oneShotBufs = {};
+      for (const pool of ONESHOT_POOLS) {
+        const wire = pool[0];
+        const count = pool[1];
+        oneShotBufs[wire] = [];
+        for (let j = 0; j < count; j++) {
+          oneShotBufs[wire].push(
+            audioMakeBuffer(office.audio_oneshot_ptr(wire, j), office.audio_oneshot_len(wire, j))
+          );
+        }
+      }
+    }
+    // A mood-track swap: replace the 5 TRACK-stem loop buffers (0..4) in place;
+    // rain (5) is weather, untouched.
+    function audioSwapLoops() {
+      for (let i = 0; i < 5; i++) {
+        const s = audioCtx.createBufferSource();
+        s.buffer = audioLoopBuffer(i);
+        s.loop = true;
+        s.connect(loopGains[i]);
+        s.start();
+        try {
+          loopSources[i].stop();
+        } catch (e) {
+          /* already stopped */
+        }
+        loopSources[i] = s;
+      }
+    }
+    function audioTick(nowMs) {
+      if (!audioReady || !audioPlaying || !audioCtx) return;
+      let cmd;
+      try {
+        cmd = JSON.parse(office.audio_tick(nowMs));
+      } catch (e) {
+        return; // a bad frame degrades to holding the last gains, never a throw
+      }
+      const now = audioCtx.currentTime;
+      // The mixer already crossfades (each gain is the RAMPED value this tick),
+      // so a short setTargetAtTime just de-zippers the ~30fps steps.
+      for (let i = 0; i < 6; i++) {
+        loopGains[i].gain.setTargetAtTime(cmd.gains[i], now, 0.03);
+      }
+      if (cmd.swapped) audioSwapLoops();
+      for (const p of cmd.plays) {
+        const bank = oneShotBufs[p[0]];
+        const buf = bank && bank[p[1]];
+        if (!buf) continue;
+        const g = audioCtx.createGain();
+        g.gain.value = p[2];
+        g.connect(audioCtx.destination);
+        const s = audioCtx.createBufferSource();
+        s.buffer = buf;
+        s.connect(g);
+        s.start();
+      }
+    }
+    // Pump the chunked synthesis off setTimeout(0) so the main thread never
+    // blocks on the multi-second bank/rain/beds build in one go.
+    function audioPumpWarmup() {
+      if (office.audio_warmup_step() > 0) {
+        setTimeout(audioPumpWarmup, 0);
+        return;
+      }
+      audioUploadBuffers();
+      audioReady = true;
+    }
+    function audioStart() {
+      if (audioBooting || !office || !wasm) return;
+      audioBooting = true;
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      } catch (e) {
+        audioBooting = false;
+        return; // no WebAudio → the ♩ simply does nothing
+      }
+      office.audio_begin();
+      audioPumpWarmup();
+    }
+    function setAudioPlaying(on) {
+      audioPlaying = on;
+      if (audioBtn) audioBtn.setAttribute('aria-pressed', String(on));
+      try {
+        window.localStorage.setItem(AUDIO_PREF, on ? '1' : '0');
+      } catch (e) {
+        /* private mode: fine, just don't remember */
+      }
+      if (!audioCtx) return;
+      // suspend on mute (or page-pause) so a frozen frame isn't left droning;
+      // resume only while the ♩ is on AND the page isn't paused.
+      if (on && !paused) audioCtx.resume();
+      else audioCtx.suspend();
+    }
+    if (audioBtn) {
+      audioBtn.addEventListener('click', function () {
+        if (!audioReady && !audioBooting) audioStart(); // first click: gesture-gated boot
+        setAudioPlaying(!audioPlaying);
+      });
+    }
+    // Reveal the ♩ only once a live office exists to sound (set in paint()).
+    // If the visitor turned sound ON before, restore it on their FIRST gesture
+    // this visit (autoplay policy forbids resuming without one) — never
+    // auto-playing on load. One-shot; a fresh ♩ click is the other opt-in.
+    let audioBtnShown = false;
+    function showAudioBtn() {
+      if (!audioBtn || mq.matches || audioBtnShown) return;
+      audioBtn.hidden = false;
+      audioBtnShown = true;
+      let remembered = false;
+      try {
+        remembered = window.localStorage.getItem(AUDIO_PREF) === '1';
+      } catch (e) {
+        /* private mode */
+      }
+      if (!remembered) return;
+      const restore = function () {
+        window.removeEventListener('pointerdown', restore, true);
+        window.removeEventListener('keydown', restore, true);
+        if (audioReady || audioBooting) return;
+        audioStart();
+        setAudioPlaying(true);
+      };
+      window.addEventListener('pointerdown', restore, true);
+      window.addEventListener('keydown', restore, true);
+    }
 
     // .office-ctl's ≤960px clearance (above) reads --footer-h off the
     // footer's REAL rendered height instead of a flat guess — Footer.astro's
@@ -789,6 +1044,12 @@ import { asset, DIM_RESTING } from '../consts';
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) stop();
       else start();
+      // Suspend the audio graph while hidden (the rAF loop stops, so the loops
+      // would otherwise drone unfed); resume only if the ♩ is on and not paused.
+      if (audioCtx && audioPlaying) {
+        if (document.hidden || paused) audioCtx.suspend();
+        else audioCtx.resume();
+      }
     });
     if (mq.addEventListener) {
       mq.addEventListener('change', function () {

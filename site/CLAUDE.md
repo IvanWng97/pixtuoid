@@ -194,6 +194,26 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   its darkness at 0.74 (below the shared `DIM_MAX` 0.86) so the LIVE office reads
   above the fold, while downpage statement holds keep `DIM_MAX` for copy
   legibility (the `[data-lit]::before` radial wash still floors local contrast).
+- **The ♩ office-sound toggle (`#office-audio`, #633 web-audio).** The hero's
+  `Office` runs the real Rust `WebAudioDriver` (`pixtuoid-web`'s `audio.rs` — the
+  SAME scene mixer/schedulers/TrackSwitch the desktop app runs); `OfficeBackdrop.astro`
+  is dumb WebAudio glue over its per-tick JSON commands (the `overlay_json` split,
+  audio edition). **Muted-by-default + gesture-gated** (browser autoplay policy):
+  no `AudioContext` until the first ♩ click, which `office.audio_begin()`s, pumps
+  the chunked `office.audio_warmup_step()` off `setTimeout(0)` (the multi-second
+  bank/rain/beds synth never blocks the main thread), uploads the buffers via the
+  zero-copy `audio_loop_ptr/_len` + `audio_oneshot_ptr/_len` getters (COPIED out —
+  a view dangles on `memory.grow`), then `office.audio_tick(nowMs)` per frame,
+  applying `{gains[6],plays,swapped}` to looping `AudioBufferSourceNode`s + a
+  `GainNode` each. Sound rides the SAME pause-shifted `nowMs` as the render, so
+  `#office-pause` + `visibilitychange` `suspend()`/`resume()` the context in
+  lockstep (a frozen office never drones). The ♩ un-hides only once the office is
+  live; a remembered "on" choice (`localStorage`) restores on the FIRST user
+  gesture (never auto-plays on load). The button STACKS above `#office-pause`
+  (same right edge → the ≤760px container reservation still covers one column).
+  Regenerate `public/wasm/` (`just gen-wasm`) whenever the `Office` audio surface
+  changes — the glue exports must match. Pinned by `smoke.spec.ts`'s existing
+  backdrop contracts (the audio layer adds no throw path).
 - **The showcase `VIBING` channel is a SECOND live `Office` (#468).** The CRT
   showcase (`Showcase.astro` + `ChannelStage.astro`, driven by `src/showcase.json`
   → `src/consts.ts`) has one `kind:"live"` channel, `vibing`, whose screen is a

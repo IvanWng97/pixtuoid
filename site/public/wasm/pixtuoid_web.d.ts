@@ -12,6 +12,50 @@ export class Office {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Create the audio engine for the CURRENT day/night + weather (from the
+     * last `step`'s clock). Idempotent — a second call is ignored, so JS can
+     * call it freely on the ♩ click. Costs nothing until `audio_warmup_step`
+     * synthesizes the beds.
+     */
+    audio_begin(): void;
+    audio_loop_len(idx: number): number;
+    /**
+     * Zero-copy pointer/length into the looping bed samples for stem `idx`
+     * (0=Pad … 5=Rain). RE-READ after warmup completes AND whenever a tick
+     * reports `swapped` (a track swap / any `memory.grow` moves the data).
+     */
+    audio_loop_ptr(idx: number): number;
+    audio_oneshot_len(pool: number, idx: number): number;
+    /**
+     * Zero-copy pointer/length into a one-shot buffer: `pool` is the wire index
+     * (0=keystroke, 1=raindrop, 2=door chime, 3=printer, 4=vending), `idx` the
+     * pool slot (keystrokes/drops are pools; the appliance cues are single).
+     * Uploaded once after warmup.
+     */
+    audio_oneshot_ptr(pool: number, idx: number): number;
+    /**
+     * The engine's sample rate (Hz) — JS builds its `AudioBuffer`s at this rate
+     * (the browser resamples to the AudioContext rate).
+     */
+    audio_sample_rate(): number;
+    /**
+     * Advance the audio one tick at `now_ms` (the site's pause-shifted clock,
+     * same as `step`) and return the JS glue commands as JSON:
+     * `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}`.
+     * `gains` are the 6 loop-stem target amplitudes (JS ramps each GainNode);
+     * `plays` are one-shots to spawn; `swapped` = re-read the loop buffers.
+     * Empty-ish before the beds are ready. No serde (tiny hand-built payload,
+     * like `overlay_json`).
+     */
+    audio_tick(now_ms: number): string;
+    /**
+     * Build ONE synthesis piece; returns pieces REMAINING (0 = ready to
+     * upload buffers + tick). JS loops it off `setTimeout(0)` so the multi-
+     * second synthesis never blocks the main thread in one shot. 0 if audio
+     * hasn't begun.
+     */
+    audio_warmup_step(): number;
+    /**
      * Byte length of the RGBA frame (`w*h*4`).
      */
     frame_len(): number;
@@ -100,6 +144,14 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_office_free: (a: number, b: number) => void;
+    readonly office_audio_begin: (a: number) => void;
+    readonly office_audio_loop_len: (a: number, b: number) => number;
+    readonly office_audio_loop_ptr: (a: number, b: number) => number;
+    readonly office_audio_oneshot_len: (a: number, b: number, c: number) => number;
+    readonly office_audio_oneshot_ptr: (a: number, b: number, c: number) => number;
+    readonly office_audio_sample_rate: (a: number) => number;
+    readonly office_audio_tick: (a: number, b: number) => [number, number];
+    readonly office_audio_warmup_step: (a: number) => number;
     readonly office_frame_len: (a: number) => number;
     readonly office_frame_ptr: (a: number) => number;
     readonly office_hire: (a: number) => number;
@@ -110,8 +162,8 @@ export interface InitOutput {
     readonly office_set_weather: (a: number, b: number, c: number) => void;
     readonly office_step: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_externrefs: WebAssembly.Table;
-    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_start: () => void;

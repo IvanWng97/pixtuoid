@@ -19,6 +19,99 @@ export class Office {
         wasm.__wbg_office_free(ptr, 0);
     }
     /**
+     * Create the audio engine for the CURRENT day/night + weather (from the
+     * last `step`'s clock). Idempotent — a second call is ignored, so JS can
+     * call it freely on the ♩ click. Costs nothing until `audio_warmup_step`
+     * synthesizes the beds.
+     */
+    audio_begin() {
+        wasm.office_audio_begin(this.__wbg_ptr);
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    audio_loop_len(idx) {
+        const ret = wasm.office_audio_loop_len(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * Zero-copy pointer/length into the looping bed samples for stem `idx`
+     * (0=Pad … 5=Rain). RE-READ after warmup completes AND whenever a tick
+     * reports `swapped` (a track swap / any `memory.grow` moves the data).
+     * @param {number} idx
+     * @returns {number}
+     */
+    audio_loop_ptr(idx) {
+        const ret = wasm.office_audio_loop_ptr(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} pool
+     * @param {number} idx
+     * @returns {number}
+     */
+    audio_oneshot_len(pool, idx) {
+        const ret = wasm.office_audio_oneshot_len(this.__wbg_ptr, pool, idx);
+        return ret >>> 0;
+    }
+    /**
+     * Zero-copy pointer/length into a one-shot buffer: `pool` is the wire index
+     * (0=keystroke, 1=raindrop, 2=door chime, 3=printer, 4=vending), `idx` the
+     * pool slot (keystrokes/drops are pools; the appliance cues are single).
+     * Uploaded once after warmup.
+     * @param {number} pool
+     * @param {number} idx
+     * @returns {number}
+     */
+    audio_oneshot_ptr(pool, idx) {
+        const ret = wasm.office_audio_oneshot_ptr(this.__wbg_ptr, pool, idx);
+        return ret >>> 0;
+    }
+    /**
+     * The engine's sample rate (Hz) — JS builds its `AudioBuffer`s at this rate
+     * (the browser resamples to the AudioContext rate).
+     * @returns {number}
+     */
+    audio_sample_rate() {
+        const ret = wasm.office_audio_sample_rate(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Advance the audio one tick at `now_ms` (the site's pause-shifted clock,
+     * same as `step`) and return the JS glue commands as JSON:
+     * `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}`.
+     * `gains` are the 6 loop-stem target amplitudes (JS ramps each GainNode);
+     * `plays` are one-shots to spawn; `swapped` = re-read the loop buffers.
+     * Empty-ish before the beds are ready. No serde (tiny hand-built payload,
+     * like `overlay_json`).
+     * @param {number} now_ms
+     * @returns {string}
+     */
+    audio_tick(now_ms) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.office_audio_tick(this.__wbg_ptr, now_ms);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Build ONE synthesis piece; returns pieces REMAINING (0 = ready to
+     * upload buffers + tick). JS loops it off `setTimeout(0)` so the multi-
+     * second synthesis never blocks the main thread in one shot. 0 if audio
+     * hasn't begun.
+     * @returns {number}
+     */
+    audio_warmup_step() {
+        const ret = wasm.office_audio_warmup_step(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * Byte length of the RGBA frame (`w*h*4`).
      * @returns {number}
      */
