@@ -374,8 +374,7 @@ fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
         model: None,
         effort: None,
         tokens_used: 0,
-        last_usage_delta: 0,
-        last_usage_at: None,
+        last_usage: None,
     }
 }
 

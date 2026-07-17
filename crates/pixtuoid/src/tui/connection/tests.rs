@@ -41,8 +41,7 @@ fn mk_slot(id: AgentId, source: &str, last_event_at: SystemTime) -> AgentSlot {
         model: None,
         effort: None,
         tokens_used: 0,
-        last_usage_delta: 0,
-        last_usage_at: None,
+        last_usage: None,
     }
 }
 

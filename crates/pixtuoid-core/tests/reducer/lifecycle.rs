@@ -1374,8 +1374,9 @@ fn usage_accumulates_saturating_and_stamps_the_last_reading() {
     r.apply(&mut scene, usage(120_000), t1, Transport::Jsonl);
     let slot = &scene.agents[&id];
     assert_eq!(slot.tokens_used, 176_500);
-    assert_eq!(slot.last_usage_delta, 120_000);
-    assert_eq!(slot.last_usage_at, Some(t1));
+    let reading = slot.last_usage.expect("reading stamped");
+    assert_eq!(reading.delta, 120_000);
+    assert_eq!(reading.seen_at, t1);
     // Saturating accumulation: a corrupt/hostile reading can't wrap the counter.
     r.apply(&mut scene, usage(u64::MAX), t1, Transport::Jsonl);
     assert_eq!(scene.agents[&id].tokens_used, u64::MAX);

@@ -198,7 +198,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 ├── pet.rs          PetKind (Cat, Dog) + per-kind static data; Pet{kind,name} (a configured office pet) + Pet::defaulted; select_pet_for_floor(u64,&[Pet])->Option<&Pet>; PetState (heart-anim interaction)
 ├── chitchat.rs     venue-keyed group/solo speech bubbles (VenueKey::Room vs ::Waypoint)
 ├── token_meter.rs  token meter (#632) — burn.rs's sibling: RAW counters live on the slot
-│                   (AgentSlot::{tokens_used, last_usage_delta, last_usage_at}, core), ALL
+│                   (AgentSlot::{tokens_used, last_usage: Option<UsageObservation>}, core), ALL
 │                   interpretation here. token_tier (×TIER_FACTOR=8 geometric ladder off
 │                   TIER_BASE_TOKENS=250K → 250K/2M/16M, MAX_TIER=3 cap; two-population
 │                   calibration in the module doc), sheet_fall_dist (the falling-sheet window:

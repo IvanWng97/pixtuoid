@@ -3,7 +3,7 @@
 //! tier, and a big spend reading drops a visible sheet onto the pile.
 //!
 //! The RAW counters live on the slot (`AgentSlot::{tokens_used,
-//! last_usage_delta, last_usage_at}`, core); ALL interpretation happens here
+//! last_usage}`, core); ALL interpretation happens here
 //! — the `burn.rs` posture. The meter reads FRESH tokens only (new input +
 //! cache writes + output; cache READS are excluded at decode): cumulative
 //! per session, monotone, honest — no ceilings, no model→window tables.
@@ -54,12 +54,15 @@ pub fn token_tier(tokens_used: u64) -> u8 {
 /// The falling sheet's distance FALLEN (0..=[`SHEET_FALL_PX`]) at `now`, or
 /// `None` when no sheet is in the air (reading too small, too old, or the
 /// clock went backwards). Ease-in (accelerating): dist = px·t²/T². Integer
-/// math throughout — `epoch_ms as f32` is the documented freeze edge.
-pub fn sheet_fall_dist(slot: &AgentSlot, now: SystemTime) -> Option<u16> {
-    if slot.last_usage_delta < SHEET_MIN_DELTA_TOKENS {
+/// math (deterministic goldens; a backward clock returns `None` cleanly via
+/// `duration_since().ok()?` — semantics `anim::eased_progress`'s clamped f32
+/// curve can't express, which is why the 1-line ease-in is hand-rolled).
+pub(crate) fn sheet_fall_dist(slot: &AgentSlot, now: SystemTime) -> Option<u16> {
+    let reading = slot.last_usage.as_ref()?;
+    if reading.delta < SHEET_MIN_DELTA_TOKENS {
         return None;
     }
-    let elapsed = now.duration_since(slot.last_usage_at?).ok()?.as_millis() as u64;
+    let elapsed = now.duration_since(reading.seen_at).ok()?.as_millis() as u64;
     if elapsed >= SHEET_FALL_MS {
         return None;
     }
@@ -80,7 +83,10 @@ pub fn compact_tokens(tokens: u64) -> String {
 }
 
 fn format_scaled(t: u64, unit: u64, suffix: char) -> String {
-    let tenths = t * 10 / unit;
+    // u128 intermediate: the reducer saturates tokens_used to u64::MAX on a
+    // hostile transcript, and `t * 10` would overflow right here in the
+    // tooltip's paint path.
+    let tenths = (t as u128 * 10 / unit as u128) as u64;
     if tenths >= 100 {
         format!("{}{suffix}", tenths / 10)
     } else {
@@ -137,8 +143,7 @@ mod tests {
             model: None,
             effort: None,
             tokens_used: 0,
-            last_usage_delta: delta,
-            last_usage_at: Some(at),
+            last_usage: Some(pixtuoid_core::state::UsageObservation::new(delta, at)),
         }
     }
 
@@ -162,7 +167,7 @@ mod tests {
         assert_eq!(sheet_fall_dist(&small, t0), None);
         // No reading at all.
         let mut none = slot_with_usage(SHEET_MIN_DELTA_TOKENS, t0);
-        none.last_usage_at = None;
+        none.last_usage = None;
         assert_eq!(sheet_fall_dist(&none, t0), None);
         // Clock skew (reading in the future) stays silent, never panics.
         assert_eq!(sheet_fall_dist(&slot, t0 - Duration::from_secs(1)), None);
@@ -177,5 +182,8 @@ mod tests {
         assert_eq!(compact_tokens(999_999), "999K");
         assert_eq!(compact_tokens(2_400_000), "2.4M");
         assert_eq!(compact_tokens(80_130_000), "80M");
+        // The saturated-counter extreme must render, not overflow (the
+        // reducer clamps a hostile accumulation to u64::MAX).
+        assert_eq!(compact_tokens(u64::MAX), "18446744073709M");
     }
 }

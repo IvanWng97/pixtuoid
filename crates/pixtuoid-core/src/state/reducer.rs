@@ -724,8 +724,7 @@ impl Reducer {
                 // feeds its tier ladder.
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
                     slot.tokens_used = slot.tokens_used.saturating_add(fresh_tokens);
-                    slot.last_usage_delta = fresh_tokens;
-                    slot.last_usage_at = Some(now);
+                    slot.last_usage = Some(crate::state::UsageObservation::new(fresh_tokens, now));
                 }
             }
         }
@@ -1135,8 +1134,7 @@ impl Reducer {
                 model: None,
                 effort: None,
                 tokens_used: 0,
-                last_usage_delta: 0,
-                last_usage_at: None,
+                last_usage: None,
             },
         );
         true

@@ -150,7 +150,21 @@ pub(crate) fn inject_openclaw_presence(
 /// Insert the standard sample-scene archetypes at desk indices `desks`
 /// (`i % 12` cycles the archetype list). Split out of `sample_scene` so
 /// `meeting_scene` can fill desks N.. around its staged agents.
+/// One exemplar per token-meter tier, each one step past its threshold. The
+/// values cross a crate boundary (the tier consts are scene-internal), so the
+/// debug_assert in `fill_sample_agents` pins them to the REAL ladder — a tier
+/// recalibration fails the next snapshot run instead of silently shrinking
+/// the gallery's spread.
+const TIER_EXEMPLARS: [u64; 4] = [0, 400_000, 3_000_000, 20_000_000];
+
 fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Range<usize>) {
+    debug_assert!(
+        TIER_EXEMPLARS
+            .iter()
+            .map(|&t| pixtuoid_scene::token_meter::token_tier(t))
+            .eq(0u8..=3),
+        "gallery exemplars must span all four tiers"
+    );
     use std::time::Duration as D;
     let agents: [(&str, ActivityState, D); 12] = [
         (
@@ -251,10 +265,10 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 effort: None,
                 // Token-meter gallery spread (#632): cycle the desks across
                 // all four tiers so the paper towers show in every capture —
-                // values one step past each tier threshold (250K/2M/16M ×8).
-                tokens_used: [0, 400_000, 3_000_000, 20_000_000][i % 4],
-                last_usage_delta: 0,
-                last_usage_at: None,
+                // exemplar values one step past each threshold, pinned below
+                // so a tier recalibration can't silently shrink the spread.
+                tokens_used: TIER_EXEMPLARS[i % 4],
+                last_usage: None,
             },
         );
     }
@@ -464,8 +478,7 @@ pub(crate) fn meeting_scene(
                 model: None,
                 effort: None,
                 tokens_used: 0,
-                last_usage_delta: 0,
-                last_usage_at: None,
+                last_usage: None,
             },
         );
     }
@@ -580,8 +593,7 @@ pub(crate) fn dashboard_scene(now: SystemTime) -> SceneState {
                 model: None,
                 effort: None,
                 tokens_used: 0,
-                last_usage_delta: 0,
-                last_usage_at: None,
+                last_usage: None,
             },
         );
     }
@@ -731,8 +743,7 @@ pub(crate) fn anim_scene(
             model: None,
             effort: None,
             tokens_used: 0,
-            last_usage_delta: 0,
-            last_usage_at: None,
+            last_usage: None,
         },
     );
     (s, skip_ms)

@@ -12,6 +12,9 @@ expression: events
     agent_id: 13129151737719962286
     model: claude-fable-5
     effort: ~
+- Usage:
+    agent_id: 13129151737719962286
+    fresh_tokens: 2613
 - ActivityStart:
     agent_id: 13129151737719962286
     tool_use_id: toolu_01CCCCCCCCCCCCCCCCCCCCCC
@@ -28,6 +31,9 @@ expression: events
     agent_id: 13129151737719962286
     model: claude-fable-5
     effort: ~
+- Usage:
+    agent_id: 13129151737719962286
+    fresh_tokens: 1947
 - SessionEnd:
     agent_id: 13129151737719962286
     as_child: false

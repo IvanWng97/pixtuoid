@@ -1041,6 +1041,11 @@ fn paint_desk_coffee(
 /// mock-verified at half-block scale before this implementation (the
 /// pin-visual round: the 3px-wide low "wing pile" variant was rejected as
 /// sub-legible; the vertical tower won on silhouette).
+///
+/// Tier 0 suppresses the SHEET too, deliberately: a sheet needs a pile to
+/// land on (one flashing onto a bare desk then vanishing reads as an
+/// artifact), it keeps the tier-0 desk byte-identical (default-on safety),
+/// and the early return is what makes the `h - 1` math below safe.
 fn paint_token_stack(
     buf: &mut RgbBuffer,
     desk: Point,
@@ -1336,6 +1341,14 @@ mod tests {
         let th = theme();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(Point { x: 40, y: 30 }, 0, None);
+        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        assert_eq!(paper_pixel_count(&buf, th), 0);
+        // …including a mid-fall sheet: a big EARLY reading (delta cleared the
+        // sheet minimum before cumulative reached T1) paints nothing — a
+        // sheet needs a pile to land on (see paint_token_stack's doc).
+        let mut cache = FrameCache::new();
+        let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
+        let d = desk_cubicle_drawable(Point { x: 40, y: 30 }, 0, Some(2));
         paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
         assert_eq!(paper_pixel_count(&buf, th), 0);
     }

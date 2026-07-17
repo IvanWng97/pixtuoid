@@ -389,17 +389,15 @@ pub struct AgentSlot {
     /// cache READS excluded) accumulated from `AgentEvent::Usage` deltas.
     /// RAW counter; the tier thresholds live in
     /// `pixtuoid-scene::token_meter` (the burn-tier posture). serde-skipped
-    /// at zero so sources with no usage wire stay out of the goldens.
+    /// at zero so sources with no usage wire stay out of the goldens. Flat
+    /// (not inside `last_usage`) on purpose: a monotone accumulator like
+    /// `tool_call_count`, independent of any one reading.
     #[serde(skip_serializing_if = "u64_is_zero", default)]
     pub tokens_used: u64,
-    /// The most recent Usage delta + its apply time — the falling-sheet
-    /// window's inputs (`token_meter::sheet_fall_dist`). A pair on purpose:
-    /// the sheet only falls for a delta that clears the scene's minimum, so
-    /// the paint pass needs the SIZE and the AGE of the same reading.
-    #[serde(skip_serializing_if = "u64_is_zero", default)]
-    pub last_usage_delta: u64,
+    /// The most recent Usage reading (size + apply time bundled — see
+    /// [`UsageObservation`]). serde-skipped.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub last_usage_at: Option<SystemTime>,
+    pub last_usage: Option<UsageObservation>,
 }
 
 fn u64_is_zero(v: &u64) -> bool {
@@ -421,6 +419,26 @@ pub struct EffortObservation {
 impl EffortObservation {
     pub fn new(value: Arc<str>, seen_at: SystemTime) -> Self {
         Self { value, seen_at }
+    }
+}
+
+/// The most recent `AgentEvent::Usage` reading — its SIZE and its apply time,
+/// the two inputs of the scene's falling-sheet window
+/// (`token_meter::sheet_fall_dist`). One struct (the `EffortObservation`
+/// pattern) so a half-stamped reading (a delta with no time, a time with no
+/// delta) is unrepresentable. `non_exhaustive` like its siblings; cross-crate
+/// construction via [`UsageObservation::new`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct UsageObservation {
+    /// Fresh tokens in this one reading (new input + cache writes + output).
+    pub delta: u64,
+    pub seen_at: SystemTime,
+}
+
+impl UsageObservation {
+    pub fn new(delta: u64, seen_at: SystemTime) -> Self {
+        Self { delta, seen_at }
     }
 }
 
@@ -667,8 +685,7 @@ mod tests {
             model: None,
             effort: None,
             tokens_used: 0,
-            last_usage_delta: 0,
-            last_usage_at: None,
+            last_usage: None,
         }
     }
 

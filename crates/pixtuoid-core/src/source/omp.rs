@@ -239,6 +239,24 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                             effort: None,
                         });
                     }
+                    // Token-meter usage observation (#632): assistant messages
+                    // carry per-turn `usage`. omp's `input` EXCLUDES the cache
+                    // share (fixture-verified: totalTokens = input + output +
+                    // cacheRead + cacheWrite), so fresh = input + cacheWrite +
+                    // output — cache READS are re-served context, excluded
+                    // like CC's. Zero readings skipped.
+                    if let Some(usage) = msg.get("usage").and_then(|u| u.as_object()) {
+                        let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+                        let fresh = field("input")
+                            .saturating_add(field("cacheWrite"))
+                            .saturating_add(field("output"));
+                        if fresh > 0 {
+                            out.push(AgentEvent::Usage {
+                                agent_id: acting,
+                                fresh_tokens: fresh,
+                            });
+                        }
+                    }
                     // A blocks-less/text-only turn still stamps the model.
                     let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else {
                         return Ok(out);
@@ -544,6 +562,33 @@ mod tests {
     }
 
     // ── tool rounds ──
+
+    #[test]
+    fn assistant_usage_becomes_a_fresh_token_observation() {
+        // Fixture-verified shape (16.4.0): totalTokens = input + output +
+        // cacheRead + cacheWrite, so `input` EXCLUDES cache — fresh =
+        // input + cacheWrite + output = 122 + 1000 + 1491 = 2613.
+        let line = r#"{"type":"message","id":"m1","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[],"usage":{"input":122,"output":1491,"cacheRead":1000,"cacheWrite":1000,"totalTokens":3613},"timestamp":1720512000000}}"#;
+        let evs = decode(line);
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                AgentEvent::Usage {
+                    fresh_tokens: 2613,
+                    ..
+                }
+            )),
+            "expected fresh=2613 (cacheRead excluded), got {evs:?}"
+        );
+        // A zero reading stays silent.
+        let line = r#"{"type":"message","id":"m2","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[],"usage":{"input":0,"output":0,"cacheRead":500,"cacheWrite":0,"totalTokens":500},"timestamp":1720512000000}}"#;
+        assert!(
+            !decode(line)
+                .iter()
+                .any(|e| matches!(e, AgentEvent::Usage { .. })),
+            "cache-read-only reading must be silent"
+        );
+    }
 
     #[test]
     fn assistant_tool_calls_start_activity_keyed_on_block_id() {

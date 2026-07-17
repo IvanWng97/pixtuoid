@@ -12,6 +12,9 @@ expression: events
     agent_id: 15994559954055168040
     model: kimi-for-coding
     effort: ~
+- Usage:
+    agent_id: 15994559954055168040
+    fresh_tokens: 22384
 - ActivityStart:
     agent_id: 15994559954055168040
     tool_use_id: tool_AAAAAAAAAAAAAAAAAAAAAAAA
@@ -25,10 +28,16 @@ expression: events
     agent_id: 15994559954055168040
     model: kimi-for-coding
     effort: ~
+- Usage:
+    agent_id: 15994559954055168040
+    fresh_tokens: 790
 - ModelInfo:
     agent_id: 15994559954055168040
     model: kimi-for-coding
     effort: ~
+- Usage:
+    agent_id: 15994559954055168040
+    fresh_tokens: 389
 - ActivityStart:
     agent_id: 15994559954055168040
     tool_use_id: tool_BBBBBBBBBBBBBBBBBBBBBBBB

@@ -153,9 +153,16 @@ SESSION's total burn, live-calibrated 2026-07); Codex `token_count`
 `info.last_token_usage` (the per-turn reading, NEVER the cumulative
 `total_token_usage` twin — the reducer accumulates deltas; codex `input`
 INCLUDES the cached share so fresh input = input − cached, saturating;
-reasoning is additive). Other sources carry no usage wire — deliberately
-unwired, their desks just never grow paper. All three slot fields
-serde-skipped at zero/None.
+reasoning is additive); omp assistant `message.usage` (per-turn; `input`
+EXCLUDES cache — fixture-verified `totalTokens = input + output + cacheRead
++ cacheWrite` — so fresh = input + cacheWrite + output). Copilot carries
+usage ONLY as a `session.shutdown` summary — one giant delta as the agent
+walks out, near-zero display value — DEFERRED, not absent (#645). The other
+8 sources genuinely carry no usage wire; their desks never grow paper. Both
+slot fields serde-skipped at zero/None (`tokens_used` flat like
+`tool_call_count`; the last reading bundled as `UsageObservation{delta,
+seen_at}` — the `EffortObservation` pattern, a half-stamped reading
+unrepresentable).
 
 **Focus-jump plumbing (#focus-jump):** the shim fills `_pid` (getppid) into the
 hook envelope WHEN ABSENT — opencode's plugin and CodeWhale's env-mode supply
