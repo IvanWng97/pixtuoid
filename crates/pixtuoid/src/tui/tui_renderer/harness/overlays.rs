@@ -148,6 +148,10 @@ fn onboarding_overlay_renders_roster_and_hint() {
         text.contains("space toggle") && text.contains("esc skip"),
         "key hint shown once rows are in; frame:\n{text}"
     );
+    assert!(
+        text.contains("press m anytime"),
+        "the one-line audio offer rides the hints (#633); frame:\n{text}"
+    );
 }
 
 #[test]

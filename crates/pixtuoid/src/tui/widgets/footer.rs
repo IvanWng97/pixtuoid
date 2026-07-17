@@ -18,6 +18,9 @@ pub(crate) struct FooterStats<'a> {
     pub counts: StateCounts,
     pub per_floor: &'a [StateCounts; MAX_FLOORS],
     pub gateway: Option<DaemonState>,
+    /// "You would hear sound right now": the audio system is live AND not
+    /// effectively muted (m-state OR pause). Drives the ♩ suffix glyph.
+    pub audio_audible: bool,
 }
 
 /// One-line footer warning for dead sources (#157); `None` while healthy.
@@ -238,7 +241,10 @@ fn status_segments(
         }
         None => String::new(),
     };
-    let quit = format!("{floor_suffix} [?]help [p]ause [t]heme [q]uit ");
+    // ♩ rides the right-flushed suffix like the cross-floor cue (present at
+    // every tier that keeps the suffix); silent (the default) shows nothing
+    let audio_glyph = if stats.audio_audible { " \u{2669}" } else { "" };
+    let quit = format!("{audio_glyph}{floor_suffix} [?]help [p]ause [t]heme [q]uit ");
 
     // --- tier builders --------------------------------------------------------
     // An empty office reads as a bare count on every tier (the board owns the
@@ -431,6 +437,7 @@ mod tests {
             counts: crate::tui::widgets::scene_stats(&scene),
             per_floor: &pf,
             gateway: None,
+            audio_audible: false,
         };
         let line = build_status_summary(&scene, &stats, 200, None, None);
         assert!(
@@ -487,6 +494,7 @@ mod tests {
             counts: crate::tui::widgets::scene_stats(&scene),
             per_floor: &pf,
             gateway: None,
+            audio_audible: false,
         };
         let segs = status_segments(&scene, &stats, width, None, None);
         let cols: usize = segs.iter().map(|(s, _)| display_width(s)).sum();
@@ -540,6 +548,7 @@ mod tests {
             counts: crate::tui::widgets::scene_stats(&scene),
             per_floor: &pf,
             gateway: None,
+            audio_audible: false,
         };
         // A warning long enough that the body must truncate at this width.
         let warn = "transport pixtuoid-hook died: connection refused after 3 retries";

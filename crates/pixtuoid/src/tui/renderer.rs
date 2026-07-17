@@ -87,6 +87,8 @@ pub struct DrawCtx<'a> {
     /// board `⬢gw` chip. `None` = no daemon configured (chip suppressed). Computed
     /// from the full scene, independent of `floor_info` (C1).
     pub gateway: Option<pixtuoid_core::state::DaemonState>,
+    /// "You would hear sound right now" — drives the footer's ♩ glyph.
+    pub audio_audible: bool,
     pub floor: pixtuoid_scene::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
@@ -241,6 +243,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         counts: crate::tui::widgets::scene_stats(scene),
         per_floor: &footer_per_floor,
         gateway: ctx.gateway,
+        audio_audible: ctx.audio_audible,
     };
 
     if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {

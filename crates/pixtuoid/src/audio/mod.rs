@@ -173,6 +173,12 @@ impl AudioHandle {
             .store(muted, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// The EFFECTIVE silence state (the m-toggle OR'd with pause — run_tui
+    /// stores the combined value), read by the footer's ♩ indicator.
+    pub(crate) fn is_muted(&self) -> bool {
+        self.muted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Test seam: a live handle whose receiver the test drains — the ONE
     /// way to observe what the render path actually feeds the audio thread
     /// (the online-review HIGH: the floor-scoping wiring needs a pin).

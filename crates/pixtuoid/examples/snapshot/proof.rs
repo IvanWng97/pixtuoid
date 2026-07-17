@@ -693,6 +693,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             floor_info: None,
             per_floor: Default::default(),
             gateway: None,
+            audio_audible: false,
             floor: pixtuoid_scene::floor::FloorMeta::ground(),
             active_pet: None,
             last_pet_pos: None,

@@ -511,10 +511,14 @@ pub(crate) struct TuiSession {
     /// The warn-floor log path — throttle-scanned for decode-drift breadcrumbs to
     /// drive the footer nudge (`main` owns the resolution; `None` = no surfacing).
     pub log_path: Option<std::path::PathBuf>,
-    /// The ambient-audio gateway (#633) — inert unless `[audio] enabled`.
+    /// The ambient-audio gateway (#633) — disabled while `[audio] muted`
+    /// (the default): the system lazily spawns on the FIRST `m` unmute.
     /// The TUI feeds per-frame `AudioFrame`s (renderer-side, floor-scoped);
-    /// `m` toggles mute.
+    /// `m` toggles + persists mute.
     pub audio: crate::audio::AudioHandle,
+    /// The resolved `[audio]` settings — the lazy spawn needs `volume`, and
+    /// `muted` seeds the m-toggle state.
+    pub audio_cfg: crate::config::AudioConfig,
     /// Focus-jump pid point-query roots: (CC projects root, Codex sessions
     /// root) — threaded from RunConfig so a sprite click can resolve a
     /// transcript-family agent's pid at click time.
@@ -539,12 +543,15 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         focus_roots,
         first_run,
         audio,
+        audio_cfg,
     } = session;
+    let mut audio = audio;
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
     renderer.set_audio(audio.clone());
-    let mut audio_muted = false;
+    // the persisted m-state: the office boots exactly as the user left it
+    let mut audio_muted = audio_cfg.muted;
     // First-run onboarding "move-in" overlay (TOP of the modal precedence chain).
     // The roster is built only on first run; if no agent CLIs are detected there's
     // nothing to connect, so it stays closed and the office shows normally.
@@ -710,7 +717,22 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             }
                             KeyAction::ToggleAudioMute => {
                                 audio_muted = !audio_muted;
+                                if !audio_muted && !audio.is_enabled() {
+                                    // lazy spawn on the FIRST unmute — muted
+                                    // audio costs nothing until someone asks
+                                    // for sound (the ~2s bed synthesis runs on
+                                    // the audio thread; beds fade in when done)
+                                    audio = crate::audio::spawn(audio_cfg.volume);
+                                    renderer.set_audio(audio.clone());
+                                }
                                 audio.set_muted(ui.paused() || audio_muted);
+                                // persist like the theme commit: next launch
+                                // boots exactly as the user left it
+                                if let Err(e) =
+                                    crate::config::save_audio_muted(&config_path, audio_muted)
+                                {
+                                    tracing::warn!("failed to persist audio mute: {e}");
+                                }
                             }
                             KeyAction::ToggleWalkableDebug => {
                                 let on = renderer.debug_walkable();

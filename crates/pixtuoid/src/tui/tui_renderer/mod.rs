@@ -511,6 +511,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 counts: per_floor[to_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)],
                 per_floor: &per_floor,
                 gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+                audio_audible: self.audio.is_enabled() && !self.audio.is_muted(),
             };
             crate::tui::renderer::draw_footer_only_frame(
                 &mut self.terminal,
@@ -674,6 +675,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             counts: crate::tui::widgets::scene_stats(&to_scene),
             per_floor: &transition_per_floor,
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+            audio_audible: self.audio.is_enabled() && !self.audio.is_muted(),
         };
 
         self.terminal.draw(|f| {
@@ -786,6 +788,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             // the footer's cross-floor cue + gateway chip render even single-floor.
             per_floor: crate::tui::widgets::per_floor_counts(scene),
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+            audio_audible: self.audio.is_enabled() && !self.audio.is_muted(),
             floor: floor_meta,
             active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,

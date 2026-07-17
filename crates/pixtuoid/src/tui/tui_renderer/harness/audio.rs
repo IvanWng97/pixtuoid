@@ -152,3 +152,36 @@ fn floor_switch_reprimes_without_a_chime_volley() {
         "a real floor-1 arrival chimes after the re-prime: {arrivals:?}"
     );
 }
+
+#[test]
+fn footer_note_glyph_tracks_effective_audibility() {
+    // ♩ = "you would hear sound right now": enabled + unmuted shows it,
+    // muting (the m/p combined state on the handle) hides it, and the
+    // default DISABLED handle never shows it (a failed lazy spawn must not
+    // advertise sound that isn't playing).
+    let scene = scene_with(vec![active_on("/f/a.jsonl", 0, 0)], 16);
+    let pack = pack();
+
+    let mut silent = build(80, 40, vec![]);
+    silent.render(&scene, &pack, t0()).expect("render");
+    assert!(
+        !frame_text(silent.frame_buffer()).contains('\u{2669}'),
+        "a disabled handle shows no note glyph"
+    );
+
+    let mut r = build(80, 40, vec![]);
+    let (handle, _rx) = AudioHandle::test_pair();
+    r.set_audio(handle.clone());
+    r.render(&scene, &pack, t0()).expect("render");
+    assert!(
+        frame_text(r.frame_buffer()).contains('\u{2669}'),
+        "enabled + unmuted shows ♩ in the footer"
+    );
+
+    handle.set_muted(true);
+    r.render(&scene, &pack, t0()).expect("render");
+    assert!(
+        !frame_text(r.frame_buffer()).contains('\u{2669}'),
+        "muting hides the glyph"
+    );
+}

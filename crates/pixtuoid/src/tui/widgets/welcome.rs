@@ -35,11 +35,11 @@ pub(crate) fn paint_welcome(
     let rows = &frame.rows;
     let selected = frame.selected;
     let elapsed_ms = frame.elapsed_ms;
-    // title (1) + subtitle (1) + blank (1) + rows + blank (1) + hint (1).
+    // title (1) + subtitle (1) + blank (1) + rows + blank (1) + hints (2).
     let area = centered_in(
         bounds,
         WELCOME_W + 2 * PANEL_PAD_X,
-        rows.len() as u16 + 5 + 2 * PANEL_PAD_Y,
+        rows.len() as u16 + 6 + 2 * PANEL_PAD_Y,
     );
     if area.width < 4 || area.height < 3 {
         return;
@@ -97,12 +97,17 @@ pub(crate) fn paint_welcome(
         ]));
     }
 
-    // The key hint appears once every row is in.
+    // The key hints appear once every row is in — incl. the one-line audio
+    // offer (#633: the office starts muted; m is the whole opt-in).
     let all_in = base + rows.len().saturating_sub(1) as u64 * ROW_STAGGER_MS;
     if elapsed_ms >= all_in {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  \u{2191}\u{2193} move \u{00b7} space toggle \u{00b7} enter connect \u{00b7} esc skip",
+            dim,
+        )));
+        lines.push(Line::from(Span::styled(
+            "  \u{2669} the office has sound \u{2014} press m anytime to turn it on",
             dim,
         )));
     }

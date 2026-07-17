@@ -745,6 +745,7 @@ mod tests {
             counts: scene_stats(scene),
             per_floor: &pf,
             gateway: None,
+            audio_audible: false,
         };
         build_status_summary(scene, &stats, width, floor_info, warning)
     }
@@ -1004,6 +1005,7 @@ mod tests {
             counts: scene_stats(scene),
             per_floor: &pf,
             gateway: None,
+            audio_audible: false,
         };
         build_status_spans(scene, &stats, width, floor_info, theme, None)
             .iter()
@@ -1049,6 +1051,7 @@ mod tests {
             counts: scene_stats(&s),
             per_floor: &pf,
             gateway: None,
+            audio_audible: false,
         };
         let spans = build_status_spans(&s, &stats, 120, None, theme, None);
         // The rungs are found by their vocabulary glyph, tinted via StateKind.
@@ -1107,6 +1110,7 @@ mod tests {
             counts: scene_stats(&s),
             per_floor: &pf,
             gateway: None,
+            audio_audible: false,
         };
         let spans = build_status_spans(&s, &stats, 160, None, theme, None);
         let tool = spans
@@ -1134,6 +1138,7 @@ mod tests {
             counts: scene_stats(&s),
             per_floor: &pf,
             gateway: Some(DaemonState::Degraded),
+            audio_audible: false,
         };
         let line = build_status_summary(&s, &with_gw, 160, None, None);
         assert!(line.contains("\u{2b22}gw err"), "degraded chip: {line}");
@@ -1141,6 +1146,7 @@ mod tests {
             counts: scene_stats(&s),
             per_floor: &pf,
             gateway: None,
+            audio_audible: false,
         };
         let line2 = build_status_summary(&s, &no_gw, 160, None, None);
         assert!(
@@ -1162,6 +1168,7 @@ mod tests {
             counts: scene_stats(&s),
             per_floor: &pf,
             gateway: None,
+            audio_audible: false,
         };
         let line = build_status_summary(&s, &stats, 160, Some(fi(1, 3, 2)), None);
         assert!(

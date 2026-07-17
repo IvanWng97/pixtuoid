@@ -247,7 +247,12 @@ src/
 │                       floor switch); rain stays global (weather, not agent activity). No elevator
 │                       ding (owner-cut). Floating feeds stems + the door cue only, scoped to its rendered
 │                       floor (FloorSession doesn't surface occupancy — deliberate Phase 1 cut).
-│                       [audio] config: enabled default FALSE (strictly opt-in), volume clamped [0,1].
+│                       [audio] config: ONE switch `muted` default TRUE (owner-cut the redundant enabled
+│                       knob; `m` = the whole opt-in, persisted via save_audio_muted) + volume clamped [0,1];
+│                       the system LAZY-SPAWNS on the first unmute (muted = zero cost: no device/thread/
+│                       buffers) — run_tui swaps the fresh handle into the renderer; floating boot-spawns
+│                       iff !muted (no runtime toggle yet, #633). Footer shows ♩ iff enabled && !effective-
+│                       muted (m OR pause); onboarding carries the one-line m hint.
 │                       An EMPTY office now plays the quiet pad+sparkle+texture "radio on" floor (the
 │                       ratified demo_1) — Phase 1's empty-silent behavior ended when the music landed.
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM

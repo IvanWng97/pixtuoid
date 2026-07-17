@@ -730,6 +730,7 @@ fn main() -> Result<()> {
         // cue, chip suppressed). The footer's counts come from `scene_stats(scene)`.
         per_floor: Default::default(),
         gateway: None,
+        audio_audible: false,
         floor: {
             let mut m = pixtuoid_scene::floor::FloorMeta::ground();
             m.floor_seed = args.floor_seed;

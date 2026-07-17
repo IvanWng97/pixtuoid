@@ -61,9 +61,10 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         first_run,
         audio,
     } = cfg;
-    // Ambient audio (#633): spawn only when the user opted in — a disabled
-    // handle is inert everywhere else. The ONE audio gateway.
-    let audio_handle = if audio.enabled && !headless {
+    // Ambient audio (#633): spawn at boot only when a PERSISTED unmute says
+    // so — the muted default costs nothing (no device, no thread, no
+    // buffers); run_tui lazily spawns on the first `m` unmute instead.
+    let audio_handle = if !audio.muted && !headless {
         crate::audio::spawn(audio.volume)
     } else {
         crate::audio::AudioHandle::disabled()
@@ -154,6 +155,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             first_run,
             focus_roots,
             audio: audio_handle,
+            audio_cfg: audio,
         })
         .await
     }
