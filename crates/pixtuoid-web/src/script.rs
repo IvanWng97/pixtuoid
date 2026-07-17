@@ -120,6 +120,26 @@ fn spell(beats: &mut Vec<Beat>, i: usize, at_ms: u64, n: u64, tools: &[&str]) {
     }
 }
 
+/// A token-usage reading (#632): the desk paper tower's wire. HONESTY RULE —
+/// only cast members whose REAL CLI carries a per-turn usage wire (cc, cx)
+/// get these; the hero must never show a tower the product can't produce for
+/// that CLI. Jsonl transport, matching production (usage is JSONL-only).
+/// Because the scene PERSISTS across loop replays, each reading re-applies
+/// per loop — the towers deliberately GROW the longer a visitor watches
+/// (cc crosses T2 on loop 2 and tops out T3 after ~8 loops ≈ 16 min; every
+/// reading clears the 25K sheet minimum, so a sheet drops onto the pile as
+/// each spell wraps). Pinned by `usage_beats_grow_only_wire_bearing_towers`.
+fn usage(i: usize, at_ms: u64, fresh_tokens: u64) -> Beat {
+    Beat {
+        at_ms,
+        transport: Transport::Jsonl,
+        event: AgentEvent::Usage {
+            agent_id: cast_id(i),
+            fresh_tokens,
+        },
+    }
+}
+
 /// How long a visitor hire works before heading out (`SessionEnd`; the
 /// reducer's exit grace then walks them to the elevator).
 pub(crate) const HIRE_STAY_MS: u64 = 70_000;
@@ -319,6 +339,20 @@ pub(crate) fn hero_script() -> Vec<Beat> {
         &["Edit tests.rs", "Bash: cargo test"],
     );
 
+    // Token-meter readings (#632) — cc (0) and cx (1) only, the two cast
+    // CLIs whose real wires carry per-turn usage. cc opens with a big
+    // restore-sized reading so its first ream + falling sheet land within
+    // the first second of the reveal; the rest settle at each spell's wrap.
+    // Per-loop totals: cc +1.9M (T1 instantly, T2 on loop 2, T3 ~loop 8),
+    // cx +0.4M (T1 late in loop 1, T2 ~loop 5).
+    b.push(usage(0, 500, 1_200_000));
+    b.push(usage(0, 11_000, 180_000));
+    b.push(usage(0, 54_000, 320_000));
+    b.push(usage(0, 108_000, 200_000));
+    b.push(usage(1, 12_000, 150_000));
+    b.push(usage(1, 25_000, 90_000));
+    b.push(usage(1, 70_000, 160_000));
+
     // A permission park: agent 6 hits a gate mid-loop, resolved ~12s later by
     // the gated tool's completion (the reducer's gated_before_waiting path).
     b.push(Beat {
@@ -453,6 +487,42 @@ mod tests {
                 a.label
             );
         }
+    }
+
+    #[test]
+    fn usage_beats_grow_only_wire_bearing_towers() {
+        // #632 honesty rule: towers appear ONLY on cast members whose real
+        // CLI carries a per-turn usage wire (cc, cx) — a tower on any other
+        // cast desk would demo something the product never does for that CLI.
+        let scene = run_script_through_reducer(1);
+        let tokens_of = |i: usize| scene.agents.get(&cast_id(i)).map_or(0, |a| a.tokens_used);
+        // cc opens with the restore-sized reading → T1 from the first second,
+        // finishing loop 1 just under T2; cx crosses T1 late in loop 1.
+        assert!(
+            pixtuoid_scene::token_meter::token_tier(tokens_of(0)) >= 1,
+            "cc must carry a tower after one loop, got {} tokens",
+            tokens_of(0)
+        );
+        assert!(
+            pixtuoid_scene::token_meter::token_tier(tokens_of(1)) >= 1,
+            "cx must carry a tower after one loop, got {} tokens",
+            tokens_of(1)
+        );
+        for (i, (source, _, _)) in CAST.iter().enumerate().skip(2) {
+            assert_eq!(
+                tokens_of(i),
+                0,
+                "cast {i} ({source}) has no usage wire — its desk must stay bare"
+            );
+        }
+        // The persistent scene makes towers GROW across loop replays — the
+        // leave-the-tab-open reward: cc reaches T2 by loop 2.
+        let scene3 = run_script_through_reducer(3);
+        let cc3 = scene3.agents.get(&cast_id(0)).map_or(0, |a| a.tokens_used);
+        assert!(
+            pixtuoid_scene::token_meter::token_tier(cc3) >= 2,
+            "cc must have grown to T2 by loop 3, got {cc3}"
+        );
     }
 
     #[test]

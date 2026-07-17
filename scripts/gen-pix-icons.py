@@ -124,6 +124,20 @@ ICONS = {
             ". . . . . . . D D D",
         ]
     },
+    "tokens": {
+        "grid": [
+            ". . . w w w . . . .",
+            ". . . . . . . . . .",
+            ". . w w w w w . . .",
+            ". . V V V V V . . .",
+            ". . w w w w w . . .",
+            ". . V V V V V . . .",
+            ". . w w w w w . . .",
+            ". . V V V V V . . .",
+            ". D D D D D D D D .",
+            ". D D D D D D D D .",
+        ]
+    },
     "shield": {
         "grid": [
             ". n n n n n n n n .",

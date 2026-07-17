@@ -90,6 +90,15 @@
     }
   },
   {
+    "icon": "📄",
+    "name": "Token meter",
+    "desc": "Paper stacks up on a desk as its session burns fresh tokens (250K / 2M / 16M tiers); a big reading drops a sheet onto the pile, and the hover dossier shows the exact Σ total",
+    "pix": "tokens",
+    "card": {
+      "blurb": "paper piles up on a desk as its agent burns tokens — a big spend drops a sheet onto the stack; hover for the exact Σ."
+    }
+  },
+  {
     "icon": "🔎",
     "name": "Hover tooltips",
     "desc": "Hover an agent for session duration, tool-call count and active-time %; hover any furniture — desks, sofas, plants, vending machine, printer — for its name",
