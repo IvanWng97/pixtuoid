@@ -184,4 +184,20 @@ fn footer_note_glyph_tracks_effective_audibility() {
         !frame_text(r.frame_buffer()).contains('\u{2669}'),
         "muting hides the glyph"
     );
+
+    // volume 0 is silence too: enabled + unmuted at 0% must not advertise
+    // sound (the audio_audible volume gate, through the real render path)
+    handle.set_muted(false);
+    handle.set_volume(0.0);
+    r.render(&scene, &pack, t0()).expect("render");
+    assert!(
+        !frame_text(r.frame_buffer()).contains('\u{2669}'),
+        "0% volume shows no note glyph"
+    );
+    handle.set_volume(0.4);
+    r.render(&scene, &pack, t0()).expect("render");
+    assert!(
+        frame_text(r.frame_buffer()).contains('\u{2669}'),
+        "restoring volume restores the glyph"
+    );
 }
