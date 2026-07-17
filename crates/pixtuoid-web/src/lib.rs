@@ -13,6 +13,7 @@
 //! Time is a PARAMETER (`now_ms` from JS): the engine never calls
 //! `SystemTime::now()` (it panics on wasm32-unknown-unknown).
 
+mod audio;
 mod script;
 
 use std::time::{Duration, SystemTime};
@@ -169,6 +170,14 @@ pub struct Office {
     /// Applied each `step` (see the force_weather invariant) so two Offices sharing
     /// the one wasm module never fight over the thread-local override.
     weather_override: Option<String>,
+    /// The WebAudio engine (#633) — `None` until the visitor clicks ♩ (browser
+    /// autoplay policy: no sound without a gesture, matching muted-by-default).
+    /// `audio_begin` creates it; JS pumps `audio_warmup_step`, uploads the
+    /// buffers, then drives `audio_tick` per rAF.
+    audio: Option<audio::WebAudioDriver>,
+    /// The cue tracker feeding `audio` — the audio twin of the render session's
+    /// cross-frame state (door/appliance one-shot edges).
+    audio_cues: pixtuoid_scene::audio::AudioCueTracker,
 }
 
 #[wasm_bindgen]
@@ -199,6 +208,8 @@ impl Office {
             last_now: None,
             caps_size: None,
             weather_override: None,
+            audio: None,
+            audio_cues: pixtuoid_scene::audio::AudioCueTracker::new(),
         })
     }
 
@@ -347,6 +358,119 @@ impl Office {
         push_board_segments(&mut out, &board.context, theme);
         out.push_str("}}");
         out
+    }
+
+    // --- WebAudio (#633) -----------------------------------------------------
+    // JS drives this after the ♩ click (browser autoplay policy): audio_begin →
+    // pump audio_warmup_step off setTimeout(0) → upload the buffers via the
+    // ptr/len getters → audio_tick per rAF, applying the returned JSON commands.
+
+    /// Create the audio engine for the CURRENT day/night + weather (from the
+    /// last `step`'s clock). Idempotent — a second call is ignored, so JS can
+    /// call it freely on the ♩ click. Costs nothing until `audio_warmup_step`
+    /// synthesizes the beds.
+    pub fn audio_begin(&mut self) {
+        if self.audio.is_some() {
+            return;
+        }
+        let track = self.current_track();
+        self.audio = Some(audio::WebAudioDriver::new(track));
+    }
+
+    /// Build ONE synthesis piece; returns pieces REMAINING (0 = ready to
+    /// upload buffers + tick). JS loops it off `setTimeout(0)` so the multi-
+    /// second synthesis never blocks the main thread in one shot. 0 if audio
+    /// hasn't begun.
+    pub fn audio_warmup_step(&mut self) -> u32 {
+        self.audio.as_mut().map_or(0, |a| a.warmup_step())
+    }
+
+    /// The engine's sample rate (Hz) — JS builds its `AudioBuffer`s at this rate
+    /// (the browser resamples to the AudioContext rate).
+    pub fn audio_sample_rate(&self) -> u32 {
+        pixtuoid_scene::audio::dsp::SAMPLE_RATE
+    }
+
+    /// Zero-copy pointer/length into the looping bed samples for stem `idx`
+    /// (0=Pad … 5=Rain). RE-READ after warmup completes AND whenever a tick
+    /// reports `swapped` (a track swap / any `memory.grow` moves the data).
+    pub fn audio_loop_ptr(&self, idx: usize) -> *const f32 {
+        self.audio
+            .as_ref()
+            .map_or(std::ptr::null(), |a| a.loop_buffer(idx).as_ptr())
+    }
+    pub fn audio_loop_len(&self, idx: usize) -> usize {
+        self.audio.as_ref().map_or(0, |a| a.loop_buffer(idx).len())
+    }
+
+    /// Zero-copy pointer/length into a one-shot buffer: `pool` is the wire index
+    /// (0=keystroke, 1=raindrop, 2=door chime, 3=printer, 4=vending), `idx` the
+    /// pool slot (keystrokes/drops are pools; the appliance cues are single).
+    /// Uploaded once after warmup.
+    pub fn audio_oneshot_ptr(&self, pool: u8, idx: usize) -> *const f32 {
+        self.audio.as_ref().map_or(std::ptr::null(), |a| {
+            audio::pool_from_wire(pool)
+                .map_or(std::ptr::null(), |p| a.oneshot_buffer(p, idx).as_ptr())
+        })
+    }
+    pub fn audio_oneshot_len(&self, pool: u8, idx: usize) -> usize {
+        self.audio.as_ref().map_or(0, |a| {
+            audio::pool_from_wire(pool).map_or(0, |p| a.oneshot_buffer(p, idx).len())
+        })
+    }
+
+    /// Advance the audio one tick at `now_ms` (the site's pause-shifted clock,
+    /// same as `step`) and return the JS glue commands as JSON:
+    /// `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}`.
+    /// `gains` are the 6 loop-stem target amplitudes (JS ramps each GainNode);
+    /// `plays` are one-shots to spawn; `swapped` = re-read the loop buffers.
+    /// Empty-ish before the beds are ready. No serde (tiny hand-built payload,
+    /// like `overlay_json`).
+    pub fn audio_tick(&mut self, now_ms: f64) -> String {
+        let Some(now) = self.last_now else {
+            return r#"{"gains":[0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
+        };
+        if self.audio.as_ref().map(|a| a.is_ready()) != Some(true) {
+            return r#"{"gains":[0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
+        }
+        // Build the AudioFrame office-side — the SAME feeders the desktop
+        // painters use (stem_levels / cue tracker / select_track). Single-floor
+        // hero: the whole scene is ground floor.
+        let precip = pixtuoid_scene::pixel_painter::precipitation_level(now);
+        let counts = pixtuoid_scene::board::scene_stats(&self.scene);
+        let track = self.current_track();
+        let events = self.audio_cues.observe(
+            self.scene.agents.keys(),
+            self.session.occupied_waypoints(),
+            |idx| self.session.waypoint_kind(idx),
+            now,
+        );
+        let frame = pixtuoid_scene::audio::AudioFrame {
+            stems: pixtuoid_scene::audio::stem_levels(&counts, precip),
+            events,
+            track,
+        };
+        let cmd = self
+            .audio
+            .as_mut()
+            .expect("audio ready checked above")
+            .tick(now_ms, frame);
+        audio::commands_json(&cmd)
+    }
+}
+
+impl Office {
+    /// The mood track for the CURRENT clock + weather — day/night off the
+    /// SAME sun window the lighting renders (`is_day_at`) plus precipitation.
+    /// Day before the first `step` (no clock yet).
+    fn current_track(&self) -> pixtuoid_scene::audio::TrackId {
+        match self.last_now {
+            Some(now) => pixtuoid_scene::audio::select_track(
+                pixtuoid_scene::pixel_painter::is_day_at(now),
+                pixtuoid_scene::pixel_painter::precipitation_level(now),
+            ),
+            None => pixtuoid_scene::audio::TrackId::Day,
+        }
     }
 }
 

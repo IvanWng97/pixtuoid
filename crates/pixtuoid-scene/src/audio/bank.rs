@@ -110,11 +110,21 @@ impl TrackBeds {
     }
 
     pub fn bed(&self, stem: LoopStem) -> Arc<Vec<f32>> {
-        let i = TRACK_STEMS
+        Arc::clone(&self.beds[self.index(stem)])
+    }
+
+    /// The bed samples as a borrow tied to `&self` — for a consumer that reads
+    /// (not retains) the buffer (the wasm driver's zero-copy JS export), where
+    /// an `Arc` clone's slice would dangle.
+    pub fn bed_slice(&self, stem: LoopStem) -> &[f32] {
+        &self.beds[self.index(stem)]
+    }
+
+    fn index(&self, stem: LoopStem) -> usize {
+        TRACK_STEMS
             .iter()
             .position(|s| *s == stem)
-            .expect("every track stem has a bed");
-        Arc::clone(&self.beds[i])
+            .expect("every track stem has a bed")
     }
 }
 

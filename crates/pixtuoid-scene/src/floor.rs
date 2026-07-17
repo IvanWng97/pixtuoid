@@ -605,6 +605,17 @@ impl FloorSession {
         &self.last_occupied
     }
 
+    /// The kind of waypoint `idx` in the LAST rendered frame's layout — the
+    /// `AudioCueTracker::observe` kind lookup (maps an occupancy index to its
+    /// PrinterWhir/VendingDrop role), against the SAME layout `occupied_waypoints`
+    /// indexes. `None` before the first render or for an out-of-range index.
+    pub fn waypoint_kind(&self, idx: usize) -> Option<crate::layout::WaypointKind> {
+        self.last_layout
+            .as_deref()
+            .and_then(|l| l.waypoints.get(idx))
+            .map(|w| w.kind)
+    }
+
     /// Flush the per-floor recolored-sprite cache. Call after a theme change so
     /// cached AGENT sprites don't render with the old palette — mirrors the TUI's
     /// `pf.ctx.cache = FrameCache::new()` (tui_renderer::set_theme). Env (walls/

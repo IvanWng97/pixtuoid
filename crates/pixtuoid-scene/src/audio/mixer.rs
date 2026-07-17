@@ -40,8 +40,9 @@ impl LoopStem {
 }
 
 /// Full-scale gain travel per second — a tier change crossfades over ~2s
-/// instead of stepping (the "office gets busier" feel, not a cut).
-const RAMP_PER_S: f32 = 0.5;
+/// instead of stepping (the "office gets busier" feel, not a cut). `pub` so
+/// the web driver's stall-clock test can bound one clamped tick's travel.
+pub const RAMP_PER_S: f32 = 0.5;
 
 /// Master-bus trim applied under the user volume: ambient office sound must
 /// sit UNDER the user's real work/music by default, and the stems (peak
