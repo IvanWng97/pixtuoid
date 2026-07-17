@@ -333,6 +333,16 @@ fn lofi_post(buf: &[f32], drive: f32) -> Vec<f32> {
     lowpass(&bumped, 6500.0)
 }
 
+/// The shared musical-stem mastering: the lofi tape chain then peak
+/// normalize. ONE site so a stem can't silently skip the ratified post
+/// (its saturation/bump/rolloff signatures are pinned by
+/// `lofi_post_saturates_bumps_and_rolls_off`).
+fn master(buf: &[f32], drive: f32, peak: f32) -> Vec<f32> {
+    let mut out = lofi_post(buf, drive);
+    normalize(&mut out, peak);
+    out
+}
+
 /// One soft electric-piano note — the sparkle/keys voice.
 fn ep_pluck(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
@@ -421,9 +431,7 @@ pub(crate) fn stem_pad() -> Vec<f32> {
         *v *= 1.0 + 0.05 * (tau * 0.22 * i as f32 / SR).sin();
     }
     normalize(&mut buf, 0.7);
-    let mut buf = lofi_post(&buf, 1.6);
-    normalize(&mut buf, 0.7);
-    buf
+    master(&buf, 1.6, 0.7)
 }
 
 /// Sparse high EP notes over the pad — the empty-office humanity layer.
@@ -434,9 +442,7 @@ pub(crate) fn stem_sparkle() -> Vec<f32> {
     }
     let mut buf = lowpass(&buf, 3200.0);
     normalize(&mut buf, 0.6);
-    let mut buf = lofi_post(&buf, 1.6);
-    normalize(&mut buf, 0.6);
-    buf
+    master(&buf, 1.6, 0.6)
 }
 
 /// The swung mid-register EP comping that joins at moderate busy-ness.
@@ -447,9 +453,7 @@ pub(crate) fn stem_keys() -> Vec<f32> {
     }
     let mut buf = lowpass(&buf, 2400.0);
     normalize(&mut buf, 0.8);
-    let mut buf = lofi_post(&buf, 1.6);
-    normalize(&mut buf, 0.8);
-    buf
+    master(&buf, 1.6, 0.8)
 }
 
 /// Kick/snare/swung-hat groove — the busy-office layer. Hat velocities are
@@ -473,9 +477,7 @@ pub(crate) fn stem_drums(rng: &mut NoiseStream) -> Vec<f32> {
     }
     let mut buf = lowpass(&buf, 7500.0); // lofi: shave the top
     normalize(&mut buf, 0.85);
-    let mut buf = lofi_post(&buf, 2.2);
-    normalize(&mut buf, 0.85);
-    buf
+    master(&buf, 2.2, 0.85)
 }
 
 #[cfg(test)]
@@ -566,6 +568,48 @@ mod tests {
             low > mid && mid > high,
             "drums must stay kick-dominant: {low:.3} > {mid:.3} > {high:.3}"
         );
+        // the hi-hat layer is the ONLY content in 3.5-6.5k (kick/snare live
+        // below 3.2k): measured 0.0043 with hats vs 0.0003 with the hat
+        // loop deleted — the pin the octave-band tolerances can't provide
+        // (review finding: the groove was invisible to the coarse bands)
+        let hats = band_energy_share(&drums, 3500.0, 6500.0);
+        assert!(
+            hats > 0.0015,
+            "the swung-hat groove must be audible in 3.5-6.5k: {hats:.5}"
+        );
+    }
+
+    #[test]
+    fn lofi_post_saturates_bumps_and_rolls_off() {
+        // the tape chain's three audible signatures, pinned directly on the
+        // pure fn (the stems bake it in via `master`, where a per-stem drop
+        // is a single-site diff — review finding: the octave-band pins
+        // alone couldn't see a dropped lofi_post):
+        let tau = std::f32::consts::TAU;
+        // 1) tanh saturation writes odd harmonics: a clean 440 tone gains
+        //    a visible 3rd harmonic (~1320Hz)
+        let tone: Vec<f32> = (0..n_samples(2.0))
+            .map(|i| (tau * 440.0 * i as f32 / SR).sin() * 0.8)
+            .collect();
+        let posted = lofi_post(&tone, 1.6);
+        let third = band_energy_share(&posted, 1200.0, 1450.0);
+        assert!(
+            third > 0.005,
+            "tanh drive must write a 3rd harmonic: {third:.4}"
+        );
+        // 2) the 80-120Hz head bump lifts that band on broadband material
+        let mut rng = NoiseStream::new(21);
+        let noise: Vec<f32> = (0..n_samples(2.0)).map(|_| rng.norm() * 0.3).collect();
+        let posted_n = lofi_post(&noise, 1.6);
+        let bump_in = band_energy_share(&noise, 80.0, 120.0);
+        let bump_out = band_energy_share(&posted_n, 80.0, 120.0);
+        assert!(
+            bump_out > bump_in * 1.3,
+            "head bump must lift 80-120Hz: {bump_in:.4} -> {bump_out:.4}"
+        );
+        // 3) the top end rolls off at 6.5k
+        let top = band_energy_share(&posted_n, 7000.0, 12000.0);
+        assert!(top < 0.001, "HF must die past the 6.5k rolloff: {top:.5}");
     }
 
     #[test]
@@ -602,6 +646,10 @@ mod tests {
             ("vending", vending_drop(&mut rng)),
             ("drop", rain_drop(&mut rng)),
             ("texture", texture_bed(&mut rng)),
+            ("pad", stem_pad()),
+            ("sparkle", stem_sparkle()),
+            ("keys", stem_keys()),
+            ("drums", stem_drums(&mut rng)),
         ] {
             assert!(!buf.is_empty(), "{name} empty");
             assert!(

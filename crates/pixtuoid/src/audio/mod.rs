@@ -54,7 +54,9 @@ const ONE_SHOT_GAIN: f32 = 0.5;
 #[cfg(feature = "audio")]
 const DROP_GAIN: f32 = 0.9;
 
-/// Everything the audio thread plays, synthesized once at spawn.
+/// The ONE-SHOT pools the audio thread keeps for its whole life,
+/// synthesized once at spawn. The loop beds live in [`LoopBeds`] instead —
+/// they are handed to the sink at registration and NOT retained.
 #[cfg(feature = "audio")]
 struct AssetBank {
     keystrokes: Vec<Arc<Vec<f32>>>,
@@ -62,59 +64,24 @@ struct AssetBank {
     door_chime: Arc<Vec<f32>>,
     printer_whir: Arc<Vec<f32>>,
     vending_drop: Arc<Vec<f32>>,
-    rain_bed: Arc<Vec<f32>>,
-    /// The Phase 2 musical loops, `LoopStem` order minus Rain: pad,
-    /// sparkle, keys, drums, texture. The four musical ones share ONE
-    /// sample count (`musical_stems_share_one_loop_length`) and start
-    /// together, so they tile phase-locked; texture/rain are noise beds
-    /// with independent lengths (no musical phase to keep).
-    pad: Arc<Vec<f32>>,
-    sparkle: Arc<Vec<f32>>,
-    keys: Arc<Vec<f32>>,
-    drums: Arc<Vec<f32>>,
-    texture: Arc<Vec<f32>>,
 }
 
 #[cfg(feature = "audio")]
 impl AssetBank {
-    fn build() -> Self {
-        // fixed seed: assets are identical run-to-run (reproducible audio)
-        let started = Instant::now();
-        let mut rng = dsp::NoiseStream::new(0xC0FF_EE01);
-        let bank = Self {
+    /// `rng` is the ONE asset stream — `LoopBeds::build` continues it, so
+    /// the draw order (and thus every buffer) is byte-identical to the
+    /// LISTEN-ratified renders. Don't reorder the synth calls.
+    fn build(rng: &mut dsp::NoiseStream) -> Self {
+        Self {
             keystrokes: (0..KEYSTROKE_POOL)
-                .map(|_| Arc::new(synth::keystroke(&mut rng)))
+                .map(|_| Arc::new(synth::keystroke(rng)))
                 .collect(),
             drops: (0..DROP_POOL)
-                .map(|_| Arc::new(synth::rain_drop(&mut rng)))
+                .map(|_| Arc::new(synth::rain_drop(rng)))
                 .collect(),
             door_chime: Arc::new(synth::door_chime()),
-            printer_whir: Arc::new(synth::printer_whir(&mut rng)),
-            vending_drop: Arc::new(synth::vending_drop(&mut rng)),
-            rain_bed: Arc::new(synth::rain_bed(&mut rng)),
-            pad: Arc::new(synth::stem_pad()),
-            sparkle: Arc::new(synth::stem_sparkle()),
-            keys: Arc::new(synth::stem_keys()),
-            drums: Arc::new(synth::stem_drums(&mut rng)),
-            texture: Arc::new(synth::texture_bed(&mut rng)),
-        };
-        // startup cost is a budget to WATCH, not a gate (CI machines vary):
-        // the beds fade in when the bank is ready; the office is never blocked
-        tracing::debug!(
-            ms = started.elapsed().as_millis(),
-            "audio: asset bank synthesized"
-        );
-        bank
-    }
-
-    fn loop_bed(&self, stem: LoopStem) -> Arc<Vec<f32>> {
-        match stem {
-            LoopStem::Pad => Arc::clone(&self.pad),
-            LoopStem::Sparkle => Arc::clone(&self.sparkle),
-            LoopStem::Keys => Arc::clone(&self.keys),
-            LoopStem::Drums => Arc::clone(&self.drums),
-            LoopStem::Texture => Arc::clone(&self.texture),
-            LoopStem::Rain => Arc::clone(&self.rain_bed),
+            printer_whir: Arc::new(synth::printer_whir(rng)),
+            vending_drop: Arc::new(synth::vending_drop(rng)),
         }
     }
 
@@ -127,26 +94,66 @@ impl AssetBank {
     }
 }
 
-// without the audio feature the handle's tx is always None, so the
-// payloads are provably unread — not a bug, the inert path
-#[cfg_attr(not(feature = "audio"), allow(dead_code))]
-pub(crate) enum Msg {
-    Frame(AudioFrame),
-    Muted(bool),
+/// The six loop beds — built once, registered with the sink, then DROPPED:
+/// `RodioSink::start_loop` copies each bed into its own `SamplesBuffer`, so
+/// retaining these Arcs would double the ~23MB bed footprint for nothing
+/// (review finding). The four musical beds share ONE sample count
+/// (`musical_stems_share_one_loop_length`) and register together, so they
+/// tile phase-locked; texture/rain are noise beds with independent lengths
+/// (no musical phase to keep).
+#[cfg(feature = "audio")]
+struct LoopBeds {
+    beds: [Arc<Vec<f32>>; LoopStem::ALL.len()],
+}
+
+#[cfg(feature = "audio")]
+impl LoopBeds {
+    /// Continues `AssetBank::build`'s rng stream — same consumption order
+    /// as the ratified renders: rain, then drums, then texture (the pure
+    /// musical stems draw nothing).
+    fn build(rng: &mut dsp::NoiseStream) -> Self {
+        let rain = Arc::new(synth::rain_bed(rng));
+        let pad = Arc::new(synth::stem_pad());
+        let sparkle = Arc::new(synth::stem_sparkle());
+        let keys = Arc::new(synth::stem_keys());
+        let drums = Arc::new(synth::stem_drums(rng));
+        let texture = Arc::new(synth::texture_bed(rng));
+        // index order = LoopStem::ALL order
+        Self {
+            beds: [pad, sparkle, keys, drums, texture, rain],
+        }
+    }
+
+    fn bed(&self, stem: LoopStem) -> Arc<Vec<f32>> {
+        let i = LoopStem::ALL
+            .iter()
+            .position(|s| *s == stem)
+            .expect("every LoopStem has a bed");
+        Arc::clone(&self.beds[i])
+    }
 }
 
 /// The painters' handle — clone-cheap, non-blocking. A disabled handle
 /// (audio off in config, or no device) swallows everything.
 #[derive(Clone)]
 pub(crate) struct AudioHandle {
-    tx: Option<mpsc::SyncSender<Msg>>,
+    tx: Option<mpsc::SyncSender<AudioFrame>>,
+    /// Mute is STATE, not an event: it rides this atomic instead of the
+    /// droppable frame channel. During the bank-synthesis window the
+    /// channel saturates and try_sends drop — an `m`/`p` keypress there
+    /// must still land, or the beds fade in unmuted against a footer that
+    /// says muted (review MEDIUM).
+    muted: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AudioHandle {
     /// The inert handle: `[audio] enabled = false` (the default) or no
     /// usable output device. Every call is a no-op.
     pub(crate) fn disabled() -> Self {
-        Self { tx: None }
+        Self {
+            tx: None,
+            muted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
     }
 
     pub(crate) fn is_enabled(&self) -> bool {
@@ -157,34 +164,37 @@ impl AudioHandle {
     /// thread drops frames rather than ever stalling the render loop.
     pub(crate) fn frame(&self, frame: AudioFrame) {
         if let Some(tx) = &self.tx {
-            let _ = tx.try_send(Msg::Frame(frame));
+            let _ = tx.try_send(frame);
         }
     }
 
     pub(crate) fn set_muted(&self, muted: bool) {
-        if let Some(tx) = &self.tx {
-            let _ = tx.try_send(Msg::Muted(muted));
-        }
+        self.muted
+            .store(muted, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Test seam: a live handle whose receiver the test drains — the ONE
     /// way to observe what the render path actually feeds the audio thread
     /// (the online-review HIGH: the floor-scoping wiring needs a pin).
     #[cfg(test)]
-    pub(crate) fn test_pair() -> (Self, mpsc::Receiver<Msg>) {
+    pub(crate) fn test_pair() -> (Self, mpsc::Receiver<AudioFrame>) {
         let (tx, rx) = mpsc::sync_channel(256);
-        (Self { tx: Some(tx) }, rx)
+        (
+            Self {
+                tx: Some(tx),
+                muted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            },
+            rx,
+        )
     }
 }
 
 /// Drain every queued frame, returning them in order (test helper).
 #[cfg(test)]
-pub(crate) fn drain_frames(rx: &mpsc::Receiver<Msg>) -> Vec<AudioFrame> {
+pub(crate) fn drain_frames(rx: &mpsc::Receiver<AudioFrame>) -> Vec<AudioFrame> {
     let mut out = Vec::new();
-    while let Ok(msg) = rx.try_recv() {
-        if let Msg::Frame(f) = msg {
-            out.push(f);
-        }
+    while let Ok(f) = rx.try_recv() {
+        out.push(f);
     }
     out
 }
@@ -209,10 +219,15 @@ pub(crate) fn spawn(volume: f32) -> AudioHandle {
             return AudioHandle::disabled();
         };
         let (tx, rx) = mpsc::sync_channel(64);
+        let muted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let muted_for_loop = std::sync::Arc::clone(&muted);
         std::thread::Builder::new()
             .name("pixtuoid-audio".into())
-            .spawn(move || run_loop(rx, Box::new(device), volume))
-            .map(|_| AudioHandle { tx: Some(tx) })
+            .spawn(move || run_loop(rx, Box::new(device), volume, muted_for_loop))
+            .map(|_| AudioHandle {
+                tx: Some(tx),
+                muted,
+            })
             .unwrap_or_else(|e| {
                 tracing::warn!("audio: thread spawn failed, running silent: {e}");
                 AudioHandle::disabled()
@@ -223,15 +238,32 @@ pub(crate) fn spawn(volume: f32) -> AudioHandle {
 /// The audio thread body — device-agnostic over [`AudioSink`], so the test
 /// probe and the LISTEN-gate wav renderer drive the SAME loop.
 #[cfg(feature = "audio")]
-fn run_loop(rx: mpsc::Receiver<Msg>, mut device: Box<dyn AudioSink>, volume: f32) {
-    let bank = AssetBank::build();
+fn run_loop(
+    rx: mpsc::Receiver<AudioFrame>,
+    mut device: Box<dyn AudioSink>,
+    volume: f32,
+    muted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    // the ~2s (release; >10s debug) synthesis window: frames try_sent
+    // meanwhile drop harmlessly (levels are re-sent every render frame),
+    // and mute rides the atomic so a keypress here can never be lost
+    let built_at = Instant::now();
+    let mut rng = dsp::NoiseStream::new(0xC0FF_EE01);
+    let bank = AssetBank::build(&mut rng);
+    let beds = LoopBeds::build(&mut rng);
     // Phase 2: every bed registers — the musical stems (empty office =
     // pad+sparkle+texture, the ratified "someone left the radio on") joined
     // by keys/drums as the office busies; texture re-wired WITH them (the
     // Phase 1 "no floor noise without music" owner call, now satisfied).
+    // The sink copies each bed; `beds` drops here so nothing is held twice.
     for stem in LoopStem::ALL {
-        device.start_loop(stem, bank.loop_bed(stem));
+        device.start_loop(stem, beds.bed(stem));
     }
+    drop(beds);
+    tracing::debug!(
+        ms = built_at.elapsed().as_millis(),
+        "audio: assets synthesized and beds registered"
+    );
 
     let mut mixer = Mixer::new(volume);
     let mut typing = TypingScheduler::new(0xBEEF);
@@ -243,8 +275,10 @@ fn run_loop(rx: mpsc::Receiver<Msg>, mut device: Box<dyn AudioSink>, volume: f32
     let mut last_step = started;
 
     loop {
-        match rx.recv_timeout(std::time::Duration::from_millis(TICK_MS)) {
-            Ok(Msg::Frame(frame)) => {
+        let msg = rx.recv_timeout(std::time::Duration::from_millis(TICK_MS));
+        mixer.set_muted(muted.load(std::sync::atomic::Ordering::Relaxed));
+        match msg {
+            Ok(frame) => {
                 typing_level = frame.stems.typing;
                 rain_level = frame.stems.rain;
                 mixer.set_target(frame.stems);
@@ -252,7 +286,6 @@ fn run_loop(rx: mpsc::Receiver<Msg>, mut device: Box<dyn AudioSink>, volume: f32
                     device.play_once(bank.one_shot(event), ONE_SHOT_GAIN * mixer.one_shot_gain());
                 }
             }
-            Ok(Msg::Muted(m)) => mixer.set_muted(m),
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
@@ -315,15 +348,36 @@ mod tests {
             }
         }
         let probe = Probe(Arc::clone(&recorder));
-        let join = std::thread::spawn(move || run_loop(rx, Box::new(probe), 1.0));
+        let muted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let muted_ctl = std::sync::Arc::clone(&muted);
+        let join = std::thread::spawn(move || run_loop(rx, Box::new(probe), 1.0, muted));
 
-        tx.send(Msg::Frame(AudioFrame {
-            stems: StemLevels {
-                rain: 0.5,
-                ..Default::default()
-            },
+        // rain stays 0 so no scheduler one-shot can race the count —
+        // only the two frame events are audible
+        tx.send(AudioFrame {
+            stems: StemLevels::default(),
             events: vec![OneShot::DoorChime, OneShot::PrinterWhir],
-        }))
+        })
+        .unwrap();
+        // wait until the loop has processed frame 1 (the bank build delays
+        // it by seconds) so the mute below deterministically lands BETWEEN
+        // the frames, not before both
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while recorder.lock().unwrap().one_shots < 2 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "frame 1 was never processed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // mute flips the ATOMIC (not a droppable channel message): the
+        // second frame's events must play at gain 0 → uncounted (the
+        // review MEDIUM: a mute during the bank-build window was lost)
+        muted_ctl.store(true, std::sync::atomic::Ordering::Relaxed);
+        tx.send(AudioFrame {
+            stems: StemLevels::default(),
+            events: vec![OneShot::DoorChime, OneShot::VendingDrop],
+        })
         .unwrap();
         drop(tx);
         join.join().unwrap();
@@ -335,7 +389,32 @@ mod tests {
                 "Phase 2 registers every bed, missing {stem:?}"
             );
         }
-        assert!(rec.one_shots >= 2, "the two frame events played");
+        assert_eq!(
+            rec.one_shots, 2,
+            "the unmuted frame's 2 events played; the post-mute frame's 2 did not"
+        );
+        // each stem got the RIGHT bed, not just A bed (a bed() arm swap
+        // must fail): noise beds carry the bed-loop length, and the four
+        // musical beds are told apart by their ratified centroid ordering
+        // drums(215) < pad(291) < keys(350) < sparkle(608)
+        let len_of = |s: LoopStem| rec.loop_samples[&s].len();
+        assert_eq!(len_of(LoopStem::Rain), 1 << 19, "rain = the noise-bed loop");
+        assert_eq!(
+            len_of(LoopStem::Texture),
+            1 << 19,
+            "texture = the noise-bed loop"
+        );
+        let c = |s: LoopStem| dsp::centroid_hz(&rec.loop_samples[&s]);
+        let (d, p, k, sp) = (
+            c(LoopStem::Drums),
+            c(LoopStem::Pad),
+            c(LoopStem::Keys),
+            c(LoopStem::Sparkle),
+        );
+        assert!(
+            d < p && p < k && k < sp,
+            "musical beds must sit in the ratified centroid order: drums {d:.0} < pad {p:.0} < keys {k:.0} < sparkle {sp:.0}"
+        );
     }
 }
 
@@ -430,13 +509,14 @@ mod listen_gate {
 
     fn render_tier(
         bank: &AssetBank,
+        beds: &LoopBeds,
         stems: StemLevels,
         events_at: &[(f32, OneShot)],
         secs: f32,
     ) -> Vec<f32> {
         let mut sink = OfflineSink::new(secs);
         for stem in LoopStem::ALL {
-            sink.start_loop(stem, bank.loop_bed(stem));
+            sink.start_loop(stem, beds.bed(stem));
         }
         let mut mixer = Mixer::new(1.0);
         mixer.set_target(stems);
@@ -477,7 +557,9 @@ mod listen_gate {
     fn render_listen_gate_wavs() {
         let out = std::env::temp_dir().join("pixtuoid-audio-audition");
         std::fs::create_dir_all(&out).unwrap();
-        let bank = AssetBank::build();
+        let mut rng = dsp::NoiseStream::new(0xC0FF_EE01);
+        let bank = AssetBank::build(&mut rng);
+        let beds = LoopBeds::build(&mut rng);
         // tier levels come from the PRODUCTION mapping, not hand-rolled
         // literals — the wavs audition exactly what the app will mix
         let counts = |active: usize| pixtuoid_scene::board::StateCounts {
@@ -505,7 +587,7 @@ mod listen_gate {
             ("tier_3_busy_oneshot_volley", busy, &volley[..]),
             ("tier_4_rainy_busy", rainy, &[][..]),
         ] {
-            let buf = render_tier(&bank, stems, events, 60.0);
+            let buf = render_tier(&bank, &beds, stems, events, 60.0);
             assert!(
                 buf.iter().any(|&s| s.abs() > 0.01),
                 "{name}: every tier is audible in Phase 2"

@@ -93,10 +93,26 @@ mod tests {
 
     #[test]
     fn score_tables_match_the_frozen_realization() {
-        // spot-pins so a table regen can't silently ship a different take:
-        // the first sparkle note, the melodic spread into bars 4-7 (the 8-bar
-        // point), and the hat-vel count (8 bars × 8 eighths).
+        // spot-pins + full-table checksums so a regen can't silently ship a
+        // different take (review finding: spot-pins alone left KEYS_SCORE /
+        // DRUM_HAT_VELS free to drift). The sums bind EVERY entry; the
+        // element pins bind the realization's identity.
         assert_eq!(SPARKLE_SCORE[0], (2.00, 65, 0.407_160));
+        assert_eq!(KEYS_SCORE[0], (1.60, 50, 0.849_421));
+        assert_eq!(DRUM_HAT_VELS[0], 0.521_412);
+        assert_eq!(DRUM_HAT_VELS[63], 0.641_744);
+        let sum3 = |t: &[(f32, u8, f32)]| {
+            t.iter()
+                .fold((0.0f64, 0u32, 0.0f64), |(b, n, v), &(bb, nn, vv)| {
+                    (b + bb as f64, n + nn as u32, v + vv as f64)
+                })
+        };
+        let (sb, sn, sv) = sum3(&SPARKLE_SCORE);
+        assert!((sb - 172.5).abs() < 1e-3 && sn == 800 && (sv - 4.868_63).abs() < 1e-4);
+        let (kb, kn, kv) = sum3(&KEYS_SCORE);
+        assert!((kb - 461.4).abs() < 1e-3 && kn == 1574 && (kv - 17.052_462).abs() < 1e-4);
+        let hv: f64 = DRUM_HAT_VELS.iter().map(|&v| v as f64).sum();
+        assert!((hv - 40.091_282).abs() < 1e-4, "hat-vel checksum: {hv}");
         assert!(
             SPARKLE_SCORE.iter().any(|&(b, _, _)| b >= 16.0),
             "the second 4 bars carry fresh sparkle events (the 8-bar variation)"

@@ -217,9 +217,14 @@ src/
 │                       the only owner of rodio/cpal (behind the default-on `audio` cargo feature; Linux
 │                       PREBUILTS ship without it — ALSA can't link into musl/cross builds — so Linux audio
 │                       is from-source). mod.rs (AudioHandle: clone-cheap try_send gateway — disabled handle
-│                       is inert everywhere, so callers never cfg; AssetBank pre-synthesizes EVERY buffer at
-│                       spawn on a fixed seed — incl. the Phase 2 musical loops, sub-second in release;
-│                       run_loop = the device-agnostic thread body, registers ALL six LoopStem beds),
+│                       is inert everywhere, so callers never cfg; AssetBank = the ONE-SHOT pools, LoopBeds =
+│                       the six loop buffers HANDED OFF at registration and dropped — RodioSink copies each
+│                       into its own SamplesBuffer, so retaining them would double the ~23MB bed RAM. Synthesis
+│                       at spawn on a fixed seed, MEASURED ~2s release / >10s debug on M-series: frames
+│                       try_sent in that window drop harmlessly (levels re-send every render frame) and MUTE
+│                       rides an AtomicBool on the handle — NOT the droppable frame channel — so an m/p press
+│                       mid-window can never be lost; run_loop = the device-agnostic thread body, registers
+│                       ALL six LoopStem beds),
 │                       dsp.rs (radix-2 FFT + brickwall bands + spectral-envelope noise shaping [circularly
 │                       seamless bed loops] + warp_resample [tape wow/flutter] + splitmix64 NoiseStream),
 │                       score.rs (the FROZEN 8-bar lofi composition — the ratified realization's events as
