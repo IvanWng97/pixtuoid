@@ -146,7 +146,7 @@ excluded at decode; zero readings skipped). The ModelInfo posture throughout:
 interpret-at-paint (tier ladder + sheet-fall window live in
 `pixtuoid-scene::token_meter`), unknown id = no-op (usage never registers a
 session), counters-only in the reducer (`tokens_used` saturating +
-`last_usage_delta`/`last_usage_at` — no liveness/`last_event_at` refresh).
+`last_usage: Option<UsageObservation>` — no liveness/`last_event_at` refresh).
 JSONL-only (no hook carries usage → never enters hook-wins dedup). Wires: CC
 assistant `message.usage` (sidechain lines included — the meter is the
 SESSION's total burn, live-calibrated 2026-07); Codex `token_count`
