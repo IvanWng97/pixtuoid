@@ -72,7 +72,7 @@ pub(crate) fn sheet_fall_dist(slot: &AgentSlot, now: SystemTime) -> Option<u16> 
     Some(((px * elapsed * elapsed) / (SHEET_FALL_MS * SHEET_FALL_MS)) as u16)
 }
 
-/// Compact human form for the dossier row: `56.5K` / `2.4M` / `816` —
+/// Compact human form for the dossier row: `9.5K` / `2.4M` / `816` —
 /// one decimal under 10 of the unit, none above (the `compact_hms` posture).
 pub fn compact_tokens(tokens: u64) -> String {
     const K: u64 = 1_000;

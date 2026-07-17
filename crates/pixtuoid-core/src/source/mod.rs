@@ -202,7 +202,7 @@ pub enum AgentEvent {
     },
     /// Emitted by a watcher once per liveness-probe refresh for EVERY session
     /// id the probe currently vouches for (CC's `sessions/<pid>.json`
-    /// registry, Codex's open-rollout FD binding). The reducer ONLY refreshes
+    /// registry, Codex's & omp's open-FD binding, grok's `active_sessions.json` registry). The reducer ONLY refreshes
     /// a sweep-exemption timestamp for an existing, non-exiting slot — it must
     /// never create a slot, never touch activity state, and never refresh
     /// `last_event_at` (the Active→Idle debounce and the label/back-fill logic
@@ -244,7 +244,7 @@ pub enum AgentEvent {
     /// An LLM model/effort OBSERVATION from a source's wire (the burn-tier
     /// feature): CC assistant lines carry `message.model` per turn, Codex
     /// `turn_context` carries `model` + `effort`, copilot per-tool `model`,
-    /// opencode `session.created`. Both fields are RAW wire strings (the
+    /// opencode `session.created`, grok `model_changed`. Both fields are RAW wire strings (the
     /// house RAW-store/interpret-at-paint posture — the burn-tier tables in
     /// `pixtuoid-scene` do the reading); CC's periodic ultra-effort marker
     /// carries no wire value, so its arm synthesizes `"ultra"`/`"ultrathink"`.

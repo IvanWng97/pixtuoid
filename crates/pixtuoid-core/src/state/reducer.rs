@@ -100,7 +100,7 @@ pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// The state-adaptive stale timeout for one slot. Unknown-cwd ghosts reap on the
 /// shortest window (almost always startup-seeding artifacts). Otherwise the
 /// timeout follows the activity state — with one carve-out: an idle slot whose
-/// source has `caps.short_idle_reap()` (today: Codex — no exit signal of any
+/// source has `caps.short_idle_reap()` (today: Codex and grok — no exit signal of any
 /// kind, so the sweep is its only reaper, AND the lone false positive — a
 /// live-but-idle session past the window — self-heals on its next
 /// `UserPromptSubmit`) uses [`STALE_SHORT_IDLE_TIMEOUT`] instead of the long

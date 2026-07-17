@@ -241,7 +241,7 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
 
     // Entry animation overrides everything for the first ENTRY_ANIMATION_MS
     // after creation — agent walks in from the door threshold to their desk.
-    // Target is offset (+6, +4) from the desk top-left so the walk ends at
+    // Target is offset (+5, +4) from the desk top-left so the walk ends at
     // the seated anchor position, not inside the desk obstacle. Without this
     // the A* router detours around the desk and always approaches from one side.
     if let Some(from) = layout.door_threshold {

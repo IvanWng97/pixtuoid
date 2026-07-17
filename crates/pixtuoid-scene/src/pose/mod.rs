@@ -580,9 +580,9 @@ pub fn derive_with_routing(
             if since_state < SNAP_BACK_MS {
                 if let Some(prev) = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now) {
                     // Distance to the CHAIR (where the agent actually sits), NOT the
-                    // desk origin: the chair is offset (+6,+4) from the origin, so a
+                    // desk origin: the chair is offset (+5,+4) from the origin, so a
                     // desk-origin gate would re-fire forever once the agent settles ON
-                    // the chair (10px from the origin ≥ MIN). Gating on the seat makes
+                    // the chair (9px from the origin ≥ MIN). Gating on the seat makes
                     // the snap-back stop the instant the walk reaches it.
                     let chair = desk_walk_anchor(desk);
                     let dist = (prev.x as i32 - chair.x as i32).abs()

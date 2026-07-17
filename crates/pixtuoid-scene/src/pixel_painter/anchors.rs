@@ -182,7 +182,7 @@ pub fn character_anchor(
 /// How long the elevator's open/close transition takes. Used as both
 /// the opening ramp at the START of an agent's entry/exit window and
 /// the closing ramp at the END. 200 ms feels snappy without being
-/// abrupt — the half-open frame is visible for ~70 ms each way.
+/// abrupt — the half-open frame is visible for ~100 ms (DOOR_TRANSITION_MS/2) each way.
 const DOOR_TRANSITION_MS: u64 = 200;
 
 /// Compute the elevator door frame (0=closed, 1=half, 2=open) from
