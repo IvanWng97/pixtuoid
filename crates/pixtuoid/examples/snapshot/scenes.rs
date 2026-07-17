@@ -37,12 +37,13 @@ pub(crate) async fn capture_live_scene(
     // coalesces and --live agents sit Idle/model-less forever (latent since
     // #203, exposed by the burn-tier replay).
     .with_id_deriver(pixtuoid_core::source::claude_code::cc_id_from_path);
-    // The SAME liveness probe as the real source: without it an in-flight
-    // session first-sights at EOF (no history replay), so session-cumulative
-    // state — tokens_used above all — reads ZERO from attach and a --live
-    // capture renders no paper tower for a session that burned millions
-    // (the #203 harness-vs-app drift class, second instance; caught by the
-    // #632 dogfood).
+    // The SAME liveness probe as the real source — the same harness-vs-app
+    // parity gap as the id-deriver above (a JsonlWatcher builder call the
+    // real CC source makes and this harness omitted): without the probe an
+    // in-flight session first-sights at EOF via the #204 gate (no history
+    // replay), so session-cumulative state — tokens_used above all — reads
+    // ZERO from attach and a --live capture renders no paper tower for a
+    // session that burned millions (caught by the #632 dogfood).
     if let Some(sessions_dir) = pixtuoid_core::source::cc_registry_dir(&root) {
         watcher = watcher.with_liveness_probe(std::sync::Arc::new(move || {
             pixtuoid_core::source::claude_code::live_cc_session_ids(&sessions_dir)

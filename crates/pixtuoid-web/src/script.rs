@@ -512,7 +512,7 @@ mod tests {
             assert_eq!(
                 tokens_of(i),
                 0,
-                "cast {i} ({source}) has no usage wire — its desk must stay bare"
+                "cast {i} ({source}) has no per-turn usage wire — its desk must stay bare"
             );
         }
         // The persistent scene makes towers GROW across loop replays — the

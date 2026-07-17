@@ -92,10 +92,10 @@
   {
     "icon": "📄",
     "name": "Token meter",
-    "desc": "Paper stacks up on a desk as its session burns fresh tokens (250K / 2M / 16M tiers); a big reading drops a sheet onto the pile, and the hover dossier shows the exact Σ total",
+    "desc": "Paper stacks up on a desk as its session burns tokens (250K / 2M / 16M tiers); a big spend drops a sheet onto the pile, and hovering shows the exact Σ total",
     "pix": "tokens",
     "card": {
-      "blurb": "paper piles up on a desk as its agent burns tokens — a big spend drops a sheet onto the stack; hover for the exact Σ."
+      "blurb": "paper piles up on a desk as its agent burns tokens — a big spend drops a sheet onto the stack; hover for the exact Σ total."
     }
   },
   {

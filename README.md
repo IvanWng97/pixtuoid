@@ -87,7 +87,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 | <img src="docs/images/pix-icons/walk.png" alt=""> | **Animated characters** | Typing, waiting (`?`), sleeping (z's), walking with A\*-routed pathfinding |
 | <img src="docs/images/pix-icons/palette.png" alt=""> | **Team palette** | Shirt + pants colored by working directory (same repo → same color, a glanceable org-chart); hair/skin per agent. 16 curated outfits |
 | <img src="docs/images/pix-icons/glow.png" alt=""> | **Per-tool monitor glow** | Edit = blue, Bash = orange, Read = cyan — scannable at a glance |
-| <img src="docs/images/pix-icons/tokens.png" alt=""> | **Token meter** | Paper stacks up on a desk as its session burns fresh tokens (250K / 2M / 16M tiers); a big reading drops a sheet onto the pile, and the hover dossier shows the exact Σ total |
+| <img src="docs/images/pix-icons/tokens.png" alt=""> | **Token meter** | Paper stacks up on a desk as its session burns tokens (250K / 2M / 16M tiers); a big spend drops a sheet onto the pile, and hovering shows the exact Σ total |
 | <img src="docs/images/pix-icons/magnify.png" alt=""> | **Hover tooltips** | Hover an agent for session duration, tool-call count and active-time %; hover any furniture — desks, sofas, plants, vending machine, printer — for its name |
 | <img src="docs/images/pix-icons/shield.png" alt=""> | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block your agent |
 <!-- features:end -->
