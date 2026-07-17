@@ -3,12 +3,12 @@
 //! parameters so tests drive time explicitly.
 
 use super::dsp::NoiseStream;
-use pixtuoid_scene::audio::StemLevels;
+use crate::audio::StemLevels;
 
 /// The looped stems the sink actually plays. `typing` is NOT here — it is a
 /// scheduled one-shot voice (`TypingScheduler`), not a loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum LoopStem {
+pub enum LoopStem {
     Pad,
     Sparkle,
     Keys,
@@ -18,7 +18,7 @@ pub(crate) enum LoopStem {
 }
 
 impl LoopStem {
-    pub(crate) const ALL: [LoopStem; 6] = [
+    pub const ALL: [LoopStem; 6] = [
         LoopStem::Pad,
         LoopStem::Sparkle,
         LoopStem::Keys,
@@ -51,7 +51,7 @@ const BUS_TRIM: f32 = 0.35;
 
 /// Per-stem gain ramps chasing the scene's target levels. Mute ramps to
 /// silence through the same slew (no click).
-pub(crate) struct Mixer {
+pub struct Mixer {
     current: [f32; LoopStem::ALL.len()],
     target: StemLevels,
     muted: bool,
@@ -60,7 +60,7 @@ pub(crate) struct Mixer {
 }
 
 impl Mixer {
-    pub(crate) fn new(master: f32) -> Self {
+    pub fn new(master: f32) -> Self {
         Self {
             current: [0.0; LoopStem::ALL.len()],
             target: StemLevels::default(),
@@ -69,17 +69,17 @@ impl Mixer {
         }
     }
 
-    pub(crate) fn set_target(&mut self, stems: StemLevels) {
+    pub fn set_target(&mut self, stems: StemLevels) {
         self.target = stems;
     }
 
     /// Live master-volume update (the +/- keys) — targets rescale next
     /// step, riding the same slew as any level change (no zipper).
-    pub(crate) fn set_master(&mut self, master: f32) {
+    pub fn set_master(&mut self, master: f32) {
         self.master = master.clamp(0.0, 1.0);
     }
 
-    pub(crate) fn set_muted(&mut self, muted: bool) {
+    pub fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
     }
 
@@ -94,7 +94,7 @@ impl Mixer {
 
     /// The scalar every one-shot's gain multiplies through — mute silences
     /// them instantly (one-shots are transient; no ramp needed).
-    pub(crate) fn one_shot_gain(&self) -> f32 {
+    pub fn one_shot_gain(&self) -> f32 {
         if self.muted {
             0.0
         } else {
@@ -104,7 +104,7 @@ impl Mixer {
 
     /// Advance every gain toward its target; returns `(stem, gain)` pairs
     /// for the sink. Never overshoots.
-    pub(crate) fn step(&mut self, dt_s: f32) -> [(LoopStem, f32); LoopStem::ALL.len()] {
+    pub fn step(&mut self, dt_s: f32) -> [(LoopStem, f32); LoopStem::ALL.len()] {
         let max_delta = RAMP_PER_S * dt_s;
         let mut out = [(LoopStem::Pad, 0.0f32); LoopStem::ALL.len()];
         for (i, stem) in LoopStem::ALL.into_iter().enumerate() {
@@ -131,7 +131,7 @@ impl Mixer {
 /// Typing-burst scheduler — the Phase 0 timing model (the ratified track:
 /// bursts of 8-22 keys at 66-96ms inter-key with 8% think-pauses), driven
 /// by the scene's `typing` level: level 0 = silence, higher = more bursts.
-pub(crate) struct TypingScheduler {
+pub struct TypingScheduler {
     rng: NoiseStream,
     /// Keys remaining in the burst currently being typed.
     burst_left: u32,
@@ -143,7 +143,7 @@ pub(crate) struct TypingScheduler {
 const BURSTS_PER_MIN_AT_FULL: f64 = 28.0;
 
 impl TypingScheduler {
-    pub(crate) fn new(seed: u64) -> Self {
+    pub fn new(seed: u64) -> Self {
         Self {
             rng: NoiseStream::new(seed),
             burst_left: 0,
@@ -152,7 +152,7 @@ impl TypingScheduler {
     }
 
     /// Advance to `now_s`; returns how many keystrokes fire this tick.
-    pub(crate) fn tick(&mut self, now_s: f64, level: f32) -> u32 {
+    pub fn tick(&mut self, now_s: f64, level: f32) -> u32 {
         if level <= 0.0 {
             self.burst_left = 0;
             // hold the clock so a later level>0 doesn't replay a backlog
@@ -185,7 +185,7 @@ impl TypingScheduler {
 /// Runtime raindrop scatter — the bed loops, the drops never repeat (the
 /// Phase 0 product note). Fires at the measured ~0.9/s while rain > 0,
 /// with 35% fast pairs.
-pub(crate) struct DropScheduler {
+pub struct DropScheduler {
     rng: NoiseStream,
     next_at_s: f64,
 }
@@ -194,7 +194,7 @@ pub(crate) struct DropScheduler {
 const DROPS_PER_S: f64 = 0.9;
 
 impl DropScheduler {
-    pub(crate) fn new(seed: u64) -> Self {
+    pub fn new(seed: u64) -> Self {
         Self {
             rng: NoiseStream::new(seed),
             next_at_s: 0.0,
@@ -202,7 +202,7 @@ impl DropScheduler {
     }
 
     /// Returns how many drops fire this tick (0 while dry).
-    pub(crate) fn tick(&mut self, now_s: f64, rain_level: f32) -> u32 {
+    pub fn tick(&mut self, now_s: f64, rain_level: f32) -> u32 {
         if rain_level <= 0.0 {
             self.next_at_s = now_s;
             return 0;

@@ -5,18 +5,18 @@
 //! beats throughput here.
 
 /// The one sample rate every buffer in this module uses (CD-standard mono).
-pub(crate) const SAMPLE_RATE: u32 = 44_100;
+pub const SAMPLE_RATE: u32 = 44_100;
 
 /// Deterministic noise stream over the canonical splitmix64 finalizer
 /// (`pixtuoid_core::id`) — seedable, so synthesized assets are reproducible
 /// run-to-run (the audition prototype's seeded-numpy property, kept).
-pub(crate) struct NoiseStream {
+pub struct NoiseStream {
     seed: u64,
     counter: u64,
 }
 
 impl NoiseStream {
-    pub(crate) fn new(seed: u64) -> Self {
+    pub fn new(seed: u64) -> Self {
         Self { seed, counter: 0 }
     }
 
@@ -29,13 +29,13 @@ impl NoiseStream {
     }
 
     /// Uniform in [0, 1).
-    pub(crate) fn unit(&mut self) -> f32 {
+    pub fn unit(&mut self) -> f32 {
         (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32
     }
 
     /// Approximately standard-normal (Irwin–Hall n=4, unit variance) —
     /// plenty gaussian for noise beds; nothing here is statistics.
-    pub(crate) fn norm(&mut self) -> f32 {
+    pub fn norm(&mut self) -> f32 {
         (self.unit() + self.unit() + self.unit() + self.unit() - 2.0) * 1.732_051
     }
 }
@@ -96,7 +96,7 @@ fn fft(re: &mut [f32], im: &mut [f32], inverse: bool) {
 /// Brickwall band-pass via FFT bin zeroing (the audition prototype's filter).
 /// Construction-time only — a linear-phase FIR would be overkill for
 /// pre-rendered assets. Keeps `buf.len()` (internally pads to a power of 2).
-pub(crate) fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
+pub fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
     let n = buf.len().next_power_of_two().max(2);
     let mut re = vec![0.0f32; n];
     re[..buf.len()].copy_from_slice(buf);
@@ -116,11 +116,11 @@ pub(crate) fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
     re
 }
 
-pub(crate) fn lowpass(buf: &[f32], cutoff_hz: f32) -> Vec<f32> {
+pub fn lowpass(buf: &[f32], cutoff_hz: f32) -> Vec<f32> {
     bandpass(buf, 0.0, cutoff_hz)
 }
 
-pub(crate) fn highpass(buf: &[f32], cutoff_hz: f32) -> Vec<f32> {
+pub fn highpass(buf: &[f32], cutoff_hz: f32) -> Vec<f32> {
     bandpass(buf, cutoff_hz, SAMPLE_RATE as f32)
 }
 
@@ -129,7 +129,7 @@ pub(crate) fn highpass(buf: &[f32], cutoff_hz: f32) -> Vec<f32> {
 /// linear interpolation, edge-clamped). Each `(hz, dev)` pair contributes a
 /// pitch deviation of ±`dev` (fractional) by displacing the read head
 /// `dev·SR/(2π·hz)` samples at rate `hz`.
-pub(crate) fn warp_resample(buf: &[f32], warps: &[(f32, f32)]) -> Vec<f32> {
+pub fn warp_resample(buf: &[f32], warps: &[(f32, f32)]) -> Vec<f32> {
     let n = buf.len();
     let amp: Vec<(f32, f32)> = warps
         .iter()
@@ -159,7 +159,7 @@ pub(crate) fn warp_resample(buf: &[f32], warps: &[(f32, f32)]) -> Vec<f32> {
 /// envelope — CIRCULARLY seamless by construction (FFT-domain shaping is
 /// periodic in the block), so the returned block loops without a click.
 /// `bands` are `(lo_hz, hi_hz, energy_percent)` rows.
-pub(crate) fn shaped_noise_loop(
+pub fn shaped_noise_loop(
     n_pow2: usize,
     bands: &[(f32, f32, f32)],
     rng: &mut NoiseStream,
@@ -220,10 +220,11 @@ fn moving_average(x: &[f32], window: usize) -> Vec<f32> {
     out
 }
 
-/// Spectral centroid in Hz — the test oracle for the synth's spectral-sanity
-/// pins (the fingerprint metric from the Phase 0 analyzers).
-#[cfg(test)]
-pub(crate) fn centroid_hz(buf: &[f32]) -> f32 {
+/// Spectral centroid in Hz — the fingerprint metric from the Phase 0
+/// analyzers. Un-gated (not `#[cfg(test)]`) because the binary's `run_loop`
+/// composition test reads it CROSS-CRATE (a dependency's test-cfg items are
+/// invisible), and the web driver's tests will too.
+pub fn centroid_hz(buf: &[f32]) -> f32 {
     let n = buf.len().next_power_of_two().max(2);
     let mut re = vec![0.0f32; n];
     re[..buf.len()].copy_from_slice(buf);
@@ -242,7 +243,7 @@ pub(crate) fn centroid_hz(buf: &[f32]) -> f32 {
 /// Fraction of spectral power inside `[lo_hz, hi_hz)` — the octave-band
 /// energy metric of the Phase 0 analyzers, for the rain-envelope pin.
 #[cfg(test)]
-pub(crate) fn band_energy_share(buf: &[f32], lo_hz: f32, hi_hz: f32) -> f32 {
+pub fn band_energy_share(buf: &[f32], lo_hz: f32, hi_hz: f32) -> f32 {
     let n = buf.len().next_power_of_two().max(2);
     let mut re = vec![0.0f32; n];
     re[..buf.len()].copy_from_slice(buf);

@@ -225,23 +225,14 @@ src/
 │                       try_sent in that window drop harmlessly (levels re-send every render frame) and MUTE
 │                       rides an AtomicBool on the handle — NOT the droppable frame channel — so an m/p press
 │                       mid-window can never be lost; run_loop = the device-agnostic thread body; rain at spawn,
-│                       track beds on the first frame),
-│                       dsp.rs (radix-2 FFT + brickwall bands + spectral-envelope noise shaping [circularly
-│                       seamless bed loops] + warp_resample [tape wow/flutter] + splitmix64 NoiseStream),
-│                       score.rs (the FROZEN lofi compositions — day (72 BPM) + night (68 BPM, at-seconds
-│                       humanized events); each ratified realization as const tables; a regen via the spec's
-│                       export scripts is a NEW take → fresh LISTEN gate),
-│                       synth.rs (the Phase 0 OWNER-RATIFIED recipes 1:1 — elevator ding + cooler glug were later owner-CUT (dogfood round), the spec keeps their recipes —
-│                       change docs/superpowers/specs/2026-07-16-ambient-sound-phase0/ first, re-audition,
-│                       then mirror; spectral-sanity tests pin the fingerprints AGAINST THE FLOAT CHAIN,
-│                       never the audition wavs — write_wav's stereo interleave + soft clip once poisoned
-│                       the reference numbers; plus the Phase 2 musical stems: lofi_post tape chain +
-│                       stem_pad/sparkle/keys/drums, ALL-PROCEDURAL by owner decision — no committed
-│                       assets, no decoder dep; the four musical loops share one sample count and start
-│                       together = phase-locked), mixer.rs (pure gain ramps
-│                       ~2s crossfade + typing-burst/raindrop schedulers — level-driven, no backlog replay),
+│                       track beds on the first frame). The PURE synth stack (dsp/score/synth/mixer) MOVED to
+│                       `pixtuoid_scene::audio` (web-audio #633) so the native gateway here AND the wasm
+│                       WebAudio painter build the SAME buffers — the binary imports `pixtuoid_scene::audio::
+│                       {dsp, synth, mixer}` + `mixer::{LoopStem, Mixer, ...}`; AssetBank/TrackBeds/run_loop
+│                       stay HERE (device-owning). Only
 │                       sink.rs (AudioSink seam: NullSink for CI/no-device, RodioSink = rodio 0.22 Player
-│                       glue, codecov-excluded winit-class). Audio NEVER blocks render: bounded channel,
+│                       glue, codecov-excluded winit-class) + spawn/run_loop remain binary-side behind the
+│                       `audio` feature (the rodio dep). Audio NEVER blocks render: bounded channel,
 │                       drop-on-backpressure. TUI feeds one AudioFrame per rendered frame (renderer-side
 │                       cue tracker + DrawCtx.occupied_waypoints out-param); m toggles mute. Audio is
 │                       FLOOR-SCOPED (owner call): stems + door/appliance cues come from the floor

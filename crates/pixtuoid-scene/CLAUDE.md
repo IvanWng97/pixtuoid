@@ -48,7 +48,15 @@ vocabulary across 400+ sites for zero behavior change.)
 src/                (the pixtuoid-scene crate root; default pack at ../sprites/default/, embedded via its own build.rs)
 ├── anim.rs         centralized easing curves + eased_progress(start, duration_ms, easing, now) free function —
 │                   used by floor slide, A* walk path ease, and version popup entrance/dismissal animations
-├── audio.rs        backend-agnostic ambient-audio MODEL (#633) — the sound twin of overlay/board: StemLevels
+├── audio/          the ambient-audio ENGINE (#633) — mod.rs is the backend-agnostic MODEL (below); the
+│                   PURE synth stack MOVED here from the binary (web-audio) so native rodio AND wasm WebAudio
+│                   build the SAME buffers: dsp.rs (radix-2 FFT + bands + spectral-envelope noise shaping +
+│                   warp_resample + splitmix64 NoiseStream + centroid_hz), score.rs (the FROZEN day/night
+│                   lofi const tables + checksums), synth.rs (the ratified per-voice recipes + fingerprint
+│                   pins), mixer.rs (LoopStem + Mixer gain ramps + typing/drop schedulers + master_amp). NO
+│                   audio-device deps (pure math; the rodio/cpal ban still holds — `just arch`). All four are
+│                   `#[doc(hidden)] pub` (workspace-internal, overlay/board pattern). The binary keeps only
+│                   the DEVICE half (sink/spawn/run_loop). mod.rs MODEL — the sound twin of overlay/board: StemLevels
 │                   (owner-ratified tier gains: empty/moderate/busy × pad/sparkle/keys/drums/texture/rain/typing;
 │                   rain scales on pixel_painter::precipitation_level) + OneShot events + AudioCueTracker
 │                   (cross-frame edge emitter: door chime capped 1/frame, printer/vending off the SAME

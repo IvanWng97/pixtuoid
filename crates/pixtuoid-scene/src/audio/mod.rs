@@ -8,6 +8,22 @@
 //! audition (docs/superpowers/specs/2026-07-16-ambient-sound-phase0/, #633):
 //! `demo_1_empty` / `demo_2_moderate` (THE taste anchor) / `demo_3_busy`.
 
+// The PURE synthesis + direction stack (#633 web-audio): dsp kernels, the
+// frozen lofi compositions, the per-voice synth recipes, and the runtime
+// mixer/schedulers. Moved here from the binary so BOTH the native device
+// gateway (rodio, in `pixtuoid`) AND the wasm WebAudio painter (`pixtuoid-web`)
+// build the SAME sample buffers — the sound twin of `render_to_rgb_buffer`.
+// NO audio-device deps live here (pure math; the rodio/cpal ban still holds).
+// `#[doc(hidden)]`: workspace-internal, not stable engine API (overlay/board pattern).
+#[doc(hidden)]
+pub mod dsp;
+#[doc(hidden)]
+pub mod mixer;
+#[doc(hidden)]
+pub mod score;
+#[doc(hidden)]
+pub mod synth;
+
 use crate::board::StateCounts;
 
 /// Active-agent count at which the office reads BUSY (full band + dense

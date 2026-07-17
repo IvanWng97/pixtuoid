@@ -8,19 +8,12 @@
 //! its own thread behind a bounded channel — the render loop only ever
 //! `try_send`s (drop-on-backpressure, never blocks).
 
-// Everything below the handle/spawn seam is feature-gated WITH the rodio
-// dep (lens-2 MEDIUM: an ungated pure half is ~40 dead_code warnings in
-// every --no-default-features build — the shipped Linux artifacts).
-#[cfg(feature = "audio")]
-pub(crate) mod dsp;
-#[cfg(feature = "audio")]
-pub(crate) mod mixer;
-#[cfg(feature = "audio")]
-mod score;
+// The PURE synth stack (dsp/mixer/score/synth) MOVED to `pixtuoid_scene::audio`
+// (#633 web-audio) so the native device gateway here AND the wasm WebAudio
+// painter build the SAME buffers. Only the DEVICE half stays here (sink +
+// spawn + run_loop), still behind the `audio` feature with the rodio dep.
 #[cfg(feature = "audio")]
 pub(crate) mod sink;
-#[cfg(feature = "audio")]
-pub(crate) mod synth;
 
 use std::sync::mpsc;
 #[cfg(feature = "audio")]
@@ -29,8 +22,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 #[cfg(feature = "audio")]
-use mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
+use pixtuoid_scene::audio::mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
 use pixtuoid_scene::audio::AudioFrame;
+#[cfg(feature = "audio")]
+use pixtuoid_scene::audio::{dsp, synth};
 #[cfg(feature = "audio")]
 use pixtuoid_scene::audio::{OneShot, TrackId};
 #[cfg(feature = "audio")]
