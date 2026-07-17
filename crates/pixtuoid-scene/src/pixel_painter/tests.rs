@@ -3109,3 +3109,87 @@ fn precipitation_level_maps_audible_rain_and_honors_the_override() {
 
     force_weather(None).expect("restore");
 }
+
+/// Capacity guard: single-occupancy is PER-WAYPOINT, and a meeting sofa is
+/// THREE waypoints (`SEAT_DX = [-6, 0, 6]`), so the sofa must still seat 3
+/// agents at once — the exclusivity fix must not shrink a venue to one. The
+/// probe sends a would-be second occupant of one seat to the NEXT seat of the
+/// same sofa, so the sofa fills; this pins that the fill still reaches 3 (a
+/// future probe/claim refactor that keyed exclusivity on the whole sofa instead
+/// of the seat would regress it to 1 and fail here).
+#[test]
+fn one_meeting_sofa_still_seats_three_agents_at_once() {
+    use crate::layout::{furniture_def, WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::pose::Pose;
+    use std::time::Duration;
+
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    // The three seat waypoints of the FIRST sofa: contiguous MeetingSofa
+    // waypoints sharing one (room_id, y). Each is `exclusive`, so this is a real
+    // 3-slot venue, not one shared bench.
+    let sofa: Vec<usize> = {
+        let mut out: Vec<usize> = vec![];
+        for (i, w) in layout.waypoints.iter().enumerate() {
+            if w.kind != WaypointKind::MeetingSofa {
+                continue;
+            }
+            match out.first() {
+                None => out.push(i),
+                Some(&f) => {
+                    if w.pos.y == layout.waypoints[f].pos.y
+                        && w.room_id == layout.waypoints[f].room_id
+                    {
+                        out.push(i);
+                    }
+                }
+            }
+            if out.len() == 3 {
+                break;
+            }
+        }
+        out
+    };
+    assert_eq!(sofa.len(), 3, "expected a 3-seat sofa, got {sofa:?}");
+    assert!(
+        sofa.iter()
+            .all(|&i| furniture_def(layout.waypoints[i].kind.furniture()).exclusive),
+        "each sofa seat must be an exclusive waypoint"
+    );
+
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut scene = SceneState::uniform(64);
+    for i in 0..TEST_DEFAULT_DESKS {
+        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/p/sofa{i}.jsonl"));
+        let mut slot = make_slot(id, ActivityState::Idle);
+        let started = now0 - Duration::from_secs(5 + (i as u64 * 11) % 80);
+        slot.created_at = started;
+        slot.state_started_at = started;
+        slot.last_event_at = started;
+        slot.desk_index = GlobalDeskIndex(i);
+        scene.agents.insert(id, slot);
+    }
+
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let mut stores = owned.stores();
+    let mut max_on_sofa = 0usize;
+    for step in 0..6_000u64 {
+        let now = now0 + Duration::from_millis(250 * step);
+        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let n = frame
+            .poses
+            .values()
+            .flatten()
+            .filter(|p| matches!(p, Pose::AtWaypoint { wp, .. } if sofa.contains(wp)))
+            .count();
+        max_on_sofa = max_on_sofa.max(n);
+        if max_on_sofa >= 3 {
+            break;
+        }
+    }
+    assert_eq!(
+        max_on_sofa, 3,
+        "one sofa must seat 3 agents at once; peaked at {max_on_sofa}"
+    );
+}
