@@ -684,12 +684,21 @@ const HERMES: SourceDescriptor = SourceDescriptor {
 /// `session_dir`), mirrored by `grok_id_from_path`. Transcript =
 /// `{grok_home}/sessions/<enc-cwd>/<session-id>/updates.jsonl`, append-only;
 /// content carries NO cwd (path-derived via the watcher's cwd deriver — see
-/// `extract_grok_cwd`). Wire facts repo-derived @ 0.1.220-alpha.4 c68e39f6;
-/// `verified_version` stays "unknown" until a byte-real capture anchors it.
+/// `extract_grok_cwd`). Wire facts repo-derived @ 0.1.220-alpha.4 c68e39f6,
+/// then BYTE-REAL anchored @ 0.2.102 (ab5ebf69acec, live capture 2026-07-16,
+/// #637): every envelope field, both method namespaces, the
+/// toolUseId==toolCallId join, and the subagent_end finish spelling held
+/// across the version jump. 0.2.x deltas absorbed: a NEW `events.jsonl`
+/// sibling (the updates.jsonl path filter already excludes it), children now
+/// fire their own `session_end` (a harmless earlier exit — the ledger still
+/// rides the parent's `subagent_end`), a new `turn_completed` xAI tag
+/// (decoded → turn-end), and the transcript `rawInput` carries CLIENT-form
+/// keys (`background`) — the both-keys `spawn_is_blocking` read covers it.
 const GROK: SourceDescriptor = SourceDescriptor {
     name: grok::SOURCE_NAME,
     label_prefix: "gk",
-    verified_version: "unknown",
+    // Byte-real capture anchor: `grok 0.2.102 (ab5ebf69acec) [stable]`.
+    verified_version: "0.2.102",
     version_probe: Some(&["grok", "--version"]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {

@@ -4,17 +4,20 @@ expression: events
 ---
 - ActivityStart:
     agent_id: 3721754798848384957
-    tool_use_id: call_1
+    tool_use_id: call-f1963737-4e4d-426c-88a2-85e86077c30b-0
     detail:
       Generic:
-        display: Run cargo test
+        display: run_terminal_command
 - ActivityEnd:
     agent_id: 3721754798848384957
-    tool_use_id: call_1
+    tool_use_id: call-f1963737-4e4d-426c-88a2-85e86077c30b-0
 - ModelInfo:
     agent_id: 3721754798848384957
     model: grok-4-code
     effort: high
+- ActivityEnd:
+    agent_id: 3721754798848384957
+    tool_use_id: ~
 - SessionStart:
     agent_id: 3721754798848384957
     source: grok
@@ -28,10 +31,10 @@ expression: events
     cwd: /Users/dev/proj
 - ActivityStart:
     agent_id: 3721754798848384957
-    tool_use_id: call_1
+    tool_use_id: call-f1963737-4e4d-426c-88a2-85e86077c30b-0
     detail:
       Generic:
-        display: "run_terminal_command: cargo test"
+        display: "run_terminal_command: cat note.txt"
 - Identity:
     agent_id: 3721754798848384957
     source: grok
@@ -39,7 +42,7 @@ expression: events
     cwd: /Users/dev/proj
 - ActivityEnd:
     agent_id: 3721754798848384957
-    tool_use_id: call_1
+    tool_use_id: call-f1963737-4e4d-426c-88a2-85e86077c30b-0
 - ActivityEnd:
     agent_id: 3721754798848384957
     tool_use_id: ~
