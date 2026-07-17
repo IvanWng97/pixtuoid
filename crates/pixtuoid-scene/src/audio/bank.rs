@@ -117,3 +117,14 @@ impl TrackBeds {
         Arc::clone(&self.beds[i])
     }
 }
+
+/// Whether every TRACK-owned stem's live gain (from a mixer step) has reached
+/// exactly 0.0 — the silence gate a player checks before swapping a mood
+/// track's beds (`TrackSwitch::try_swap`). Rain/typing gains are ignored
+/// (track-independent).
+pub fn track_stems_silent(gains: &[(LoopStem, f32)]) -> bool {
+    gains
+        .iter()
+        .filter(|(s, _)| TRACK_STEMS.contains(s))
+        .all(|(_, g)| *g == 0.0)
+}

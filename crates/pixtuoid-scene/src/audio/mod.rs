@@ -100,6 +100,89 @@ pub fn select_track(is_day: bool, precipitation: f32) -> TrackId {
     }
 }
 
+impl StemLevels {
+    /// Zero the five TRACK-owned musical stems (pad/sparkle/keys/drums/
+    /// texture), leaving rain + typing (weather + activity, track-independent).
+    /// The "hold silent" half of the mood-track crossfade — a player calls it
+    /// on the target while a switch is [`TrackSwitch::is_holding`].
+    pub fn silence_track_stems(&mut self) {
+        self.pad = 0.0;
+        self.sparkle = 0.0;
+        self.keys = 0.0;
+        self.drums = 0.0;
+        self.texture = 0.0;
+    }
+}
+
+/// The mood-track switch machine (#644) — the PURE state half both players
+/// run (the native rodio thread AND the wasm WebAudio driver, #633 web-audio),
+/// so the latch/hold/silent-gate can't drift between them. It owns ONLY the
+/// state: the BUILD (blocking synth on native, chunked warmup on web) stays
+/// caller-side, since that's the one thing the two backends do differently.
+///
+/// Lifecycle: `init` on the first frame (build + register the right mood) →
+/// `request` a switch on a changed [`TrackId`] (LATCHED — a hour/weather
+/// flap at a boundary can't thrash the synths) → while `is_holding`, the
+/// caller silences the track stems → once they reach silence, `try_swap`
+/// hands back the new track to build + swap in and releases the hold.
+#[derive(Debug, Default)]
+pub struct TrackSwitch {
+    current: Option<TrackId>,
+    pending: Option<TrackId>,
+}
+
+impl TrackSwitch {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The registered track, or `None` before the first `init`.
+    pub fn current(&self) -> Option<TrackId> {
+        self.current
+    }
+
+    /// First frame ONLY: adopt `track` as current and return `Some(track)` to
+    /// build + register its beds. Returns `None` once initialized (use
+    /// [`TrackSwitch::request`] thereafter).
+    pub fn init(&mut self, track: TrackId) -> Option<TrackId> {
+        if self.current.is_none() {
+            self.current = Some(track);
+            Some(track)
+        } else {
+            None
+        }
+    }
+
+    /// Record a requested switch — ignored while unchanged or while a switch
+    /// is already in flight (the settling latch). No-op before `init`.
+    pub fn request(&mut self, track: TrackId) {
+        if let Some(cur) = self.current {
+            if track != cur && self.pending.is_none() {
+                self.pending = Some(track);
+            }
+        }
+    }
+
+    /// Whether a switch is in flight (the caller holds the track stems silent).
+    pub fn is_holding(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// When the held track stems have reached silence (`track_silent`),
+    /// commit the pending switch: adopt it as current, clear the latch, and
+    /// return `Some(to)` to build + swap in. `None` until then.
+    pub fn try_swap(&mut self, track_silent: bool) -> Option<TrackId> {
+        if let Some(to) = self.pending {
+            if track_silent {
+                self.current = Some(to);
+                self.pending = None;
+                return Some(to);
+            }
+        }
+        None
+    }
+}
+
 /// Cross-frame cue state — the audio twin of the painter session halves
 /// (`PerOffice` pattern). Diffs identity/occupancy sets frame-to-frame and
 /// emits each [`OneShot`] exactly once on the EDGE (a 30fps rebuild never
@@ -207,6 +290,57 @@ mod tests {
         assert_eq!(select_track(true, 0.6), TrackId::Night);
         assert_eq!(select_track(false, 1.0), TrackId::Night);
         assert_eq!(select_track(true, f32::MIN_POSITIVE), TrackId::Night);
+    }
+
+    #[test]
+    fn track_switch_inits_then_latches_a_change_until_silence() {
+        let mut sw = TrackSwitch::new();
+        assert_eq!(sw.current(), None);
+        // first frame builds+registers, does NOT request
+        assert_eq!(sw.init(TrackId::Day), Some(TrackId::Day));
+        assert_eq!(sw.current(), Some(TrackId::Day));
+        assert_eq!(sw.init(TrackId::Night), None, "init is first-frame only");
+        assert!(!sw.is_holding());
+
+        // an unchanged request is a no-op; a real change latches the hold
+        sw.request(TrackId::Day);
+        assert!(!sw.is_holding());
+        sw.request(TrackId::Night);
+        assert!(sw.is_holding(), "a changed track holds the stems silent");
+
+        // a SECOND change mid-flight is ignored (the settling latch)
+        sw.request(TrackId::Day);
+        // not silent yet → no swap
+        assert_eq!(sw.try_swap(false), None);
+        assert!(sw.is_holding());
+        // silence reached → swap to the FIRST-latched target, release the hold
+        assert_eq!(sw.try_swap(true), Some(TrackId::Night));
+        assert_eq!(sw.current(), Some(TrackId::Night));
+        assert!(!sw.is_holding());
+        assert_eq!(sw.try_swap(true), None, "nothing pending after the swap");
+    }
+
+    #[test]
+    fn silence_track_stems_zeroes_music_keeps_weather_and_typing() {
+        let mut s = StemLevels {
+            pad: 0.4,
+            sparkle: 0.3,
+            keys: 0.5,
+            drums: 0.6,
+            texture: 0.2,
+            rain: 0.7,
+            typing: 0.8,
+        };
+        s.silence_track_stems();
+        assert_eq!(
+            (s.pad, s.sparkle, s.keys, s.drums, s.texture),
+            (0.0, 0.0, 0.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            (s.rain, s.typing),
+            (0.7, 0.8),
+            "rain + typing are track-independent"
+        );
     }
 
     fn counts(active: usize) -> StateCounts {

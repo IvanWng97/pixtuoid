@@ -25,13 +25,12 @@ use std::time::Instant;
 use pixtuoid_scene::audio::mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
 use pixtuoid_scene::audio::AudioFrame;
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::TrackId;
-#[cfg(feature = "audio")]
 use pixtuoid_scene::audio::{dsp, synth};
-// OneShot is named only in the test fixtures now (run_loop infers it from
-// `frame.events`), so import it test-side to keep the prod build warning-free.
+// OneShot + TrackId are named only in the test fixtures now (run_loop infers
+// both — `frame.events` / `switch.init(frame.track)`), so import them test-side
+// to keep the prod build warning-free.
 #[cfg(all(feature = "audio", test))]
-use pixtuoid_scene::audio::OneShot;
+use pixtuoid_scene::audio::{OneShot, TrackId};
 #[cfg(feature = "audio")]
 use sink::AudioSink;
 
@@ -459,14 +458,13 @@ fn run_loop(
     let mut rain_level = 0.0f32;
     let started = Instant::now();
     let mut last_step = started;
-    // The mood-track machine (#644): `current` = the registered beds
-    // (None until the first frame); `pending` = a requested switch,
-    // LATCHED until its cycle completes (hour/weather flapping at a
-    // boundary must not thrash 2s synths). The cycle: hold the five track
-    // stems at target 0 → when their gains reach silence, synthesize +
-    // swap (the silence covers the ~2s) → release the hold.
-    let mut current: Option<TrackId> = None;
-    let mut pending: Option<TrackId> = None;
+    // The mood-track machine (#644) — the state half is the SHARED
+    // `pixtuoid_scene::audio::TrackSwitch` (native + wasm run the same
+    // latch/hold/silent-gate); only the BUILD (blocking synth here) is
+    // caller-side. The cycle: hold the five track stems at target 0 → when
+    // their gains reach silence, synthesize + swap (the silence covers the
+    // ~2s) → release the hold.
+    let mut switch = pixtuoid_scene::audio::TrackSwitch::new();
     let mut wanted_stems = pixtuoid_scene::audio::StemLevels::default();
 
     loop {
@@ -480,29 +478,24 @@ fn run_loop(
                 typing_level = frame.stems.typing;
                 rain_level = frame.stems.rain;
                 wanted_stems = frame.stems;
-                match current {
-                    None => {
-                        // first frame: build + register the RIGHT track
-                        let beds = TrackBeds::build(&mut rng, frame.track);
-                        for stem in TRACK_STEMS {
-                            device.start_loop(stem, beds.bed(stem));
-                        }
-                        current = Some(frame.track);
-                        resync_after_stall(
-                            &rx,
-                            started,
-                            &mut last_step,
-                            &mut typing,
-                            &mut drops,
-                            &mut typing_level,
-                            &mut rain_level,
-                            &mut wanted_stems,
-                        );
+                if let Some(track) = switch.init(frame.track) {
+                    // first frame: build + register the RIGHT track
+                    let beds = TrackBeds::build(&mut rng, track);
+                    for stem in TRACK_STEMS {
+                        device.start_loop(stem, beds.bed(stem));
                     }
-                    Some(cur) if frame.track != cur && pending.is_none() => {
-                        pending = Some(frame.track);
-                    }
-                    _ => {}
+                    resync_after_stall(
+                        &rx,
+                        started,
+                        &mut last_step,
+                        &mut typing,
+                        &mut drops,
+                        &mut typing_level,
+                        &mut rain_level,
+                        &mut wanted_stems,
+                    );
+                } else {
+                    switch.request(frame.track);
                 }
                 for event in frame.events {
                     device.play_once(bank.one_shot(event), ONE_SHOT_GAIN * mixer.one_shot_gain());
@@ -515,12 +508,8 @@ fn run_loop(
         // while a switch is pending, hold the track stems silent (rain and
         // typing keep following the scene — weather is not the track's)
         let mut target = wanted_stems;
-        if pending.is_some() {
-            target.pad = 0.0;
-            target.sparkle = 0.0;
-            target.keys = 0.0;
-            target.drums = 0.0;
-            target.texture = 0.0;
+        if switch.is_holding() {
+            target.silence_track_stems();
         }
         mixer.set_target(target);
 
@@ -532,31 +521,23 @@ fn run_loop(
             device.set_loop_gain(stem, gain);
         }
 
-        if let Some(to) = pending {
-            let track_silent = gains
-                .iter()
-                .filter(|(s, _)| TRACK_STEMS.contains(s))
-                .all(|(_, g)| *g == 0.0);
-            if track_silent {
-                // ~2s of synthesis under silence; the ramp back in is the
-                // same crossfade every tier change rides
-                let beds = TrackBeds::build(&mut rng, to);
-                for stem in TRACK_STEMS {
-                    device.swap_loop(stem, beds.bed(stem));
-                }
-                current = Some(to);
-                pending = None;
-                resync_after_stall(
-                    &rx,
-                    started,
-                    &mut last_step,
-                    &mut typing,
-                    &mut drops,
-                    &mut typing_level,
-                    &mut rain_level,
-                    &mut wanted_stems,
-                );
+        if let Some(to) = switch.try_swap(pixtuoid_scene::audio::bank::track_stems_silent(&gains)) {
+            // ~2s of synthesis under silence; the ramp back in is the
+            // same crossfade every tier change rides
+            let beds = TrackBeds::build(&mut rng, to);
+            for stem in TRACK_STEMS {
+                device.swap_loop(stem, beds.bed(stem));
             }
+            resync_after_stall(
+                &rx,
+                started,
+                &mut last_step,
+                &mut typing,
+                &mut drops,
+                &mut typing_level,
+                &mut rain_level,
+                &mut wanted_stems,
+            );
         }
 
         let now_s = now.duration_since(started).as_secs_f64();
