@@ -540,7 +540,7 @@ mod tests {
              update the const so hit-test/decor/label geometry tracks the pack",
             crate::layout::CHARACTER_SPRITE_W
         );
-        // The px sprite is `H_CELLS` half-block rows tall (2 px per cell); pin
+        // The px sprite is `CHARACTER_SPRITE_H_CELLS` half-block rows tall (2 px per cell); pin
         // the cell const too so the hit-test box height can't drift from the pack.
         assert_eq!(
             h,

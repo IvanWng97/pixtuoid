@@ -346,7 +346,7 @@ pub fn find_path(
 }
 
 /// Is the coarse routing cell containing `p` walkable (the SAME predicate A*
-/// expands on — ≥`CELL_WALKABLE_MIN`/16 px open)? This is the granularity the
+/// expands on — ≥`COARSE_CELL_WALKABLE_MIN`/16 px open)? This is the granularity the
 /// router actually guarantees: a position can fail a per-pixel `is_walkable`
 /// (it's in the obstacle PAD band, or a transient diagonal corner-graze) yet
 /// still be in a walkable routing cell — exactly like every agent sprite, which

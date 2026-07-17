@@ -434,7 +434,7 @@ fn sample_polyline(pts: &[Point], t: f32, fallback: Point) -> Point {
 // and walks back out to the elevator when the gateway goes Down. Stateless like
 // the pet — position is a pure function of `now`, the presence timestamps, and a
 // seed — so there is no per-frame state and the A*-on-static-mask legs never
-// flash. The per-source sprite is resolved by `gateway_mascot_anims`.
+// flash. The per-source sprite is resolved by `gateway_mascot_def`.
 
 const MASCOT_ENTER_MS: u64 = 2200;
 const MASCOT_LEAVE_MS: u64 = 2200;

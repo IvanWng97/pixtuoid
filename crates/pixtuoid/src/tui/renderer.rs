@@ -211,7 +211,7 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
 //   * `render_to_rgb_buffer` -- pure RGB output. No ratatui types, no
 //     terminal I/O. Can be called by any renderer (web canvas, PNG
 //     snapshot, GIF capture).
-//   * `flush_to_terminal` -- ratatui half-block compression + label overlay
+//   * `draw_scene` -- ratatui half-block compression + label overlay
 //     + bulletin notice + footer. Terminal-specific, runs inside
 //     `term.draw`.
 

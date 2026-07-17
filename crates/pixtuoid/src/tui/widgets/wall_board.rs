@@ -12,7 +12,7 @@ use crate::tui::renderer::clip_widget_rect;
 
 /// The wall board's text width + cell-origin pin to the painted neon panel's dark
 /// INTERIOR (spine 2), so the lit sign's letters can never overrun the glowing
-/// frame — the `PANTRY_COFFEE_COLS` anti-drift precedent. `NEON_PANEL_INNER_W` =
+/// frame — the `PANTRY_COFFEE_COLS_*` anti-drift precedent. `NEON_PANEL_INNER_W` =
 /// the outer panel minus its `NEON_PANEL_BORDER` on each side (laying text to the
 /// full outer `NEON_PANEL_W` overran the frame — the board-overflow bug). Only the
 /// horizontal derives; the 3-row height + the `+1` cell ROW stay literal (the

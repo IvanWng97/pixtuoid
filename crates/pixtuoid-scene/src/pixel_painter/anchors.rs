@@ -84,7 +84,7 @@ pub(super) fn with_breath(
 /// Anchor for a back-view sitter on a mirror_vertical'd couch. Couch back
 /// is now at the BOTTOM of the sprite, so the character's body sits
 /// ENTIRELY ABOVE the couch back (head 7 px above couch center, body
-/// ending right at the couch back row). Different from `couch_seat_anchor`
+/// ending right at the couch back row). Different from a normal front-view seat anchor
 /// because back_couch.sprite has no transparent head/face area — its hair
 /// extends across all top rows, so positioning it lower would put the
 /// character's "head" overlapping the couch back row.
