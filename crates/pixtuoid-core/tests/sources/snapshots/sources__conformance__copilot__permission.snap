@@ -28,6 +28,9 @@ expression: events
     agent_id: 4184320534004752587
     model: gpt-5-mini
     effort: ~
+- Usage:
+    agent_id: 4184320534004752587
+    fresh_tokens: 11387
 - SessionEnd:
     agent_id: 4184320534004752587
     as_child: false

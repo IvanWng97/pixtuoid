@@ -280,10 +280,45 @@ pub fn decode_copilot_line(
             agent_id: root,
             tool_use_id: None,
         }],
-        "session.shutdown" => vec![AgentEvent::SessionEnd {
-            agent_id: root,
-            as_child: false,
-        }],
+        // Token-meter usage (#645): copilot's ONLY usage wire is this
+        // shutdown summary — one final delta as the session ends. The desk
+        // tower/sheet never flash from it (the SessionEnd right after marks
+        // the slot exiting, and exiting desks paint no tower); the payoff is
+        // the dossier's Σ total staying honest on the walk-out hover.
+        // `tokenDetails.input.tokenCount` already EXCLUDES cache reads
+        // (fixture-verified: usage.inputTokens 12839 − cacheReadTokens 1664 =
+        // tokenDetails.input 11175), so fresh = input + cache_write (absent
+        // at zero) + output. Usage FIRST: the reducer applies in order, and
+        // the counter must land before the slot flips to exiting.
+        "session.shutdown" => {
+            let mut evs = Vec::new();
+            if let Some(details) = data
+                .and_then(|d| d.get("tokenDetails"))
+                .and_then(|t| t.as_object())
+            {
+                let bucket = |k: &str| {
+                    details
+                        .get(k)
+                        .and_then(|b| b.get("tokenCount"))
+                        .and_then(|n| n.as_u64())
+                        .unwrap_or(0)
+                };
+                let fresh = bucket("input")
+                    .saturating_add(bucket("cache_write"))
+                    .saturating_add(bucket("output"));
+                if fresh > 0 {
+                    evs.push(AgentEvent::Usage {
+                        agent_id: root,
+                        fresh_tokens: fresh,
+                    });
+                }
+            }
+            evs.push(AgentEvent::SessionEnd {
+                agent_id: root,
+                as_child: false,
+            });
+            evs
+        }
         // Everything else (ephemeral streaming, assistant.*, hook.*, user.message,
         // session.* metadata) is not a sprite-visible lifecycle change → ignore.
         _ => vec![],
@@ -727,6 +762,8 @@ mod tests {
 
     #[test]
     fn real_session_shutdown_ends_the_root() {
+        // A tokenDetails-less shutdown (older wire / crashy teardown) still
+        // ends the session — no Usage, no panic.
         let line = r#"{"type":"session.shutdown","data":{"shutdownType":"routine","totalPremiumRequests":1},"id":"220c4131","timestamp":"2026-05-22T06:17:01.077Z","parentId":"cd21bd01"}"#;
         match &decode(line)[..] {
             [AgentEvent::SessionEnd { agent_id, as_child }] => {
@@ -734,6 +771,31 @@ mod tests {
                 assert!(!*as_child, "a root shutdown is NOT a child end");
             }
             other => panic!("expected root SessionEnd, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn real_session_shutdown_usage_summary_lands_one_final_delta() {
+        // #645: the fixture's real shutdown shape — tokenDetails.input already
+        // EXCLUDES cache reads (usage.inputTokens 12839 − cacheReadTokens 1664
+        // = 11175), so fresh = 11175 + 0 (no cache_write bucket) + 212. The
+        // Usage must precede the SessionEnd: the reducer applies in order and
+        // the counter has to land before the slot flips to exiting.
+        let line = r#"{"type":"session.shutdown","data":{"shutdownType":"routine","tokenDetails":{"input":{"tokenCount":11175},"cache_read":{"tokenCount":1664},"output":{"tokenCount":212}},"currentModel":"gpt-5-mini"},"id":"56992353","timestamp":"2026-06-14T21:38:47.162Z","parentId":"3079df1f"}"#;
+        match &decode(line)[..] {
+            [AgentEvent::Usage {
+                agent_id: u_id,
+                fresh_tokens,
+            }, AgentEvent::SessionEnd { agent_id, as_child }] => {
+                assert_eq!(*u_id, root());
+                assert_eq!(
+                    *fresh_tokens, 11_387,
+                    "fresh = input 11175 + output 212, cache_read excluded"
+                );
+                assert_eq!(*agent_id, root());
+                assert!(!*as_child);
+            }
+            other => panic!("expected [Usage, SessionEnd], got {other:?}"),
         }
     }
 

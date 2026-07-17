@@ -155,9 +155,13 @@ SESSION's total burn, live-calibrated 2026-07); Codex `token_count`
 INCLUDES the cached share so fresh input = input − cached, saturating;
 reasoning is additive); omp assistant `message.usage` (per-turn; `input`
 EXCLUDES cache — fixture-verified `totalTokens = input + output + cacheRead
-+ cacheWrite` — so fresh = input + cacheWrite + output). Copilot carries
-usage ONLY as a `session.shutdown` summary — one giant delta as the agent
-walks out, near-zero display value — DEFERRED, not absent (#645). The other
++ cacheWrite` — so fresh = input + cacheWrite + output); copilot's ONE usage
+wire is the `session.shutdown` summary (#645) — decoded as a final Usage
+BEFORE the SessionEnd in the same vec (the reducer applies in order, so the
+counter lands before the slot flips exiting; the tower/sheet never flash
+from it — exiting desks paint no tower — the payoff is an honest dossier Σ
+on the walk-out hover; `tokenDetails.input` already EXCLUDES cache reads,
+fixture-verified 12839 − 1664 = 11175). The other
 8 sources genuinely carry no usage wire; their desks never grow paper. Both
 slot fields serde-skipped at zero/None (`tokens_used` flat like
 `tool_call_count`; the last reading bundled as `UsageObservation{delta,
