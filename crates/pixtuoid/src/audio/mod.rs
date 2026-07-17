@@ -163,6 +163,209 @@ pub(crate) const VOLUME_STEP: f32 = 0.05;
 /// the volume-persist debounce window on both painters all read this one.
 pub(crate) const VOLUME_FLASH_MS: u128 = 1000;
 
+/// The two audio gestures both painters drive — the `m` toggle and the
+/// `+`/`-` nudge. The KEY→action map is painter-specific (crossterm vs winit,
+/// in each painter), but the STATE TRANSITION is shared: see
+/// [`apply_audio_action`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AudioAction {
+    ToggleMute,
+    /// `true` = volume up.
+    Volume(bool),
+}
+
+/// The audio UI state both painters keep — the TUI as loop locals it marshals
+/// in/out per keypress, floating as an owned field.
+pub(crate) struct AudioUi {
+    pub(crate) handle: AudioHandle,
+    pub(crate) muted: bool,
+    pub(crate) volume: f32,
+}
+
+/// What the caller persists after [`apply_audio_action`] — the side effects
+/// (config path, wall-clock flash) stay painter-side so the transition itself
+/// is pure and unit-tested.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Persist {
+    /// The mute flag changed — persist NOW (`save_audio_muted`, like a theme
+    /// commit).
+    pub(crate) muted: bool,
+    /// The volume changed — flash the readout and persist DEBOUNCED (the +/-
+    /// keys autorepeat; per-press ConfigLock rounds were a review MEDIUM).
+    pub(crate) volume_nudged: bool,
+}
+
+/// THE audio mute/volume transition — the single authority BOTH painters run
+/// (the TUI's `ToggleAudioMute`/`AdjustVolume` arms and floating's key
+/// handler), so the two surfaces can't drift on feel (the duplicated-logic
+/// review MEDIUM; VOLUME_STEP lives here for the same reason). Semantics:
+/// mute toggles; volume-up from muted IS the un-mute gesture; the lazy spawn
+/// (re)fires whenever sound is wanted but the system is down (`+`/`m` are
+/// never dead keys — boot-muted and failed-spawn both recover); volume clamps
+/// to [0, 1] by [`VOLUME_STEP`]. `paused` folds an external hold (the TUI's
+/// `[p]ause`) into the effective mute; floating passes `false`. `spawn` is
+/// injected so the transition is testable without a device.
+pub(crate) fn apply_audio_action(
+    st: &mut AudioUi,
+    action: AudioAction,
+    paused: bool,
+    spawn: impl FnOnce(f32) -> AudioHandle,
+) -> Persist {
+    let mut persist = Persist {
+        muted: false,
+        volume_nudged: false,
+    };
+    match action {
+        AudioAction::ToggleMute => {
+            st.muted = !st.muted;
+            persist.muted = true;
+        }
+        AudioAction::Volume(up) => {
+            let delta = if up { VOLUME_STEP } else { -VOLUME_STEP };
+            st.volume = (st.volume + delta).clamp(0.0, 1.0);
+            if up && st.muted {
+                // volume-up IS the un-mute gesture too
+                st.muted = false;
+                persist.muted = true;
+            }
+            persist.volume_nudged = true;
+        }
+    }
+    if !st.muted && !st.handle.is_enabled() {
+        // lazy (re)spawn: muted costs nothing, so the device/thread/buffers
+        // only come up when sound is actually wanted
+        st.handle = spawn(st.volume);
+    }
+    st.handle.set_muted(paused || st.muted);
+    st.handle.set_volume(st.volume);
+    persist
+}
+
+#[cfg(test)]
+mod controls_tests {
+    use super::*;
+
+    #[test]
+    fn unmute_lazy_spawns_and_mute_back_does_not() {
+        let mut st = AudioUi {
+            handle: AudioHandle::disabled(),
+            muted: true,
+            volume: 0.4,
+        };
+        let (live, _rx) = AudioHandle::test_pair();
+        let mut spawned_at = None;
+        let p = apply_audio_action(&mut st, AudioAction::ToggleMute, false, |v| {
+            spawned_at = Some(v);
+            live.clone()
+        });
+        assert!(!st.muted);
+        assert_eq!(
+            spawned_at,
+            Some(0.4),
+            "first unmute spawns at the kept volume"
+        );
+        assert!(st.handle.is_enabled() && !st.handle.is_muted());
+        assert_eq!(
+            p,
+            Persist {
+                muted: true,
+                volume_nudged: false
+            }
+        );
+        // muting back must NOT spawn again
+        let p = apply_audio_action(&mut st, AudioAction::ToggleMute, false, |_| {
+            panic!("mute must never spawn")
+        });
+        assert!(st.muted && st.handle.is_muted());
+        assert_eq!(
+            p,
+            Persist {
+                muted: true,
+                volume_nudged: false
+            }
+        );
+    }
+
+    #[test]
+    fn volume_up_from_muted_unmutes_and_respawns_a_dead_system() {
+        // the sticky (unmuted, disabled) state: '+' must re-attempt the spawn
+        let mut st = AudioUi {
+            handle: AudioHandle::disabled(),
+            muted: true,
+            volume: 0.5,
+        };
+        let (live, _rx) = AudioHandle::test_pair();
+        let mut spawns = 0;
+        let p = apply_audio_action(&mut st, AudioAction::Volume(true), false, |_| {
+            spawns += 1;
+            live.clone()
+        });
+        assert!(!st.muted, "volume-up IS the un-mute gesture");
+        assert_eq!(spawns, 1);
+        assert_eq!(
+            p,
+            Persist {
+                muted: true,
+                volume_nudged: true
+            }
+        );
+        assert!((st.volume - (0.5 + VOLUME_STEP)).abs() < 1e-6);
+        assert!((st.handle.volume() - st.volume).abs() < 1e-6);
+        // volume-down while unmuted: no mute persist, no respawn
+        let p = apply_audio_action(&mut st, AudioAction::Volume(false), false, |_| {
+            panic!("live system must not respawn")
+        });
+        assert_eq!(
+            p,
+            Persist {
+                muted: false,
+                volume_nudged: true
+            }
+        );
+        assert!((st.volume - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn volume_clamps_at_both_rails() {
+        let (live, _rx) = AudioHandle::test_pair();
+        let mut st = AudioUi {
+            handle: live,
+            muted: false,
+            volume: 1.0,
+        };
+        apply_audio_action(
+            &mut st,
+            AudioAction::Volume(true),
+            false,
+            |_| unreachable!(),
+        );
+        assert_eq!(st.volume, 1.0, "top rail");
+        st.volume = 0.0;
+        apply_audio_action(
+            &mut st,
+            AudioAction::Volume(false),
+            false,
+            |_| unreachable!(),
+        );
+        assert_eq!(st.volume, 0.0, "bottom rail");
+    }
+
+    #[test]
+    fn paused_forces_effective_mute_without_touching_the_flag() {
+        // the TUI's [p]ause term: the handle is silenced but the user's own
+        // mute flag is preserved (unpause restores it)
+        let (live, _rx) = AudioHandle::test_pair();
+        let mut st = AudioUi {
+            handle: live,
+            muted: false,
+            volume: 0.5,
+        };
+        apply_audio_action(&mut st, AudioAction::Volume(true), true, |_| unreachable!());
+        assert!(!st.muted, "the user's flag stays unmuted");
+        assert!(st.handle.is_muted(), "but paused silences the handle");
+    }
+}
+
 /// The painters' handle — clone-cheap, non-blocking. A disabled handle
 /// (audio off in config, or no device) swallows everything.
 #[derive(Clone)]

@@ -217,6 +217,14 @@ const LABEL_FONT_PX: f32 = 12.0;
 /// the office (no TUI cell background), so a 1px offset shadow keeps it legible
 /// over bright windows / plants.
 const BADGE_SHADOW: u32 = 0x0000_0000;
+/// The near-white AA ink for foreground captions with no theme cell behind them
+/// — the hovered name badge AND the volume-flash readout share it (one
+/// definition so a future softening can't split them).
+const HOVER_INK: Rgb = Rgb {
+    r: 240,
+    g: 240,
+    b: 240,
+};
 
 /// Alpha-composite `color` over the surface pixel at `(x, y)` by `coverage` (the
 /// AA rasterizer's per-pixel strength), a straight linear blend in `0x00RRGGBB`
@@ -279,11 +287,7 @@ pub fn paint_labels_into_surface(
 ) {
     for el in labels {
         let rgb = if el.hovered {
-            Rgb {
-                r: 240,
-                g: 240,
-                b: 240,
-            }
+            HOVER_INK
         } else {
             // Tone→role map is single-sourced in `scene::overlay`.
             pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme)
@@ -378,19 +382,25 @@ pub fn paint_wall_board_into_surface(
     }
 }
 
+/// The transient readout's TEXT (`♩ N%` unmuted / `♩ off` muted) — pure so
+/// the muted/percent branch is unit-tested off the codecov-ignored redraw.
+pub fn volume_flash_text(muted: bool, volume: f32) -> String {
+    if muted {
+        "\u{2669} off".to_string()
+    } else {
+        format!("\u{2669} {}%", (volume * 100.0).round() as u8)
+    }
+}
+
 /// Paint the transient volume readout (`♩ 45%` / `♩ off`) into the window's
 /// bottom-right corner — the floating twin of the TUI footer's flash and the
 /// m/+/- keys' ONLY visual feedback (this window has no footer). Fixed
 /// caption height like the name badges (crisp at any office scale), the
-/// hovered-badge near-white over the shared 1px shadow.
+/// shared [`HOVER_INK`] near-white over the shared 1px shadow.
 pub fn paint_volume_flash_into_surface(sb: &mut [u32], win_w: usize, win_h: usize, text: &str) {
     // breathing room from the window edges
     const FLASH_MARGIN_PX: i32 = 6;
-    let color = pack_xrgb(Rgb {
-        r: 240,
-        g: 240,
-        b: 240,
-    });
+    let color = pack_xrgb(HOVER_INK);
     let tw = crate::aa_text::text_width(text, LABEL_FONT_PX);
     let x = (win_w as i32 - tw - FLASH_MARGIN_PX).max(0);
     let y = (win_h as i32 - crate::aa_text::line_height(LABEL_FONT_PX) - FLASH_MARGIN_PX).max(0);
@@ -733,6 +743,16 @@ mod tests {
             stems.typing, moderate.typing,
             "typing level must reflect the RENDERED floor's 1 active, not all 4"
         );
+    }
+
+    #[test]
+    fn volume_flash_text_reads_off_when_muted_else_the_rounded_percent() {
+        assert_eq!(volume_flash_text(true, 0.42), "\u{2669} off");
+        assert_eq!(volume_flash_text(false, 0.45), "\u{2669} 45%");
+        assert_eq!(volume_flash_text(false, 0.0), "\u{2669} 0%");
+        assert_eq!(volume_flash_text(false, 1.0), "\u{2669} 100%");
+        // rounds, not truncates (0.455 → 46%, the footer-percent convention)
+        assert_eq!(volume_flash_text(false, 0.455), "\u{2669} 46%");
     }
 
     #[test]

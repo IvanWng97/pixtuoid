@@ -260,6 +260,46 @@ fn should_dispatch_key(kind: KeyEventKind) -> bool {
     kind == KeyEventKind::Press
 }
 
+/// The `m`/`+`/`-` dispatch, marshalling the loop's audio locals through the
+/// SHARED `crate::audio::apply_audio_action` (the ONE mute/volume transition
+/// both painters run — floating's key handler is the twin caller). The side
+/// effects the pure transition returns are applied here: reinstall the handle
+/// (a lazy spawn mints a new one), persist mute immediately, flash + mark the
+/// volume dirty on a nudge (the debounced persist lands on flash expiry / quit).
+#[allow(clippy::too_many_arguments)] // the loop's flat audio locals, threaded once from two arms
+fn run_audio_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+    action: crate::audio::AudioAction,
+    audio: &mut crate::audio::AudioHandle,
+    audio_muted: &mut bool,
+    audio_volume: &mut f32,
+    paused: bool,
+    renderer: &mut TuiRenderer<B>,
+    config_path: &std::path::Path,
+    volume_flash: &mut Option<Instant>,
+    volume_dirty: &mut bool,
+) {
+    let mut ui = crate::audio::AudioUi {
+        handle: audio.clone(),
+        muted: *audio_muted,
+        volume: *audio_volume,
+    };
+    let persist = crate::audio::apply_audio_action(&mut ui, action, paused, crate::audio::spawn);
+    *audio = ui.handle;
+    *audio_muted = ui.muted;
+    *audio_volume = ui.volume;
+    renderer.set_audio(audio.clone());
+    if persist.muted {
+        // persist like the theme commit: next launch boots as the user left it
+        if let Err(e) = crate::config::save_audio_muted(config_path, *audio_muted) {
+            tracing::warn!("failed to persist audio mute: {e}");
+        }
+    }
+    if persist.volume_nudged {
+        *volume_flash = Some(Instant::now());
+        *volume_dirty = true; // the debounced write; see the volume_flash comment
+    }
+}
+
 /// What pressing `t` on a Sources-panel row does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToggleIntent {
@@ -742,53 +782,30 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 renderer.navigate_floor(target, now);
                             }
                             KeyAction::ToggleAudioMute => {
-                                audio_muted = !audio_muted;
-                                if !audio_muted && !audio.is_enabled() {
-                                    // lazy spawn on the FIRST unmute — muted
-                                    // audio costs nothing until someone asks
-                                    // for sound (the ~2s bed synthesis runs on
-                                    // the audio thread; beds fade in when done)
-                                    audio = crate::audio::spawn(audio_volume);
-                                    renderer.set_audio(audio.clone());
-                                }
-                                audio.set_muted(ui.paused() || audio_muted);
-                                // persist like the theme commit: next launch
-                                // boots exactly as the user left it
-                                if let Err(e) =
-                                    crate::config::save_audio_muted(&config_path, audio_muted)
-                                {
-                                    tracing::warn!("failed to persist audio mute: {e}");
-                                }
+                                run_audio_action(
+                                    crate::audio::AudioAction::ToggleMute,
+                                    &mut audio,
+                                    &mut audio_muted,
+                                    &mut audio_volume,
+                                    ui.paused(),
+                                    &mut renderer,
+                                    &config_path,
+                                    &mut volume_flash,
+                                    &mut volume_dirty,
+                                );
                             }
                             KeyAction::AdjustVolume(up) => {
-                                let delta = if up {
-                                    crate::audio::VOLUME_STEP
-                                } else {
-                                    -crate::audio::VOLUME_STEP
-                                };
-                                audio_volume = (audio_volume + delta).clamp(0.0, 1.0);
-                                if up && audio_muted {
-                                    // volume-up IS the un-mute gesture too
-                                    audio_muted = false;
-                                    if let Err(e) =
-                                        crate::config::save_audio_muted(&config_path, audio_muted)
-                                    {
-                                        tracing::warn!("failed to persist audio mute: {e}");
-                                    }
-                                }
-                                if !audio_muted && !audio.is_enabled() {
-                                    // (re)attempt the lazy spawn whenever sound is
-                                    // WANTED but the system is down — covers boot
-                                    // without a device and a failed earlier spawn
-                                    // (review MEDIUM: '+' must never be a dead key;
-                                    // each press is one bounded open attempt)
-                                    audio = crate::audio::spawn(audio_volume);
-                                    renderer.set_audio(audio.clone());
-                                }
-                                audio.set_muted(ui.paused() || audio_muted);
-                                audio.set_volume(audio_volume);
-                                volume_flash = Some(std::time::Instant::now());
-                                volume_dirty = true;
+                                run_audio_action(
+                                    crate::audio::AudioAction::Volume(up),
+                                    &mut audio,
+                                    &mut audio_muted,
+                                    &mut audio_volume,
+                                    ui.paused(),
+                                    &mut renderer,
+                                    &config_path,
+                                    &mut volume_flash,
+                                    &mut volume_dirty,
+                                );
                             }
                             KeyAction::ToggleWalkableDebug => {
                                 let on = renderer.debug_walkable();

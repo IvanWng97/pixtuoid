@@ -255,15 +255,22 @@ src/
 │                       knob; `m` = the whole opt-in, persisted via save_audio_muted) + volume clamped [0,1];
 │                       the system LAZY-SPAWNS on the first unmute (muted = zero cost: no device/thread/
 │                       buffers) — run_tui swaps the fresh handle into the renderer; floating boot-spawns
-│                       iff !muted AND has the SAME m/+/- runtime keys (floating/input.rs = the pure
-│                       key-map + state transitions mirroring the TUI arms 1:1, unit-tested; window.rs
-│                       stays thin winit glue; lazy spawn + persistence identical; feedback = a transient
-│                       bottom-right `♩ N%`/`♩ off` AA overlay, offscreen::paint_volume_flash_into_surface —
-│                       the window has no footer). Footer shows ♩ iff enabled && !effective-
-│                       muted (m OR pause); onboarding carries the one-line m hint. +/- nudge volume
-│                       (audio::VOLUME_STEP, THE shared step both painters read — audio/ is the sibling
-│                       painters' one shared home, same for VOLUME_FLASH_MS; an AtomicU32-bits sibling of
-│                       the mute atomic; mixer folds it per tick; persisted;
+│                       iff !muted AND has the SAME m/+/- runtime keys. The mute/volume TRANSITION is
+│                       ONE authority — `audio::apply_audio_action(&mut AudioUi, action, paused, spawn)`
+│                       (audio/mod.rs, unit-tested) — that BOTH painters run: the TUI's ToggleAudioMute/
+│                       AdjustVolume arms (via run_audio_action, marshalling the loop locals) and floating's
+│                       key handler. Only the KEY→action decode is painter-specific: crossterm dispatch in
+│                       tui/mod.rs, winit in floating/input.rs (the pure key-map, `m`/`+`=/`-`_, lowercase
+│                       m only; winit's repeat flag swallows a held m — the TUI's crossterm path lacks it).
+│                       window.rs stays thin winit glue; lazy spawn + persistence identical; feedback = a
+│                       transient bottom-right `♩ N%`/`♩ off` AA overlay (offscreen::volume_flash_text +
+│                       paint_volume_flash_into_surface) — the window has no footer. The KeyboardInput arm
+│                       gates `is_synthetic: false` (winit replays held keys on focus-gain, X11/Windows —
+│                       the focus-replay twin of the TUI's should_dispatch_key). Footer shows ♩ iff
+│                       enabled && !effective-muted (m OR pause); onboarding carries the one-line m hint.
+│                       +/- nudge volume (audio::VOLUME_STEP, THE shared step both painters read — audio/ is
+│                       the sibling painters' one shared home, same for VOLUME_FLASH_MS + the transition
+│                       fn; an AtomicU32-bits sibling of the mute atomic; mixer folds it per tick; persisted;
 │                       footer flashes `♩ N%` ~1s — the lowfi volume-timer pattern; + from muted unmutes).
 │                       RodioSink::open silences stderr around device open on Unix (ALSA prints raw lines;
 │                       lazy spawn = mid-altscreen open, one line corrupts the TUI — lowfi issue #1).
@@ -375,9 +382,8 @@ src/
 │                       geometry.rs (the pure window/monitor rect math extracted OUT of window.rs so it's
 │                       unit-testable: window_visible_on_monitors = the off-screen-recovery AABB overlap +
 │                       empty-monitor-list guard; near_resize_corner = the drag-vs-resize hit-test),
-│                       input.rs (the PURE audio-key half: winit key → AudioAction map + the
-│                       apply_audio_action mute/volume transitions mirroring the TUI arms 1:1 — see the
-│                       audio/ entry; unit-tested with spawn injected as a closure).
+│                       input.rs (the PURE winit key → audio::AudioAction map; the mute/volume TRANSITION
+│                       itself is shared with the TUI in audio::apply_audio_action — see the audio/ entry).
 │                       **mod.rs + window.rs are codecov-IGNORED** (winit `EventLoop`/`ApplicationHandler` +
 │                       tokio glue, the floating twin of driver.rs — need a real display); the floating crate's
 │                       TESTED surface is offscreen.rs (render seam) + geometry.rs (rect math) + input.rs

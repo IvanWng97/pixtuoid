@@ -544,6 +544,9 @@ impl FloorSession {
                 occupied_waypoints,
             }) => {
                 self.last_layout = Some(Arc::clone(&layout));
+                // REPLACE, never extend: occupancy must track THIS frame's set
+                // (the cue tracker fires on edges; an accumulating set would
+                // re-report stale waypoints forever — the frame-accuracy tooth).
                 self.last_occupied = occupied_waypoints;
                 Some(layout)
             }
@@ -1647,9 +1650,17 @@ mod tests {
             session.occupied_waypoints().is_empty(),
             "empty before any render"
         );
-        let mut pinned = false;
-        for step in 0..240u64 {
-            let now = now0 + Duration::from_secs(5 * step);
+        // Frame-ACCURACY, not just "ever nonempty": walk the whole sim and
+        // record the occupancy-set size each frame. The set must (a) go
+        // nonempty (the agent reaches a waypoint, indices valid) AND (b) fall
+        // back to empty on a LATER layoutable frame (the agent wanders off).
+        // A sticky/accumulating `last_occupied` (the `.extend` mutant) is
+        // monotone non-decreasing, so it can never produce the fall — this is
+        // the anti-stick tooth the "ever nonempty" check lacked.
+        let mut occupied_ever = false;
+        let mut fell_back_empty = false;
+        for step in 0..600u64 {
+            let now = now0 + Duration::from_secs(3 * step);
             let layout = session
                 .render(FrameInputs {
                     scene: &scene,
@@ -1663,20 +1674,28 @@ mod tests {
                     debug_walkable: false,
                 })
                 .expect("160x96 lays out");
-            if !session.occupied_waypoints().is_empty() {
+            if session.occupied_waypoints().is_empty() {
+                if occupied_ever {
+                    fell_back_empty = true;
+                    break;
+                }
+            } else {
                 for &wp in session.occupied_waypoints() {
                     assert!(
                         wp < layout.waypoints.len(),
                         "occupied index {wp} must be a real waypoint"
                     );
                 }
-                pinned = true;
-                break;
+                occupied_ever = true;
             }
         }
         assert!(
-            pinned,
-            "the idle agent never occupied a waypoint in 20 min of sim"
+            occupied_ever,
+            "the idle agent never occupied a waypoint in 30 min of sim"
+        );
+        assert!(
+            fell_back_empty,
+            "occupancy never fell back to empty — last_occupied accumulates instead of tracking the frame"
         );
         // An unlayoutable size clears the stale set — a painter reading it
         // after a shrink must not replay the last big frame's occupancy.

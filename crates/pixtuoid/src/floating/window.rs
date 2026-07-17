@@ -57,7 +57,7 @@ pub(crate) struct FloatingApp {
     /// handle/muted/volume trio the TUI loop keeps as locals. The renderer
     /// holds its own handle clone (installed by `set_audio_ui` + on every
     /// lazy spawn).
-    audio: super::input::AudioUi,
+    audio: crate::audio::AudioUi,
     /// A fresh m/+/- press shows the `♩` readout overlay for
     /// `crate::audio::VOLUME_FLASH_MS` — the window has no footer, so this
     /// transient is the keys' only visual feedback.
@@ -106,7 +106,7 @@ impl FloatingApp {
             config_path,
             pets,
             renderer: OfficeRenderer::new(),
-            audio: super::input::AudioUi {
+            audio: crate::audio::AudioUi {
                 handle: crate::audio::AudioHandle::disabled(),
                 muted: true,
                 volume: 1.0,
@@ -165,13 +165,8 @@ impl FloatingApp {
             self.volume_flash = None;
             self.flush_volume();
         }
-        let flash_text = flashing.then(|| {
-            if self.audio.muted {
-                "\u{2669} off".to_string()
-            } else {
-                format!("\u{2669} {}%", (self.audio.volume * 100.0).round() as u8)
-            }
-        });
+        let flash_text = flashing
+            .then(|| super::offscreen::volume_flash_text(self.audio.muted, self.audio.volume));
         // Office buffer = window / SCALE (kept ~OFFICE_TARGET_H tall → chunky sprites).
         // The ONE projection helper, shared with the boot seed so the two can't drift.
         let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(win_w, win_h);
@@ -373,11 +368,22 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 self.persist_geometry();
                 event_loop.exit();
             }
-            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+            // `is_synthetic: false`: winit fabricates a Pressed for every key
+            // physically held when the window GAINS FOCUS (X11 + Windows). A
+            // muted user holding `+`/`m` who clicks in would otherwise be
+            // spuriously unmuted AND have it persisted (volume-up is the
+            // un-mute gesture) — the focus-gain-replay twin of the TUI's
+            // Windows Press/Release guard (should_dispatch_key).
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
+                ..
+            } if event.state == ElementState::Pressed => {
                 if let Some(action) = super::input::audio_action(&event.logical_key, event.repeat) {
-                    let persist = super::input::apply_audio_action(
+                    let persist = crate::audio::apply_audio_action(
                         &mut self.audio,
                         action,
+                        false, // floating has no [p]ause; effective mute == muted
                         crate::audio::spawn,
                     );
                     // a lazy spawn mints a NEW handle — reinstall so the
@@ -467,7 +473,7 @@ impl FloatingApp {
     /// Install the ambient-audio state (#633): the renderer takes a handle
     /// clone (the per-frame feed), the app keeps the handle/muted/volume trio
     /// the m/+/- keys drive.
-    pub(crate) fn set_audio_ui(&mut self, audio: super::input::AudioUi) {
+    pub(crate) fn set_audio_ui(&mut self, audio: crate::audio::AudioUi) {
         self.renderer.set_audio(audio.handle.clone());
         self.audio = audio;
     }

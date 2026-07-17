@@ -65,7 +65,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     // Ambient audio (#633): boot-spawn iff the persisted state is unmuted —
     // a muted boot stays at zero cost (no device/thread/buffers) until the
     // first m/+ press lazy-spawns it (window.rs, TUI parity).
-    let audio_ui = input::AudioUi {
+    let audio_ui = crate::audio::AudioUi {
         handle: if !audio.muted {
             crate::audio::spawn(audio.volume)
         } else {
