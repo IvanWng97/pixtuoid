@@ -352,6 +352,14 @@ fn run_loop(
                             device.start_loop(stem, beds.bed(stem));
                         }
                         current = Some(frame.track);
+                        // the blocking build stalled the thread ~2s: reset
+                        // the ramp clock and re-anchor the schedulers, or
+                        // the next tick's dt snaps gains to target (bot
+                        // HIGH) and the schedulers fire a backlog burst
+                        last_step = Instant::now();
+                        let resync = last_step.duration_since(started).as_secs_f64();
+                        typing.tick(resync, 0.0);
+                        drops.tick(resync, 0.0);
                     }
                     Some(cur) if frame.track != cur && pending.is_none() => {
                         pending = Some(frame.track);
@@ -400,6 +408,11 @@ fn run_loop(
                 }
                 current = Some(to);
                 pending = None;
+                // same stall-clock reset as the first-frame build
+                last_step = Instant::now();
+                let resync = last_step.duration_since(started).as_secs_f64();
+                typing.tick(resync, 0.0);
+                drops.tick(resync, 0.0);
             }
         }
 
@@ -637,21 +650,28 @@ mod track_switch_tests {
             );
         }
 
-        // after the swap the pad ramps back up (sound returns)
-        loop {
+        // after the swap the pad RAMPS back — the first nonzero gain must
+        // be a slew step, not the full goal (the bot HIGH: a stalled ramp
+        // clock made dt cover the ~2s synth and snap gains to target)
+        let first_gain = loop {
             let _ = tx.try_send(night_frame());
             {
                 let rec = recorder.lock().unwrap();
-                if rec.last_gain.get(&LoopStem::Pad).copied().unwrap_or(0.0) > 0.0 {
-                    break;
+                let g = rec.last_gain.get(&LoopStem::Pad).copied().unwrap_or(0.0);
+                if g > 0.0 {
+                    break g;
                 }
             }
             assert!(
                 std::time::Instant::now() < deadline,
                 "pad never ramped back"
             );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert!(
+            first_gain < 0.1,
+            "post-swap gain must fade in (first step {first_gain}), not snap to target"
+        );
         drop(tx);
         join.join().unwrap();
     }

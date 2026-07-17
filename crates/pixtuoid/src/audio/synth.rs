@@ -343,8 +343,9 @@ fn master(buf: &[f32], drive: f32, peak: f32) -> Vec<f32> {
     out
 }
 
-/// One soft electric-piano note — the sparkle/keys voice.
-fn ep_pluck(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
+/// One soft electric-piano note — the shared voice core; `h2` is the
+/// 2nd-harmonic weight (the one axis the day/night voices differ on).
+fn ep_pluck_h2(midi: u8, dur_s: f32, vel: f32, h2: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
     let f = midi_freq(midi as f32);
     let tau = std::f32::consts::TAU;
@@ -352,11 +353,17 @@ fn ep_pluck(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
         .map(|i| {
             let t = i as f32 / SR;
             let sig = (tau * f * t).sin() * (-t * 5.5).exp()
-                + 0.35 * (tau * 2.0 * f * t).sin() * (-t * 9.0).exp()
+                + h2 * (tau * 2.0 * f * t).sin() * (-t * 9.0).exp()
                 + 0.12 * (tau * 3.01 * f * t).sin() * (-t * 14.0).exp();
             sig * vel
         })
         .collect()
+}
+
+/// The day EP voice — the ratified FIXED 2nd harmonic (identity guarded
+/// by the day fingerprint pins).
+fn ep_pluck(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
+    ep_pluck_h2(midi, dur_s, vel, 0.35)
 }
 
 fn kick(rng: &mut NoiseStream) -> Vec<f32> {
@@ -490,19 +497,7 @@ pub(crate) fn stem_drums(rng: &mut NoiseStream) -> Vec<f32> {
 /// "bell vs bark" — LOFI-BIBLE.md delta 4). Day keeps the ratified
 /// fixed-harmonic [`ep_pluck`]; only night events ride this.
 fn ep_pluck_vel(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
-    let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
-    let tau = std::f32::consts::TAU;
-    let h2 = 0.18 + 0.45 * vel * vel;
-    (0..n)
-        .map(|i| {
-            let t = i as f32 / SR;
-            let sig = (tau * f * t).sin() * (-t * 5.5).exp()
-                + h2 * (tau * 2.0 * f * t).sin() * (-t * 9.0).exp()
-                + 0.12 * (tau * 3.01 * f * t).sin() * (-t * 14.0).exp();
-            sig * vel
-        })
-        .collect()
+    ep_pluck_h2(midi, dur_s, vel, 0.18 + 0.45 * vel * vel)
 }
 
 fn night_bar_s() -> f32 {

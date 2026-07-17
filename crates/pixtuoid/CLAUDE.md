@@ -227,8 +227,9 @@ src/
 │                       ALL six LoopStem beds),
 │                       dsp.rs (radix-2 FFT + brickwall bands + spectral-envelope noise shaping [circularly
 │                       seamless bed loops] + warp_resample [tape wow/flutter] + splitmix64 NoiseStream),
-│                       score.rs (the FROZEN 8-bar lofi composition — the ratified realization's events as
-│                       const tables; a regen via the spec's export_score is a NEW take → fresh LISTEN gate),
+│                       score.rs (the FROZEN lofi compositions — day (72 BPM) + night (68 BPM, at-seconds
+│                       humanized events); each ratified realization as const tables; a regen via the spec's
+│                       export scripts is a NEW take → fresh LISTEN gate),
 │                       synth.rs (the Phase 0 OWNER-RATIFIED recipes 1:1 — elevator ding + cooler glug were later owner-CUT (dogfood round), the spec keeps their recipes —
 │                       change docs/superpowers/specs/2026-07-16-ambient-sound-phase0/ first, re-audition,
 │                       then mirror; spectral-sanity tests pin the fingerprints AGAINST THE FLOAT CHAIN,
