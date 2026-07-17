@@ -174,16 +174,27 @@ pub struct FurnitureDef {
     /// on (its `unreachable!` arm is the compile-adjacent tooth keeping the two
     /// in step).
     ///
-    /// This flag is THE seat authority, read by three consumers that must not
-    /// drift: `seated_foot_cell` (the settle cell), `pose::SeatClaims` (a seat
-    /// is single-occupancy — see the scene guide's sharp edge), and
-    /// `waypoint_rank_offset_x` (a seat never steps aside). A new SEAT is a
-    /// `WaypointKind`, so setting the flag opts it into all three at once —
-    /// which is the point; a hand-listed kind set in any consumer would silently
-    /// re-open the two-agents-on-one-chair bug. (`Desk` is the lone non-waypoint
-    /// member: it reaches only `seated_foot_cell` and is single-occupancy by its
-    /// own per-agent home-desk assignment, never a shared wander destination.)
+    /// This is a RENDER/APPROACH fact (sprite ON `pos`, has a `seated_foot_cell`)
+    /// — NOT the single-occupancy fact: a phone booth renders stand-beside
+    /// (`occupies_pos: false`) yet holds exactly one caller, so capacity lives on
+    /// the separate [`exclusive`](Self::exclusive) field. `occupies_pos ⇒
+    /// exclusive` (every seat is single-occupancy), but not the reverse.
     pub occupies_pos: bool,
+    /// A single-occupancy DESTINATION: at most one agent is assigned here at a
+    /// time. SUPERSET of `occupies_pos` — every seat is exclusive (a chair
+    /// can't be shared), PLUS the enclosed stand-beside singles (`PhoneBooth`,
+    /// `StandingDesk`) that render at a SIDE cell yet still hold exactly one
+    /// person. Read by `pose::SpotClaims` / `motion::spot_claims` (claim it at
+    /// wander-SELECTION so a second agent probes onward) and
+    /// `waypoint_rank_offset_x` (an exclusive spot never steps a second arrival
+    /// aside). DISTINCT from `occupies_pos` on purpose: that is a render/approach
+    /// fact (sprite ON `pos`, has a `seated_foot_cell`), this is a CAPACITY fact
+    /// — a phone booth is exclusive but stand-beside, so one flag can't carry
+    /// both (the wrong-abstraction split). Queue spots (pantry / vending /
+    /// printer / snack shelf) are NOT exclusive — agents share and step aside.
+    /// Invariant `occupies_pos ⇒ exclusive`, pinned by
+    /// `furniture_def_invariants_hold_for_every_row`.
+    pub exclusive: bool,
     /// Per-spot idle dwell window. `range_ms == 0` (the `DECOR` rows) marks a
     /// kind that is NOT a wander destination and is never fed to
     /// `pose::dwell_ms`; `range_ms > 0` marks a destination.
@@ -385,6 +396,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         footprint: None,
         visual: Size { w: 0, h: 0 },
         occupies_pos: false,
+        exclusive: false,
         dwell: DwellWindow::DECOR,
         approach: ApproachSides::ALL,
         ground_x: GroundAlign::Center,
@@ -395,6 +407,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(Size { w: 8, h: 7 }),
             visual: Size { w: 8, h: 7 }, // procedural render; visual unused
             occupies_pos: true,
+            exclusive: true,
             dwell: DwellWindow {
                 base_ms: 20_000,
                 range_ms: 20_000,
@@ -416,6 +429,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: None,             // runtime-sized — see obstacle_footprint
             visual: Size { w: 0, h: 0 }, // runtime-sized; procedural render
             occupies_pos: false,
+            exclusive: false,
             dwell: DwellWindow {
                 base_ms: 10_000,
                 range_ms: 8_000,
@@ -432,6 +446,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(Size { w: 6, h: 3 }),
             visual: Size { w: 6, h: 12 },
             occupies_pos: false,
+            exclusive: true,
             dwell: DwellWindow {
                 base_ms: 8_000,
                 range_ms: 22_000,
@@ -446,6 +461,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(Size { w: 8, h: 3 }),
             visual: Size { w: 8, h: 8 },
             occupies_pos: false,
+            exclusive: true,
             dwell: DwellWindow {
                 base_ms: 8_000,
                 range_ms: 22_000,
@@ -458,6 +474,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(Size { w: 4, h: 6 }),
             visual: Size { w: 4, h: 6 },
             occupies_pos: false,
+            exclusive: false,
             dwell: DwellWindow {
                 base_ms: 4_000,
                 range_ms: 4_000,
@@ -470,6 +487,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(Size { w: 5, h: 4 }),
             visual: Size { w: 5, h: 4 },
             occupies_pos: false,
+            exclusive: false,
             dwell: DwellWindow {
                 base_ms: 4_000,
                 range_ms: 4_000,
@@ -482,6 +500,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: None,
             visual: Size { w: 0, h: 0 }, // procedural render
             occupies_pos: true,
+            exclusive: true,
             dwell: DwellWindow {
                 base_ms: 20_000,
                 range_ms: 20_000,
@@ -499,6 +518,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: None,
             visual: Size { w: 7, h: 7 },
             occupies_pos: true,
+            exclusive: true,
             dwell: DwellWindow {
                 base_ms: 20_000,
                 range_ms: 20_000,
@@ -637,6 +657,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: None,
             visual: Size { w: 0, h: 0 },
             occupies_pos: true,
+            exclusive: true,
             dwell: DwellWindow {
                 base_ms: 9_000,
                 range_ms: 9_000,
@@ -653,6 +674,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(Size { w: 7, h: 2 }),
             visual: Size { w: 7, h: 10 },
             occupies_pos: false,
+            exclusive: false,
             dwell: DwellWindow {
                 base_ms: 5_000,
                 range_ms: 5_000,
@@ -713,6 +735,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
                 h: DESK_H + 2,
             },
             occupies_pos: true,
+            exclusive: true,
             dwell: DwellWindow {
                 base_ms: 15_000,
                 range_ms: 15_000,
@@ -1206,6 +1229,18 @@ mod tests {
                     | Furniture::Desk
             );
             assert_eq!(d.occupies_pos, expect_occupies, "{f:?}: occupies_pos");
+            // exclusive = single-occupancy: every seat PLUS the stand-beside
+            // singles (phone booth, standing desk). The two claim consumers
+            // (`spot_claims`, `waypoint_rank_offset_x`) gate on THIS, so the row
+            // set is pinned here.
+            let expect_exclusive =
+                expect_occupies || matches!(f, Furniture::PhoneBooth | Furniture::StandingDesk);
+            assert_eq!(d.exclusive, expect_exclusive, "{f:?}: exclusive");
+            // The load-bearing law: a seat can never be shareable.
+            assert!(
+                !d.occupies_pos || d.exclusive,
+                "{f:?}: occupies_pos implies exclusive"
+            );
             // SEAT/STAND rows add no obstacle (they sit/stand ON a separately
             // stamped body: meeting sofa/table, kitchen island).
             if matches!(

@@ -104,22 +104,24 @@ const STEP_ASIDE_DX: i16 = 9;
 /// SAME waypoint in the same cycle. rank 0 = first arrival (no offset); later
 /// arrivals step aside.
 ///
-/// A SEAT never steps aside. `occupies_pos` — the one authority for "the agent
-/// sits/stands ON this cell" — is the gate, so this holds for every current seat
-/// (couch / meeting sofa / meeting chair / island stand) AND for any seat added
-/// later, without a second list to keep in sync. Sliding a sitter sideways off a
-/// discrete slot renders them on thin air — and the old fossil arm made that
-/// concrete: its generic +9 happened to equal `MEETING_CHAIR_TABLE_DX` (a
-/// chair's distance from the table centre — a coincidence of two unrelated 9s,
-/// NOT one value; `STEP_ASIDE_DX` is now obstacle-only and never touches a
-/// chair), so a second chair-sitter was parked ON the meeting table. The offsets
-/// predate per-seat waypoints (one `Couch` waypoint used to spread 3 sitters over
-/// the sofa — hence the old ±6 == `SEAT_DX`); seats are now single-occupancy at
-/// SELECTION (`pose::SeatClaims`), so `rank` is always 0 here for them and the
-/// guard is belt-and-braces: on a seat, an exact overlap reads as one sprite,
-/// which is the honest render of a bug, not a plausible wrong one.
+/// An EXCLUSIVE spot never steps aside. `exclusive` — the one authority for
+/// "single-occupancy destination" — is the gate, so this holds for every seat
+/// (couch / meeting sofa / meeting chair / island stand) AND the stand-beside
+/// singles (phone booth, standing desk) AND anything added later, without a
+/// second list to keep in sync. Sliding an occupant sideways off a discrete slot
+/// renders them on thin air — and the old fossil arm made that concrete: its
+/// generic +9 happened to equal `MEETING_CHAIR_TABLE_DX` (a chair's distance
+/// from the table centre — a coincidence of two unrelated 9s, NOT one value;
+/// `STEP_ASIDE_DX` is now shareable-only and never touches a chair), so a second
+/// chair-sitter was parked ON the meeting table. The offsets predate per-seat
+/// waypoints (one `Couch` waypoint used to spread 3 sitters over the sofa —
+/// hence the old ±6 == `SEAT_DX`); exclusive spots are now single-occupancy at
+/// SELECTION (`pose::SpotClaims`), so `rank` is always 0 here for them and the
+/// guard is belt-and-braces: an exact overlap reads as one sprite, the honest
+/// render of a bug, not a plausible wrong one. Shareable spots (pantry counter /
+/// vending / printer / snack shelf) still step aside — queueing is the intent.
 pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
-    if crate::layout::furniture_def(kind.furniture()).occupies_pos {
+    if crate::layout::furniture_def(kind.furniture()).exclusive {
         return 0;
     }
     match rank {

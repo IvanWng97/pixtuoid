@@ -1448,34 +1448,46 @@ fn waypoint_rank_offset_x_decollision_table() {
     );
 }
 
-/// A seat is a discrete single-occupancy slot, so it must NEVER step aside —
-/// sliding a sitter off the chair renders them on thin air, and the generic ±9
-/// is `MEETING_CHAIR_TABLE_DX`, which parked the extra sitter on the meeting
-/// table (the "two agents on one chair" report). Ranged over
-/// `WaypointKind::ALL` against the `occupies_pos` authority rather than a
-/// hand-listed set, so a seat kind added later inherits the guard instead of
-/// silently re-opening the bug.
+/// An EXCLUSIVE spot is a discrete single-occupancy slot, so it must NEVER step
+/// aside — sliding an occupant off it renders them on thin air, and the generic
+/// ±9 is `MEETING_CHAIR_TABLE_DX`, which parked the extra sitter on the meeting
+/// table (the "two agents on one chair" report). Ranged over `WaypointKind::ALL`
+/// against the `exclusive` authority rather than a hand-listed set, so an
+/// exclusive kind added later inherits the guard instead of silently re-opening
+/// the bug. Also asserts the phone booth and standing desk — the stand-beside
+/// singles — are covered, and the shareable queue spots (pantry / vending /
+/// printer / snack shelf) DO still step aside.
 #[test]
-fn no_seat_waypoint_kind_ever_steps_aside() {
+fn no_exclusive_waypoint_kind_ever_steps_aside() {
     use super::anchors::waypoint_rank_offset_x;
     use crate::layout::{furniture_def, WaypointKind};
-    let mut seats = 0;
+    let mut exclusive = 0;
+    let (mut saw_booth, mut saw_shareable_steps) = (false, false);
     for &kind in WaypointKind::ALL {
-        if !furniture_def(kind.furniture()).occupies_pos {
-            continue;
-        }
-        seats += 1;
-        for rank in 0..4 {
-            assert_eq!(
-                waypoint_rank_offset_x(kind, rank),
-                0,
-                "{kind:?} is a seat (occupies_pos) — rank {rank} must not slide it off the seat"
-            );
+        if furniture_def(kind.furniture()).exclusive {
+            exclusive += 1;
+            if matches!(kind, WaypointKind::PhoneBooth) {
+                saw_booth = true;
+            }
+            for rank in 0..4 {
+                assert_eq!(
+                    waypoint_rank_offset_x(kind, rank),
+                    0,
+                    "{kind:?} is exclusive — rank {rank} must not slide it off the spot"
+                );
+            }
+        } else if waypoint_rank_offset_x(kind, 1) != 0 {
+            saw_shareable_steps = true; // a queue spot genuinely steps aside
         }
     }
     assert!(
-        seats >= 4,
-        "expected the couch/sofa/chair/island seats, got {seats}"
+        exclusive >= 6,
+        "expected couch/sofa/chair/island + booth + standing desk, got {exclusive}"
+    );
+    assert!(saw_booth, "phone booth must be an exclusive spot");
+    assert!(
+        saw_shareable_steps,
+        "a shareable queue spot (pantry/vending/printer/snack) must still step aside"
     );
 }
 
@@ -2939,19 +2951,20 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
     );
 }
 
-/// THE seat-exclusivity invariant, end to end through the real sim: a full desk
+/// THE spot-exclusivity invariant, end to end through the real sim: a full desk
 /// pool wandering for ~15 simulated minutes must never put two agents on one
-/// seat waypoint. Before `SeatClaims` this failed in seconds — the destination
-/// hash `waypoint_index_for_cycle(id, cycle_n, n)` is occupancy-blind, so N
-/// agents happily targeted one chair and the painter's rank offset slid the
-/// extras sideways onto the meeting table / thin air.
+/// EXCLUSIVE waypoint (seat OR stand-beside single like the phone booth). Before
+/// `SpotClaims` this failed in seconds — the destination hash
+/// `waypoint_index_for_cycle(id, cycle_n, n)` is occupancy-blind, so N agents
+/// happily targeted one chair and the painter's rank offset slid the extras
+/// sideways onto the meeting table / thin air.
 ///
-/// Ranged over the `occupies_pos` authority (not a hand-listed set) so a seat
-/// kind added later is covered by this test the day it lands. Non-seat
+/// Ranged over the `exclusive` authority (not a hand-listed set) so an exclusive
+/// kind added later is covered by this test the day it lands. Shareable
 /// waypoints are deliberately NOT asserted on: sharing a pantry counter or
 /// queueing at a printer is the intended step-aside.
 #[test]
-fn no_two_agents_ever_occupy_the_same_seat_waypoint() {
+fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
     use crate::layout::{furniture_def, TEST_DEFAULT_DESKS};
     use crate::pose::Pose;
     use std::time::Duration;
@@ -2963,7 +2976,7 @@ fn no_two_agents_ever_occupy_the_same_seat_waypoint() {
     for i in 0..TEST_DEFAULT_DESKS {
         let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/p/seat{i}.jsonl"));
         let mut slot = make_slot(id, ActivityState::Idle);
-        // Stagger the idle starts so wander cycles desync and the seats see a
+        // Stagger the idle starts so wander cycles desync and the spots see a
         // realistic mix of arrivals/departures rather than one lockstep wave.
         let started = now0 - Duration::from_secs(5 + (i as u64 * 11) % 80);
         slot.created_at = started;
@@ -2985,7 +2998,7 @@ fn no_two_agents_ever_occupy_the_same_seat_waypoint() {
             let Pose::AtWaypoint { wp, kind } = pose else {
                 continue;
             };
-            if !furniture_def(kind.furniture()).occupies_pos {
+            if !furniture_def(kind.furniture()).exclusive {
                 continue;
             }
             seat_visits += 1;
@@ -2993,7 +3006,7 @@ fn no_two_agents_ever_occupy_the_same_seat_waypoint() {
             *n += 1;
             assert_eq!(
                 *n, 1,
-                "{kind:?} waypoint {wp} double-booked at step {step} — a seat is single-occupancy"
+                "{kind:?} waypoint {wp} double-booked at step {step} — an exclusive spot is single-occupancy"
             );
         }
     }

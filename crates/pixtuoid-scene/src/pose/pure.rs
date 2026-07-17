@@ -443,33 +443,34 @@ fn thinking_hold_ms(slot: &AgentSlot) -> u64 {
         .map_or(0, |d| d.as_millis() as u64)
 }
 
-/// The seat waypoints already spoken for — the input that makes a seat
-/// SINGLE-OCCUPANCY. A seat (`occupies_pos` furniture: couch / meeting sofa /
-/// meeting chair / island stand) is a discrete slot the agent sits or stands
-/// ON, and each one is already its OWN waypoint, so "two agents at the same
-/// seat waypoint" has no valid rendering — the painter's rank de-collision can
-/// only slide the second sitter sideways onto thin air (or, at ±9 ==
-/// `MEETING_CHAIR_TABLE_DX`, onto the meeting table). Claims are therefore
-/// resolved where the destination is CHOSEN, not where it is drawn.
+/// The EXCLUSIVE-spot waypoints already spoken for — the input that makes a
+/// single-occupancy destination single-occupancy. An exclusive spot (any
+/// `exclusive` furniture: the seats couch / meeting sofa / meeting chair /
+/// island stand, PLUS the stand-beside singles phone booth / standing desk) is
+/// a discrete slot for exactly one occupant, and each is already its OWN
+/// waypoint, so "two agents at the same exclusive waypoint" has no valid
+/// rendering — the painter's rank de-collision can only slide the second
+/// occupant sideways onto thin air (or, at ±9, onto the meeting table). Claims
+/// are therefore resolved where the destination is CHOSEN, not where it's drawn.
 ///
-/// Built by [`crate::motion::seat_claims`] from the live wander targets; small
-/// by construction (at most one entry per agent out on a seat trip), so a
-/// linear `contains` beats hashing.
+/// Built by [`crate::motion::spot_claims`] from the live wander targets; small
+/// by construction (at most one entry per agent out on an exclusive-spot trip),
+/// so a linear `contains` beats hashing.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct SeatClaims(Vec<usize>);
+pub(crate) struct SpotClaims(Vec<usize>);
 
-impl SeatClaims {
-    /// Claim `wp_idx` for a seat trip. Idempotent — re-claiming is a no-op, so
-    /// an agent re-picking its own held seat can't grow the set.
+impl SpotClaims {
+    /// Claim `wp_idx` for an exclusive-spot trip. Idempotent — re-claiming is a
+    /// no-op, so an agent re-picking its own held spot can't grow the set.
     pub(crate) fn claim(&mut self, wp_idx: usize) {
         if !self.holds(wp_idx) {
             self.0.push(wp_idx);
         }
     }
 
-    /// Whether some agent is already headed for (or sitting at) this seat.
-    /// Only seat waypoints are ever claimed, so this is always false for an
-    /// obstacle kind — a stand-beside spot stays shareable.
+    /// Whether some agent is already headed for (or occupying) this spot. Only
+    /// `exclusive` waypoints are ever claimed, so this is always false for a
+    /// shareable queue spot.
     pub(crate) fn holds(&self, wp_idx: usize) -> bool {
         self.0.contains(&wp_idx)
     }
@@ -482,7 +483,7 @@ impl SeatClaims {
 /// `idle_pose` calls it then maps the [`WanderTarget`] to a [`Pose`]. Was
 /// DUPLICATED across the two, kept in lockstep only by comment + test.
 ///
-/// `claimed` is the seat-exclusion input (see [`SeatClaims`]): the two callers
+/// `claimed` is the seat-exclusion input (see [`SpotClaims`]): the two callers
 /// stay in lockstep for equal `claimed`, and `idle_pose` passes an EMPTY set
 /// because the pure half has no occupancy knowledge — the same reason its dwell
 /// timeline is estimated rather than exact. The routed motion authority is what
@@ -508,7 +509,7 @@ pub(crate) fn resolve_wander_target(
     cycle_n: u64,
     layout: &SceneLayout,
     origin: Point,
-    claimed: &SeatClaims,
+    claimed: &SpotClaims,
 ) -> WanderTarget {
     let amble = || WanderTarget {
         dest: pick_aimless_dest(layout, aimless_wander_seed(id, cycle_n), origin),
@@ -602,7 +603,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     // occupancy knowledge (see `resolve_wander_target`), and its job is a
     // cache-stable overlay estimate, not the authoritative placement.
     let target =
-        resolve_wander_target(slot.agent_id, cycle_n, layout, desk, &SeatClaims::default());
+        resolve_wander_target(slot.agent_id, cycle_n, layout, desk, &SpotClaims::default());
     let dest = target.dest;
     let at_dest_pose: Pose = match target.kind {
         WanderKind::Named { wp_idx, kind, .. } => Pose::AtWaypoint { wp: wp_idx, kind },

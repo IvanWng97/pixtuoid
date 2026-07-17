@@ -20,7 +20,7 @@ use crate::layout::{Layout, Point, WaypointKind};
 use crate::pathfind::Router;
 use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
 use crate::pose::{
-    dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip, SeatClaims,
+    dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip, SpotClaims,
     WANDER_DWELL_EST_MS,
 };
 
@@ -235,7 +235,7 @@ pub fn advance_wander(
     // (the two borrows of `motion` can't overlap). Cheap: one pass over the
     // floor's motion map, and the Vec stays empty unless someone is actually out
     // on a seat trip.
-    let claimed = seat_claims(motion, id);
+    let claimed = spot_claims(motion, id);
     let ms = motion.entry(id).or_insert_with(|| MotionState::new(id));
 
     // ---- INIT / BOOTSTRAP --------------------------------------------------
@@ -473,44 +473,47 @@ fn pick_wander_dest(
     cycle_n: u64,
     layout: &Layout,
     origin: Point,
-    claimed: &SeatClaims,
+    claimed: &SpotClaims,
 ) -> WanderTarget {
     crate::pose::resolve_wander_target(id, cycle_n, layout, origin, claimed)
 }
 
-/// The seat waypoints every OTHER agent on this floor is currently out on a trip
-/// to — the exclusion set that keeps a seat single-occupancy (see
-/// [`SeatClaims`]). Read from the live wander targets in `motion`, which is why
-/// it must be built BEFORE the caller takes its own `&mut MotionState`.
+/// The exclusive-spot waypoints every OTHER agent on this floor is currently out
+/// on a trip to — the exclusion set that keeps a single-occupancy spot to one
+/// occupant (see [`SpotClaims`]). Read from the live wander targets in `motion`,
+/// which is why it must be built BEFORE the caller takes its own `&mut
+/// MotionState`.
 ///
 /// Two gates, both load-bearing:
 ///  * **phase ≠ Seated** — a Seated agent is at its desk. `target.kind` is
 ///    normally reset to `Aimless` on the walk-back's arrival, but the
 ///    bootstrap / stale-resume path re-seats an agent WITHOUT touching its
 ///    target, so the phase (not the kind) is the honest "is this agent actually
-///    out at the seat" signal.
-///  * **`occupies_pos`** — reuses the one authority for "the agent is ON this
-///    cell" rather than re-listing the seat kinds. Obstacle waypoints (pantry
-///    counter, vending, printer, phone booth) are approached from a side and
-///    stay shareable: the painter's rank offset is a genuine step-aside there.
+///    out at the spot" signal.
+///  * **`exclusive`** — reuses the one authority for "single-occupancy
+///    destination" rather than re-listing kinds, so seats AND the stand-beside
+///    singles (phone booth, standing desk) are covered, and a future exclusive
+///    kind inherits it. Shareable waypoints (pantry counter, vending, printer,
+///    snack shelf) are NOT claimed: the painter's rank offset is a genuine
+///    step-aside queue there.
 ///
 /// An agent that goes Active mid-trip releases its claim in
-/// `pose::derive_with_routing`, so a typing agent can't hold a seat it isn't
-/// sitting in. The other two holds are bounded and deliberate: an EXITING agent
-/// keeps its seat for the ≤`EXIT_GRACE_WINDOW` walkout (it IS still on the seat
-/// until it rises) until eviction drops the whole `MotionState`; and a
-/// `SeatedThinking` agent keeps it for ≤`THINKING_WINDOW_SECS` — reachable
-/// without ever going Active, since a stale `ActivityEnd` stamps `last_event_at`
-/// with no state change — after which the stale-resume bootstrap re-seats the
-/// phase machine and the `phase != Seated` gate drops the claim.
-fn seat_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> SeatClaims {
-    let mut claims = SeatClaims::default();
+/// `pose::derive_with_routing`, so a typing agent can't hold a spot it isn't at.
+/// The other two holds are bounded and deliberate: an EXITING agent keeps its
+/// spot for the ≤`EXIT_GRACE_WINDOW` walkout (it IS still there until it leaves)
+/// until eviction drops the whole `MotionState`; and a `SeatedThinking` agent
+/// keeps it for ≤`THINKING_WINDOW_SECS` — reachable without ever going Active,
+/// since a stale `ActivityEnd` stamps `last_event_at` with no state change —
+/// after which the stale-resume bootstrap re-seats the phase machine and the
+/// `phase != Seated` gate drops the claim.
+fn spot_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> SpotClaims {
+    let mut claims = SpotClaims::default();
     for (id, ms) in motion {
         if *id == exclude || matches!(ms.wander.phase, WanderPhase::Seated) {
             continue;
         }
         if let WanderKind::Named { wp_idx, kind, .. } = ms.wander.target.kind {
-            if crate::layout::furniture_def(kind.furniture()).occupies_pos {
+            if crate::layout::furniture_def(kind.furniture()).exclusive {
                 claims.claim(wp_idx);
             }
         }

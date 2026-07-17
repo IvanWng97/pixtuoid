@@ -31,10 +31,10 @@ pub use pure::{
     STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS, THINKING_WINDOW_SECS, TYPING_FRAMES,
     TYPING_FRAME_MS, WALKING_FRAMES, WALKING_FRAME_MS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS,
 };
-// `resolve_wander_target` + its `SeatClaims` input stay crate-internal (the
+// `resolve_wander_target` + its `SpotClaims` input stay crate-internal (the
 // motion authority delegates to it and builds the claims); a `pub use` would try
 // to widen their `pub(crate)` visibility.
-pub(crate) use pure::{resolve_wander_target, SeatClaims};
+pub(crate) use pure::{resolve_wander_target, SpotClaims};
 
 use crate::layout::{desk_walk_anchor, Layout, Point, WaypointKind};
 use crate::pathfind::Router;

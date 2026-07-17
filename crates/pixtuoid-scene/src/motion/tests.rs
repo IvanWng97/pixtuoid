@@ -1112,7 +1112,7 @@ fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
         .expect("should find a directed-trip agent");
 
     let origin = l.home_desks[0];
-    let target = pick_wander_dest(id, 0, &l, origin, &SeatClaims::default());
+    let target = pick_wander_dest(id, 0, &l, origin, &SpotClaims::default());
 
     assert!(
         matches!(target.kind, WanderKind::Aimless),
@@ -1144,7 +1144,7 @@ fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
             continue;
         }
         if let WanderKind::Named { kind, seat, .. } =
-            pick_wander_dest(id, 0, &l, origin, &SeatClaims::default()).kind
+            pick_wander_dest(id, 0, &l, origin, &SpotClaims::default()).kind
         {
             assert_eq!(
                 seat.is_some(),
@@ -1168,7 +1168,7 @@ fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
     );
 }
 
-// --- seat_claims: who actually holds a seat ---------------------------
+// --- spot_claims: who actually holds an exclusive spot ----------------
 
 /// Build a motion state parked mid-trip at `wp_idx` of `kind`.
 fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> MotionState {
@@ -1187,35 +1187,43 @@ fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> MotionState {
 }
 
 #[test]
-fn seat_claims_holds_only_seats_of_other_agents_out_on_a_trip() {
+fn spot_claims_holds_only_exclusive_spots_of_other_agents_out_on_a_trip() {
     let me = AgentId::from_transcript_path("/p/claims-me.jsonl");
     let sitter = AgentId::from_transcript_path("/p/claims-sitter.jsonl");
+    let caller = AgentId::from_transcript_path("/p/claims-caller.jsonl");
     let stander = AgentId::from_transcript_path("/p/claims-stander.jsonl");
     let mut motion = HashMap::new();
     // Another agent sitting on a seat: claimed.
     motion.insert(sitter, tripping_at(sitter, 3, WaypointKind::MeetingChair));
-    // Another agent at an obstacle it stands BESIDE: shareable, never claimed —
-    // the painter's ±9 step-aside is the intended affordance there.
+    // Another agent in a phone booth — occupies_pos FALSE but EXCLUSIVE, so it
+    // is claimed too (the whole point of the exclusive/occupies_pos split).
+    motion.insert(caller, tripping_at(caller, 9, WaypointKind::PhoneBooth));
+    // Another agent at a SHAREABLE queue obstacle: never claimed — the painter's
+    // ±9 step-aside is the intended affordance there.
     motion.insert(stander, tripping_at(stander, 7, WaypointKind::Printer));
-    // This agent's OWN seat must not block its own re-pick.
+    // This agent's OWN spot must not block its own re-pick.
     motion.insert(me, tripping_at(me, 5, WaypointKind::Couch));
 
-    let claims = seat_claims(&motion, me);
+    let claims = spot_claims(&motion, me);
     assert!(claims.holds(3), "another agent's seat must be claimed");
-    assert!(!claims.holds(7), "an obstacle waypoint is shareable");
+    assert!(claims.holds(9), "a phone booth is exclusive → claimed");
+    assert!(
+        !claims.holds(7),
+        "a shareable queue obstacle is not claimed"
+    );
     assert!(
         !claims.holds(5),
-        "an agent must not claim a seat against itself"
+        "an agent must not claim a spot against itself"
     );
 }
 
 /// The `phase != Seated` gate. `target.kind` is reset to `Aimless` on the normal
 /// walk-back arrival, but the bootstrap / stale-resume path re-seats an agent at
-/// its desk WITHOUT touching its target — so a stale `Named` seat would linger
-/// and block the seat for everyone. The phase, not the kind, is the honest "is
-/// this agent actually out at the seat" signal.
+/// its desk WITHOUT touching its target — so a stale `Named` spot would linger
+/// and block it for everyone. The phase, not the kind, is the honest "is this
+/// agent actually out at the spot" signal.
 #[test]
-fn seat_claims_ignores_a_seated_agents_stale_target() {
+fn spot_claims_ignores_a_seated_agents_stale_target() {
     let me = AgentId::from_transcript_path("/p/claims-me.jsonl");
     let resumed = AgentId::from_transcript_path("/p/claims-resumed.jsonl");
     let mut ms = tripping_at(resumed, 3, WaypointKind::MeetingChair);
@@ -1224,7 +1232,7 @@ fn seat_claims_ignores_a_seated_agents_stale_target() {
     motion.insert(resumed, ms);
 
     assert!(
-        !seat_claims(&motion, me).holds(3),
+        !spot_claims(&motion, me).holds(3),
         "an agent re-seated at its desk must not keep holding a meeting seat"
     );
 }
@@ -1246,7 +1254,7 @@ fn a_claimed_seat_sends_the_agent_to_the_next_seat_of_the_same_venue() {
             if !takes_trip(id, 0) || is_aimless_cycle(id, 0) {
                 return None;
             }
-            match pick_wander_dest(id, 0, &l, origin, &SeatClaims::default()).kind {
+            match pick_wander_dest(id, 0, &l, origin, &SpotClaims::default()).kind {
                 WanderKind::Named {
                     wp_idx,
                     kind: WaypointKind::MeetingSofa | WaypointKind::MeetingChair,
@@ -1257,7 +1265,7 @@ fn a_claimed_seat_sends_the_agent_to_the_next_seat_of_the_same_venue() {
         })
         .expect("some agent must pick a meeting seat on cycle 0");
 
-    let mut claims = SeatClaims::default();
+    let mut claims = SpotClaims::default();
     claims.claim(taken);
     let target = pick_wander_dest(id, 0, &l, origin, &claims);
     let WanderKind::Named { wp_idx, kind, .. } = target.kind else {
