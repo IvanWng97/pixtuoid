@@ -43,6 +43,12 @@ impl LoopStem {
 /// instead of stepping (the "office gets busier" feel, not a cut).
 const RAMP_PER_S: f32 = 0.5;
 
+/// Master-bus trim applied under the user volume: ambient office sound must
+/// sit UNDER the user's real work/music by default, and the stems (peak
+/// 0.6-0.85 each) SUM on the live path with no audition soft clip — dogfood
+/// verdict: untrimmed linear was "too loud even at 5%". ~-9dB.
+const BUS_TRIM: f32 = 0.35;
+
 /// Per-stem gain ramps chasing the scene's target levels. Mute ramps to
 /// silence through the same slew (no click).
 pub(crate) struct Mixer {
@@ -77,13 +83,22 @@ impl Mixer {
         self.muted = muted;
     }
 
+    /// The USER volume (0..1) mapped to bus amplitude: a squared perceptual
+    /// curve (loudness is logarithmic — linear made 5% still clearly audible,
+    /// the lowfi study's one skipped nicety) under the ambient BUS_TRIM.
+    /// The ONE volume→amplitude site; the footer keeps showing the user's
+    /// linear percent.
+    fn master_amp(&self) -> f32 {
+        self.master * self.master * BUS_TRIM
+    }
+
     /// The scalar every one-shot's gain multiplies through — mute silences
     /// them instantly (one-shots are transient; no ramp needed).
     pub(crate) fn one_shot_gain(&self) -> f32 {
         if self.muted {
             0.0
         } else {
-            self.master
+            self.master_amp()
         }
     }
 
@@ -96,7 +111,7 @@ impl Mixer {
             let goal = if self.muted {
                 0.0
             } else {
-                stem.level_of(&self.target) * self.master
+                stem.level_of(&self.target) * self.master_amp()
             };
             let cur = self.current[i];
             let next = if (goal - cur).abs() <= max_delta {
@@ -234,7 +249,8 @@ mod tests {
         }
         let g = m.step(0.1);
         let pad = g.iter().find(|(s, _)| *s == LoopStem::Pad).unwrap().1;
-        assert_eq!(pad, 0.8, "converged without overshoot");
+        // target 0.8 through the curved master (1.0² × BUS_TRIM)
+        assert_eq!(pad, 0.8 * BUS_TRIM, "converged without overshoot");
     }
 
     #[test]
@@ -264,7 +280,36 @@ mod tests {
         }
         let g = m.step(0.1);
         let pad = g.iter().find(|(s, _)| *s == LoopStem::Pad).unwrap().1;
-        assert!((pad - 0.4).abs() < 1e-6, "0.8 target × 0.5 master = {pad}");
+        // 0.8 target × (0.5² perceptual × BUS_TRIM ambient headroom)
+        let want = 0.8 * 0.25 * BUS_TRIM;
+        assert!((pad - want).abs() < 1e-6, "curved master: {pad} vs {want}");
+    }
+
+    #[test]
+    fn volume_curve_makes_low_percents_near_silent() {
+        // the dogfood verdict behind the curve: linear 5% was still clearly
+        // audible; squared-under-trim 5% must be effectively silent while
+        // 100% keeps the full (trimmed) bus
+        let mut quiet = Mixer::new(0.05);
+        quiet.set_target(levels(1.0, 0.0, 0.0));
+        for _ in 0..300 {
+            quiet.step(0.1);
+        }
+        let g = quiet.step(0.1);
+        let pad = g.iter().find(|(s, _)| *s == LoopStem::Pad).unwrap().1;
+        assert!(pad < 0.001, "5% must be near-silent, got {pad}");
+
+        let mut full = Mixer::new(1.0);
+        full.set_target(levels(1.0, 0.0, 0.0));
+        for _ in 0..300 {
+            full.step(0.1);
+        }
+        let g = full.step(0.1);
+        let pad = g.iter().find(|(s, _)| *s == LoopStem::Pad).unwrap().1;
+        assert!(
+            (pad - BUS_TRIM).abs() < 1e-6,
+            "100% = the trimmed bus: {pad}"
+        );
     }
 
     #[test]

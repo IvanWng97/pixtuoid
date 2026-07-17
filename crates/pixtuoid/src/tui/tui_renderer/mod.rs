@@ -129,6 +129,15 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     audio_floor: Option<usize>,
 }
 
+/// "You would hear sound right now": live handle, not effectively muted
+/// (m OR pause — the combined state on the handle), and volume above zero
+/// (a 0% ♩ would advertise sound that isn't playing). A free fn over the
+/// handle FIELD so call sites keep their disjoint borrows of the rest of
+/// the renderer (a `&self` method would borrow all of `*self`).
+fn audio_audible(audio: &crate::audio::AudioHandle) -> bool {
+    audio.is_enabled() && !audio.is_muted() && audio.volume() > 0.0
+}
+
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub fn new(
         terminal: Terminal<B>,
@@ -521,7 +530,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 counts: per_floor[to_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)],
                 per_floor: &per_floor,
                 gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
-                audio_audible: self.audio.is_enabled() && !self.audio.is_muted(),
+                audio_audible: audio_audible(&self.audio),
                 volume_flash: self.volume_flash,
             };
             crate::tui::renderer::draw_footer_only_frame(
@@ -686,7 +695,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             counts: crate::tui::widgets::scene_stats(&to_scene),
             per_floor: &transition_per_floor,
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
-            audio_audible: self.audio.is_enabled() && !self.audio.is_muted(),
+            audio_audible: audio_audible(&self.audio),
             volume_flash: self.volume_flash,
         };
 
@@ -800,7 +809,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             // the footer's cross-floor cue + gateway chip render even single-floor.
             per_floor: crate::tui::widgets::per_floor_counts(scene),
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
-            audio_audible: self.audio.is_enabled() && !self.audio.is_muted(),
+            audio_audible: audio_audible(&self.audio),
             volume_flash: self.volume_flash,
             floor: floor_meta,
             active_pet: self.active_pet.as_ref(),

@@ -151,8 +151,9 @@ pub(crate) struct AudioHandle {
 }
 
 impl AudioHandle {
-    /// The inert handle: `[audio] enabled = false` (the default) or no
-    /// usable output device. Every call is a no-op.
+    /// The inert handle: sound not requested yet (muted — the default —
+    /// with the lazy spawn untriggered) or no usable output device. Every
+    /// call is a no-op.
     pub(crate) fn disabled() -> Self {
         Self {
             tx: None,
@@ -185,6 +186,12 @@ impl AudioHandle {
             volume.clamp(0.0, 1.0).to_bits(),
             std::sync::atomic::Ordering::Relaxed,
         );
+    }
+
+    /// The user's master volume — the footer's audibility check reads it
+    /// (0% is silence even when live and unmuted).
+    pub(crate) fn volume(&self) -> f32 {
+        f32::from_bits(self.volume.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// The EFFECTIVE silence state (the m-toggle OR'd with pause — run_tui

@@ -57,8 +57,8 @@ pub struct AppConfig {
     #[serde(rename = "floating", default, skip_serializing_if = "Option::is_none")]
     pub floating: Option<FloatingConfigRaw>,
     /// Ambient office sound — a single `[audio]` table (#633). Absent ⇒
-    /// DISABLED (sound is strictly opt-in; a terminal app must never speak
-    /// uninvited). Resolved by [`resolve_audio`]. Keep BEFORE `pets` (the
+    /// MUTED (the office starts silent; `m` is the whole opt-in and persists
+    /// here). Resolved by [`resolve_audio`]. Keep BEFORE `pets` (the
     /// table-before-array-of-tables rule above).
     #[serde(rename = "audio", default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<AudioConfigRaw>,
@@ -168,8 +168,12 @@ pub(crate) fn save_audio_muted(path: &Path, muted: bool) -> Result<()> {
 /// Persist the `[audio] volume` level (the +/- nudge keys write through
 /// here, same ConfigLock round).
 pub(crate) fn save_audio_volume(path: &Path, volume: f32) -> Result<()> {
+    // quantize to the footer's percent vocabulary before widening — a raw
+    // f32→f64 writes float noise (0.949999988079071) into a file the repo
+    // deliberately keeps human-edited
+    let percent = (volume * 100.0).round() / 100.0;
     update_config(path, |doc| {
-        doc["audio"]["volume"] = toml_edit::value(volume as f64);
+        doc["audio"]["volume"] = toml_edit::value(percent as f64);
     })
 }
 

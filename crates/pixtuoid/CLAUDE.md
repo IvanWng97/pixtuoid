@@ -257,6 +257,12 @@ src/
 │                       footer flashes `♩ N%` ~1s — the lowfi volume-timer pattern; + from muted unmutes).
 │                       RodioSink::open silences stderr around device open on Unix (ALSA prints raw lines;
 │                       lazy spawn = mid-altscreen open, one line corrupts the TUI — lowfi issue #1).
+│                       Volume→amplitude is mixer::master_amp = user² × BUS_TRIM(0.35): a squared perceptual
+│                       curve under an ambient bus trim (dogfood: untrimmed linear was "too loud even at
+│                       5%") — the ONE mapping site; the footer keeps showing the user's linear percent.
+│                       Volume persist is DEBOUNCED to the ~1s flash expiry + the quit path (+/- is a
+│                       repeatable key — per-repeat ConfigLock rounds were the bot MEDIUM); the +/- arm
+│                       re-attempts the lazy spawn whenever unmuted-but-disabled ('+' is never a dead key).
 │                       An EMPTY office now plays the quiet pad+sparkle+texture "radio on" floor (the
 │                       ratified demo_1) — Phase 1's empty-silent behavior ended when the music landed.
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM

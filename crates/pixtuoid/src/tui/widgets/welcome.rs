@@ -35,11 +35,13 @@ pub(crate) fn paint_welcome(
     let rows = &frame.rows;
     let selected = frame.selected;
     let elapsed_ms = frame.elapsed_ms;
-    // title (1) + subtitle (1) + blank (1) + rows + blank (1) + hints (2).
+    // title (1) + subtitle (1) + blank (1) + rows + blank (1) + hints
+    // (2 on audio builds, 1 without the audio offer line).
+    let hint_rows: u16 = if cfg!(feature = "audio") { 2 } else { 1 };
     let area = centered_in(
         bounds,
         WELCOME_W + 2 * PANEL_PAD_X,
-        rows.len() as u16 + 6 + 2 * PANEL_PAD_Y,
+        rows.len() as u16 + 4 + hint_rows + 2 * PANEL_PAD_Y,
     );
     if area.width < 4 || area.height < 3 {
         return;
@@ -106,10 +108,15 @@ pub(crate) fn paint_welcome(
             "  \u{2191}\u{2193} move \u{00b7} space toggle \u{00b7} enter connect \u{00b7} esc skip",
             dim,
         )));
-        lines.push(Line::from(Span::styled(
-            "  \u{2669} the office has sound \u{2014} press m anytime to turn it on",
-            dim,
-        )));
+        if cfg!(feature = "audio") {
+            lines.push(Line::from(Span::styled(
+                // ≤ WELCOME_W(54) cols incl. the 2-col indent — a longer
+                // line clips mid-word (review MEDIUM); no line on no-audio
+                // builds (the Linux prebuilts — a dead m key reads broken)
+                "  \u{2669} office sound \u{2014} press m anytime",
+                dim,
+            )));
+        }
     }
 
     f.render_widget(Paragraph::new(lines).style(bg), inner);

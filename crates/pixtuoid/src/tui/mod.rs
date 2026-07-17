@@ -558,8 +558,14 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // the persisted m-state: the office boots exactly as the user left it
     let mut audio_muted = audio_cfg.muted;
     let mut audio_volume = audio_cfg.volume;
-    // transient +/- readout: the footer shows "♩ N%" for a beat after a nudge
+    // transient +/- readout: the footer shows "♩ N%" for a beat after a nudge.
+    // The same window DEBOUNCES the persist: +/- is a repeatable key (unlike
+    // every other inline config write, which is a one-shot confirm — the
+    // accepted-stall class), so a held key must not fire a ConfigLock round
+    // per repeat event. The write lands once, when the flash expires (and on
+    // quit, for a nudge-then-exit).
     let mut volume_flash: Option<std::time::Instant> = None;
+    let mut volume_dirty = false;
     // First-run onboarding "move-in" overlay (TOP of the modal precedence chain).
     // The roster is built only on first run; if no agent CLIs are detected there's
     // nothing to connect, so it stays closed and the office shows normally.
@@ -653,11 +659,15 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             // transient +/- readout: ~1s after a nudge the footer appends the
             // percent to the ♩ glyph (the lowfi volume-timer pattern)
             const VOLUME_FLASH_MS: u128 = 1000;
-            renderer.set_volume_flash(
-                volume_flash
-                    .filter(|t| t.elapsed().as_millis() < VOLUME_FLASH_MS)
-                    .map(|_| (audio_volume * 100.0).round() as u8),
-            );
+            let flashing = volume_flash.is_some_and(|t| t.elapsed().as_millis() < VOLUME_FLASH_MS);
+            renderer.set_volume_flash(flashing.then(|| (audio_volume * 100.0).round() as u8));
+            if volume_dirty && !flashing {
+                // the debounced volume persist: once, when the nudge burst ends
+                volume_dirty = false;
+                if let Err(e) = crate::config::save_audio_volume(&config_path, audio_volume) {
+                    tracing::warn!("failed to persist audio volume: {e}");
+                }
+            }
             renderer.render(&snapshot, &pack, now)?;
 
             // Auto-compute per-floor desk capacity from the current
@@ -757,24 +767,25 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 if up && audio_muted {
                                     // volume-up IS the un-mute gesture too
                                     audio_muted = false;
-                                    if !audio.is_enabled() {
-                                        audio = crate::audio::spawn(audio_volume);
-                                        renderer.set_audio(audio.clone());
-                                    }
-                                    audio.set_muted(ui.paused() || audio_muted);
                                     if let Err(e) =
                                         crate::config::save_audio_muted(&config_path, audio_muted)
                                     {
                                         tracing::warn!("failed to persist audio mute: {e}");
                                     }
                                 }
+                                if !audio_muted && !audio.is_enabled() {
+                                    // (re)attempt the lazy spawn whenever sound is
+                                    // WANTED but the system is down — covers boot
+                                    // without a device and a failed earlier spawn
+                                    // (review MEDIUM: '+' must never be a dead key;
+                                    // each press is one bounded open attempt)
+                                    audio = crate::audio::spawn(audio_volume);
+                                    renderer.set_audio(audio.clone());
+                                }
+                                audio.set_muted(ui.paused() || audio_muted);
                                 audio.set_volume(audio_volume);
                                 volume_flash = Some(std::time::Instant::now());
-                                if let Err(e) =
-                                    crate::config::save_audio_volume(&config_path, audio_volume)
-                                {
-                                    tracing::warn!("failed to persist audio volume: {e}");
-                                }
+                                volume_dirty = true;
                             }
                             KeyAction::ToggleWalkableDebug => {
                                 let on = renderer.debug_walkable();
@@ -1078,6 +1089,12 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 if ui.theme_picker.is_some() {
                     renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
                 }
+                // a nudge-then-quit inside the debounce window still persists
+                if volume_dirty {
+                    if let Err(e) = crate::config::save_audio_volume(&config_path, audio_volume) {
+                        tracing::warn!("failed to persist audio volume: {e}");
+                    }
+                }
                 break;
             }
             // The frame-pacing sleep doubles as the signal-listen window (the
@@ -1222,6 +1239,18 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('m'), NONE, modal(), nav()),
             KeyAction::ToggleAudioMute
         );
+        for up in ['+', '='] {
+            assert_eq!(
+                dispatch_key(KeyCode::Char(up), NONE, modal(), nav()),
+                KeyAction::AdjustVolume(true)
+            );
+        }
+        for down in ['-', '_'] {
+            assert_eq!(
+                dispatch_key(KeyCode::Char(down), NONE, modal(), nav()),
+                KeyAction::AdjustVolume(false)
+            );
+        }
         assert_eq!(
             dispatch_key(KeyCode::Char('t'), NONE, modal(), nav()),
             KeyAction::OpenThemePicker
