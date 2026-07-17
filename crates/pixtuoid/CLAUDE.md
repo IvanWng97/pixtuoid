@@ -218,11 +218,20 @@ src/
 │                       PREBUILTS ship without it — ALSA can't link into musl/cross builds — so Linux audio
 │                       is from-source). mod.rs (AudioHandle: clone-cheap try_send gateway — disabled handle
 │                       is inert everywhere, so callers never cfg; AssetBank pre-synthesizes EVERY buffer at
-│                       spawn on a fixed seed; run_loop = the device-agnostic thread body), dsp.rs (radix-2
-│                       FFT + brickwall bands + spectral-envelope noise shaping [circularly seamless bed
-│                       loops] + splitmix64 NoiseStream), synth.rs (the Phase 0 OWNER-RATIFIED recipes 1:1 — elevator ding + cooler glug were later owner-CUT (dogfood round), the spec keeps their recipes —
+│                       spawn on a fixed seed — incl. the Phase 2 musical loops, sub-second in release;
+│                       run_loop = the device-agnostic thread body, registers ALL six LoopStem beds),
+│                       dsp.rs (radix-2 FFT + brickwall bands + spectral-envelope noise shaping [circularly
+│                       seamless bed loops] + warp_resample [tape wow/flutter] + splitmix64 NoiseStream),
+│                       score.rs (the FROZEN 8-bar lofi composition — the ratified realization's events as
+│                       const tables; a regen via the spec's export_score is a NEW take → fresh LISTEN gate),
+│                       synth.rs (the Phase 0 OWNER-RATIFIED recipes 1:1 — elevator ding + cooler glug were later owner-CUT (dogfood round), the spec keeps their recipes —
 │                       change docs/superpowers/specs/2026-07-16-ambient-sound-phase0/ first, re-audition,
-│                       then mirror; spectral-sanity tests pin the fingerprints), mixer.rs (pure gain ramps
+│                       then mirror; spectral-sanity tests pin the fingerprints AGAINST THE FLOAT CHAIN,
+│                       never the audition wavs — write_wav's stereo interleave + soft clip once poisoned
+│                       the reference numbers; plus the Phase 2 musical stems: lofi_post tape chain +
+│                       stem_pad/sparkle/keys/drums, ALL-PROCEDURAL by owner decision — no committed
+│                       assets, no decoder dep; the four musical loops share one sample count and start
+│                       together = phase-locked), mixer.rs (pure gain ramps
 │                       ~2s crossfade + typing-burst/raindrop schedulers — level-driven, no backlog replay),
 │                       sink.rs (AudioSink seam: NullSink for CI/no-device, RodioSink = rodio 0.22 Player
 │                       glue, codecov-excluded winit-class). Audio NEVER blocks render: bounded channel,
@@ -234,6 +243,8 @@ src/
 │                       ding (owner-cut). Floating feeds stems + the door cue only, scoped to its rendered
 │                       floor (FloorSession doesn't surface occupancy — deliberate Phase 1 cut).
 │                       [audio] config: enabled default FALSE (strictly opt-in), volume clamped [0,1].
+│                       An EMPTY office now plays the quiet pad+sparkle+texture "radio on" floor (the
+│                       ratified demo_1) — Phase 1's empty-silent behavior ended when the music landed.
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM
 │                       from githubnext/monaspace v1.400 static — unmodified, so the OFL Reserved-Font-Name
 │                       clause is never triggered)

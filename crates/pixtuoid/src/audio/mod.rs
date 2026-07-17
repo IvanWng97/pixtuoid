@@ -1,11 +1,12 @@
 //! Ambient office audio — the ONE consumer of the scene's
 //! `pixtuoid_scene::audio::AudioFrame` model and the only owner of any
 //! audio-device dependency (#633; the plan's single-gateway rule). Pure
-//! synthesis (`dsp`/`synth`) pre-renders every sample buffer at startup;
-//! playback rides its own thread behind a bounded channel — the render
-//! loop only ever `try_send`s (drop-on-backpressure, never blocks).
-//! (Phase 2's AI-generated stem ASSETS will live in `crates/pixtuoid/
-//! sounds/`, the `sprites/` twin; Phase 1 ships zero asset files.)
+//! synthesis (`dsp`/`synth`) pre-renders every sample buffer at startup —
+//! including the Phase 2 musical stems (`score` + `synth`), which are
+//! ALL-PROCEDURAL by owner decision (no committed assets, no decoder dep;
+//! the ratified composition is frozen data in `score.rs`). Playback rides
+//! its own thread behind a bounded channel — the render loop only ever
+//! `try_send`s (drop-on-backpressure, never blocks).
 
 // Everything below the handle/spawn seam is feature-gated WITH the rodio
 // dep (lens-2 MEDIUM: an ungated pure half is ~40 dead_code warnings in
@@ -14,6 +15,8 @@
 pub(crate) mod dsp;
 #[cfg(feature = "audio")]
 pub(crate) mod mixer;
+#[cfg(feature = "audio")]
+mod score;
 #[cfg(feature = "audio")]
 pub(crate) mod sink;
 #[cfg(feature = "audio")]
@@ -60,14 +63,25 @@ struct AssetBank {
     printer_whir: Arc<Vec<f32>>,
     vending_drop: Arc<Vec<f32>>,
     rain_bed: Arc<Vec<f32>>,
+    /// The Phase 2 musical loops, `LoopStem` order minus Rain: pad,
+    /// sparkle, keys, drums, texture. The four musical ones share ONE
+    /// sample count (`musical_stems_share_one_loop_length`) and start
+    /// together, so they tile phase-locked; texture/rain are noise beds
+    /// with independent lengths (no musical phase to keep).
+    pad: Arc<Vec<f32>>,
+    sparkle: Arc<Vec<f32>>,
+    keys: Arc<Vec<f32>>,
+    drums: Arc<Vec<f32>>,
+    texture: Arc<Vec<f32>>,
 }
 
 #[cfg(feature = "audio")]
 impl AssetBank {
     fn build() -> Self {
         // fixed seed: assets are identical run-to-run (reproducible audio)
+        let started = Instant::now();
         let mut rng = dsp::NoiseStream::new(0xC0FF_EE01);
-        Self {
+        let bank = Self {
             keystrokes: (0..KEYSTROKE_POOL)
                 .map(|_| Arc::new(synth::keystroke(&mut rng)))
                 .collect(),
@@ -78,6 +92,29 @@ impl AssetBank {
             printer_whir: Arc::new(synth::printer_whir(&mut rng)),
             vending_drop: Arc::new(synth::vending_drop(&mut rng)),
             rain_bed: Arc::new(synth::rain_bed(&mut rng)),
+            pad: Arc::new(synth::stem_pad()),
+            sparkle: Arc::new(synth::stem_sparkle()),
+            keys: Arc::new(synth::stem_keys()),
+            drums: Arc::new(synth::stem_drums(&mut rng)),
+            texture: Arc::new(synth::texture_bed(&mut rng)),
+        };
+        // startup cost is a budget to WATCH, not a gate (CI machines vary):
+        // the beds fade in when the bank is ready; the office is never blocked
+        tracing::debug!(
+            ms = started.elapsed().as_millis(),
+            "audio: asset bank synthesized"
+        );
+        bank
+    }
+
+    fn loop_bed(&self, stem: LoopStem) -> Arc<Vec<f32>> {
+        match stem {
+            LoopStem::Pad => Arc::clone(&self.pad),
+            LoopStem::Sparkle => Arc::clone(&self.sparkle),
+            LoopStem::Keys => Arc::clone(&self.keys),
+            LoopStem::Drums => Arc::clone(&self.drums),
+            LoopStem::Texture => Arc::clone(&self.texture),
+            LoopStem::Rain => Arc::clone(&self.rain_bed),
         }
     }
 
@@ -188,12 +225,13 @@ pub(crate) fn spawn(volume: f32) -> AudioHandle {
 #[cfg(feature = "audio")]
 fn run_loop(rx: mpsc::Receiver<Msg>, mut device: Box<dyn AudioSink>, volume: f32) {
     let bank = AssetBank::build();
-    device.start_loop(LoopStem::Rain, Arc::clone(&bank.rain_bed));
-    // pad/sparkle/keys/drums AND texture await Phase 2: the vinyl/room
-    // texture only makes sense UNDER music ("底噪没有音乐" — owner call),
-    // so Phase 1's sound is entirely event-driven (typing/rain/one-shots)
-    // and an empty office is truly silent. Levels still compute and ramp;
-    // no loop is registered to hear them.
+    // Phase 2: every bed registers — the musical stems (empty office =
+    // pad+sparkle+texture, the ratified "someone left the radio on") joined
+    // by keys/drums as the office busies; texture re-wired WITH them (the
+    // Phase 1 "no floor noise without music" owner call, now satisfied).
+    for stem in LoopStem::ALL {
+        device.start_loop(stem, bank.loop_bed(stem));
+    }
 
     let mut mixer = Mixer::new(volume);
     let mut typing = TypingScheduler::new(0xBEEF);
@@ -291,14 +329,12 @@ mod tests {
         join.join().unwrap();
 
         let rec = recorder.lock().unwrap();
-        assert!(
-            rec.loops_started.contains(&LoopStem::Rain),
-            "the rain bed registered"
-        );
-        assert!(
-            !rec.loops_started.contains(&LoopStem::Texture),
-            "texture waits for Phase 2's music (owner call: no floor noise without music)"
-        );
+        for stem in LoopStem::ALL {
+            assert!(
+                rec.loops_started.contains(&stem),
+                "Phase 2 registers every bed, missing {stem:?}"
+            );
+        }
         assert!(rec.one_shots >= 2, "the two frame events played");
     }
 }
@@ -399,7 +435,9 @@ mod listen_gate {
         secs: f32,
     ) -> Vec<f32> {
         let mut sink = OfflineSink::new(secs);
-        sink.start_loop(LoopStem::Rain, Arc::clone(&bank.rain_bed));
+        for stem in LoopStem::ALL {
+            sink.start_loop(stem, bank.loop_bed(stem));
+        }
         let mut mixer = Mixer::new(1.0);
         mixer.set_target(stems);
         let mut typing = TypingScheduler::new(0xBEEF);
@@ -440,41 +478,37 @@ mod listen_gate {
         let out = std::env::temp_dir().join("pixtuoid-audio-audition");
         std::fs::create_dir_all(&out).unwrap();
         let bank = AssetBank::build();
-        let quiet = StemLevels {
-            texture: 0.28,
-            ..Default::default()
+        // tier levels come from the PRODUCTION mapping, not hand-rolled
+        // literals — the wavs audition exactly what the app will mix
+        let counts = |active: usize| pixtuoid_scene::board::StateCounts {
+            active,
+            waiting: 0,
+            idle: 0,
+            exiting: 0,
+            total: active,
         };
-        let moderate = StemLevels {
-            texture: 0.30,
-            typing: 0.5,
-            ..Default::default()
-        };
-        let busy = StemLevels {
-            texture: 0.28,
-            typing: 0.8,
-            ..Default::default()
-        };
-        let rainy = StemLevels { rain: 0.55, ..busy };
-        // the busy tier carries a scripted one-shot volley (incl. the
-        // un-auditioned vending drop — flagged in the synth doc)
+        let quiet = pixtuoid_scene::audio::stem_levels(&counts(0), 0.0);
+        let moderate = pixtuoid_scene::audio::stem_levels(&counts(1), 0.0);
+        let busy = pixtuoid_scene::audio::stem_levels(&counts(3), 0.0);
+        let rainy = pixtuoid_scene::audio::stem_levels(&counts(3), 1.0);
+        // the busy tier carries a scripted one-shot volley
         let volley = [
             (5.0, OneShot::DoorChime),
             (10.0, OneShot::PrinterWhir),
             (15.0, OneShot::VendingDrop),
         ];
-        for (name, stems, events, expect_sound) in [
-            // Phase 1: an empty office is truly SILENT (texture waits for
-            // Phase 2's music — owner call)
-            ("tier_1_empty", quiet, &[][..], false),
-            ("tier_2_moderate", moderate, &[][..], true),
-            ("tier_3_busy_oneshot_volley", busy, &volley[..], true),
-            ("tier_4_rainy_busy", rainy, &[][..], true),
+        for (name, stems, events) in [
+            // Phase 2: an empty office plays the ratified pad+sparkle+
+            // texture radio-on floor (demo_1 / p3_soak_empty)
+            ("tier_1_empty", quiet, &[][..]),
+            ("tier_2_moderate", moderate, &[][..]),
+            ("tier_3_busy_oneshot_volley", busy, &volley[..]),
+            ("tier_4_rainy_busy", rainy, &[][..]),
         ] {
-            let buf = render_tier(&bank, stems, events, 30.0);
-            assert_eq!(
+            let buf = render_tier(&bank, stems, events, 60.0);
+            assert!(
                 buf.iter().any(|&s| s.abs() > 0.01),
-                expect_sound,
-                "{name}: unexpected audibility"
+                "{name}: every tier is audible in Phase 2"
             );
             write_wav(&out.join(format!("{name}.wav")), &buf);
         }

@@ -59,7 +59,7 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.16.0" => Some(&[
-            "The office you can hear — opt-in ambient sound (`[audio] enabled = true`): typing that tracks how busy your agents are, gentle rain when the office weather rains, and little moments — a door chime when someone walks in, the printer, the vending machine; press m to mute",
+            "The office you can hear — opt-in ambient sound (`[audio] enabled = true`): a lofi band that layers up as your agents get busier (warm pad, sparkle, keys, drums — an 8-bar loop composed in-house, synthesized at startup, zero assets), typing that tracks the bustle, gentle rain when the office weather rains, and little moments — a door chime when someone walks in, the printer, the vending machine; you hear the floor you're looking at, and m mutes",
         ]),
         "0.15.0" => Some(&[
             "A busier, better-looking office — denser desk pods that pack the grid at every size, agents walking behind their desks, and a full interior-decor pass: glass walls with door jambs and mullions, a lounge aquarium, real head-of-table meeting chairs, greenery (two ficus trees) and mats",
