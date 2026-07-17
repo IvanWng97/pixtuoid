@@ -658,8 +658,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 .apply_to(&mut renderer, now);
             // transient +/- readout: ~1s after a nudge the footer appends the
             // percent to the ♩ glyph (the lowfi volume-timer pattern)
-            const VOLUME_FLASH_MS: u128 = 1000;
-            let flashing = volume_flash.is_some_and(|t| t.elapsed().as_millis() < VOLUME_FLASH_MS);
+            let flashing = volume_flash
+                .is_some_and(|t| t.elapsed().as_millis() < crate::audio::VOLUME_FLASH_MS);
             renderer.set_volume_flash(flashing.then(|| (audio_volume * 100.0).round() as u8));
             if volume_dirty && !flashing {
                 // the debounced volume persist: once, when the nudge burst ends
@@ -761,8 +761,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 }
                             }
                             KeyAction::AdjustVolume(up) => {
-                                const VOLUME_STEP: f32 = 0.05;
-                                let delta = if up { VOLUME_STEP } else { -VOLUME_STEP };
+                                let delta = if up {
+                                    crate::audio::VOLUME_STEP
+                                } else {
+                                    -crate::audio::VOLUME_STEP
+                                };
                                 audio_volume = (audio_volume + delta).clamp(0.0, 1.0);
                                 if up && audio_muted {
                                     // volume-up IS the un-mute gesture too

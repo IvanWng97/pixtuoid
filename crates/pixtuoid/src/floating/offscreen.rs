@@ -39,10 +39,10 @@ pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
 pub struct OfficeRenderer {
     session: FloorSession,
     /// Ambient-audio gateway + cue tracker (#633). Inert unless installed.
-    /// Floating v1 feeds stems + the door cue; the appliance one-shots are
-    /// TUI-only for now (FloorSession doesn't surface waypoint occupancy —
-    /// a deliberate Phase 1 scope cut, not an oversight). The window always
-    /// renders `FloorMeta::ground()`, so no cross-floor re-prime exists here —
+    /// Full TUI cue parity: stems + door chime + the appliance one-shots
+    /// (the session's `occupied_waypoints` + this frame's layout feed the
+    /// tracker's occupancy edges). The window always renders
+    /// `FloorMeta::ground()`, so no cross-floor re-prime exists here —
     /// if floating ever gains floor nav, mirror the TUI's `audio_floor` guard
     /// or switching floors fires a chime volley for the new floor's agents.
     audio: crate::audio::AudioHandle,
@@ -82,7 +82,7 @@ impl OfficeRenderer {
     ) -> &RgbBuffer {
         // active_pet stays None: click-to-pet needs window pointer hit-testing
         // (deferred); the WANDERING floor pet is wired. The rest is the session's.
-        self.session.render(FrameInputs {
+        let layout = self.session.render(FrameInputs {
             scene,
             pack,
             theme,
@@ -104,10 +104,17 @@ impl OfficeRenderer {
                 .iter()
                 .filter(|(_, slot)| slot.floor_idx == floor_meta.floor_idx)
                 .map(|(id, _)| id);
+            // The session's occupancy + THIS frame's layout give the tracker
+            // the appliance edges — printer/vending cues, TUI parity (#633).
             let events = self.audio_cues.observe(
                 floor_ids,
-                &Default::default(), // no waypoint feed here (see the field doc)
-                |_| None,
+                self.session.occupied_waypoints(),
+                |idx| {
+                    layout
+                        .as_deref()
+                        .and_then(|l| l.waypoints.get(idx))
+                        .map(|w| w.kind)
+                },
                 now,
             );
             self.audio.frame(pixtuoid_scene::audio::AudioFrame {
@@ -369,6 +376,25 @@ pub fn paint_wall_board_into_surface(
             x += crate::aa_text::text_width(&seg.text, font_px);
         }
     }
+}
+
+/// Paint the transient volume readout (`♩ 45%` / `♩ off`) into the window's
+/// bottom-right corner — the floating twin of the TUI footer's flash and the
+/// m/+/- keys' ONLY visual feedback (this window has no footer). Fixed
+/// caption height like the name badges (crisp at any office scale), the
+/// hovered-badge near-white over the shared 1px shadow.
+pub fn paint_volume_flash_into_surface(sb: &mut [u32], win_w: usize, win_h: usize, text: &str) {
+    // breathing room from the window edges
+    const FLASH_MARGIN_PX: i32 = 6;
+    let color = pack_xrgb(Rgb {
+        r: 240,
+        g: 240,
+        b: 240,
+    });
+    let tw = crate::aa_text::text_width(text, LABEL_FONT_PX);
+    let x = (win_w as i32 - tw - FLASH_MARGIN_PX).max(0);
+    let y = (win_h as i32 - crate::aa_text::line_height(LABEL_FONT_PX) - FLASH_MARGIN_PX).max(0);
+    draw_badge_text(sb, win_w, win_h, text, x, y, LABEL_FONT_PX, color);
 }
 
 #[cfg(test)]
@@ -706,6 +732,84 @@ mod tests {
         assert_eq!(
             stems.typing, moderate.typing,
             "typing level must reflect the RENDERED floor's 1 active, not all 4"
+        );
+    }
+
+    #[test]
+    fn volume_flash_blits_into_the_bottom_right_quadrant() {
+        // The m/+/- keys' only feedback surface: the readout must actually
+        // land pixels, and land them where the doc says (bottom-right, inside
+        // the margins) — the phantom-feedback twin of the label blit tests.
+        let (w, h) = (200usize, 120usize);
+        let mut sb = vec![0u32; w * h];
+        paint_volume_flash_into_surface(&mut sb, w, h, "\u{2669} 45%");
+        let changed: Vec<usize> = sb
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| **p != 0)
+            .map(|(i, _)| i)
+            .collect();
+        assert!(!changed.is_empty(), "the readout painted something");
+        assert!(
+            changed.iter().all(|&i| {
+                let (x, y) = (i % w, i / w);
+                x >= w / 2 && y >= h / 2
+            }),
+            "the readout stays in the bottom-right quadrant"
+        );
+    }
+
+    #[test]
+    fn floating_appliance_cues_fire_from_the_sessions_occupancy() {
+        // TUI cue parity (#633 close-out): the tracker now receives the
+        // session's occupied_waypoints + this frame's waypoint kinds, so a
+        // wanderer standing at the printer / vending machine fires the
+        // appliance one-shot in the floating window too. Deterministic —
+        // fixed agent id + a hand-stepped clock; the loop bound mirrors the
+        // scene crate's occupancy sim pin.
+        use pixtuoid_scene::audio::OneShot;
+        let pack =
+            pixtuoid_scene::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now0 = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut idle = active_on("/w/wanderer.jsonl", 0, 0);
+        idle.state = pixtuoid_core::state::ActivityState::Idle;
+        let scene = scene_with(vec![idle], 16);
+        let mut renderer = OfficeRenderer::new();
+        let (handle, rx) = crate::audio::AudioHandle::test_pair();
+        renderer.set_audio(handle);
+        let mut heard = Vec::new();
+        for step in 0..900u64 {
+            let now = now0 + std::time::Duration::from_secs(2 * step);
+            // 192x160: tall enough that the corridor hosts BOTH appliances
+            // (the vending/printer height gates in layout::compute).
+            renderer.render(
+                &scene,
+                &pack,
+                theme,
+                now,
+                192,
+                160,
+                FloorMeta::ground(),
+                None,
+            );
+            heard.extend(
+                crate::audio::drain_frames(&rx)
+                    .into_iter()
+                    .flat_map(|f| f.events),
+            );
+            if heard
+                .iter()
+                .any(|e| matches!(e, OneShot::PrinterWhir | OneShot::VendingDrop))
+            {
+                break;
+            }
+        }
+        assert!(
+            heard
+                .iter()
+                .any(|e| matches!(e, OneShot::PrinterWhir | OneShot::VendingDrop)),
+            "a wander through the appliance strip must fire a printer/vending cue; heard: {heard:?}"
         );
     }
 

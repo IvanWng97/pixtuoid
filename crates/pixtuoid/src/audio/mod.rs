@@ -153,6 +153,16 @@ impl TrackBeds {
     }
 }
 
+/// The +/- keys' volume increment — ONE definition for BOTH painters' key
+/// handlers (`tui/mod.rs` dispatch + `floating::input`), so the two surfaces
+/// can't drift on feel. Lives here (the shared gateway) because `tui` and
+/// `floating` are siblings that must not import from each other.
+pub(crate) const VOLUME_STEP: f32 = 0.05;
+/// How long the transient volume readout stays up after a nudge (the lowfi
+/// volume-timer pattern) — the TUI footer flash, the floating overlay, and
+/// the volume-persist debounce window on both painters all read this one.
+pub(crate) const VOLUME_FLASH_MS: u128 = 1000;
+
 /// The painters' handle — clone-cheap, non-blocking. A disabled handle
 /// (audio off in config, or no device) swallows everything.
 #[derive(Clone)]

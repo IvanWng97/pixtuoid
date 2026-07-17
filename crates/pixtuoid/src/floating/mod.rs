@@ -10,6 +10,7 @@
 //! window-free (invariant #1) — all windowing lives here.
 
 mod geometry;
+mod input;
 pub mod offscreen;
 mod window;
 
@@ -61,13 +62,17 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         audio,
         ..
     } = cfg;
-    // Ambient audio (#633): boot-spawn iff the persisted state is unmuted.
-    // Floating has no runtime toggle yet (#633 deferred), so a muted config
-    // keeps the window silent for the whole run at zero cost.
-    let audio_handle = if !audio.muted {
-        crate::audio::spawn(audio.volume)
-    } else {
-        crate::audio::AudioHandle::disabled()
+    // Ambient audio (#633): boot-spawn iff the persisted state is unmuted —
+    // a muted boot stays at zero cost (no device/thread/buffers) until the
+    // first m/+ press lazy-spawns it (window.rs, TUI parity).
+    let audio_ui = input::AudioUi {
+        handle: if !audio.muted {
+            crate::audio::spawn(audio.volume)
+        } else {
+            crate::audio::AudioHandle::disabled()
+        },
+        muted: audio.muted,
+        volume: audio.volume,
     };
 
     let app_config = config::load(&config_path, &mut Vec::new());
@@ -173,7 +178,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         scene_rx,
         floor_caps,
     );
-    app.set_audio(audio_handle);
+    app.set_audio_ui(audio_ui);
     event_loop
         .run_app(&mut app)
         .context("running the floating window event loop")?;

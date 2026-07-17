@@ -367,13 +367,23 @@ pub struct FrameInputs<'a> {
     pub debug_walkable: bool,
 }
 
+/// One frame's outward-facing results from [`render_floor`]: the computed
+/// layout (callers cache it for overlays/hit-testing) plus the sim's occupancy
+/// observation — `SimFrame::occupied_waypoints` carried through the paint
+/// pass, the appliance audio-cue feed a windowed painter can't otherwise
+/// reach (#633; the TUI reads the same set off its `DrawCtx` out-param).
+pub struct FloorFrame {
+    pub layout: Arc<crate::layout::Layout>,
+    pub occupied_waypoints: std::collections::HashSet<usize>,
+}
+
 pub fn render_floor(
     fctx: &mut FloorCtx,
     buf: &mut RgbBuffer,
     coffee: &mut CoffeeState,
     chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
     inputs: FrameInputs,
-) -> Option<Arc<crate::layout::Layout>> {
+) -> Option<FloorFrame> {
     let FrameInputs {
         scene,
         pack,
@@ -403,10 +413,14 @@ pub fn render_floor(
         chitchat_state: chitchat,
         debug_walkable,
     });
+    let occupied_waypoints = result.occupied_waypoints;
     // The shared epilogue (carrier stamping + the door-cosmetic clamp) — ONE
     // definition shared with observe().
     frame_epilogue(fctx, coffee, result.new_coffee_carriers, now);
-    Some(layout)
+    Some(FloorFrame {
+        layout,
+        occupied_waypoints,
+    })
 }
 
 /// The per-FLOOR half of a painter's persistent session state: the sim/paint
@@ -478,6 +492,11 @@ pub struct FloorSession {
     /// labels against IT (not a caller-supplied one), so a painter can't pass a
     /// layout that disagrees with the sprite pass.
     last_layout: Option<Arc<crate::layout::Layout>>,
+    /// The occupancy the last `render` observed ([`FloorFrame`]'s
+    /// `occupied_waypoints`) — the `last_layout` pattern, so a painter reads
+    /// the SAME frame's occupancy it just painted. Empty before the first
+    /// render and after an unlayoutable size.
+    last_occupied: std::collections::HashSet<usize>,
 }
 
 impl FloorSession {
@@ -486,6 +505,7 @@ impl FloorSession {
             floor: PerFloor::new(),
             office: PerOffice::default(),
             last_layout: None,
+            last_occupied: std::collections::HashSet::new(),
         }
     }
 
@@ -511,15 +531,28 @@ impl FloorSession {
     /// itself.
     pub fn render(&mut self, inputs: FrameInputs) -> Option<Arc<crate::layout::Layout>> {
         self.evict_missing(inputs.scene);
-        let layout = render_floor(
+        let frame = render_floor(
             &mut self.floor.ctx,
             &mut self.floor.buf,
             &mut self.office.coffee,
             &mut self.office.chitchat,
             inputs,
         );
-        self.last_layout = layout.clone();
-        layout
+        match frame {
+            Some(FloorFrame {
+                layout,
+                occupied_waypoints,
+            }) => {
+                self.last_layout = Some(Arc::clone(&layout));
+                self.last_occupied = occupied_waypoints;
+                Some(layout)
+            }
+            None => {
+                self.last_layout = None;
+                self.last_occupied.clear();
+                None
+            }
+        }
     }
 
     /// Agent labels for the LAST rendered frame, built against THIS session's
@@ -560,6 +593,13 @@ impl FloorSession {
     /// The rendered pixel buffer (a borrow of the reused allocation).
     pub fn buf(&self) -> &RgbBuffer {
         &self.floor.buf
+    }
+
+    /// The waypoint occupancy the LAST `render` observed — the appliance
+    /// audio-cue feed (`AudioCueTracker::observe`'s second argument), aligned
+    /// with the same frame `buf()` holds. Empty before the first render.
+    pub fn occupied_waypoints(&self) -> &std::collections::HashSet<usize> {
+        &self.last_occupied
     }
 
     /// Flush the per-floor recolored-sprite cache. Call after a theme change so
@@ -1584,6 +1624,77 @@ mod tests {
         assert!(
             !session.office.coffee.map().contains_key(&gone),
             "render() evicts the office half (coffee) — the cup leaves with the agent"
+        );
+    }
+
+    #[test]
+    fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
+        // The floating painter's appliance-cue feed (#633): render() must hand
+        // the sim's occupancy observation out through occupied_waypoints() —
+        // the same wp_rank keys the TUI reads off its DrawCtx out-param — so a
+        // windowed painter can feed AudioCueTracker without re-running the sim.
+        let pack = crate::embedded_pack::test_default_pack();
+        let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+        let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let mut scene = make_scene(1, 8);
+        for slot in scene.agents.values_mut() {
+            slot.created_at = now0;
+            slot.state_started_at = now0;
+            slot.last_event_at = now0;
+        }
+        let mut session = FloorSession::new();
+        assert!(
+            session.occupied_waypoints().is_empty(),
+            "empty before any render"
+        );
+        let mut pinned = false;
+        for step in 0..240u64 {
+            let now = now0 + Duration::from_secs(5 * step);
+            let layout = session
+                .render(FrameInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    theme,
+                    now,
+                    size: Size { w: 160, h: 96 },
+                    floor_meta: FloorMeta::ground(),
+                    active_pet: None,
+                    floor_pet: None,
+                    debug_walkable: false,
+                })
+                .expect("160x96 lays out");
+            if !session.occupied_waypoints().is_empty() {
+                for &wp in session.occupied_waypoints() {
+                    assert!(
+                        wp < layout.waypoints.len(),
+                        "occupied index {wp} must be a real waypoint"
+                    );
+                }
+                pinned = true;
+                break;
+            }
+        }
+        assert!(
+            pinned,
+            "the idle agent never occupied a waypoint in 20 min of sim"
+        );
+        // An unlayoutable size clears the stale set — a painter reading it
+        // after a shrink must not replay the last big frame's occupancy.
+        let none = session.render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
+            theme,
+            now: now0,
+            size: Size { w: 8, h: 8 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        });
+        assert!(none.is_none());
+        assert!(
+            session.occupied_waypoints().is_empty(),
+            "an unlayoutable render clears the stale occupancy"
         );
     }
 

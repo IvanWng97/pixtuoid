@@ -247,15 +247,23 @@ src/
 │                       FLOOR-SCOPED (owner call): stems + door/appliance cues come from the floor
 │                       being VIEWED (per_floor_counts + floor_idx-filtered ids; tracker re-primes on
 │                       floor switch); rain stays global (weather, not agent activity). No elevator
-│                       ding (owner-cut). Floating feeds stems + the door cue only, scoped to its rendered
-│                       floor (FloorSession doesn't surface occupancy — deliberate Phase 1 cut).
+│                       ding (owner-cut). Floating has FULL cue parity (#633 close-out): stems + door +
+│                       appliance one-shots, scoped to its rendered floor — the occupancy feed is
+│                       `FloorSession::occupied_waypoints()` (the scene seam surfaces the sim's set via
+│                       `FloorFrame`) + the render-returned layout's waypoint kinds.
 │                       [audio] config: ONE switch `muted` default TRUE (owner-cut the redundant enabled
 │                       knob; `m` = the whole opt-in, persisted via save_audio_muted) + volume clamped [0,1];
 │                       the system LAZY-SPAWNS on the first unmute (muted = zero cost: no device/thread/
 │                       buffers) — run_tui swaps the fresh handle into the renderer; floating boot-spawns
-│                       iff !muted (no runtime toggle yet, #633). Footer shows ♩ iff enabled && !effective-
-│                       muted (m OR pause); onboarding carries the one-line m hint. +/- nudge volume ±0.05
-│                       (an AtomicU32-bits sibling of the mute atomic; mixer folds it per tick; persisted;
+│                       iff !muted AND has the SAME m/+/- runtime keys (floating/input.rs = the pure
+│                       key-map + state transitions mirroring the TUI arms 1:1, unit-tested; window.rs
+│                       stays thin winit glue; lazy spawn + persistence identical; feedback = a transient
+│                       bottom-right `♩ N%`/`♩ off` AA overlay, offscreen::paint_volume_flash_into_surface —
+│                       the window has no footer). Footer shows ♩ iff enabled && !effective-
+│                       muted (m OR pause); onboarding carries the one-line m hint. +/- nudge volume
+│                       (audio::VOLUME_STEP, THE shared step both painters read — audio/ is the sibling
+│                       painters' one shared home, same for VOLUME_FLASH_MS; an AtomicU32-bits sibling of
+│                       the mute atomic; mixer folds it per tick; persisted;
 │                       footer flashes `♩ N%` ~1s — the lowfi volume-timer pattern; + from muted unmutes).
 │                       RodioSink::open silences stderr around device open on Unix (ALSA prints raw lines;
 │                       lazy spawn = mid-altscreen open, one line corrupts the TUI — lowfi issue #1).
@@ -359,16 +367,21 @@ src/
 │                       Degraded) are present, else a ~1fps IDLE_AMBIENT tick (keeps the clock/weather/pet alive
 │                       without burning CPU on an empty office — was a full 0fps freeze); restored [floating] position is validated against
 │                       the live monitors (off-every-screen → OS-default placement, not unrecoverable off-screen);
-│                       left-press drag / corner resize; persists [floating] geometry on close;
+│                       left-press drag / corner resize; m/+/- audio keys (the pure half in input.rs — see
+│                       the audio/ entry); persists [floating] geometry (+ any pending volume) on close;
 │                       floor_caps synced to the rendered layout's home-desk count so no agent is stranded
 │                       off-screen; macOS Accessory + shadow, #[cfg(windows)] skip-taskbar; opacity = honest v1
 │                       no-op, winit has none + softbuffer is opaque → wgpu/native deferred),
 │                       geometry.rs (the pure window/monitor rect math extracted OUT of window.rs so it's
 │                       unit-testable: window_visible_on_monitors = the off-screen-recovery AABB overlap +
-│                       empty-monitor-list guard; near_resize_corner = the drag-vs-resize hit-test).
+│                       empty-monitor-list guard; near_resize_corner = the drag-vs-resize hit-test),
+│                       input.rs (the PURE audio-key half: winit key → AudioAction map + the
+│                       apply_audio_action mute/volume transitions mirroring the TUI arms 1:1 — see the
+│                       audio/ entry; unit-tested with spawn injected as a closure).
 │                       **mod.rs + window.rs are codecov-IGNORED** (winit `EventLoop`/`ApplicationHandler` +
 │                       tokio glue, the floating twin of driver.rs — need a real display); the floating crate's
-│                       TESTED surface is offscreen.rs (render seam) + geometry.rs (rect math). Visual check:
+│                       TESTED surface is offscreen.rs (render seam) + geometry.rs (rect math) + input.rs
+│                       (audio keys). Visual check:
 │                       `examples/floating_snapshot.rs` (the floating twin of the `snapshot` example).
 └── tui/                ratatui App + TuiRenderer (inherent `render` flush; core Renderer trait retired #483) — the half-block flush + widgets +
                         event loop, a thin painter over the pixtuoid-scene crate (the engine is its own crate now) — see src/tui/CLAUDE.md
