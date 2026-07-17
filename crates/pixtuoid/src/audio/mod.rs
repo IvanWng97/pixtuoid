@@ -25,128 +25,24 @@ use std::time::Instant;
 use pixtuoid_scene::audio::mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
 use pixtuoid_scene::audio::AudioFrame;
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::{dsp, synth};
+use pixtuoid_scene::audio::TrackId;
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::{OneShot, TrackId};
+use pixtuoid_scene::audio::{dsp, synth};
+// OneShot is named only in the test fixtures now (run_loop infers it from
+// `frame.events`), so import it test-side to keep the prod build warning-free.
+#[cfg(all(feature = "audio", test))]
+use pixtuoid_scene::audio::OneShot;
 #[cfg(feature = "audio")]
 use sink::AudioSink;
 
-/// Per-key / per-drop pre-rendered variant pools: playback picks randomly so
-/// typing/rain never sound repeated, while runtime stays synthesis-free.
+// AssetBank / TrackBeds / TRACK_STEMS + the pool/gain consts MOVED to
+// `pixtuoid_scene::audio::bank` (web-audio #633): pure builders, so the wasm
+// WebAudio painter builds byte-identical banks from the SAME source. run_loop
+// imports them below.
 #[cfg(feature = "audio")]
-const KEYSTROKE_POOL: usize = 16;
-#[cfg(feature = "audio")]
-const DROP_POOL: usize = 12;
-
-/// One-shot playback gains relative to master — the loudness-matched Phase 0
-/// unit levels (±2.2dB across the set), with typing under the beds.
-#[cfg(feature = "audio")]
-const KEYSTROKE_GAIN: f32 = 0.35;
-#[cfg(feature = "audio")]
-const ONE_SHOT_GAIN: f32 = 0.5;
-/// Foreground raindrops sit 12-14dB ABOVE the wash per the reference — the
-/// bed peaks well under 1.0, so drops ride at the rain level itself.
-#[cfg(feature = "audio")]
-const DROP_GAIN: f32 = 0.9;
-
-/// The ONE-SHOT pools the audio thread keeps for its whole life,
-/// synthesized once at spawn. The loop beds live in [`TrackBeds`] instead —
-/// they are handed to the sink at registration and NOT retained.
-#[cfg(feature = "audio")]
-struct AssetBank {
-    keystrokes: Vec<Arc<Vec<f32>>>,
-    drops: Vec<Arc<Vec<f32>>>,
-    door_chime: Arc<Vec<f32>>,
-    printer_whir: Arc<Vec<f32>>,
-    vending_drop: Arc<Vec<f32>>,
-}
-
-#[cfg(feature = "audio")]
-impl AssetBank {
-    /// `rng` is the ONE asset stream — rain then `TrackBeds::build` continue it, so
-    /// the draw order (and thus every buffer) is byte-identical to the
-    /// LISTEN-ratified renders. Don't reorder the synth calls.
-    fn build(rng: &mut dsp::NoiseStream) -> Self {
-        Self {
-            keystrokes: (0..KEYSTROKE_POOL)
-                .map(|_| Arc::new(synth::keystroke(rng)))
-                .collect(),
-            drops: (0..DROP_POOL)
-                .map(|_| Arc::new(synth::rain_drop(rng)))
-                .collect(),
-            door_chime: Arc::new(synth::door_chime()),
-            printer_whir: Arc::new(synth::printer_whir(rng)),
-            vending_drop: Arc::new(synth::vending_drop(rng)),
-        }
-    }
-
-    fn one_shot(&self, event: OneShot) -> Arc<Vec<f32>> {
-        match event {
-            OneShot::DoorChime => Arc::clone(&self.door_chime),
-            OneShot::PrinterWhir => Arc::clone(&self.printer_whir),
-            OneShot::VendingDrop => Arc::clone(&self.vending_drop),
-        }
-    }
-}
-
-/// The five TRACK-OWNED loop stems, in registration order. Rain is not
-/// here — it is weather, shared by every mood track (#644).
-#[cfg(feature = "audio")]
-const TRACK_STEMS: [LoopStem; 5] = [
-    LoopStem::Pad,
-    LoopStem::Sparkle,
-    LoopStem::Keys,
-    LoopStem::Drums,
-    LoopStem::Texture,
-];
-
-/// One mood track's loop beds — built per [`TrackId`], registered (or
-/// swapped in) with the sink, then DROPPED: `RodioSink` copies each bed
-/// into its own `SamplesBuffer`, so retaining the Arcs would double the
-/// bed RAM (review finding). Within a track the four musical beds share
-/// ONE sample count and register together (phase-locked); the NIGHT
-/// texture shares it too (its kick-duck is baked at frozen kick times);
-/// the DAY texture keeps its free-running power-of-two length.
-#[cfg(feature = "audio")]
-struct TrackBeds {
-    beds: [Arc<Vec<f32>>; TRACK_STEMS.len()],
-}
-
-#[cfg(feature = "audio")]
-impl TrackBeds {
-    /// DAY continues the boot rng stream in the ratified order (drums,
-    /// then texture — the pure musical stems draw nothing), keeping every
-    /// day buffer byte-identical to the #642/#643 renders. NIGHT draws
-    /// from wherever the stream stands — its identity is the frozen score
-    /// plus spectral pins, not byte equality.
-    fn build(rng: &mut dsp::NoiseStream, track: TrackId) -> Self {
-        let beds = match track {
-            TrackId::Day => [
-                Arc::new(synth::stem_pad()),
-                Arc::new(synth::stem_sparkle()),
-                Arc::new(synth::stem_keys()),
-                Arc::new(synth::stem_drums(rng)),
-                Arc::new(synth::texture_bed(rng)),
-            ],
-            TrackId::Night => [
-                Arc::new(synth::night_pad()),
-                Arc::new(synth::night_sparkle()),
-                Arc::new(synth::night_keys()),
-                Arc::new(synth::night_drums(rng)),
-                Arc::new(synth::night_texture(rng)),
-            ],
-        };
-        Self { beds }
-    }
-
-    fn bed(&self, stem: LoopStem) -> Arc<Vec<f32>> {
-        let i = TRACK_STEMS
-            .iter()
-            .position(|s| *s == stem)
-            .expect("every track stem has a bed");
-        Arc::clone(&self.beds[i])
-    }
-}
+use pixtuoid_scene::audio::bank::{
+    AssetBank, TrackBeds, DROP_GAIN, KEYSTROKE_GAIN, ONE_SHOT_GAIN, TRACK_STEMS,
+};
 
 /// The +/- keys' volume increment — ONE definition for BOTH painters' key
 /// handlers (`tui/mod.rs` dispatch + `floating::input`), so the two surfaces

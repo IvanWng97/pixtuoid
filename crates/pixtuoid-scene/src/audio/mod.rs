@@ -16,6 +16,8 @@
 // NO audio-device deps live here (pure math; the rodio/cpal ban still holds).
 // `#[doc(hidden)]`: workspace-internal, not stable engine API (overlay/board pattern).
 #[doc(hidden)]
+pub mod bank;
+#[doc(hidden)]
 pub mod dsp;
 #[doc(hidden)]
 pub mod mixer;
