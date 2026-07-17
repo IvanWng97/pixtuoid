@@ -60,7 +60,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   synthesizes the frozen lofi compositions at startup and loops all six beds.
 │                   MOOD TRACKS (#644): TrackId {Day, Night} + pure select_track(is_day, precip)
 │                   ride AudioFrame — night hours (the SAME pixel_painter::hour_is_day sun window
-│                   the lighting renders) or any rain pick the Night take; the binary crossfades
+│                   the lighting renders) or any rain pick the Night take; the binary's switch
+│                   machine crossfades between the tracks (see the pixtuoid audio/ entry)
 ├── layout/             zone-based office geometry (terminal-agnostic; moved from pixtuoid-core —
 │                       the engine owns its geometry; `Layout` = compat alias for SceneLayout;
 │                       the WalkableMask VOCABULARY it stamps stays in core, coherence-bound to Grid):

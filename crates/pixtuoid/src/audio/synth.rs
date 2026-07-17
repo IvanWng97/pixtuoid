@@ -597,10 +597,17 @@ const NIGHT_TEXTURE_SPLICE_S: f32 = 0.03;
 /// inaudible-class quiet noise — re-verified at the LISTEN gate.)
 pub(crate) fn night_texture(rng: &mut NoiseStream) -> Vec<f32> {
     let n = n_samples(score::night_loop_secs());
-    let raw: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
+    let f = n_samples(NIGHT_TEXTURE_SPLICE_S);
+    // synthesize f EXTRA samples past the loop end: the splice blends a
+    // genuine CONTINUATION of the tail into the head, so the wrap
+    // buf[n-1] -> buf[0] is adjacent samples of one stream (a head-only
+    // crossfade of unrelated content leaves the discontinuity — the
+    // review refuted the first attempt empirically)
+    let total = n + f;
+    let raw: Vec<f32> = (0..total).map(|_| rng.norm()).collect();
     let hiss = lowpass(&raw, 3800.0);
     let tau = std::f32::consts::TAU;
-    let mut buf: Vec<f32> = (0..n)
+    let mut buf: Vec<f32> = (0..total)
         .map(|i| {
             let t = i as f32 / SR;
             let room = (tau * 90.0 * t).sin() * (1.0 + 0.2 * (tau * 0.4 * t).sin()) * 0.006;
@@ -614,9 +621,19 @@ pub(crate) fn night_texture(rng: &mut NoiseStream) -> Vec<f32> {
         let pop: Vec<f32> = (0..pn)
             .map(|i| rng.norm() * (-(i as f32 / SR) * 800.0).exp())
             .collect();
-        place(&mut buf, &pop, at, 0.03 + 0.06 * rng.unit());
+        place(&mut buf[..n], &pop, at, 0.03 + 0.06 * rng.unit());
     }
-    // kick duck: dip 4dB, 150ms linear recovery after each frozen kick
+    // linear blend of CORRELATED content (the pre-roll continues the same
+    // lowpassed stream + the same sines), so no equal-power law is needed
+    for j in 0..f {
+        let a = j as f32 / f as f32;
+        buf[j] = buf[n + j] * (1.0 - a) + buf[j] * a;
+    }
+    buf.truncate(n);
+    // normalize BEFORE the duck (the python reference ducks the tiled,
+    // already-normalized bed — duck-then-normalize re-inflated the level
+    // by up to the duck depth, a review catch)
+    normalize(&mut buf, 0.45);
     let depth = 10f32.powf(-4.0 / 20.0);
     let rel = n_samples(0.15);
     for &kt in &score::NIGHT_KICK_TIMES {
@@ -629,13 +646,6 @@ pub(crate) fn night_texture(rng: &mut NoiseStream) -> Vec<f32> {
             *slot *= g;
         }
     }
-    // seam splice: crossfade the tail into the head (non-pow2 loop)
-    let f = n_samples(NIGHT_TEXTURE_SPLICE_S);
-    for j in 0..f {
-        let a = j as f32 / f as f32;
-        buf[j] = buf[j] * a + buf[n - f + j] * (1.0 - a);
-    }
-    normalize(&mut buf, 0.45);
     buf
 }
 
@@ -856,15 +866,28 @@ mod tests {
     fn night_texture_seam_is_spliced_and_duck_dips_after_kicks() {
         let tex = night_texture(&mut NoiseStream::new(4));
         let n = tex.len();
-        // seam: the wrap jump must not exceed the buffer's own body jumps
-        let body_max = tex
-            .windows(2)
-            .map(|w| (w[1] - w[0]).abs())
-            .fold(0.0f32, f32::max);
+        // the wrap must be a CONTINUATION, not merely "no huge jump" (the
+        // first splice attempt passed the loose body-max check while the
+        // discontinuity survived — review-refuted empirically). Two pins:
+        // adjacent-sample continuity at the wrap, and no level step across
+        // it (the 0.4Hz AM's phase mismatch was a ~19% RMS step broken).
+        let body_median = {
+            let mut d: Vec<f32> = tex.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+            d.sort_by(f32::total_cmp);
+            d[d.len() / 2]
+        };
         let seam = (tex[0] - tex[n - 1]).abs();
         assert!(
-            seam <= body_max,
-            "loop seam jump {seam} exceeds body max {body_max}"
+            seam <= body_median * 8.0,
+            "wrap must read as adjacent samples: seam {seam} vs median {body_median}"
+        );
+        let rms = |s: &[f32]| (s.iter().map(|v| v * v).sum::<f32>() / s.len() as f32).sqrt();
+        let w = n_samples(0.01);
+        let head = rms(&tex[..w]);
+        let tail = rms(&tex[n - w..]);
+        assert!(
+            (head - tail).abs() <= 0.10 * head.max(tail),
+            "no level step across the wrap: head {head:.5} vs tail {tail:.5}"
         );
         // duck: RMS right after a kick is lower than just before it
         let kt = score::NIGHT_KICK_TIMES[2];
@@ -906,6 +929,11 @@ mod tests {
             ("sparkle", stem_sparkle()),
             ("keys", stem_keys()),
             ("drums", stem_drums(&mut rng)),
+            ("night_pad", night_pad()),
+            ("night_sparkle", night_sparkle()),
+            ("night_keys", night_keys()),
+            ("night_drums", night_drums(&mut rng)),
+            ("night_texture", night_texture(&mut rng)),
         ] {
             assert!(!buf.is_empty(), "{name} empty");
             assert!(

@@ -242,3 +242,53 @@ pub(super) const NIGHT_KICK_TIMES: [f32; 16] = [
     0.0236, 2.2367, 3.5526, 5.7660, 7.0743, 9.2961, 10.6070, 12.8277, 14.1332, 16.3608, 17.6657,
     19.8895, 21.1983, 23.4135, 24.7274, 26.9428,
 ];
+
+#[cfg(test)]
+mod night_tests {
+    use super::*;
+
+    #[test]
+    fn night_tables_match_the_frozen_v4_realization() {
+        // the day tables' drift guard, extended to night (plan item 3 —
+        // the review caught it undelivered): sums bind EVERY entry, spot
+        // pins bind the identity, and NIGHT_KICK_TIMES is pinned to the
+        // Kick entries of NIGHT_DRUMS (two frozen copies of one truth —
+        // the texture's baked duck desyncs from the drums if they drift).
+        let sum3 = |t: &[(f32, u8, f32)]| {
+            t.iter()
+                .fold((0.0f64, 0u32, 0.0f64), |(a, n, v), &(aa, nn, vv)| {
+                    (a + aa as f64, n + nn as u32, v + vv as f64)
+                })
+        };
+        let (ka, kn, kv) = sum3(&NIGHT_KEYS);
+        assert!((ka - 71.1778).abs() < 1e-3 && kn == 336 && (kv - 2.563_291).abs() < 1e-4);
+        let (sa, sn, sv) = sum3(&NIGHT_SPARKLE);
+        assert!((sa - 79.853).abs() < 1e-3 && sn == 354 && (sv - 1.573_556).abs() < 1e-4);
+        let (da, dg) = NIGHT_DRUMS
+            .iter()
+            .fold((0.0f64, 0.0f64), |(a, g), &(aa, _, gg)| {
+                (a + aa as f64, g + gg as f64)
+            });
+        assert!((da - 495.7997).abs() < 1e-3 && (dg - 14.081_426).abs() < 1e-4);
+        assert_eq!(NIGHT_KEYS[0], (3.9989, 53, 0.501_036));
+        // the pairing pin: kick times ARE the drums' Kick timestamps
+        let mut kicks: Vec<f32> = NIGHT_DRUMS
+            .iter()
+            .filter(|(_, k, _)| *k == DrumKind::Kick)
+            .map(|&(a, _, _)| a)
+            .collect();
+        kicks.sort_by(f32::total_cmp);
+        let mut kt = NIGHT_KICK_TIMES.to_vec();
+        kt.sort_by(f32::total_cmp);
+        assert_eq!(kicks, kt, "NIGHT_KICK_TIMES desynced from NIGHT_DRUMS");
+        // harmonic invariant: every night keys note is a chord tone
+        for &(at, note, _) in NIGHT_KEYS.iter() {
+            let bar = (at / (night_beat_s() * BEATS_PER_BAR)) as usize;
+            let (chord, _) = night_chord_at_bar(bar);
+            assert!(
+                chord.iter().any(|&c| note == c || note == c + 12),
+                "night note {note} at {at}s is not a tone of its bar's chord"
+            );
+        }
+    }
+}

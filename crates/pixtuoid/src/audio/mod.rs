@@ -360,6 +360,15 @@ fn run_loop(
                         let resync = last_step.duration_since(started).as_secs_f64();
                         typing.tick(resync, 0.0);
                         drops.tick(resync, 0.0);
+                        // drain the stall backlog: keep the freshest
+                        // LEVELS but discard queued edge-EVENTS — replayed
+                        // stacked they are a clank pile, and losing a chime
+                        // under a track change is the better artifact
+                        while let Ok(f) = rx.try_recv() {
+                            typing_level = f.stems.typing;
+                            rain_level = f.stems.rain;
+                            wanted_stems = f.stems;
+                        }
                     }
                     Some(cur) if frame.track != cur && pending.is_none() => {
                         pending = Some(frame.track);
@@ -413,6 +422,15 @@ fn run_loop(
                 let resync = last_step.duration_since(started).as_secs_f64();
                 typing.tick(resync, 0.0);
                 drops.tick(resync, 0.0);
+                // drain the stall backlog: keep the freshest
+                // LEVELS but discard queued edge-EVENTS — replayed
+                // stacked they are a clank pile, and losing a chime
+                // under a track change is the better artifact
+                while let Ok(f) = rx.try_recv() {
+                    typing_level = f.stems.typing;
+                    rain_level = f.stems.rain;
+                    wanted_stems = f.stems;
+                }
             }
         }
 
