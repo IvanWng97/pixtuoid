@@ -262,7 +262,10 @@ impl WebAudioDriver {
 
     /// The `(pool, index)` one-shot samples JS pre-uploads once after warmup.
     /// Pool sizes: keystroke = `bank::KEYSTROKE_POOL`, drop = `bank::DROP_POOL`,
-    /// the three appliance cues = 1 each. Empty until warmup builds the bank.
+    /// the three appliance cues = 1 each. Empty until warmup builds the bank,
+    /// AND empty for any `index` PAST the pool's end — the single-sample pools
+    /// return their buffer ONLY at index 0 (the JS discovery loop grows until
+    /// the first empty slot, so an unbounded non-empty would spin forever).
     pub(crate) fn oneshot_buffer(&self, pool: OneShotPool, index: usize) -> &[f32] {
         let Some(bank) = &self.bank else {
             return &[];
@@ -270,9 +273,12 @@ impl WebAudioDriver {
         match pool {
             OneShotPool::Keystroke => bank.keystrokes.get(index).map(|a| a.as_slice()),
             OneShotPool::Drop => bank.drops.get(index).map(|a| a.as_slice()),
-            OneShotPool::DoorChime => Some(bank.door_chime.as_slice()),
-            OneShotPool::PrinterWhir => Some(bank.printer_whir.as_slice()),
-            OneShotPool::VendingDrop => Some(bank.vending_drop.as_slice()),
+            // single-sample pools: buffer at index 0 ONLY, else empty (the JS
+            // discovery loop reads until the first empty slot — an unbounded
+            // non-empty would spin forever)
+            OneShotPool::DoorChime => (index == 0).then(|| bank.door_chime.as_slice()),
+            OneShotPool::PrinterWhir => (index == 0).then(|| bank.printer_whir.as_slice()),
+            OneShotPool::VendingDrop => (index == 0).then(|| bank.vending_drop.as_slice()),
         }
         .unwrap_or(&[])
     }
@@ -332,6 +338,35 @@ fn fmt_f32(v: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_oneshot_pool_has_a_finite_end_the_js_discovery_loop_can_find() {
+        // The site reads oneshot_buffer(pool, j) for j=0,1,… until len==0 to
+        // discover the pool size; a pool that returns non-empty for EVERY index
+        // would spin the browser's main thread forever (the review HIGH). Pin
+        // that every pool terminates, at its true size.
+        let mut d = WebAudioDriver::new(TrackId::Day);
+        while d.warmup_step() > 0 {}
+        let pools = [
+            (OneShotPool::Keystroke, bank::KEYSTROKE_POOL),
+            (OneShotPool::Drop, bank::DROP_POOL),
+            (OneShotPool::DoorChime, 1),
+            (OneShotPool::PrinterWhir, 1),
+            (OneShotPool::VendingDrop, 1),
+        ];
+        for (pool, size) in pools {
+            for j in 0..size {
+                assert!(
+                    !d.oneshot_buffer(pool, j).is_empty(),
+                    "{pool:?}[{j}] present"
+                );
+            }
+            assert!(
+                d.oneshot_buffer(pool, size).is_empty(),
+                "{pool:?}[{size}] must be EMPTY — the discovery-loop terminator"
+            );
+        }
+    }
 
     #[test]
     fn commands_json_is_parseable_and_pool_wire_round_trips() {

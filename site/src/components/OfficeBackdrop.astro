@@ -788,8 +788,12 @@ import { asset, DIM_RESTING } from '../consts';
       oneShotBufs = {};
       for (const wire of ONESHOT_WIRES) {
         oneShotBufs[wire] = [];
-        // grow the pool until the engine reports an empty slot (len 0)
-        for (let j = 0; office.audio_oneshot_len(wire, j) > 0; j++) {
+        // grow the pool until the engine reports an empty slot (len 0). The
+        // POOL_MAX cap is a belt-and-braces guard: the engine terminates every
+        // pool (pinned by a Rust test), but a future regression that returned
+        // non-empty unboundedly must never hang the main thread here.
+        const POOL_MAX = 1024;
+        for (let j = 0; j < POOL_MAX && office.audio_oneshot_len(wire, j) > 0; j++) {
           oneShotBufs[wire].push(
             audioMakeBuffer(office.audio_oneshot_ptr(wire, j), office.audio_oneshot_len(wire, j))
           );
