@@ -875,6 +875,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.audio.frame(pixtuoid_scene::audio::AudioFrame {
                 stems: pixtuoid_scene::audio::stem_levels(&counts, precipitation),
                 events,
+                track: pixtuoid_scene::audio::select_track(
+                    pixtuoid_scene::pixel_painter::is_day_at(now),
+                    precipitation,
+                ),
             });
         }
         // The shared after-frame seam (coffee stamp + door-anim clamp) — the same

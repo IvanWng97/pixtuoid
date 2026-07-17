@@ -229,6 +229,14 @@ pub fn hour_is_day(hour: f32) -> bool {
     background::hour_is_day(hour)
 }
 
+/// Day/night at `now` on the LOCAL clock — the native painters' feed for
+/// the audio track selector (wasm passes its own hour; time is a parameter
+/// there). Same sun window the lighting renders: the music follows what
+/// the office SHOWS.
+pub fn is_day_at(now: std::time::SystemTime) -> bool {
+    background::hour_is_day(background::local_hour_frac(now))
+}
+
 // The steam gate reads the SAME window `CoffeeState::record` refreshes on —
 // a reference, not a second copy of the value.
 const COFFEE_STEAM_WINDOW_SECS: u64 = crate::floor::CoffeeState::STEAM_WINDOW_SECS;

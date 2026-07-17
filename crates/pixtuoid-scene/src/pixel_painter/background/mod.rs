@@ -44,7 +44,7 @@ use super::palette::{blend, blend_rgb, mix_lab};
 /// window-look timers and `sun_on_wall` (via `emitter`) all route through here.
 /// (`paint_clock`'s analog hands keep their own decode — they need raw
 /// `hour % 12` / `minute`, not this fractional value.)
-fn local_hour_frac(now: std::time::SystemTime) -> f32 {
+pub(in crate::pixel_painter) fn local_hour_frac(now: std::time::SystemTime) -> f32 {
     use chrono::Timelike;
     let unix_now = now
         .duration_since(std::time::UNIX_EPOCH)

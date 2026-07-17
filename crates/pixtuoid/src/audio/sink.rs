@@ -11,6 +11,9 @@ use super::mixer::LoopStem;
 pub(crate) trait AudioSink: Send {
     /// Start `stem` looping `samples` (mono f32 @ 44_100) at gain 0.
     fn start_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>);
+    /// Replace a looping stem's buffer (the #644 mood-track switch) — the
+    /// caller guarantees the stem is at gain 0, so the cut is inaudible.
+    fn swap_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>);
     /// Set a looping stem's gain (0..=1, already master-scaled).
     fn set_loop_gain(&mut self, stem: LoopStem, gain: f32);
     /// Fire-and-forget one-shot at `gain`.
@@ -26,6 +29,8 @@ pub(crate) trait AudioSink: Send {
 pub(crate) struct NullSink {
     pub(crate) loops_started: Vec<LoopStem>,
     pub(crate) loop_samples: std::collections::HashMap<LoopStem, Arc<Vec<f32>>>,
+    /// (stem, new buffer length) per swap — the #644 switch-machine pin.
+    pub(crate) swaps: Vec<(LoopStem, usize)>,
     pub(crate) last_gain: std::collections::HashMap<LoopStem, f32>,
     pub(crate) one_shots: usize,
 }
@@ -34,6 +39,10 @@ pub(crate) struct NullSink {
 impl AudioSink for NullSink {
     fn start_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>) {
         self.loops_started.push(stem);
+        self.loop_samples.insert(stem, samples);
+    }
+    fn swap_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>) {
+        self.swaps.push((stem, samples.len()));
         self.loop_samples.insert(stem, samples);
     }
     fn set_loop_gain(&mut self, stem: LoopStem, gain: f32) {
@@ -126,6 +135,15 @@ pub(crate) mod rodio_sink {
             player.set_volume(0.0);
             player.append(Self::source_of(&samples).repeat_infinite());
             self.loops.insert(stem, player);
+        }
+
+        fn swap_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>) {
+            // dropping the old Player stops it (the caller holds the stem
+            // at gain 0 across the swap, so nothing audible is cut)
+            if let Some(old) = self.loops.remove(&stem) {
+                old.stop();
+            }
+            self.start_loop(stem, samples);
         }
 
         fn set_loop_gain(&mut self, stem: LoopStem, gain: f32) {

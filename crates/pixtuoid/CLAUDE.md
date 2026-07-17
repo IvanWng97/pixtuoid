@@ -265,6 +265,17 @@ src/
 │                       re-attempts the lazy spawn whenever unmuted-but-disabled ('+' is never a dead key).
 │                       An EMPTY office now plays the quiet pad+sparkle+texture "radio on" floor (the
 │                       ratified demo_1) — Phase 1's empty-silent behavior ended when the music landed.
+│                       MOOD TRACKS (#644): TrackId rides AudioFrame (scene's select_track over the
+│                       lighting's OWN sun window + precipitation); run_loop's switch machine holds the
+│                       five TRACK_STEMS at 0, synthesizes the new track's TrackBeds under the silence
+│                       (~2s), swap_loop's them (RodioSink drops+recreates the Player at gain 0), ramps
+│                       back — LATCHED per cycle (boundary flapping can't thrash synths); rain is
+│                       weather, never swapped. Track beds register on the FIRST frame (it names the
+│                       right mood — booting Day at night would synth a track just to fade it away).
+│                       NIGHT = the Lofi Girl-anchored v4 take (LOFI-BIBLE.md; BPM 68, sub-bass floor
+│                       in the pad, at-seconds frozen humanization, duck-baked texture at the night
+│                       loop length = phase-locked); bus glue is deliberately NOT runtime (rodio has
+│                       no insert) — the listen gate renders the honest no-glue approximation.
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM
 │                       from githubnext/monaspace v1.400 static — unmodified, so the OFL Reserved-Font-Name
 │                       clause is never triggered)

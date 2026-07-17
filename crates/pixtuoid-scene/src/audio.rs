@@ -54,6 +54,32 @@ pub enum OneShot {
 pub struct AudioFrame {
     pub stems: StemLevels,
     pub events: Vec<OneShot>,
+    /// Which mood track the musical beds should play (#644) — selected
+    /// scene-side from the SAME day/night boundary the lighting renders
+    /// plus the weather. The binary's audio thread crossfades on change.
+    pub track: TrackId,
+}
+
+/// The mood-track registry ids (#644). Day = the original ratified
+/// composition; Night = the Lofi Girl-anchored slow take, also chosen
+/// whenever it rains (the office's rainy mood).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TrackId {
+    #[default]
+    Day,
+    Night,
+}
+
+/// Pure track selection: night hours (the painter's OWN sun window via
+/// `pixel_painter::hour_is_day`/`is_day_at`) or any precipitation pick
+/// the night take. Pure in its inputs so wasm can feed its parametric
+/// hour and tests need no clock.
+pub fn select_track(is_day: bool, precipitation: f32) -> TrackId {
+    if !is_day || precipitation > 0.0 {
+        TrackId::Night
+    } else {
+        TrackId::Day
+    }
 }
 
 /// Cross-frame cue state — the audio twin of the painter session halves
@@ -154,6 +180,16 @@ pub fn stem_levels(counts: &StateCounts, precipitation: f32) -> StemLevels {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn select_track_truth_table() {
+        // day + dry = Day; night hours OR any rain = Night
+        assert_eq!(select_track(true, 0.0), TrackId::Day);
+        assert_eq!(select_track(false, 0.0), TrackId::Night);
+        assert_eq!(select_track(true, 0.6), TrackId::Night);
+        assert_eq!(select_track(false, 1.0), TrackId::Night);
+        assert_eq!(select_track(true, f32::MIN_POSITIVE), TrackId::Night);
+    }
 
     fn counts(active: usize) -> StateCounts {
         StateCounts {
