@@ -745,21 +745,23 @@ import { asset, DIM_RESTING } from '../consts';
     let loopGains = []; // 6 GainNodes (LoopStem::ALL order: 0=Pad … 5=Rain)
     let loopSources = []; // 6 looping AudioBufferSourceNodes
     let oneShotBufs = {}; // pool wire → [AudioBuffer]
-    // Pool sizes must match bank::{KEYSTROKE_POOL, DROP_POOL} + the 3 singles.
-    const ONESHOT_POOLS = [
-      [0, 16],
-      [1, 12],
-      [2, 1],
-      [3, 1],
-      [4, 1],
-    ];
+    let audioSR = 44100; // engine sample rate, read ONCE at upload (see below)
+    // Pool WIRES only (0=keystroke, 1=drop, 2=chime, 3=printer, 4=vending); the
+    // COUNT is discovered from the engine (audio_oneshot_len == 0 past the pool
+    // end) so the Rust bank::{KEYSTROKE_POOL,DROP_POOL} sizes aren't duplicated
+    // here across the wasm/JS wire.
+    const ONESHOT_WIRES = [0, 1, 2, 3, 4];
 
     // Copy f32 samples OUT of wasm linear memory (a view would dangle on the
-    // next memory.grow — the frame_ptr contract) into an AudioBuffer.
+    // next memory.grow — the frame_ptr contract) into an AudioBuffer. `audioSR`
+    // is passed in (NOT re-read here) so no wasm call sits between the view and
+    // the copy — a grow there would detach the view mid-`.set` (defensive: the
+    // const getter can't grow today, but the contract says re-read after ANY
+    // wasm call).
     function audioMakeBuffer(ptr, len) {
       if (!len) return null;
       const view = new Float32Array(wasm.memory.buffer, ptr, len);
-      const buf = audioCtx.createBuffer(1, len, office.audio_sample_rate());
+      const buf = audioCtx.createBuffer(1, len, audioSR);
       buf.getChannelData(0).set(view);
       return buf;
     }
@@ -767,6 +769,7 @@ import { asset, DIM_RESTING } from '../consts';
       return audioMakeBuffer(office.audio_loop_ptr(i), office.audio_loop_len(i));
     }
     function audioUploadBuffers() {
+      audioSR = office.audio_sample_rate(); // read once, before any view is taken
       loopGains = [];
       loopSources = [];
       for (let i = 0; i < 6; i++) {
@@ -782,11 +785,10 @@ import { asset, DIM_RESTING } from '../consts';
         loopSources[i] = s;
       }
       oneShotBufs = {};
-      for (const pool of ONESHOT_POOLS) {
-        const wire = pool[0];
-        const count = pool[1];
+      for (const wire of ONESHOT_WIRES) {
         oneShotBufs[wire] = [];
-        for (let j = 0; j < count; j++) {
+        // grow the pool until the engine reports an empty slot (len 0)
+        for (let j = 0; office.audio_oneshot_len(wire, j) > 0; j++) {
           oneShotBufs[wire].push(
             audioMakeBuffer(office.audio_oneshot_ptr(wire, j), office.audio_oneshot_len(wire, j))
           );
@@ -811,13 +813,22 @@ import { asset, DIM_RESTING } from '../consts';
       }
     }
     function audioTick(nowMs) {
-      if (!audioReady || !audioPlaying || !audioCtx) return;
+      if (!audioReady || !audioCtx) return;
+      // ALWAYS advance the engine (mixer ramp + typing/rain schedulers + the
+      // cue tracker's edge diff) even while MUTED — mirrors native, which keeps
+      // observing every frame and merely plays one-shots at gain 0. If we
+      // skipped the whole tick while muted the cue tracker would freeze and
+      // replay a stacked one-shot volley on unmute (the review's parity find).
       let cmd;
       try {
         cmd = JSON.parse(office.audio_tick(nowMs));
       } catch (e) {
         return; // a bad frame degrades to holding the last gains, never a throw
       }
+      // Muted = the AudioContext is suspended; keep the engine live but don't
+      // schedule any WebAudio (no gain ramps, no one-shot nodes queued against
+      // a suspended context that would all fire on resume).
+      if (!audioPlaying) return;
       const now = audioCtx.currentTime;
       // The mixer already crossfades (each gain is the RAMPED value this tick),
       // so a short setTargetAtTime just de-zippers the ~30fps steps.
@@ -896,10 +907,13 @@ import { asset, DIM_RESTING } from '../consts';
         /* private mode */
       }
       if (!remembered) return;
-      const restore = function () {
+      const restore = function (e) {
         window.removeEventListener('pointerdown', restore, true);
         window.removeEventListener('keydown', restore, true);
-        if (audioReady || audioBooting) return;
+        // If the gesture IS the ♩ button, let its OWN click handler own the
+        // toggle — a capture-phase restore→on followed by the click→off would
+        // invert the returning visitor's very first press (review MEDIUM).
+        if ((e && e.target && audioBtn.contains(e.target)) || audioReady || audioBooting) return;
         audioStart();
         setAudioPlaying(true);
       };
@@ -1067,10 +1081,20 @@ import { asset, DIM_RESTING } from '../consts';
           if (overlayEl) overlayEl.classList.remove('is-on');
           live = false;
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));
+          // Reduced motion stops the rAF loop, so the sound loops would drone
+          // unfed behind the poster — suspend the context (the flag stays on, so
+          // an un-reduce resumes it). Hide + re-arm the ♩ so it re-shows on the
+          // fresh boot (showAudioBtn's once-guard would otherwise keep it hidden).
+          if (audioCtx && audioPlaying) audioCtx.suspend();
+          if (audioBtn) audioBtn.hidden = true;
+          audioBtnShown = false;
         } else if (hasWasm) {
           cover(); // re-cover before the fresh boot rolls the live office in
           boot(); // no-op if already booted; a reduced-motion first visit fetches here
           start();
+          // resume the sound if the visitor had it on before reducing (the
+          // ♩ re-shows via showAudioBtn once the office rolls back in)
+          if (audioCtx && audioPlaying) audioCtx.resume();
         }
         // ambient motion stops on reduce and resumes on un-reduce (ticker/dust/
         // clips) — show/hide the control to match, both directions. #456
