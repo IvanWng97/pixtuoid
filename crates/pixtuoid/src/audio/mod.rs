@@ -288,6 +288,38 @@ pub(crate) fn spawn(volume: f32) -> AudioHandle {
     }
 }
 
+/// After a blocking `TrackBeds::build` (~2s release / >10s debug) the
+/// thread's clocks are stale and the frame channel holds a backlog. ONE
+/// recovery routine for both build arms (first-frame + pending-switch):
+/// reset the ramp clock (a stale `last_step` snaps gains to target — the
+/// bot HIGH), re-anchor the schedulers via their level-0 clock-hold arm
+/// (else they fire the stall's backlog as a burst), and drain the queued
+/// frames keeping the freshest LEVELS while discarding edge-EVENTS
+/// (replayed stacked they are a clank pile; losing a chime under a track
+/// change is the better artifact).
+#[cfg(feature = "audio")]
+#[allow(clippy::too_many_arguments)] // the loop's mutable locals, passed once from two arms
+fn resync_after_stall(
+    rx: &mpsc::Receiver<AudioFrame>,
+    started: Instant,
+    last_step: &mut Instant,
+    typing: &mut TypingScheduler,
+    drops: &mut DropScheduler,
+    typing_level: &mut f32,
+    rain_level: &mut f32,
+    wanted_stems: &mut pixtuoid_scene::audio::StemLevels,
+) {
+    *last_step = Instant::now();
+    let resync = last_step.duration_since(started).as_secs_f64();
+    typing.tick(resync, 0.0);
+    drops.tick(resync, 0.0);
+    while let Ok(f) = rx.try_recv() {
+        *typing_level = f.stems.typing;
+        *rain_level = f.stems.rain;
+        *wanted_stems = f.stems;
+    }
+}
+
 /// The audio thread body — device-agnostic over [`AudioSink`], so the test
 /// probe and the LISTEN-gate wav renderer drive the SAME loop.
 #[cfg(feature = "audio")]
@@ -352,23 +384,16 @@ fn run_loop(
                             device.start_loop(stem, beds.bed(stem));
                         }
                         current = Some(frame.track);
-                        // the blocking build stalled the thread ~2s: reset
-                        // the ramp clock and re-anchor the schedulers, or
-                        // the next tick's dt snaps gains to target (bot
-                        // HIGH) and the schedulers fire a backlog burst
-                        last_step = Instant::now();
-                        let resync = last_step.duration_since(started).as_secs_f64();
-                        typing.tick(resync, 0.0);
-                        drops.tick(resync, 0.0);
-                        // drain the stall backlog: keep the freshest
-                        // LEVELS but discard queued edge-EVENTS — replayed
-                        // stacked they are a clank pile, and losing a chime
-                        // under a track change is the better artifact
-                        while let Ok(f) = rx.try_recv() {
-                            typing_level = f.stems.typing;
-                            rain_level = f.stems.rain;
-                            wanted_stems = f.stems;
-                        }
+                        resync_after_stall(
+                            &rx,
+                            started,
+                            &mut last_step,
+                            &mut typing,
+                            &mut drops,
+                            &mut typing_level,
+                            &mut rain_level,
+                            &mut wanted_stems,
+                        );
                     }
                     Some(cur) if frame.track != cur && pending.is_none() => {
                         pending = Some(frame.track);
@@ -417,20 +442,16 @@ fn run_loop(
                 }
                 current = Some(to);
                 pending = None;
-                // same stall-clock reset as the first-frame build
-                last_step = Instant::now();
-                let resync = last_step.duration_since(started).as_secs_f64();
-                typing.tick(resync, 0.0);
-                drops.tick(resync, 0.0);
-                // drain the stall backlog: keep the freshest
-                // LEVELS but discard queued edge-EVENTS — replayed
-                // stacked they are a clank pile, and losing a chime
-                // under a track change is the better artifact
-                while let Ok(f) = rx.try_recv() {
-                    typing_level = f.stems.typing;
-                    rain_level = f.stems.rain;
-                    wanted_stems = f.stems;
-                }
+                resync_after_stall(
+                    &rx,
+                    started,
+                    &mut last_step,
+                    &mut typing,
+                    &mut drops,
+                    &mut typing_level,
+                    &mut rain_level,
+                    &mut wanted_stems,
+                );
             }
         }
 
