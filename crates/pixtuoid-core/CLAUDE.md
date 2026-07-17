@@ -157,11 +157,14 @@ reasoning is additive); omp assistant `message.usage` (per-turn; `input`
 EXCLUDES cache — fixture-verified `totalTokens = input + output + cacheRead
 + cacheWrite` — so fresh = input + cacheWrite + output); copilot's ONE usage
 wire is the `session.shutdown` summary (#645) — decoded as a final Usage
-BEFORE the SessionEnd in the same vec (the reducer applies in order, so the
-counter lands before the slot flips exiting; the tower/sheet never flash
-from it — exiting desks paint no tower — the payoff is an honest dossier Σ
-on the walk-out hover; `tokenDetails.input` already EXCLUDES cache reads,
-fixture-verified 12839 − 1664 = 11175). The other
+AFTER the SessionEnd in the same vec. The flash-safety is the PAINTER's
+exiting filter (an exiting desk paints no tower/sheet), not the event order
+— the counter lands on the slot either way (cascade_exit keeps the slot for
+the GC window); SessionEnd-first just makes the one theoretically
+observable intermediate frame an already-exiting slot (defense-in-depth).
+Payoff: an honest dossier Σ on the walk-out hover. `tokenDetails.input`
+already EXCLUDES cache reads (arithmetic pinned by the copilot shutdown
+usage test). The other
 8 sources genuinely carry no usage wire; their desks never grow paper. Both
 slot fields serde-skipped at zero/None (`tokens_used` flat like
 `tool_call_count`; the last reading bundled as `UsageObservation{delta,

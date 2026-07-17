@@ -281,17 +281,24 @@ pub fn decode_copilot_line(
             tool_use_id: None,
         }],
         // Token-meter usage (#645): copilot's ONLY usage wire is this
-        // shutdown summary — one final delta as the session ends. The desk
-        // tower/sheet never flash from it (the SessionEnd right after marks
-        // the slot exiting, and exiting desks paint no tower); the payoff is
-        // the dossier's Σ total staying honest on the walk-out hover.
-        // `tokenDetails.input.tokenCount` already EXCLUDES cache reads
-        // (fixture-verified: usage.inputTokens 12839 − cacheReadTokens 1664 =
-        // tokenDetails.input 11175), so fresh = input + cache_write (absent
-        // at zero) + output. Usage FIRST: the reducer applies in order, and
-        // the counter must land before the slot flips to exiting.
+        // shutdown summary — one final delta as the session ends.
+        // `tokenDetails.input` already EXCLUDES cache reads (the arithmetic
+        // is pinned by `real_session_shutdown_usage_summary_lands_one_final_
+        // delta`), so fresh = input + cache_write (inferred snake_case key
+        // from the sibling `cache_read`; unconfirmed — no fixture carries a
+        // nonzero bucket, and a differently-spelled key only UNDERcounts) +
+        // output. No walk-out flash: the painter suppresses the tower/sheet
+        // for any EXITING desk (the occupant filter's `exiting_at.is_none()`)
+        // — NOT the event order; the counter lands on the slot either way,
+        // since cascade_exit keeps the slot for the GC window. SessionEnd
+        // FIRST is defense-in-depth on top: the one theoretically observable
+        // intermediate state is then the already-exiting slot, which paints
+        // nothing. Payoff: an honest dossier Σ on the walk-out hover.
         "session.shutdown" => {
-            let mut evs = Vec::new();
+            let mut evs = vec![AgentEvent::SessionEnd {
+                agent_id: root,
+                as_child: false,
+            }];
             if let Some(details) = data
                 .and_then(|d| d.get("tokenDetails"))
                 .and_then(|t| t.as_object())
@@ -313,10 +320,6 @@ pub fn decode_copilot_line(
                     });
                 }
             }
-            evs.push(AgentEvent::SessionEnd {
-                agent_id: root,
-                as_child: false,
-            });
             evs
         }
         // Everything else (ephemeral streaming, assistant.*, hook.*, user.message,
@@ -776,17 +779,17 @@ mod tests {
 
     #[test]
     fn real_session_shutdown_usage_summary_lands_one_final_delta() {
-        // #645: the fixture's real shutdown shape — tokenDetails.input already
+        // #645: the fixture's real shutdown shape. tokenDetails.input already
         // EXCLUDES cache reads (usage.inputTokens 12839 − cacheReadTokens 1664
-        // = 11175), so fresh = 11175 + 0 (no cache_write bucket) + 212. The
-        // Usage must precede the SessionEnd: the reducer applies in order and
-        // the counter has to land before the slot flips to exiting.
+        // = 11175 — THE authoritative arithmetic pin), so fresh = 11175 + 0
+        // (no cache_write bucket) + 212, never 13_051 (summing cache_read in
+        // would break this). SessionEnd first — defense-in-depth, see the arm.
         let line = r#"{"type":"session.shutdown","data":{"shutdownType":"routine","tokenDetails":{"input":{"tokenCount":11175},"cache_read":{"tokenCount":1664},"output":{"tokenCount":212}},"currentModel":"gpt-5-mini"},"id":"56992353","timestamp":"2026-06-14T21:38:47.162Z","parentId":"3079df1f"}"#;
         match &decode(line)[..] {
-            [AgentEvent::Usage {
+            [AgentEvent::SessionEnd { agent_id, as_child }, AgentEvent::Usage {
                 agent_id: u_id,
                 fresh_tokens,
-            }, AgentEvent::SessionEnd { agent_id, as_child }] => {
+            }] => {
                 assert_eq!(*u_id, root());
                 assert_eq!(
                     *fresh_tokens, 11_387,
@@ -795,7 +798,7 @@ mod tests {
                 assert_eq!(*agent_id, root());
                 assert!(!*as_child);
             }
-            other => panic!("expected [Usage, SessionEnd], got {other:?}"),
+            other => panic!("expected [SessionEnd, Usage], got {other:?}"),
         }
     }
 
