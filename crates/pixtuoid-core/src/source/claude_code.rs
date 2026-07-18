@@ -178,14 +178,19 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
     {
-        // Capped at decode (CONTRIBUTING pitfall 3): `attributionAgent` is
-        // transcript content, and the label persists in slot state for the
-        // session's lifetime.
-        let label = ellipsize(
-            name.rsplit(':').next().unwrap_or(name),
-            MAX_DECODED_FIELD_CHARS,
-        );
-        out.push(AgentEvent::Rename { agent_id, label });
+        // Strip a `namespace:` prefix, keeping the segment after the LAST colon.
+        // A trailing colon ("ns:") splits to an EMPTY segment — the guard above
+        // only checked the PRE-split value, so without re-checking here it would
+        // emit `Rename { label: "" }` and blank the sprite label for the whole
+        // session (the exact harm the empty-string guard exists to prevent).
+        let seg = name.rsplit(':').next().unwrap_or(name);
+        if !seg.is_empty() {
+            // Capped at decode (CONTRIBUTING pitfall 3): `attributionAgent` is
+            // transcript content, and the label persists in slot state for the
+            // session's lifetime.
+            let label = ellipsize(seg, MAX_DECODED_FIELD_CHARS);
+            out.push(AgentEvent::Rename { agent_id, label });
+        }
     }
 
     // Burn-tier effort observation: CC stamps a PERIODIC reminder attachment

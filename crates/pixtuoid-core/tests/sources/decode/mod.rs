@@ -161,6 +161,25 @@ fn cc_empty_attribution_agent_emits_no_rename() {
     );
 }
 
+// A TRAILING-colon attributionAgent ("ns:") splits to an EMPTY segment after the
+// last colon — it must NOT emit a label-blanking Rename either. The pre-split
+// emptiness guard doesn't catch it; the post-split check in decode_cc_line does.
+#[test]
+fn cc_trailing_colon_attribution_agent_emits_no_rename() {
+    let events = decode_cc_line(
+        "/p/parent.jsonl",
+        "claude-code",
+        json!({"type": "assistant", "attributionAgent": "ns:", "message": {"content": []}}),
+    )
+    .unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Rename { .. })),
+        "trailing-colon attributionAgent must not emit a (label-blanking) Rename, got {events:?}"
+    );
+}
+
 // Codex subagents (`spawn_agent`) signal their lifecycle ONLY via the
 // SubagentStart/SubagentStop hooks: the subagent's own rollout renders the
 // sprite but is keyed flat (no `/subagents/` path), so it can't learn its

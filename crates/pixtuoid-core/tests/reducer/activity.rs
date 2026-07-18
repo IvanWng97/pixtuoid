@@ -260,11 +260,15 @@ fn active_ms_does_not_double_count_on_duplicate_activity_end() {
     // Flush to idle
     r.tick(&mut scene, t1 + Duration::from_secs(3));
     let slot = scene.agents.get(&id).unwrap();
-    // Should be ~2-3s, not ~4-6s (double-counted)
-    assert!(
-        slot.active_ms < 5000,
-        "active_ms looks double-counted: {}",
-        slot.active_ms
+    // EXACTLY 2600ms = ONE active span from t0 to the last end signal (t1+600).
+    // The 2nd ActivityEnd is deliberately PAST the hook-wins window (so NOT
+    // deduped): it re-arms pending-idle to t1+600, EXTENDING the single span —
+    // it must not fold a SECOND span (~4600ms), which is the double-count this
+    // test guards. The old `< 5000` bound accepted both the true 2600 AND a
+    // gross ~4600 double-fold, so it pinned nothing tight.
+    assert_eq!(
+        slot.active_ms, 2600,
+        "active_ms should be the single t0→t1+600 span (2600ms), not double-counted"
     );
 }
 
