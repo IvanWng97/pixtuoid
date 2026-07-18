@@ -81,6 +81,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 | 🪟 | **Floating desktop window** | `pixtuoid floating` opens a frameless, always-on-top desktop window of the office — not just a terminal TUI |
 | 🦞 | **OpenClaw gateway mascot** | A live OpenClaw gateway shows up as a wandering lobster whose motion tracks gateway health |
 | 🎛️ | **Vibing** | A sun and moon arc the skyline as the day turns, weather rolls past the windows (rain, storm, snow, fog, overcast, windy, smog), and six themes reskin the office |
+| <img src="docs/images/pix-icons/note.png" alt=""> | **Lofi soundtrack** | A lofi soundtrack synthesized at launch (zero bundled audio) — day and night takes follow the office's clock and weather, typing swells with activity, and the door chime, printer and vending machine cue as coworkers come and go. `m` mutes, `+`/`-` volume |
 | 🐾 | **Office pets** | A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up |
 | 🗂️ | **Agent tree dashboard** | Tab opens a foldable tree of every floor's agents — badged by CLI, with activity tints and tool-call counts |
 | 🧭 | **Office spaces** | Cubicles, a meeting lounge, and a pantry — the office is laid out in distinct furnished zones, not just a grid of identical desks |

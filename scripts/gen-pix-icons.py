@@ -138,6 +138,20 @@ ICONS = {
             ". D D D D D D D D .",
         ]
     },
+    "note": {
+        "grid": [
+            ". . y y y y y y y .",
+            ". . y y y y y y y .",
+            ". . y . . . . . y .",
+            ". . y . . . . . y .",
+            ". . y . . . . . y .",
+            ". . y . . . . . y .",
+            "y y y . . . y y y .",
+            "y y y . . . y y y .",
+            ". y y . . . . y y .",
+            ". . . . . . . . . .",
+        ]
+    },
     "shield": {
         "grid": [
             ". n n n n n n n n .",
