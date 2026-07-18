@@ -778,25 +778,11 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
 
     // Rolled-up footer: a broken install is locally fixable (reconnect); decode
     // drift is a report-upstream concern — distinct remediation paths.
-    let n = REGISTERED_SOURCES.len();
-    if broken.is_empty() {
-        out.push_str(&format!("\n{n} sources · ✓ all connected installs sound"));
-    } else {
-        let verb = if broken.len() == 1 { "needs" } else { "need" };
-        out.push_str(&format!(
-            "\n{n} sources · ⚠ {} {verb} attention ({}) — reconnect in the Sources panel (press s)",
-            broken.len(),
-            broken.join(", ")
-        ));
-    }
-    if any_drift {
-        out.push_str(
-            " · ⚠ decode drift recorded — may predate a CLI's wire format; report: \
-             https://github.com/IvanWng97/pixtuoid/issues\n",
-        );
-    } else {
-        out.push_str(" · ✓ no decode drift\n");
-    }
+    out.push_str(&health_summary(
+        REGISTERED_SOURCES.len(),
+        &broken,
+        any_drift,
+    ));
     // The #526 focus diagnostic — probe roots come from the SAME default
     // resolution the runtime seeds its watchers with (a --projects-root /
     // --codex-sessions-root override changes the RUNNING app, and doctor
@@ -823,12 +809,79 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     Ok(out)
 }
 
+/// The rolled-up doctor footer: the broken-install rollup (locally fixable via
+/// reconnect) + the decode-drift note (report-upstream). Split out of the
+/// I/O-heavy `run()` so the user-facing wording — singular/plural verb, the
+/// comma-joined broken list, and the drift branch — is teeth-testable in isolation.
+fn health_summary(n: usize, broken: &[String], any_drift: bool) -> String {
+    let mut out = String::new();
+    if broken.is_empty() {
+        out.push_str(&format!("\n{n} sources · ✓ all connected installs sound"));
+    } else {
+        let verb = if broken.len() == 1 { "needs" } else { "need" };
+        out.push_str(&format!(
+            "\n{n} sources · ⚠ {} {verb} attention ({}) — reconnect in the Sources panel (press s)",
+            broken.len(),
+            broken.join(", ")
+        ));
+    }
+    if any_drift {
+        out.push_str(
+            " · ⚠ decode drift recorded — may predate a CLI's wire format; report: \
+             https://github.com/IvanWng97/pixtuoid/issues\n",
+        );
+    } else {
+        out.push_str(" · ✓ no decode drift\n");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
     use std::sync::{Arc, Mutex};
     use tracing_subscriber::fmt::MakeWriter;
+
+    #[test]
+    fn health_summary_one_broken_uses_the_singular_verb() {
+        let s = health_summary(9, &["cc·claude-code".to_string()], false);
+        assert!(
+            s.contains("⚠ 1 needs attention (cc·claude-code)"),
+            "singular verb + the broken id: {s:?}"
+        );
+        assert!(s.contains("✓ no decode drift"), "clean-drift branch: {s:?}");
+    }
+
+    #[test]
+    fn health_summary_many_broken_pluralizes_and_comma_joins() {
+        let s = health_summary(
+            9,
+            &["cc·claude-code".to_string(), "cx·codex".to_string()],
+            false,
+        );
+        assert!(
+            s.contains("⚠ 2 need attention (cc·claude-code, cx·codex)"),
+            "plural verb + comma-joined list: {s:?}"
+        );
+    }
+
+    #[test]
+    fn health_summary_clean_installs_with_and_without_drift() {
+        // Exact byte layout for the clean case pins the leading/trailing `\n` and
+        // the ` · ` joiners the extraction must preserve (the substring tests above
+        // deliberately don't, so a whitespace regression would slip past them).
+        let clean = health_summary(9, &[], false);
+        assert_eq!(
+            clean,
+            "\n9 sources · ✓ all connected installs sound · ✓ no decode drift\n"
+        );
+        let drifted = health_summary(9, &[], true);
+        assert!(
+            drifted.contains("⚠ decode drift recorded"),
+            "drift flag surfaces the report note: {drifted:?}"
+        );
+    }
 
     #[test]
     fn linux_activation_backend_covers_every_channel_in_priority_order() {

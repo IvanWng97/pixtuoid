@@ -359,15 +359,26 @@ fn apply_one(cfg: &Path, sid: &'static str, action: Action) -> ChangeOutcome {
             Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
         },
         Action::Disconnect => match disconnect(cfg, sid) {
-            // The flag IS disconnected; surface a folded hook-removal failure so a
-            // caller doesn't hide stale hooks behind a clean "disconnected".
-            Ok(DisconnectOutcome::HookRemovalFailed(e)) => {
-                ChangeOutcome::Failed(format!("hooks not removed: {e}"))
-            }
-            Ok(_) => ChangeOutcome::Disconnected,
+            Ok(o) => map_disconnect_outcome(o),
             Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
         },
         Action::NoOp => ChangeOutcome::NoOp,
+    }
+}
+
+/// Map a SUCCESSFUL `disconnect`'s [`DisconnectOutcome`] to the CLI
+/// [`ChangeOutcome`]. Split out of `apply_one` so the load-bearing fold is
+/// teeth-testable apart from the real install FS path: a folded hook-removal
+/// failure MUST surface as `Failed` (with the reason), NEVER a clean
+/// `Disconnected` — else a caller hides stale hooks behind a clean "disconnected".
+fn map_disconnect_outcome(o: DisconnectOutcome) -> ChangeOutcome {
+    match o {
+        DisconnectOutcome::HookRemovalFailed(e) => {
+            ChangeOutcome::Failed(format!("hooks not removed: {e}"))
+        }
+        DisconnectOutcome::FlagOnly | DisconnectOutcome::Uninstalled(_) => {
+            ChangeOutcome::Disconnected
+        }
     }
 }
 
@@ -693,6 +704,22 @@ mod tests {
         let connected = set(&["antigravity"]);
         let freeze = freeze_for_skip(["antigravity", "codex"], &connected, |_| false);
         assert_eq!(freeze, vec![("antigravity", true), ("codex", false)]);
+    }
+
+    #[test]
+    fn map_disconnect_outcome_surfaces_a_folded_hook_removal_failure() {
+        // The safety fold: a disconnect whose flag flipped but whose hooks did NOT
+        // get removed must surface as Failed (with the reason), never a clean
+        // Disconnected — else a caller hides stale hooks behind "disconnected".
+        match map_disconnect_outcome(DisconnectOutcome::HookRemovalFailed("boom".into())) {
+            ChangeOutcome::Failed(m) => assert_eq!(m, "hooks not removed: boom"),
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        // A clean disconnect (flag-only) maps to a plain Disconnected.
+        assert!(matches!(
+            map_disconnect_outcome(DisconnectOutcome::FlagOnly),
+            ChangeOutcome::Disconnected
+        ));
     }
 
     #[test]

@@ -449,6 +449,30 @@ mod tests {
         });
         assert!(!called, "silent no-op without a pid");
     }
+
+    #[test]
+    fn focus_agent_no_focusable_ancestor_never_activates() {
+        // resolve yields a pid but the walk finds NO focusable ancestor → the fn
+        // must return without activating. Teeth: a regression that activates the
+        // raw resolved pid (the agent's own process) instead of a walked terminal-
+        // app ancestor would call `activate` here.
+        let t = MockTable {
+            parents: HashMap::new(),
+            focusable: vec![],
+            started: HashMap::new(),
+        };
+        let mut activated: Option<i32> = None;
+        focus_agent(
+            &slot("opencode", "s", Some(pid_id(4242, None))),
+            &NO_PATHS,
+            &t,
+            |p| {
+                activated = Some(p);
+                true
+            },
+        );
+        assert_eq!(activated, None, "no focusable ancestor ⇒ nothing activated");
+    }
 }
 
 /// Live dogfood (manual, `cargo test -p pixtuoid --lib focus -- --ignored`):
