@@ -260,3 +260,10 @@ ship a `hook.custom` decoder + an `install/` target instead) + a row in
 steps: `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding" + the tests
 guide — or invoke the `add-source` skill (which foregrounds the test-teeth steps
 a diff-scoped edit misses). A new theme has an analogous `add-theme` skill.
+
+**Adding a new ambient sound** (another lofi mood, a new one-shot cue, a
+weather bed): the `procedural-lofi` skill is the reusable recipe — the
+reference-fingerprint → shape-to-curve → freeze-a-take → synthesize-at-launch
+pipeline the whole `#633` audio line was built on, with the parameter tables
+(`LOFI-BIBLE.md`) + the numpy fingerprint/synth/freeze scripts bundled. The
+in-tree synth home is `pixtuoid-scene/src/audio/` (see that crate's guide).
