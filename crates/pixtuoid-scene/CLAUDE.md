@@ -194,9 +194,15 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   returns Option<FloorFrame> {layout, occupied_waypoints}: the sim's occupancy rides out
 │                   with the layout so a windowed painter can feed the audio cue tracker, #633),
 │                   FloorSession (THE owned painter session: PerFloor {FloorCtx+RgbBuffer} + PerOffice
-│                   {CoffeeState+chitchat} — render() runs the dual eviction + render_floor and keeps
-│                   last_layout AND last_occupied (getter occupied_waypoints(), cleared on an
-│                   unlayoutable size); observe()
+│                   {CoffeeState + chitchat + AudioObserver} — render() runs the dual eviction + render_floor
+│                   and keeps last_layout AND last_occupied (cleared on an unlayoutable size); the
+│                   appliance-cue occupancy/kind feed flows through FloorSession::audio_frame() (the audio
+│                   twin of board()/overlay(), backed by the PRIVATE last_occupied+last_layout — the old
+│                   public occupied_waypoints()/waypoint_kind() getters are GONE) into the shared
+│                   AudioObserver: the office-wide cue tracker + floor-reprime latch that composes the
+│                   per-frame AudioFrame. It runs EVERY frame; only DELIVERY is mute-gated, so re-enabling
+│                   audio fires no cue volley for what arrived while muted (the kind lookup is the shared
+│                   free fn floor::waypoint_kind_of). observe()
 │                   is the headless sim tick, no pixels; a NEW painter starts here, not by hand-rolling
 │                   the bundle), CoffeeState (per-office cup/steam bookkeeping), FloorTransition,
 │                   LightingState, build_floor_scene (projects one floor's agents into ProjectedSlot

@@ -534,9 +534,11 @@ impl AudioObserver {
 }
 
 /// The per-OFFICE half: cross-frame state that survives floor navigation —
-/// an agent's desk cup ([`CoffeeState`]) and the venue chitchat map (its
-/// `VenueKey` already carries `floor_idx`). ONE per painter surface, shared
-/// across every floor, so a cup follows its agent through a floor switch.
+/// an agent's desk cup ([`CoffeeState`]), the venue chitchat map (its
+/// `VenueKey` already carries `floor_idx`), and the audio cue tracker +
+/// reprime latch ([`AudioObserver`]). ONE per painter surface, shared across
+/// every floor, so a cup follows its agent through a floor switch and the audio
+/// cue edges stay warm (the observer reprimes on a switch).
 #[derive(Default)]
 pub struct PerOffice {
     pub coffee: CoffeeState,

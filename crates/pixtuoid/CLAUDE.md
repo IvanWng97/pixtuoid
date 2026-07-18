@@ -233,15 +233,17 @@ src/
 │                       sink.rs (AudioSink seam: NullSink for CI/no-device, RodioSink = rodio 0.22 Player
 │                       glue, codecov-excluded winit-class) + spawn/run_loop remain binary-side behind the
 │                       `audio` feature (the rodio dep). Audio NEVER blocks render: bounded channel,
-│                       drop-on-backpressure. TUI feeds one AudioFrame per rendered frame (renderer-side
-│                       cue tracker + DrawCtx.occupied_waypoints out-param); m toggles mute. Audio is
+│                       drop-on-backpressure. TUI feeds one AudioFrame per rendered frame, composed by the
+│                       office-shared AudioObserver (pixtuoid_scene::floor, in PerOffice) via
+│                       self.office.audio.frame(..) — runs every frame, only DELIVERY is mute-gated; m toggles
+│                       mute. Audio is
 │                       FLOOR-SCOPED (owner call): stems + door/appliance cues come from the floor
 │                       being VIEWED (per_floor_counts + floor_idx-filtered ids; tracker re-primes on
 │                       floor switch); rain stays global (weather, not agent activity). No elevator
 │                       ding (owner-cut). Floating has FULL cue parity (#633 close-out): stems + door +
-│                       appliance one-shots, scoped to its rendered floor — the occupancy feed is
-│                       `FloorSession::occupied_waypoints()` (the scene seam surfaces the sim's set via
-│                       `FloorFrame`) + the render-returned layout's waypoint kinds.
+│                       appliance one-shots, scoped to its rendered floor — composed via
+│                       `FloorSession::audio_frame()` through the SAME office-shared AudioObserver (backed by
+│                       the session's private last_occupied + last_layout), floor-reprime automatic.
 │                       [audio] config: ONE switch `muted` default TRUE (owner-cut the redundant enabled
 │                       knob; `m` = the whole opt-in, persisted via save_audio_muted) + volume clamped [0,1];
 │                       the system LAZY-SPAWNS on the first unmute (muted = zero cost: no device/thread/
