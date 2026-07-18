@@ -1831,6 +1831,46 @@ test('the feed hides itself, rather than show an unreadably short fragment, at a
   await expect(page.locator('.sl__feed')).toBeVisible();
 });
 
+test('the feed pauses while the tab is hidden — no ghosted double-exposure on refocus', async ({
+  page,
+}) => {
+  // A hidden tab freezes CSS transitions but NOT setInterval/setTimeout. If the
+  // crossfading feed kept rotating while hidden, its queued out→in `is-on` class
+  // swaps would replay their opacity fades AT ONCE on refocus — two lines
+  // double-exposed (the ghosting bug). The rotation must stop while hidden and
+  // resync on return; at every point exactly one item is lit.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await gotoLive(page);
+  await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
+
+  const litIndex = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll('.sl__item')).findIndex((el) =>
+        el.classList.contains('is-on')
+      )
+    );
+  const before = await litIndex();
+  expect(before).toBeGreaterThanOrEqual(0);
+
+  // Force the tab "hidden" (the handler reads document.hidden) and wait past one
+  // 6s rotation: with the fix the rotation is paused, so the SAME single line
+  // stays lit; with the bug it advances (and would ghost on show).
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForTimeout(6500);
+  await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
+  expect(await litIndex()).toBe(before); // rotation truly paused while hidden
+
+  // Refocus: still exactly one lit, no double-exposure.
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
+});
+
 test('footer separators never strand alone at a wrap boundary', async ({ page }) => {
   // Each "·" is grouped with the item it introduces into ONE flex item
   // (.footer__grp), so flex-wrap can only break BETWEEN groups. Pin the

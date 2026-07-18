@@ -105,6 +105,13 @@ const badgeColor = (who: string): string | undefined => {
   const hit = sources.find((s) => s.badge && who.startsWith(s.badge));
   return hit && 'badge_color' in hit ? (hit.badge_color as string) : undefined;
 };
+
+// Feed crossfade timing — single-sourced so the CSS fade (`--feed-fade`, set
+// from FEED_FADE_MS) and the JS out→in gap both derive from ONE value: a fade
+// longer than the gap would re-expose two lines mid-swap (ghosting).
+const FEED_FADE_MS = 300; // the .sl__item opacity transition
+const FEED_SWAP_GAP_MS = FEED_FADE_MS + 50; // fade-out must fully finish before fade-in starts
+const FEED_ROTATE_MS = 6000; // one line every 6s
 ---
 
 <div class="statusline" id="statusline">
@@ -350,8 +357,11 @@ const badgeColor = (who: string): string | undefined => {
     align-items: center;
     gap: 0.5rem;
     opacity: 0;
-    /* must finish inside the rotation's 350ms out→in gap */
-    transition: opacity 0.3s ease;
+    /* the operative fade is JS-set (--feed-fade, from FEED_FADE_MS) so it can
+       never drift past the out→in gap; the 0.3s literal is a never-operative
+       pre-JS default (rotation is JS-only, so the transition never fires before
+       the var is set). Must finish inside that gap. */
+    transition: opacity var(--feed-fade, 0.3s) ease;
   }
   .sl__item.is-on {
     opacity: 1;
@@ -523,6 +533,9 @@ const badgeColor = (who: string): string | undefined => {
     dimResting: DIM_RESTING,
     floorSpyRootMargin: FLOOR_SPY_ROOT_MARGIN,
     bottomClampEpsilonPx: BOTTOM_CLAMP_EPSILON_PX,
+    feedFadeMs: FEED_FADE_MS,
+    feedSwapGapMs: FEED_SWAP_GAP_MS,
+    feedRotateMs: FEED_ROTATE_MS,
   }}
 >
   (function () {
@@ -660,24 +673,40 @@ const badgeColor = (who: string): string | undefined => {
 
     // ── the feed: one item at a time, sequenced fade-out → fade-in (the items
     // are absolutely stacked, so a simultaneous swap double-exposes two lines
-    // mid-transition; reduced motion / user pause: static) ──
+    // mid-transition; reduced motion / user pause / hidden tab: static) ──
     const feedItems = Array.prototype.slice.call(bar.querySelectorAll('.sl__item'));
+    // Single-source the crossfade duration into CSS (inherited by .sl__item) so
+    // the fade and the JS out→in gap (feedSwapGapMs = fade + margin) can't drift.
+    bar.style.setProperty('--feed-fade', feedFadeMs + 'ms');
     let feedTimer = 0;
+    // the pending out→in swap: tracked so a mid-transition stop cancels it — a
+    // hidden tab whose timers kept firing would otherwise replay it on refocus
+    let feedSwap = 0;
     let feedOn = 0;
+    // Exactly one line lit — the crossfade's invariant. Snapping to it on every
+    // stop means a paused/hidden feed can never freeze with two half-faded lines
+    // showing (the ghosting we saw on refocus).
+    function showOnlyFeed(idx) {
+      feedItems.forEach(function (it, i) {
+        it.classList.toggle('is-on', i === idx);
+      });
+    }
     function stopFeed() {
       if (feedTimer) clearInterval(feedTimer);
-      feedTimer = 0;
+      if (feedSwap) clearTimeout(feedSwap);
+      feedTimer = feedSwap = 0;
+      showOnlyFeed(feedOn);
     }
     function startFeed() {
-      if (feedTimer || feedItems.length <= 1 || mq.matches || userPaused) return;
+      if (feedTimer || feedItems.length <= 1 || mq.matches || userPaused || document.hidden) return;
       feedTimer = setInterval(function () {
         feedItems[feedOn].classList.remove('is-on');
         feedOn = (feedOn + 1) % feedItems.length;
-        const next = feedItems[feedOn];
-        setTimeout(function () {
-          next.classList.add('is-on');
-        }, 350);
-      }, 6000);
+        feedSwap = setTimeout(function () {
+          feedSwap = 0;
+          showOnlyFeed(feedOn);
+        }, feedSwapGapMs);
+      }, feedRotateMs);
     }
 
     // ── env readouts ──
@@ -811,6 +840,15 @@ const badgeColor = (who: string): string | undefined => {
         renderAir();
       });
     }
+    // A hidden tab freezes CSS transitions but keeps setInterval/setTimeout
+    // firing — the office render loop already stops on hide (OfficeBackdrop),
+    // but this ambient ticker was still free-running, so its queued is-on swaps
+    // all replayed their fades at once on refocus (ghosted double text). Stop
+    // the rotation while hidden and resync on return.
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) stopFeed();
+      else startFeed();
+    });
     startFeed();
   })();
 </script>
