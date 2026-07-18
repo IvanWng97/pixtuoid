@@ -43,9 +43,9 @@ OUT = ROOT / "site/src/assets/pix-icons"
 README_OUT = ROOT / "docs/images/pix-icons"
 # Nearest-neighbor upscale factor for the README variants: GitHub's markdown
 # renderer strips <img> sizing/CSS, so unlike PixIcon.astro's runtime upscale
-# these must be pre-scaled pixels. 3x turns the 10x10 (or 8x12 sprite) grids
-# into ~24-36px images — crisp and legible at their natural embed size.
-README_SCALE = 3
+# these must be pre-scaled pixels. 4x turns the 10x10 (or 8x12 sprite) grids
+# into ~32-56px images — crisp and legible at their natural embed size.
+README_SCALE = 4
 COMPARE = ROOT / "scripts/compare-screenshots.py"
 DIFF_DIR = ROOT / "target/gen-check-diff"
 
