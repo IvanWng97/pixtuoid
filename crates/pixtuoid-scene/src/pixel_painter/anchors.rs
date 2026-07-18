@@ -173,7 +173,7 @@ pub fn character_anchor(
             // badge `WALKING_Y_OFF − SEAT_RENDER_Y_OFF = 5` px above the sitter.
             // MeetingChair was moved to the seat anchor for the sprite but its
             // label twin was missed (sibling-set drift). Pinned by
-            // `character_anchor_seat_kinds_use_the_back_couch_anchor_like_the_sprite`.
+            // `character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high`.
             match kind {
                 WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
                     back_couch_anchor(stand, w)
