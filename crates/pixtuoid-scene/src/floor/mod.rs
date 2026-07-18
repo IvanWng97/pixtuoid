@@ -293,23 +293,13 @@ impl CoffeeState {
     }
 }
 
-/// The shared per-frame PROLOGUE: lay the floor out and point the router at
-/// its corridor. ONE definition so `render_floor` and `FloorSession::observe`
-/// can't drift (the mirrored-epilogue class #423 exists to kill).
-fn frame_prologue(
-    fctx: &mut FloorCtx,
-    buf_w: u16,
-    buf_h: u16,
-    floor_seed: u64,
-) -> Option<Arc<crate::layout::Layout>> {
-    fctx.frame_layout(buf_w, buf_h, floor_seed)
-}
-
 /// The shared per-frame EPILOGUE: stamp this frame's new coffee carriers and
-/// refresh the door-cosmetic clamp. Same ONE-definition rationale as
-/// [`frame_prologue`] — `pub` so the TUI's `draw_scene` (on the raw
-/// `render_to_rgb_buffer` path, which can't call `render_floor`/`observe`) runs
-/// THIS seam instead of re-inlining the two operations (the #423 drift class).
+/// refresh the door-cosmetic clamp. The frame PROLOGUE twin is
+/// [`FloorCtx::frame_layout`] itself (the memoized layout + router corridor
+/// re-point all three frame paths ride directly — no wrapper). This bundles
+/// TWO ops, so it stays a named seam — `pub` so the TUI's `draw_scene` (on the
+/// raw `render_to_rgb_buffer` path, which can't call `render_floor`/`observe`)
+/// runs THIS seam instead of re-inlining the pair (the #423 drift class).
 pub fn frame_epilogue(
     fctx: &mut FloorCtx,
     coffee: &mut CoffeeState,
@@ -397,7 +387,7 @@ pub fn render_floor(
         debug_walkable,
     } = inputs;
     buf.ensure_size(size.w, size.h, theme.surface.bg_fallback);
-    let layout = frame_prologue(fctx, size.w, size.h, floor_meta.floor_seed)?;
+    let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
     let result = render_to_rgb_buffer(&mut PixelCtx {
         // Reborrow: `frame_epilogue` uses `fctx` after this render.
         store: &mut *fctx,
@@ -739,7 +729,10 @@ impl FloorSession {
         now: SystemTime,
     ) -> Option<SimFrame> {
         self.evict_missing(scene);
-        let layout = frame_prologue(&mut self.floor.ctx, buf_w, buf_h, floor_meta.floor_seed)?;
+        let layout = self
+            .floor
+            .ctx
+            .frame_layout(buf_w, buf_h, floor_meta.floor_seed)?;
         let frame = sim_step(
             &mut SimStores {
                 router: &mut self.floor.ctx.router,
