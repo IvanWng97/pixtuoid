@@ -97,6 +97,8 @@
     "id": "vibing",
     "label": "VIBING",
     "kind": "live",
+    "w": 176,
+    "h": 99,
     "default": true,
     "poster": "vibing-poster.png",
     "timeSlider": true,

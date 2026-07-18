@@ -189,8 +189,8 @@
   "targets": [
    "site"
   ],
-  "w": 320,
-  "h": 180,
+  "w": 176,
+  "h": 99,
   "hour": 18,
   "weather": "clear",
   "seed": 11,

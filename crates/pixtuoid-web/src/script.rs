@@ -21,7 +21,8 @@ use std::path::PathBuf;
 
 use pixtuoid_core::source::daemon::DaemonPresenceUpdate;
 use pixtuoid_core::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, opencode,
+    antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, omp, opencode,
+    reasonix,
 };
 use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
 
@@ -41,12 +42,13 @@ pub(crate) const LOOP_MS: u64 = 120_000;
 /// `SOURCE_NAME` consts — a hand-typed string here silently misses the
 /// registry and the label falls back to the RAW string (`claude_code·api`
 /// instead of `cc·api` — a review-caught, test-invisible defect class).
-/// Every slot carries a DISTINCT CLI (8 of the registry's 10 non-daemon
-/// sources — Reasonix and omp are omitted; OpenClaw is the 11th, rendered
-/// separately as the lobster mascot via `lobster_beats`, never a cast
-/// member): the hero's CLI-name chips and the badged sprites below are
-/// meant to ECHO each other ("we support these agents"), so the cast should
-/// span the roster instead of repeating one CLI across most of the slots.
+/// Every slot carries a DISTINCT CLI — ALL 11 of the registry's non-daemon
+/// sources (#655; OpenClaw is the 12th, rendered separately as the lobster
+/// mascot via `lobster_beats`, never a cast member): the hero's CLI-name
+/// chips and the badged sprites below are meant to ECHO each other ("we
+/// support these agents"), so the cast spans the full roster instead of
+/// repeating one CLI across most of the slots. Slots 0-6 are the morning
+/// rush, 7 the late visitor, 8-9 join the rush's tail, 10 a mid-loop joiner.
 const CAST: &[(&str, &str, &str)] = &[
     // (source, session key, cwd)
     (claude_code::SOURCE_NAME, "hero-cc-api", "/work/api"),
@@ -57,7 +59,17 @@ const CAST: &[(&str, &str, &str)] = &[
     (copilot::SOURCE_NAME, "hero-cp-docs", "/work/docs"),
     (cursor::SOURCE_NAME, "hero-cu-etl", "/work/etl"),
     (hermes::SOURCE_NAME, "hero-hm-tests", "/work/tests"),
+    (grok::SOURCE_NAME, "hero-gk-ml", "/work/ml"),
+    (reasonix::SOURCE_NAME, "hero-rx-research", "/work/research"),
+    (omp::SOURCE_NAME, "hero-om-embedded", "/work/embedded"),
 ];
+
+/// The cast size — the one authority tests derive "is this id a cast member
+/// or a visitor hire" from (a hardcoded slot count silently rots when the
+/// cast grows, as the 8→11 extension proved). Test-only: production code
+/// iterates beats, never the cast roster.
+#[cfg(test)]
+pub(crate) const CAST_LEN: usize = CAST.len();
 
 pub(crate) fn cast_id(i: usize) -> AgentId {
     let (source, key, _) = CAST[i];
@@ -268,6 +280,25 @@ pub(crate) fn hero_script() -> Vec<Beat> {
             event: session_start(i),
         });
     }
+    // The rush's tail (#655): gk and rx trail the first seven in, keeping the
+    // door busy through ~3.5s without delaying the ≥4-monitors-by-3s pin.
+    b.push(Beat {
+        at_ms: 2_900,
+        transport: Transport::Jsonl,
+        event: session_start(8),
+    });
+    b.push(Beat {
+        at_ms: 3_300,
+        transport: Transport::Jsonl,
+        event: session_start(9),
+    });
+    // om joins mid-loop — one more arrival beat spread into the loop's quiet
+    // middle (its replayed start is a no-op once seated, like the rush's).
+    b.push(Beat {
+        at_ms: 30_000,
+        transport: Transport::Jsonl,
+        event: session_start(10),
+    });
 
     // Opening spells: each agent starts working shortly after walking in —
     // ≥4 monitors on by ~3s (pinned by morning_rush_populates_within_three_
@@ -290,6 +321,8 @@ pub(crate) fn hero_script() -> Vec<Beat> {
     spell(&mut b, 3, 2_800, 6, &["Bash: dbt run", "Edit models.sql"]);
     spell(&mut b, 4, 3_400, 8, &["Edit cmd.rs", "Bash: cargo clippy"]);
     spell(&mut b, 5, 4_000, 6, &["Read index.ts", "Edit routes.ts"]);
+    spell(&mut b, 8, 4_600, 8, &["Bash: pytest -q", "Edit agent.py"]);
+    spell(&mut b, 9, 5_200, 6, &["Read planner.md", "Edit reason.rs"]);
     // Fill spells: the openers now END early (~11s), so re-cover the 15–40s
     // stretch the old 6–30s starts used to occupy.
     spell(
@@ -331,6 +364,18 @@ pub(crate) fn hero_script() -> Vec<Beat> {
     );
     spell(&mut b, 3, 80_000, 6, &["Read schema.sql", "Edit etl.py"]);
     spell(&mut b, 5, 90_000, 8, &["Bash: vitest run", "Edit hooks.ts"]);
+    spell(&mut b, 8, 38_000, 8, &["Edit train.py", "Bash: pytest -q"]);
+    spell(&mut b, 9, 48_000, 6, &["Edit reason.rs", "Read notes.md"]);
+    spell(
+        &mut b,
+        10,
+        32_000,
+        8,
+        &["Bash: make flash", "Edit firmware.c"],
+    );
+    spell(&mut b, 10, 76_000, 6, &["Read boot.c", "Edit firmware.c"]);
+    spell(&mut b, 8, 86_000, 6, &["Bash: pytest -q", "Edit eval.py"]);
+    spell(&mut b, 9, 96_000, 6, &["Read paper.md", "Edit reason.rs"]);
     spell(
         &mut b,
         0,
@@ -460,11 +505,12 @@ mod tests {
     #[test]
     fn one_loop_populates_a_working_office() {
         let scene = run_script_through_reducer(1);
-        // 7 walk-ins + the late hire − the two walkouts still present as slots
-        // (exiting slots GC ~4.5s after their end; the loop's last end is 2s
-        // before wrap, so at wrap the cast is 6 seated + up to 2 exiting).
+        // 9 rush walk-ins + the mid-loop joiner + the late hire − the two
+        // walkouts still present as slots (exiting slots GC ~4.5s after their
+        // end; the loop's last end is 2s before wrap, so at wrap the cast is
+        // 9 seated + up to 2 exiting).
         assert!(
-            scene.agents.len() >= 6,
+            scene.agents.len() >= 9,
             "expected a populated office, got {}",
             scene.agents.len()
         );
@@ -482,7 +528,8 @@ mod tests {
         for a in scene.agents.values() {
             let prefix = a.label.split('·').next().unwrap();
             assert!(
-                ["cc", "cx", "ag", "cw", "oc", "cp", "cu", "hm"].contains(&prefix),
+                ["cc", "cx", "ag", "cw", "oc", "cp", "cu", "hm", "gk", "rx", "om"]
+                    .contains(&prefix),
                 "label {:?} must carry a registered source prefix",
                 a.label
             );
@@ -528,10 +575,11 @@ mod tests {
     #[test]
     fn looping_stays_stable_across_wraps() {
         // 3 loops: replayed SessionStarts must not duplicate agents or leak
-        // desks; the office converges to the steady cast.
+        // desks; the office converges to the steady cast (9 seated + up to 2
+        // exiting-slot stragglers at the wrap boundary).
         let scene = run_script_through_reducer(3);
         assert!(
-            (6..=8).contains(&scene.agents.len()),
+            (9..=11).contains(&scene.agents.len()),
             "cast must stay bounded across loops, got {}",
             scene.agents.len()
         );

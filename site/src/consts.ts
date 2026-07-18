@@ -160,7 +160,12 @@ export interface ShowcaseChannel {
   label: string; // monitor label (channel number is derived from manifest order)
   kind: 'clip' | 'variant-set' | 'live';
   asset?: string; // clip: demos/<asset>.mp4 [+ .webm] + <asset>-poster.png
-  w?: number; // clip intrinsic dims (CLS)
+  // clip: intrinsic dims (CLS); live: the canvas BUFFER dims — the vibing
+  // "camera": smaller = closer zoom, fewer desks fill the floor naturally.
+  // MUST match media.json's poster job (w/h) or the static poster and the
+  // live canvas reframe on the crossfade; pinned by
+  // config/vibing-parity.test.mjs.
+  w?: number;
   h?: number;
   variantsRef?: 'themes' | 'weather'; // variant-set backed by an existing manifest
   variants?: ShowcaseVariant[]; // …or inline variants

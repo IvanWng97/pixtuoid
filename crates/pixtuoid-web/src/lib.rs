@@ -749,7 +749,7 @@ mod tests {
             t += step_ms;
         }
         assert!(
-            (5..=8).contains(&o.scene.agents.len()),
+            (8..=11).contains(&o.scene.agents.len()),
             "cast bounded across the wrap, got {}",
             o.scene.agents.len()
         );
@@ -871,7 +871,7 @@ mod tests {
         assert_eq!(advanced % LOOP_MS, 0, "re-anchor keeps the loop phase");
         assert!(gap - advanced < 2 * LOOP_MS, "at most one wrap replays");
         assert!(
-            (5..=8).contains(&o.scene.agents.len()),
+            (8..=11).contains(&o.scene.agents.len()),
             "office coherent after the gap, got {}",
             o.scene.agents.len()
         );
@@ -974,7 +974,7 @@ mod tests {
             .scene
             .agents
             .keys()
-            .filter(|id| !(0..8).map(cast_id).any(|c| c == **id))
+            .filter(|id| !(0..crate::script::CAST_LEN).map(cast_id).any(|c| c == **id))
             .count();
         assert_eq!(hired_alive, 0, "the hire left and never replays");
     }
@@ -992,15 +992,15 @@ mod tests {
     #[test]
     fn capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted() {
         use pixtuoid_scene::layout::Layout;
-        // A portrait-phone hero buffer (the site renders BUF_H=130 at a
-        // narrow bufW). The reducer's capacity must derive from THAT layout,
-        // so an admitted agent always has a paintable desk anchor — an agent
-        // whose desk index falls off the canvas layout renders NOWHERE
-        // (character_anchor returns None) while staying alive in the scene.
-        // Free-desk count is DERIVED (capacity − cast), not a size literal —
-        // the density pass re-tunes desk-per-buffer out from under any
-        // hardcoded count.
-        let (w, h) = (96u32, 130u32);
+        // A modest hero buffer (the site renders BUF_H=130; this width seats
+        // the full 11-cast plus at least one spare). The reducer's capacity
+        // must derive from THAT layout, so an admitted agent always has a
+        // paintable desk anchor — an agent whose desk index falls off the
+        // canvas layout renders NOWHERE (character_anchor returns None) while
+        // staying alive in the scene. Free-desk count is DERIVED (capacity −
+        // cast), not a size literal — the density pass re-tunes
+        // desk-per-buffer out from under any hardcoded count.
+        let (w, h) = (192u32, 130u32);
         let mut o = office();
         let mut t = 0u64;
         while t <= 30_000 {
@@ -1047,6 +1047,31 @@ mod tests {
     }
 
     #[test]
+    fn a_phone_narrow_office_the_cast_fills_refuses_hires_outright() {
+        // The 64-96px bufW floor lays out fewer desks than the 11-cast — the
+        // cast that fits seats, the rest stay unadmitted, and a hire click is
+        // politely refused (the documented narrow-phone easter-egg behavior,
+        // now reachable by cast overflow too, not just exact-fit).
+        let (w, h) = (96u32, 130u32);
+        let mut o = office();
+        let mut t = 0u64;
+        while t <= 30_000 {
+            o.step(T0_MS + t as f64, w, h);
+            t += 1_000;
+        }
+        assert!(
+            o.scene.total_capacity() <= crate::script::CAST_LEN,
+            "premise: this width seats no more than the cast"
+        );
+        assert_eq!(
+            o.scene.agents.len(),
+            o.scene.total_capacity(),
+            "the cast fills every desk the narrow canvas lays out"
+        );
+        assert!(!o.hire(), "no free desk: the hire click is refused");
+    }
+
+    #[test]
     fn hire_cap_holds_under_click_spam() {
         // 320×180 (a roomy 16:9 canvas) lays out 32 desks — ample room, so
         // this exercises the MAX_LIVE cap, not desk exhaustion (the
@@ -1065,7 +1090,7 @@ mod tests {
             o.scene
                 .agents
                 .keys()
-                .filter(|id| !(0..8).map(cast_id).any(|c| c == **id))
+                .filter(|id| !(0..crate::script::CAST_LEN).map(cast_id).any(|c| c == **id))
                 .count()
         };
         assert_eq!(
@@ -1110,7 +1135,7 @@ mod tests {
             o.scene
                 .agents
                 .keys()
-                .filter(|id| !(0..8).map(cast_id).any(|c| c == **id))
+                .filter(|id| !(0..crate::script::CAST_LEN).map(cast_id).any(|c| c == **id))
                 .count()
         };
         assert_eq!(count_hires(&o), VisitorHires::MAX_LIVE);
