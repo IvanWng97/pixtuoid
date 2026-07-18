@@ -58,6 +58,28 @@ pub enum WanderPhase {
     WalkingBack(WalkProfile),
 }
 
+/// The wander frame `advance_wander` resolves — the phase plus the trip facts
+/// the pose builder consumes, SNAPSHOTTED off `MotionState` at return time so
+/// the single caller never re-reads (or re-borrows) `motion` to build its pose.
+/// That re-read+borrow is what forced the WalkingBack "copy the fields off `ms`
+/// so the immutable borrow ends before `route_walking_pose` takes `&mut motion`"
+/// dance; feeding the caller a snapshot retires it.
+#[derive(Debug, Clone, Copy)]
+pub struct WanderFrame {
+    /// The resolved phase this frame — selects the pose builder's arm.
+    pub phase: WanderPhase,
+    /// Physics walk progress 0–1000, meaningful ONLY in `WalkingOut`/
+    /// `WalkingBack` (0 otherwise); the caller reads it only in those arms.
+    pub t_x1000: u16,
+    /// The current trip's destination cell (the walk `to` / waypoint `dest`).
+    pub dest: Point,
+    /// The current trip's kind — carries the seat cell + waypoint identity the
+    /// walk/at-waypoint arms need (`WanderKind::seat()`, `Named { wp_idx, kind }`).
+    pub kind: WanderKind,
+    /// The current phase's start instant — the pose builder's walk-frame clock.
+    pub phase_started_at: SystemTime,
+}
+
 /// A one-shot walk leg (exit / snap-back): the wall-clock instant the leg
 /// armed, its frozen physics profile, and the FROZEN origin recorded at
 /// arm-time (reused every frame so the leg doesn't drift). Names the fields
@@ -220,8 +242,9 @@ impl MotionState {
 /// stateless `idle_pose` would have derived for an agent that was Idle
 /// before the first render.
 ///
-/// Returns `(phase, t_x1000)` where `t_x1000` is meaningful only in
-/// the `WalkingOut` / `WalkingBack` phases (0–1000 physics progress).
+/// Returns a [`WanderFrame`]: the resolved phase, the walk progress `t_x1000`
+/// (meaningful only in `WalkingOut`/`WalkingBack`), and a snapshot of the trip
+/// facts the pose builder needs — so the caller never re-reads `motion`.
 pub fn advance_wander(
     slot: &AgentSlot,
     now: SystemTime,
@@ -229,7 +252,7 @@ pub fn advance_wander(
     router: &mut dyn Router,
     overlay: &OccupancyOverlay,
     motion: &mut HashMap<AgentId, MotionState>,
-) -> (WanderPhase, u16) {
+) -> WanderFrame {
     let id = slot.agent_id;
     // Snapshot the other agents' seat claims BEFORE taking this agent's `&mut`
     // (the two borrows of `motion` can't overlap). Cheap: one pass over the
@@ -417,7 +440,18 @@ pub fn advance_wander(
         ms.wander.last_advanced_at = now;
     }
 
-    result
+    // Snapshot the trip facts the pose builder reads for THIS frame. `result.0`
+    // == `ms.wander.phase` in every arm (InFlight leaves it, a transition sets
+    // it to the same value it returns), so the frame's `phase_started_at`/
+    // `target` always describe the returned phase.
+    let (phase, t_x1000) = result;
+    WanderFrame {
+        phase,
+        t_x1000,
+        dest: ms.wander.target.dest,
+        kind: ms.wander.target.kind,
+        phase_started_at: ms.wander.phase_started_at,
+    }
 }
 
 /// Status of an in-flight wander walk leg (`WalkingOut` / `WalkingBack`) for the
