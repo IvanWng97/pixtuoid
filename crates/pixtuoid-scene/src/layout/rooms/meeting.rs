@@ -124,10 +124,11 @@ impl MeetingRoom {
     }
 
     /// The entrance doormat's 4×5 sprite box (bordered rug on the cubicle side,
-    /// one clear column east of the room's east wall), or `None` when the room
-    /// is too narrow (`width > 10`). THE one authority `paint_doormat` AND the
-    /// binary's hover hit-test both read — the `coat_rack_pos` pattern for the
-    /// room's other procedural decor, so the mat and its hover box can't drift.
+    /// one clear column east of the room's east wall) — present only when the
+    /// room is wide enough (`width > 10`), `None` otherwise. THE one authority
+    /// `paint_doormat` AND the binary's hover hit-test both read — the
+    /// `coat_rack_pos` pattern for the room's other procedural decor, so the mat
+    /// and its hover box can't drift.
     pub fn doormat_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
         // Lazy `.then`: `b.height / 2 - 2` must not run for a sub-gate room.

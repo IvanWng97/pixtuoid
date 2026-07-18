@@ -310,21 +310,25 @@ pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, room: &crate::layout::PantryR
         g: 160,
         b: 170,
     };
-    for dy in 0..5u16 {
-        for dx in 0..4u16 {
+    // Loop bounds derive from the rect (like paint_doormat/paint_water_cooler),
+    // so the painted box is structurally coupled to trash_bin_rect and can't
+    // drift from the hover box. dy==0/1 are the fixed sprite-art top rows.
+    for dy in 0..bin.height {
+        for dx in 0..bin.width {
             let px = tx + dx;
             let py = ty + dy;
             if px < buf.width() && py < buf.height() {
+                let on_edge = dx == 0 || dx == bin.width - 1;
                 let color = if dy == 0 {
                     // Rim row — lighter metal rim with bag liner peek
-                    if dx == 0 || dx == 3 {
+                    if on_edge {
                         bin_rim
                     } else {
                         bag_liner
                     }
                 } else if dy == 1 {
                     // Bag liner visible
-                    if dx == 0 || dx == 3 {
+                    if on_edge {
                         bin_outer
                     } else {
                         bag_fill

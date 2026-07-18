@@ -445,6 +445,13 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
             // exactly the pre-dispatch behavior.
             cwd_extractor: extract_top_level_cwd,
         }),
+        // Keeps a real hook spec (NOT `None` like copilot/omp) even with no
+        // install target: an antigravity hook payload decodes via the shared
+        // arms on its REAL `TranscriptPathThenSessionId` key (the one the enum
+        // doc calls "Correct for Antigravity"), a path the hook-decode tests
+        // exercise. copilot/omp were `None`'d in #10 because they are
+        // TS-extension-only with NO hook path — their spec was an inert stub;
+        // antigravity's is not.
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId,
             custom: None,

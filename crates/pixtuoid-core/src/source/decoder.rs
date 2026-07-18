@@ -532,6 +532,34 @@ pub(crate) fn ellipsize(s: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn parsed_tail_lines_yields_only_complete_parseable_lines() {
+        // The shared session_ended tail-parse scaffold — pins the byte-level
+        // parity the #9 refactor rests on (grok moved from from_utf8_lossy +
+        // str::lines to split(b'\n') + from_utf8). A tail byte-window can begin
+        // mid-line (torn leading partial), carry CRLF terminators, and hold
+        // empty/torn segments; only the COMPLETE, JSON-parseable lines yield.
+        let tail = b"3,\"torn\":tru\n{\"type\":\"a\"}\n{\"type\":\"b\"}\r\n\n{\"type\":\"c\"";
+        let kinds: Vec<String> = parsed_tail_lines(tail)
+            .filter_map(|v| v.get("type").and_then(|t| t.as_str()).map(str::to_owned))
+            .collect();
+        // "a" (plain) + "b" (CRLF → trailing \r is JSON whitespace) parse; the
+        // torn leading partial, the empty segment, and the torn trailing partial
+        // are all dropped — exactly what a session-end marker sweep needs so
+        // content never false-ends and a window edge never mis-parses.
+        assert_eq!(kinds, vec!["a".to_owned(), "b".to_owned()]);
+        assert_eq!(
+            parsed_tail_lines(b"").count(),
+            0,
+            "empty tail yields nothing"
+        );
+        assert_eq!(
+            parsed_tail_lines(b"not json at all\n").count(),
+            0,
+            "non-JSON lines are skipped, never panic",
+        );
+    }
+
     // ---- burn-tier observations riding the shared hook arms ----
 
     #[test]

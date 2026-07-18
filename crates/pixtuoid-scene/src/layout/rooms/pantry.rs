@@ -84,11 +84,11 @@ impl PantryRoom {
     }
 
     /// The water cooler's 3×6 sprite box against the pantry's east side (blue
-    /// bottle over a light body), or `None` when the room is too small for it
-    /// (`height > 25 && width > 12`). THE one authority `paint_water_cooler`
-    /// AND the binary's hover hit-test both read, so the drawn sprite and its
-    /// hover box can't drift across the crate boundary (the `coat_rack_pos`
-    /// pattern for the pantry's procedural decor).
+    /// bottle over a light body) — present only when the room fits it
+    /// (`height > 25 && width > 12`), `None` otherwise. THE one authority
+    /// `paint_water_cooler` AND the binary's hover hit-test both read, so the
+    /// drawn sprite and its hover box can't drift across the crate boundary (the
+    /// `coat_rack_pos` pattern for the pantry's procedural decor).
     pub fn water_cooler_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
         // Lazy `.then` (not `.then_some`): the `b.width - 6` etc. must not run
@@ -101,9 +101,10 @@ impl PantryRoom {
         })
     }
 
-    /// The trash bin's 4×5 sprite box near the pantry's west counter, or `None`
-    /// when the room is too short (`height > 20`). Shared placement authority
-    /// for `paint_trash_bin` and the hover hit-test — see [`Self::water_cooler_rect`].
+    /// The trash bin's 4×5 sprite box near the pantry's west counter — present
+    /// only when the room is tall enough (`height > 20`), `None` otherwise.
+    /// Shared placement authority for `paint_trash_bin` and the hover hit-test —
+    /// see [`Self::water_cooler_rect`].
     pub fn trash_bin_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
         // Lazy `.then`: `b.height - 14` must not run below the gate.
