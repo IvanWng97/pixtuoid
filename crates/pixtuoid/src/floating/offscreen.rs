@@ -607,6 +607,38 @@ mod tests {
     }
 
     #[test]
+    fn paint_labels_split_the_status_dot_tone_from_the_cli_name_hue() {
+        // #657 owner-ratified split: the ● dot keeps the activity tone while the
+        // NAME paints in the source's by_prefix badge hue. A registered prefix
+        // (`cc·`) exercises the `Some(hue)` arm the tone-only tests above skip.
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let as_u32 = |c: Rgb| (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32;
+        // Idle grey dot vs the cc badge hue — deliberately distinct colors, so
+        // "both present" proves a genuine split, not one color bleeding into both.
+        let tone_rgb = theme.ui.label_idle;
+        let name_rgb = theme.source.claude_code;
+        assert_ne!(tone_rgb, name_rgb, "premise: idle tone != cc badge hue");
+        let label = vec![LabelElement {
+            anchor_px: Point { x: 20, y: 20 },
+            text: "cc\u{b7}api".into(),
+            tone: LabelTone::Idle,
+            hovered: false,
+        }];
+        let mut sb = vec![0u32; 120 * 120];
+        paint_labels_into_surface(&mut sb, 120, 120, &label, 2, theme);
+        assert!(
+            sb.contains(&as_u32(tone_rgb)),
+            "the ● dot must paint the activity tone {tone_rgb:?}"
+        );
+        assert!(
+            sb.contains(&as_u32(name_rgb)),
+            "the name must paint the cc badge hue {name_rgb:?}"
+        );
+    }
+
+    #[test]
     fn paint_labels_render_antialiased_partial_coverage_not_binary_pixels() {
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::{LabelElement, LabelTone};
