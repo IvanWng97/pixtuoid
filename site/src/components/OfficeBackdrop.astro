@@ -912,6 +912,9 @@ import { asset, DIM_RESTING } from '../consts';
       if (audioBooting || audioUnavailable || !office || !wasm) return;
       audioBooting = true;
       try {
+        // iOS mutes default WebAudio on the Ring/Silent switch; 'playback' routes
+        // to the media channel so the deliberate ♩ tap plays even on silent (#664).
+        if ('audioSession' in navigator) navigator.audioSession.type = 'playback';
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       } catch (e) {
         audioBooting = false;

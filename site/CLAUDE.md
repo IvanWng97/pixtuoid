@@ -234,7 +234,19 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   (same right edge → the ≤760px container reservation still covers one column).
   Regenerate `public/wasm/` (`just gen-wasm`) whenever the `Office` audio surface
   changes — the glue exports must match. Pinned by `smoke.spec.ts`'s existing
-  backdrop contracts (the audio layer adds no throw path).
+  backdrop contracts (the audio layer adds no throw path). **iOS silent-switch
+  (#664, DELIBERATE — don't revert to respecting it):** on the ♩ click the glue
+  sets `navigator.audioSession.type = 'playback'` BEFORE constructing the
+  `AudioContext`. iOS Safari routes default WebAudio to the ambient channel, so the
+  hardware Ring/Silent switch (very commonly left ON) mutes it — a user who
+  deliberately taps ♩ then hears nothing, reading as broken. `'playback'` routes to
+  the media channel (like a `<video>`), honouring the explicit opt-in even on
+  silent. Accepted trade-off: `'playback'` is the ONLY web AudioSession category
+  that bypasses the switch and is non-mixing, so it can pause other apps' audio
+  (Spotify) when ♩ is tapped — acceptable since ♩ is a deliberate gesture. The API
+  is Safari-only; the `'audioSession' in navigator` guard no-ops elsewhere, so it's
+  a pure iOS enhancement CI can't exercise (the smoke test mocks the API to pin the
+  wiring; the real silent-switch behavior is device-verified).
 - **The showcase `VIBING` channel is a SECOND live `Office` (#468).** The CRT
   showcase (`Showcase.astro` + `ChannelStage.astro`, driven by `src/showcase.json`
   → `src/consts.ts`) has one `kind:"live"` channel, `vibing`, whose screen is a

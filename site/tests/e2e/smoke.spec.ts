@@ -354,6 +354,45 @@ test('the hero ♩ sound toggle: muted by default, gesture-gated, no AudioContex
   expect(errors()).toEqual([]);
 });
 
+test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode does not mute the opt-in', async ({
+  page,
+}) => {
+  // #664: a deliberate ♩ tap is explicit consent to hear sound. iOS Safari routes
+  // default WebAudio to the ambient channel (the hardware Ring/Silent switch mutes
+  // it), so the opt-in would produce silence → reads as broken. We set
+  // navigator.audioSession.type='playback' (media channel, ignores the switch).
+  // The API is Safari-only, so mock it here to verify the WIRING in Chromium; the
+  // real iOS silent-switch behavior is device-verified.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'audioSession', {
+      value: { type: 'auto' },
+      configurable: true,
+      writable: true,
+    });
+  });
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  const btn = page.locator('#office-audio');
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  // before any gesture: untouched (the audio path hasn't run)
+  expect(
+    await page.evaluate(
+      () => (navigator as unknown as { audioSession: { type: string } }).audioSession.type
+    )
+  ).toBe('auto');
+  // the gesture spins up the audio path (audioStart) → we set the category BEFORE
+  // constructing the AudioContext, so it holds even if the warmup later degrades.
+  await btn.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (navigator as unknown as { audioSession: { type: string } }).audioSession.type
+      )
+    )
+    .toBe('playback');
+  expect(errors()).toEqual([]);
+});
+
 test('a remembered ♩ choice never inverts a direct first click on the button', async ({ page }) => {
   // Review HIGH: the remembered-"on" restore installs capture-phase
   // pointerdown/keydown listeners; if the visitor's FIRST gesture is a direct
