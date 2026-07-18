@@ -215,7 +215,12 @@ pub enum SourceKind {
         /// harness then accepts a transcript-less, hook-payloads-only
         /// scenario for it — and ONLY for it.
         transcript: Option<Transcript>,
-        hook: HookDecoding,
+        /// `None` = a TRANSCRIPT-ONLY agent with no hook transport (copilot,
+        /// omp — no install target, the shim never fires for them). Symmetric
+        /// with `transcript: None`: absent capability is TYPED, not an inert
+        /// stub. A non-daemon row must carry a transcript OR a hook (both `None`
+        /// would decode nothing — pinned by `agent_has_a_decode_path`).
+        hook: Option<HookDecoding>,
         caps: SourceCaps,
         /// The focus-jump pid channel. Lives INSIDE `Agent` so a daemon can't
         /// carry one (structurally unrepresentable — a mascot isn't clickable).
@@ -266,10 +271,12 @@ impl SourceDescriptor {
     }
 
     /// The hook-decoding spec (`None` for a daemon — its payloads never reach
-    /// the shared agent arms).
+    /// the shared agent arms — AND for a transcript-only agent with no hook
+    /// transport, e.g. copilot/omp). `decode_hook_payload` already defaults a
+    /// missing spec (id_key → `TranscriptPathThenSessionId`, no custom arm).
     pub fn hook(&self) -> Option<&HookDecoding> {
         match &self.kind {
-            SourceKind::Agent { hook, .. } => Some(hook),
+            SourceKind::Agent { hook, .. } => hook.as_ref(),
             SourceKind::Daemon { .. } => None,
         }
     }
@@ -361,7 +368,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
             // CC writes a top-level `cwd` on transcript lines — the shared shape.
             cwd_extractor: extract_top_level_cwd,
         }),
-        hook: HookDecoding {
+        hook: Some(HookDecoding {
             // CC keys on the session UUID (== the transcript filename stem
             // `cc_id_from_path` derives), NOT the cwd-derived transcript path, so a
             // subagent→parent link survives a git-worktree cwd-split. Mirrors Codex.
@@ -370,7 +377,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
             // session AgentId) — inexpressible in the shared arms. The Stop is the
             // ONLY end signal a Workflow-fleet subagent gets (#241).
             custom: Some(claude_code::decode_cc_hook_custom),
-        },
+        }),
         caps: SourceCaps {
             has_exit_signal: true,
             // CC has no UserPromptSubmit-class resurrect path (its JSONL
@@ -395,12 +402,12 @@ const CODEX: SourceDescriptor = SourceDescriptor {
             // Rollouts carry cwd ONLY on the head session_meta line, under `payload`.
             cwd_extractor: codex::extract_codex_cwd,
         }),
-        hook: HookDecoding {
+        hook: Some(HookDecoding {
             id_key: IdKey::SessionId,
             // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
             // session AgentId) — inexpressible in the shared arms.
             custom: Some(codex::decode_codex_hook_custom),
-        },
+        }),
         caps: SourceCaps {
             has_exit_signal: false,
             resurrects_on_prompt: true,
@@ -423,10 +430,10 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
             // exactly the pre-dispatch behavior.
             cwd_extractor: extract_top_level_cwd,
         }),
-        hook: HookDecoding {
+        hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId,
             custom: None,
-        },
+        }),
         caps: SourceCaps {
             has_exit_signal: false,
             resurrects_on_prompt: false,
@@ -448,10 +455,10 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["reasonix", "--version"]),
     kind: SourceKind::Agent {
         transcript: None, // hook-only: no transcript for the walker to watch
-        hook: HookDecoding {
+        hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
             custom: Some(reasonix::decode_rx_hook_custom),
-        },
+        }),
         caps: SourceCaps {
             // SessionEnd hook fires on clean exit (verified upstream @v1.2.0,
             // internal/hook/hook.go run sites) — best-effort counts.
@@ -484,10 +491,10 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["codewhale", "--version"]),
     kind: SourceKind::Agent {
         transcript: None, // hook-only: no transcript for the walker to watch
-        hook: HookDecoding {
+        hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
             custom: Some(codewhale::decode_cw_hook_custom),
-        },
+        }),
         caps: SourceCaps {
             // session_end fires on a clean TUI quit carrying DEEPSEEK_WORKSPACE
             // — best-effort counts.
@@ -516,10 +523,10 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["opencode", "--version"]),
     kind: SourceKind::Agent {
         transcript: None, // hook-only: no transcript for the walker to watch
-        hook: HookDecoding {
+        hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
             custom: Some(opencode::decode_oc_hook_custom),
-        },
+        }),
         caps: SourceCaps {
             // A clean per-session close fires `session.deleted` → SessionEnd, and an
             // abrupt exit / TUI quit kills the opencode process → `hook::HookPidWatch`
@@ -579,10 +586,10 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
             // `session.start` nests the cwd at `data.context.cwd`.
             cwd_extractor: copilot::extract_copilot_cwd,
         }),
-        hook: HookDecoding {
-            id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
-            custom: None,
-        },
+        // No hook transport: copilot is transcript-only (no install target, the
+        // shim never fires for it), so absent-capability is TYPED as `None`,
+        // symmetric with a hook-only source's `transcript: None` — not a stub.
+        hook: None,
         caps: SourceCaps {
             // `session.shutdown` is a real persisted exit marker → no short-idle reaper.
             has_exit_signal: true,
@@ -615,10 +622,10 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["cursor-agent", "--version"]),
     kind: SourceKind::Agent {
         transcript: None, // hook-only: no transcript for the walker to watch
-        hook: HookDecoding {
+        hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
             custom: Some(cursor::decode_cursor_hook_custom),
-        },
+        }),
         caps: SourceCaps {
             // `sessionEnd` FIRES on clean completion (`reason:"completed"`) —
             // best-effort counts, CC/Reasonix class. Abrupt
@@ -656,10 +663,10 @@ const HERMES: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["hermes", "--version"]),
     kind: SourceKind::Agent {
         transcript: None, // hook-only: no transcript for the walker to watch
-        hook: HookDecoding {
+        hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
             custom: Some(hermes::decode_hermes_hook_custom),
-        },
+        }),
         caps: SourceCaps {
             // `on_session_end` FIRES on clean completion (best-effort counts,
             // CC/Cursor class). Abrupt exits (no PID in the payload) fall to the
@@ -708,10 +715,10 @@ const GROK: SourceDescriptor = SourceDescriptor {
             // (URL-encoded group dir), applied via the watcher's cwd deriver.
             cwd_extractor: grok::extract_grok_cwd,
         }),
-        hook: HookDecoding {
+        hook: Some(HookDecoding {
             id_key: IdKey::SessionId, // inert: custom claims all
             custom: Some(grok::decode_grok_hook_custom),
-        },
+        }),
         caps: SourceCaps {
             // grok's `session_end` hook does NOT fire on a plain TUI quit (the
             // event loop breaks without draining the session actor — verified
@@ -762,10 +769,10 @@ const OMP: SourceDescriptor = SourceDescriptor {
             // shared shape.
             cwd_extractor: extract_top_level_cwd,
         }),
-        hook: HookDecoding {
-            id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
-            custom: None,
-        },
+        // No hook transport: omp is transcript-only (no install target, only
+        // in-process TS extensions), so absent-capability is TYPED as `None`,
+        // symmetric with a hook-only source's `transcript: None` — not a stub.
+        hook: None,
         caps: SourceCaps {
             // The `session_exit` custom entry is appended + flushed on every
             // clean teardown incl. SIGINT/SIGTERM (best-effort counts;
@@ -988,15 +995,18 @@ mod tests {
         );
     }
 
-    // The complement: every Agent exposes a hook spec and NO presence decoder, so
-    // the registry-driven demux never routes an agent payload to the presence
-    // channel (and a daemon's payload never decodes as an agent — pinned above).
+    // The complement: every Agent has a DECODE PATH (a transcript, a hook, or
+    // both) and NO presence decoder, so the registry-driven demux never routes
+    // an agent payload to the presence channel (and a daemon's payload never
+    // decodes as an agent — pinned above). Both-absent would be a wholly inert
+    // row (decodes nothing) — now unrepresentable-by-review since `hook` went
+    // `Option` alongside `transcript` (#10: absent capability is typed, not stubbed).
     #[test]
-    fn agents_expose_hook_and_no_presence_decoder() {
+    fn agent_has_a_decode_path_and_no_presence_decoder() {
         for d in REGISTRY.iter().filter(|d| !d.is_daemon()) {
             assert!(
-                d.hook().is_some(),
-                "agent {:?} must expose a hook spec",
+                d.line_decoder().is_some() || d.hook().is_some(),
+                "agent {:?} has no decode path (neither a transcript nor a hook)",
                 d.name
             );
             assert!(
