@@ -188,14 +188,6 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     }
 }
 
-/// The registry's `hook.custom` entry point. Cursor's envelope is ALIEN to the
-/// shared CC-shaped arms (camelCase event values, cwd-only identity), so per
-/// the `HookDecoding::custom` contract it claims EVERY event reaching it —
-/// `.map(Some)`, never `Ok(None)`.
-pub(crate) fn decode_cursor_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    decode_cursor_hook_payload(v).map(Some)
-}
-
 /// Cursor tool detail: `"name: target"` using Cursor's argument vocabulary,
 /// looked up `command` > `file_path` > `path` > `pattern` > `url` (the keys its
 /// shell/read/edit/grep/web tool inputs carry). Both the tool NAME and the

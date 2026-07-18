@@ -238,14 +238,6 @@ fn decode_cw_subagent(
     }]))
 }
 
-/// The registry's `hook.custom` entry point. CodeWhale's envelope is ALIEN (no
-/// `hook_event_name`/`session_id`), so per the `HookDecoding::custom` contract
-/// it claims EVERY event reaching it — `.map(Some)`, never `Ok(None)` — and the
-/// shared CC-shaped arms are unreachable for `_pixtuoid_source=codewhale`.
-pub(crate) fn decode_cw_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    decode_cw_hook_payload(v).map(Some)
-}
-
 /// CodeWhale-side tool detail: the dispatch family is name-keyed (CodeWhale args
 /// carry no `subagent_type`, so the shared semantic detection can't see it),
 /// everything else gets a `"name: target"` display. `tool_args` arrives as the

@@ -183,13 +183,19 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     // requirements below — so an alien envelope (Reasonix: camelCase, `event`
     // discriminator, no `session_id` at all) or a subject-changing event
     // (CC's and Codex's SubagentStart/Stop, whose AgentId is the CHILD's)
-    // decodes in the source's module, not here. `Ok(None)` falls through to
-    // the shared CC-shaped arms; an alien-envelope source claims EVERY event
-    // instead.
-    if let Some(custom) = desc.and_then(|d| d.hook()).and_then(|h| h.custom) {
-        if let Some(evs) = custom(&v)? {
-            return Ok(evs);
+    // decodes in the source's module, not here. An `Extend` decoder that
+    // declines (`Ok(None)`) falls through to the shared CC-shaped arms; a
+    // `ClaimsAll` decoder handles EVERY event and CANNOT fall through (no
+    // `Option` to return) — the contract is the type, see `HookCustom`.
+    use crate::source::registry::HookCustom;
+    match desc.and_then(|d| d.hook()).and_then(|h| h.custom) {
+        Some(HookCustom::ClaimsAll(decode)) => return decode(&v),
+        Some(HookCustom::Extend(decode)) => {
+            if let Some(evs) = decode(&v)? {
+                return Ok(evs);
+            }
         }
+        None => {}
     }
 
     let event = obj
@@ -1330,61 +1336,55 @@ mod tests {
             (
                 reasonix::SOURCE_NAME,
                 Box::new(|| {
-                    reasonix::decode_rx_hook_custom(&json!({
+                    reasonix::decode_rx_hook_payload(&json!({
                         "event":"PreToolUse","cwd":"/r","toolName":name,"toolArgs":{"command":tgt}}))
                     .expect("reasonix decodes")
-                    .expect("reasonix claims the event")
                 }),
             ),
             (
                 codewhale::SOURCE_NAME,
                 Box::new(|| {
-                    codewhale::decode_cw_hook_custom(&json!({
+                    codewhale::decode_cw_hook_payload(&json!({
                         "event":"tool_call_before","cwd":"/r","tool":name,"tool_args":cw_args}))
                     .expect("codewhale decodes")
-                    .expect("codewhale claims the event")
                 }),
             ),
             (
                 opencode::SOURCE_NAME,
                 Box::new(|| {
-                    opencode::decode_oc_hook_custom(&json!({
+                    opencode::decode_oc_hook_payload(&json!({
                         "type":"message.part.updated","properties":{"sessionID":"ses-1","part":{
                             "type":"tool","callID":"c1","tool":name,
                             "state":{"status":"running","input":{"command":tgt}}}}}))
                     .expect("opencode decodes")
-                    .expect("opencode claims the event")
                 }),
             ),
             (
                 cursor::SOURCE_NAME,
                 Box::new(|| {
-                    cursor::decode_cursor_hook_custom(&json!({
+                    cursor::decode_cursor_hook_payload(&json!({
                         "hook_event_name":"preToolUse","session_id":"s",
                         "tool_name":name,"tool_input":{"command":tgt}}))
                     .expect("cursor decodes")
-                    .expect("cursor claims the event")
                 }),
             ),
             (
                 hermes::SOURCE_NAME,
                 Box::new(|| {
-                    hermes::decode_hermes_hook_custom(&json!({
+                    hermes::decode_hermes_hook_payload(&json!({
                         "hook_event_name":"pre_tool_call","session_id":"s","cwd":"/r",
                         "tool_name":name,"tool_input":{"command":tgt}}))
                     .expect("hermes decodes")
-                    .expect("hermes claims the event")
                 }),
             ),
             (
                 grok::SOURCE_NAME,
                 Box::new(|| {
-                    grok::decode_grok_hook_custom(&json!({
+                    grok::decode_grok_hook_payload(&json!({
                         "hookEventName":"pre_tool_use","sessionId":"s","cwd":"/r",
                         "workspaceRoot":"/r","toolName":name,"toolUseId":"c1",
                         "toolInput":{"command":tgt},"toolInputTruncated":false}))
                     .expect("grok decodes")
-                    .expect("grok claims the event")
                 }),
             ),
         ];

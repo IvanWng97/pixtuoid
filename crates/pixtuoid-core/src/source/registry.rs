@@ -49,29 +49,44 @@ pub enum IdKey {
     SessionId,
 }
 
-/// A source's own hook-payload decoder, dispatched ahead of the shared arms.
-/// `Ok(Some(events))` short-circuits (the decoded sequence for this payload —
-/// usually one event, two when an [`AgentEvent::Identity`] is attached ahead
-/// of an activity event, #221); `Ok(None)` means "not my event" and falls
-/// through to the shared arms; `Err` propagates.
-pub type HookCustomDecoder = fn(&Value) -> Result<Option<Vec<AgentEvent>>>;
+/// A source's own hook-payload decoder, dispatched ahead of the shared
+/// CC-shaped arms — TYPED by whether it may decline. The two-variant split
+/// makes the old "an alien-envelope source must NEVER return `Ok(None)`"
+/// caller-contract unrepresentable: a [`Self::ClaimsAll`] fn has no `Option`
+/// to get wrong.
+#[derive(Clone, Copy)]
+pub enum HookCustom {
+    /// EXTENDS the shared arms: tried first; `Ok(Some(events))` short-circuits
+    /// (the decoded sequence — usually one event, two when an
+    /// [`AgentEvent::Identity`] is attached ahead of an activity event, #221),
+    /// `Ok(None)` DECLINES and falls through to the shared arms, `Err`
+    /// propagates. CC/Codex: they decode only `SubagentStart`/`SubagentStop`
+    /// (which change the event's SUBJECT to the child) and defer everything
+    /// else to the shared session-keyed arms.
+    Extend(fn(&Value) -> Result<Option<Vec<AgentEvent>>>),
+    /// CLAIMS every event: an alien-envelope source (no shared
+    /// `hook_event_name`/`session_id` for the shared arms to key on, so they'd
+    /// only mis-serve it) whose decoder handles EVERYTHING and constructs its
+    /// own AgentIds. Returns `Result<Vec>` — structurally it can NOT decline,
+    /// so the payload can never silently fall through to the shared arms.
+    /// reasonix/codewhale/opencode/cursor/hermes/grok.
+    ClaimsAll(fn(&Value) -> Result<Vec<AgentEvent>>),
+}
 
 /// Per-source hook decoding behaviour beyond the shared CC-shaped arms.
 pub struct HookDecoding {
+    /// The per-session AgentId key strategy. Read by the shared arms only —
+    /// MOOT for a [`HookCustom::ClaimsAll`] source (its decoder builds its own
+    /// AgentIds and the shared branch is never reached), pick
+    /// `TranscriptPathThenSessionId` with an `// inert` comment there.
     pub id_key: IdKey,
-    /// Tried FIRST, immediately after `_pixtuoid_source` attribution and
-    /// BEFORE any shared field requirement (`hook_event_name`, `session_id`)
-    /// — so a source with a completely alien envelope (no `session_id` at
-    /// all) can still decode. The fn knows its own `SOURCE_NAME` — no source
-    /// parameter needed. CONTRACT: a custom fn that claims an event name must
-    /// claim it FULLY — return `Err` on a malformed instance of its own
-    /// event, never `Ok(None)` — or the payload silently falls through and
-    /// decodes under the shared session-keyed semantics (divergent AgentId
-    /// instead of an error). An ALIEN-envelope source (payloads without
-    /// `hook_event_name`/`session_id` at all) must claim EVERY event — its
-    /// simplest correct shape is `decode_x(v).map(Some)`, never `Ok(None)` —
-    /// since the shared arms can only mis-serve it.
-    pub custom: Option<HookCustomDecoder>,
+    /// The source's own decoder, dispatched FIRST (immediately after
+    /// `_pixtuoid_source` attribution, BEFORE any shared field requirement) —
+    /// so an alien envelope (no `session_id` at all) can still decode. The fn
+    /// knows its own `SOURCE_NAME` (no source parameter). `None` = ride the
+    /// shared arms only (CC/Codex before #241 did). See [`HookCustom`] for the
+    /// Extend-vs-ClaimsAll contract.
+    pub custom: Option<HookCustom>,
 }
 
 /// Reducer-facing capability flags — stable facts about the source's wire
@@ -376,7 +391,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
             // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
             // session AgentId) — inexpressible in the shared arms. The Stop is the
             // ONLY end signal a Workflow-fleet subagent gets (#241).
-            custom: Some(claude_code::decode_cc_hook_custom),
+            custom: Some(HookCustom::Extend(claude_code::decode_cc_hook_custom)),
         }),
         caps: SourceCaps {
             has_exit_signal: true,
@@ -406,7 +421,7 @@ const CODEX: SourceDescriptor = SourceDescriptor {
             id_key: IdKey::SessionId,
             // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
             // session AgentId) — inexpressible in the shared arms.
-            custom: Some(codex::decode_codex_hook_custom),
+            custom: Some(HookCustom::Extend(codex::decode_codex_hook_custom)),
         }),
         caps: SourceCaps {
             has_exit_signal: false,
@@ -457,7 +472,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
         transcript: None, // hook-only: no transcript for the walker to watch
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            custom: Some(reasonix::decode_rx_hook_custom),
+            custom: Some(HookCustom::ClaimsAll(reasonix::decode_rx_hook_payload)),
         }),
         caps: SourceCaps {
             // SessionEnd hook fires on clean exit (verified upstream @v1.2.0,
@@ -493,7 +508,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
         transcript: None, // hook-only: no transcript for the walker to watch
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            custom: Some(codewhale::decode_cw_hook_custom),
+            custom: Some(HookCustom::ClaimsAll(codewhale::decode_cw_hook_payload)),
         }),
         caps: SourceCaps {
             // session_end fires on a clean TUI quit carrying DEEPSEEK_WORKSPACE
@@ -525,7 +540,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
         transcript: None, // hook-only: no transcript for the walker to watch
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            custom: Some(opencode::decode_oc_hook_custom),
+            custom: Some(HookCustom::ClaimsAll(opencode::decode_oc_hook_payload)),
         }),
         caps: SourceCaps {
             // A clean per-session close fires `session.deleted` → SessionEnd, and an
@@ -624,7 +639,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
         transcript: None, // hook-only: no transcript for the walker to watch
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            custom: Some(cursor::decode_cursor_hook_custom),
+            custom: Some(HookCustom::ClaimsAll(cursor::decode_cursor_hook_payload)),
         }),
         caps: SourceCaps {
             // `sessionEnd` FIRES on clean completion (`reason:"completed"`) —
@@ -665,7 +680,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
         transcript: None, // hook-only: no transcript for the walker to watch
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            custom: Some(hermes::decode_hermes_hook_custom),
+            custom: Some(HookCustom::ClaimsAll(hermes::decode_hermes_hook_payload)),
         }),
         caps: SourceCaps {
             // `on_session_end` FIRES on clean completion (best-effort counts,
@@ -717,7 +732,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
         }),
         hook: Some(HookDecoding {
             id_key: IdKey::SessionId, // inert: custom claims all
-            custom: Some(grok::decode_grok_hook_custom),
+            custom: Some(HookCustom::ClaimsAll(grok::decode_grok_hook_payload)),
         }),
         caps: SourceCaps {
             // grok's `session_end` hook does NOT fire on a plain TUI quit (the

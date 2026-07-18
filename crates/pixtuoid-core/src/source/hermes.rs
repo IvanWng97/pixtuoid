@@ -181,13 +181,6 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     }
 }
 
-/// The registry's `hook.custom` entry point. Hermes's envelope is ALIEN to the
-/// shared CC-shaped arms (snake_case event values), so per the
-/// `HookDecoding::custom` contract it claims EVERY event — `.map(Some)`.
-pub(crate) fn decode_hermes_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    decode_hermes_hook_payload(v).map(Some)
-}
-
 /// Hermes tool detail: `"name: target"` using Hermes's argument vocabulary,
 /// looked up `command` > `file_path` > `path` > `pattern` > `url` (`terminal`
 /// carries `command`; file/search tools carry the rest). Both the tool NAME and

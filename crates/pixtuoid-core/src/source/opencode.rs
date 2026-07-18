@@ -298,13 +298,6 @@ fn oc_identity(agent_id: AgentId, session_id: &str) -> AgentEvent {
     }
 }
 
-/// The registry's `hook.custom` entry point. opencode's envelope is ALIEN (no
-/// `hook_event_name`/`session_id` at the top level), so it claims EVERY event
-/// reaching it — `.map(Some)`, never falling through to the shared CC arms.
-pub(crate) fn decode_oc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    decode_oc_hook_payload(v).map(Some)
-}
-
 /// opencode-side tool detail: the `task` dispatch tool (by NAME) →
 /// `ToolDetail::Task` (parent reads "Delegating"); everything else → a
 /// `"name: target"` display, the target pulled from the tool `input` record
@@ -354,7 +347,7 @@ mod tests {
                 "model": {"id": "deepseek-v4-flash-free", "providerID": "opencode"}
             }}
         });
-        let evs = decode_oc_hook_custom(&v).unwrap().unwrap();
+        let evs = decode_oc_hook_payload(&v).unwrap();
         assert!(
             evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: None, .. } if m == "deepseek-v4-flash-free")),
             "session.created model must surface, got {evs:?}"
@@ -364,7 +357,7 @@ mod tests {
             "type": "session.created",
             "properties": {"sessionID": "ses_n", "info": {"id": "ses_n", "directory": "/repo"}}
         });
-        let evs = decode_oc_hook_custom(&v).unwrap().unwrap();
+        let evs = decode_oc_hook_payload(&v).unwrap();
         assert!(evs
             .iter()
             .any(|e| matches!(e, AgentEvent::SessionStart { .. })));

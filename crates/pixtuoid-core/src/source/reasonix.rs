@@ -237,14 +237,6 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     }
 }
 
-/// The registry's `hook.custom` entry point. Reasonix's envelope is ALIEN (no
-/// `hook_event_name`/`session_id`), so per the `HookDecoding::custom` contract
-/// it claims EVERY event reaching it — `.map(Some)`, never `Ok(None)` — and
-/// the shared CC-shaped arms are unreachable for `_pixtuoid_source=reasonix`.
-pub(crate) fn decode_rx_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    decode_rx_hook_payload(v).map(Some)
-}
-
 /// Reasonix-side tool detail: the dispatch family is name-keyed (Reasonix args
 /// carry no `subagent_type`, so the shared semantic detection can't see it),
 /// everything else gets a `"name: target"` display using Reasonix's own

@@ -309,13 +309,6 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     }
 }
 
-/// The registry's `hook.custom` entry point: grok's envelope is ALIEN to the
-/// shared CC-shaped arms (`hookEventName` vs `hook_event_name`), so it claims
-/// EVERY event reaching it — `.map(Some)`, never `Ok(None)`.
-pub(crate) fn decode_grok_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    decode_grok_hook_payload(v).map(Some)
-}
-
 /// The child's `subagentId` — upstream sets `child_session_id = subagent_id`
 /// (handle_request.rs), so this key coalesces with the child's own tool hooks
 /// (which carry the child's `sessionId`) AND its flat transcript dir name.
