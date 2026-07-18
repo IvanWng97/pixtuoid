@@ -182,7 +182,7 @@ repo-committed and won't exist on a fresh checkout or in a non-Claude tool.
    (LOCAL, git-ignored — the working design record, not the tracker). Also
    plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md).
 4. **Mock gate (taste/visual work only)** — ratify the AFTER visual BEFORE any
-   code (`beautify-decoration`; see its skill + "Pin visual before coding").
+   code (the `beautify-decoration` skill's "The visual-iteration loop").
 5. **Build** — TDD (see Conventions): failing test → minimal impl → commit.
 6. **Self-review** — a standards+spec pass before pushing. Not the merge gate.
 7. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
