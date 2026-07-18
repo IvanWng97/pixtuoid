@@ -121,6 +121,9 @@ schemars = "1"
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
 insta    = "1"
+# Integration tests parse the `--json` CLI output back (the delivery-contract
+# e2e in cli_json.rs). Already a normal dep, so no new lockfile entry.
+serde_json = { workspace = true }
 
 [[example]]
 name = "snapshot"
