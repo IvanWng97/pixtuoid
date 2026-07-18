@@ -3193,3 +3193,90 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
         "one sofa must seat 3 agents at once; peaked at {max_on_sofa}"
     );
 }
+
+/// Regression: the name-badge (`character_anchor`) must ride the SAME anchor as
+/// the SPRITE (`sim.rs::resolve_characters`) for a seat kind. MeetingChair
+/// drifted — its sprite moved to `back_couch_anchor` but its label stayed on
+/// `waypoint_anchor`, floating the badge `WALKING_Y_OFF − SEAT_RENDER_Y_OFF = 5`
+/// px above the sitter. Ranged reach: any AtWaypoint seat kind whose sprite uses
+/// the seat anchor must have its label there too.
+#[test]
+fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
+    use crate::layout::{stand_point, WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::pose::{Pose, RouteCtx};
+    use std::time::Duration;
+
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut scene = SceneState::uniform(64);
+    for i in 0..TEST_DEFAULT_DESKS {
+        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/p/mc{i}.jsonl"));
+        let mut slot = make_slot(id, ActivityState::Idle);
+        let started = now0 - Duration::from_secs(5 + (i as u64 * 11) % 80);
+        slot.created_at = started;
+        slot.state_started_at = started;
+        slot.last_event_at = started;
+        slot.desk_index = GlobalDeskIndex(i);
+        scene.agents.insert(id, slot);
+    }
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let mut checked = false;
+    for step in 0..4_000u64 {
+        let now = now0 + Duration::from_millis(250 * step);
+        let frame = {
+            let mut stores = owned.stores();
+            sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now)
+        };
+        let mc = frame.poses.iter().find_map(|(id, p)| match p {
+            Some(Pose::AtWaypoint {
+                wp,
+                kind: WaypointKind::MeetingChair,
+            }) => Some((*id, *wp)),
+            _ => None,
+        });
+        let Some((id, wp)) = mc else { continue };
+        let agent = scene.agents.get(&id).unwrap();
+        let desk = layout
+            .home_desk(agent.desk_index.single_floor_local())
+            .unwrap();
+        let w = &layout.waypoints[wp];
+        let stand = stand_point(
+            w.kind,
+            w.pos,
+            layout.pantry_counter_size(),
+            &layout.walkable,
+            desk,
+            w.facing,
+            &layout.reachable,
+        );
+        // Idempotent re-derive at the same `now` (sim_step already stamped
+        // last_advanced_at, so no wander transition fires here).
+        let label = {
+            let mut rctx = RouteCtx {
+                router: &mut owned.router,
+                overlay: &owned.overlay,
+                history: &mut owned.history,
+                motion: &mut owned.motion,
+            };
+            character_anchor(agent, &layout, now, &mut rctx).expect("chair sitter is visible")
+        };
+        let seat = back_couch_anchor(stand, CHARACTER_SPRITE_W);
+        let walk = waypoint_anchor(stand, CHARACTER_SPRITE_W);
+        assert!(
+            (label.y as i32 - seat.y as i32).abs() <= 1,
+            "meeting-chair label y {} must track the seat sprite anchor {} (±breath), not float above",
+            label.y,
+            seat.y
+        );
+        assert!(
+            (label.y as i32 - walk.y as i32).abs() >= 4,
+            "meeting-chair label must NOT sit on the 5px-high waypoint_anchor {} (the bug)",
+            walk.y
+        );
+        checked = true;
+        break;
+    }
+    assert!(checked, "no meeting-chair sitter appeared in 1000s of sim");
+}
