@@ -11,44 +11,6 @@
     "desc": "Hop between floors with `PageUp`/`PageDown`, `↑`/`↓`, or `j`/`k` — each switch slides into view"
   },
   {
-    "icon": "🪟",
-    "name": "Floating desktop window",
-    "desc": "`pixtuoid floating` opens the office in a frameless, always-on-top window — on your desktop, not just in your terminal"
-  },
-  {
-    "icon": "🦞",
-    "name": "OpenClaw gateway mascot",
-    "desc": "A live OpenClaw gateway shows up as a wandering lobster — the way it moves shows the gateway's health",
-    "channel": "openclaw"
-  },
-  {
-    "icon": "🎛️",
-    "name": "Vibing",
-    "desc": "The sun and moon cross the skyline as the day goes by, weather rolls past the windows — rain, storm, snow, fog, overcast, windy, smog — and six themes give the office a whole new look",
-    "channel": "vibing"
-  },
-  {
-    "icon": "🎧",
-    "name": "Lofi soundtrack",
-    "desc": "A lofi soundtrack synthesized entirely in code — no audio files shipped. Day and night tracks follow the office's clock and weather, typing sounds swell with activity, and the door chime, printer and vending machine play as coworkers come and go. `m` mutes, `+`/`-` volume",
-    "pix": "note",
-    "card": {
-      "blurb": "a lofi soundtrack, synthesized live in code, follows the office's clock and weather — hear it: the ♩ toggle in the corner of this page."
-    }
-  },
-  {
-    "icon": "🐾",
-    "name": "Office pets",
-    "desc": "A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up",
-    "channel": "pets"
-  },
-  {
-    "icon": "🗂️",
-    "name": "Agent tree dashboard",
-    "desc": "Tab opens a collapsible tree of every floor's agents — each badged with the CLI it runs, color-tinted by what it's doing, with tool-call counts",
-    "channel": "dashboard"
-  },
-  {
     "icon": "🧭",
     "name": "Office spaces",
     "desc": "Cubicles, a meeting lounge, and a pantry — the office is laid out in distinct furnished zones, not just a grid of identical desks",
@@ -62,23 +24,6 @@
     "card": {
       "blurb": "everyone types, waits with a '?', naps under z's, and walks A*-routed paths between desks."
     }
-  },
-  {
-    "icon": "☕",
-    "name": "Coffee run",
-    "desc": "Idle agents visit the pantry, carry a cup back to their desk. Cup stays while you work; taken on exit",
-    "featured": false,
-    "pix": "coffee",
-    "card": {
-      "blurb": "idle agents fetch a coffee from the pantry and carry it back — the cup stays till they leave."
-    }
-  },
-  {
-    "icon": "💬",
-    "name": "Pantry chitchat",
-    "desc": "When two or more idle coworkers gather at the same spot — say, the pantry — speech bubbles pop up with little dev jokes",
-    "featured": false,
-    "channel": "meetings"
   },
   {
     "icon": "🎨",
@@ -115,6 +60,61 @@
     "card": {
       "blurb": "hover a coworker for session length, tool-call count and active-time %, or any desk or plant for its name."
     }
+  },
+  {
+    "icon": "🗂️",
+    "name": "Agent tree dashboard",
+    "desc": "Tab opens a collapsible tree of every floor's agents — each badged with the CLI it runs, color-tinted by what it's doing, with tool-call counts",
+    "channel": "dashboard"
+  },
+  {
+    "icon": "☕",
+    "name": "Coffee run",
+    "desc": "Idle agents visit the pantry, carry a cup back to their desk. Cup stays while you work; taken on exit",
+    "featured": false,
+    "pix": "coffee",
+    "card": {
+      "blurb": "idle agents fetch a coffee from the pantry and carry it back — the cup stays till they leave."
+    }
+  },
+  {
+    "icon": "💬",
+    "name": "Pantry chitchat",
+    "desc": "When two or more idle coworkers gather at the same spot — say, the pantry — speech bubbles pop up with little dev jokes",
+    "featured": false,
+    "channel": "meetings"
+  },
+  {
+    "icon": "🐾",
+    "name": "Office pets",
+    "desc": "A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up",
+    "channel": "pets"
+  },
+  {
+    "icon": "🦞",
+    "name": "OpenClaw gateway mascot",
+    "desc": "A live OpenClaw gateway shows up as a wandering lobster — the way it moves shows the gateway's health",
+    "channel": "openclaw"
+  },
+  {
+    "icon": "🎛️",
+    "name": "Office vibes",
+    "desc": "The sun and moon cross the skyline as the day goes by, weather rolls past the windows — rain, storm, snow, fog, overcast, windy, smog — and six themes give the office a whole new look",
+    "channel": "vibing"
+  },
+  {
+    "icon": "🎧",
+    "name": "Lofi soundtrack",
+    "desc": "A lofi soundtrack synthesized entirely in code — no audio files shipped. Day and night tracks follow the office's clock and weather, typing sounds swell with activity, and the door chime, printer and vending machine play as coworkers come and go. `m` mutes, `+`/`-` volume",
+    "pix": "note",
+    "card": {
+      "blurb": "a lofi soundtrack, synthesized live in code, follows the office's clock and weather — hear it: the ♩ toggle in the corner of this page."
+    }
+  },
+  {
+    "icon": "🪟",
+    "name": "Floating desktop window",
+    "desc": "`pixtuoid floating` opens the office in a frameless, always-on-top window — on your desktop, not just in your terminal"
   },
   {
     "icon": "🛡️",
