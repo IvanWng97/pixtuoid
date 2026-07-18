@@ -89,14 +89,19 @@ function regenSection(label, start, end, body) {
 // `"featured": false` (the inverse of install.json's opt-IN `readme:true`, because
 // most features are headline and only a few are flavor). Edit the flag in
 // features.json, never this table.
-// Icon column: a feature with a `pix` name gets the office's own pixel icon —
-// the SAME sprite-pack-derived art PixIcon.astro renders on the site, via the
-// README-scaled PNG scripts/gen-pix-icons.py writes to docs/images/pix-icons/
-// (pre-scaled because GitHub's renderer strips the site's upscale CSS) — so
-// the README and the site can never show different art for the same feature.
-// Features without a `pix` yet fall back to the plain emoji.
+// Icon column: the office's own pixel PNGs (docs/images/pix-icons/). GitHub gives
+// this empty-header column almost no width and forces `max-width:100%` on the
+// <img>, so WITHOUT explicit dimensions the icon collapses to an illegible blob
+// when the table is width-starved (this is why they looked tiny). Pin width/height
+// from the PNG's own IHDR — GitHub keeps those attrs (it does on the 500px banner)
+// — so the column reserves real space and the art renders 1:1: crisp, undistorted,
+// sized by README_SCALE in gen-pix-icons.py (bump that const to resize).
+const pixDims = (pix) => {
+  const b = readFileSync(join(root, 'docs', 'images', 'pix-icons', `${pix}.png`));
+  return `width="${b.readUInt32BE(16)}" height="${b.readUInt32BE(20)}"`;
+};
 const iconCell = (f) =>
-  f.pix ? `<img src="docs/images/pix-icons/${cell(f.pix)}.png" alt="">` : cell(f.icon);
+  f.pix ? `<img src="docs/images/pix-icons/${cell(f.pix)}.png" alt="" ${pixDims(f.pix)}>` : cell(f.icon);
 const featureRows = features
   .filter((f) => f.featured !== false)
   .map((f) => `| ${iconCell(f)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
