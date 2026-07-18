@@ -69,7 +69,7 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
 - The root `README.md` Features table + install commands are GENERATED from
   `src/features.json` / `src/install.json` (`just gen-readme`); drift is gated by
   the `readme` job (`just gen-readme-check`) on every PR. Edit the JSON, not the
-  README prose. `gen-readme.mjs` reads only `icon`/`name`/`desc`/`featured` off
+  README prose. `gen-readme.mjs` reads only `icon`/`name`/`desc`/`pix`/`featured` off
   each row, regardless of the partition below.
 - **`features.json` is the TOTAL feature collection, partitioned by `channel`**
   (wb-3.1): a row with a video/live demo carries `channel: "<showcase.json id>"`
