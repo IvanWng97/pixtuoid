@@ -204,9 +204,11 @@ skills + all `just` gates immediately. The day-to-day *loop* skills
 (`grilling`, `to-spec`, `tdd`, `code-review`, `diagnosing-bugs`) are a
 PERSONAL, non-committed layer — install [mattpocock/skills](https://github.com/mattpocock/skills)
 if you want the Claude Code implementations; otherwise this section IS the loop.
-Do NOT run its `setup-matt-pocock-skills` here — it would plant a competing
-`CONTEXT.md`/`docs/adr/` doc convention beside our nested `CLAUDE.md` + sharp-edges
-system, and a triage-label vocabulary that conflicts with our 4-axis taxonomy.
+Do NOT run its `setup-matt-pocock-skills` here — it scaffolds a `CONTEXT.md` +
+`docs/adr/` doc convention that would compete with our richer nested `CLAUDE.md`
++ sharp-edges system (neither exists in this repo, and we don't want a second,
+rotting one), plus a fixed triage-label vocabulary separate from our existing
+issue labels (e.g. `bug` / `enhancement` / `upstream-drift` / `needs-human-verify`).
 
 ## Conventions
 
