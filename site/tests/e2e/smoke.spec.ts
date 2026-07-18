@@ -714,6 +714,43 @@ test('wasm fetch failure keeps the still poster without an uncaught error', asyn
   await context.close();
 });
 
+test('a transient wasm-fetch drop self-heals: the office still goes live via retry', async ({
+  browser,
+}) => {
+  // The boot path memoizes ONE shared init promise on window.__pixWasm; before
+  // the bounded retry (OfficeBackdrop.boot / Showcase.bootCanvas), a single
+  // dropped wasm fetch rejected that promise and stranded the office on the
+  // poster until a manual reload. Abort ONLY the FIRST pixtuoid_web_bg.wasm
+  // request (the big binary — the likeliest drop) and let every retry through:
+  // the office MUST recover and go live without a reload.
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const errors = watchErrors(page);
+  let wasmHits = 0;
+  let abortedFirst = false;
+  await page.route('**/pixtuoid_web_bg.wasm', (route) => {
+    wasmHits += 1;
+    if (wasmHits === 1) {
+      abortedFirst = true;
+      return route.abort();
+    }
+    return route.continue();
+  });
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  // Retry recovers: poster → live canvas comes up despite the first-fetch abort.
+  await expect(page.locator('.backdrop.is-live')).toBeAttached({ timeout: 20_000 });
+  await expect(page.locator('[data-sl-onair]')).toHaveText('● LIVE', { timeout: 10_000 });
+  // Prove the recovery went through the retry, not a lucky single fetch: the
+  // first request was aborted and at least one re-fetch followed.
+  expect(abortedFirst).toBe(true);
+  expect(wasmHits).toBeGreaterThan(1);
+  // The one aborted request logs a resource error; the retried rejection must
+  // stay handled — nothing uncaught beyond that line.
+  expect(errors().filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
+  await context.close();
+});
+
 test('key vocabulary: digits ride globally, typing surfaces stay guarded, t keeps its gate', async ({
   page,
 }) => {
