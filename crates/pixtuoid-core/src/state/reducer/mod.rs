@@ -882,13 +882,10 @@ impl Reducer {
             if slot.parent_id.is_none() {
                 if let Some(p) = parent_id {
                     slot.parent_id = Some(p);
-                    // An APPLIED link feeds the child ledger
-                    // (#244/#246); clearing ended_at marks this life
-                    // alive so gc can't prune the memory while the
-                    // child still lives (the end/sweep re-stamps it).
-                    let entry = self.corr.child_ledger.entry(agent_id).or_default();
-                    entry.parent_id = Some(p);
-                    entry.ended_at = None;
+                    // An APPLIED link feeds the child ledger (#244/#246), reviving
+                    // the entry so gc can't prune a still-live re-linked child —
+                    // the ONE revive invariant, shared with the register arm.
+                    self.corr.link_applied_parent(agent_id, p);
                 }
             }
             // G4 back-fill: a slot can exist with MISSING identity
@@ -972,12 +969,10 @@ impl Reducer {
         if self.register_slot(scene, agent_id, ctx, parent_id, now) {
             // A CHILD registration feeds the ledger with its APPLIED
             // parent (a desk-exhaustion refusal records nothing — the
-            // session was dropped, not registered); ended_at clears
-            // for the new life, mirroring the enrichment above.
+            // session was dropped, not registered); the revive invariant
+            // (clear ended_at for the new life) is shared with the enrich arm.
             if let Some(p) = parent_id {
-                let entry = self.corr.child_ledger.entry(agent_id).or_default();
-                entry.parent_id = Some(p);
-                entry.ended_at = None;
+                self.corr.link_applied_parent(agent_id, p);
             }
         }
     }

@@ -131,8 +131,12 @@ pub(super) enum ToolEventKind {
 
 /// The seven reducer-private correlation maps (see the module doc). Fields
 /// are `pub(super)` on purpose: the reducer's arms keep their map-touching
-/// logic verbatim (`self.corr.<map>`), while the named predicates/pruning
-/// below carry the helper logic that is purely map-shaped.
+/// logic verbatim (`self.corr.<map>`) — EXCEPT a coupled write that guards an
+/// invariant, which is named here so its call sites can't drift: the re-link
+/// revive (`link_applied_parent`, set `parent_id` + clear `ended_at`) is one
+/// helper shared by both link arms, while the two divergent `ended_at`
+/// end-stamps stay verbatim in their arms. The named predicates/pruning below
+/// carry the read-side helper logic that is purely map-shaped.
 ///
 /// In/out criterion for a future map: PASSIVE cross-event memory (consulted
 /// to interpret a later event) lives here; ARMED actions that mutate the
@@ -239,6 +243,20 @@ impl Correlation {
         })
     }
 
+    /// Record an APPLIED child→parent link, REVIVING the ledger entry: clearing
+    /// `ended_at` marks this life alive so [`Correlation::gc`] can't prune the
+    /// memory while the child still lives (the end/sweep re-stamps it on its next
+    /// exit). The ONE home of the re-link revive invariant — both the register
+    /// and enrich arms of the `SessionStart` handling call it, so a future third
+    /// link site can't half-implement it (set `parent_id` but forget the clear).
+    /// The reducer keeps the DECISION (whether a link applies — arrival order,
+    /// cycle refusal, desk exhaustion); this is only the coupled two-field write.
+    pub(super) fn link_applied_parent(&mut self, child: AgentId, parent: AgentId) {
+        let entry = self.child_ledger.entry(child).or_default();
+        entry.parent_id = Some(parent);
+        entry.ended_at = None;
+    }
+
     pub(super) fn gc(&mut self, now: SystemTime) {
         self.recent_hook_tool_uses
             .retain(|_, (ts, _)| is_fresh(now, *ts, HOOK_WINS_WINDOW));
@@ -315,6 +333,35 @@ mod tests {
         assert!(
             !corr.child_recently_ended(id, t0() + CHILD_END_LEDGER_TTL),
             "freshness is strict: elapsed == TTL is expired"
+        );
+    }
+
+    #[test]
+    fn link_applied_parent_sets_the_link_and_revives_an_ended_entry() {
+        let child = AgentId::from_parts("claude-code", "child");
+        let parent = AgentId::from_parts("claude-code", "parent");
+        let mut corr = Correlation::default();
+        // A previously-ended child (its exit stamped ended_at, GC-eligible).
+        corr.child_ledger.insert(
+            child,
+            ChildLedgerEntry {
+                parent_id: None,
+                ended_at: Some(t0()),
+            },
+        );
+        // The re-link revive: the link is recorded AND ended_at is cleared, so
+        // gc no longer prunes the entry (child_recently_ended goes false) — the
+        // invariant a bare `parent_id = Some(..)` (without the clear) would break.
+        corr.link_applied_parent(child, parent);
+        let entry = &corr.child_ledger[&child];
+        assert_eq!(entry.parent_id, Some(parent));
+        assert_eq!(
+            entry.ended_at, None,
+            "a re-link must clear ended_at (revive)"
+        );
+        assert!(
+            !corr.child_recently_ended(child, t0() + Duration::from_secs(1)),
+            "a revived entry is no longer 'recently ended'"
         );
     }
 
