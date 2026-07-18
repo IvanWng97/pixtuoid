@@ -1458,6 +1458,36 @@ mod tests {
     }
 
     #[test]
+    fn coffee_record_keeps_stamp_on_a_backward_clock_step() {
+        // Backward clock (now < stored → duration_since errs): `is_ok_and` yields
+        // false → not-expired → the old stamp is KEPT, not rewound. Guards against a
+        // treat-clock-error-as-expired regression that would restart the steam
+        // window (and rewind the stamp) on an NTP/suspend step. The two forward
+        // tests can't catch it — their `duration_since` never errs.
+        let id = AgentId::from_parts("claude-code", "coffee-backclock");
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let mut coffee = CoffeeState::new();
+        coffee.record([id], t0);
+        coffee.record([id], t0 - Duration::from_secs(10));
+        assert_eq!(
+            coffee.map().get(&id),
+            Some(&t0),
+            "a backward clock step must keep the original stamp, not rewind it"
+        );
+    }
+
+    #[test]
+    fn floor_capacity_clamps_to_zero_on_a_too_small_buffer() {
+        // A buffer too small for even one cubicle → compute_with_seed None → the
+        // `unwrap_or(0)` clamp. Mutating it to `unwrap()` panics boot-seeding;
+        // `unwrap_or(1)` seeds a phantom desk. A normal buffer fits ≥ 1 desk (the
+        // `> 0` guards an always-None / constant-0 mutant); the exact count is left
+        // to the layout tests — re-deriving it here would just re-run the impl.
+        assert_eq!(floor_capacity(3, 3, 0), 0);
+        assert!(floor_capacity(192, 160, 0) > 0);
+    }
+
+    #[test]
     fn transition_escapes_a_backward_clock_step() {
         let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let tr = FloorTransition::new(0, 1, start);

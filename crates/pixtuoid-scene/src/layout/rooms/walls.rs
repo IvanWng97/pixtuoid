@@ -596,6 +596,37 @@ mod tests {
     }
 
     #[test]
+    fn vertical_wall_meeting_a_horizontal_at_its_bottom_extends_to_fill_the_corner() {
+        // The `y_bot` stitch — the mirror of the north-cap test above. A vertical
+        // divider whose SOUTH end lands on a crossing H-wall row must extend its
+        // blocked footprint DOWN by WALL_THICK_H-1 to fill the inside corner, else
+        // its east columns leave an L-notch (a walkable bite through the divider).
+        // Only the TOP join was under test; this pins the bottom join.
+        let hwall = WallSegment {
+            start: Point { x: 40, y: 80 },
+            end: Point { x: 56, y: 80 },
+        };
+        let vseg = WallSegment {
+            start: Point { x: 56, y: 40 },
+            end: Point { x: 56, y: 80 },
+        };
+        // seg_bot (80) sits on the crossing H-wall row ⇒ the bottom stitch fires.
+        let (o, s) = wall_segment_rect(&vseg, 20, &[hwall, vseg]);
+        assert_eq!(
+            o.y + s.h - 1,
+            80 + (WALL_THICK_H - 1),
+            "south edge extends WALL_THICK_H-1 below seg_bot to fill the inside corner"
+        );
+        // The same segment with NO crossing wall at the bottom stops at seg_bot.
+        let (o2, s2) = wall_segment_rect(&vseg, 20, &[vseg]);
+        assert_eq!(
+            o2.y + s2.h - 1,
+            80,
+            "no crossing wall at the bottom ⇒ footprint ends at seg_bot (no extension)"
+        );
+    }
+
+    #[test]
     fn horizontal_wall_rect_is_full_face_unchanged() {
         // Routed through the same ground_rect for uniformity — geometry must be
         // byte-identical to the pre-refactor hand-rolled rect.

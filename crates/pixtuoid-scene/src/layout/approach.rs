@@ -412,16 +412,16 @@ mod tests {
     }
 
     #[test]
-    fn real_layout_obstacle_stand_matches_approach_point() {
-        // The RENDER anchor (stand_point) and the WALK goal (approach_point) MUST
-        // agree for obstacle waypoints — else the AtWaypoint sprite pops from the
-        // side the agent walked to onto a different face on arrival. They diverged
-        // when stand_point lacked approach_point's reachability filter: on a real
-        // floor where the nearest-desk side's first walkable pixel sat in a coarse-
-        // unreachable OBSTACLE_PAD cell, stand kept the near (unreachable) side
-        // while approach picked a farther reachable one (~1 full sprite width pop).
-        // Assert equality across the sizes×seeds×desks that exhibited it.
-        use crate::layout::SceneLayout;
+    fn real_layout_obstacle_stand_is_a_reachable_allowed_off_visual_cell() {
+        // `stand_point ≡ approach_point` is now true BY CONSTRUCTION (stand_point
+        // delegates to approach_point for obstacles), so asserting their equality is
+        // a tautology — `f(X) == f(X)` can't fail whatever approach_point computes.
+        // Instead pin the real invariants of the obstacle branch on live layouts:
+        // the resolved stand cell is walkable, coarse-reachable, on a facing-allowed
+        // (non-back) side, and OUTSIDE the whole visual sprite (clearance derives
+        // from the visual, not the shallow footprint — else the agent stands inside
+        // the sprite). Each sub-assertion can genuinely fail under a regression.
+        use crate::layout::{furniture_def, SceneLayout};
         let obstacle = |k| {
             !matches!(
                 k,
@@ -444,7 +444,7 @@ mod tests {
                 };
                 for &desk in &l.home_desks {
                     for wp in l.waypoints.iter().filter(|w| obstacle(w.kind)) {
-                        let stand = stand_point(
+                        let s = stand_point(
                             wp.kind,
                             wp.pos,
                             l.pantry_counter_size(),
@@ -453,19 +453,49 @@ mod tests {
                             wp.facing,
                             &l.reachable,
                         );
-                        let approach = approach_point(
-                            wp.kind.furniture(),
-                            wp.pos,
-                            wp.facing,
-                            l.pantry_counter_size(),
-                            &l.walkable,
-                            desk,
-                            &l.reachable,
+                        if s == wp.pos {
+                            continue; // "no valid approach" sentinel — nothing to stand on
+                        }
+                        assert!(
+                            l.walkable.is_walkable(s.x, s.y),
+                            "{bw}x{bh} seed {seed}: {:?} stand {s:?} not walkable",
+                            wp.kind
                         );
-                        assert_eq!(
-                            stand, approach,
-                            "{bw}x{bh} seed {seed} desk {desk:?}: {:?} render anchor {stand:?} != walk goal {approach:?}",
-                            wp.kind,
+                        assert!(
+                            l.reachable.reaches(s),
+                            "{bw}x{bh} seed {seed}: {:?} stand {s:?} not coarse-reachable",
+                            wp.kind
+                        );
+                        // A pure single-axis offset from pos → its direction MUST be
+                        // an allowed (non-back) side.
+                        let dx = s.x as i32 - wp.pos.x as i32;
+                        let dy = s.y as i32 - wp.pos.y as i32;
+                        let dir = if dx.abs() >= dy.abs() {
+                            (dx.signum(), 0)
+                        } else {
+                            (0, dy.signum())
+                        };
+                        let def = furniture_def(wp.kind.furniture());
+                        assert!(
+                            def.approach.allows(wp.facing, dir),
+                            "{bw}x{bh} seed {seed}: {:?} stand {s:?} on a FORBIDDEN side {dir:?}",
+                            wp.kind
+                        );
+                        // Clear of the WHOLE visual, not the shallow footprint: the
+                        // offset along the stand axis is ≥ visual/2 + STAND_CLEARANCE.
+                        let ext =
+                            approach_clearance_extent(wp.kind.furniture(), l.pantry_counter_size())
+                                .expect("an obstacle stand cell implies a clearance extent");
+                        let (half, off) = if dx != 0 {
+                            (ext.w as i32 / 2, dx.abs())
+                        } else {
+                            (ext.h as i32 / 2, dy.abs())
+                        };
+                        assert!(
+                            off >= half + STAND_CLEARANCE as i32,
+                            "{bw}x{bh} seed {seed}: {:?} stand {s:?} sits INSIDE its visual \
+                             (off {off} < half {half} + clearance {STAND_CLEARANCE})",
+                            wp.kind
                         );
                     }
                 }

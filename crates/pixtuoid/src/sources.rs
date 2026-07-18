@@ -633,6 +633,35 @@ mod tests {
     }
 
     #[test]
+    fn status_from_row_connected_is_present_and_bound_not_persisted_intent() {
+        // The wire `connected` is PRESENT-AND-BOUND (state == Connected), NOT the
+        // persisted `[sources]` intent bit. A NoCli{connected:true} (absent CLI whose
+        // stored intent is "connected") must serialize connected:false AND
+        // cli_present:false — the divergence status_from_row's doc warns about. The
+        // empty-HOME golden only ever produces NoCli{connected:false}+connected:false
+        // rows, so it can't distinguish `matches!(Connected)` from `state.connected()`.
+        let row = |state| ConnectionRow {
+            source_id: "claude-code",
+            label_prefix: "cc",
+            display_name: "Claude Code",
+            state,
+            config_path: None,
+            target: None,
+            health: None,
+        };
+        let connected = status_from_row(&row(ConnState::Connected));
+        assert!(connected.connected, "Connected → wire connected:true");
+        assert!(connected.cli_present, "Connected → present");
+
+        let nocli_intent_on = status_from_row(&row(ConnState::NoCli { connected: true }));
+        assert!(
+            !nocli_intent_on.connected,
+            "NoCli persisted-intent true must NOT leak as wire connected (present-and-bound is false)"
+        );
+        assert!(!nocli_intent_on.cli_present, "an absent CLI is not present");
+    }
+
+    #[test]
     fn registered_id_accepts_known_rejects_unknown() {
         assert_eq!(registered_id("antigravity").unwrap(), "antigravity");
         let err = registered_id("not-a-source").unwrap_err().to_string();

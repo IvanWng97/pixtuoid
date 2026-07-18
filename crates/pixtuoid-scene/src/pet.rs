@@ -246,4 +246,25 @@ mod tests {
         assert_eq!(PetKind::Cat.hitbox("unknown"), Size { w: 6, h: 6 });
         assert_eq!(PetKind::Dog.hitbox("unknown"), Size { w: 6, h: 6 });
     }
+
+    #[test]
+    fn is_active_true_within_window_false_after_and_on_a_backward_clock() {
+        use std::time::Duration;
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let pet = PetState {
+            petted_at: t0,
+            pet_pos: Point { x: 10, y: 10 },
+            kind: PetKind::Cat,
+            floor_idx: 0,
+        };
+        // Within the freeze window → active.
+        assert!(pet.is_active(t0 + Duration::from_millis(PET_DURATION_MS / 2)));
+        // At/after the window → inactive (the `< PET_DURATION_MS` boundary).
+        assert!(!pet.is_active(t0 + Duration::from_millis(PET_DURATION_MS)));
+        assert!(!pet.is_active(t0 + Duration::from_millis(PET_DURATION_MS + 500)));
+        // Backward clock (now < petted_at): the deliberate `unwrap_or(PET_DURATION_MS+1)`
+        // fallback treats it as EXPIRED, not active — guards that constant against a
+        // `unwrap_or(0)` regression that would freeze the pet on a clock step.
+        assert!(!pet.is_active(t0 - Duration::from_secs(1)));
+    }
 }

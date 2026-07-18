@@ -397,6 +397,31 @@ mod tests {
     }
 
     #[test]
+    fn current_bubble_line_advances_across_turns_not_frozen() {
+        // Teeth for the LINE selection (`line_idx = seed.wrapping_add(turn)`, the
+        // `.1` of the tuple): every round-robin test above asserts only the SPEAKER
+        // (`.0`), so dropping `turn` from the index — freezing every turn on one
+        // quip — goes uncaught. Assert each line is drawn from the pool AND that the
+        // line is not frozen across the exchange.
+        let start = base_time();
+        let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
+        let lines: Vec<&str> = (0..TURNS)
+            .map(|t| {
+                chat.current_bubble(start + Duration::from_millis(t * TURN_MS))
+                    .unwrap()
+                    .1
+            })
+            .collect();
+        for l in &lines {
+            assert!(CHITCHAT_LINES.contains(l), "{l:?} not in the quip pool");
+        }
+        assert!(
+            lines.iter().collect::<std::collections::HashSet<_>>().len() > 1,
+            "the line must vary across turns (index tracks `turn`), got all {lines:?}"
+        );
+    }
+
+    #[test]
     fn meeting_slots_in_same_room_form_one_conversation() {
         let now = base_time();
         let mut state = HashMap::new();

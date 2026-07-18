@@ -1014,25 +1014,33 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
             v,
         )
     };
+    // Does the plant box come within PLANT_OBSTACLE_CLEARANCE_PX of the obstacle
+    // box (obs_pos, obs_v)? Inflate the obstacle box by the clearance on every side
+    // and test overlap — the shared predicate the three obstacle families (fish
+    // tank / meeting-trio bodies / obstacle waypoints) each need.
+    let within_clearance = |plant_box: (Point, Size), obs_pos: Point, obs_v: Size| {
+        let m = PLANT_OBSTACLE_CLEARANCE_PX;
+        let (otl, osz) = visual_tl(obs_pos, obs_v);
+        let inflated = (
+            Point {
+                x: otl.x.saturating_sub(m),
+                y: otl.y.saturating_sub(m),
+            },
+            Size {
+                w: osz.w + 2 * m,
+                h: osz.h + 2 * m,
+            },
+        );
+        super::placement::rects_overlap(plant_box, inflated)
+    };
     let mut v = Vec::new();
     sweep(|w, h, seed, l| {
         for p in &l.plants {
             let pv = furniture_def(p.kind.furniture()).visual;
+            let plant_box = visual_tl(p.pos, pv);
             if let Some(t) = l.fish_tank {
                 let tv = furniture_def(Furniture::FishTank).visual;
-                let m = PLANT_OBSTACLE_CLEARANCE_PX;
-                let (ttl, tsz) = visual_tl(t, tv);
-                let inflated = (
-                    Point {
-                        x: ttl.x.saturating_sub(m),
-                        y: ttl.y.saturating_sub(m),
-                    },
-                    Size {
-                        w: tsz.w + 2 * m,
-                        h: tsz.h + 2 * m,
-                    },
-                );
-                if super::placement::rects_overlap(visual_tl(p.pos, pv), inflated) {
+                if within_clearance(plant_box, t, tv) {
                     v.push(format!(
                         "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of the fish tank @{:?}",
                         p.kind, p.pos, t
@@ -1044,7 +1052,6 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
             // (visible at ~110x45).
             for room in &l.meeting_rooms {
                 let Some(trio) = &room.trio else { continue };
-                let m = PLANT_OBSTACLE_CLEARANCE_PX;
                 let bodies = [
                     (
                         trio.sofas[0],
@@ -1057,18 +1064,7 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
                     (trio.table, furniture_def(Furniture::MeetingTable).visual),
                 ];
                 for (bpos, bv) in bodies {
-                    let (btl, bsz) = visual_tl(bpos, bv);
-                    let inflated = (
-                        Point {
-                            x: btl.x.saturating_sub(m),
-                            y: btl.y.saturating_sub(m),
-                        },
-                        Size {
-                            w: bsz.w + 2 * m,
-                            h: bsz.h + 2 * m,
-                        },
-                    );
-                    if super::placement::rects_overlap(visual_tl(p.pos, pv), inflated) {
+                    if within_clearance(plant_box, bpos, bv) {
                         v.push(format!(
                             "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of a trio body @{:?}",
                             p.kind, p.pos, bpos
@@ -1081,19 +1077,7 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
                 if def.footprint.is_none() {
                     continue;
                 }
-                let m = PLANT_OBSTACLE_CLEARANCE_PX;
-                let (wtl, wsz) = visual_tl(wp.pos, def.visual);
-                let inflated = (
-                    Point {
-                        x: wtl.x.saturating_sub(m),
-                        y: wtl.y.saturating_sub(m),
-                    },
-                    Size {
-                        w: wsz.w + 2 * m,
-                        h: wsz.h + 2 * m,
-                    },
-                );
-                if super::placement::rects_overlap(visual_tl(p.pos, pv), inflated) {
+                if within_clearance(plant_box, wp.pos, def.visual) {
                     v.push(format!(
                         "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of {:?}@{:?}",
                         p.kind, p.pos, wp.kind, wp.pos

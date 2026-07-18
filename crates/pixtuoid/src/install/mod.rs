@@ -1425,6 +1425,65 @@ mod tests {
     }
 
     #[test]
+    fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Isolate OpenClaw's artifacts under a temp home (never touch ~/.openclaw).
+        let oc_home = tempfile::TempDir::new().unwrap();
+        let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+        let exe = std::env::current_exe().unwrap();
+        let mut covered = 0;
+        for &t in target::TARGETS {
+            let Some(make) = t.extra_artifacts else {
+                continue;
+            };
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("config");
+            install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+
+            // Delete a wholly-owned artifact + capture its correct (shim-baked)
+            // content. Located via the target's OWN declaration — generic over any
+            // extra_artifacts target.
+            let (victim, want) = make(&exe).unwrap().into_iter().next().unwrap();
+            std::fs::remove_file(&victim).unwrap();
+            assert!(
+                !victim.exists(),
+                "{}: precondition — artifact deleted",
+                t.name
+            );
+
+            // Re-install: the config merge is a SEMANTIC no-op (AlreadyUpToDate)…
+            let r = install_target(t, Some(cfg), Some(exe.clone())).unwrap();
+            assert!(
+                matches!(r.outcome, InstallOutcome::AlreadyUpToDate),
+                "{}: config already current — the heal must fire despite the no-op",
+                t.name
+            );
+            // …yet the deleted artifact is HEALED byte-for-byte. The artifact write
+            // runs BEFORE the `!changed` early-return; moving it after would leave
+            // the file gone. The round-trip/verify tests never delete-then-reinstall,
+            // so only this catches that regression.
+            assert!(
+                victim.exists(),
+                "{}: a no-op re-install must re-create the deleted plugin file",
+                t.name
+            );
+            assert_eq!(
+                std::fs::read_to_string(&victim).unwrap(),
+                want,
+                "{}: the healed artifact must carry the correct baked content",
+                t.name
+            );
+            covered += 1;
+        }
+        assert!(
+            covered >= 1,
+            "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+        );
+    }
+
+    #[test]
     fn verify_target_flags_a_missing_event() {
         // An older-pixtuoid install / an upstream schema change that orphaned an
         // event: hand-remove one registered event → "missing hook entries".

@@ -778,6 +778,30 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_usage_sums_a_cache_write_bucket_into_fresh() {
+        // The `cache_write` bucket is an INFERRED snake_case key — no fixture
+        // confirms copilot's real spelling (see the arm comment). This pins the
+        // decoder CONTRACT: IF a tokenDetails.cache_write bucket arrives, it counts
+        // toward fresh (input + cache_write + output). The real-shutdown sibling
+        // below carries NO cache_write bucket, so the `.saturating_add(bucket(
+        // "cache_write"))` branch is otherwise never exercised with a nonzero value.
+        let line = r#"{"type":"session.shutdown","data":{"shutdownType":"routine","tokenDetails":{"input":{"tokenCount":11175},"cache_write":{"tokenCount":500},"cache_read":{"tokenCount":1664},"output":{"tokenCount":212}},"currentModel":"gpt-5-mini"},"id":"56992353","timestamp":"2026-06-14T21:38:47.162Z","parentId":"3079df1f"}"#;
+        match &decode(line)[..] {
+            [AgentEvent::SessionEnd { .. }, AgentEvent::Usage {
+                agent_id,
+                fresh_tokens,
+            }] => {
+                assert_eq!(*agent_id, root());
+                assert_eq!(
+                    *fresh_tokens, 11_887,
+                    "fresh = input 11175 + cache_write 500 + output 212 (cache_read excluded)"
+                );
+            }
+            other => panic!("expected [SessionEnd, Usage], got {other:?}"),
+        }
+    }
+
+    #[test]
     fn real_session_shutdown_usage_summary_lands_one_final_delta() {
         // #645: the fixture's real shutdown shape. tokenDetails.input already
         // EXCLUDES cache reads (usage.inputTokens 12839 − cacheReadTokens 1664
