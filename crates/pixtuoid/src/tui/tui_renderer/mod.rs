@@ -838,13 +838,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // it; rain stays global). The observer runs EVERY frame, even muted, so
         // its cue edges stay warm — re-enabling audio fires no door/appliance
         // volley for what arrived while silent; only DELIVERY is gated.
-        // `cached_layout` holds the PREVIOUS frame's layout here (set below): the
-        // 1-frame kind-lookup lag on resize is pre-existing and out of scope.
-        let cached_layout = self.cached_layout.as_deref();
+        // Resolve the kind-map against THIS frame's layout (the `result` handle,
+        // not `self.cached_layout` which is still last frame's until set below),
+        // so occupancy and kind-map are the same frame's — matching
+        // `FloorSession::audio_frame`, which reads both from the render it just
+        // ran (the last cross-painter non-uniformity). On a too-small frame
+        // (`Ok(None)`) no waypoints are occupied, so the `None` layout is never
+        // queried.
+        let frame_layout = result.as_ref().ok().and_then(|o| o.as_deref());
         let audio_frame = self.office.audio.frame(
             scene,
             &occupied_waypoints,
-            |idx| pixtuoid_scene::floor::waypoint_kind_of(cached_layout, idx),
+            |idx| pixtuoid_scene::floor::waypoint_kind_of(frame_layout, idx),
             self.current_floor,
             now,
         );
