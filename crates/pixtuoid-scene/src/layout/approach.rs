@@ -68,9 +68,11 @@ pub(super) fn obstacle_footprint(kind: WaypointKind, pantry_counter_size: Size) 
 /// reachable allowed side nearest `origin`" scan. Falls back to `pos` (the "no
 /// valid approach" sentinel) exactly where `approach_point` does.
 ///
-/// Equality is now true BY CONSTRUCTION — the old parallel scan (kept equal only
-/// by `real_layout_obstacle_stand_matches_approach_point`, retained as a cheap
-/// guard) is gone.
+/// Equality is now true BY CONSTRUCTION — the old parallel scan is gone, so the
+/// stand-vs-approach equality a dedicated guard once asserted is a tautology now;
+/// that guard was repurposed to pin the obstacle branch's REAL invariants
+/// (walkable / reachable / allowed-side / off-visual) in
+/// `real_layout_obstacle_stand_is_a_reachable_allowed_off_visual_cell`.
 pub fn stand_point(
     kind: WaypointKind,
     pos: Point,
@@ -483,13 +485,21 @@ mod tests {
                         );
                         // Clear of the WHOLE visual, not the shallow footprint: the
                         // offset along the stand axis is ≥ visual/2 + STAND_CLEARANCE.
-                        let ext =
-                            approach_clearance_extent(wp.kind.furniture(), l.pantry_counter_size())
-                                .expect("an obstacle stand cell implies a clearance extent");
-                        let (half, off) = if dx != 0 {
-                            (ext.w as i32 / 2, dx.abs())
+                        // Read the visual from an INDEPENDENT authority (furniture_def /
+                        // the pantry counter size) — NOT `approach_clearance_extent`, the
+                        // fn `approach_point` itself uses to place the cell — so a
+                        // visual→footprint regression there fails HERE (off < visual/2 +
+                        // clearance) instead of shifting both the placement AND this
+                        // oracle together (which would leave it toothless).
+                        let visual = if wp.kind == WaypointKind::Pantry {
+                            l.pantry_counter_size()
                         } else {
-                            (ext.h as i32 / 2, dy.abs())
+                            def.visual
+                        };
+                        let (half, off) = if dx != 0 {
+                            (visual.w as i32 / 2, dx.abs())
+                        } else {
+                            (visual.h as i32 / 2, dy.abs())
                         };
                         assert!(
                             off >= half + STAND_CLEARANCE as i32,
@@ -724,10 +734,11 @@ mod tests {
     }
 
     #[test]
-    fn approach_point_for_obstacle_matches_stand_point_when_reachable() {
-        // For an obstacle on an open-enough field, the approach point is exactly
-        // the stand cell (the reachability filter drops nothing). This pins the
-        // obstacle render (stand_point) ≡ obstacle walk-end (approach_point).
+    fn obstacle_stand_point_resolves_to_a_reachable_walkable_off_center_cell() {
+        // On an open field an obstacle's stand cell must be a walkable, coarse-
+        // reachable cell OFF the blocked center. (stand_point ≡ approach_point is
+        // now true BY CONSTRUCTION — stand_point delegates — so an equality assert
+        // would be a tautology; pin the real properties instead.)
         let pos = Point { x: 50, y: 50 };
         let m = mask_with_obstacle(100, 100, pos, 32, 10);
         let reach = ReachSet::from_mask(&m, Point { x: 5, y: 5 });
@@ -741,22 +752,11 @@ mod tests {
             Facing::South,
             &reach,
         );
+        assert_ne!(sp, pos, "must resolve off the blocked center");
+        assert!(m.is_walkable(sp.x, sp.y), "the stand cell must be walkable");
         assert!(
             reach.reaches(sp),
             "the stand cell must be coarse-reachable here"
-        );
-        assert_eq!(
-            approach_point(
-                Furniture::Pantry,
-                pos,
-                Facing::South,
-                Size { w: 32, h: 10 },
-                &m,
-                origin,
-                &reach,
-            ),
-            sp,
-            "obstacle approach_point must equal stand_point when reachable",
         );
     }
 
