@@ -1038,19 +1038,17 @@ import { asset, DIM_RESTING } from '../consts';
       // Office built against the losing instance reading the wrong linear
       // memory forever. Memoize ONE shared init promise on `window` so every
       // consumer awaits the same instantiation (site/CLAUDE.md VIBING entry).
-      // A transient drop on the ~874KB wasm fetch — a flaky link, or a brief
-      // glue/wasm cache-desync during a Pages deploy (max-age=600, unhashed
-      // names) — used to STRAND the office on the poster until a manual reload:
-      // the rejected init promise was memoized on window and never retried.
-      // Retry the import+instantiate a bounded number of times with backoff so a
-      // recoverable blip self-heals; only once WASM_INIT_RETRIES exhaust does the
-      // promise reject (→ poster, the deliberate no-wasm fallback). The retry
-      // stays INSIDE this one shared promise on purpose — both live-office
-      // consumers (this backdrop + Showcase VIBING) must keep awaiting a SINGLE
-      // instantiation, so a per-consumer retry would reintroduce the
-      // double-instantiate race __pixWasm exists to close. Keep the retry factory
-      // in sync with Showcase.astro's bootCanvas() (separate is:inline scopes —
-      // no shared const, so the two copies are pinned by this comment).
+      // A transient drop on the ~874KB wasm-binary fetch (a flaky link) used to
+      // strand the office on the poster until a manual reload — the rejected
+      // init promise was memoized on window and never retried. Retry
+      // import+instantiate a bounded number of times with backoff so a
+      // recoverable blip self-heals; on exhaustion the promise rejects → poster
+      // (the deliberate no-wasm fallback). Scope: this re-fetches the binary; a
+      // first-load GLUE-import() failure is import-map-cached and not covered.
+      // The retry MUST stay INSIDE this one shared promise — a per-consumer
+      // retry would reintroduce the double-instantiate race __pixWasm closes
+      // (site/CLAUDE.md, VIBING entry). Retry consts mirror Showcase.astro's
+      // bootCanvas(), pinned by config/wasm-init-consts.test.mjs.
       window.__pixWasm =
         window.__pixWasm ||
         (function initSharedWasm() {
@@ -1106,7 +1104,7 @@ import { asset, DIM_RESTING } from '../consts';
           markEngineResolved();
         });
     }
-    // Defer the ~740KB wasm fetch OUT of the render-critical window: kick it
+    // Defer the ~874KB wasm fetch OUT of the render-critical window: kick it
     // after `load`, at idle, so it stops competing with the above-fold poster /
     // fonts / CSS (LCP is the H1 text). The bg-tone cover holds until the first
     // frame lands (~0.5–1s later on fast links), then the office FLOOR-ROLLS in

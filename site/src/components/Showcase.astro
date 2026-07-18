@@ -339,12 +339,12 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       // resolves would instantiate two wasm instances and stomp the single
       // module-global `wasm` (see OfficeBackdrop.astro's `boot()` for the
       // full race + site/CLAUDE.md's VIBING entry).
-      // Bounded retry with backoff so a transient wasm-fetch drop self-heals
-      // instead of stranding the office on the poster until a manual reload — the
-      // retry MUST stay inside the one shared __pixWasm promise (both live-office
-      // consumers await a SINGLE instantiation; a per-consumer retry would
-      // reintroduce the double-instantiate race). Keep in sync with
-      // OfficeBackdrop.astro's boot(), where the full rationale lives.
+      // Bounded retry with backoff so a transient wasm-binary fetch drop
+      // self-heals instead of stranding the office on the poster until a manual
+      // reload — the retry MUST stay inside the one shared __pixWasm promise (a
+      // per-consumer retry would reintroduce the double-instantiate race). Full
+      // rationale: OfficeBackdrop.astro's boot() + site/CLAUDE.md; retry consts
+      // pinned by config/wasm-init-consts.test.mjs.
       window.__pixWasm =
         window.__pixWasm ||
         (function initSharedWasm() {
