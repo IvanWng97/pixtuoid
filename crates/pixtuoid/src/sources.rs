@@ -224,17 +224,18 @@ pub enum DisconnectOutcome {
 /// choice that materializes that CLI's config dir.)
 pub fn connect(cfg: &Path, id: &str) -> Result<ConnectOutcome> {
     let sid = registered_id(id)?;
-    connect_target(cfg, sid, by_source(sid), None)
+    connect_target(cfg, sid, by_source(sid))
 }
 
 /// The persist + install + rollback core, with the `target` passed EXPLICITLY so
 /// tests can inject a deterministic-fail fake (`connect` resolves it from the
-/// registry). `target_config` overrides the target's config path.
+/// registry). Hooks install at the target's default config path — the
+/// per-target config override is `install_target`'s own seam (exercised there),
+/// and the sources layer only ever wants the default, so it isn't re-threaded.
 fn connect_target(
     cfg: &Path,
     sid: &'static str,
     target: Option<&Target>,
-    target_config: Option<PathBuf>,
 ) -> Result<ConnectOutcome> {
     // Capture the PRIOR flag before the optimistic save, so a failed install
     // restores the exact pre-attempt state: a re-connect of an ALREADY-connected
@@ -244,7 +245,7 @@ fn connect_target(
     let prior = config::load(cfg, &mut Vec::new()).sources.get(sid).copied();
     config::save_source_connected(cfg, sid, true)?;
     match target {
-        Some(t) => match install::install_target(t, target_config, None) {
+        Some(t) => match install::install_target(t, None, None) {
             Ok(r) => Ok(ConnectOutcome::Installed(r)),
             Err(e) => {
                 // Roll the flag back to the prior state so the next launch
@@ -277,20 +278,19 @@ fn connect_target(
 /// disconnected (the safer direction).
 pub fn disconnect(cfg: &Path, id: &str) -> Result<DisconnectOutcome> {
     let sid = registered_id(id)?;
-    disconnect_target(cfg, sid, by_source(sid), None)
+    disconnect_target(cfg, sid, by_source(sid))
 }
 
 fn disconnect_target(
     cfg: &Path,
     sid: &'static str,
     target: Option<&Target>,
-    target_config: Option<PathBuf>,
 ) -> Result<DisconnectOutcome> {
     // `?` here = the persist-failure abort (flip nothing). Past it, the flag is
     // false, so a hook-removal error folds into the outcome rather than erroring.
     config::save_source_connected(cfg, sid, false)?;
     Ok(match target {
-        Some(t) => match install::uninstall_target(t, target_config) {
+        Some(t) => match install::uninstall_target(t, None) {
             Ok(r) => DisconnectOutcome::Uninstalled(r),
             Err(e) => DisconnectOutcome::HookRemovalFailed(format!("{e:#}")),
         },
@@ -788,7 +788,7 @@ mod tests {
         // ABSENT (keeping the is_first_run signal), not a forced `false`.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
-        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET), None).unwrap_err();
+        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap_err();
         assert!(err.to_string().contains("forced install failure"), "{err}");
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(
@@ -809,7 +809,7 @@ mod tests {
         let cfg = dir.path().join("config.toml");
         config::save_source_connected(&cfg, "rollbacktest", true).unwrap();
 
-        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET), None).unwrap_err();
+        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap_err();
         assert!(err.to_string().contains("forced install failure"), "{err}");
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(
@@ -828,7 +828,7 @@ mod tests {
         let cfg = dir.path().join("config.toml");
         config::save_source_connected(&cfg, "rollbacktest", false).unwrap();
 
-        connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET), None).unwrap_err();
+        connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap_err();
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(app.sources.get("rollbacktest"), Some(&false));
     }
@@ -841,7 +841,7 @@ mod tests {
         // persist-abort) so the gate still closes + the CLI/panel can surface it.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
-        let outcome = disconnect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET), None).unwrap();
+        let outcome = disconnect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap();
         assert!(matches!(outcome, DisconnectOutcome::HookRemovalFailed(_)));
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(
