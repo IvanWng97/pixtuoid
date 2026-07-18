@@ -1900,6 +1900,15 @@ fn furniture_room_decor_too_small_bounds_are_noops() {
         width: 8,
         height: 8,
     };
+    let small_meeting = crate::layout::MeetingRoom {
+        bounds: small,
+        trio: None,
+    };
+    let small_pantry = crate::layout::PantryRoom {
+        bounds: small,
+        counter_size: crate::layout::Size { w: 20, h: 8 },
+        kitchen_island: None,
+    };
     let assert_noop = |f: &dyn Fn(&mut RgbBuffer)| {
         let mut buf = RgbBuffer::filled(60, 60, bg);
         f(&mut buf);
@@ -1910,9 +1919,11 @@ fn furniture_room_decor_too_small_bounds_are_noops() {
         }
     };
     assert_noop(&|b| paint_notice_board(b, small, theme));
-    assert_noop(&|b| paint_doormat(b, small, theme));
-    assert_noop(&|b| paint_water_cooler(b, small, std::time::SystemTime::UNIX_EPOCH, theme));
-    assert_noop(&|b| paint_trash_bin(b, small));
+    assert_noop(&|b| paint_doormat(b, &small_meeting, theme));
+    assert_noop(&|b| {
+        paint_water_cooler(b, &small_pantry, std::time::SystemTime::UNIX_EPOCH, theme)
+    });
+    assert_noop(&|b| paint_trash_bin(b, &small_pantry));
 }
 
 #[test]
@@ -1929,6 +1940,15 @@ fn furniture_room_decor_large_bounds_paint() {
         width: 40,
         height: 40,
     };
+    let big_meeting = crate::layout::MeetingRoom {
+        bounds: big,
+        trio: None,
+    };
+    let big_pantry = crate::layout::PantryRoom {
+        bounds: big,
+        counter_size: crate::layout::Size { w: 20, h: 8 },
+        kitchen_island: None,
+    };
     let assert_paints = |f: &dyn Fn(&mut RgbBuffer)| {
         let mut buf = RgbBuffer::filled(120, 80, bg);
         f(&mut buf);
@@ -1938,9 +1958,11 @@ fn furniture_room_decor_large_bounds_paint() {
         assert!(painted, "large bounds must paint the decor");
     };
     assert_paints(&|b| paint_notice_board(b, big, theme));
-    assert_paints(&|b| paint_doormat(b, big, theme));
-    assert_paints(&|b| paint_water_cooler(b, big, std::time::SystemTime::UNIX_EPOCH, theme));
-    assert_paints(&|b| paint_trash_bin(b, big));
+    assert_paints(&|b| paint_doormat(b, &big_meeting, theme));
+    assert_paints(&|b| {
+        paint_water_cooler(b, &big_pantry, std::time::SystemTime::UNIX_EPOCH, theme)
+    });
+    assert_paints(&|b| paint_trash_bin(b, &big_pantry));
 }
 
 #[test]
@@ -2862,11 +2884,16 @@ fn water_cooler_glugs_a_rising_bubble() {
         width: 30,
         height: 40,
     };
+    let pantry = crate::layout::PantryRoom {
+        bounds: pr,
+        counter_size: crate::layout::Size { w: 20, h: 8 },
+        kitchen_island: None,
+    };
     let render = |ms: u64| {
         let mut buf = RgbBuffer::filled(60, 60, bg);
         furniture::paint_water_cooler(
             &mut buf,
-            pr,
+            &pantry,
             SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms),
             theme,
         );

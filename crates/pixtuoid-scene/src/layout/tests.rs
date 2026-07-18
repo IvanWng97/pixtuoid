@@ -1127,3 +1127,83 @@ fn ficus_greets_at_the_elevator_and_fills_the_lounge_west_flank() {
         "one ficus fills the lounge west flank"
     );
 }
+
+#[test]
+fn pantry_and_meeting_procedural_rects_match_the_painted_geometry() {
+    // The water-cooler/trash-bin/doormat placement + fit-gate live on the room
+    // aggregates as the ONE authority the scene painter AND the binary's hover
+    // hit-test both read (the coat_rack_pos pattern), so a sprite move can't
+    // strand the hover box across the crate boundary. These expected boxes ARE
+    // the pixels paint_water_cooler/paint_trash_bin/paint_doormat draw.
+    let pantry = PantryRoom {
+        bounds: Bounds {
+            x: 10,
+            y: 20,
+            width: 40,
+            height: 40,
+        },
+        counter_size: Size { w: 20, h: 8 },
+        kitchen_island: None,
+    };
+    assert_eq!(
+        pantry.water_cooler_rect(),
+        Some(Bounds {
+            x: 10 + 40 - 6,
+            y: 20 + 8,
+            width: 3,
+            height: 6,
+        }),
+    );
+    assert_eq!(
+        pantry.trash_bin_rect(),
+        Some(Bounds {
+            x: 10 + 3,
+            y: 20 + 40 - 14,
+            width: 4,
+            height: 5,
+        }),
+    );
+    let meeting = MeetingRoom {
+        bounds: Bounds {
+            x: 100,
+            y: 30,
+            width: 44,
+            height: 40,
+        },
+        trio: None,
+    };
+    assert_eq!(
+        meeting.doormat_rect(),
+        Some(Bounds {
+            x: 100 + 44 + 1,
+            y: 30 + 40 / 2 - 2,
+            width: 4,
+            height: 5,
+        }),
+    );
+
+    // Fit gate: a too-small room yields None (the painters no-op there), so the
+    // hit-test's box vanishes in lockstep with the sprite.
+    let tiny_pantry = PantryRoom {
+        bounds: Bounds {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        },
+        counter_size: Size { w: 20, h: 8 },
+        kitchen_island: None,
+    };
+    assert_eq!(tiny_pantry.water_cooler_rect(), None);
+    assert_eq!(tiny_pantry.trash_bin_rect(), None);
+    let tiny_meeting = MeetingRoom {
+        bounds: Bounds {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 40,
+        },
+        trio: None,
+    };
+    assert_eq!(tiny_meeting.doormat_rect(), None);
+}

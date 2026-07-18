@@ -82,6 +82,38 @@ impl PantryRoom {
             clr + 2 * (island_half_h + OBSTACLE_PAD_PX) + 1 + counter.h / 2 + OBSTACLE_PAD_PX;
         (u32::from(island_need) * 100).div_ceil(u32::from(pantry_counter_y_pct(counter.w))) as u16
     }
+
+    /// The water cooler's 3×6 sprite box against the pantry's east side (blue
+    /// bottle over a light body), or `None` when the room is too small for it
+    /// (`height > 25 && width > 12`). THE one authority `paint_water_cooler`
+    /// AND the binary's hover hit-test both read, so the drawn sprite and its
+    /// hover box can't drift across the crate boundary (the `coat_rack_pos`
+    /// pattern for the pantry's procedural decor).
+    pub fn water_cooler_rect(&self) -> Option<Bounds> {
+        let b = self.bounds;
+        // Lazy `.then` (not `.then_some`): the `b.width - 6` etc. must not run
+        // for a sub-gate room (it would `u16`-underflow).
+        (b.height > 25 && b.width > 12).then(|| Bounds {
+            x: b.x + b.width - 6,
+            y: b.y + 8,
+            width: 3,
+            height: 6,
+        })
+    }
+
+    /// The trash bin's 4×5 sprite box near the pantry's west counter, or `None`
+    /// when the room is too short (`height > 20`). Shared placement authority
+    /// for `paint_trash_bin` and the hover hit-test — see [`Self::water_cooler_rect`].
+    pub fn trash_bin_rect(&self) -> Option<Bounds> {
+        let b = self.bounds;
+        // Lazy `.then`: `b.height - 14` must not run below the gate.
+        (b.height > 20).then(|| Bounds {
+            x: b.x + 3,
+            y: b.y + b.height - 14,
+            width: 4,
+            height: 5,
+        })
+    }
 }
 
 /// Place the kitchen island (pantry v2's centre piece) in room `pr`: refuse-

@@ -349,38 +349,33 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Meeting room procedural items (coat rack, doormat) — EVERY room
-    // (#555: room 1 used to render bare of decor, keyed room 0 only). The
-    // rack spot (incl. the narrow-fitted-room yield) comes from
-    // coat_rack_pos, the same authority the painter enqueues from.
+    // (#555: room 1 used to render bare of decor, keyed room 0 only). Both the
+    // rack (coat_rack_pos, incl. the narrow-fitted-room yield) and the doormat
+    // (doormat_rect) come from the SAME room-aggregate authority the painter
+    // draws from, so a geometry edit can't leave a stale hover box behind.
     for room in &layout.meeting_rooms {
-        let mr = room.bounds;
         if let Some(rack) = room.coat_rack_pos() {
             if hit(rack.x.saturating_sub(2), rack.y, 5, 8) {
                 return Some("Coat Rack");
             }
         }
-        if mr.width > 10 {
-            let mat_x = mr.x + mr.width + 1;
-            let mat_y = mr.y + mr.height / 2 - 2;
-            if hit(mat_x, mat_y, 4, 5) {
+        if let Some(mat) = room.doormat_rect() {
+            if hit(mat.x, mat.y, mat.width, mat.height) {
                 return Some("Doormat");
             }
         }
     }
 
-    // Pantry room procedural items (water cooler, trash bin)
-    if let Some(pr) = layout.pantry.map(|p| p.bounds) {
-        if pr.height > 25 && pr.width > 12 {
-            let wx = pr.x + pr.width - 6;
-            let wy = pr.y + 8;
-            if hit(wx, wy, 3, 6) {
+    // Pantry room procedural items (water cooler, trash bin) — placement +
+    // fit-gate from the PantryRoom aggregate, shared with the scene painter.
+    if let Some(pantry) = layout.pantry {
+        if let Some(cooler) = pantry.water_cooler_rect() {
+            if hit(cooler.x, cooler.y, cooler.width, cooler.height) {
                 return Some("Water Cooler");
             }
         }
-        if pr.height > 20 {
-            let tx = pr.x + 3;
-            let ty = pr.y + pr.height - 14;
-            if hit(tx, ty, 4, 5) {
+        if let Some(bin) = pantry.trash_bin_rect() {
+            if hit(bin.x, bin.y, bin.width, bin.height) {
                 return Some("Trash Bin");
             }
         }

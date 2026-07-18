@@ -529,13 +529,13 @@ fn paint_frame(
     // Ground footprint rule: walkable mask is NOT affected by these (they're
     // small items characters can walk around or over).
     // Per-room decor: EVERY meeting room, keyed by its own bounds (not room 0).
-    for mr in ctx.layout.meeting_rooms.iter().map(|r| r.bounds) {
-        furniture::paint_notice_board(ctx.buf, mr, ctx.theme);
+    for room in &ctx.layout.meeting_rooms {
+        furniture::paint_notice_board(ctx.buf, room.bounds, ctx.theme);
 
         // Coat rack is a y-sorted DrawableKind::CoatRack (pushed in the drawable
         // pass) so characters in front occlude it and those behind are occluded.
 
-        furniture::paint_doormat(ctx.buf, mr, ctx.theme);
+        furniture::paint_doormat(ctx.buf, room, ctx.theme);
     }
     // Soft goods (decor arc) paint FIRST: floor-level mats sit under every
     // upright pantry fixture — on a narrow pantry the entry mat's box reaches
@@ -543,9 +543,9 @@ fn paint_frame(
     // west edge.
     furniture::paint_pantry_entry_mat(ctx.buf, ctx.layout, ctx.theme);
     furniture::paint_island_bar_mat(ctx.buf, ctx.layout, ctx.theme);
-    if let Some(pr) = ctx.layout.pantry.map(|p| p.bounds) {
-        furniture::paint_water_cooler(ctx.buf, pr, ctx.now, ctx.theme);
-        furniture::paint_trash_bin(ctx.buf, pr);
+    if let Some(pantry) = &ctx.layout.pantry {
+        furniture::paint_water_cooler(ctx.buf, pantry, ctx.now, ctx.theme);
+        furniture::paint_trash_bin(ctx.buf, pantry);
     }
 
     // Shadow pass — soft floor shadows under desks + lounge furniture
