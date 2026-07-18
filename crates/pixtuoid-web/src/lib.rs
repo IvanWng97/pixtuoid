@@ -344,7 +344,25 @@ impl Office {
             let cx = el.anchor_px.x as i32 + CHARACTER_SPRITE_W as i32 / 2;
             out.push_str(&format!("{{\"x\":{cx},\"y\":{},\"text\":", el.anchor_px.y));
             push_json_string(&mut out, &format!("\u{25cf}{}", el.text));
-            out.push_str(&format!(",\"color\":\"{}\"}}", label_hex(theme, el.tone)));
+            out.push_str(&format!(",\"color\":\"{}\"", label_hex(theme, el.tone)));
+            // The CLI-identity half (#657): the registry prefix before the
+            // first '·' resolves to the source's badge hue — the SAME
+            // SourceColors::by_prefix the dashboard/Sources/tooltip badges
+            // ride — so the site paints the prefix in the CLI color while the
+            // ● marker + name keep the activity tone. `plen` counts the
+            // prefix + its '·' (all BMP single-unit chars, so a JS slice by
+            // UTF-16 index lands on the same boundary). An unregistered
+            // prefix emits no badge and the whole label stays tone-colored.
+            if let Some((prefix, _)) = el.text.split_once('\u{b7}') {
+                if let Some(rgb) = theme.source.by_prefix(prefix) {
+                    out.push_str(&format!(
+                        ",\"badge\":\"{}\",\"plen\":{}",
+                        hex(rgb),
+                        prefix.chars().count() + 1
+                    ));
+                }
+            }
+            out.push('}');
         }
         out.push_str(&format!(
             "],\"board\":{{\"rect\":{{\"x\":{NEON_PANEL_INNER_X},\"y\":{NEON_PANEL_INNER_Y},\"w\":{NEON_PANEL_INNER_W},\"h\":{NEON_PANEL_INNER_H}}},"
@@ -703,6 +721,34 @@ mod tests {
     /// Anchor sim time well past 0 so `exiting_at`-style guards never see the
     /// UNIX_EPOCH sentinel; the value itself is arbitrary.
     const T0_MS: f64 = 1_000_000_000.0;
+
+    #[test]
+    fn overlay_json_carries_the_cli_badge_hue_for_registered_prefixes() {
+        let mut o = office();
+        o.step(T0_MS, 320, 180);
+        o.step(T0_MS + 10_000.0, 320, 180);
+        let json = o.overlay_json();
+        // cc·api resolves the SAME SourceColors::by_prefix hue the dashboard
+        // badges ride; plen spans "cc·" so the site can paint just the prefix.
+        let cc = pixtuoid_scene::theme::ALL_THEMES[0].source.claude_code;
+        let expect = format!(
+            "\"badge\":\"#{:02x}{:02x}{:02x}\",\"plen\":3",
+            cc.r, cc.g, cc.b
+        );
+        assert!(
+            json.contains(&expect),
+            "labels carry the cc badge hue: {json}"
+        );
+        // Every label of the scripted cast has a REGISTERED prefix, so every
+        // label carries a badge — none silently falls back to tone-only.
+        // (Scope the count to the labels array: board segments also emit
+        // "text" keys.)
+        let labels_json = json.split("],\"board\"").next().unwrap();
+        let labels = labels_json.split("\"text\":").count() - 1;
+        let badges = labels_json.split("\"badge\":").count() - 1;
+        assert!(labels > 0, "the seated cast produced labels");
+        assert_eq!(labels, badges, "every cast label resolves a badge hue");
+    }
 
     #[test]
     fn step_renders_a_frame_of_the_advertised_shape() {
