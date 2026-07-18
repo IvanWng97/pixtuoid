@@ -175,9 +175,6 @@ pub struct Office {
     /// `audio_begin` creates it; JS pumps `audio_warmup_step`, uploads the
     /// buffers, then drives `audio_tick` per rAF.
     audio: Option<audio::WebAudioDriver>,
-    /// The cue tracker feeding `audio` — the audio twin of the render session's
-    /// cross-frame state (door/appliance one-shot edges).
-    audio_cues: pixtuoid_scene::audio::AudioCueTracker,
 }
 
 #[wasm_bindgen]
@@ -209,7 +206,6 @@ impl Office {
             caps_size: None,
             weather_override: None,
             audio: None,
-            audio_cues: pixtuoid_scene::audio::AudioCueTracker::new(),
         })
     }
 
@@ -447,23 +443,13 @@ impl Office {
         if self.audio.as_ref().map(|a| a.is_ready()) != Some(true) {
             return r#"{"gains":[0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
         }
-        // Build the AudioFrame office-side — the SAME feeders the desktop
-        // painters use (stem_levels / cue tracker / select_track). Single-floor
-        // hero: the whole scene is ground floor.
-        let precip = pixtuoid_scene::pixel_painter::precipitation_level(now);
-        let counts = pixtuoid_scene::board::scene_stats(&self.scene);
-        let track = self.current_track();
-        let events = self.audio_cues.observe(
-            self.scene.agents.keys(),
-            self.session.occupied_waypoints(),
-            |idx| self.session.waypoint_kind(idx),
-            now,
-        );
-        let frame = pixtuoid_scene::audio::AudioFrame {
-            stems: pixtuoid_scene::audio::stem_levels(&counts, precip),
-            events,
-            track,
-        };
+        // The office's shared observer composes the whole AudioFrame (stems +
+        // cues + track), single-sourced with the desktop painters — no per-painter
+        // hand-assembly (was the floating-vs-web waypoint_kind drift). Single-floor
+        // hero → floor 0: `per_floor_counts[0]` == the old `scene_stats`, all hero
+        // agents are ground floor, and the observer's `select_track` matches the
+        // old `current_track()` by construction.
+        let frame = self.session.audio_frame(&self.scene, 0, now);
         let cmd = self
             .audio
             .as_mut()

@@ -20,6 +20,7 @@ use pixtuoid_core::state::{AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, Scen
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
+use crate::audio::{AudioCueTracker, AudioFrame};
 use crate::chitchat::{ActiveChitchat, VenueKey};
 use crate::frame_cache::FrameCache;
 use crate::layout::Size;
@@ -453,6 +454,85 @@ impl Default for PerFloor {
     }
 }
 
+/// Resolve an occupied-waypoint index to its [`WaypointKind`](crate::layout::WaypointKind)
+/// against `layout` — the ONE authored form of the audio cue tracker's kind
+/// lookup, shared by [`FloorSession::audio_frame`] and the multi-floor TUI's own
+/// call site so the formula can't drift between them (was the floating-re-inlined
+/// vs web-getter divergence).
+pub fn waypoint_kind_of(
+    layout: Option<&crate::layout::Layout>,
+    idx: usize,
+) -> Option<crate::layout::WaypointKind> {
+    layout.and_then(|l| l.waypoints.get(idx)).map(|w| w.kind)
+}
+
+/// Office-wide cross-frame AUDIO bookkeeping — the sound twin of [`CoffeeState`].
+/// Wraps the pure `crate::audio` model (`stem_levels`/`select_track`/`observe`)
+/// into the ONE per-frame [`AudioFrame`] composition all three painters used to
+/// hand-roll. Holds the [`AudioCueTracker`] (cross-frame edge state) plus the
+/// floor it is primed for, so a floor switch reprimes silently — the reprime the
+/// TUI once spelled out, now automatic for every painter.
+#[derive(Debug, Default)]
+pub struct AudioObserver {
+    cues: AudioCueTracker,
+    primed_floor: Option<usize>,
+}
+
+impl AudioObserver {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Compose one frame of audio intent for the floor being VIEWED, advancing
+    /// the cross-frame cue edges. `waypoint_kind` resolves an occupied index to
+    /// its kind — a CLOSURE exactly like [`AudioCueTracker::observe`], so this
+    /// seam never holds a `Layout` and tests need none.
+    ///
+    /// Call it EVERY world-frame regardless of mute (the painter gates only
+    /// DELIVERY): a muted stretch keeps `seen_agents`/`occupied` warm, so
+    /// re-enabling never fires a door/appliance volley for what arrived while
+    /// silent. `floor_idx` is the floor being viewed; counts are per-floor
+    /// (`per_floor_counts[floor_idx]` == `scene_stats` for a single-floor scene).
+    pub fn frame(
+        &mut self,
+        scene: &SceneState,
+        occupied: &std::collections::HashSet<usize>,
+        waypoint_kind: impl Fn(usize) -> Option<crate::layout::WaypointKind>,
+        floor_idx: usize,
+        now: SystemTime,
+    ) -> AudioFrame {
+        // Reprime on floor switch: a fresh tracker primes silently next observe,
+        // so riding to a new floor never fires a cue volley for agents /
+        // appliances already there (was the TUI audio_floor != current_floor block).
+        if self.primed_floor != Some(floor_idx) {
+            self.cues = AudioCueTracker::new();
+            self.primed_floor = Some(floor_idx);
+        }
+        // You hear the floor you're LOOKING AT: stems + door/appliance cues come
+        // from that floor only; rain stays global (weather, not agent activity).
+        let counts = crate::board::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
+        let precipitation = crate::pixel_painter::precipitation_level(now);
+        let floor_ids = scene
+            .agents
+            .iter()
+            .filter(|(_, slot)| slot.floor_idx == floor_idx)
+            .map(|(id, _)| id);
+        let events = self.cues.observe(floor_ids, occupied, waypoint_kind, now);
+        AudioFrame {
+            stems: crate::audio::stem_levels(&counts, precipitation),
+            events,
+            track: crate::audio::select_track(crate::pixel_painter::is_day_at(now), precipitation),
+        }
+    }
+
+    /// The floor this observer's cue tracker is currently primed for — the
+    /// reprime latch, exposed for the floor-switch test.
+    #[cfg(test)]
+    pub(crate) fn primed_floor(&self) -> Option<usize> {
+        self.primed_floor
+    }
+}
+
 /// The per-OFFICE half: cross-frame state that survives floor navigation —
 /// an agent's desk cup ([`CoffeeState`]) and the venue chitchat map (its
 /// `VenueKey` already carries `floor_idx`). ONE per painter surface, shared
@@ -461,6 +541,10 @@ impl Default for PerFloor {
 pub struct PerOffice {
     pub coffee: CoffeeState,
     pub chitchat: HashMap<VenueKey, ActiveChitchat>,
+    /// The office-wide audio observer (the sound twin of `coffee`): one cue
+    /// tracker + reprime latch, shared across floors, so every painter composes
+    /// its [`AudioFrame`] through the same seam. See [`AudioObserver`].
+    pub audio: AudioObserver,
 }
 
 impl PerOffice {
@@ -598,22 +682,34 @@ impl FloorSession {
         &self.floor.buf
     }
 
-    /// The waypoint occupancy the LAST `render` observed — the appliance
-    /// audio-cue feed (`AudioCueTracker::observe`'s second argument), aligned
-    /// with the same frame `buf()` holds. Empty before the first render.
-    pub fn occupied_waypoints(&self) -> &std::collections::HashSet<usize> {
-        &self.last_occupied
-    }
-
-    /// The kind of waypoint `idx` in the LAST rendered frame's layout — the
-    /// `AudioCueTracker::observe` kind lookup (maps an occupancy index to its
-    /// PrinterWhir/VendingDrop role), against the SAME layout `occupied_waypoints`
-    /// indexes. `None` before the first render or for an out-of-range index.
-    pub fn waypoint_kind(&self, idx: usize) -> Option<crate::layout::WaypointKind> {
-        self.last_layout
-            .as_deref()
-            .and_then(|l| l.waypoints.get(idx))
-            .map(|w| w.kind)
+    /// One frame of audio intent for THIS session's last render — the audio twin
+    /// of [`FloorSession::board`]/[`FloorSession::overlay`]. Fed from the
+    /// session's OWN occupancy + layout (so a painter can't hand a mismatched
+    /// occupancy/kind pair) through the shared [`AudioObserver`] in [`PerOffice`].
+    /// `floor_idx` is the floor this single-floor session shows (0 for the web
+    /// hero). Primes (no cues) before the first render.
+    ///
+    /// Call it EVERY frame regardless of mute — the painter gates only DELIVERY —
+    /// so the cue tracker stays warm and re-enabling audio fires no volley.
+    pub fn audio_frame(
+        &mut self,
+        scene: &SceneState,
+        floor_idx: usize,
+        now: SystemTime,
+    ) -> AudioFrame {
+        // Disjoint field borrows: &mut self.office.audio (receiver) alongside
+        // & self.last_occupied (arg) and & self.last_layout (closure). Bind the
+        // two shared fields to LOCALS first so the closure captures the locals,
+        // not `self` — robust regardless of closure-capture edition.
+        let occupied = &self.last_occupied;
+        let layout = self.last_layout.as_deref();
+        self.office.audio.frame(
+            scene,
+            occupied,
+            |idx| waypoint_kind_of(layout, idx),
+            floor_idx,
+            now,
+        )
     }
 
     /// Flush the per-floor recolored-sprite cache. Call after a theme change so

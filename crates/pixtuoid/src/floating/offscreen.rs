@@ -38,15 +38,12 @@ pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
 /// continuous (no walk-flash).
 pub struct OfficeRenderer {
     session: FloorSession,
-    /// Ambient-audio gateway + cue tracker (#633). Inert unless installed.
-    /// Full TUI cue parity: stems + door chime + the appliance one-shots
-    /// (the session's `occupied_waypoints` + this frame's layout feed the
-    /// tracker's occupancy edges). The window always renders
-    /// `FloorMeta::ground()`, so no cross-floor re-prime exists here —
-    /// if floating ever gains floor nav, mirror the TUI's `audio_floor` guard
-    /// or switching floors fires a chime volley for the new floor's agents.
+    /// Ambient-audio gateway (#633). Inert unless installed. The per-frame
+    /// `AudioFrame` is composed through the session's shared `AudioObserver`
+    /// (`FloorSession::audio_frame`) — full TUI parity (stems + door + appliance
+    /// one-shots), with the floor-reprime handled automatically by the observer
+    /// (so floor nav, if ever added, needs no hand-mirrored guard).
     audio: crate::audio::AudioHandle,
-    audio_cues: pixtuoid_scene::audio::AudioCueTracker,
 }
 
 impl OfficeRenderer {
@@ -54,7 +51,6 @@ impl OfficeRenderer {
         Self {
             session: FloorSession::new(),
             audio: crate::audio::AudioHandle::disabled(),
-            audio_cues: pixtuoid_scene::audio::AudioCueTracker::new(),
         }
     }
 
@@ -82,7 +78,7 @@ impl OfficeRenderer {
     ) -> &RgbBuffer {
         // active_pet stays None: click-to-pet needs window pointer hit-testing
         // (deferred); the WANDERING floor pet is wired. The rest is the session's.
-        let layout = self.session.render(FrameInputs {
+        self.session.render(FrameInputs {
             scene,
             pack,
             theme,
@@ -93,38 +89,14 @@ impl OfficeRenderer {
             floor_pet,
             debug_walkable: false,
         });
+        // Ambient audio: compose via the session's shared observer EVERY
+        // frame (even muted) so its cue edges stay warm — re-enabling fires no
+        // volley; only DELIVERY is gated. Single-sourced with the TUI (was a
+        // hand-rolled block that re-inlined waypoint_kind — the floating-vs-web
+        // drift). Floor-reprime is automatic inside the observer.
+        let audio_frame = self.session.audio_frame(scene, floor_meta.floor_idx, now);
         if self.audio.is_enabled() {
-            // floor-scoped like the TUI: you hear the floor the window shows
-            let counts = pixtuoid_scene::board::per_floor_counts(scene)[floor_meta
-                .floor_idx
-                .min(pixtuoid_core::state::MAX_FLOORS - 1)];
-            let precipitation = pixtuoid_scene::pixel_painter::precipitation_level(now);
-            let floor_ids = scene
-                .agents
-                .iter()
-                .filter(|(_, slot)| slot.floor_idx == floor_meta.floor_idx)
-                .map(|(id, _)| id);
-            // The session's occupancy + THIS frame's layout give the tracker
-            // the appliance edges — printer/vending cues, TUI parity (#633).
-            let events = self.audio_cues.observe(
-                floor_ids,
-                self.session.occupied_waypoints(),
-                |idx| {
-                    layout
-                        .as_deref()
-                        .and_then(|l| l.waypoints.get(idx))
-                        .map(|w| w.kind)
-                },
-                now,
-            );
-            self.audio.frame(pixtuoid_scene::audio::AudioFrame {
-                stems: pixtuoid_scene::audio::stem_levels(&counts, precipitation),
-                events,
-                track: pixtuoid_scene::audio::select_track(
-                    pixtuoid_scene::pixel_painter::is_day_at(now),
-                    precipitation,
-                ),
-            });
+            self.audio.frame(audio_frame);
         }
         self.session.buf()
     }

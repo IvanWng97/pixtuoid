@@ -113,20 +113,14 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// they always move together). Kept here, disjoint from the floor buffers, for
     /// borrow-free `DrawCtx` assembly.
     onboarding: crate::tui::welcome::OnboardingFrame,
-    /// Ambient-audio gateway + the per-office cue tracker (#633). draw_scene
-    /// feeds one `AudioFrame` per rendered frame — stem levels from the VIEWED
-    /// floor's stats + weather, plus edge-detected one-shots (#636 scoped both
-    /// to `current_floor`).
+    /// Ambient-audio gateway (#633). The per-frame `AudioFrame` is composed
+    /// through the shared office [`AudioObserver`](pixtuoid_scene::floor::AudioObserver)
+    /// (`self.office.audio`), which owns the cue tracker + floor-reprime latch.
+    /// Inert unless installed.
     audio: crate::audio::AudioHandle,
-    audio_cues: pixtuoid_scene::audio::AudioCueTracker,
     /// Transient +/- volume readout (percent), pushed per frame by the
     /// event loop; `None` outside the ~1s flash window.
     volume_flash: Option<u8>,
-    /// The floor the cue tracker's occupancy set belongs to. Waypoint
-    /// indices are FLOOR-LOCAL, so a floor switch must re-prime the tracker
-    /// — diffing floor N's occupied set against floor M's would fire
-    /// phantom appliance cues (self-audit catch).
-    audio_floor: Option<usize>,
 }
 
 /// "You would hear sound right now": live handle, not effectively muted
@@ -165,9 +159,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             connection: Default::default(),
             onboarding: crate::tui::welcome::OnboardingFrame::default(),
             audio: crate::audio::AudioHandle::disabled(),
-            audio_cues: pixtuoid_scene::audio::AudioCueTracker::new(),
             volume_flash: None,
-            audio_floor: None,
         }
     }
 
@@ -840,46 +832,24 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let occupied_waypoints = std::mem::take(&mut draw_ctx.occupied_waypoints);
         // drop draw_ctx here so we can re-borrow the floors freely.
         drop(draw_ctx);
-        // Ambient audio (#633): one AudioFrame per rendered frame — stem
-        // levels from the FULL scene's stats + live weather, one-shots from
-        // the cue tracker's edges. The disabled handle makes this free.
+        // Ambient audio: compose one AudioFrame per rendered frame through
+        // the shared office observer (floor-scoped: you hear the floor you're
+        // LOOKING AT — an agent typing two floors up is silent until you ride to
+        // it; rain stays global). The observer runs EVERY frame, even muted, so
+        // its cue edges stay warm — re-enabling audio fires no door/appliance
+        // volley for what arrived while silent; only DELIVERY is gated.
+        // `cached_layout` holds the PREVIOUS frame's layout here (set below): the
+        // 1-frame kind-lookup lag on resize is pre-existing and out of scope.
+        let cached_layout = self.cached_layout.as_deref();
+        let audio_frame = self.office.audio.frame(
+            scene,
+            &occupied_waypoints,
+            |idx| pixtuoid_scene::floor::waypoint_kind_of(cached_layout, idx),
+            self.current_floor,
+            now,
+        );
         if self.audio.is_enabled() {
-            if self.audio_floor != Some(self.current_floor) {
-                // fresh tracker primes silently next observe — no cue volley
-                self.audio_cues = pixtuoid_scene::audio::AudioCueTracker::new();
-                self.audio_floor = Some(self.current_floor);
-            }
-            // You hear the floor you're LOOKING AT (owner call): typing and
-            // door cues come from the CURRENT floor only — an agent typing
-            // two floors up is silent until you ride down to it. Rain stays
-            // global (weather is outside the windows, not agent activity).
-            let counts = crate::tui::widgets::per_floor_counts(scene)
-                [self.current_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)];
-            let precipitation = pixtuoid_scene::pixel_painter::precipitation_level(now);
-            let floor_ids = scene
-                .agents
-                .iter()
-                .filter(|(_, slot)| slot.floor_idx == self.current_floor)
-                .map(|(id, _)| id);
-            let events = self.audio_cues.observe(
-                floor_ids,
-                &occupied_waypoints,
-                |idx| {
-                    self.cached_layout
-                        .as_deref()
-                        .and_then(|l| l.waypoints.get(idx))
-                        .map(|w| w.kind)
-                },
-                now,
-            );
-            self.audio.frame(pixtuoid_scene::audio::AudioFrame {
-                stems: pixtuoid_scene::audio::stem_levels(&counts, precipitation),
-                events,
-                track: pixtuoid_scene::audio::select_track(
-                    pixtuoid_scene::pixel_painter::is_day_at(now),
-                    precipitation,
-                ),
-            });
+            self.audio.frame(audio_frame);
         }
         // The shared after-frame seam (coffee stamp + door-anim clamp) — the same
         // frame_epilogue render_floor/observe run, not a hand-copy (#423).

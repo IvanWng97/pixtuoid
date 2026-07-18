@@ -790,10 +790,11 @@ fn floor_session_render_owns_the_dual_eviction() {
 
 #[test]
 fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
-    // The floating painter's appliance-cue feed (#633): render() must hand
-    // the sim's occupancy observation out through occupied_waypoints() —
-    // the same wp_rank keys the TUI reads off its DrawCtx out-param — so a
-    // windowed painter can feed AudioCueTracker without re-running the sim.
+    // The appliance-cue feed (#633): render() must record the sim's occupancy
+    // observation in `last_occupied` — the set the shared `AudioObserver` reads
+    // (via `FloorSession::audio_frame`) — so a windowed painter never re-runs the
+    // sim. (`last_occupied` is a private field; this test is a child module of
+    // `floor`, so it reads it directly.)
     let pack = crate::embedded_pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -804,10 +805,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         slot.last_event_at = now0;
     }
     let mut session = FloorSession::new();
-    assert!(
-        session.occupied_waypoints().is_empty(),
-        "empty before any render"
-    );
+    assert!(session.last_occupied.is_empty(), "empty before any render");
     // Frame-ACCURACY, not just "ever nonempty": walk the whole sim and
     // record the occupancy-set size each frame. The set must (a) go
     // nonempty (the agent reaches a waypoint, indices valid) AND (b) fall
@@ -832,13 +830,13 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
                 debug_walkable: false,
             })
             .expect("160x96 lays out");
-        if session.occupied_waypoints().is_empty() {
+        if session.last_occupied.is_empty() {
             if occupied_ever {
                 fell_back_empty = true;
                 break;
             }
         } else {
-            for &wp in session.occupied_waypoints() {
+            for &wp in &session.last_occupied {
                 assert!(
                     wp < layout.waypoints.len(),
                     "occupied index {wp} must be a real waypoint"
@@ -870,7 +868,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     });
     assert!(none.is_none());
     assert!(
-        session.occupied_waypoints().is_empty(),
+        session.last_occupied.is_empty(),
         "an unlayoutable render clears the stale occupancy"
     );
 }
@@ -967,5 +965,88 @@ fn reset_frame_cache_clears_cached_sprites() {
         s.floor.ctx.cache.len(),
         0,
         "reset must clear a populated cache"
+    );
+}
+
+#[test]
+fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
+    // Wiring-oracle: the AudioFrame the observer returns must equal the pure model
+    // (stem_levels / select_track) applied to the SAME inputs the painters used to
+    // assemble by hand — so the consolidation can't drift the composition.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = make_scene(4, 16);
+    let occupied = std::collections::HashSet::new();
+    let mut obs = AudioObserver::new();
+    let frame = obs.frame(&scene, &occupied, |_| None, 0, now);
+    let precip = crate::pixel_painter::precipitation_level(now);
+    assert_eq!(
+        frame.stems,
+        crate::audio::stem_levels(&crate::board::per_floor_counts(&scene)[0], precip),
+        "stems must equal stem_levels(per_floor_counts[floor], precip)"
+    );
+    assert_eq!(
+        frame.track,
+        crate::audio::select_track(crate::pixel_painter::is_day_at(now), precip),
+        "track must equal select_track(is_day_at(now), precip)"
+    );
+}
+
+#[test]
+fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
+    // Switching the VIEWED floor must reprime the cue tracker: the switch frame
+    // primes silently (no volley for agents/appliances already there), then normal
+    // edges resume. `primed_floor` tracks the latch.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = make_scene(4, 16); // agents live on floor 0
+    let printer = |i: usize| (i == 0 || i == 1).then_some(crate::layout::WaypointKind::Printer);
+    let mut obs = AudioObserver::new();
+
+    // Prime floor 0.
+    let _ = obs.frame(&scene, &std::collections::HashSet::new(), printer, 0, now);
+    assert_eq!(obs.primed_floor(), Some(0));
+
+    // Switch to floor 1 with an appliance ALREADY occupied: the reprime makes the
+    // switch frame silent (this would fire PrinterWhir without the reprime).
+    let occ0: std::collections::HashSet<usize> = [0usize].into_iter().collect();
+    let switch = obs.frame(&scene, &occ0, printer, 1, now);
+    assert_eq!(obs.primed_floor(), Some(1));
+    assert!(
+        switch.events.is_empty(),
+        "a floor switch reprimes silently — no cue volley for the new floor"
+    );
+
+    // Post-reprime the tracker still works: a NEWLY occupied printer fires.
+    let occ01: std::collections::HashSet<usize> = [0usize, 1usize].into_iter().collect();
+    let next = obs.frame(&scene, &occ01, printer, 1, now);
+    assert!(
+        next.events.contains(&crate::audio::OneShot::PrinterWhir),
+        "after the reprime, a newly occupied printer still fires"
+    );
+}
+
+#[test]
+fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
+    // B (mute-gating): the painter calls frame() EVERY world-frame and gates only
+    // DELIVERY. An agent arriving during a muted stretch is consumed by the still-
+    // running observer, so when delivery resumes it must NOT re-fire a chime.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let empty = make_scene(0, 16);
+    let one = make_scene(1, 16);
+    let occ = std::collections::HashSet::new();
+    let mut obs = AudioObserver::new();
+
+    let _ = obs.frame(&empty, &occ, |_| None, 0, now); // prime (empty office)
+                                                       // "muted" frame: the agent arrives; the painter still calls frame(), then
+                                                       // DROPS the result. The chime fires here (and is discarded by the caller).
+    let arrival = obs.frame(&one, &occ, |_| None, 0, now);
+    assert!(
+        arrival.events.contains(&crate::audio::OneShot::DoorChime),
+        "an arrival chimes on the frame it happens"
+    );
+    // Delivery resumes: the SAME agent is still present → no new chime.
+    let resumed = obs.frame(&one, &occ, |_| None, 0, now);
+    assert!(
+        !resumed.events.contains(&crate::audio::OneShot::DoorChime),
+        "no volley on resume — the observer saw the agent while muted"
     );
 }
