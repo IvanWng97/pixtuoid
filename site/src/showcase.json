@@ -6,7 +6,7 @@
     "asset": "multi-floor",
     "w": 1664,
     "h": 1408,
-    "caption": "every session claims a desk across floors — typing, wandering, coffee runs. big swarms scale too: fleets of 100+ agents have run this repo through this very office.",
+    "caption": "every session claims a desk across floors — typing, wandering, coffee runs. swarms scale too: fleets of 100+ agents working on this repo have passed through this very office.",
     "duration": "0:10",
     "status": "live"
   },
@@ -40,7 +40,6 @@
         "src": "agent-tree-zoom_popup.png"
       }
     ],
-    "caption": "press Tab — the whole building's roster, badged by CLI",
     "status": "live"
   },
   {
@@ -102,8 +101,17 @@
     "poster": "vibing-poster.png",
     "timeSlider": true,
     "variantGroups": [
-      { "key": "weather", "label": "weather", "variantsRef": "weather" },
-      { "key": "theme", "label": "vibe", "variantsRef": "themes", "retint": true }
+      {
+        "key": "weather",
+        "label": "weather",
+        "variantsRef": "weather"
+      },
+      {
+        "key": "theme",
+        "label": "vibe",
+        "variantsRef": "themes",
+        "retint": true
+      }
     ],
     "caption": "live — you're driving this one",
     "status": "live"
