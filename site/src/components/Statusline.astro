@@ -110,7 +110,8 @@ const badgeColor = (who: string): string | undefined => {
 // from FEED_FADE_MS) and the JS out→in gap both derive from ONE value: a fade
 // longer than the gap would re-expose two lines mid-swap (ghosting).
 const FEED_FADE_MS = 300; // the .sl__item opacity transition
-const FEED_SWAP_GAP_MS = FEED_FADE_MS + 50; // fade-out must fully finish before fade-in starts
+const FEED_SWAP_MARGIN_MS = 50; // headroom so the fade-out fully finishes before the fade-in starts
+const FEED_SWAP_GAP_MS = FEED_FADE_MS + FEED_SWAP_MARGIN_MS; // out→in gap (must outlast the fade)
 const FEED_ROTATE_MS = 6000; // one line every 6s
 ---
 

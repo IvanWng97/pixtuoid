@@ -1849,16 +1849,28 @@ test('the feed pauses while the tab is hidden — no ghosted double-exposure on 
         el.classList.contains('is-on')
       )
     );
-  const before = await litIndex();
-  expect(before).toBeGreaterThanOrEqual(0);
 
-  // Force the tab "hidden" (the handler reads document.hidden) and wait past one
-  // 6s rotation: with the fix the rotation is paused, so the SAME single line
-  // stays lit; with the bug it advances (and would ghost on show).
-  await page.evaluate(() => {
+  // Force the tab "hidden" (the handler reads document.hidden) AND read the lit
+  // line in the SAME synchronous evaluate: dispatching visibilitychange runs
+  // stopFeed → showOnlyFeed, so exactly one item is lit and no rotation timer is
+  // pending. Reading here (not before the stop) is deterministic — it can't land
+  // in the fade gap (findIndex → -1) or race a free-running 6s tick.
+  const before = await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
     document.dispatchEvent(new Event('visibilitychange'));
+    return Array.from(document.querySelectorAll('.sl__item')).findIndex((el) =>
+      el.classList.contains('is-on')
+    );
   });
+  expect(before).toBeGreaterThanOrEqual(0);
+
+  // A pix:paused{false} can fire WHILE hidden (OfficeBackdrop dispatches it on a
+  // reduced-motion toggle) — startFeed's document.hidden guard must refuse to
+  // re-arm the rotation behind a hidden tab. Then wait past one 6s rotation:
+  // with the fix nothing advances; with the bug the interval keeps ticking.
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: false } }))
+  );
   await page.waitForTimeout(6500);
   await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
   expect(await litIndex()).toBe(before); // rotation truly paused while hidden
@@ -1867,6 +1879,14 @@ test('the feed pauses while the tab is hidden — no ghosted double-exposure on 
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
     document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
+
+  // stopFeed collapses any accidental multi-lit state to exactly one line: force
+  // an illegal 2+-lit state, then a stop (user pause) must snap it back to one.
+  await page.evaluate(() => {
+    document.querySelectorAll('.sl__item').forEach((el) => el.classList.add('is-on'));
+    document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }));
   });
   await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
 });
