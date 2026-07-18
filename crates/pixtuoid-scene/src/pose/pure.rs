@@ -537,15 +537,7 @@ pub(crate) fn resolve_wander_target(
     // Walk destination = the A*-reachable approach point on an allowed side (NOT
     // the raw blocked `wp.pos`, which made A* detour + the sprite pop). Same
     // `&layout.reachable` + origin on both callers so they can't drift.
-    let dest = crate::layout::approach_point(
-        wp.kind.furniture(),
-        wp.pos,
-        wp.facing,
-        layout.pantry_counter_size(),
-        &layout.walkable,
-        origin,
-        &layout.reachable,
-    );
+    let dest = layout.approach_point(wp.kind.furniture(), wp.pos, origin, wp.facing);
     if dest == wp.pos {
         return amble();
     }

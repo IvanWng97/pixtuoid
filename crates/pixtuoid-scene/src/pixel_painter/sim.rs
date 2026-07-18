@@ -172,15 +172,7 @@ pub(crate) fn sim_step(
                 let origin = layout
                     .home_desk(agent.desk_index.single_floor_local())
                     .unwrap_or(w.pos);
-                let stand = crate::layout::stand_point(
-                    w.kind,
-                    w.pos,
-                    layout.pantry_counter_size(),
-                    &layout.walkable,
-                    origin,
-                    w.facing,
-                    &layout.reachable,
-                );
+                let stand = layout.stand_point(w.kind, w.pos, origin, w.facing);
                 // Reserve the pack-resolved footprint (char_w wide, WALKING_Y_OFF
                 // tall) — the SAME width the sprite anchor centers on, not a bare 8.
                 stores.overlay.add(
@@ -379,15 +371,7 @@ fn resolve_characters(
                     // this is the side stand cell (side-aware); for seats it is
                     // `wp.pos` (the sprite sits ON the furniture) — the walk-in
                     // approach cell is resolved separately by `approach_point`.
-                    let stand = crate::layout::stand_point(
-                        wp_obj.kind,
-                        wp_obj.pos,
-                        layout.pantry_counter_size(),
-                        &layout.walkable,
-                        desk,
-                        wp_obj.facing,
-                        &layout.reachable,
-                    );
+                    let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
                     // Anchor-base + sprite height are the ONE authority
                     // `SeatView::waypoint_render_anchor` (the label twin in
                     // `anchors::character_anchor` rides the SAME call, so they

@@ -27,7 +27,10 @@ mod placement;
 mod reach;
 mod rooms;
 
-pub use approach::{approach_point, stand_point};
+// Crate-internal: the deep interface is `SceneLayout::{stand_point,approach_point}`
+// (which supply the layout-internal mask/reach/counter); the free fns stay for the
+// scene crate's own synthetic-mask unit tests. No external caller.
+pub(crate) use approach::{approach_point, stand_point};
 pub use compute::PANTRY_COUNTER_LARGE_W;
 pub(crate) use decor::DESK_GROUND_H;
 pub use decor::{
@@ -378,6 +381,53 @@ impl SceneLayout {
     pub fn pantry_counter_size(&self) -> Size {
         self.pantry
             .map_or(rooms::pantry::COMPACT_COUNTER, |p| p.counter_size)
+    }
+
+    /// Where an agent's sprite RENDERS when it visits furniture `kind` at `pos`
+    /// (the walk goal for an obstacle, the seat cell for a seat), on the side
+    /// nearest `origin` facing `facing`. This layout's `walkable`/`reachable`/
+    /// `pantry_counter_size` are supplied internally, so a caller passes only
+    /// the trip's own facts (not three mutually-consistent layout internals).
+    /// The deep interface over the free [`stand_point`].
+    pub fn stand_point(
+        &self,
+        kind: WaypointKind,
+        pos: Point,
+        origin: Point,
+        facing: Facing,
+    ) -> Point {
+        stand_point(
+            kind,
+            pos,
+            self.pantry_counter_size(),
+            &self.walkable,
+            origin,
+            facing,
+            &self.reachable,
+        )
+    }
+
+    /// A\*'s goal cell when an agent at `origin` visits furniture `kind` at
+    /// `pos` facing `facing` — this layout's `walkable`/`reachable`/
+    /// `pantry_counter_size` supplied internally (the deep interface over the
+    /// free [`approach_point`]). Callers MUST still honor its `== pos` "no valid
+    /// approach" sentinel (skip the furniture this cycle rather than route to it).
+    pub fn approach_point(
+        &self,
+        kind: Furniture,
+        pos: Point,
+        origin: Point,
+        facing: Facing,
+    ) -> Point {
+        approach_point(
+            kind,
+            pos,
+            facing,
+            self.pantry_counter_size(),
+            &self.walkable,
+            origin,
+            &self.reachable,
+        )
     }
 }
 

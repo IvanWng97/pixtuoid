@@ -125,19 +125,11 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// approach cell sits directly off the seat and the settle glide is a short
 /// straight hop onto the chair.
 pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
-    use crate::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
+    use crate::layout::{desk_walk_anchor, Facing, Furniture};
     let chair = desk_walk_anchor(desk);
-    let cell = approach_point(
-        Furniture::Desk,
-        chair,
-        // The desk sitter faces the camera (South); DESK_APPROACH then allows
-        // N/E/W (the south front is excluded — that is the bug-prone side).
-        Facing::South,
-        layout.pantry_counter_size(),
-        &layout.walkable,
-        chair,
-        &layout.reachable,
-    );
+    // The desk sitter faces the camera (South); DESK_APPROACH then allows
+    // N/E/W (the south front is excluded — that is the bug-prone side).
+    let cell = layout.approach_point(Furniture::Desk, chair, chair, Facing::South);
     // approach_point returns the scanned `pos` (== chair) as the "no valid
     // approach" sentinel when no allowed+reachable side exists.
     (cell != chair).then_some(cell)

@@ -73,7 +73,7 @@ pub(super) fn obstacle_footprint(kind: WaypointKind, pantry_counter_size: Size) 
 /// that guard was repurposed to pin the obstacle branch's REAL invariants
 /// (walkable / reachable / allowed-side / off-visual) in
 /// `real_layout_obstacle_stand_is_a_reachable_allowed_off_visual_cell`.
-pub fn stand_point(
+pub(crate) fn stand_point(
     kind: WaypointKind,
     pos: Point,
     pantry_counter_size: Size,
@@ -150,7 +150,7 @@ fn approach_clearance_extent(kind: Furniture, pantry_counter_size: Size) -> Opti
 /// reachable side exists (a seat boxed in to only its back, or a fully-blocked
 /// obstacle). Callers MUST treat `== pos` as "skip this furniture this cycle"
 /// rather than routing to it — routing to `pos` would let A\* snap onto the back.
-pub fn approach_point(
+pub(crate) fn approach_point(
     kind: Furniture,
     pos: Point,
     facing: Facing,

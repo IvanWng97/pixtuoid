@@ -158,15 +158,7 @@ pub fn character_anchor(
             // Anchor off the resolved stand cell (same `desk` origin as the
             // walk destination), so the label tracks where the agent actually
             // stands instead of the blocked furniture center.
-            let stand = crate::layout::stand_point(
-                wp_obj.kind,
-                wp_obj.pos,
-                layout.pantry_counter_size(),
-                &layout.walkable,
-                desk,
-                wp_obj.facing,
-                &layout.reachable,
-            );
+            let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
             // Anchor via the ONE authority the sprite blit uses —
             // `SeatView::waypoint_render_anchor` (see seat.rs). The badge rides the
             // sprite 1:1, so sharing the call makes the label-vs-sprite drift
