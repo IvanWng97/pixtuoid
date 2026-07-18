@@ -33,6 +33,7 @@ pub mod board;
 #[doc(hidden)]
 pub mod burn;
 pub mod chitchat;
+pub(crate) mod creatures;
 pub mod embedded_pack;
 pub mod floor;
 // Per-agent recolored-sprite cache owned by each painter's `FloorCtx` — an

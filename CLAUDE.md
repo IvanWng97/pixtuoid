@@ -48,7 +48,7 @@ crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pix
 ├── pixtuoid-scene/  backend-agnostic render+sim ENGINE crate — terminal AND window-free BY CRATE
 │                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)
 │                    pixel_painter/ (render_to_rgb_buffer) layout/ physics.rs pose/ (pure + routed,
-│                    file-level split) motion/ pathfind.rs floor.rs theme/ pet.rs chitchat.rs
+│                    file-level split) motion/ pathfind.rs floor.rs theme/ pet.rs creatures.rs chitchat.rs
 │                    frame_cache.rs anim.rs overlay.rs board.rs burn.rs embedded_pack.rs (default pack at
 │                    sprites/default/, own build.rs); depends on pixtuoid-core (forwards `native`)
 ├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene

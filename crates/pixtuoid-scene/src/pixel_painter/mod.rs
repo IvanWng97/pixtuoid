@@ -154,15 +154,14 @@ pub const NEON_PANEL_INNER_H: u16 = NEON_PANEL_H - 2 * NEON_PANEL_BORDER;
 const _: () = assert!(NEON_PANEL_INNER_W > 0 && NEON_PANEL_INNER_W < NEON_PANEL_W);
 const _: () = assert!(NEON_PANEL_INNER_H > 0 && NEON_PANEL_INNER_H < NEON_PANEL_H);
 
+use crate::creatures::{gateway_mascot_def, mascot_position, pet_position};
 use anchors::compute_door_frame_idx;
 use background::{
     daylight_floor_overlay, dim_floor_overlay, paint_ceiling_pool, paint_clock,
     paint_corridor_runner, paint_floor_and_walls, paint_floor_lamp_halo, paint_neon_panel,
     paint_shadow, time_of_day_look, Ellipse,
 };
-use drawable::{
-    gateway_mascot_def, mascot_position, paint_drawable, pet_position, Drawable, DrawableKind,
-};
+use drawable::{paint_drawable, Drawable, DrawableKind};
 use palette::{agent_palette, outfit_seed_for, recolor_frame};
 use seat::paint_character_at;
 use wall::{
