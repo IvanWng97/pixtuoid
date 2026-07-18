@@ -146,9 +146,11 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   (prettier/eslint/knip all ignore it); regenerate from the crate.
   The hero renders at `BUF_H=130`, `SEED=0` (a deliberately closer camera than
   the app's ~180 — roadmap C): at the 64px `bufW` floor (very narrow phones)
-  seed-0 lays out exactly 8 desks = the scripted cast, so the install-copy
-  `hire()` easter egg is politely refused there for lack of a free desk —
-  graceful and owner-accepted, not a bug.
+  the 11-CLI cast OVERFLOWS the ~8 desks that floor lays out — the cast that
+  fits seats, the rest stay unadmitted (invisible), and the install-copy
+  `hire()` easter egg is politely refused for lack of a free desk — graceful
+  and owner-accepted, not a bug (pinned by pixtuoid-web's
+  `a_phone_narrow_office_the_cast_fills_refuses_hires_outright`).
 - **The crisp AA caption layer (`#office-overlay`).** The canvas renders a
   ~130px buffer that CSS upscales with `image-rendering: pixelated`, so text
   BAKED into the office pixels blows up blocky. Instead the engine exports the
