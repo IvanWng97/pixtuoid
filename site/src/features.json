@@ -30,10 +30,10 @@
   {
     "icon": "🎧",
     "name": "Lofi soundtrack",
-    "desc": "A lofi soundtrack synthesized at launch (zero bundled audio) — day and night takes follow the office's clock and weather, typing swells with activity, and the door chime, printer and vending machine cue as coworkers come and go. `m` mutes, `+`/`-` volume",
+    "desc": "A procedurally-synthesized lofi soundtrack (zero bundled audio) — day and night takes follow the office's clock and weather, typing swells with activity, and the door chime, printer and vending machine cue as coworkers come and go. `m` mutes, `+`/`-` volume",
     "pix": "note",
     "card": {
-      "blurb": "a lofi bed synthesized at launch follows the office's clock and weather — hear it live: the ♩ toggle in the corner of this page."
+      "blurb": "a procedurally-synthesized lofi bed follows the office's clock and weather — hear it live: the ♩ toggle in the corner of this page."
     }
   },
   {
