@@ -309,12 +309,13 @@ pub(crate) struct DoctorSourceRow {
     /// The version this build's decoder was verified against (`"unknown"` = no
     /// anchor), from the source's `SourceDescriptor`.
     pub verified_version: &'static str,
-    pub scan: LogScanResult,
-    /// Install-schema soundness — `Some` only when hooks are installed;
-    /// `None` = not checked (no target / not installed). A non-sound result
-    /// flips the verdict glyph to `⚠` and prints the reason on an indented `↳`
-    /// continuation line.
-    pub schema: Option<crate::install::verify::SchemaVerifyResult>,
+    /// The shared health rollup (install soundness + decode drift) — the SAME
+    /// [`SourceDiagnostics`] the Sources panel + boot preflight read, embedded
+    /// whole so `is_broken`/`drift` stay the ONE authority (no re-implemented
+    /// `row_broken`, no re-flattened `scan`/`schema` copy that could disagree).
+    /// A non-sound install flips the verdict glyph to `⚠` and prints the reason
+    /// on an indented `↳` continuation line.
+    pub diag: SourceDiagnostics,
 }
 
 /// A dotted-run major at or above this looks like a YEAR/date token, not a semver
@@ -389,17 +390,12 @@ pub(crate) fn version_status(installed: Option<&str>, verified: &str) -> String 
     format!("{inst_disp} (verified {verified}{cmp})")
 }
 
-/// Whether the row has a HARD install problem (the silent-dead case).
-fn row_broken(row: &DoctorSourceRow) -> bool {
-    row.schema.as_ref().is_some_and(|s| !s.is_sound())
-}
-
 /// The scannable per-row HEALTH verdict glyph (the rollup made visible):
 /// `⚠` a problem (install broken OR decode drift), `✓` healthy (installed +
 /// sound + no drift), `○` installable but not installed, `–` transcript-only
 /// (no install schema to verify).
 fn verdict_glyph(row: &DoctorSourceRow) -> char {
-    if row_broken(row) || row.scan.total() > 0 {
+    if row.diag.is_broken() || row.diag.drift.total() > 0 {
         '\u{26a0}' // ⚠
     } else if !row.has_target {
         '\u{2013}' // –
@@ -468,7 +464,7 @@ pub(crate) fn format_doctor_row(row: &DoctorSourceRow) -> String {
     // Reason continuation lines — only emitted when there IS a problem, so a
     // healthy row stays a single clean line. `issues` are already control-char
     // sanitized at the source (`verify::display_safe`).
-    if let Some(s) = &row.schema {
+    if let Some(s) = &row.diag.install {
         if !s.is_sound() {
             out.push_str(&format!(
                 "\n       \u{21b3} install broken: {}",
@@ -478,10 +474,10 @@ pub(crate) fn format_doctor_row(row: &DoctorSourceRow) -> String {
             out.push_str(&format!("\n       \u{21b3} note: {}", s.notes.join("; ")));
         }
     }
-    if row.scan.total() > 0 {
+    if row.diag.drift.total() > 0 {
         out.push_str(&format!(
             "\n       \u{21b3} decode drift: {}",
-            drift_detail(&row.scan)
+            drift_detail(&row.diag.drift)
         ));
     }
     out
@@ -765,11 +761,10 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
             hooks_installed,
             installed_version: desc.and_then(|d| d.version_probe).and_then(probe_version),
             verified_version: desc.map(|d| d.verified_version).unwrap_or("unknown"),
-            scan: diag.drift,
-            schema: diag.install,
+            diag,
         };
-        any_drift |= row.scan.total() > 0;
-        if row_broken(&row) {
+        any_drift |= row.diag.drift.total() > 0;
+        if row.diag.is_broken() {
             broken.push(format!("{}\u{b7}{}", row.prefix, row.source_id));
         }
         out.push_str(&format_doctor_row(&row));
@@ -1131,8 +1126,10 @@ mod tests {
             hooks_installed: true,
             installed_version: Some("2.0.0".into()),
             verified_version: "unknown",
-            scan: LogScanResult::default(),
-            schema: Some(crate::install::verify::SchemaVerifyResult::default()),
+            diag: SourceDiagnostics {
+                install: Some(crate::install::verify::SchemaVerifyResult::default()),
+                drift: LogScanResult::default(),
+            },
         };
         let c = format_doctor_row(&clean);
         assert!(c.contains("codex") && c.contains("connected") && c.contains("installed"));
@@ -1153,11 +1150,13 @@ mod tests {
             hooks_installed: false,
             installed_version: Some("1.1.0".into()),
             verified_version: "1.0.62",
-            scan: LogScanResult {
-                missing_field: 3,
-                ..Default::default()
+            diag: SourceDiagnostics {
+                install: None,
+                drift: LogScanResult {
+                    missing_field: 3,
+                    ..Default::default()
+                },
             },
-            schema: None,
         };
         let d = format_doctor_row(&drifted);
         assert!(
@@ -1183,11 +1182,13 @@ mod tests {
             hooks_installed: true,
             installed_version: None,
             verified_version: "unknown",
-            scan: LogScanResult::default(),
-            schema: Some(crate::install::verify::SchemaVerifyResult {
-                issues: vec!["shim binary missing: /old/pixtuoid-hook".into()],
-                notes: vec![],
-            }),
+            diag: SourceDiagnostics {
+                install: Some(crate::install::verify::SchemaVerifyResult {
+                    issues: vec!["shim binary missing: /old/pixtuoid-hook".into()],
+                    notes: vec![],
+                }),
+                drift: LogScanResult::default(),
+            },
         };
         let b = format_doctor_row(&broken);
         assert!(
@@ -1437,8 +1438,10 @@ mod tests {
             hooks_installed: false,
             installed_version: None,
             verified_version: "unknown",
-            scan: LogScanResult::default(),
-            schema: None,
+            diag: SourceDiagnostics {
+                install: None,
+                drift: LogScanResult::default(),
+            },
         };
         let s = format_doctor_row(&row);
         assert!(
@@ -1462,8 +1465,10 @@ mod tests {
             hooks_installed: false,
             installed_version: None,
             verified_version: "unknown",
-            scan: LogScanResult::default(),
-            schema: None,
+            diag: SourceDiagnostics {
+                install: None,
+                drift: LogScanResult::default(),
+            },
         };
         let s = format_doctor_row(&row);
         assert!(
@@ -1491,11 +1496,13 @@ mod tests {
             hooks_installed: true,
             installed_version: Some("1.0.0".into()),
             verified_version: "unknown",
-            scan: LogScanResult::default(),
-            schema: Some(crate::install::verify::SchemaVerifyResult {
-                issues: vec![],
-                notes: vec!["pixtuoid-hook not on PATH".into()],
-            }),
+            diag: SourceDiagnostics {
+                install: Some(crate::install::verify::SchemaVerifyResult {
+                    issues: vec![],
+                    notes: vec!["pixtuoid-hook not on PATH".into()],
+                }),
+                drift: LogScanResult::default(),
+            },
         };
         let s = format_doctor_row(&row);
         assert!(s.starts_with("  \u{2713}"), "sound-with-notes still ✓: {s}");
@@ -1522,15 +1529,17 @@ mod tests {
             hooks_installed: false,
             installed_version: None,
             verified_version: "unknown",
-            scan: LogScanResult {
-                unknown_event: 2,
-                missing_field: 0,
-                unknown_dispatch: 1,
-                shape_drift: 1,
-                samples: vec!["NewHook".into(), "MyTool".into()],
-                last_ts: Some("2026-06-15T00:00:00Z".into()),
+            diag: SourceDiagnostics {
+                install: None,
+                drift: LogScanResult {
+                    unknown_event: 2,
+                    missing_field: 0,
+                    unknown_dispatch: 1,
+                    shape_drift: 1,
+                    samples: vec!["NewHook".into(), "MyTool".into()],
+                    last_ts: Some("2026-06-15T00:00:00Z".into()),
+                },
             },
-            schema: None,
         };
         let s = format_doctor_row(&row);
         assert!(
