@@ -65,7 +65,7 @@ tui/
 │                   connection.rs (paint_connection_panel — the Sources-panel PAINTER),
 │                   welcome.rs (paint_welcome — the first-run onboarding overlay PAINTER; typewriter
 │                   + staged roster reveal driven by OnboardingFrame.elapsed_ms)
-├── hit_test.rs     mouse hit-test: agent hover, coffee machine click, furniture tooltips, pet
+├── hit_test/       mouse hit-test: agent hover, coffee machine click, furniture tooltips, pet
 ├── tui_renderer/   TuiRenderer + its inherent `render` flush, split production vs tests:
 │                   mod.rs (TuiRenderer: cross-frame state — Vec<pixtuoid_scene::floor::PerFloor> (each = FloorCtx
 │                   [FrameCache/Router/PoseHistory/OccupancyOverlay + .motion + .door_anim_max_ms] + its RgbBuffer)

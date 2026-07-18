@@ -48,11 +48,11 @@ crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pix
 ├── pixtuoid-scene/  backend-agnostic render+sim ENGINE crate — terminal AND window-free BY CRATE
 │                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)
 │                    pixel_painter/ (render_to_rgb_buffer) layout/ physics.rs pose/ (pure + routed,
-│                    file-level split) motion/ pathfind.rs floor.rs theme/ pet.rs creatures.rs chitchat.rs
+│                    file-level split) motion/ pathfind/ floor/ theme/ pet.rs creatures.rs chitchat.rs
 │                    frame_cache.rs anim.rs overlay.rs board.rs burn.rs embedded_pack.rs (default pack at
 │                    sprites/default/, own build.rs); depends on pixtuoid-core (forwards `native`)
 ├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene
-│                    cli.rs config.rs runtime/ install/ focus/ (click-to-focus: pid→ancestor→activate) tui/ floating/ (two thin painters over the
+│                    cli.rs config/ runtime/ install/ focus/ (click-to-focus: pid→ancestor→activate) tui/ floating/ (two thin painters over the
 │                    pixtuoid-scene crate; neither depends on the other) sprites/ (skeleton embedded via
 │                    include_str!, robot --pack-dir-loadable)
 ├── pixtuoid-web/    the THIRD painter — wasm-bindgen `<canvas>` painter over pixtuoid-scene

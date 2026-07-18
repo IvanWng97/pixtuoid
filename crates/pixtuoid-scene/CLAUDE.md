@@ -189,8 +189,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   from the render layer); advance_wander drives the elastic wander timeline, idempotent
 │                   per now via wander.last_advanced_at; owned as HashMap<AgentId, MotionState> on FloorCtx.motion),
 │                   tests.rs (#[cfg(test)] mod tests)
-├── pathfind.rs     Router trait + AStarRouter with selective cache invalidation
-├── floor.rs        FloorCtx (per-floor render state), render_floor (THE shared headless frame seam, #423 —
+├── pathfind/       Router trait + AStarRouter with selective cache invalidation
+├── floor/          FloorCtx (per-floor render state), render_floor (THE shared headless frame seam, #423 —
 │                   returns Option<FloorFrame> {layout, occupied_waypoints}: the sim's occupancy rides out
 │                   with the layout so a windowed painter can feed the audio cue tracker, #633),
 │                   FloorSession (THE owned painter session: PerFloor {FloorCtx+RgbBuffer} + PerOffice

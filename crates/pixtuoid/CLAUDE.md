@@ -154,7 +154,7 @@ src/
 │                       App-level only in v1 (no tab/pane precision — backlog). On Windows the SHIM sends no
 │                       pid (transient cmd.exe parent — see pixtuoid-hook), but a plugin-stamped pid
 │                       (opencode's process.pid) still flows: the `_pid` peek doesn't need the exit-watch.
-├── config.rs           AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
+├── config/             AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
 ├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize — all unit-tested;
 │                       ConnectedSources = the live `Arc<Mutex<HashSet<String>>>` connected-set,
 │                       seeded from config::resolve_connected, mutated by the Sources panel toggle,
