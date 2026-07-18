@@ -167,6 +167,47 @@ stops before the tag; pushing the tag is the irreversible crates.io publish
 and stays a human step. See
 [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
+## Development workflow (the arc loop)
+
+Non-trivial work runs as an **arc**: design → build → gate → wrap. This is
+the ONE portable description of the loop — follow it whatever tool or machine
+you're on, because the richer aids below (skills, memory) are NOT
+repo-committed and won't exist on a fresh checkout or in a non-Claude tool.
+
+1. **Pick** — an issue (GitHub is the tracker; `gh issue list`) or backlog item.
+2. **Grill the design** — decide the open questions ONE at a time, each with a
+   recommended answer, before writing code. (A big arc introducing new
+   seams/vocabulary grills against the domain docs first.)
+3. **Spec** — synthesize the grilled decisions into `docs/superpowers/specs/`
+   (LOCAL, git-ignored — the working design record, not the tracker). Also
+   plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md).
+4. **Mock gate (taste/visual work only)** — ratify the AFTER visual BEFORE any
+   code (`beautify-decoration`; see its skill + "Pin visual before coding").
+5. **Build** — TDD (see Conventions): failing test → minimal impl → commit.
+6. **Self-review** — a standards+spec pass before pushing. Not the merge gate.
+7. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
+   lenses on the diff) + green CI + the online review bot's `Findings: 0` at
+   HEAD, checked atomically. See "Things NOT to do" and the running order under
+   "Where to look". **A human merges.**
+8. **Wrap** — retro; record durable lessons.
+
+**Skills.** Repo skills live in [`.claude/skills/`](.claude/skills/) (committed,
+so they travel with the repo): `two-lens-review` (the merge gate),
+`beautify-decoration` (the visual mock loop), `add-source` / `add-theme`
+(scaffold + test-teeth for a new CLI / palette), `procedural-lofi` (synthesize
+a new ambient sound — the reference-fingerprint → freeze pipeline). Claude Code
+auto-surfaces them by description; other tools read this file (`AGENTS.md`) and
+run the loop above as prose.
+
+**Bootstrap on a fresh machine / other tool.** `git clone` gives you the repo
+skills + all `just` gates immediately. The day-to-day *loop* skills
+(`grilling`, `to-spec`, `tdd`, `code-review`, `diagnosing-bugs`) are a
+PERSONAL, non-committed layer — install [mattpocock/skills](https://github.com/mattpocock/skills)
+if you want the Claude Code implementations; otherwise this section IS the loop.
+Do NOT run its `setup-matt-pocock-skills` here — it would plant a competing
+`CONTEXT.md`/`docs/adr/` doc convention beside our nested `CLAUDE.md` + sharp-edges
+system, and a triage-label vocabulary that conflicts with our 4-axis taxonomy.
+
 ## Conventions
 
 - **TDD first.** Failing test → minimal impl → commit. Don't add code without a test that exercises it. Non-trivial changes (new feature/config key/seam, sharp edge, or spanning ≥3 files) plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md) first — it front-loads the review's failure classes, and its answers fill the review's change-specific slots.
