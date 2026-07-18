@@ -39,9 +39,17 @@ solves all three:
   13 dB above the bed). You never keep or ship the reference bytes. What ships is your own
   oscillator code hitting those numbers.
 - **Size**: a few kilobytes of constant tables + a synth function vs. megabytes of PCM.
-- **Never repeats**: loop only the *harmonic bed*; scatter the foreground (melody notes,
-  rain drops, keystrokes) at runtime from a seeded RNG. The bed can be short; the ear
-  never hears a seam because the top layer is always fresh.
+- **Never repeats (in practice)**, from three stacked tricks: (1) the frozen musical
+  composition — pad, drums, *and* the melody (keys + sparkle) — loops in lockstep, but the
+  loop is made **long enough** that its repetition doesn't fatigue (this project doubled its
+  day loop from 4 to 8 bars precisely because a short looped melody *was* audibly repetitive
+  — "loop the bed" does not mean "make it short"); (2) the genuinely-stochastic layers —
+  **rain drops and keystrokes** — *are* scattered fresh at runtime from a seeded RNG, laid
+  over the loop; (3) a **busy-ness stem mixer** fades whole stems (drums, keys…) in and out
+  by how active the scene is, so the *arrangement* keeps changing even though the notes
+  don't. The result reads as "never the same two minutes" without regenerating harmony.
+  (Regenerating melody live is possible but it's the hard, optional part — the shipped
+  product froze the melody and leaned on 1–3 instead.)
 
 The one law of the whole method:
 
@@ -115,12 +123,18 @@ Port the numpy synth to your runtime language reading the frozen tables. Key eng
   wasm especially, `SystemTime::now()` isn't available — and a backgrounded tab that jumps
   the clock will otherwise ramp-snap your crossfades and burst-replay every queued event
   (the "stall-clock" bug). Clamp big `dt` gaps.
-- **Loop the bed, scatter the foreground at runtime.** One short harmonic loop + fresh
-  melody/drops/keystrokes each cycle = never repeats, tiny RAM.
-- **Mix by subtraction.** High-pass every non-bass stem ~140 Hz so the sub band belongs to
-  the bass alone; keep one texture stem carrying all the "medium" noise (per-stem hiss
-  *stacks* — four stems each with a little hiss = +6 dB of mud). Texture sits 25–35 dB
-  below the music.
+- **Loop the frozen composition, scatter only the stochastic layers.** All the musical
+  stems (pad/drums/keys/sparkle) tile in lockstep on one loop length — make that loop long
+  enough to not fatigue; then scatter the truly-random layers (rain drops, keystrokes) fresh
+  each frame and fade whole stems by busy-ness (see "Never repeats" above). Tiny RAM: one
+  copy of each stem loop.
+- **Keep the sub band clear.** The sub-bass register must belong to the bass alone or the
+  low end turns to mud. Two ways to get there: the textbook one is to high-pass every
+  non-bass stem ~140 Hz (LOFI-BIBLE §4); the cheaper one this project used is to *voice the
+  other stems out of that register in the first place* (mid-register EP plucks, and a day
+  track with no sub content at all) so there's nothing to filter. Either way, keep ONE
+  texture stem carrying all the "medium" noise — per-stem hiss *stacks* (four stems each
+  with a little = +6 dB of mud); texture sits 25–35 dB below the music.
 - **Perceptual volume.** Map a user volume slider as `amplitude = user²` (loudness is
   logarithmic). Linear volume feels "still too loud at 5%" — the classic trap.
 
@@ -163,8 +177,13 @@ Port the numpy synth to your runtime language reading the frozen tables. Key eng
 4. Adapt `synth_audition.py`'s voices toward the fingerprint; re-measure to convergence.
 5. Human listens once. On yes, `export_score.py` freezes the take + checksum.
 6. Port to your runtime; keep the fingerprint tests as the byte-identity oracle; synthesize
-   at launch, loop the bed, scatter the foreground.
+   at launch, loop the frozen composition, scatter the stochastic layers, gate stems by
+   busy-ness.
+
+(The `scripts/` are the real working prototypes from this project, kept as a concrete
+starting point — not a turnkey CLI; `synth_audition.py` runs standalone, and `export_score.py`
+imports `phase2_audition.py` — both are bundled. Adapt the voices to your own reference.)
 
 The whole discipline in one line: **fingerprint a reference you love, drive your own
-synthesis to the numbers, freeze the one take a human blesses, and let the runtime keep the
-foreground fresh forever.**
+synthesis to the numbers, freeze the one take a human blesses, then let a long-enough loop +
+runtime-stochastic layers + busy-ness stem-gating keep it from ever sounding the same.**
