@@ -79,19 +79,11 @@ pub(crate) fn run_sources_set(ids: &[String], json: bool) -> Result<()> {
         .iter()
         .map(|id| sources::registered_id(id).map(String::from))
         .collect::<Result<_>>()?;
-    let outcomes = sources::reconcile_to(&cfg, &desired);
-    let any_failed = outcomes
-        .iter()
-        .any(|(_, oc)| matches!(oc, sources::ChangeOutcome::Failed(_)));
-    let rows: Vec<sources::OutcomeRow> = outcomes
+    let rows: Vec<sources::OutcomeRow> = sources::reconcile_to(&cfg, &desired)
         .into_iter()
         .map(|(id, oc)| sources::OutcomeRow::new(id, &oc))
         .collect();
-    emit_outcomes(&rows, json)?;
-    if any_failed {
-        anyhow::bail!("one or more sources failed (see the rows above)");
-    }
-    Ok(())
+    report_batch(&rows, json)
 }
 
 /// Shared `connect`/`disconnect` presenter: validate all ids up front, then apply
@@ -109,25 +101,34 @@ pub(crate) fn run_change(
         .iter()
         .map(|id| sources::registered_id(id))
         .collect::<Result<_>>()?;
-    let mut any_failed = false;
     let rows: Vec<sources::OutcomeRow> = sids
         .into_iter()
         .map(|sid| {
-            let oc = match op(&cfg, sid) {
-                Ok(oc) => oc,
-                Err(e) => {
-                    any_failed = true;
-                    // The same `failed` token + message split `sources set`
-                    // emits — spelled through the ONE outcome→row authority
-                    // (`OutcomeRow::new`) so the two command surfaces can't drift.
-                    sources::ChangeOutcome::Failed(format!("{e:#}"))
-                }
-            };
+            let oc = op(&cfg, sid).unwrap_or_else(|e| {
+                // The same `failed` token + message split `sources set` emits —
+                // spelled through the ONE outcome→row authority (`OutcomeRow::new`)
+                // so the two command surfaces can't drift.
+                sources::ChangeOutcome::Failed(format!("{e:#}"))
+            });
             sources::OutcomeRow::new(sid.to_string(), &oc)
         })
         .collect();
-    emit_outcomes(&rows, json)?;
-    if any_failed {
+    report_batch(&rows, json)
+}
+
+/// The shared tail of `run_change` / `run_sources_set`: emit the batch, then fail
+/// the command if any row failed. Emits BEFORE bailing — the `--json` rows must
+/// reach stdout even on the non-zero exit (the delivery contract the Raycast
+/// consumer rides, pinned by
+/// `cli_json::a_failing_connect_emits_the_outcome_rows_and_exits_nonzero`).
+/// `any_failed` is DERIVED from the rows (their `outcome` token), so the emitted
+/// rows and the exit code can't disagree.
+fn report_batch(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
+    emit_outcomes(rows, json)?;
+    if rows
+        .iter()
+        .any(|r| r.outcome == sources::WireOutcome::Failed)
+    {
         anyhow::bail!("one or more sources failed (see the rows above)");
     }
     Ok(())
