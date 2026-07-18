@@ -296,18 +296,40 @@ pub fn paint_labels_into_surface(
         // A ● state dot leads the badge (▸ when hovered — dead today: `labels()` passes
         // `hovered: None`, floating has no agent-hover). The AA face renders any glyph, so
         // ▸ needs no bitmap registration (unlike the old 8×8 font).
-        let text = if el.hovered {
-            format!("\u{25b8}{}", el.text)
-        } else {
-            format!("\u{25cf}{}", el.text)
-        };
+        let marker = if el.hovered { "\u{25b8}" } else { "\u{25cf}" };
+        let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
         // anchor_px is the sprite TOP-LEFT in office space; center the badge over the sprite
         // and lift it a badge-height + gap above the head.
         const BADGE_LIFT_PX: i32 = 12;
         let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
-        draw_badge_text(sb, win_w, win_h, &text, cx, cy, LABEL_FONT_PX, color);
+        // The CLI-identity split (#657, owner-ratified, all three painters):
+        // the ● dot keeps the activity tone (status), the name paints in the
+        // source's badge hue (identity) via the SAME SourceColors::by_prefix
+        // the dashboard badges ride. Unregistered prefix / hover → one run in
+        // the tone/hover ink, unchanged.
+        let badge = (!el.hovered)
+            .then(|| el.text.split_once('\u{b7}'))
+            .flatten()
+            .and_then(|(prefix, _)| theme.source.by_prefix(prefix));
+        match badge {
+            Some(hue) => {
+                let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
+                draw_badge_text(sb, win_w, win_h, marker, cx, cy, LABEL_FONT_PX, color);
+                draw_badge_text(
+                    sb,
+                    win_w,
+                    win_h,
+                    &el.text,
+                    cx + mw,
+                    cy,
+                    LABEL_FONT_PX,
+                    pack_xrgb(hue),
+                );
+            }
+            None => draw_badge_text(sb, win_w, win_h, &text, cx, cy, LABEL_FONT_PX, color),
+        }
     }
 }
 

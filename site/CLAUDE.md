@@ -156,14 +156,15 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   BAKED into the office pixels blows up blocky. Instead the engine exports the
   name badges + the neon wall board as a MODEL — `pixtuoid-web`'s
   `Office.overlay_json()` (the SAME `pixtuoid_scene::overlay` + `pixtuoid_scene::board`
-  the TUI/floating painters use) → `{ labels:[{x,y,text,color,badge?,plen?}],
+  the TUI/floating painters use) → `{ labels:[{x,y,text,color,badge?}],
   board:{rect,brand, star,mood,context} }`, coords in OFFICE-BUFFER px, colors
-  resolved against the current theme. A label's optional `badge`/`plen` pair
-  (#657) is the CLI-identity half: `badge` is the source's per-CLI hue
-  (`SourceColors::by_prefix` — the SAME hue the app's dashboard/Sources/
-  tooltip badges use) and `plen` the prefix length incl. its `·` (BMP
-  single-unit chars, so a JS UTF-16 slice lands on the engine's boundary); an
-  unregistered prefix omits both and the label stays tone-only. SHARP EDGE:
+  resolved against the current theme. A label's optional `badge` (#657,
+  owner-ratified across ALL THREE painters) is the CLI-identity color: the
+  source's per-CLI hue (`SourceColors::by_prefix` — the SAME hue the app's
+  dashboard/Sources/tooltip badges use) painting the WHOLE name, while the
+  `●` marker keeps the activity tone (`color`) — the status-dot idiom: dot =
+  busy/idle, text = identity. An unregistered prefix omits `badge` and the
+  label stays tone-only. SHARP EDGE:
   the engine re-derives the prefix by splitting the label on its FIRST `·` —
   a cross-crate echo of core's `source_label_prefix` + `·` join, pinned by
   the web `labels == badges` test, not a shared const.
@@ -171,9 +172,9 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   DOM `<span>`s over the canvas at DISPLAY resolution, positioned by the canvas's
   `object-fit: cover` geometry (`scale = max(disp/buf)`, buffer centered — the
   same math the cover-crop uses), so they stay sharp at any zoom. Each pooled
-  label holds THREE fixed child spans — ● marker (tone) / CLI prefix (badge
-  hue) / name (tone) — updated together behind one text+color+badge change
-  key; child `textContent`s concatenate to the full label, so text assertions
+  label holds TWO fixed child spans — ● dot (tone) / name (badge hue, tone
+  when absent) — updated together behind one text+color+badge change key;
+  child `textContent`s concatenate to the full label, so text assertions
   and hit-tests read it unchanged. Load-bearing:
   (1) captions update + fade in (`.is-on`) only AFTER the reveal roll settles
   (`rt >= 1`), never over the rolling floors — labels track FINAL sprite

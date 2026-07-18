@@ -403,16 +403,18 @@ test('crisp AA captions overlay the live office (name badges + neon board)', asy
   await expect(label).toHaveText(/\S/, { timeout: 10_000 });
   const labelFont = await label.evaluate((el) => getComputedStyle(el).fontFamily);
   expect(labelFont).toContain('Monaspace Neon');
-  // The label splits into ●/prefix/name child spans, the prefix carrying the
-  // CLI's badge hue (#657) — the same per-CLI color the app's dashboard uses.
+  // The label splits into ●-dot/name child spans — the dot carries the
+  // activity tone, the name the CLI's badge hue (#657): the same per-CLI
+  // color the app's dashboard uses.
   const parts = await label.evaluate((el) =>
     Array.from(el.children).map((c) => ({
       text: c.textContent,
       color: (c as HTMLElement).style.color,
     }))
   );
-  expect(parts).toHaveLength(3);
-  expect(parts[1].text).toMatch(/^[a-z]{2}·$/);
+  expect(parts).toHaveLength(2);
+  expect(parts[0].text).toBe('●');
+  expect(parts[1].text).toMatch(/^[a-z]{2}·/);
   expect(parts[1].color).not.toEqual('');
   // The neon wall board renders its brand row (● / ★) from the same model.
   const brand = page.locator('#office-overlay .ov-board .ov-brow--top span').first();

@@ -66,16 +66,31 @@ pub(crate) fn paint_label_widgets(
             // only converts the resolved `Rgb` to ratatui `Color`.
             to_color(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme))
         };
-        let text = if el.hovered {
-            format!("▸{}", el.text)
-        } else {
-            format!("●{}", el.text)
-        };
         let mut style = Style::default().fg(label_color);
         if el.hovered {
             style = style.add_modifier(ratatui::style::Modifier::BOLD);
         }
-        let para = Paragraph::new(Span::styled(text, style));
+        let marker = if el.hovered { "▸" } else { "●" };
+        // The CLI-identity split (#657, owner-ratified): the ● marker is the
+        // STATUS dot (activity tone — the Slack-presence idiom) and the whole
+        // name text carries the source's badge hue via the SAME
+        // SourceColors::by_prefix the dashboard/Sources/tooltip badges ride.
+        // Status stays redundantly visible (dot + the ? bubble + monitor
+        // glow); identity stays constant. An unregistered prefix keeps the
+        // whole label tone-colored; hover stays all-white BOLD (focus
+        // overrides identity).
+        let badge = (!el.hovered)
+            .then(|| el.text.split_once('\u{b7}'))
+            .flatten()
+            .and_then(|(prefix, _)| theme.source.by_prefix(prefix));
+        let spans = match badge {
+            Some(rgb) => vec![
+                Span::styled(marker.to_string(), style),
+                Span::styled(el.text.clone(), Style::default().fg(to_color(rgb))),
+            ],
+            None => vec![Span::styled(format!("{marker}{}", el.text), style)],
+        };
+        let para = Paragraph::new(ratatui::text::Line::from(spans));
         if let Some(r) = clip_widget_rect(
             Rect {
                 x: lx,

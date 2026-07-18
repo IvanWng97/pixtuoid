@@ -345,21 +345,17 @@ impl Office {
             out.push_str(&format!("{{\"x\":{cx},\"y\":{},\"text\":", el.anchor_px.y));
             push_json_string(&mut out, &format!("\u{25cf}{}", el.text));
             out.push_str(&format!(",\"color\":\"{}\"", label_hex(theme, el.tone)));
-            // The CLI-identity half (#657): the registry prefix before the
-            // first '·' resolves to the source's badge hue — the SAME
-            // SourceColors::by_prefix the dashboard/Sources/tooltip badges
-            // ride — so the site paints the prefix in the CLI color while the
-            // ● marker + name keep the activity tone. `plen` counts the
-            // prefix + its '·' (all BMP single-unit chars, so a JS slice by
-            // UTF-16 index lands on the same boundary). An unregistered
-            // prefix emits no badge and the whole label stays tone-colored.
+            // The CLI-identity half (#657, owner-ratified design): the
+            // registry prefix before the first '·' resolves to the source's
+            // badge hue — the SAME SourceColors::by_prefix the dashboard/
+            // Sources/tooltip badges ride. The site paints the WHOLE name in
+            // it while the ● marker stays the activity tone (the status-dot
+            // idiom: dot = busy/idle, text = identity — all three painters
+            // share this split). An unregistered prefix emits no badge and
+            // the whole label stays tone-colored.
             if let Some((prefix, _)) = el.text.split_once('\u{b7}') {
                 if let Some(rgb) = theme.source.by_prefix(prefix) {
-                    out.push_str(&format!(
-                        ",\"badge\":\"{}\",\"plen\":{}",
-                        hex(rgb),
-                        prefix.chars().count() + 1
-                    ));
+                    out.push_str(&format!(",\"badge\":\"{}\"", hex(rgb)));
                 }
             }
             out.push('}');
@@ -729,12 +725,9 @@ mod tests {
         o.step(T0_MS + 10_000.0, 320, 180);
         let json = o.overlay_json();
         // cc·api resolves the SAME SourceColors::by_prefix hue the dashboard
-        // badges ride; plen spans "cc·" so the site can paint just the prefix.
+        // badges ride; the site paints the whole name in it (● stays tone).
         let cc = pixtuoid_scene::theme::ALL_THEMES[0].source.claude_code;
-        let expect = format!(
-            "\"badge\":\"#{:02x}{:02x}{:02x}\",\"plen\":3",
-            cc.r, cc.g, cc.b
-        );
+        let expect = format!("\"badge\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
         assert!(
             json.contains(&expect),
             "labels carry the cc badge hue: {json}"

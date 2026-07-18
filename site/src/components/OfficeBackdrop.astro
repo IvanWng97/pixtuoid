@@ -560,29 +560,25 @@ import { asset, DIM_RESTING } from '../consts';
         if (!el) {
           el = document.createElement('span');
           el.className = 'ov-label';
-          // Three fixed child spans: the ● status marker (activity tone), the
-          // CLI prefix (the source's badge hue — the same per-CLI color the
-          // app's dashboard badges use), and the name (tone again). Child
-          // textContent concatenates to the full label, so hit-tests and
-          // text assertions read the label unchanged.
-          for (let k = 0; k < 3; k++) el.appendChild(document.createElement('span'));
+          // Two fixed child spans — the ● status dot (activity tone) and
+          // the name (the source's badge hue, the same per-CLI color the
+          // app's dashboard badges use; tone when no badge). The status-dot
+          // idiom: dot = busy/idle, text = identity. Child textContent
+          // concatenates to the full label, so hit-tests and text assertions
+          // read it unchanged.
+          for (let k = 0; k < 2; k++) el.appendChild(document.createElement('span'));
           overlayEl.appendChild(el);
           labelPool[i] = el;
         }
         const L = labels[i];
-        const key = L.text + '�' + L.color + '�' + (L.badge || '');
+        const key = L.text + '\u0000' + L.color + '\u0000' + (L.badge || '');
         if (el._k !== key) {
           el._k = key;
-          // plen spans the prefix + '·' (BMP single-unit chars, so UTF-16
-          // slicing lands on the same boundary the engine counted).
-          const plen = L.badge ? L.plen : 0;
           const parts = el.children;
-          parts[0].textContent = L.text.slice(0, 1); // ● marker
-          parts[1].textContent = L.text.slice(1, 1 + plen);
-          parts[2].textContent = L.text.slice(1 + plen);
+          parts[0].textContent = L.text.slice(0, 1); // ● dot
+          parts[1].textContent = L.text.slice(1);
           parts[0].style.color = L.color;
           parts[1].style.color = L.badge || L.color;
-          parts[2].style.color = L.color;
         }
         const x = map.ox + L.x * map.s;
         const y = map.oy + L.y * map.s - lift;
