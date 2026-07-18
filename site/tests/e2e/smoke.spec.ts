@@ -369,27 +369,45 @@ test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode doe
       configurable: true,
       writable: true,
     });
+    // Capture the category AT AudioContext construction. The load-bearing order is
+    // that 'playback' is set BEFORE the context is built (a context inherits its
+    // routing at construction on real iOS; setting it after would leave it on the
+    // ambient channel = silent, yet still END as 'playback'). A bare end-state
+    // check would pass a broken reorder — this wrapper pins the ordering.
+    const w = window as unknown as { __acTypeAtCtor: string | null };
+    w.__acTypeAtCtor = null;
+    const Real =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Real) return;
+    const Wrapped = function (this: unknown, ...args: unknown[]) {
+      w.__acTypeAtCtor = (
+        navigator as unknown as { audioSession: { type: string } }
+      ).audioSession.type;
+      return new (Real as new (..._a: unknown[]) => AudioContext)(...args);
+    } as unknown as typeof AudioContext;
+    Wrapped.prototype = Real.prototype;
+    window.AudioContext = Wrapped;
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext = Wrapped;
   });
   const errors = watchErrors(page);
   await gotoLive(page);
   const btn = page.locator('#office-audio');
   await expect(btn).toBeVisible({ timeout: 15_000 });
-  // before any gesture: untouched (the audio path hasn't run)
+  const atCtor = () =>
+    page.evaluate(() => (window as unknown as { __acTypeAtCtor: string | null }).__acTypeAtCtor);
+  // before any gesture: category untouched AND no AudioContext yet (muted-by-default)
   expect(
     await page.evaluate(
       () => (navigator as unknown as { audioSession: { type: string } }).audioSession.type
     )
   ).toBe('auto');
-  // the gesture spins up the audio path (audioStart) → we set the category BEFORE
-  // constructing the AudioContext, so it holds even if the warmup later degrades.
+  expect(await atCtor()).toBeNull();
+  // the gesture spins up the audio path (audioStart), which sets the category
+  // BEFORE constructing the AudioContext — assert the value captured AT
+  // construction, the property that's load-bearing on real iOS.
   await btn.click();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () => (navigator as unknown as { audioSession: { type: string } }).audioSession.type
-      )
-    )
-    .toBe('playback');
+  await expect.poll(atCtor).toBe('playback');
   expect(errors()).toEqual([]);
 });
 

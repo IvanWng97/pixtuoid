@@ -241,9 +241,10 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   hardware Ring/Silent switch (very commonly left ON) mutes it — a user who
   deliberately taps ♩ then hears nothing, reading as broken. `'playback'` routes to
   the media channel (like a `<video>`), honouring the explicit opt-in even on
-  silent. Accepted trade-off: `'playback'` is the ONLY web AudioSession category
-  that bypasses the switch and is non-mixing, so it can pause other apps' audio
-  (Spotify) when ♩ is tapped — acceptable since ♩ is a deliberate gesture. The API
+  silent. Accepted trade-off: `'playback'` is the only NON-RECORDING AudioSession
+  category that bypasses the switch (`play-and-record` also would, but needs a mic
+  prompt), and it's non-mixing, so it can pause other apps' audio (Spotify) when ♩
+  is tapped — acceptable since ♩ is a deliberate gesture. The API
   is Safari-only; the `'audioSession' in navigator` guard no-ops elsewhere, so it's
   a pure iOS enhancement CI can't exercise (the smoke test mocks the API to pin the
   wiring; the real silent-switch behavior is device-verified).
