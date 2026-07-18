@@ -56,9 +56,9 @@ ICONS = {
     "walk": {"sprite": "walking_0.sprite"},
     "coffee": {
         "grid": [
-            ". . w . . w . . . .",
-            ". w . . w . . . . .",
-            ". . w . . w . . . .",
+            ". . K . . K . . . .",
+            ". K . . K . . . . .",
+            ". . K . . K . . . .",
             ". . . . . . . . . .",
             ". V V V V V V . . .",
             ". V d d d d V V V .",
@@ -96,44 +96,51 @@ ICONS = {
             ". . . . . . . . . .",
         ]
     },
+    # per-tool monitor glow → a monitor with a light (K) outline so the dark
+    # bezel doesn't dissolve into the DARK theme
     "glow": {
         "grid": [
-            ". M M M M M M M M .",
-            ". M j j j j j j M .",
-            ". M j c c c c j M .",
-            ". M j c c c c j M .",
-            ". M j c c c c j M .",
-            ". M j j j j j j M .",
-            ". M M M M M M M M .",
-            ". . . . M M . . . .",
-            ". . M M M M M M . .",
+            ". K K K K K K K K .",
+            ". K M M M M M M K .",
+            ". K M c c c c M K .",
+            ". K M c c c c M K .",
+            ". K M c c c c M K .",
+            ". K M M M M M M K .",
+            ". K K K K K K K K .",
+            ". . . K K K K . . .",
+            ". . K K K K K K . .",
             ". . . . . . . . . .",
         ]
     },
+    # hover tooltips → an info "i" badge (the old magnifier read as "search /
+    # zoom", not "hover for details")
     "magnify": {
         "grid": [
-            ". . K K K K . . . .",
-            ". K c c c c K . . .",
-            "K c w c c c c K . .",
-            "K c c c c c c K . .",
-            "K c c c c c c K . .",
-            "K c c c c c c K . .",
-            ". K c c c c K . . .",
-            ". . K K K K D D . .",
-            ". . . . . . D D D .",
-            ". . . . . . . D D D",
+            ". . K K K K K K . .",
+            ". K w w w w w w K .",
+            ". K w w b w w w K .",
+            ". K w w w w w w K .",
+            ". K w b b w w w K .",
+            ". K w w b w w w K .",
+            ". K w w b w w w K .",
+            ". K w b b b w w K .",
+            ". K w w w w w w K .",
+            ". . K K K K K K . .",
         ]
     },
+    # token meter → a stack of sheets on a desk, the top one fanned. Dark (n)
+    # side-edges so the near-white sheets separate on the LIGHT theme (they
+    # vanished into cream before).
     "tokens": {
         "grid": [
-            ". . . w w w . . . .",
-            ". . . . . . . . . .",
-            ". . w w w w w . . .",
-            ". . V V V V V . . .",
-            ". . w w w w w . . .",
-            ". . V V V V V . . .",
-            ". . w w w w w . . .",
-            ". . V V V V V . . .",
+            ". . . n n n . . . .",
+            ". . n w w w n . . .",
+            ". n w w w w w n . .",
+            ". n V V V V V n . .",
+            ". n w w w w w n . .",
+            ". n V V V V V n . .",
+            ". n w w w w w n . .",
+            ". n V V V V V n . .",
             ". D D D D D D D D .",
             ". D D D D D D D D .",
         ]
@@ -164,6 +171,129 @@ ICONS = {
             ". n B B B B B B n .",
             ". . n B B B B n . .",
             ". . . n n n n . . .",
+        ]
+    },
+    # stacked floors with up/down arrows — "hop between floors". The orange
+    # arrows (visible on both themes) + banded floors read as floor navigation,
+    # NOT the filing-cabinet/building the earlier shaft version was mistaken for
+    # (and no longer twins the multiagent building).
+    "multifloor": {
+        "grid": [
+            ". . . . o . . . . .",
+            ". . . o o o . . . .",
+            ". K K K K K K K K .",
+            ". K V V V V V V K .",
+            ". K K K K K K K K .",
+            ". K V V V V V V K .",
+            ". K K K K K K K K .",
+            ". . . o o o . . . .",
+            ". . . . o . . . . .",
+            ". . . . . . . . . .",
+        ]
+    },
+    # an office facade (light frame) with 2-wide windows lit in different hues —
+    # one per agent — and a bright ground-floor entrance
+    "multiagent": {
+        "grid": [
+            ". K K K K K K K K .",
+            ". K c c M y y M K .",
+            ". K M M M M M M K .",
+            ". K r r M c c M K .",
+            ". K M M M M M M K .",
+            ". K y y M r r M K .",
+            ". K M M M M M M K .",
+            ". K M w w w w M K .",
+            ". K M w w w w M K .",
+            ". K K K K K K K K .",
+        ]
+    },
+    # a top-down floor plan: four rooms (cream), each with a desk (cyan), walled
+    # off with doorways. Light (K) walls so the plan holds on the DARK theme (the
+    # earlier brown frame merged into the night bg), and the desks say "rooms",
+    # not a bare "+" grid.
+    "spaces": {
+        "grid": [
+            "K K K K K K K K K .",
+            "K V V V K V V V K .",
+            "K V c V K V c V K .",
+            "K V V V K V V V K .",
+            "K K . K K K . K K .",
+            "K V V V K V V V K .",
+            "K V c V K V c V K .",
+            "K V V V K V V V K .",
+            "K K K K K K K K K .",
+            ". . . . . . . . . .",
+        ]
+    },
+    # the agent-tree DASHBOARD — a file-tree view: a root row, a trunk, and
+    # three coloured agent rows branching off it (the sidebar-tree idiom reads
+    # far clearer at ~20px than an org-chart's thin diagonal lines)
+    "tree": {
+        "grid": [
+            "c c c . . . . . . .",
+            ". K . . . . . . . .",
+            ". K K l l . . . . .",
+            ". K . . . . . . . .",
+            ". K K y y . . . . .",
+            ". K . . . . . . . .",
+            ". K K r r . . . . .",
+            ". . . . . . . . . .",
+            ". . . . . . . . . .",
+            ". . . . . . . . . .",
+        ]
+    },
+    # a paw print — four toe beans in an arc + a rounded pad, centred and in a
+    # warm brown (D) so it reads clean, not a heavy off-centre lump
+    "pets": {
+        "grid": [
+            ". . D D . . D D . .",
+            ". . D D . . D D . .",
+            "D D . . . . . . D D",
+            "D D . . . . . . D D",
+            ". . . D D D D . . .",
+            ". . D D D D D D . .",
+            ". . D D D D D D . .",
+            ". . D D D D D D . .",
+            ". . . D D D D . . .",
+            ". . . . . . . . . .",
+        ]
+    },
+    # the OpenClaw gateway mascot — the office's own lobster, straight from the
+    # pack (14x12), so the icon IS the mascot rendered in the office
+    "lobster": {"sprite": "lobster_rest.sprite"},
+    # Office VIBES = the ambient atmosphere: day/night + weather + themes (NOT
+    # audio — that's the lofi row). A warm sun peeking behind a cloud; the cloud
+    # is fully grey-OUTLINED so the white body stays legible on the light theme
+    # (a base-only edge still washed out on cream).
+    "vibes": {
+        "grid": [
+            ". t . . . . . . . .",
+            ". . t t t . . . . .",
+            ". t t t t t . . . .",
+            "t . t t t t . . . .",
+            ". . t t t K K K . .",
+            ". . . K w w w w K .",
+            ". . K w w w w w w K",
+            ". . K w w w w w w K",
+            ". . . K K K K K K .",
+            ". . . . . . . . . .",
+        ]
+    },
+    # a floating desktop window — title bar with traffic-light dots, then a light
+    # content pane with text lines (NOT a solid cyan screen, which twinned the
+    # monitor-glow icon)
+    "window": {
+        "grid": [
+            "K K K K K K K K K K",
+            "K M M M M M M M M K",
+            "K r . y . l . M M K",
+            "K M M M M M M M M K",
+            "K w w w w w w w w K",
+            "K w M M M M w w w K",
+            "K w w w w w w w w K",
+            "K w M M M w w w w K",
+            "K w w w w w w w w K",
+            "K K K K K K K K K K",
         ]
     },
 }

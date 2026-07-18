@@ -76,20 +76,20 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 <!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->
 | | Feature | Description |
 |---|---|---|
-| 🏢 | **Multi-agent office** | Every agent session gets its own desk — when a floor fills up, a new floor opens automatically |
-| 🛗 | **Multi-floor office** | Hop between floors with `PageUp`/`PageDown`, `↑`/`↓`, or `j`/`k` — each switch slides into view |
-| 🧭 | **Office spaces** | Cubicles, a meeting lounge, and a pantry — the office is laid out in distinct furnished zones, not just a grid of identical desks |
+| <img src="docs/images/pix-icons/multiagent.png" alt=""> | **Multi-agent office** | Every agent session gets its own desk — when a floor fills up, a new floor opens automatically |
+| <img src="docs/images/pix-icons/multifloor.png" alt=""> | **Multi-floor office** | Hop between floors with `PageUp`/`PageDown`, `↑`/`↓`, or `j`/`k` — each switch slides into view |
+| <img src="docs/images/pix-icons/spaces.png" alt=""> | **Office spaces** | Cubicles, a meeting lounge, and a pantry — the office is laid out in distinct furnished zones, not just a grid of identical desks |
 | <img src="docs/images/pix-icons/walk.png" alt=""> | **Animated characters** | Coworkers type, wait with a `?`, sleep under little z's, and walk A\*-routed paths between desks |
 | <img src="docs/images/pix-icons/palette.png" alt=""> | **Team palette** | Shirt and pants take their colors from the working directory — same repo, same colors, so the room reads like an org chart. Hair and skin vary per agent; 16 curated outfits |
 | <img src="docs/images/pix-icons/glow.png" alt=""> | **Per-tool monitor glow** | Each desk's monitor glows with the tool in use — Edit blue, Bash orange, Read cyan — so you can read the whole room at a glance |
 | <img src="docs/images/pix-icons/tokens.png" alt=""> | **Token meter** | Paper stacks up on a desk as its session burns tokens — the pile climbs through 250K / 2M / 16M tiers, a big spend drops a fresh sheet, and hovering shows the exact total (Σ) |
 | <img src="docs/images/pix-icons/magnify.png" alt=""> | **Hover tooltips** | Hover an agent for session duration, tool-call count and active-time %; hover any furniture — desks, sofas, plants, vending machine, printer — for its name |
-| 🗂️ | **Agent tree dashboard** | Tab opens a collapsible tree of every floor's agents — each badged with the CLI it runs, color-tinted by what it's doing, with tool-call counts |
-| 🐾 | **Office pets** | A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up |
-| 🦞 | **OpenClaw gateway mascot** | A live OpenClaw gateway shows up as a wandering lobster — the way it moves shows the gateway's health |
-| 🎛️ | **Office vibes** | The sun and moon cross the skyline as the day goes by, weather rolls past the windows — rain, storm, snow, fog, overcast, windy, smog — and six themes give the office a whole new look |
+| <img src="docs/images/pix-icons/tree.png" alt=""> | **Agent tree dashboard** | Tab opens a collapsible tree of every floor's agents — each badged with the CLI it runs, color-tinted by what it's doing, with tool-call counts |
+| <img src="docs/images/pix-icons/pets.png" alt=""> | **Office pets** | A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up |
+| <img src="docs/images/pix-icons/lobster.png" alt=""> | **OpenClaw gateway mascot** | A live OpenClaw gateway shows up as a wandering lobster — the way it moves shows the gateway's health |
+| <img src="docs/images/pix-icons/vibes.png" alt=""> | **Office vibes** | The sun and moon cross the skyline as the day goes by, weather rolls past the windows — rain, storm, snow, fog, overcast, windy, smog — and six themes give the office a whole new look |
 | <img src="docs/images/pix-icons/note.png" alt=""> | **Lofi soundtrack** | A lofi soundtrack synthesized entirely in code — no audio files shipped. Day and night tracks follow the office's clock and weather, typing sounds swell with activity, and the door chime, printer and vending machine play as coworkers come and go. `m` mutes, `+`/`-` volume |
-| 🪟 | **Floating desktop window** | `pixtuoid floating` opens the office in a frameless, always-on-top window — on your desktop, not just in your terminal |
+| <img src="docs/images/pix-icons/window.png" alt=""> | **Floating desktop window** | `pixtuoid floating` opens the office in a frameless, always-on-top window — on your desktop, not just in your terminal |
 | <img src="docs/images/pix-icons/shield.png" alt=""> | **Hook-safe** | The tiny hook shim pixtuoid installs always exits 0 — even a stuck office can never block your agent |
 <!-- features:end -->
 

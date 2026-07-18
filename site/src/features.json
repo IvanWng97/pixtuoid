@@ -3,17 +3,20 @@
     "icon": "🏢",
     "name": "Multi-agent office",
     "desc": "Every agent session gets its own desk — when a floor fills up, a new floor opens automatically",
+    "pix": "multiagent",
     "channel": "agents"
   },
   {
     "icon": "🛗",
     "name": "Multi-floor office",
-    "desc": "Hop between floors with `PageUp`/`PageDown`, `↑`/`↓`, or `j`/`k` — each switch slides into view"
+    "desc": "Hop between floors with `PageUp`/`PageDown`, `↑`/`↓`, or `j`/`k` — each switch slides into view",
+    "pix": "multifloor"
   },
   {
     "icon": "🧭",
     "name": "Office spaces",
     "desc": "Cubicles, a meeting lounge, and a pantry — the office is laid out in distinct furnished zones, not just a grid of identical desks",
+    "pix": "spaces",
     "channel": "spaces"
   },
   {
@@ -65,6 +68,7 @@
     "icon": "🗂️",
     "name": "Agent tree dashboard",
     "desc": "Tab opens a collapsible tree of every floor's agents — each badged with the CLI it runs, color-tinted by what it's doing, with tool-call counts",
+    "pix": "tree",
     "channel": "dashboard"
   },
   {
@@ -88,18 +92,21 @@
     "icon": "🐾",
     "name": "Office pets",
     "desc": "A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up",
+    "pix": "pets",
     "channel": "pets"
   },
   {
     "icon": "🦞",
     "name": "OpenClaw gateway mascot",
     "desc": "A live OpenClaw gateway shows up as a wandering lobster — the way it moves shows the gateway's health",
+    "pix": "lobster",
     "channel": "openclaw"
   },
   {
     "icon": "🎛️",
     "name": "Office vibes",
     "desc": "The sun and moon cross the skyline as the day goes by, weather rolls past the windows — rain, storm, snow, fog, overcast, windy, smog — and six themes give the office a whole new look",
+    "pix": "vibes",
     "channel": "vibing"
   },
   {
@@ -114,7 +121,8 @@
   {
     "icon": "🪟",
     "name": "Floating desktop window",
-    "desc": "`pixtuoid floating` opens the office in a frameless, always-on-top window — on your desktop, not just in your terminal"
+    "desc": "`pixtuoid floating` opens the office in a frameless, always-on-top window — on your desktop, not just in your terminal",
+    "pix": "window"
   },
   {
     "icon": "🛡️",
