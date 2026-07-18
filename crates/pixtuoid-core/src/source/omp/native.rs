@@ -8,9 +8,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use serde_json::Value;
 
 use super::{decode_omp_line, derive_omp_label, omp_agent_dir, omp_id_from_path, SOURCE_NAME};
+use crate::source::decoder::parsed_tail_lines;
 use crate::source::fd_probe;
 use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
@@ -24,16 +24,11 @@ use crate::source::{Source, TaggedSender};
 /// scan would let CONTENT (e.g. a grep for `session_exit`) end a live session
 /// — the CC sharp edge.
 fn omp_session_ended(tail: &[u8]) -> bool {
-    tail.split(|b| *b == b'\n').any(|line| {
-        if line.is_empty() {
-            return false;
-        }
-        let Ok(s) = std::str::from_utf8(line) else {
-            return false;
-        };
-        let Ok(v) = serde_json::from_str::<Value>(s) else {
-            return false;
-        };
+    // Structural per-line parse via the shared `parsed_tail_lines` scaffold — a
+    // substring scan would let CONTENT (a grep for `session_exit`) end a live
+    // session (the CC sharp edge). The vocabulary (`custom`/`session_exit`)
+    // stays here.
+    parsed_tail_lines(tail).any(|v| {
         v.get("type").and_then(|t| t.as_str()) == Some("custom")
             && v.get("customType").and_then(|c| c.as_str()) == Some("session_exit")
     })

@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::decoder::{
-    cwd_basename_label, ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS,
+    cwd_basename_label, ellipsize, make_tool_detail, parsed_tail_lines, MAX_DECODED_FIELD_CHARS,
 };
 use crate::source::AgentEvent;
 use crate::AgentId;
@@ -326,17 +326,12 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
 /// CC session-end checker: parses lines as JSON and checks for
 /// session lifecycle markers structurally (not byte scan).
 pub fn cc_session_ended(tail: &[u8]) -> bool {
+    // Uses the shared `parsed_tail_lines` scaffold for the per-line JSON parse,
+    // then keeps CC's STATEFUL last-marker-wins fold (a later session_start
+    // resets a session_end earlier in the window) — the one checker that can't
+    // reduce to a simple `.any(predicate)`.
     let mut last_is_end = false;
-    for line in tail.split(|b| *b == b'\n') {
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(s) = std::str::from_utf8(line) else {
-            continue;
-        };
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(s) else {
-            continue;
-        };
+    for v in parsed_tail_lines(tail) {
         let subtype = v.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
         let hook = v
             .get("hook_event_name")

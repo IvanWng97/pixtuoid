@@ -8,11 +8,11 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use serde_json::Value;
 
 use super::{
     copilot_home, copilot_id_from_path, decode_copilot_line, derive_copilot_label, SOURCE_NAME,
 };
+use crate::source::decoder::parsed_tail_lines;
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};
 
@@ -20,25 +20,14 @@ use crate::source::{Source, TaggedSender};
 /// already ended carries that marker — the first-sight gate uses it to avoid
 /// resurrecting a finished session.
 fn copilot_session_ended(tail: &[u8]) -> bool {
-    // Parse each tail line as JSON and read ONLY the structural top-level
-    // `type` field (mirrors `cc_session_ended`). A substring scan is
-    // falsifiable by CONTENT: copilot persists tool `arguments` structurally
-    // in events.jsonl, so a grep run with pattern `session_end` lands the
-    // quoted marker bytes in the tail verbatim — and content must never
-    // drive lifecycle (the CC sharp edge). The window's leading partial line
-    // fails the parse and is skipped. `session.shutdown` is the real on-disk
-    // marker (drift-watched); `session_end` stays a defensive alias, now
-    // anchored on the structural field like everything else.
-    tail.split(|b| *b == b'\n').any(|line| {
-        if line.is_empty() {
-            return false;
-        }
-        let Ok(s) = std::str::from_utf8(line) else {
-            return false;
-        };
-        let Ok(v) = serde_json::from_str::<Value>(s) else {
-            return false;
-        };
+    // Structural top-level `type` per parsed line (via the shared
+    // `parsed_tail_lines` scaffold). A substring scan is falsifiable by
+    // CONTENT: copilot persists tool `arguments` structurally in events.jsonl,
+    // so a grep for `session_end` would land the quoted marker bytes verbatim —
+    // content must never drive lifecycle (the CC sharp edge). `session.shutdown`
+    // is the real on-disk marker (drift-watched); `session_end` stays a
+    // defensive alias, anchored on the structural field.
+    parsed_tail_lines(tail).any(|v| {
         matches!(
             v.get("type").and_then(|t| t.as_str()),
             Some("session.shutdown" | "session_end")

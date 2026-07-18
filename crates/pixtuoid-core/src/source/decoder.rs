@@ -107,6 +107,22 @@ pub(crate) fn first_present_str<'a>(obj: &'a Value, keys: &[&str]) -> Option<&'a
     keys.iter().find_map(|k| m.get(*k).and_then(|v| v.as_str()))
 }
 
+/// Parse every COMPLETE line of a tail-scan window as JSON, yielding the
+/// parsed `Value`s and silently dropping empty, torn (the leading partial line
+/// of a byte window), and non-JSON lines. The ONE tail-parse scaffold the
+/// source-specific `*_session_ended` checkers share — each passes only its own
+/// STRUCTURAL end-marker predicate (the per-source vocabulary), never a
+/// substring scan (user-controllable content — a tool result QUOTING the marker
+/// — must not drive lifecycle, the CC sharp edge). The `first_present_str`
+/// centralization for the tail scan: the scaffold is shared, the vocabulary
+/// stays per-source (invariant #3).
+pub(crate) fn parsed_tail_lines(tail: &[u8]) -> impl Iterator<Item = Value> + '_ {
+    tail.split(|b| *b == b'\n').filter_map(|line| {
+        let s = std::str::from_utf8(line).ok()?;
+        serde_json::from_str::<Value>(s).ok()
+    })
+}
+
 /// Decode one hook payload into the event sequence the reducer applies.
 ///
 /// Tool/permission arms (PreToolUse / PostToolUse / Notification /
