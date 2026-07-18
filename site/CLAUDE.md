@@ -156,19 +156,37 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   BAKED into the office pixels blows up blocky. Instead the engine exports the
   name badges + the neon wall board as a MODEL — `pixtuoid-web`'s
   `Office.overlay_json()` (the SAME `pixtuoid_scene::overlay` + `pixtuoid_scene::board`
-  the TUI/floating painters use) → `{ labels:[{x,y,text,color}], board:{rect,brand,
-  star,mood,context} }`, coords in OFFICE-BUFFER px, colors resolved against the
-  current theme. `OfficeBackdrop.astro` lays pooled Monaspace Neon (`var(--font-mono)`)
+  the TUI/floating painters use) → `{ labels:[{x,y,text,color,badge?,plen?}],
+  board:{rect,brand, star,mood,context} }`, coords in OFFICE-BUFFER px, colors
+  resolved against the current theme. A label's optional `badge`/`plen` pair
+  (#657) is the CLI-identity half: `badge` is the source's per-CLI hue
+  (`SourceColors::by_prefix` — the SAME hue the app's dashboard/Sources/
+  tooltip badges use) and `plen` the prefix length incl. its `·` (BMP
+  single-unit chars, so a JS UTF-16 slice lands on the engine's boundary); an
+  unregistered prefix omits both and the label stays tone-only. SHARP EDGE:
+  the engine re-derives the prefix by splitting the label on its FIRST `·` —
+  a cross-crate echo of core's `source_label_prefix` + `·` join, pinned by
+  the web `labels == badges` test, not a shared const.
+  `OfficeBackdrop.astro` lays pooled Monaspace Neon (`var(--font-mono)`)
   DOM `<span>`s over the canvas at DISPLAY resolution, positioned by the canvas's
   `object-fit: cover` geometry (`scale = max(disp/buf)`, buffer centered — the
-  same math the cover-crop uses), so they stay sharp at any zoom. Load-bearing:
+  same math the cover-crop uses), so they stay sharp at any zoom. Each pooled
+  label holds THREE fixed child spans — ● marker (tone) / CLI prefix (badge
+  hue) / name (tone) — updated together behind one text+color+badge change
+  key; child `textContent`s concatenate to the full label, so text assertions
+  and hit-tests read it unchanged. Load-bearing:
   (1) captions update + fade in (`.is-on`) only AFTER the reveal roll settles
   (`rt >= 1`), never over the rolling floors — labels track FINAL sprite
   positions; (2) `JSON.parse` is try/caught so a malformed frame degrades to no
   overlay, never a throw; (3) segment spans use `.textContent`, never
   `innerHTML` — agent cwds are untrusted; (4) reduced motion is `display:none`
-  (no live office to caption). Pinned by `smoke.spec.ts` ("crisp AA captions
-  overlay the live office" + the reduced-motion hide twin). This layer is part
+  (no live office to caption); (5) caption legibility is HALO-carried (the
+  dark text-shadow) by design — raw label/badge hues are deliberately not
+  WCAG-gated against the office pixels (the idle/exiting grays never were;
+  the flat chips elsewhere on the page are the raw-contrast surfaces).
+  Pinned by `smoke.spec.ts` ("crisp AA captions
+  overlay the live office" — incl. the 3-span split with a colored prefix —
+  + the reduced-motion hide twin). This layer is part
   of the same `is:inline` script the CSP hook hashes — no manual CSP step.
   The backdrop's pause switch (`#office-pause`, WCAG 2.2.2) lives in the same
   component: pause stops the rAF loop (frozen frame stays on the canvas) and
