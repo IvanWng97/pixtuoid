@@ -2,38 +2,38 @@
   {
     "icon": "🏢",
     "name": "Multi-agent office",
-    "desc": "Each agent session gets a desk; overflow agents auto-fill new floors",
+    "desc": "Every agent session gets its own desk — when a floor fills up, a new floor opens automatically",
     "channel": "agents"
   },
   {
     "icon": "🛗",
     "name": "Multi-floor office",
-    "desc": "PageUp/PageDown/↑↓/jk to navigate floors with slide transition"
+    "desc": "Hop between floors with `PageUp`/`PageDown`, `↑`/`↓`, or `j`/`k` — each switch slides into view"
   },
   {
     "icon": "🪟",
     "name": "Floating desktop window",
-    "desc": "`pixtuoid floating` opens a frameless, always-on-top desktop window of the office — not just a terminal TUI"
+    "desc": "`pixtuoid floating` opens the office in a frameless, always-on-top window — on your desktop, not just in your terminal"
   },
   {
     "icon": "🦞",
     "name": "OpenClaw gateway mascot",
-    "desc": "A live OpenClaw gateway shows up as a wandering lobster whose motion tracks gateway health",
+    "desc": "A live OpenClaw gateway shows up as a wandering lobster — the way it moves shows the gateway's health",
     "channel": "openclaw"
   },
   {
     "icon": "🎛️",
     "name": "Vibing",
-    "desc": "A sun and moon arc the skyline as the day turns, weather rolls past the windows (rain, storm, snow, fog, overcast, windy, smog), and six themes reskin the office",
+    "desc": "The sun and moon cross the skyline as the day goes by, weather rolls past the windows — rain, storm, snow, fog, overcast, windy, smog — and six themes give the office a whole new look",
     "channel": "vibing"
   },
   {
     "icon": "🎧",
     "name": "Lofi soundtrack",
-    "desc": "A procedurally-synthesized lofi soundtrack (zero bundled audio) — day and night takes follow the office's clock and weather, typing swells with activity, and the door chime, printer and vending machine cue as coworkers come and go. `m` mutes, `+`/`-` volume",
+    "desc": "A lofi soundtrack synthesized entirely in code — no audio files shipped. Day and night tracks follow the office's clock and weather, typing sounds swell with activity, and the door chime, printer and vending machine play as coworkers come and go. `m` mutes, `+`/`-` volume",
     "pix": "note",
     "card": {
-      "blurb": "a procedurally-synthesized lofi bed follows the office's clock and weather — hear it live: the ♩ toggle in the corner of this page."
+      "blurb": "a lofi soundtrack, synthesized live in code, follows the office's clock and weather — hear it: the ♩ toggle in the corner of this page."
     }
   },
   {
@@ -45,7 +45,7 @@
   {
     "icon": "🗂️",
     "name": "Agent tree dashboard",
-    "desc": "Tab opens a foldable tree of every floor's agents — badged by CLI, with activity tints and tool-call counts",
+    "desc": "Tab opens a collapsible tree of every floor's agents — each badged with the CLI it runs, color-tinted by what it's doing, with tool-call counts",
     "channel": "dashboard"
   },
   {
@@ -57,7 +57,7 @@
   {
     "icon": "🎭",
     "name": "Animated characters",
-    "desc": "Typing, waiting (`?`), sleeping (z's), walking with A\\*-routed pathfinding",
+    "desc": "Coworkers type, wait with a `?`, sleep under little z's, and walk A\\*-routed paths between desks",
     "pix": "walk",
     "card": {
       "blurb": "everyone types, waits with a '?', naps under z's, and walks A*-routed paths between desks."
@@ -76,14 +76,14 @@
   {
     "icon": "💬",
     "name": "Pantry chitchat",
-    "desc": "2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets",
+    "desc": "When two or more idle coworkers gather at the same spot — say, the pantry — speech bubbles pop up with little dev jokes",
     "featured": false,
     "channel": "meetings"
   },
   {
     "icon": "🎨",
     "name": "Team palette",
-    "desc": "Shirt + pants colored by working directory (same repo → same color, a glanceable org-chart); hair/skin per agent. 16 curated outfits",
+    "desc": "Shirt and pants take their colors from the working directory — same repo, same colors, so the room reads like an org chart. Hair and skin vary per agent; 16 curated outfits",
     "pix": "palette",
     "card": {
       "blurb": "shirt and pants colored by working directory — same repo, same colors: the room reads like an org-chart."
@@ -92,7 +92,7 @@
   {
     "icon": "💡",
     "name": "Per-tool monitor glow",
-    "desc": "Edit = blue, Bash = orange, Read = cyan — scannable at a glance",
+    "desc": "Each desk's monitor glows with the tool in use — Edit blue, Bash orange, Read cyan — so you can read the whole room at a glance",
     "pix": "glow",
     "card": {
       "blurb": "edit glows blue, bash orange, read cyan — you can read the room from across the floor."
@@ -101,7 +101,7 @@
   {
     "icon": "📄",
     "name": "Token meter",
-    "desc": "Paper stacks up on a desk as its session burns tokens (250K / 2M / 16M tiers); a big spend drops a sheet onto the pile, and hovering shows the exact Σ total",
+    "desc": "Paper stacks up on a desk as its session burns tokens — the pile climbs through 250K / 2M / 16M tiers, a big spend drops a fresh sheet, and hovering shows the exact total (Σ)",
     "pix": "tokens",
     "card": {
       "blurb": "paper piles up on a desk as its agent burns tokens — a big spend drops a sheet onto the stack; hover for the exact Σ total."
@@ -119,7 +119,7 @@
   {
     "icon": "🛡️",
     "name": "Hook-safe",
-    "desc": "The shim always exits 0 — a stuck visualizer can never block your agent",
+    "desc": "The tiny hook shim pixtuoid installs always exits 0 — even a stuck office can never block your agent",
     "pix": "shield",
     "card": {
       "blurb": "the hook shim always exits 0 — a stuck office can never block the agent it's watching."
