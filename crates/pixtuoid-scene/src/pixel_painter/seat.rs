@@ -5,6 +5,8 @@
 
 use super::*;
 
+use super::anchors::{back_couch_anchor, waypoint_anchor};
+
 /// Paint a character at an arbitrary anchor with per-agent recolor. `flip_x`
 /// mirrors the sprite horizontally — used to make walkers face the direction
 /// they're moving. `glow_tint` should carry the tool-derived monitor color
@@ -226,6 +228,37 @@ impl SeatView {
             // bartender's pos row sits INSIDE the island body, below the
             // island's own south-row key, so the whole arc stays behind it.
             SeatView::Stander { .. } => wp_pos.y,
+        }
+    }
+
+    /// The render ANCHOR-BASE + sprite base-row height `(anchor, sprite_h)` for a
+    /// WAYPOINT occupant at resolved stand cell `stand` (`sprite_w` = pack char
+    /// width). The ONE authority BOTH the sprite blit (`sim::resolve_characters`)
+    /// AND its label twin (`anchors::character_anchor`) derive the anchor from, so
+    /// the badge can never float above the sitter again — the MeetingChair drift,
+    /// pinned by `character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high`.
+    /// The seated↔upright split here is NOT `z_key_for_seat`'s 3-way split.
+    ///
+    /// WAYPOINT occupants ONLY. `Front` ALSO describes the home-DESK sitter, whose
+    /// pose path (`Pose::SeatedIdle`/`SeatedThinking`/`SeatedTyping`) anchors via
+    /// `seated_anchor(desk, w)`, NOT this — and can't reach here structurally: the
+    /// only path in is `SeatView::of(kind: WaypointKind, ..)` + a resolved waypoint
+    /// `stand` cell, and a home desk is a `Furniture::Desk` with no `WaypointKind`
+    /// and no `stand`.
+    pub(super) fn waypoint_render_anchor(self, stand: Point, sprite_w: u16) -> (Point, u16) {
+        // UPRIGHT height REUSES the offset `waypoint_anchor` subtracts, so the
+        // obstacle z-key `anchor.y + sprite_h` recovers the feet row BY
+        // CONSTRUCTION (can't drift). SEATED height is parity-only: seat kinds
+        // z-sort via `z_key_for_seat`, so `sprite_h` is dead on that path.
+        const UPRIGHT_SPRITE_H: u16 = crate::layout::WALKING_Y_OFF;
+        const SEATED_SPRITE_H: u16 = 9;
+        match self {
+            SeatView::Front | SeatView::Back | SeatView::SideSeated { .. } => {
+                (back_couch_anchor(stand, sprite_w), SEATED_SPRITE_H)
+            }
+            SeatView::Side { .. } | SeatView::Stander { .. } => {
+                (waypoint_anchor(stand, sprite_w), UPRIGHT_SPRITE_H)
+            }
         }
     }
 }

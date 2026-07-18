@@ -35,7 +35,7 @@ use crate::pathfind::Router;
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{
-    back_couch_anchor, seated_anchor, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
+    seated_anchor, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
     waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
 };
 use super::seat::{seat_sprite_in_pack, settle_seat_view, SeatView};
@@ -388,43 +388,30 @@ fn resolve_characters(
                         wp_obj.facing,
                         &layout.reachable,
                     );
-                    let (anim_name, anchor_base, sprite_h, flip_x) = match kind {
-                        WaypointKind::Pantry => (
-                            "holding_coffee",
-                            waypoint_anchor(stand, char_w),
-                            12u16,
-                            false,
-                        ),
-                        // Lounge couch + meeting sofa + head-of-table chair:
-                        // the sprite follows the SEATED facing (couch always
-                        // North/window → back_couch; the sofa's two seats face
-                        // each other across the table; the chair sits in
-                        // PROFILE facing the table — SideSeated).
-                        // All reuse the seat anchor — pairing the chair with
-                        // the stand-era waypoint_anchor left its 10-row seated
-                        // sprite hovering 5 rows above the chair body.
+                    // Anchor-base + sprite height are the ONE authority
+                    // `SeatView::waypoint_render_anchor` (the label twin in
+                    // `anchors::character_anchor` rides the SAME call, so they
+                    // can't drift). anim/flip STAY per-kind here: Pantry's
+                    // holding_coffee + the pack-fallback seat sprites need `pack`,
+                    // which the pure SeatView model can't hold.
+                    let view = SeatView::of(kind, wp_obj.facing);
+                    let (anchor_base, sprite_h) = view.waypoint_render_anchor(stand, char_w);
+                    let (anim_name, flip_x) = match kind {
+                        WaypointKind::Pantry => ("holding_coffee", false),
+                        // Couch/sofa (seated facing) + head-of-table chair
+                        // (SideSeated) + island stander all resolve their pose
+                        // sprite via the pack (with the base-pose fallback).
                         WaypointKind::Couch
                         | WaypointKind::MeetingSofa
-                        | WaypointKind::MeetingChair => {
-                            let (anim, flip) = seat_sprite_in_pack(pack, kind, wp_obj.facing);
-                            (anim, back_couch_anchor(stand, char_w), 9u16, flip)
-                        }
-                        // Island stander anchors on the waypoint cell itself.
-                        WaypointKind::Island => {
-                            let (anim, flip) = seat_sprite_in_pack(pack, kind, wp_obj.facing);
-                            (anim, waypoint_anchor(stand, char_w), 12u16, flip)
-                        }
-                        // PhoneBooth + StandingDesk → agent just stands at the
-                        // decor. waypoint_anchor positions them directly above
-                        // the decor centre (sprite footprint sits just north
-                        // of the decor's centre, head visible above).
+                        | WaypointKind::MeetingChair
+                        | WaypointKind::Island => seat_sprite_in_pack(pack, kind, wp_obj.facing),
+                        // PhoneBooth/StandingDesk/vending/printer/snack: the agent
+                        // just stands at the decor, head visible above it.
                         WaypointKind::PhoneBooth
                         | WaypointKind::StandingDesk
                         | WaypointKind::VendingMachine
                         | WaypointKind::Printer
-                        | WaypointKind::SnackShelf => {
-                            ("standing", waypoint_anchor(stand, char_w), 12u16, false)
-                        }
+                        | WaypointKind::SnackShelf => ("standing", false),
                     };
                     let anchor_no_breath = Point {
                         x: anchor_base.x.saturating_add_signed(dx),
@@ -462,9 +449,7 @@ fn resolve_characters(
                             WaypointKind::Couch
                             | WaypointKind::MeetingSofa
                             | WaypointKind::MeetingChair
-                            | WaypointKind::Island => {
-                                SeatView::of(kind, wp_obj.facing).z_key_for_seat(stand)
-                            }
+                            | WaypointKind::Island => view.z_key_for_seat(stand),
                             _ => anchor_no_breath.y + sprite_h,
                         },
                         anim_name,

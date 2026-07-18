@@ -3280,3 +3280,59 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
     }
     assert!(checked, "no meeting-chair sitter appeared in 1000s of sim");
 }
+
+/// `SeatView::waypoint_render_anchor` must equal the PRE-LIFT per-kind partition
+/// (the `match kind` that used to live in BOTH `sim::resolve_characters` and
+/// `anchors::character_anchor`) for every kind × facing — an INDEPENDENT oracle
+/// hardcoded here (NOT re-derived through SeatView), so the two sites now sharing
+/// one authority provably didn't change behaviour. Ranges `WaypointKind::ALL`, so
+/// a future seat kind is forced to declare its anchor here.
+#[test]
+fn waypoint_render_anchor_matches_the_pre_lift_kind_partition() {
+    use crate::layout::{Facing, Point, WaypointKind};
+    let stand = Point { x: 80, y: 60 };
+    let w = CHARACTER_SPRITE_W;
+    for &kind in WaypointKind::ALL {
+        // Independent oracle: the exact pre-lift partition, keyed on kind alone.
+        let expected = match kind {
+            WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
+                (back_couch_anchor(stand, w), 9u16)
+            }
+            _ => (waypoint_anchor(stand, w), 12u16),
+        };
+        for facing in [Facing::North, Facing::South, Facing::East, Facing::West] {
+            assert_eq!(
+                SeatView::of(kind, facing).waypoint_render_anchor(stand, w),
+                expected,
+                "{kind:?}/{facing:?}: render anchor drifted from the pre-lift partition"
+            );
+        }
+    }
+}
+
+/// The UPRIGHT (Side/Stander) sprite height IS the offset `waypoint_anchor`
+/// subtracts, so the obstacle z-key `anchor.y + sprite_h` recovers the feet row
+/// by construction. Locks `UPRIGHT_SPRITE_H == WALKING_Y_OFF` — a future edit to
+/// `waypoint_anchor`'s offset can't silently desync the delivered height.
+#[test]
+fn waypoint_render_anchor_upright_height_recovers_the_feet_row() {
+    use crate::layout::{Facing, Point, WaypointKind};
+    let stand = Point { x: 80, y: 60 };
+    let w = CHARACTER_SPRITE_W;
+    for &kind in WaypointKind::ALL {
+        // Only the upright kinds feed the obstacle z-key (anchor.y + sprite_h);
+        // seated kinds z-sort via z_key_for_seat, so skip them here.
+        if matches!(
+            kind,
+            WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair
+        ) {
+            continue;
+        }
+        let (anchor, sprite_h) = SeatView::of(kind, Facing::South).waypoint_render_anchor(stand, w);
+        assert_eq!(
+            anchor.y + sprite_h,
+            stand.y,
+            "{kind:?}: upright anchor.y + sprite_h must land on the feet row (stand.y)"
+        );
+    }
+}

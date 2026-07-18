@@ -11,6 +11,7 @@ use crate::layout::{SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
+use super::seat::SeatView;
 use crate::layout::{Point, WaypointKind, DESK_W};
 // Walk-leg lerp lives on the sim side (`motion` — pose history records with
 // it); re-imported here for the painter's blit/anchor call-sites.
@@ -166,20 +167,14 @@ pub fn character_anchor(
                 wp_obj.facing,
                 &layout.reachable,
             );
-            // MUST mirror the SPRITE anchor arm in `sim.rs::resolve_characters`
-            // (Couch | MeetingSofa | MeetingChair → back_couch_anchor): the label
-            // rides the sprite 1:1, so a kind the sprite anchors with
-            // `back_couch_anchor` but the label with `waypoint_anchor` floats the
-            // badge `WALKING_Y_OFF − SEAT_RENDER_Y_OFF = 5` px above the sitter.
-            // MeetingChair was moved to the seat anchor for the sprite but its
-            // label twin was missed (sibling-set drift). Pinned by
-            // `character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high`.
-            match kind {
-                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
-                    back_couch_anchor(stand, w)
-                }
-                _ => waypoint_anchor(stand, w),
-            }
+            // Anchor via the ONE authority the sprite blit uses —
+            // `SeatView::waypoint_render_anchor` (see seat.rs). The badge rides the
+            // sprite 1:1, so sharing the call makes the label-vs-sprite drift
+            // structurally impossible (the MeetingChair sibling-set bug, still
+            // pinned by `character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high`).
+            SeatView::of(kind, wp_obj.facing)
+                .waypoint_render_anchor(stand, w)
+                .0
         }
         Pose::AimlessAt { dest } => waypoint_anchor(dest, w),
         Pose::Walking {
