@@ -165,10 +165,6 @@ pub(super) fn compute_with_seed(
         top_margin + half_split
     };
 
-    // The sofa sprite height — the trio clamps below and the per-room
-    // north_floor both read it (furniture_def is a const fn returning Copy).
-    let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.h;
-
     let meeting_room = if has_meeting {
         // A meeting always shares the left column with either the pantry or a
         // second meeting room (variant table: meeting-bearing variants 0/3 set
@@ -274,54 +270,18 @@ pub(super) fn compute_with_seed(
 
     let pod_decor = compute_pod_decor(&cubicle_band, pod_grid, floor_seed);
 
-    // One source for a meeting room's furniture trio: two facing sofas and the
-    // table CENTERED BETWEEN THEM. The table used to sit at the room centre while
-    // the sofas sat at 30%/80% of the room height — asymmetric, so the north
-    // sofa's front was packed against the table (a sub-coarse-grid seam that cost
-    // its seats their front approach) while the south sofa had clearance. Placing
-    // the table at the sofa midpoint gives both fronts equal, routable clearance.
-    // The sofas keep their 20%/80% bias (backrest clearance from the room's top/
-    // bottom walls); only the table follows them. All positions are
-    // window-height-driven, so the approach points the agents path to derive from
-    // the resulting mask at every size — nothing here is a fixed pixel offset.
-    let room_furniture = |mr: &Bounds, north_floor: u16| -> ([Point; 2], Point) {
-        let cx = mr.x + mr.width / 2;
-        // Sofas sit SYMMETRICALLY about the room mid-line (20%/80%, was 30%/80%)
-        // so each gets equal front clearance to the centred table — the old 30%
-        // packed the north sofa's front against the table. The north clamp is
-        // per-room (`north_floor`): room 0's top edge is the wall band's
-        // walkable carpet apron, so its sofa may TUCK toward the wall. The
-        // sofa_h/2 floor binds only if the sprite ever grows (the trio fit
-        // gate guarantees pct-20 ≥ 4 > sofa_h/2 today), so pct-20 governs;
-        // the 1-row apron strip that remains above the padded body drains
-        // laterally through the screen-west/bookshelf-east channel the wall
-        // decor placement guarantees — do NOT weaken that channel, or the
-        // strip strands (the 150×68 sealed-pocket class). Room 1 (dense)
-        // sits under the glass divider, which stamps WALL_THICK_H rows into
-        // its top — its floor stays a full sofa_h so the sofa ground clears
-        // the wall ground. The south clamp keeps a full sofa_h off the
-        // bottom wall on both.
-        let north_y = (mr.y + pct(mr.height, 20)).max(mr.y + north_floor);
-        let south_y = (mr.y + pct(mr.height, 80)).min(mr.y + mr.height.saturating_sub(sofa_h));
-        let sofas = [Point { x: cx, y: north_y }, Point { x: cx, y: south_y }];
-        let table = Point {
-            x: cx,
-            y: (north_y + south_y) / 2,
-        };
-        (sofas, table)
-    };
     // Vec index IS the room_id (room 0 always exists when any room does, so
     // push order == the [room0, room1] enumeration index). A room too small
     // for its trio still occupies its slot with `trio: None` — bounds and
-    // furniture can't mis-join (see `MeetingRoom`'s doc).
+    // furniture can't mis-join (see `MeetingRoom`'s doc). The trio geometry
+    // (facing sofas + centred table, per-room north floor) lives on
+    // `MeetingRoom::place_trio`, next to the room's other geometry — the pantry
+    // twin `place_kitchen_island`/`place_snack_shelf` lives in `rooms/pantry.rs`.
+    // `dense` = room 1 (under the glass divider); room 0 is the wall-apron room.
     let mut meeting_rooms: Vec<MeetingRoom> = Vec::new();
     for (room_idx, room) in [meeting_room, meeting_room_2].into_iter().enumerate() {
         let Some(mr) = room else { continue };
-        let trio = room_fits_furniture(&mr).then(|| {
-            let north_floor = if room_idx == 0 { sofa_h / 2 } else { sofa_h };
-            let (sofas, table) = room_furniture(&mr, north_floor);
-            MeetingTrio { sofas, table }
-        });
+        let trio = room_fits_furniture(&mr).then(|| MeetingRoom::place_trio(mr, room_idx != 0));
         meeting_rooms.push(MeetingRoom { bounds: mr, trio });
     }
 
@@ -750,7 +710,7 @@ fn place_wall_decor(
                 // against it instead (sweep sealed-pocket catch at 48×60 —
                 // a bare doll-house room).
                 if room_fits_furniture(&mr) {
-                    // Mirrors room_furniture's cx + the mask's Center-anchored
+                    // Mirrors MeetingRoom::place_trio's cx + the mask's Center-anchored
                     // sofa ground east edge (fp/2 + OBSTACLE_PAD_PX) — pinned
                     // behaviorally by the sweep's connectivity invariant: if
                     // either side drifts, the drain channel seals and the

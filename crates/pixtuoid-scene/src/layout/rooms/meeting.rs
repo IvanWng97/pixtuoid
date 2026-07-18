@@ -1,6 +1,6 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
-use crate::layout::{furniture_def, Bounds, Furniture, Point};
+use crate::layout::{furniture_def, pct, Bounds, Furniture, Point};
 
 /// One meeting room's furniture trio, grouped so the per-room structure is
 /// explicit instead of reconstructed by index arithmetic over two flat Vecs.
@@ -84,6 +84,43 @@ impl MeetingRoom {
             .footprint
             .map_or(0, |s| s.h);
         sofa.visual.h * 2 + sofa.footprint.map_or(0, |s| s.h) + table_fp_h
+    }
+
+    /// Place the sofa/table trio inside `bounds` (the caller gates on
+    /// `room_fits_furniture` first). Lives HERE — next to `bounds`,
+    /// `trio_fit_h`, and `coat_rack_pos` — so ALL meeting-room geometry has one
+    /// home, symmetric with the pantry's `place_kitchen_island`/
+    /// `place_snack_shelf` in `rooms/pantry.rs` (was an inline closure in
+    /// `compute_with_seed`).
+    ///
+    /// Sofas sit SYMMETRICALLY about the room mid-line (20%/80%) so each gets
+    /// equal front clearance to the centred table (the old 30% packed the north
+    /// sofa's front against the table). The table follows to the sofa midpoint,
+    /// keeping both fronts equally routable. `dense` picks the north-sofa floor:
+    /// a NON-dense room (room 0) sits above the wall band's walkable carpet
+    /// apron, so its sofa may tuck to `sofa_h/2`; the DENSE room (room 1) sits
+    /// under the glass divider (which stamps `WALL_THICK_H` rows into its top),
+    /// so its sofa needs a full `sofa_h` for its ground to clear the wall. The
+    /// `sofa_h/2` floor binds only if the sprite grows (the trio fit gate keeps
+    /// pct-20 ≥ 4 > sofa_h/2 today, so pct-20 governs); the 1-row apron strip
+    /// above the padded body drains laterally through the screen-west/
+    /// bookshelf-east channel the wall-decor placement guarantees — do NOT
+    /// weaken that channel or the strip strands (the 150×68 sealed-pocket
+    /// class). The south clamp keeps a full `sofa_h` off the bottom wall on both.
+    pub(crate) fn place_trio(bounds: Bounds, dense: bool) -> MeetingTrio {
+        let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.h;
+        let north_floor = if dense { sofa_h } else { sofa_h / 2 };
+        let cx = bounds.x + bounds.width / 2;
+        let north_y = (bounds.y + pct(bounds.height, 20)).max(bounds.y + north_floor);
+        let south_y = (bounds.y + pct(bounds.height, 80))
+            .min(bounds.y + bounds.height.saturating_sub(sofa_h));
+        MeetingTrio {
+            sofas: [Point { x: cx, y: north_y }, Point { x: cx, y: south_y }],
+            table: Point {
+                x: cx,
+                y: (north_y + south_y) / 2,
+            },
+        }
     }
 
     /// The entrance doormat's 4×5 sprite box (bordered rug on the cubicle side,
