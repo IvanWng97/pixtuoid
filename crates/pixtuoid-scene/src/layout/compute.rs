@@ -784,17 +784,9 @@ fn place_wall_decor(
         // 10px wheel strip at the sprite base; skip the board when that
         // strip would collide with any desk's ground.
         let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
-        let collides_a_desk = wb_def.footprint.is_some_and(|fp| {
-            let wb_r = mask::ground_rect(
-                Anchor::TopLeft,
-                pos,
-                fp,
-                wb_def.visual,
-                wb_def.ground_x,
-                wb_def.ground_y,
-            );
-            overlaps_a_desk_ground(wb_r, home_desks)
-        });
+        let collides_a_desk = wb_def
+            .ground_rect(Anchor::TopLeft, pos)
+            .is_some_and(|wb_r| overlaps_a_desk_ground(wb_r, home_desks));
         if !collides_a_desk {
             wall_decor.push(WallDecorItem {
                 kind: WallDecor::Whiteboard,
@@ -979,18 +971,11 @@ fn plant_spot_clear(
     singletons: &[(Point, Size)],
 ) -> bool {
     let def = furniture_def(kind.furniture());
-    if let Some(fp) = def.footprint {
-        let r = mask::ground_rect(
-            Anchor::Center,
-            pos,
-            fp,
-            def.visual,
-            def.ground_x,
-            def.ground_y,
-        );
-        if overlaps_a_desk_ground(r, home_desks) {
-            return false;
-        }
+    if def
+        .ground_rect(Anchor::Center, pos)
+        .is_some_and(|r| overlaps_a_desk_ground(r, home_desks))
+    {
+        return false;
     }
     // Fixed singletons get the same inflated-clearance rule as waypoints.
     let pv = def.visual;
@@ -1017,18 +1002,9 @@ fn plant_spot_clear(
 /// with.
 fn overlaps_a_desk_ground(r: (Point, Size), home_desks: &[Point]) -> bool {
     let desk = super::decor::desk_furniture_def();
-    desk.footprint.is_some_and(|fp| {
-        home_desks.iter().any(|&d| {
-            let desk_ground = mask::ground_rect(
-                Anchor::TopLeft,
-                d,
-                fp,
-                desk.visual,
-                desk.ground_x,
-                desk.ground_y,
-            );
-            super::placement::rects_overlap(r, desk_ground)
-        })
+    home_desks.iter().any(|&d| {
+        desk.ground_rect(Anchor::TopLeft, d)
+            .is_some_and(|desk_ground| super::placement::rects_overlap(r, desk_ground))
     })
 }
 
@@ -1072,17 +1048,9 @@ pub(super) fn unreachable_walkable_cells(mask: &WalkableMask, seed: Point) -> Ve
 /// causer selector for the #566 connectivity guard.
 fn plant_ground_in_bounds(p: &PlantItem, b: &Bounds) -> bool {
     let def = furniture_def(p.kind.furniture());
-    let Some(fp) = def.footprint else {
+    let Some(ground) = def.ground_rect(Anchor::Center, p.pos) else {
         return false;
     };
-    let ground = mask::ground_rect(
-        Anchor::Center,
-        p.pos,
-        fp,
-        def.visual,
-        def.ground_x,
-        def.ground_y,
-    );
     super::placement::rects_overlap(
         ground,
         (

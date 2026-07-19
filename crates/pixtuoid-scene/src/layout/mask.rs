@@ -4,7 +4,7 @@
 //! clearance band around each obstacle so walkers don't scrape along
 //! edges.
 
-use super::decor::GroundAlign;
+use super::decor::{FurnitureDef, GroundAlign};
 use super::{
     anchored_top_left, furniture_def, Anchor, Furniture, MeetingRoom, PlantItem, PodDecorItem,
     Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
@@ -34,20 +34,15 @@ use pixtuoid_core::walkable::WalkableMask;
 /// This replaced the old `visual_h > footprint_h` per-site INFERENCE, whose
 /// three exceptions each bypassed the helper through a dedicated stamp site
 /// — in the declared model they are not exceptions, just different aligns.
-/// The `pad` clearance band is added on every side.
-#[allow(clippy::too_many_arguments)] // mask/visual geometry — each arg distinct
-fn stamp_ground(
-    mask: &mut WalkableMask,
-    anchor: Anchor,
-    pos: Point,
-    fp: Size,
-    visual: Size,
-    ground_x: GroundAlign,
-    ground_y: GroundAlign,
-    pad: u16,
-) {
-    let (tl, sz) = ground_rect(anchor, pos, fp, visual, ground_x, ground_y);
-    mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, pad);
+/// The `pad` clearance band is added on every side. The alignment arithmetic
+/// lives on [`FurnitureDef::ground_rect`]; a footprint-less piece (wall-hung
+/// decor) stamps nothing. Runtime-footprint pieces (waypoints via
+/// `FurnitureDef::ground_rect_of`, the pantry counter via `pantry_ground_rect`)
+/// build their rect and call `mark_blocked` directly.
+fn stamp_ground(mask: &mut WalkableMask, def: &FurnitureDef, anchor: Anchor, pos: Point, pad: u16) {
+    if let Some((tl, sz)) = def.ground_rect(anchor, pos) {
+        mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, pad);
+    }
 }
 
 /// The ONE ground-geometry formula: the blocked rect (top-left + size) of a
@@ -224,18 +219,13 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // its NW corner, and `stamp_ground` offsets the shallow strip to the
         // sprite base via `ground_y`. OBSTACLE_PAD still fences the strip.
         let desk_def = super::decor::desk_furniture_def();
-        if let Some(fp) = desk_def.footprint {
-            stamp_ground(
-                &mut mask,
-                Anchor::TopLeft,
-                *desk,
-                fp,
-                desk_def.visual,
-                desk_def.ground_x,
-                desk_def.ground_y,
-                OBSTACLE_PAD_PX,
-            );
-        }
+        stamp_ground(
+            &mut mask,
+            &desk_def,
+            Anchor::TopLeft,
+            *desk,
+            OBSTACLE_PAD_PX,
+        );
     }
 
     for trio in meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
@@ -243,53 +233,26 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // 20px sprite X footprint, with the pad giving vertical sit clearance —
         // see the furniture_def row). Top-down rule: walk up to its sides.
         let sofa_def = furniture_def(Furniture::MeetingSofaBody);
-        if let Some(fp) = sofa_def.footprint {
-            for sofa in trio.sofas {
-                // Declared CENTERED inside the visual (the sofa row's
-                // ground_y) — the strip sits on the sofa pos, not its base.
-                stamp_ground(
-                    &mut mask,
-                    Anchor::Center,
-                    sofa,
-                    fp,
-                    sofa_def.visual,
-                    sofa_def.ground_x,
-                    sofa_def.ground_y,
-                    OBSTACLE_PAD_PX,
-                );
-            }
+        for sofa in trio.sofas {
+            // Declared CENTERED inside the visual (the sofa row's
+            // ground_y) — the strip sits on the sofa pos, not its base.
+            stamp_ground(&mut mask, &sofa_def, Anchor::Center, sofa, OBSTACLE_PAD_PX);
         }
         let table_def = furniture_def(Furniture::MeetingTable);
-        if let Some(fp) = table_def.footprint {
-            stamp_ground(
-                &mut mask,
-                Anchor::Center,
-                trio.table,
-                fp,
-                table_def.visual,
-                table_def.ground_x,
-                table_def.ground_y,
-                OBSTACLE_PAD_PX,
-            );
-        }
+        stamp_ground(
+            &mut mask,
+            &table_def,
+            Anchor::Center,
+            trio.table,
+            OBSTACLE_PAD_PX,
+        );
     }
 
     if let Some(island) = kitchen_island {
         // Island body: block the south-anchored base only (footprint from
         // the row); the two countertop rows overhang (walk-behind, #6).
         let def = furniture_def(Furniture::KitchenIsland);
-        if let Some(fp) = def.footprint {
-            stamp_ground(
-                &mut mask,
-                Anchor::Center,
-                island,
-                fp,
-                def.visual,
-                def.ground_x,
-                def.ground_y,
-                OBSTACLE_PAD_PX,
-            );
-        }
+        stamp_ground(&mut mask, &def, Anchor::Center, island, OBSTACLE_PAD_PX);
     }
 
     for wp in waypoints {
@@ -323,16 +286,8 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // desk strips pin to their sprite base (End); vending/printer/couch
         // are flat.
         let def = furniture_def(wp.kind.furniture());
-        stamp_ground(
-            &mut mask,
-            Anchor::Center,
-            wp.pos,
-            Size { w, h },
-            def.visual,
-            def.ground_x,
-            def.ground_y,
-            WAYPOINT_STAMP_PAD_PX,
-        );
+        let (tl, sz) = def.ground_rect_of(Anchor::Center, wp.pos, Size { w, h });
+        mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, WAYPOINT_STAMP_PAD_PX);
     }
 
     for &PlantItem { kind, pos } in plants {
@@ -340,54 +295,21 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // the table pins it to the sprite base (the leaves then occlude a
         // walker parked north of the pot via their own y-sort; invariant #6).
         let def = furniture_def(kind.furniture());
-        if let Some(fp) = def.footprint {
-            stamp_ground(
-                &mut mask,
-                Anchor::Center,
-                pos,
-                fp,
-                def.visual,
-                def.ground_x,
-                def.ground_y,
-                1,
-            );
-        }
+        stamp_ground(&mut mask, &def, Anchor::Center, pos, 1);
     }
 
     if let Some(lamp) = floor_lamp {
         // The lamp's tall footprint stamps CENTERED despite the sprite
         // overhang — the WHY lives on its ground_y row in decor.rs.
         let def = furniture_def(Furniture::FloorLamp);
-        if let Some(fp) = def.footprint {
-            stamp_ground(
-                &mut mask,
-                Anchor::Center,
-                lamp,
-                fp,
-                def.visual,
-                def.ground_x,
-                def.ground_y,
-                1,
-            );
-        }
+        stamp_ground(&mut mask, &def, Anchor::Center, lamp, 1);
     }
 
     if let Some(t) = lounge_side_table {
         // Small footprint, pad=1: sits in the wide open lounge floor with
         // plenty of clearance.
         let def = furniture_def(Furniture::LoungeSideTable);
-        if let Some(fp) = def.footprint {
-            stamp_ground(
-                &mut mask,
-                Anchor::Center,
-                t,
-                fp,
-                def.visual,
-                def.ground_x,
-                def.ground_y,
-                1,
-            );
-        }
+        stamp_ground(&mut mask, &def, Anchor::Center, t, 1);
     }
 
     if let Some(t) = fish_tank {
@@ -395,18 +317,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // the sprite base); the glass tank is visual overhang against the
         // wall band. pad=1 like the other lounge pieces.
         let def = furniture_def(Furniture::FishTank);
-        if let Some(fp) = def.footprint {
-            stamp_ground(
-                &mut mask,
-                Anchor::Center,
-                t,
-                fp,
-                def.visual,
-                def.ground_x,
-                def.ground_y,
-                1,
-            );
-        }
+        stamp_ground(&mut mask, &def, Anchor::Center, t, 1);
     }
 
     // Wall decor is top-left anchored. Only kinds with a ground footprint in
@@ -423,18 +334,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // blocked rect back to the full sprite width (hiding the footprint
         // shrink). Matches the pod-decor whiteboard's pad.
         let def = furniture_def(kind.furniture());
-        if let Some(fp) = def.footprint {
-            stamp_ground(
-                &mut mask,
-                Anchor::TopLeft,
-                pos,
-                fp,
-                def.visual,
-                def.ground_x,
-                def.ground_y,
-                1,
-            );
-        }
+        stamp_ground(&mut mask, &def, Anchor::TopLeft, pos, 1);
     }
 
     // Pod-aisle decor is centred at `pos`. All variants are obstacles.
@@ -449,19 +349,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // base-pinned ground_y (End), so the overhang occludes a walker behind
         // it (invariant #6); flat boxes declare Center (offset 0).
         let def = furniture_def(kind.furniture());
-        let Some(fp) = def.footprint else {
-            continue;
-        };
-        stamp_ground(
-            &mut mask,
-            Anchor::Center,
-            pos,
-            fp,
-            def.visual,
-            def.ground_x,
-            def.ground_y,
-            1,
-        );
+        stamp_ground(&mut mask, &def, Anchor::Center, pos, 1);
     }
 
     mask
@@ -498,12 +386,12 @@ mod tests {
     }
 
     #[test]
-    fn ground_rect_matches_what_stamp_ground_blocks() {
+    fn ground_rect_blocks_exactly_its_declared_rect() {
         // `ground_rect` is the ONE ground-geometry formula, shared by the mask
-        // (via `stamp_ground`) and the placement-invariant sweep — a second
+        // (via `FurnitureDef::ground_rect`) and the placement-invariant sweep — a second
         // copy of the offset math is the drift class this repo hunts. Pin the
         // sharing structurally: for every anchor × align combination, the rect
-        // it returns must be EXACTLY the pad-0 cell set `stamp_ground` blocks.
+        // it returns must be EXACTLY the pad-0 cell set `mark_blocked` fills.
         for anchor in [Anchor::TopLeft, Anchor::Center] {
             for gx in [GroundAlign::Start, GroundAlign::Center, GroundAlign::End] {
                 for gy in [GroundAlign::Start, GroundAlign::Center, GroundAlign::End] {
@@ -511,8 +399,8 @@ mod tests {
                     let fp = Size { w: 5, h: 3 };
                     let visual = Size { w: 8, h: 12 };
                     let mut mask = WalkableMask::new_open(40, 40);
-                    stamp_ground(&mut mask, anchor, pos, fp, visual, gx, gy, 0);
                     let (tl, sz) = ground_rect(anchor, pos, fp, visual, gx, gy);
+                    mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 0);
                     for y in 0..40u16 {
                         for x in 0..40u16 {
                             let in_rect =
@@ -529,6 +417,50 @@ mod tests {
         }
     }
 
+    /// `FurnitureDef::ground_rect` is the def-facing concentrator over the ONE
+    /// formula: for every furniture row it must equal `Some(ground_rect(…))`
+    /// with the def's OWN visual/aligns — or `None` when the row has no table
+    /// footprint — so the mask stamp / collision checks / placement sweep can't
+    /// drift from the primitive by threading a field wrong.
+    #[test]
+    fn furniture_def_ground_rect_equals_the_primitive_for_every_row() {
+        let pos = Point { x: 20, y: 20 };
+        for &kind in Furniture::ALL {
+            let def = furniture_def(kind);
+            for anchor in [Anchor::TopLeft, Anchor::Center] {
+                let expect = def
+                    .footprint
+                    .map(|fp| ground_rect(anchor, pos, fp, def.visual, def.ground_x, def.ground_y));
+                assert_eq!(
+                    def.ground_rect(anchor, pos),
+                    expect,
+                    "{kind:?} ground_rect diverged from the primitive at {anchor:?}"
+                );
+            }
+        }
+    }
+
+    /// `ground_rect_of` applies a def's visual/aligns to an EXPLICIT footprint
+    /// (a waypoint's runtime `obstacle_footprint`), so a runtime-sized piece
+    /// aligns identically to a table-footprint one.
+    #[test]
+    fn furniture_def_ground_rect_of_uses_an_explicit_footprint() {
+        let def = furniture_def(Furniture::VendingMachine);
+        let pos = Point { x: 12, y: 30 };
+        let fp = Size { w: 7, h: 2 };
+        assert_eq!(
+            def.ground_rect_of(Anchor::Center, pos, fp),
+            ground_rect(
+                Anchor::Center,
+                pos,
+                fp,
+                def.visual,
+                def.ground_x,
+                def.ground_y
+            ),
+        );
+    }
+
     #[test]
     fn overhang_footprint_south_anchored_leaves_the_overhang_walkable() {
         // A 6-wide piece whose sprite is 12 tall but whose ground base is only 3
@@ -539,16 +471,15 @@ mod tests {
         // cap-deletion relies on; pin it directly.
         let mut mask = WalkableMask::new_open(40, 40);
         let pos = Point { x: 20, y: 20 };
-        stamp_ground(
-            &mut mask,
+        let (tl, sz) = ground_rect(
             Anchor::Center,
             pos,
             Size { w: 6, h: 3 },
             Size { w: 6, h: 12 },
             GroundAlign::Center,
             GroundAlign::End,
-            0,
         );
+        mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 0);
         let south = z_sort_row(Anchor::Center, pos, 12); // sprite base row
         for dy in 0..3 {
             assert!(
@@ -631,16 +562,15 @@ mod tests {
         // row NORTH of center is blocked (a south strip would leave it open).
         let mut mask = WalkableMask::new_open(40, 40);
         let pos = Point { x: 20, y: 20 };
-        stamp_ground(
-            &mut mask,
+        let (tl, sz) = ground_rect(
             Anchor::Center,
             pos,
             Size { w: 4, h: 6 },
             Size { w: 4, h: 6 },
             GroundAlign::Center,
             GroundAlign::Center,
-            0,
         );
+        mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 0);
         assert!(
             !mask.is_walkable(pos.x, pos.y),
             "centered block: center blocked"

@@ -2,7 +2,7 @@
 //! piece of furniture and waypoint kind in the office. Kept separate from
 //! geometry so adding a new sprite kind doesn't churn the layout math.
 
-use super::{Point, Size, CHARACTER_SPRITE_W, DESK_FOOT_H, DESK_H, DESK_W};
+use super::{Anchor, Point, Size, CHARACTER_SPRITE_W, DESK_FOOT_H, DESK_H, DESK_W};
 
 /// Wander destinations the Idle state machine can pick. Each kind controls
 /// the pose + sprite an arriving agent takes. Plants/lamps are decor, not
@@ -223,6 +223,28 @@ pub struct FurnitureDef {
     /// the third align. Resolves to a pixel offset from `visual − footprint`
     /// at stamp time (drift-free).
     pub ground_y: GroundAlign,
+}
+
+impl FurnitureDef {
+    /// The blocked ground rect for an EXPLICIT footprint, placed with THIS
+    /// def's visual box + ground aligns. The runtime-footprint path (a
+    /// waypoint's `approach::obstacle_footprint`, which is NOT `self.footprint`)
+    /// shares the def's alignment with the table path — so no call site
+    /// re-threads `visual`/`ground_x`/`ground_y`. Delegates to the ONE
+    /// geometry formula (`mask::ground_rect`), never a second copy.
+    pub(super) fn ground_rect_of(&self, anchor: Anchor, pos: Point, fp: Size) -> (Point, Size) {
+        super::mask::ground_rect(anchor, pos, fp, self.visual, self.ground_x, self.ground_y)
+    }
+
+    /// The blocked ground rect from this def's OWN table footprint, or `None`
+    /// when the piece has no ground footprint (wall-hung decor, runtime-sized
+    /// pantry counter). THE concentrator the mask stamp / collision checks /
+    /// placement sweep all read, so `visual`/`ground_x`/`ground_y` are threaded
+    /// in exactly one place.
+    pub(super) fn ground_rect(&self, anchor: Anchor, pos: Point) -> Option<(Point, Size)> {
+        self.footprint
+            .map(|fp| self.ground_rect_of(anchor, pos, fp))
+    }
 }
 
 /// Canonical seat approach: front + sides, exclude the back. Rotates with

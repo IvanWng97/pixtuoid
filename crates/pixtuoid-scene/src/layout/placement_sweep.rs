@@ -20,7 +20,7 @@
 //! layer's z-sort/occlusion suite — re-asserting those would make one table
 //! edit fail two suites. Position-STABILITY stays with the insta goldens.
 
-use super::mask::{ground_rect, pantry_ground_rect};
+use super::mask::pantry_ground_rect;
 use super::placement::rects_overlap;
 use super::*;
 
@@ -150,9 +150,7 @@ impl Piece {
         let vis_tl = anchored_top_left(anchor, pos, def.visual.w, def.visual.h);
         Piece {
             label,
-            ground: def
-                .footprint
-                .map(|fp| ground_rect(anchor, pos, fp, def.visual, def.ground_x, def.ground_y)),
+            ground: def.ground_rect(anchor, pos),
             visual: (vis_tl, def.visual),
             center_fit: matches!(anchor, Anchor::Center).then_some((pos, def.visual)),
             container,
