@@ -122,9 +122,7 @@ test('pantry FAQ: bubbles pop in sequence, join pix:paused, reduced-motion is st
     document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }))
   );
   await expect(page.locator('.pantry__scene')).toHaveClass(/\bis-paused\b/);
-  await expect
-    .poll(() => first.evaluate((el) => getComputedStyle(el).animationName))
-    .toBe('none');
+  await expect.poll(() => first.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
   await expect(first).toBeVisible();
   // reduced-motion: static, no animation, fully visible
   const ctx = await browser.newContext({ reducedMotion: 'reduce' });
