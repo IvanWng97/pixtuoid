@@ -1,9 +1,6 @@
-#![cfg(feature = "test-renderer")]
-
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::render::test_renderer::TestRenderer;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentEvent, AgentId, Reducer, SceneState, Transport};
 
@@ -11,7 +8,7 @@ use pixtuoid_core::{AgentEvent, AgentId, Reducer, SceneState, Transport};
 fn scripted_timeline_drives_scene_through_states() {
     let mut scene = SceneState::uniform(4);
     let mut reducer = Reducer::new();
-    let mut renderer = TestRenderer::new();
+    let mut snapshots: Vec<SceneState> = Vec::new();
     let id = AgentId::from_transcript_path("/p/a.jsonl");
 
     let mut now = SystemTime::now();
@@ -19,11 +16,11 @@ fn scripted_timeline_drives_scene_through_states() {
                     dt_ms: u64,
                     r: &mut Reducer,
                     s: &mut SceneState,
-                    render: &mut TestRenderer| {
+                    snaps: &mut Vec<SceneState>| {
         for ev in events {
             r.apply(s, ev, now, Transport::Hook);
         }
-        render.record(s);
+        snaps.push(s.clone());
         now += Duration::from_millis(dt_ms);
     };
 
@@ -38,7 +35,7 @@ fn scripted_timeline_drives_scene_through_states() {
         10,
         &mut reducer,
         &mut scene,
-        &mut renderer,
+        &mut snapshots,
     );
 
     step(
@@ -50,7 +47,7 @@ fn scripted_timeline_drives_scene_through_states() {
         200,
         &mut reducer,
         &mut scene,
-        &mut renderer,
+        &mut snapshots,
     );
 
     step(
@@ -61,7 +58,7 @@ fn scripted_timeline_drives_scene_through_states() {
         50,
         &mut reducer,
         &mut scene,
-        &mut renderer,
+        &mut snapshots,
     );
 
     step(
@@ -72,7 +69,7 @@ fn scripted_timeline_drives_scene_through_states() {
         50,
         &mut reducer,
         &mut scene,
-        &mut renderer,
+        &mut snapshots,
     );
 
     step(
@@ -83,10 +80,10 @@ fn scripted_timeline_drives_scene_through_states() {
         10,
         &mut reducer,
         &mut scene,
-        &mut renderer,
+        &mut snapshots,
     );
 
-    let snaps = renderer.snapshots.lock().unwrap();
+    let snaps = &snapshots;
     assert_eq!(snaps.len(), 5);
     assert_eq!(snaps[0].agents.get(&id).unwrap().state, ActivityState::Idle);
     assert!(matches!(

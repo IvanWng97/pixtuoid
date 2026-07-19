@@ -1,6 +1,6 @@
 //! Smoke test that `TuiRenderer::render` (the production flush entry point —
 //! an inherent method since #483, was the core `Renderer` trait impl) drives a
-//! real half-block frame end to end, not just the in-memory `TestRenderer`.
+//! real half-block frame end to end, not just an in-memory `SceneState` capture.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};

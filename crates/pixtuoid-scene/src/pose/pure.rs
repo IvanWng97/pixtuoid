@@ -313,7 +313,7 @@ fn state_driven_pose(
 /// This is the seam used by `pose::derive_with_routing` so that a
 /// physics-driven entry (already in-flight via `MotionState`) does not
 /// restart a redundant linear entry walk. `derive()` itself stays
-/// UNTOUCHED — its existing callers (TestRenderer, overlay pass, snapshot
+/// UNTOUCHED — its existing callers (the overlay pass, snapshot
 /// tooling) keep identical behaviour.
 ///
 /// Returns `None` when `slot.desk_index` is out of range for `layout`.
@@ -586,7 +586,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     // until `thinking_hold_ms` into the Idle period. If the release lands PAST
     // this cycle's seated phase, the first pose `derive()` would emit after
     // SeatedThinking is mid-Walking / AtWaypoint — a desk→corridor pop in
-    // every stateless consumer (TestRenderer, occupancy overlay, snapshot
+    // every stateless consumer (the occupancy overlay + snapshot
     // tooling). Sit out the RELEASE cycle instead: SeatedThinking → SeatedIdle
     // is continuous, the cycle boundary stays continuous (Seated → Seated),
     // and the next trip's walk-out starts from its beginning. Deliberately

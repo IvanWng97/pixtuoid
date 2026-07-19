@@ -25,7 +25,7 @@ Delete sections that don't apply. Keep it short — the diff speaks for itself.
 ## How I tested it
 
 <!--
-- `cargo test --workspace --features pixtuoid-core/test-renderer`
+- `cargo test --workspace`  (or `just test`)
 - just preflight (full CI gate)
 - Live: ./target/release/pixtuoid run --headless --projects-root ~/.claude/projects
 -->

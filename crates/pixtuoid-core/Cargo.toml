@@ -35,9 +35,8 @@ workspace = true
 # sprite/render surface, no tokio/notify. That no-default
 # build is what pixtuoid-scene → the WebAssembly office hero compiles against.
 [features]
-default       = ["native"]
-native        = ["dep:tokio", "dep:notify"]
-test-renderer = []
+default = ["native"]
+native  = ["dep:tokio", "dep:notify"]
 
 [dependencies]
 tokio       = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util"], optional = true }
