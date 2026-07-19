@@ -187,8 +187,11 @@ repo-committed and won't exist on a fresh checkout or in a non-Claude tool.
 6. **Self-review** — a standards+spec pass before pushing. Not the merge gate.
 7. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
    lenses on the diff) + green CI + the online review bot's `Findings: 0` at
-   HEAD, checked atomically. See "Things NOT to do" and the running order under
-   "Where to look". **A human merges.**
+   HEAD, checked atomically. (If the bot errors or posts no findings comment at
+   HEAD — it can fail on a very large diff — the gate is unsatisfiable as
+   written; the `two-lens-review` skill's step 6 owns the fallback.)
+   See "Things NOT to do" and the running order under "Where to look". **A human
+   merges.**
 8. **Wrap** — retro; record durable lessons.
 
 **Skills.** Repo skills live in [`.claude/skills/`](.claude/skills/) (committed,
@@ -230,7 +233,7 @@ issue labels (e.g. `bug` / `enhancement` / `upstream-drift` / `needs-human-verif
 - **A refuted finding cites (or adds) a sharp edge.** When you reject a review finding as "deliberate design," point at the relevant per-crate `CLAUDE.md` "Known sharp edges" entry — or add one in the same change. That keeps the context accurate for the next agent (the real payoff).
 - **Track every deferred finding as a GitHub issue** BEFORE moving on — problem, why deferred, fix sketch. A deferred finding with no issue is a silently-dropped finding. (Verify it's real first — see "Don't blindly accept reviewer findings".)
 - **Sprite changes require visual verification** — render, crop, read the PNG, self-critique until it reads at half-block scale; commit messages carry the iteration history. Full checklist: `.claude/skills/beautify-decoration/SKILL.md`.
-- **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (the memory layer of [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md)).
+- **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (the memory layer of [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md)). The same pass reconciles prose that implies REMOVED machinery still runs — the `check_dod`/`.dod/` gate, the census/review-metrics automation — since a live instruction to use retired tooling is the doc↔drift class the review itself hunts (`just links` only catches dead paths, not rotted semantics). Retained *provenance* is NOT drift: a factor's `R06xx` incident id or KE.md's kept historical record points at what a rule learned from, not at machinery to run.
 - **The lifecycle conventions above are PRACTICES, not a gate.** Two-lens review before merge, deferred→issue, docs-currency, no stray prod-`println!`, no direct `settings.json` write, no `--no-verify` — do them because they're right, not because a script blocks you. (The old `check_dod` mechanization + its `.dod/` attestation + the CI `definition-of-done` job were removed: a one-person gate run against oneself is ceremony, not enforcement. Real teeth live in the automated checks — `just preflight`, clippy, tests, the `claude-review` second lens.)
 
 ## Architecture invariants
@@ -275,7 +278,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 - Don't relax the hook shim's "always exit 0" contract. Blocking CC = breaking the user's primary workflow.
 - Don't add `--no-verify` / hook-skipping flags to git operations in this repo.
 - Don't generate a README / CLAUDE.md / CHANGELOG / docs in PRs unless explicitly asked.
-- Don't `git push` without explicit user confirmation, even after committing.
+- Don't `git push` without explicit user confirmation, even after committing. (This, `gh pr merge`, and `--no-verify` are also surfaced as an `ask`/confirm by [`.claude/hooks/guard-banned-ops.sh`](.claude/hooks/guard-banned-ops.sh) — a Claude-on-Unix backstop, NOT a replacement for the rule; other tools/platforms rely on the prose.)
 - Don't leave stale `Closes #N` in commit/squash bodies or PR text on a re-scope — GitHub fires the keyword from either place, and conditional phrasing still fires.
 - Don't merge a PR without the **two-lens review**: 2+ agents, lenses differentiated (correctness/grounding + design/blast-radius), briefs from [`.github/prompts/pr-review.prompt.md`](.github/prompts/pr-review.prompt.md) — invokable via the `two-lens-review` skill. No exceptions — PR #23 merged unreviewed with a critical path-traversal vulnerability. (That skill's **whole-codebase scope** runs the periodic/pre-release AUDIT — the SAME shared factor taxonomy + verify contract + disposition, fanned out over the whole tree instead of a diff; `pr-review.prompt.md` is canonical for BOTH scopes, so a factor added once upgrades both.)
 - Don't blindly accept reviewer findings. Verify the premise before coding a fix — check the relevant sharp edges and existing comments first; if a fix contradicts an earlier design decision, trace the code path manually.

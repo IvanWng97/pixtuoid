@@ -73,7 +73,12 @@ silently dropped).
 6. **After a fix round**, re-run the gates and watch the NEW head's CI; before
    merging, read the online bot review's LATEST COMMENT verdict (`Findings: N`)
    + `mergeStateStatus` — the review JOB passes even when it posts findings, so
-   the check table alone can't gate (#448).
+   the check table alone can't gate (#448). If the bot ERRORED or left no
+   findings comment at HEAD (it can fail on a very large diff — `error_max_turns`
+   with no comment), the gate is unsatisfiable as written: split the PR smaller,
+   else fall back to one extra differentiated lens + owner merge, recorded in the
+   PR thread. State the condition behaviorally (errored/absent), never a fixed
+   LOC ceiling.
 
 ## Whole-codebase scope — how to run (orchestration)
 

@@ -17,6 +17,12 @@ the exact two-copies class Lens 2 hunts). Fill the `<...>` slots; keep the five
 hard requirements — each is there because its absence measurably hurt
 (false-positive rates, a 0–1 confidence-scale incident, re-litigated verdicts).
 
+> Factors often cite an `R06xx-xx` id — a historical review-ledger row (the
+> ledger was retired 2026-06; see the editor's note in
+> [`KNOWLEDGE-ENGINEERING.md`](../../docs/KNOWLEDGE-ENGINEERING.md)). Treat it as
+> provenance for *why* a factor exists, not a live lookup — the id no longer
+> resolves to a file in-tree.
+
 ## The factor taxonomy (shared by both scopes)
 
 Four families. A diff-scope lens bundles several of these per agent (scaled to
