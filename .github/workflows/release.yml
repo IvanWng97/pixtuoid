@@ -4,6 +4,14 @@ on:
   push:
     tags: ["v*"]
 
+# One release at a time per tag: a tag re-push / rapid double-tag must not run two
+# publishes concurrently (they'd race creating the GH release + crates.io/npm
+# publish). cancel-in-progress: false — never interrupt an in-flight release
+# (mirrors pages.yml's deploy concurrency).
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 # Least-privilege (#215): jobs inherit read-only; the `release` job alone
 # carries write + attestation scopes (it creates the GH release and attests
 # provenance), and `publish`/`npm` carry id-token for OIDC publishing. A
