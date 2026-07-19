@@ -112,16 +112,26 @@ pub(super) async fn emit_proof_of_life(
     }
 }
 
-/// #223: the negative-vouch ledger. A session id the probe previously vouched
-/// for that DISAPPEARS from a healthy snapshot is a high-confidence exit — the
-/// registry entry was removed / the rollout fd closed, signals only the OWNING
-/// process can produce — so the watcher can emit the `SessionEnd` the CLI
-/// never writes (Codex has no exit signal of any kind; CC's hook is
-/// best-effort) instead of waiting out the 10–30 min stale-sweep.
-/// Confirmation needs the id missing from two healthy observations at least
-/// `min_span` apart (see [`NEGATIVE_VOUCH_MIN_SPAN`]); a probe FAILURE
+/// #223: the probe ladder's DERIVED liveness state, given one owner. A session
+/// id the probe previously vouched for that DISAPPEARS from a healthy snapshot
+/// is a high-confidence exit — the registry entry was removed / the rollout fd
+/// closed, signals only the OWNING process can produce — so the watcher can
+/// emit the `SessionEnd` the CLI never writes (Codex has no exit signal of any
+/// kind; CC's hook is best-effort) instead of waiting out the 10–30 min
+/// stale-sweep. Confirmation needs the id missing from two healthy observations
+/// at least `min_span` apart (see [`NEGATIVE_VOUCH_MIN_SPAN`]); a probe FAILURE
 /// (`None`) is never an observation — failure changes nothing.
-pub(super) struct NegativeVouch {
+///
+/// This is a **pure failure-detector module** (functional core / imperative
+/// shell): [`fold`](ProbeLadder::fold) takes a snapshot + `now` and RETURNS the
+/// effects to apply ([`ProbeOutcome`]) — it never emits, never touches the
+/// watcher channel or the exit watch. The imperative shell
+/// (`refresh_probe_snapshot`) performs those effects, so the ladder is
+/// unit-testable with synthetic time and zero mocks. It owns BOTH the vouch
+/// ledger AND the `pid → ids` bindings the instant-exit rung joins on, so the
+/// `forget`↔`unbind` inverse (once a prose contract split across a free fn + a
+/// method) is now two private methods one owner keeps in lockstep.
+pub(super) struct ProbeLadder {
     min_span: Duration,
     /// Ids vouched by an earlier healthy snapshot. An id stays "previously
     /// vouched" while its miss window runs, so the second observation can
@@ -130,38 +140,55 @@ pub(super) struct NegativeVouch {
     /// id → when a healthy snapshot FIRST came back without it. `Instant`
     /// (monotonic): a wall-clock jump must not fake a 60s span.
     miss_since: HashMap<String, std::time::Instant>,
+    /// pid → the session ids a healthy snapshot bound to it, for the exit watch
+    /// (many ids may share one pid — one codex process holds every rollout it
+    /// has open). An id is bound under at most ONE pid (`fold`'s migration
+    /// maintains this). Entries leave on a whole-pid death (`pid_died`), a
+    /// negative-vouch confirm (single id, `unbind`), or a rebind migration.
+    pid_bindings: HashMap<i32, HashSet<String>>,
 }
 
-impl NegativeVouch {
+/// What one [`ProbeLadder::fold`] decided the imperative shell must DO
+/// (functional-core → imperative-shell): the confirmed-exit ids to emit
+/// `SessionEnd` for, and the newly-seen pids to register with the exit watch.
+/// Both are DATA; the shell applies them in the pre-owner order (emit BEFORE
+/// watch — `exit_watch.watch` sends nothing synchronously to the channel), so
+/// the `AgentEvent` stream stays byte-identical.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct ProbeOutcome {
+    pub exits: Vec<String>,
+    pub newly_watched: Vec<i32>,
+}
+
+impl ProbeLadder {
     pub(super) fn new(min_span: Duration) -> Self {
         Self {
             min_span,
             prev_vouched: HashSet::new(),
             miss_since: HashMap::new(),
+            pid_bindings: HashMap::new(),
         }
     }
 
-    /// Fold one HEALTHY snapshot into the ledger, emitting a confirmed exit's
-    /// `SessionEnd` (+ the `seen` un-claim) through `ctx` and dropping the
-    /// confirmed id from `pid_bindings`. Never called on a probe failure —
-    /// the caller (`refresh_probe_snapshot`) only forwards `Some` snapshots.
-    async fn observe(
-        &mut self,
-        snap: &ProbeSnapshot,
-        decoders: SourceDecoders,
-        ctx: &WatchCtx<'_>,
-        pid_bindings: &mut HashMap<i32, HashSet<String>>,
-    ) {
-        let now = std::time::Instant::now();
+    /// Fold one HEALTHY snapshot: advance the negative-vouch miss windows
+    /// (confirming an id missing from two snapshots ≥ `min_span` apart) and the
+    /// pid bindings (migrate a rebind, note a newly-seen pid), returning the
+    /// effects — confirmed-exit ids + newly-seen pids — for the shell to emit +
+    /// watch. PURE: no `ctx`, no `tx`, no `exit_watch`; `now` is a parameter so
+    /// a test drives the span with synthetic time. Never called on a probe
+    /// FAILURE — the shell forwards only `Some` snapshots (failure changes
+    /// nothing).
+    pub(super) fn fold(&mut self, snap: &ProbeSnapshot, now: std::time::Instant) -> ProbeOutcome {
         // A re-appearing id (fd reopened, registry entry back) cancels its
         // pending miss window.
         self.miss_since.retain(|id, _| !snap.contains(id));
         let missing: Vec<String> = self
             .prev_vouched
             .iter()
-            .filter(|id| !snap.pid_of.contains_key(*id))
+            .filter(|id| !snap.contains(id))
             .cloned()
             .collect();
+        let mut exits = Vec::new();
         for id in missing {
             match self.miss_since.get(&id) {
                 // Second healthy miss past the span — confirmed exit.
@@ -170,14 +197,13 @@ impl NegativeVouch {
                         "negative vouch confirmed for {id}: probe stopped vouching; \
                          emitting SessionEnd"
                     );
-                    emit_session_exit(&id, decoders, ctx).await;
-                    // Also drop the id's pid binding: a codex-style process
-                    // owns many rollouts, so it may outlive this session —
-                    // its eventual OS exit must not re-emit a SessionEnd for
-                    // an id whose end was already confirmed here.
-                    unbind_session(pid_bindings, &id);
-                    self.prev_vouched.remove(&id);
-                    self.miss_since.remove(&id);
+                    // Drop the pid binding too: a codex-style process owns many
+                    // rollouts, so it may outlive this session — its eventual OS
+                    // exit must not re-emit a SessionEnd for an already-confirmed
+                    // id. `forget`↔`unbind` are the ledger↔bindings inverse.
+                    self.forget(&id);
+                    self.unbind(&id);
+                    exits.push(id);
                 }
                 // Window still running — wait for a later snapshot.
                 Some(_) => {}
@@ -191,16 +217,82 @@ impl NegativeVouch {
         // still runs (they must stay eligible for the confirming observation).
         self.prev_vouched = snap.pid_of.keys().cloned().collect();
         self.prev_vouched.extend(self.miss_since.keys().cloned());
+
+        // Bindings are ADDITIVE per snapshot (ids leave via `pid_died` or the
+        // confirm-unbind above, never by snapshot omission — the vouch ladder
+        // owns "gone" semantics) — EXCEPT an observed rebind: `snap.pid_of` is
+        // the probe's ownership ground truth, so an id seen under a NEW pid (a
+        // codex `resume` of the same rollout in another process while the old
+        // one lives) migrates between sets. The negative vouch can't clean that
+        // stale binding (the id stays vouched under the new pid), and the old
+        // pid's later death would otherwise instant-exit a live session. A pid
+        // is RETURNED for exit-watch registration only on its FIRST appearance.
+        let mut newly_watched = Vec::new();
+        for (id, pid) in &snap.pid_of {
+            // find-then-compare (not `any(p != pid && contains)`): an id is
+            // bound under at most ONE pid (this very loop maintains that —
+            // unbind on migration, insert once), so the first holder is the
+            // only holder, and the single `!=` leaves no conjunction whose
+            // halves a mutation could silently swap.
+            let bound_elsewhere = self
+                .pid_bindings
+                .iter()
+                .find(|(_, ids)| ids.contains(id))
+                .is_some_and(|(p, _)| p != pid);
+            if bound_elsewhere {
+                self.unbind(id);
+            }
+            let newly_seen = !self.pid_bindings.contains_key(pid);
+            self.pid_bindings
+                .entry(*pid)
+                .or_default()
+                .insert(id.clone());
+            if newly_seen {
+                newly_watched.push(*pid);
+            }
+        }
+        ProbeOutcome {
+            exits,
+            newly_watched,
+        }
     }
 
-    /// Remove `id` from the ledger WITHOUT confirming anything — the
-    /// instant-exit arm already emitted its SessionEnd, so a later healthy
-    /// snapshot must not open/age a miss window toward re-confirming it (a
-    /// duplicate SessionEnd would be a reducer no-op, but the ledger should
-    /// not be left armed for one).
-    pub(super) fn forget(&mut self, id: &str) {
+    /// The instant-exit rung: the watched OS process `pid` died. Remove its
+    /// whole binding and `forget` every id it held (so the slower negative-vouch
+    /// rung can't re-confirm an exit this rung is about to emit), returning
+    /// those ids for the shell to emit `SessionEnd` for. An unknown pid (already
+    /// unbound by a negative-vouch confirm, or a duplicate event) returns empty.
+    pub(super) fn pid_died(&mut self, pid: i32) -> Vec<String> {
+        let ids: Vec<String> = self
+            .pid_bindings
+            .remove(&pid)
+            .into_iter()
+            .flatten()
+            .collect();
+        for id in &ids {
+            self.forget(id);
+        }
+        ids
+    }
+
+    /// Disarm the negative-vouch ledger for `id` WITHOUT confirming anything —
+    /// a later healthy snapshot must not open/age a miss window toward
+    /// re-confirming an exit a faster rung already emitted. Private: only
+    /// `fold`/`pid_died` drive it, always paired with `unbind` (its bindings
+    /// inverse) so the two halves can't drift.
+    fn forget(&mut self, id: &str) {
         self.prev_vouched.remove(id);
         self.miss_since.remove(id);
+    }
+
+    /// Remove one session id from every pid's binding set, dropping pids whose
+    /// set empties — the keep-bindings-clean half of the instant-exit ↔
+    /// negative-vouch handshake (its ledger inverse is `forget`).
+    fn unbind(&mut self, id: &str) {
+        self.pid_bindings.retain(|_, ids| {
+            ids.remove(id);
+            !ids.is_empty()
+        });
     }
 }
 
@@ -274,30 +366,18 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
     ctx.live.lock().await.remove(id);
 }
 
-/// Remove one session id from every pid's binding set, dropping pids whose
-/// set empties — the keep-state-clean half of the instant-exit ↔ negative-
-/// vouch handshake (its inverse is `NegativeVouch::forget`).
-pub(super) fn unbind_session(pid_bindings: &mut HashMap<i32, HashSet<String>>, id: &str) {
-    pid_bindings.retain(|_, ids| {
-        ids.remove(id);
-        !ids.is_empty()
-    });
-}
-
-/// ONE probe refresh, shared by the three sites that re-snapshot `live` (the
-/// initial seed, the 250ms rescan, the 60s poll). On a HEALTHY snapshot
-/// (`Some`): replace the admission set, fold the snapshot into the
-/// negative-vouch ledger, then fold the id→pid bindings — registering every
-/// newly-seen pid with the exit watch (#223 rung 2); returns true so the
-/// caller re-emits `ProofOfLife` after its scan. On a probe FAILURE (`None`)
-/// or no probe wired: change NOTHING — `ctx.live` keeps the previous ids
-/// (admission stays additive), the miss windows neither advance nor confirm,
-/// no bindings move, no `ProofOfLife` is emitted (the reducer's TTL absorbs
-/// the gap).
+/// ONE probe refresh (the imperative SHELL over `ProbeLadder::fold`), shared by
+/// the three sites that re-snapshot `live` (the initial seed, the 250ms rescan,
+/// the 60s poll). On a HEALTHY snapshot (`Some`): replace the admission set,
+/// then apply the ladder's fold — emit each confirmed exit and register each
+/// newly-seen pid with the exit watch (#223 rung 2); returns true so the caller
+/// re-emits `ProofOfLife` after its scan. On a probe FAILURE (`None`) or no
+/// probe wired: change NOTHING — `ctx.live` keeps the previous ids (admission
+/// stays additive), the miss windows neither advance nor confirm, no bindings
+/// move, no `ProofOfLife` is emitted (the reducer's TTL absorbs the gap).
 pub(super) async fn refresh_probe_snapshot(
     probe: Option<&LivenessProbe>,
-    vouch: &mut NegativeVouch,
-    pid_bindings: &mut HashMap<i32, HashSet<String>>,
+    ladder: &mut ProbeLadder,
     exit_watch: Option<&ExitWatch>,
     decoders: SourceDecoders,
     ctx: &WatchCtx<'_>,
@@ -334,38 +414,19 @@ pub(super) async fn refresh_probe_snapshot(
         }
     };
     *ctx.live.lock().await = snap.pid_of.keys().cloned().collect();
-    vouch.observe(&snap, decoders, ctx, pid_bindings).await;
-    // Bindings are ADDITIVE per snapshot (ids leave via the instant-exit arm
-    // or the negative-vouch unbind above, never by snapshot omission — the
-    // vouch ladder owns "gone" semantics) — EXCEPT an observed rebind: the
-    // snapshot's `pid_of` is the probe's current ownership ground truth, so
-    // an id seen under a NEW pid (a codex `resume` of the same rollout in
-    // another process while the old one lives) migrates between sets. The
-    // negative vouch can't clean that stale binding (the id stays vouched
-    // under the new pid, so no miss window ever opens), and the old pid's
-    // later death would otherwise instant-exit a session that is alive. A
-    // pid is registered with the exit watch only on its FIRST appearance; if
-    // that registration failed kernel-side (EPERM), it is not retried — the
-    // slower rungs cover.
-    for (id, pid) in &snap.pid_of {
-        // find-then-compare (not `any(p != pid && contains)`): an id is bound
-        // under at most ONE pid (this very loop maintains that — unbind on
-        // migration, insert once), so the first holder is the only holder,
-        // and the single `!=` leaves no conjunction whose halves a mutation
-        // could silently swap.
-        let bound_elsewhere = pid_bindings
-            .iter()
-            .find(|(_, ids)| ids.contains(id))
-            .is_some_and(|(p, _)| p != pid);
-        if bound_elsewhere {
-            unbind_session(pid_bindings, id);
-        }
-        let newly_seen = !pid_bindings.contains_key(pid);
-        pid_bindings.entry(*pid).or_default().insert(id.clone());
-        if newly_seen {
-            if let Some(watch) = exit_watch {
-                watch.watch(*pid);
-            }
+    // Functional core → imperative shell: the ladder DECIDES (pure), we APPLY.
+    // Emit the confirmed exits BEFORE registering the new pids — the pre-owner
+    // order — so the channel sees the same `SessionEnd` sequence: `watch` sends
+    // nothing synchronously, and each just-confirmed id is absent from
+    // `snap.pid_of`, so the watch loop never touches it. A pid whose kernel
+    // registration fails (EPERM) is not retried — the slower rungs cover.
+    let outcome = ladder.fold(&snap, std::time::Instant::now());
+    for id in &outcome.exits {
+        emit_session_exit(id, decoders, ctx).await;
+    }
+    for pid in outcome.newly_watched {
+        if let Some(watch) = exit_watch {
+            watch.watch(pid);
         }
     }
     true

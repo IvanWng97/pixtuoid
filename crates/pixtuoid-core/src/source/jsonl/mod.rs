@@ -32,7 +32,7 @@ pub(crate) use crate::source::decoder::is_subagent_path;
 // recovery info) — a second local latch would drift from this one.
 pub(crate) use health::FailureLatch;
 use liveness::{
-    emit_proof_of_life, emit_session_exit, refresh_probe_snapshot, NegativeVouch,
+    emit_proof_of_life, emit_session_exit, refresh_probe_snapshot, ProbeLadder,
     NEGATIVE_VOUCH_MIN_SPAN,
 };
 use unclaim::drain_child_end_unclaims;
@@ -128,20 +128,16 @@ struct WatchCtx<'a> {
 
 /// The persistent scan-state bundle threaded through every `run_scan_pass`
 /// (initial seed / 250ms rescan / 60s poll). Created once in `run` and borrowed
-/// `&mut` by each pass; the vouch and pid-binding maps also serve the
-/// instant-exit arm directly (see `run`'s `exit_rx` branch).
+/// `&mut` by each pass; the ladder also serves the instant-exit arm directly
+/// (see `run`'s `exit_rx` branch).
 struct ScanState {
-    /// Negative-vouch confirmations: a probe-missing id must stay missing for
-    /// `NEGATIVE_VOUCH_MIN_SPAN` before its exit is emitted (guards a probe
-    /// blip from ending a live session).
-    vouch: NegativeVouch,
-    /// pid → the session ids a healthy probe snapshot bound to it
-    /// (`ProbeSnapshot::pid_of` folded by `refresh_probe_snapshot`) — the
-    /// join the instant-exit arm uses to translate an OS exit into
-    /// SessionEnds. Entries leave on exit (whole pid), negative-vouch
-    /// confirm (single id, see `unbind_session`), or a rebind migration
-    /// (the snapshot observes the id under a different pid).
-    pid_bindings: HashMap<i32, HashSet<String>>,
+    /// The #223 probe ladder (`ProbeLadder`): the negative-vouch hysteresis
+    /// (a probe-missing id must stay missing for `NEGATIVE_VOUCH_MIN_SPAN`
+    /// before its exit fires — guards a probe blip from ending a live session)
+    /// PLUS the `pid → ids` bindings the instant-exit arm joins on, under one
+    /// owner. Folded per scan pass by `refresh_probe_snapshot`; the `exit_rx`
+    /// arm calls `ladder.pid_died` directly.
+    ladder: ProbeLadder,
     /// Latches the root-scan's persistent-error breadcrumb (warn once per
     /// failure streak, info on recovery — the `FailureLatch` convention).
     root_health: FailureLatch,
@@ -150,8 +146,7 @@ struct ScanState {
 impl ScanState {
     fn new(negative_vouch_min_span: Duration) -> Self {
         Self {
-            vouch: NegativeVouch::new(negative_vouch_min_span),
-            pid_bindings: HashMap::new(),
+            ladder: ProbeLadder::new(negative_vouch_min_span),
             root_health: FailureLatch::default(),
         }
     }
@@ -297,8 +292,7 @@ impl JsonlWatcher {
     ) {
         let healthy = refresh_probe_snapshot(
             self.liveness_probe.as_ref(),
-            &mut scan_state.vouch,
-            &mut scan_state.pid_bindings,
+            &mut scan_state.ladder,
             exit_watch,
             decoders,
             ctx,
@@ -507,19 +501,14 @@ impl JsonlWatcher {
                     ).await;
                 }
                 Some(pid) = exit_rx.recv() => {
-                    // Instant exit (#223 rung 2): the watched OS process
-                    // died. Translate through the pid→ids binding; an
-                    // unknown pid (already unbound by a negative-vouch
-                    // confirm, or a duplicate event) is a no-op.
-                    if let Some(ids) = scan_state.pid_bindings.remove(&pid) {
-                        for id in ids {
-                            debug!("instant exit: pid {pid} died; emitting SessionEnd for {id}");
-                            emit_session_exit(&id, decoders, &ctx).await;
-                            // The next healthy snapshot will see the id gone
-                            // anyway; forget it NOW so the negative vouch
-                            // can't re-confirm the exit we just emitted.
-                            scan_state.vouch.forget(&id);
-                        }
+                    // Instant exit (#223 rung 2): the watched OS process died.
+                    // `pid_died` translates through the pid→ids binding AND
+                    // disarms the negative vouch for each id (so the slower rung
+                    // can't re-confirm the exit we're about to emit); an
+                    // unknown/duplicate pid returns empty.
+                    for id in scan_state.ladder.pid_died(pid) {
+                        debug!("instant exit: pid {pid} died; emitting SessionEnd for {id}");
+                        emit_session_exit(&id, decoders, &ctx).await;
                     }
                 }
             }

@@ -1,10 +1,8 @@
 use std::io::Write;
+use std::time::Instant;
 
 use super::health::FailureLatch;
-use super::liveness::{
-    emit_session_exit, refresh_probe_snapshot, revouch_gated_files, unbind_session, NegativeVouch,
-    ProbeSnapshot,
-};
+use super::liveness::{emit_session_exit, revouch_gated_files, ProbeLadder, ProbeSnapshot};
 use super::unclaim::drain_child_end_unclaims;
 use super::walk::{
     detect_parent_id, extract_cwd, park_if_truncated_below_cursor, scan_root, walk_jsonl,
@@ -15,139 +13,106 @@ use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, Transport};
 use crate::AgentId;
 
-#[test]
-fn unbind_session_drops_only_emptied_pid_entries() {
-    let mut bindings: HashMap<i32, HashSet<String>> = HashMap::new();
-    bindings
-        .entry(100)
-        .or_default()
-        .extend(["a".to_string(), "b".to_string()]);
-    bindings.entry(200).or_default().insert("a".to_string());
-    unbind_session(&mut bindings, "a");
-    // pid 200 emptied → dropped; pid 100 keeps its other session.
-    assert!(!bindings.contains_key(&200));
-    assert_eq!(
-        bindings.get(&100).map(|ids| ids.len()),
-        Some(1),
-        "the sibling id on a shared pid must survive the unbind"
-    );
-}
-
-/// #223 rebind: the snapshot's `pid_of` is ownership ground truth — an id
-/// seen under a NEW pid MIGRATES its binding, so the old pid's later death
-/// can't end the live session. Asserted directly on the bindings map (the
-/// watcher-level twin skips the map, so an inverted `!=` that left the stale
-/// binding in place survived it).
-#[tokio::test]
-async fn refresh_probe_snapshot_migrates_a_rebound_id_between_pids() {
-    let cursors = Arc::new(Mutex::new(HashMap::new()));
-    let seen = Arc::new(Mutex::new(HashMap::new()));
-    let (tx, _rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
-    let source: Arc<str> = Arc::from("test");
-    let live = Arc::new(Mutex::new(HashSet::new()));
-    let ctx = WatchCtx {
-        source: &source,
-        cursors: &cursors,
-        seen: &seen,
-        tx: &tx,
-        window: Duration::from_secs(3600),
-        live: &live,
-    };
-    let mut vouch = NegativeVouch::new(Duration::from_secs(60));
-    let mut bindings: HashMap<i32, HashSet<String>> = HashMap::new();
-    bindings.entry(1).or_default().insert("sess".to_string());
-    let probe: LivenessProbe = Arc::new(|| {
-        Some(ProbeSnapshot {
-            pid_of: HashMap::from([("sess".to_string(), 2)]),
-        })
-    });
-    let refreshed = refresh_probe_snapshot(
-        Some(&probe),
-        &mut vouch,
-        &mut bindings,
-        None,
-        t_decoders(),
-        &ctx,
-    )
-    .await;
-    assert!(refreshed, "a healthy snapshot must report refreshed");
-    assert!(
-        !bindings.contains_key(&1),
-        "the stale pid-1 binding must be dropped on rebind, got {bindings:?}"
-    );
-    assert_eq!(
-        bindings.get(&2).map(|ids| ids.contains("sess")),
-        Some(true),
-        "the id must be bound under its NEW pid, got {bindings:?}"
-    );
-}
-
-/// The instant-exit ↔ negative-vouch handshake: `forget` disarms the ledger,
-/// so a later healthy-snapshot pair can never re-confirm an id whose
-/// `SessionEnd` the instant-exit arm already emitted. A body-wiped `forget`
-/// leaves the ledger armed and a duplicate SessionEnd lands on the channel.
-#[tokio::test]
-async fn forget_disarms_a_pending_negative_vouch_confirmation() {
-    let cursors = Arc::new(Mutex::new(HashMap::new()));
-    let seen = Arc::new(Mutex::new(HashMap::new()));
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
-    let source: Arc<str> = Arc::from("test");
-    let live = Arc::new(Mutex::new(HashSet::new()));
-    let ctx = WatchCtx {
-        source: &source,
-        cursors: &cursors,
-        seen: &seen,
-        tx: &tx,
-        window: Duration::from_secs(3600),
-        live: &live,
-    };
-    // Tiny span so the confirming observation lands deterministically after
-    // it (load only stretches the sleep FURTHER past — the safe direction).
-    let mut vouch = NegativeVouch::new(Duration::from_millis(1));
-    let mut bindings: HashMap<i32, HashSet<String>> = HashMap::new();
-    let vouched: LivenessProbe = Arc::new(|| {
-        Some(ProbeSnapshot {
-            pid_of: HashMap::from([("sess".to_string(), 2)]),
-        })
-    });
-    refresh_probe_snapshot(
-        Some(&vouched),
-        &mut vouch,
-        &mut bindings,
-        None,
-        t_decoders(),
-        &ctx,
-    )
-    .await;
-    // The instant-exit arm already ended "sess" — disarm the slower rung.
-    vouch.forget("sess");
-    let gone: LivenessProbe = Arc::new(|| Some(ProbeSnapshot::default()));
-    refresh_probe_snapshot(
-        Some(&gone),
-        &mut vouch,
-        &mut bindings,
-        None,
-        t_decoders(),
-        &ctx,
-    )
-    .await;
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    refresh_probe_snapshot(
-        Some(&gone),
-        &mut vouch,
-        &mut bindings,
-        None,
-        t_decoders(),
-        &ctx,
-    )
-    .await;
-    let events = drain_events(&mut rx);
-    assert!(
-        !events
+/// A healthy `ProbeSnapshot` binding each `(id, pid)`. The ladder is a PURE
+/// state machine (functional core), so these tests drive it with synthetic time
+/// and zero mocks — no `WatchCtx`, no probe, no tokio.
+fn snap(pairs: &[(&str, i32)]) -> ProbeSnapshot {
+    ProbeSnapshot {
+        pid_of: pairs
             .iter()
-            .any(|(_, e)| matches!(e, AgentEvent::SessionEnd { .. })),
-        "a forgotten id must never re-confirm into a second SessionEnd, got {events:?}"
+            .map(|(id, pid)| (id.to_string(), *pid))
+            .collect(),
+    }
+}
+
+#[test]
+fn fold_confirms_an_exit_only_after_a_sustained_miss() {
+    let span = Duration::from_secs(60);
+    let mut ladder = ProbeLadder::new(span);
+    let t0 = Instant::now();
+    // Vouch the session, then two healthy misses spanning `min_span`.
+    assert!(ladder.fold(&snap(&[("sess", 1)]), t0).exits.is_empty());
+    assert!(ladder.fold(&snap(&[]), t0).exits.is_empty()); // window opens
+    assert!(ladder.fold(&snap(&[]), t0 + span / 2).exits.is_empty()); // still inside
+    assert_eq!(
+        ladder.fold(&snap(&[]), t0 + span).exits,
+        vec!["sess".to_string()],
+        "a miss sustained past min_span confirms the exit"
     );
+    // No double-confirm on a later miss.
+    assert!(ladder.fold(&snap(&[]), t0 + span * 2).exits.is_empty());
+}
+
+#[test]
+fn fold_reappearance_cancels_a_pending_miss_window() {
+    let span = Duration::from_secs(60);
+    let mut ladder = ProbeLadder::new(span);
+    let t0 = Instant::now();
+    ladder.fold(&snap(&[("sess", 1)]), t0);
+    ladder.fold(&snap(&[]), t0); // miss window opens
+    ladder.fold(&snap(&[("sess", 1)]), t0 + span / 2); // reappears — cancels it
+                                                       // A later miss must re-open a FRESH window, not confirm off the stale one.
+    assert!(
+        ladder.fold(&snap(&[]), t0 + span).exits.is_empty(),
+        "a re-appearing id resets its miss window"
+    );
+}
+
+#[test]
+fn fold_returns_each_new_pid_once_for_the_exit_watch() {
+    let mut ladder = ProbeLadder::new(Duration::from_secs(60));
+    let t = Instant::now();
+    // pid 1 (a+b) and pid 2 (c) each register exactly once.
+    let mut watched = ladder
+        .fold(&snap(&[("a", 1), ("b", 1), ("c", 2)]), t)
+        .newly_watched;
+    watched.sort_unstable();
+    assert_eq!(watched, vec![1, 2]);
+    // Re-seeing the same pids registers nothing new (bindings are additive).
+    assert!(ladder
+        .fold(&snap(&[("a", 1), ("c", 2)]), t)
+        .newly_watched
+        .is_empty());
+}
+
+/// #223 rebind: `snap.pid_of` is ownership ground truth — an id seen under a
+/// NEW pid MIGRATES its binding (so the old pid's later death can't end the live
+/// session) while a sibling on the old pid survives the single-id unbind.
+/// Observed through the interface: `pid_died` on each pid returns the right ids
+/// (an inverted `!=` that left the stale binding in place would return "a" from
+/// the old pid too).
+#[test]
+fn fold_migrates_a_rebound_id_and_keeps_the_old_pids_sibling() {
+    let mut ladder = ProbeLadder::new(Duration::from_secs(60));
+    let t = Instant::now();
+    ladder.fold(&snap(&[("a", 1), ("b", 1)]), t); // a, b under pid 1
+                                                  // "a" resumes under pid 2 in another process; "b" stays on pid 1.
+    let out = ladder.fold(&snap(&[("a", 2), ("b", 1)]), t);
+    assert_eq!(out.newly_watched, vec![2], "only the new pid 2 registers");
+    // pid 1's death now ends only "b" (a migrated away); pid 2's ends "a".
+    assert_eq!(ladder.pid_died(1), vec!["b".to_string()]);
+    assert_eq!(ladder.pid_died(2), vec!["a".to_string()]);
+}
+
+/// The instant-exit ↔ negative-vouch handshake: `pid_died` returns the dead ids
+/// AND disarms the ledger for each, so a later healthy-snapshot pair can never
+/// re-confirm an id whose `SessionEnd` the faster instant-exit rung already
+/// emitted (a body-wiped `forget` would leave the ledger armed and emit a
+/// duplicate). Also pins the unknown/duplicate-pid no-op.
+#[test]
+fn pid_died_returns_its_ids_and_disarms_the_negative_vouch() {
+    let span = Duration::from_secs(60);
+    let mut ladder = ProbeLadder::new(span);
+    let t0 = Instant::now();
+    ladder.fold(&snap(&[("sess", 2)]), t0); // vouched, bound to pid 2
+                                            // The instant-exit rung fires first and returns the id.
+    assert_eq!(ladder.pid_died(2), vec!["sess".to_string()]);
+    // A duplicate/unknown pid event is a no-op.
+    assert!(ladder.pid_died(2).is_empty());
+    // The slower negative vouch must NOT re-confirm the id it just forgot,
+    // however long it stays missing.
+    assert!(ladder.fold(&snap(&[]), t0).exits.is_empty());
+    assert!(ladder.fold(&snap(&[]), t0 + span * 2).exits.is_empty());
 }
 
 #[test]
