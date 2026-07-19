@@ -67,7 +67,9 @@ jobs:
           # +7ms cache HIT, never re-rendering the ```mermaid block. `cache: false`
           # forces a fresh, real mermaid render each deploy — poison can't persist.
           # (site.yml renders fine precisely because it has no cross-run Astro cache.)
-          # A static 7-page build; the lost speedup is milliseconds, correctness isn't.
+          # Cost is a cold content-layer rebuild (incl. the one Chromium mermaid
+          # render) — seconds on a 7-page site, negligible for an infrequent deploy;
+          # correctness isn't negotiable.
           cache: false
           # PIN npm. Without it, v6's detection fell back to pnpm, whose fresh
           # install resolved a DIFFERENT Playwright than the Chromium installed
