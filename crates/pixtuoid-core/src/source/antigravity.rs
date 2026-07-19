@@ -118,9 +118,11 @@ fn decode_ag_tool_call(
 
 /// The first present path/command field of an Antigravity tool call's
 /// `args`, quote-stripped — the `: target` half of the Generic display.
-/// AG tool names have no `describe_tool_target` arm (that dispatch is CC's),
-/// so like `cursor_tool_detail` the source extracts its own target and hands
-/// it to the shared `generic_tool_display` chokepoint for the caps. (The
+/// AG tool names have no `describe_tool_target` arm (that dispatch is CC's), so
+/// AG extracts its own target and hands it to the shared `generic_tool_display`
+/// chokepoint for the caps. It stays OUTSIDE `decoder::generic_keyed_detail`
+/// (the concentrator the other non-CC sources route through) because of the
+/// quote-strip step below — that helper scans + caps but has no cleanup hook. (The
 /// former `normalize_ag_tool_input` re-KEYED the value into a
 /// `{command|pattern|file_path: …}` object for `make_tool_detail` to read —
 /// but nothing read AG-named tools' input there, so the keys were dead code
