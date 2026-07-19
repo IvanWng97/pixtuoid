@@ -568,15 +568,24 @@ pub fn night_sparkle() -> Vec<f32> {
     night_events_stem(&score::NIGHT_SPARKLE, 2.2, 2800.0, 0.5)
 }
 
+/// One frozen drum event's hit buffer — the kind dispatch shared by every
+/// event-table drum stem (night + the day takes). NOISE content is fresh
+/// per call; only timing/gain are frozen.
+fn drum_hit(rng: &mut NoiseStream, kind: score::DrumKind) -> Vec<f32> {
+    match kind {
+        score::DrumKind::Kick => kick(rng),
+        score::DrumKind::Snare => snare(rng),
+        score::DrumKind::Hat => hat(rng, false),
+        score::DrumKind::OpenHat => hat(rng, true),
+    }
+}
+
 /// Kick + soft closed hats only — timing and gains frozen in the score
 /// (humanization baked); each hit's NOISE content is fresh per call.
 pub fn night_drums(rng: &mut NoiseStream) -> Vec<f32> {
     let mut buf = vec![0.0f32; n_samples(score::night_loop_secs())];
     for &(at, kind, gain) in &score::NIGHT_DRUMS {
-        let hit = match kind {
-            score::DrumKind::Kick => kick(rng),
-            score::DrumKind::Hat => hat(rng, false),
-        };
+        let hit = drum_hit(rng, kind);
         place(&mut buf, &hit, at, gain);
     }
     let mut buf = lowpass(&buf, 6000.0);
@@ -647,6 +656,87 @@ pub fn night_texture(rng: &mut NoiseStream) -> Vec<f32> {
         }
     }
     buf
+}
+
+// ------------------------------------------------- day takes
+// Additional day-mood compositions, owner LISTEN-passed 2026-07-19 — the
+// SAME production chain as the ratified original day take (its pad recipe,
+// kit, tape post), parameterized over the frozen `score::DayTake` tables;
+// sparkle/keys ride the velocity-keyed EP voice (`ep_pluck_vel`). The
+// original day fns above are UNTOUCHED: their identity stays guarded by
+// the day fingerprint pins. Like night, a take's identity is its frozen
+// score + spectral pins, not rng-stream byte equality.
+
+/// The original day pad recipe (harmonic stack, staggered onsets, slow AM)
+/// over a take's changes.
+pub(super) fn day_take_pad(take: &score::DayTake) -> Vec<f32> {
+    let tau = std::f32::consts::TAU;
+    let mut buf = vec![0.0f32; n_samples(take.loop_secs())];
+    for bar in 0..score::DAY_TAKE_LOOP_BARS {
+        let chord = take.chord_at_bar(bar);
+        let dur = take.bar_s() + 0.9;
+        let nd = n_samples(dur);
+        let mut chord_sig = vec![0.0f32; nd];
+        for (i, &m) in chord.iter().enumerate() {
+            let f = midi_freq(m as f32);
+            let env = env_ar(nd, 0.25 + 0.08 * i as f32, 1.2);
+            for (j, slot) in chord_sig.iter_mut().enumerate() {
+                let t = j as f32 / SR;
+                let tone = (tau * f * t).sin()
+                    + 0.30 * (tau * 2.0 * f * t).sin()
+                    + 0.08 * (tau * 3.0 * f * t).sin();
+                *slot += tone * env(j);
+            }
+        }
+        place(&mut buf, &chord_sig, bar as f32 * take.bar_s(), 1.0);
+    }
+    let mut buf = lowpass(&buf, 2600.0);
+    for (i, v) in buf.iter_mut().enumerate() {
+        *v *= 1.0 + 0.05 * (tau * 0.22 * i as f32 / SR).sin();
+    }
+    normalize(&mut buf, 0.7);
+    master(&buf, 1.6, 0.7)
+}
+
+/// An at-seconds EP event table rendered at a take's loop length (the
+/// day-take twin of `night_events_stem`).
+fn day_take_events_stem(
+    take: &score::DayTake,
+    events: &[(f32, u8, f32)],
+    dur_s: f32,
+    cutoff_hz: f32,
+    peak: f32,
+) -> Vec<f32> {
+    let mut buf = vec![0.0f32; n_samples(take.loop_secs())];
+    for &(at, note, vel) in events {
+        place(&mut buf, &ep_pluck_vel(note, dur_s, vel), at, 1.0);
+    }
+    let mut buf = lowpass(&buf, cutoff_hz);
+    normalize(&mut buf, peak);
+    master(&buf, 1.6, peak)
+}
+
+/// The hand-written lead melody — a day take's singable identity.
+pub(super) fn day_take_sparkle(take: &score::DayTake) -> Vec<f32> {
+    day_take_events_stem(take, take.sparkle, 2.0, 3200.0, 0.6)
+}
+
+/// RNG-comped mid-register EP, frozen with the v4 swing feel baked in.
+pub(super) fn day_take_keys(take: &score::DayTake) -> Vec<f32> {
+    day_take_events_stem(take, take.keys, 0.9, 2400.0, 0.8)
+}
+
+/// The full day kit (kick/snare/hats incl. the bar-4/8 open hat) from the
+/// frozen event table; each hit's NOISE content is fresh per call.
+pub(super) fn day_take_drums(take: &score::DayTake, rng: &mut NoiseStream) -> Vec<f32> {
+    let mut buf = vec![0.0f32; n_samples(take.loop_secs())];
+    for &(at, kind, gain) in take.drums {
+        let hit = drum_hit(rng, kind);
+        place(&mut buf, &hit, at, gain);
+    }
+    let mut buf = lowpass(&buf, 7500.0);
+    normalize(&mut buf, 0.85);
+    master(&buf, 2.2, 0.85)
 }
 
 #[cfg(test)]
@@ -849,6 +939,117 @@ mod tests {
     }
 
     #[test]
+    fn day_take_stems_match_the_ratified_fingerprints() {
+        // reference = the owner-LISTEN-passed candidates A/B (2026-07-19)
+        // measured on the python float chain with the RUST formulas
+        // (export_day2_score.py); same tolerances as the day/night pins:
+        // centroid ±20%, shares ±0.10 (drums ±0.15 — fresh noise per build)
+        type Case = (&'static str, Vec<f32>, f32, f32, &'static [(f32, f32, f32)]);
+        let cases: [Case; 8] = [
+            (
+                "day2_pad",
+                day_take_pad(&score::DAY2),
+                277.7,
+                0.10,
+                &[(125.0, 250.0, 0.497), (250.0, 500.0, 0.462)],
+            ),
+            (
+                "day2_sparkle",
+                day_take_sparkle(&score::DAY2),
+                580.4,
+                0.10,
+                &[(250.0, 500.0, 0.312), (500.0, 1000.0, 0.659)],
+            ),
+            (
+                "day2_keys",
+                day_take_keys(&score::DAY2),
+                355.6,
+                0.10,
+                &[(125.0, 250.0, 0.323), (250.0, 500.0, 0.556)],
+            ),
+            (
+                "day2_drums",
+                day_take_drums(&score::DAY2, &mut NoiseStream::new(4)),
+                235.5,
+                0.15,
+                &[(62.5, 125.0, 0.492), (125.0, 250.0, 0.420)],
+            ),
+            (
+                "day3_pad",
+                day_take_pad(&score::DAY3),
+                217.5,
+                0.10,
+                &[(125.0, 250.0, 0.746), (250.0, 500.0, 0.235)],
+            ),
+            (
+                "day3_sparkle",
+                day_take_sparkle(&score::DAY3),
+                611.3,
+                0.10,
+                &[(250.0, 500.0, 0.218), (500.0, 1000.0, 0.751)],
+            ),
+            (
+                "day3_keys",
+                day_take_keys(&score::DAY3),
+                303.7,
+                0.10,
+                &[(125.0, 250.0, 0.404), (250.0, 500.0, 0.558)],
+            ),
+            (
+                "day3_drums",
+                day_take_drums(&score::DAY3, &mut NoiseStream::new(4)),
+                192.2,
+                0.15,
+                &[(62.5, 125.0, 0.521), (125.0, 250.0, 0.414)],
+            ),
+        ];
+        for (name, buf, ref_centroid, tol, bands) in cases {
+            let c = centroid_hz(&buf);
+            assert!(
+                (c - ref_centroid).abs() <= ref_centroid * 0.20,
+                "{name}: centroid {c:.1} vs ratified {ref_centroid}"
+            );
+            for &(lo, hi, ref_share) in bands {
+                let s = band_energy_share(&buf, lo, hi);
+                assert!(
+                    (s - ref_share).abs() <= tol,
+                    "{name} band {lo}-{hi}: {s:.3} vs ratified {ref_share}"
+                );
+            }
+        }
+        // the full-kit signatures night deliberately lacks: the snare's
+        // 400-3200 noise body and the open hat's long top-end ring both
+        // put audible energy in 3.5-6.5k
+        for take in [&score::DAY2, &score::DAY3] {
+            let drums = day_take_drums(take, &mut NoiseStream::new(4));
+            let hats = band_energy_share(&drums, 3500.0, 6500.0);
+            assert!(
+                hats > 0.0015,
+                "day-take hats/snare must be audible in 3.5-6.5k: {hats:.5}"
+            );
+        }
+    }
+
+    #[test]
+    fn day_take_stems_share_one_loop_length_per_take() {
+        // the phase-lock precondition per take; and each take's loop is
+        // its OWN length (76/74 BPM vs day 72) — takes never cross-tile
+        for take in [&score::DAY2, &score::DAY3] {
+            let n = day_take_pad(take).len();
+            assert_eq!(n, n_samples(take.loop_secs()));
+            assert_eq!(day_take_sparkle(take).len(), n);
+            assert_eq!(day_take_keys(take).len(), n);
+            assert_eq!(day_take_drums(take, &mut NoiseStream::new(4)).len(), n);
+            assert_ne!(n, n_samples(score::loop_secs()));
+            assert_ne!(n, n_samples(score::night_loop_secs()));
+        }
+        assert_ne!(
+            n_samples(score::DAY2.loop_secs()),
+            n_samples(score::DAY3.loop_secs())
+        );
+    }
+
+    #[test]
     fn night_stems_share_one_loop_length_including_texture() {
         // night phase-lock covers TEXTURE too: its kick-duck is baked at
         // frozen kick times, so it must tile in lockstep with the drums
@@ -934,6 +1135,14 @@ mod tests {
             ("night_keys", night_keys()),
             ("night_drums", night_drums(&mut rng)),
             ("night_texture", night_texture(&mut rng)),
+            ("day2_pad", day_take_pad(&score::DAY2)),
+            ("day2_sparkle", day_take_sparkle(&score::DAY2)),
+            ("day2_keys", day_take_keys(&score::DAY2)),
+            ("day2_drums", day_take_drums(&score::DAY2, &mut rng)),
+            ("day3_pad", day_take_pad(&score::DAY3)),
+            ("day3_sparkle", day_take_sparkle(&score::DAY3)),
+            ("day3_keys", day_take_keys(&score::DAY3)),
+            ("day3_drums", day_take_drums(&score::DAY3, &mut rng)),
         ] {
             assert!(!buf.is_empty(), "{name} empty");
             assert!(
