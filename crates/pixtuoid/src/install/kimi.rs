@@ -226,8 +226,9 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     // no-managed message names the `_pixtuoid` sentinel Kimi can't carry).
     if entries.is_empty() {
         return SchemaParse::broken(
-            "no managed pixtuoid hook entries in [[hooks]] (the `--source kimi` command marker is \
-             absent — the config was hand-edited or hooks were never installed)",
+            "no managed pixtuoid hook entries in [[hooks]] (the pixtuoid source marker \
+             `PIXTUOID_SOURCE=kimi` / `--source kimi` is absent — the config was hand-edited \
+             or hooks were never installed)",
         );
     }
     let mut missing = Vec::new();

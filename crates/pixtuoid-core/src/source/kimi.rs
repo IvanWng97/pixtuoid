@@ -62,7 +62,7 @@ pub const SOURCE_NAME: &str = "kimi";
 /// - `StopFailure` — a failed turn end; settle to idle like `Stop`, with NO
 ///   Identity (an end proves nothing worth registering — mirrors the shared
 ///   `Stop` arm's boundary).
-pub fn decode_kimi_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
+pub(crate) fn decode_kimi_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
     let obj = v
         .as_object()
         .ok_or_else(|| anyhow!("kimi hook payload must be an object"))?;
@@ -205,9 +205,13 @@ mod tests {
     }
 
     #[test]
-    fn shared_arm_events_decline_to_fall_through() {
-        // Everything the shared CC-shaped arms handle must DECLINE here (Ok(None))
-        // so decode_hook_payload routes it to those arms — Kimi is CC-shaped.
+    fn non_failure_events_decline_to_the_shared_arms() {
+        // The custom decoder claims ONLY the two failure variants; everything else
+        // must DECLINE (Ok(None)) so decode_hook_payload falls through to the shared
+        // CC-shaped arms. The registered lifecycle events then decode there natively;
+        // SubagentStart is included to prove the decoder's narrow scope — it is
+        // deliberately UNregistered, so at the shared arms it would bail (not our
+        // concern here; the point is the custom decoder doesn't claim it).
         for ev in [
             "SessionStart",
             "PreToolUse",
@@ -226,7 +230,7 @@ mod tests {
             .expect("decodes");
             assert!(
                 out.is_none(),
-                "{ev} must decline to the shared arms, got {out:?}"
+                "{ev} must be declined (Ok(None)) by the custom decoder, got {out:?}"
             );
         }
     }
