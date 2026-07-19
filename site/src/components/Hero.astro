@@ -175,6 +175,12 @@ const badges = sources.filter((s) => s.status === 'supported');
   .hero__badge--more a {
     color: var(--fg);
     text-decoration: none;
+    /* EXPLICIT pointer: the ancestor chips force cursor: default (inherited),
+       and only a UA-stylesheet special case (a:any-link) restores pointer —
+       measured present in Chromium, but not spec-guaranteed across engines.
+       State the intent instead of leaning on the UA rule; pinned by the
+       bridge e2e's cursor assertions. */
+    cursor: pointer;
     transition: color 0.18s ease;
   }
   .hero__badge--more a:hover {

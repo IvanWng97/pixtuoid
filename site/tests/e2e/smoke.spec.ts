@@ -1755,6 +1755,13 @@ test('hero badge row: one chip per registered source, matching the tools-table r
   const more = page.locator('.hero__badge--more a');
   await expect(more).toHaveText(`${supportedSources.length} CLIs →`);
   await expect(more).toHaveAttribute('href', '#tools');
+  // Cursor affordances: label chips arrow, the link pointer. Pins the I-beam
+  // shimmer fix (chips are not copy text — an inherited/UA regression here
+  // re-introduces the per-glyph arrow↔I-beam flicker) AND the count-link's
+  // explicit pointer (cursor inherits; only a UA special case would otherwise
+  // restore it).
+  await expect(chips.first()).toHaveCSS('cursor', 'default');
+  await expect(more).toHaveCSS('cursor', 'pointer');
 
   const tableRows = page.locator('.tools tbody:not(.tools__planned) tr');
   await expect(tableRows).toHaveCount(supportedSources.length);
