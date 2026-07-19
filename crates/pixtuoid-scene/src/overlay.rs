@@ -21,9 +21,12 @@ use crate::pose::RouteCtx;
 use crate::theme::Theme;
 
 /// The separator between a label's source prefix and its cwd/disambiguation
-/// tail (`cc·repo`, `cc·repo·1a2b`). Single-sourced so the write side
-/// (`build_overlay`'s disambig join) and the read sides (`truncate_label`'s
-/// suffix-preserving cut, `badge_hue`'s prefix split) can't drift on the char.
+/// tail (`cc·repo`, `cc·repo·1a2b`). This is the SCENE-side READ authority
+/// (`badge_hue`'s prefix split + `truncate_label`'s suffix-preserving cut) plus
+/// `build_overlay`'s own disambig join. The label's `prefix·cwd` itself is
+/// WRITTEN core-side as a bare `·` (`reducer::source_label_prefix` join) — a
+/// crate boundary this const can't reach — so it must MATCH that char; pinned
+/// by `badge_hue_resolves_a_registered_prefix` (reds if this drifts from `·`).
 const LABEL_SEP: char = '\u{b7}';
 
 /// Activity-derived label tone — backend-agnostic. Each painter maps it to its own
