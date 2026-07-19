@@ -131,6 +131,189 @@ pub(crate) fn apply_audio_action(
     persist
 }
 
+/// Owns the whole mute/volume PERSIST protocol both painters used to duplicate:
+/// the pure [`apply_audio_action`] transition PLUS its side effects — mute saves
+/// NOW, a volume nudge marks dirty + arms the `♩ N%` readout, the debounced
+/// volume save fires once that window elapses (a held `+`/`-` writes once, not
+/// per repeat), and a flush on shutdown. The TUI keeps ONE of these instead of
+/// five loop locals + `run_audio_action`; floating keeps one instead of its own
+/// duplicated `volume_flash`/`volume_dirty`/`flush_volume`. `now` is injected so
+/// the debounce is unit-testable without a clock.
+pub(crate) struct AudioController {
+    ui: AudioUi,
+    config_path: std::path::PathBuf,
+    /// A volume nudge awaits its debounced `save_audio_volume`.
+    volume_dirty: bool,
+    /// When the transient `♩ N%` readout was armed (volume nudges only). Doubles
+    /// as the debounce clock: the volume save lands once this window elapses.
+    flash_at: Option<std::time::Instant>,
+}
+
+impl AudioController {
+    pub(crate) fn new(ui: AudioUi, config_path: std::path::PathBuf) -> Self {
+        Self {
+            ui,
+            config_path,
+            volume_dirty: false,
+            flash_at: None,
+        }
+    }
+
+    /// Run one gesture: the shared transition, then persist — mute NOW, volume
+    /// debounced (dirty + readout armed). A lazy spawn may mint a new handle;
+    /// read it back via [`Self::handle`].
+    pub(crate) fn apply(
+        &mut self,
+        action: AudioAction,
+        paused: bool,
+        now: std::time::Instant,
+        spawn: impl FnOnce(f32) -> AudioHandle,
+    ) {
+        let persist = apply_audio_action(&mut self.ui, action, paused, spawn);
+        if persist.muted {
+            // persist like a theme commit: next launch boots as the user left it
+            if let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted) {
+                tracing::warn!("failed to persist audio mute: {e}");
+            }
+        }
+        if persist.volume_nudged {
+            self.volume_dirty = true;
+            self.flash_at = Some(now);
+        }
+    }
+
+    /// The transient readout window is still fresh.
+    fn flashing(&self, now: std::time::Instant) -> bool {
+        self.flash_at
+            .is_some_and(|t| now.duration_since(t).as_millis() < VOLUME_FLASH_MS)
+    }
+
+    /// The `♩ N%` volume readout, `Some` iff the window is fresh (volume nudges
+    /// only — mute state is shown by the persistent footer indicator, not this).
+    pub(crate) fn volume_flash(&self, now: std::time::Instant) -> Option<u8> {
+        self.flashing(now)
+            .then(|| (self.ui.volume * 100.0).round() as u8)
+    }
+
+    /// Per frame: flush the debounced volume save once the readout window has
+    /// elapsed.
+    pub(crate) fn tick(&mut self, now: std::time::Instant) {
+        if self.volume_dirty && !self.flashing(now) {
+            self.save_volume();
+        }
+    }
+
+    /// Flush any pending volume on shutdown (a nudge-then-quit).
+    pub(crate) fn flush_on_exit(&mut self) {
+        if self.volume_dirty {
+            self.save_volume();
+        }
+    }
+
+    fn save_volume(&mut self) {
+        self.volume_dirty = false;
+        if let Err(e) = crate::config::save_audio_volume(&self.config_path, self.ui.volume) {
+            tracing::warn!("failed to persist audio volume: {e}");
+        }
+    }
+
+    /// Re-apply the effective mute when the external pause toggles (a frozen
+    /// office must not keep clacking; unpause restores the user's own m-state).
+    pub(crate) fn set_paused(&mut self, paused: bool) {
+        self.ui.handle.set_muted(paused || self.ui.muted);
+    }
+
+    pub(crate) fn muted(&self) -> bool {
+        self.ui.muted
+    }
+
+    pub(crate) fn volume(&self) -> f32 {
+        self.ui.volume
+    }
+
+    /// The live audio handle — the renderer/window feeds frames to it. Re-sync
+    /// the consumer after [`Self::apply`], which may have lazily spawned a new one.
+    pub(crate) fn handle(&self) -> &AudioHandle {
+        &self.ui.handle
+    }
+}
+
+#[cfg(test)]
+mod controller_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn ctl(muted: bool, volume: f32) -> (AudioController, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "theme = \"normal\"\n").unwrap();
+        let ui = AudioUi {
+            handle: AudioHandle::disabled(),
+            muted,
+            volume,
+        };
+        (AudioController::new(ui, path), dir)
+    }
+
+    #[test]
+    fn mute_persists_immediately_and_does_not_arm_the_volume_flash() {
+        let (mut c, _d) = ctl(false, 0.4);
+        let t0 = Instant::now();
+        c.apply(AudioAction::ToggleMute, false, t0, |_| {
+            AudioHandle::disabled()
+        });
+        assert!(
+            std::fs::read_to_string(&c.config_path)
+                .unwrap()
+                .contains("muted = true"),
+            "mute toggled on AND persists NOW (like a theme commit)"
+        );
+        assert_eq!(c.volume_flash(t0), None, "mute does not flash ♩ N%");
+    }
+
+    #[test]
+    fn volume_flashes_now_and_debounces_the_save_until_the_window_elapses() {
+        let (mut c, _d) = ctl(false, 0.50);
+        let t0 = Instant::now();
+        let saved = |c: &AudioController| std::fs::read_to_string(&c.config_path).unwrap();
+        c.apply(AudioAction::Volume(true), false, t0, |_| {
+            AudioHandle::disabled()
+        });
+        assert_eq!(c.volume_flash(t0), Some(55), "readout armed immediately");
+        assert!(
+            !saved(&c).contains("volume"),
+            "volume NOT persisted mid-flash (debounced, not per-repeat)"
+        );
+        c.tick(t0 + Duration::from_millis(500));
+        assert!(
+            !saved(&c).contains("volume"),
+            "still within the window → no flush"
+        );
+        let after = t0 + Duration::from_millis(VOLUME_FLASH_MS as u64 + 50);
+        c.tick(after);
+        assert!(
+            saved(&c).contains("volume"),
+            "window elapsed → debounced save flushes"
+        );
+        assert_eq!(c.volume_flash(after), None, "readout expired");
+    }
+
+    #[test]
+    fn flush_on_exit_writes_a_pending_nudge() {
+        let (mut c, _d) = ctl(false, 0.50);
+        c.apply(AudioAction::Volume(false), false, Instant::now(), |_| {
+            AudioHandle::disabled()
+        });
+        c.flush_on_exit();
+        assert!(
+            std::fs::read_to_string(&c.config_path)
+                .unwrap()
+                .contains("volume"),
+            "a nudge-then-quit persists on exit"
+        );
+    }
+}
+
 #[cfg(test)]
 mod controls_tests {
     use super::*;

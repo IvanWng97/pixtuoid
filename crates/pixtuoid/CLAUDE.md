@@ -250,9 +250,14 @@ src/
 │                       buffers) — run_tui swaps the fresh handle into the renderer; floating boot-spawns
 │                       iff !muted AND has the SAME m/+/- runtime keys. The mute/volume TRANSITION is
 │                       ONE authority — `audio::apply_audio_action(&mut AudioUi, action, paused, spawn)`
-│                       (audio/mod.rs, unit-tested) — that BOTH painters run: the TUI's ToggleAudioMute/
-│                       AdjustVolume arms (via run_audio_action, marshalling the loop locals) and floating's
-│                       key handler. Only the KEY→action decode is painter-specific: crossterm dispatch in
+│                       (audio/mod.rs, unit-tested); the PERSIST protocol around it (mute-save-now, volume
+│                       debounce→flash-expiry, exit-flush) is a SECOND authority BOTH painters OWN —
+│                       `audio::AudioController` (new/apply/tick/flush_on_exit/set_paused/volume_flash/handle;
+│                       `now` injected → the debounce/flash is unit-tested). The TUI keeps ONE controller (was
+│                       5 loop locals + a deleted `run_audio_action`); floating keeps one (was its own
+│                       volume_flash/volume_dirty/flush_volume). Flash is VOLUME-only on both now — a mute
+│                       toggle relies on the footer's `♩` indicator (TUI); floating shows no transient until a
+│                       footer lands (AudioController is that footer's `♩` source). Only the KEY→action decode is painter-specific: crossterm dispatch in
 │                       tui/mod.rs, winit in floating/input.rs (the pure key-map, `m`/`+`=/`-`_, lowercase
 │                       m only; winit's repeat flag swallows a held m — the TUI's crossterm path lacks it).
 │                       window.rs stays thin winit glue; lazy spawn + persistence identical; feedback = a

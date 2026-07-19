@@ -53,18 +53,13 @@ pub(crate) struct FloatingApp {
     /// The configured office pets — one is selected per floor (v1 shows floor 0's).
     pets: Vec<pixtuoid_scene::pet::Pet>,
     renderer: OfficeRenderer,
-    /// Runtime audio state the m/+/- keys drive (#633 close-out) — the same
-    /// handle/muted/volume trio the TUI loop keeps as locals. The renderer
-    /// holds its own handle clone (installed by `set_audio_ui` + on every
-    /// lazy spawn).
-    audio: crate::audio::AudioUi,
-    /// A fresh m/+/- press shows the `♩` readout overlay for
-    /// `crate::audio::VOLUME_FLASH_MS` — the window has no footer, so this
-    /// transient is the keys' only visual feedback.
-    volume_flash: Option<Instant>,
-    /// The debounced volume persist (TUI parity): save once when the nudge
-    /// burst's flash expires, plus a final flush on close.
-    volume_dirty: bool,
+    /// The whole mute/volume persist protocol (#633 close-out) — the SAME
+    /// `AudioController` the TUI owns (was `audio`/`volume_flash`/`volume_dirty`
+    /// duplicated here). The renderer holds its own handle clone, re-synced by
+    /// `set_audio_ui` + after every lazy spawn. Flash is VOLUME-only now (was
+    /// every-gesture): a mute toggle shows no transient overlay until a footer
+    /// lands to display it — the accepted TUI-parity tradeoff.
+    audio_ctl: crate::audio::AudioController,
     scene_rx: watch::Receiver<Arc<SceneState>>,
     floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
     /// The buffer size the capacity atomics were last synced for — capacity only changes
@@ -99,6 +94,14 @@ impl FloatingApp {
         scene_rx: watch::Receiver<Arc<SceneState>>,
         floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
     ) -> Self {
+        let audio_ctl = crate::audio::AudioController::new(
+            crate::audio::AudioUi {
+                handle: crate::audio::AudioHandle::disabled(),
+                muted: true,
+                volume: 1.0,
+            },
+            config_path.clone(),
+        );
         Self {
             cfg,
             theme,
@@ -106,13 +109,7 @@ impl FloatingApp {
             config_path,
             pets,
             renderer: OfficeRenderer::new(),
-            audio: crate::audio::AudioUi {
-                handle: crate::audio::AudioHandle::disabled(),
-                muted: true,
-                volume: 1.0,
-            },
-            volume_flash: None,
-            volume_dirty: false,
+            audio_ctl,
             scene_rx,
             floor_caps,
             last_caps_size: None,
@@ -156,17 +153,13 @@ impl FloatingApp {
         let (Some(nw), Some(nh)) = (NonZeroU32::new(win_w), NonZeroU32::new(win_h)) else {
             return; // a 0-area window: nothing to draw
         };
-        // The transient ♩ readout + its expiry-driven debounced volume persist
-        // (TUI parity) — resolved BEFORE the surface borrow below.
-        let flashing = self
-            .volume_flash
-            .is_some_and(|t| t.elapsed().as_millis() < crate::audio::VOLUME_FLASH_MS);
-        if !flashing {
-            self.volume_flash = None;
-            self.flush_volume();
-        }
-        let flash_text = flashing
-            .then(|| super::offscreen::volume_flash_text(self.audio.muted, self.audio.volume));
+        // The transient ♩ readout + its expiry-driven debounced volume persist,
+        // both owned by the controller — resolved BEFORE the surface borrow below.
+        let audio_now = Instant::now();
+        self.audio_ctl.tick(audio_now);
+        let flash_text = self.audio_ctl.volume_flash(audio_now).map(|_pct| {
+            super::offscreen::volume_flash_text(self.audio_ctl.muted(), self.audio_ctl.volume())
+        });
         // Office buffer = window / SCALE (kept ~OFFICE_TARGET_H tall → chunky sprites).
         // The ONE projection helper, shared with the boot seed so the two can't drift.
         let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(win_w, win_h);
@@ -364,7 +357,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
     ) {
         match event {
             WindowEvent::CloseRequested => {
-                self.flush_volume();
+                self.audio_ctl.flush_on_exit();
                 self.persist_geometry();
                 event_loop.exit();
             }
@@ -380,26 +373,14 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 ..
             } if event.state == ElementState::Pressed => {
                 if let Some(action) = super::input::audio_action(&event.logical_key, event.repeat) {
-                    let persist = crate::audio::apply_audio_action(
-                        &mut self.audio,
-                        action,
-                        false, // floating has no [p]ause; effective mute == muted
-                        crate::audio::spawn,
-                    );
+                    // floating has no [p]ause; effective mute == muted. The
+                    // controller persists mute NOW + debounces the volume + arms
+                    // the (volume-only) readout.
+                    self.audio_ctl
+                        .apply(action, false, Instant::now(), crate::audio::spawn);
                     // a lazy spawn mints a NEW handle — reinstall so the
                     // renderer's frame feed reaches the live thread
-                    self.renderer.set_audio(self.audio.handle.clone());
-                    if persist.muted {
-                        if let Err(e) =
-                            config::save_audio_muted(&self.config_path, self.audio.muted)
-                        {
-                            tracing::warn!("pixtuoid floating: could not persist audio mute: {e}");
-                        }
-                    }
-                    if persist.volume_nudged {
-                        self.volume_dirty = true;
-                    }
-                    self.volume_flash = Some(Instant::now());
+                    self.renderer.set_audio(self.audio_ctl.handle().clone());
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -474,19 +455,7 @@ impl FloatingApp {
     /// clone (the per-frame feed), the app keeps the handle/muted/volume trio
     /// the m/+/- keys drive.
     pub(crate) fn set_audio_ui(&mut self, audio: crate::audio::AudioUi) {
-        self.renderer.set_audio(audio.handle.clone());
-        self.audio = audio;
-    }
-
-    /// The debounced volume's flush — fired when a nudge burst's flash
-    /// expires (from `redraw`) and on the close path, the TUI quit-flush
-    /// twin. A no-op unless a nudge is pending.
-    fn flush_volume(&mut self) {
-        if self.volume_dirty {
-            self.volume_dirty = false;
-            if let Err(e) = config::save_audio_volume(&self.config_path, self.audio.volume) {
-                tracing::warn!("pixtuoid floating: could not persist audio volume: {e}");
-            }
-        }
+        self.audio_ctl = crate::audio::AudioController::new(audio, self.config_path.clone());
+        self.renderer.set_audio(self.audio_ctl.handle().clone());
     }
 }
