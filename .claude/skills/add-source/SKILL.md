@@ -1,7 +1,7 @@
 ---
 name: add-source
-version: 1.0.0
-description: "Wire a new agent-CLI Source adapter into pixtuoid (a new coding CLI whose sessions become office sprites). Use when the user says 'add support for <CLI>', 'add a source for <tool>', or 'integrate <agent CLI>'. Orchestrates the cross-crate checklist whose steps have TEST TEETH — the ones a diff-scoped edit silently misses (site manifest bridge, per-source badge hue, home-dir fn)."
+version: 1.1.0
+description: "Wire a new agent-CLI Source adapter into pixtuoid (a new coding CLI whose sessions become office sprites). Use when the user says 'add support for <CLI>', 'add a source for <tool>', or 'integrate <agent CLI>'. Orchestrates the cross-crate checklist whose steps have TEST TEETH — the ones a diff-scoped edit silently misses (site manifest bridge, per-source badge hue, home-dir fn, plus the two `pixtuoid/tests/*` integration goldens that `-p <crate> --lib` never builds)."
 metadata:
   scope: "pixtuoid repo only"
 ---
@@ -45,6 +45,22 @@ These are the ones with a failing test attached — do NOT stop before them:
 - **A captured fixture** under `tests/sources/fixtures/<name>/<scenario>/`
   exercising the **SessionStart hook** — the conformance test forces one, and its
   one-AgentId assertion guards against the reason-field ghost.
+- **`sources --json` CLI golden** — `crates/pixtuoid/tests/snapshots/cli/sources.json`,
+  the real-binary end-to-end golden the Raycast `--json` contract rides. The new
+  source's row must appear or `cli_json::sources_json_lists_every_source_in_an_isolated_home`
+  reds; regenerate with `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
+- **`wire_to_pixels` matrix row** — `crates/pixtuoid/tests/wire_to_pixels.rs`: add a
+  `WireCase` (reuse your SessionStart fixture; a hook-only source uses
+  `DecodeKind::Hook` + `Transport::Hook`, like cursor/hermes — a transcript source
+  the JSONL variant) AND the per-source `<name>_..._renders_a_painted_sprite` test,
+  or `wire_matrix_covers_every_registered_source` reds ("registration is not
+  coverage").
+
+**Those last two live in `pixtuoid/tests/*.rs` INTEGRATION BINARIES that
+`-p <crate> --lib` never builds** — the #692 (kimi) miss: a green `--lib` run AND a
+multi-lens review BOTH passed while these two were red, caught only by the pre-push
+`just preflight`. Run `cargo nextest run --workspace` / `just test` (NOT just
+`--lib`) before declaring green — a targeted `--lib` run is not the full suite.
 
 (The exact test names + full step list are in `crates/pixtuoid-core/CLAUDE.md`
 "Adding a new agent CLI" and `add-source.prompt.md` — this skill headlines the

@@ -41,8 +41,19 @@ decoding" / "Adding a new agent CLI") first, then:
 9. If the CLI has a custom config/home root, add a `pub fn <cli>_home()` honoring
    its `*_HOME` env precedence, called from BOTH the watcher's `default_paths()`
    AND the installer's `default_config_path()` (one function, two consumers).
+10. Cover the source in the binary's TWO per-source INTEGRATION goldens (own test
+    binaries, NOT built by `-p pixtuoid --lib`): regenerate the `sources --json`
+    golden `crates/pixtuoid/tests/snapshots/cli/sources.json`
+    (`SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`), and add a
+    `WireCase` + per-source render test in `crates/pixtuoid/tests/wire_to_pixels.rs`
+    (hook-only → `DecodeKind::Hook`+`Transport::Hook`), else
+    `sources_json_lists_every_source_in_an_isolated_home` /
+    `wire_matrix_covers_every_registered_source` red.
 
 These cross-crate deps are caught only by `just preflight`'s FULL run, not the
-targeted source/install suites. Respect the architecture invariants (no terminal
+targeted source/install suites — and a `-p <crate> --lib` run builds NEITHER
+integration binary in step 10 (kimi #692 shipped both red past a green `--lib`
+run and a multi-lens review). Respect the architecture invariants (no terminal
 deps in `pixtuoid-core`/`pixtuoid-scene`; one `(Transport, AgentEvent)` channel)
-and `.github/instructions/rust.instructions.md`. Run `just preflight` before the PR.
+and `.github/instructions/rust.instructions.md`. Run `just preflight` (or at least
+`cargo nextest run --workspace`) before the PR.
