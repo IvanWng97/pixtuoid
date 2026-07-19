@@ -213,11 +213,10 @@ const badges = sources.filter((s) => s.status === 'supported');
     grid-template-columns: 1fr;
     opacity: 1;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .hero__badge-name {
-      transition: none;
-    }
-  }
+  /* No per-component reduced-motion arm for the name track: global.css's
+     universal RM clamp (`* { transition-duration: 0.001ms !important }`)
+     already zeroes it — a local `transition: none` here would be dead code
+     under that !important (pinned by the reduced-motion badge e2e). */
   :root[data-theme='night'] .hero__badge,
   :root[data-theme='dracula'] .hero__badge {
     /* dracula's --bg is dark too (same direction as night — see

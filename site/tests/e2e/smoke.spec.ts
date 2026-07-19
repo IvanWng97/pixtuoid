@@ -1785,6 +1785,34 @@ test('hero badge hover expands the full CLI name in place', async ({ page }) => 
   await expect(chip.locator('.hero__badge-name')).toHaveCSS('opacity', '1');
 });
 
+test('reduced motion: the badge hover-expand is instant but still works', async ({ browser }) => {
+  // Under RM the name track's transition is zeroed by global.css's UNIVERSAL
+  // clamp (`* { transition-duration: 0.001ms !important }`) — Hero.astro
+  // deliberately carries NO per-component arm (it would be dead code under
+  // that !important). Pins BOTH halves: the clamp actually reaches the track
+  // (sub-millisecond duration — deleting the global block reds this) AND the
+  // expansion still functions (motion removed ≠ feature removed — the hover
+  // rule still flips the 0fr track, instantly). Mirrors the repo's
+  // every-new-animated-element RM pattern (rise-entry, caption-overlay,
+  // ding-pulse pins).
+  const context = await browser.newContext({ reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await page.waitForLoadState('networkidle');
+  const chip = page.locator('.hero__badges .hero__badge:not(.hero__badge--more)').nth(6);
+  const durationSecs = await chip
+    .locator('.hero__badge-name')
+    .evaluate((el) => parseFloat(getComputedStyle(el).transitionDuration));
+  expect(durationSecs).toBeLessThan(0.001);
+  const restBox = (await chip.boundingBox())!;
+  await page.mouse.move(restBox.x + restBox.width / 2, restBox.y + restBox.height / 2);
+  await expect
+    .poll(async () => (await chip.boundingBox())!.width)
+    .toBeGreaterThan(restBox.width + 20);
+  await context.close();
+});
+
 test('hero badge hues clear WCAG AA against their theme-aware chip surface (day + night)', async ({
   page,
 }) => {
