@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import featuresData from '../../src/features.json' with { type: 'json' };
+import sourcesData from '../../src/sources.json' with { type: 'json' };
 
 // wb-3's runtime contracts: the merged 5F band (the dial is the ONE channel
 // switcher; the feature roster below the stage is quiet, non-interactive
@@ -304,7 +305,9 @@ test('elevator shaft: the ding pulse joins the pix:paused set', async ({ page })
   ).toBe(false);
 });
 
-test('scroll budget: the page fits ~8.9 viewport-heights at 1440×900', async ({ browser }) => {
+test('scroll budget: the page fits its roster-aware viewport-height budget at 1440×900', async ({
+  browser,
+}) => {
   // The spec's original compression target (§4) was 6.5vh — a plan-authoring
   // proxy that turned out to bake in assumptions three LOCKED design
   // decisions invalidate: hold #1 stays full-viewport, the hero stays
@@ -353,22 +356,27 @@ test('scroll budget: the page fits ~8.9 viewport-heights at 1440×900', async ({
   // margin; the pin keeps catching section ballooning while scaling with
   // the source roster it deliberately tracks.
   //
-  // The kimi source (13th supported CLI, PR #692) is the same class: one
-  // more tools-table row + one more hero badge chip. CI measured 8.812vh
-  // after the row landed (was 8.637 at 12 — ~0.175vh, consistent with
-  // grok's per-source delta). 8.9 = that measured value plus ~0.09vh of
-  // headroom, the same order as the last two bumps. This is the pin's THIRD
-  // roster-driven bump — the hero badge row's height is O(sources), so the
-  // treadmill is structural; the planned fix is an O(1) hero badge layout
-  // (featured chips + code strip) plus a roster-aware budget
-  // (BASE + N*PER_SOURCE, N from sources.json), after which this constant
-  // stops tracking the roster entirely.
+  // The kimi source (13th supported CLI, PR #692) forced the pin's THIRD
+  // roster-driven bump (8.75 → 8.9) and ended the treadmill: the hero badge
+  // row is now the O(1) collapsed code strip (Hero.astro — codes-only cells,
+  // hover-expand), so a new source adds ONLY its tools-table row. The budget
+  // is therefore ROSTER-AWARE — BASE + N×PER_SOURCE, N from the same
+  // sources.json the page renders — so a source-add never touches this test
+  // again, while non-roster ballooning (a section growing, a regression
+  // re-introducing per-source hero height) still trips it. Measured at the
+  // strip's landing: 8.811vh at N=13, and 8.883 at a synthetic N=14 → a
+  // 0.072vh/source slope (the table row alone). PER_SOURCE = 0.075 (the
+  // measured slope + rounding slack); BASE = 7.95 ≈ 8.811 − 13×0.075 plus
+  // ~0.11vh headroom, the same order as the historical bumps' margins.
+  const SCROLL_BUDGET_BASE_VH = 7.95;
+  const SCROLL_BUDGET_PER_SOURCE_VH = 0.075;
+  const supported = sourcesData.filter((s) => s.status === 'supported').length;
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   await page.waitForLoadState('networkidle');
   const vh = await page.evaluate(() => document.documentElement.scrollHeight / window.innerHeight);
-  expect(vh).toBeLessThanOrEqual(8.9);
+  expect(vh).toBeLessThanOrEqual(SCROLL_BUDGET_BASE_VH + supported * SCROLL_BUDGET_PER_SOURCE_VH);
   await ctx.close();
 });

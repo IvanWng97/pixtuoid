@@ -1742,14 +1742,43 @@ test('hero badge row: one chip per registered source, matching the tools-table r
   // adding/removing a source can't silently desync them.
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
-  const chips = page.locator('.hero__badges .hero__badge');
+  // Source chips exclude the trailing count-link cell (chrome, not a CLI).
+  const chips = page.locator('.hero__badges .hero__badge:not(.hero__badge--more)');
   await expect(chips).toHaveCount(supportedSources.length);
-  await expect(chips.first()).toHaveText(
-    `${supportedSources[0].badge.replace('·', '')} ${supportedSources[0].name}`
+  // Collapsed rest state: the two-letter code is the visible face; the full
+  // name rides aria-label (AT) and the hover expansion (tested separately).
+  await expect(chips.first().locator('.hero__badge-code')).toHaveText(
+    supportedSources[0].badge.replace('·', '')
   );
+  await expect(chips.first()).toHaveAttribute('aria-label', supportedSources[0].name);
+  // The count-link is bridged to the SAME manifest length and points at #tools.
+  const more = page.locator('.hero__badge--more a');
+  await expect(more).toHaveText(`${supportedSources.length} CLIs →`);
+  await expect(more).toHaveAttribute('href', '#tools');
 
   const tableRows = page.locator('.tools tbody:not(.tools__planned) tr');
   await expect(tableRows).toHaveCount(supportedSources.length);
+});
+
+test('hero badge hover expands the full CLI name in place', async ({ page }) => {
+  // The strip is codes-only at rest; hovering a chip opens its 0fr name track
+  // (Hero.astro .hero__badge-name). Raw mouse.move, NOT page.hover(): the
+  // page's html { scroll-behavior: smooth } lets hover()'s actionability pass
+  // queue a smooth CDP scroll that slides the page out from under the pointer
+  // (probed during the mock round) — a real pointer has no such machinery.
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  const chip = page.locator('.hero__badges .hero__badge:not(.hero__badge--more)').nth(6);
+  const restBox = (await chip.boundingBox())!;
+  await page.mouse.move(restBox.x + restBox.width / 2, restBox.y + restBox.height / 2);
+  // The chip grows RIGHTWARD past its collapsed width and the name becomes
+  // visible; its own left edge must not move (jitter-free hover contract).
+  await expect
+    .poll(async () => (await chip.boundingBox())!.width)
+    .toBeGreaterThan(restBox.width + 20);
+  const hoverBox = (await chip.boundingBox())!;
+  expect(Math.abs(hoverBox.x - restBox.x)).toBeLessThan(1);
+  await expect(chip.locator('.hero__badge-name')).toHaveCSS('opacity', '1');
 });
 
 test('hero badge hues clear WCAG AA against their theme-aware chip surface (day + night)', async ({
@@ -1757,10 +1786,13 @@ test('hero badge hues clear WCAG AA against their theme-aware chip surface (day 
 }) => {
   // The badge-code hue is a cross-boundary copy of the app's per-source color
   // (pinned to theme::NORMAL.source by the Rust bridge test), painted on a
-  // chip surface that FLIPS per theme — day's light --surface chip darkens
-  // the hue toward black, night's dark --screen chip lightens it toward
-  // white (global.css's .hero__badge-code doc comment) — so this sweeps
-  // every rendered hue in both themes rather than trusting one spot check.
+  // cell TINTED with the same hue per theme (Hero.astro's tint formulas:
+  // day darkens the code toward black on a 14% tint, night lightens it
+  // toward white on a 34% tint — same-hue text on same-hue ground is exactly
+  // where contrast silently dies) — so this sweeps every rendered hue in both
+  // themes rather than trusting one spot check. It sweeps BOTH text pairs per
+  // cell: the always-visible code AND the hover-expanded name (state-sweep,
+  // not spot-check — the #455 rendered-runtime lesson).
   for (const theme of ['day', 'night'] as const) {
     await page.addInitScript((t) => {
       sessionStorage.setItem('pix-booted', '1');
@@ -1770,22 +1802,45 @@ test('hero badge hues clear WCAG AA against their theme-aware chip surface (day 
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 
     const chips = await page.evaluate(() =>
-      [...document.querySelectorAll('.hero__badge')].map((li) => ({
+      [...document.querySelectorAll('.hero__badge:not(.hero__badge--more)')].map((li) => ({
         codeColor: getComputedStyle(li.querySelector('.hero__badge-code')!).color,
+        nameColor: getComputedStyle(li.querySelector('.hero__badge-name')!).color,
         chipBg: getComputedStyle(li).backgroundColor,
-        label: li.textContent?.trim(),
+        label: li.getAttribute('aria-label'),
       }))
     );
     expect(chips.length, `${theme}: no .hero__badge chips rendered`).toBe(supportedSources.length);
-    for (const { codeColor, chipBg, label } of chips) {
-      const fg = parseRgb(codeColor).slice(0, 3) as [number, number, number];
+    for (const { codeColor, nameColor, chipBg, label } of chips) {
       const bg = parseRgb(chipBg).slice(0, 3) as [number, number, number];
-      const ratio = contrastRatio(fg, bg);
-      expect(
-        ratio,
-        `${theme} "${label}": WCAG AA floor is 4.5:1; code ${codeColor} on chip ${chipBg} measured ${ratio.toFixed(2)}:1`
-      ).toBeGreaterThanOrEqual(4.5);
+      for (const [what, color] of [
+        ['code', codeColor],
+        ['hover-expanded name', nameColor],
+      ] as const) {
+        const fg = parseRgb(color).slice(0, 3) as [number, number, number];
+        const ratio = contrastRatio(fg, bg);
+        expect(
+          ratio,
+          `${theme} "${label}" ${what}: WCAG AA floor is 4.5:1; ${color} on cell ${chipBg} measured ${ratio.toFixed(2)}:1`
+        ).toBeGreaterThanOrEqual(4.5);
+      }
     }
+
+    // The count-link cell (neutral tint) in both its rest and idiom-hover ink.
+    const moreColor = await page.evaluate(() => {
+      const a = document.querySelector('.hero__badge--more a')!;
+      return {
+        fg: getComputedStyle(a).color,
+        bg: getComputedStyle(a.closest('.hero__badge')!).backgroundColor,
+      };
+    });
+    const moreRatio = contrastRatio(
+      parseRgb(moreColor.fg).slice(0, 3) as [number, number, number],
+      parseRgb(moreColor.bg).slice(0, 3) as [number, number, number]
+    );
+    expect(
+      moreRatio,
+      `${theme} count-link: WCAG AA floor is 4.5:1; measured ${moreRatio.toFixed(2)}:1`
+    ).toBeGreaterThanOrEqual(4.5);
   }
 });
 
