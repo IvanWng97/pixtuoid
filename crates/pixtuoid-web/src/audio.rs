@@ -22,11 +22,11 @@ use std::sync::Arc;
 use pixtuoid_scene::audio::bank::{self, AssetBank, TrackBeds};
 use pixtuoid_scene::audio::dsp::NoiseStream;
 use pixtuoid_scene::audio::mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
-use pixtuoid_scene::audio::{synth, AudioFrame, OneShot, StemLevels, TrackId, TrackSwitch};
+use pixtuoid_scene::audio::{
+    synth, AudioFrame, OneShot, StemLevels, TrackId, TrackSwitch, BUILD_SEED, DROP_SEED, PICK_SEED,
+    TYPING_SEED,
+};
 
-/// The boot rng seed — the SAME the native `run_loop` uses, so the initial
-/// day bank/rain/beds are byte-identical to the desktop app.
-const BUILD_SEED: u64 = 0xC0FF_EE01;
 /// dt ceiling (s): a bigger inter-tick gap (backgrounded tab, GC pause) is
 /// clamped so the crossfade can't snap and the scheduler can't burst-replay.
 const MAX_DT_S: f32 = 0.10;
@@ -116,9 +116,9 @@ impl WebAudioDriver {
             stage: 0,
             track: initial_track,
             mixer: Mixer::new(1.0),
-            typing: TypingScheduler::new(0xBEEF),
-            drops: DropScheduler::new(0xFACE),
-            pick: NoiseStream::new(0xDEAD),
+            typing: TypingScheduler::new(TYPING_SEED),
+            drops: DropScheduler::new(DROP_SEED),
+            pick: NoiseStream::new(PICK_SEED),
             switch: TrackSwitch::new(),
             typing_level: 0.0,
             rain_level: 0.0,

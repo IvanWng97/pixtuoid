@@ -28,6 +28,22 @@ pub mod synth;
 
 use crate::board::StateCounts;
 
+/// Fixed RNG seeds for the four ambient-synth voices, in ONE place because both
+/// painters MUST seed identically: the native rodio gateway and the wasm
+/// WebAudio painter synthesize the SAME frozen buffers (the whole point of the
+/// shared synth stack), so a per-crate copy silently desyncs the two soundtracks
+/// on the next edit. `#[doc(hidden)]`: workspace-internal, like the synth modules.
+/// `BUILD_SEED` seeds the build-time noise (AssetBank + beds); the rest seed the
+/// per-tick keystroke / rain-drop schedulers and the keystroke/drop picker.
+#[doc(hidden)]
+pub const BUILD_SEED: u64 = 0xC0FF_EE01;
+#[doc(hidden)]
+pub const TYPING_SEED: u64 = 0xBEEF;
+#[doc(hidden)]
+pub const DROP_SEED: u64 = 0xFACE;
+#[doc(hidden)]
+pub const PICK_SEED: u64 = 0xDEAD;
+
 /// Active-agent count at which the office reads BUSY (full band + dense
 /// typing). 1..BUSY_ACTIVE_MIN is the moderate anchor tier; 0 is empty.
 const BUSY_ACTIVE_MIN: usize = 3;

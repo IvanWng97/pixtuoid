@@ -25,7 +25,7 @@ use std::time::Instant;
 use pixtuoid_scene::audio::mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
 use pixtuoid_scene::audio::AudioFrame;
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::{dsp, synth};
+use pixtuoid_scene::audio::{dsp, synth, BUILD_SEED, DROP_SEED, PICK_SEED, TYPING_SEED};
 // OneShot + TrackId are named only in the test fixtures now (run_loop infers
 // both — `frame.events` / `switch.init(frame.track)`), so import them test-side
 // to keep the prod build warning-free.
@@ -436,7 +436,7 @@ fn run_loop(
     // meanwhile drop harmlessly (levels are re-sent every render frame),
     // and mute rides the atomic so a keypress here can never be lost
     let built_at = Instant::now();
-    let mut rng = dsp::NoiseStream::new(0xC0FF_EE01);
+    let mut rng = dsp::NoiseStream::new(BUILD_SEED);
     let bank = AssetBank::build(&mut rng);
     // Rain is weather — track-independent, registered once. The five
     // TRACK beds register on the FIRST frame (it names the right mood for
@@ -451,9 +451,9 @@ fn run_loop(
     let mut mixer = Mixer::new(f32::from_bits(
         volume.load(std::sync::atomic::Ordering::Relaxed),
     ));
-    let mut typing = TypingScheduler::new(0xBEEF);
-    let mut drops = DropScheduler::new(0xFACE);
-    let mut pick = dsp::NoiseStream::new(0xDEAD);
+    let mut typing = TypingScheduler::new(TYPING_SEED);
+    let mut drops = DropScheduler::new(DROP_SEED);
+    let mut pick = dsp::NoiseStream::new(PICK_SEED);
     let mut typing_level = 0.0f32;
     let mut rain_level = 0.0f32;
     let started = Instant::now();
@@ -910,9 +910,9 @@ mod listen_gate {
         }
         let mut mixer = Mixer::new(1.0);
         mixer.set_target(stems);
-        let mut typing = TypingScheduler::new(0xBEEF);
-        let mut drops = DropScheduler::new(0xFACE);
-        let mut pick = dsp::NoiseStream::new(0xDEAD);
+        let mut typing = TypingScheduler::new(TYPING_SEED);
+        let mut drops = DropScheduler::new(DROP_SEED);
+        let mut pick = dsp::NoiseStream::new(PICK_SEED);
         let step_s = 0.05f32;
         let step_n = (step_s * dsp::SAMPLE_RATE as f32) as usize;
         let mut fired = vec![false; events_at.len()];
@@ -947,7 +947,7 @@ mod listen_gate {
     fn render_listen_gate_wavs() {
         let out = std::env::temp_dir().join("pixtuoid-audio-audition");
         std::fs::create_dir_all(&out).unwrap();
-        let mut rng = dsp::NoiseStream::new(0xC0FF_EE01);
+        let mut rng = dsp::NoiseStream::new(BUILD_SEED);
         let bank = AssetBank::build(&mut rng);
         let rain = Arc::new(synth::rain_bed(&mut rng));
         let beds = TrackBeds::build(&mut rng, TrackId::Day);
