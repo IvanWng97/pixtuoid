@@ -66,15 +66,13 @@ jobs:
           # silently shipped an EMPTY page. Forcing npm reuses package-lock.json,
           # so the build's Playwright matches the cached Chromium and it renders.
           package-manager: npm
-      # Fail LOUD: a mermaid render failure can collapse the whole ARCHITECTURE.md
-      # <Content /> to an empty article WITHOUT erroring the build. Assert the one
-      # mermaid page rendered its body — the deploy job is `needs: build`, so this
-      # gates it: a broken diagram can never silently ship an empty /architecture.
-      - name: Guard — the mermaid doc rendered its body
-        working-directory: site
-        run: |
-          test -f dist/architecture/index.html || { echo "::error::site/dist/architecture/index.html missing after build"; exit 1; }
-          grep -q 'Data flow' dist/architecture/index.html || { echo "::error::/architecture rendered EMPTY — rehype-mermaid inline-SVG failed (Chromium version mismatch?)"; exit 1; }
+          # Build, then assert EVERY doc page rendered a body (and /architecture kept
+          # its mermaid <svg>) IN the action's own context, before it uploads — so a
+          # silent empty-render fails the build and never deploys. rehype-mermaid can
+          # collapse a doc's <Content /> to an empty <article> WITHOUT erroring
+          # `astro build` (it shipped an empty /architecture once). check:docs is the
+          # SAME generic check `verify`/site-check runs — see config/assert-docs-rendered.mjs.
+          build-cmd: npm run build && npm run check:docs
   deploy:
     needs: build
     runs-on: ubuntu-latest

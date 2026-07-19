@@ -17,7 +17,8 @@
     "format:check": "prettier --check .",
     "knip": "knip",
     "test:unit": "node --test \"config/**/*.test.mjs\"",
-    "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build",
+    "check:docs": "node config/assert-docs-rendered.mjs dist",
+    "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build && npm run check:docs",
     "lighthouse": "lhci autorun",
     "e2e": "playwright test"
   },
