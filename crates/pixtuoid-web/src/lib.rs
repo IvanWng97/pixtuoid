@@ -349,10 +349,8 @@ impl Office {
             // idiom: dot = busy/idle, text = identity — all three painters
             // share this split). An unregistered prefix emits no badge and
             // the whole label stays tone-colored.
-            if let Some((prefix, _)) = el.text.split_once('\u{b7}') {
-                if let Some(rgb) = theme.source.by_prefix(prefix) {
-                    out.push_str(&format!(",\"badge\":\"{}\"", hex(rgb)));
-                }
+            if let Some(rgb) = pixtuoid_scene::overlay::badge_hue(&el.text, theme) {
+                out.push_str(&format!(",\"badge\":\"{}\"", hex(rgb)));
             }
             out.push('}');
         }

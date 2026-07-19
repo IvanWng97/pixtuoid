@@ -80,9 +80,8 @@ pub(crate) fn paint_label_widgets(
         // whole label tone-colored; hover stays all-white BOLD (focus
         // overrides identity).
         let badge = (!el.hovered)
-            .then(|| el.text.split_once('\u{b7}'))
-            .flatten()
-            .and_then(|(prefix, _)| theme.source.by_prefix(prefix));
+            .then(|| pixtuoid_scene::overlay::badge_hue(&el.text, theme))
+            .flatten();
         let spans = match badge {
             Some(rgb) => vec![
                 Span::styled(marker.to_string(), style),

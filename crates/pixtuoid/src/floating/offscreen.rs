@@ -282,9 +282,8 @@ pub fn paint_labels_into_surface(
         // the dashboard badges ride. Unregistered prefix / hover → one run in
         // the tone/hover ink, unchanged.
         let badge = (!el.hovered)
-            .then(|| el.text.split_once('\u{b7}'))
-            .flatten()
-            .and_then(|(prefix, _)| theme.source.by_prefix(prefix));
+            .then(|| pixtuoid_scene::overlay::badge_hue(&el.text, theme))
+            .flatten();
         match badge {
             Some(hue) => {
                 let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);

@@ -20,6 +20,12 @@ use crate::pixel_painter::character_anchor;
 use crate::pose::RouteCtx;
 use crate::theme::Theme;
 
+/// The separator between a label's source prefix and its cwd/disambiguation
+/// tail (`cc·repo`, `cc·repo·1a2b`). Single-sourced so the write side
+/// (`build_overlay`'s disambig join) and the read sides (`truncate_label`'s
+/// suffix-preserving cut, `badge_hue`'s prefix split) can't drift on the char.
+const LABEL_SEP: char = '\u{b7}';
+
 /// Activity-derived label tone — backend-agnostic. Each painter maps it to its own
 /// color (ratatui `Color` in tui, `Rgb` in floating). Mirrors the TUI's color tiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +48,19 @@ pub fn label_tone_rgb(tone: LabelTone, theme: &Theme) -> Rgb {
         LabelTone::Waiting => theme.ui.label_waiting,
         LabelTone::Idle => theme.ui.label_idle,
     }
+}
+
+/// The source's badge hue for a name-badge label, or `None` when the label has
+/// no `LABEL_SEP` prefix (a bare-prefix / cwd-less label like `cx`) or the
+/// prefix is unregistered. THE single definition of the CLI-identity split all
+/// three painters share — split on `LABEL_SEP`, resolve the pre-separator
+/// prefix via the registry-pinned `SourceColors::by_prefix` — so the
+/// tui/floating/wasm badge decomposition can't drift. Resolver-beside-resolver
+/// with `label_tone_rgb`: both are `(input, &Theme) -> color` resolved at paint
+/// time, neither baked into `LabelElement`, so the model stays unresolved.
+pub fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
+    text.split_once(LABEL_SEP)
+        .and_then(|(prefix, _)| theme.source.by_prefix(prefix))
 }
 
 /// One agent name-badge to paint above its sprite. `anchor_px` is the character anchor in
@@ -81,7 +100,7 @@ pub fn build_overlay(
             && agent.session_id.chars().count() >= 4;
         let raw: std::borrow::Cow<'_, str> = if needs_disambig {
             let id4 = disambig_suffix(&agent.session_id);
-            std::borrow::Cow::Owned(format!("{}·{id4}", agent.label))
+            std::borrow::Cow::Owned(format!("{}{LABEL_SEP}{id4}", agent.label))
         } else {
             std::borrow::Cow::Borrowed(&*agent.label)
         };
@@ -119,7 +138,7 @@ pub(crate) fn truncate_label(label: &str, budget: usize) -> std::borrow::Cow<'_,
     if label.chars().count() <= budget {
         return Cow::Borrowed(label);
     }
-    if let Some(sep_byte) = label.rfind('\u{00b7}') {
+    if let Some(sep_byte) = label.rfind(LABEL_SEP) {
         let suffix = &label[sep_byte..];
         let suffix_len = suffix.chars().count();
         if suffix_len < budget {
@@ -151,7 +170,9 @@ pub fn disambig_suffix(session_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_overlay, disambig_suffix, truncate_label, LabelElement, LabelTone};
+    use super::{
+        badge_hue, build_overlay, disambig_suffix, truncate_label, LabelElement, LabelTone,
+    };
     use crate::layout::Layout;
     use crate::motion::MotionState;
     use crate::pathfind::AStarRouter;
@@ -239,6 +260,28 @@ mod tests {
         assert_eq!(els[0].text, "cc");
         assert_eq!(els[0].tone, LabelTone::Active);
         assert!(!els[0].hovered);
+    }
+
+    #[test]
+    fn badge_hue_resolves_a_registered_prefix() {
+        // `cc·repo` splits to `cc`, which by_prefix maps to the claude_code hue —
+        // pins that the split extracts the prefix before the FIRST separator.
+        let theme = &crate::theme::NORMAL;
+        assert!(badge_hue("cc·repo", theme).is_some());
+        assert_eq!(badge_hue("cc·repo", theme), theme.source.by_prefix("cc"));
+    }
+
+    #[test]
+    fn badge_hue_is_none_for_a_bare_prefix_without_separator() {
+        // codex/antigravity fall back to a bare prefix (`cx`, `ag`) when cwd has
+        // no basename; with no separator there is nothing to split, so no badge
+        // (the label renders whole in its activity tone — the fallback path).
+        assert_eq!(badge_hue("cx", &crate::theme::NORMAL), None);
+    }
+
+    #[test]
+    fn badge_hue_is_none_for_an_unregistered_prefix() {
+        assert_eq!(badge_hue("zz·repo", &crate::theme::NORMAL), None);
     }
 
     #[test]
