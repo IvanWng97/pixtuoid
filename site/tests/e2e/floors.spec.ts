@@ -368,6 +368,9 @@ test('scroll budget: the page fits its roster-aware viewport-height budget at 14
   // 0.072vh/source slope (the table row alone). PER_SOURCE = 0.075 (the
   // measured slope + rounding slack); BASE = 7.95 ≈ 8.811 − 13×0.075 plus
   // ~0.11vh headroom, the same order as the historical bumps' margins.
+  // Caveat: the strip is O(1) only while its codes fit ONE line at 1440
+  // (~20 sources); past that it wraps a step the linear PER_SOURCE doesn't
+  // model — whoever adds the ~20th source should re-measure BASE.
   const SCROLL_BUDGET_BASE_VH = 7.95;
   const SCROLL_BUDGET_PER_SOURCE_VH = 0.075;
   const supported = sourcesData.filter((s) => s.status === 'supported').length;

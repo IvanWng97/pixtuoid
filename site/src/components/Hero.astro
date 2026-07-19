@@ -157,7 +157,11 @@ const badges = sources.filter((s) => s.status === 'supported');
      shared tint formulas above apply unchanged (a per-chip background override
      here would go invalid-at-computed-value on the formulas' var(--badge) and
      fall to transparent — text straight on office pixels); the gray tint reads
-     as chrome, not a 14th CLI. */
+     as chrome, not a 14th CLI. One knowing wrinkle: --border-strong is itself
+     a TRANSLUCENT token, so unlike the opaque-hex source cells this cell's mix
+     keeps some alpha (~a quarter of the office bleeds through at night) —
+     accepted, the chrome-halo/raw-contrast posture covers it and the e2e gates
+     the nominal ink pair. */
   .hero__badge--more {
     --badge: var(--border-strong);
   }
@@ -175,14 +179,20 @@ const badges = sources.filter((s) => s.status === 'supported');
        theme::NORMAL.source by crates/pixtuoid-scene/tests/site_badge_colors.rs),
        darkened toward black so it clears WCAG AA (4.5:1) on the TINTED day
        cell (same-hue text on same-hue tint eats contrast, so 50% black vs the
-       old 45%) — computed worst case (Grok #66d0e8) 5.57:1; the e2e badge-hue
+       old 45%) — computed worst case (Grok #30d0e8) 5.57:1; the e2e badge-hue
        sweep (smoke.spec.ts) pins every hue in both themes. */
     color: color-mix(in srgb, var(--badge) 50%, black);
   }
   /* Collapsed-by-default name: a 0fr grid track animates open to auto width on
      hover (interaction-triggered, so no WCAG 2.2.2 pause obligation). The chip
      grows RIGHTWARD — its own left edge never moves, so the pointer stays
-     inside and hover can't jitter. Deliberately hover-only: chips carry no
+     inside and the HOVERED chip can't jitter (empirically swept 760–1440px:
+     0 wrap-jumps of the hovered chip itself; a last-on-line chip overflows
+     right rather than re-wrapping, bounded by .hero's overflow:hidden). "Left
+     edge never moves" ≠ "nothing below moves": at line-wrap-boundary widths
+     the expansion can push a TRAILING sibling to a new line (+1 strip row,
+     the CTA shifts ~35px, self-correcting on un-hover) — accepted as LOW over
+     the costlier reserve-height/overlay alternatives. Deliberately hover-only: chips carry no
      tabindex (13 tab stops before the CTA is hostile keyboard UX) — names stay
      available to AT via aria-label and to everyone at the #tools matrix the
      trailing count-link points at. */
@@ -221,7 +231,7 @@ const badges = sources.filter((s) => s.status === 'supported');
   :root[data-theme='dracula'] .hero__badge-code {
     /* lightened toward white so the hue clears 4.5:1 — measured against the
        TINTED night cell (same-hue bg eats same-hue text, so 45% white vs the
-       old 20%) — computed worst case (opencode #e8823c-family) 5.86:1 at the
+       old 20%) — computed worst case (opencode #d83a3a) 5.86:1 at the
        34% cell tint; the e2e sweep pins every hue. */
     color: color-mix(in srgb, var(--badge) 55%, white);
   }

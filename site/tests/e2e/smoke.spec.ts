@@ -1768,6 +1768,10 @@ test('hero badge hover expands the full CLI name in place', async ({ page }) => 
   // (probed during the mock round) — a real pointer has no such machinery.
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
+  // Let the hero's `rise` entrance (translateY, 0.7s) settle before capturing
+  // the box — a one-shot mouse.move to a mid-animation center can land off
+  // the chip once it settles (the sibling hero tests' networkidle idiom).
+  await page.waitForLoadState('networkidle');
   const chip = page.locator('.hero__badges .hero__badge:not(.hero__badge--more)').nth(6);
   const restBox = (await chip.boundingBox())!;
   await page.mouse.move(restBox.x + restBox.width / 2, restBox.y + restBox.height / 2);
@@ -1825,7 +1829,9 @@ test('hero badge hues clear WCAG AA against their theme-aware chip surface (day 
       }
     }
 
-    // The count-link cell (neutral tint) in both its rest and idiom-hover ink.
+    // The count-link cell (neutral tint), REST ink only — its hover ink is
+    // --coral, the same transient-hover-dips-below-AA exception .hero__ghost
+    // documents (rest is the AA case, hover is the accepted exception).
     const moreColor = await page.evaluate(() => {
       const a = document.querySelector('.hero__badge--more a')!;
       return {
