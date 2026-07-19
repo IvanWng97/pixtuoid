@@ -1,14 +1,3 @@
 {
-  "permissions": {
-    "ask": [
-      "Bash(git push)",
-      "Bash(git push *)",
-      "Bash(rtk git push)",
-      "Bash(rtk git push *)",
-      "Bash(gh pr merge)",
-      "Bash(gh pr merge *)",
-      "Bash(rtk gh pr merge)",
-      "Bash(rtk gh pr merge *)"
-    ]
-  }
+  "hooks": {}
 }
