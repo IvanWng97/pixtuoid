@@ -130,7 +130,7 @@ You **must** run this checklist explicitly before each `SendUserFile` in a beaut
 | Visually differs | Diff is noticeable, not a sub-pixel tweak. If hash-identical to last attempt, you didn't actually rebuild. |
 | Subzone width | Each new sub-element ≥ 5 **display** cells wide (horizontal cells = buffer px; vertical cells = buffer px / 2 due to half-block). |
 | Color distinctness | New elements use colors distinct from immediate neighbours. |
-| `cargo test` | Connectivity test passes (`cargo test --workspace --features pixtuoid-core/test-renderer`). |
+| `cargo test` | Connectivity test passes (`cargo test --workspace`, or `just test`). |
 | `--debug-walkable` | Rendered the overlay and visually checked no narrow / isolated walkable pockets near the new element. |
 
 Skipping this checklist defeats the point of the skill — the whole reason it exists is that past sessions shipped invisible / unverified changes.
