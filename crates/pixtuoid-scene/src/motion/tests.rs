@@ -660,6 +660,63 @@ fn far_waypoint_full_cycle_is_longer() {
 }
 
 // -----------------------------------------------------------------------
+// snapshot_leg_profile: the one-shot route→measure→freeze composition the
+// five entry/exit/snap-back/wander legs share
+// -----------------------------------------------------------------------
+#[test]
+fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
+    use crate::physics::{walk_profile, WalkIntent};
+
+    let mask = WalkableMask::new_open(64, 64);
+    let overlay = OccupancyOverlay::new();
+    let id = AgentId::from_parts("test", "leg-profile");
+    let from = Point { x: 4, y: 8 };
+    let to = Point { x: 40, y: 8 };
+    let seat = Point { x: 42, y: 10 };
+
+    // The straight-line router returns `[from, to]` and route_jittered restores
+    // the endpoint, so the composer must equal the manual route→measure→freeze it
+    // replaced — pinning that measurement runs on the ROUTED polyline + settles.
+    let got = snapshot_leg_profile(
+        &mut Straight,
+        &mask,
+        &overlay,
+        id,
+        from,
+        to,
+        None,
+        Some(seat),
+        WalkIntent::WanderOut,
+    );
+    let path = route_jittered(&mut Straight, &mask, &overlay, id, from, to);
+    let expect = walk_profile(
+        measured_leg_len(&path, None, Some(seat)),
+        WalkIntent::WanderOut,
+        id,
+    );
+    assert_eq!(got.path_len_octile, expect.path_len_octile);
+    assert_eq!(got.duration_ms, expect.duration_ms);
+
+    // The end-settle glide onto the seat must LENGTHEN the measured leg vs no
+    // settle — pins the settle segments are folded in, not dropped.
+    let no_settle = snapshot_leg_profile(
+        &mut Straight,
+        &mask,
+        &overlay,
+        id,
+        from,
+        to,
+        None,
+        None,
+        WalkIntent::WanderOut,
+    );
+    assert!(
+        got.path_len_octile > no_settle.path_len_octile,
+        "an end settle must add octile length to the measured leg"
+    );
+}
+
+// -----------------------------------------------------------------------
 // T9: Arrival pause holds WalkingOut phase during [T, T+pause)
 // -----------------------------------------------------------------------
 #[test]

@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::physics::{walk_arrived, walk_profile, WalkIntent, WalkProfile};
 use pixtuoid_core::state::AgentSlot;
-use pixtuoid_core::walkable::OccupancyOverlay;
+use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 use pixtuoid_core::AgentId;
 
 use crate::layout::{Layout, Point, WaypointKind};
@@ -359,18 +359,20 @@ pub fn advance_wander(
 
                     let desk = desk_pt.unwrap_or(dest);
                     // Leave via the desk approach cell (rise off the chair),
-                    // mirroring pose's WalkingOut leg. The profile duration must
-                    // cover the FULL polyline: chair-glide + route + seat settle —
-                    // else t reaches 1000 before the sprite arrives and it pops.
-                    // Routed via the SAME jittered goal the render's walk-path
-                    // freeze uses (route_jittered), so the measured length and
-                    // the router-cache key match the rendered leg.
+                    // mirroring pose's WalkingOut leg.
                     let (from, chair_settle) = desk_leg_endpoint(desk, layout);
-                    let path = route_jittered(router, &layout.walkable, overlay, id, from, dest);
                     // Rise off the desk chair (start), glide onto the waypoint seat (end).
-                    let len = measured_leg_len(&path, chair_settle, seat);
-                    ms.wander.phase =
-                        WanderPhase::WalkingOut(walk_profile(len, WalkIntent::WanderOut, id));
+                    ms.wander.phase = WanderPhase::WalkingOut(snapshot_leg_profile(
+                        router,
+                        &layout.walkable,
+                        overlay,
+                        id,
+                        from,
+                        dest,
+                        chair_settle,
+                        seat,
+                        WalkIntent::WanderOut,
+                    ));
                     ms.wander.phase_started_at = ms
                         .wander
                         .phase_started_at
@@ -555,6 +557,36 @@ fn spot_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> Spot
     claims
 }
 
+/// Snapshot one one-shot walk leg's timing profile: route the jittered leg
+/// (endpoint restored so the measured octile length matches the RENDERED leg —
+/// the render re-routes via the same jittered goal, a raw `router.route` would
+/// measure the ±jitter-perturbed polyline), then measure that ROUTED polyline
+/// PLUS the start/end settle glides and freeze a `WalkProfile` over the full
+/// length. Measuring the routed (not raw) polyline is load-bearing: the duration
+/// must cover the whole path or `t` reaches 1000 before the sprite arrives and
+/// it pops. THE composition every one-shot leg shares (entry / exit / snap-back
+/// in `pose`, wander out/back here); the single `id` feeds both the route jitter
+/// and the profile.
+#[allow(clippy::too_many_arguments)] // each arg is a distinct leg parameter
+pub(crate) fn snapshot_leg_profile(
+    router: &mut dyn Router,
+    mask: &WalkableMask,
+    overlay: &OccupancyOverlay,
+    id: AgentId,
+    from: Point,
+    to: Point,
+    start_settle: Option<Point>,
+    end_settle: Option<Point>,
+    intent: WalkIntent,
+) -> WalkProfile {
+    let path = route_jittered(router, mask, overlay, id, from, to);
+    walk_profile(
+        measured_leg_len(&path, start_settle, end_settle),
+        intent,
+        id,
+    )
+}
+
 /// Snapshot the WanderBack `WalkProfile`: route `wander.target.dest → desk
 /// approach cell`, add the seat-rise (`settle_len(target.dest, target.kind.seat())`)
 /// and the chair-glide settle, then freeze a `WanderBack` profile over that full
@@ -581,17 +613,18 @@ fn snapshot_back_profile(
     // render's walk-path freeze uses (route_jittered), so the measured length
     // and the router-cache key match the rendered leg.
     let (snap_to, chair_settle) = desk_leg_endpoint(desk, layout);
-    let back_path = route_jittered(
+    // Rise off the waypoint seat (start), glide onto the desk chair (end).
+    snapshot_leg_profile(
         router,
         &layout.walkable,
         overlay,
         slot.agent_id,
         ms.wander.target.dest,
         snap_to,
-    );
-    // Rise off the waypoint seat (start), glide onto the desk chair (end).
-    let back_len = measured_leg_len(&back_path, ms.wander.target.kind.seat(), chair_settle);
-    walk_profile(back_len, WalkIntent::WanderBack, slot.agent_id)
+        ms.wander.target.kind.seat(),
+        chair_settle,
+        WalkIntent::WanderBack,
+    )
 }
 
 /// Reuses `pose::octile_distance` (the same metric A* uses) so the

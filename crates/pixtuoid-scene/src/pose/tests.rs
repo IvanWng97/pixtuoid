@@ -1,5 +1,6 @@
 use super::*;
 use crate::motion::{octile_path_len, settle_len};
+use crate::physics::walk_profile;
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::WalkableMask;
 use std::path::PathBuf;

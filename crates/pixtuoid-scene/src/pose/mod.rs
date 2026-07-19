@@ -18,10 +18,10 @@ use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::AgentId;
 
 use crate::motion::{
-    advance_wander, measured_leg_len, walking_position, MotionState, WalkLeg, WalkPathSnapshot,
+    advance_wander, snapshot_leg_profile, walking_position, MotionState, WalkLeg, WalkPathSnapshot,
     WanderKind, WanderPhase,
 };
-use crate::physics::{walk_arrived, walk_profile, walk_progress, WalkIntent};
+use crate::physics::{walk_arrived, walk_progress, WalkIntent};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 pub use pure::{
@@ -239,21 +239,18 @@ pub fn derive_with_routing(
             } else {
                 (from, None)
             };
-            // route_jittered restores the polyline's endpoint to the TRUE target,
-            // so the measured octile length matches the rendered leg — the same
-            // contract the wander legs use. A raw router.route(to_jittered) would
-            // measure the ±jitter-perturbed polyline, a small duration/speed skew.
-            let path = route_jittered(
+            // Rise off the chair (start settle); the door has no seat (end None).
+            let profile = snapshot_leg_profile(
                 rctx.router,
                 &layout.walkable,
                 rctx.overlay,
                 slot.agent_id,
                 route_from,
                 door_target,
+                chair_rise,
+                None,
+                WalkIntent::Exit,
             );
-            // Rise off the chair (start settle); the door has no seat (end None).
-            let path_len = measured_leg_len(&path, chair_rise, None);
-            let profile = walk_profile(path_len, WalkIntent::Exit, slot.agent_id);
             // Store the ORIGIN (chair when a desk exit) so the render can detect
             // the desk-departure and re-derive the approach+settle.
             mstate.exit = Some(WalkLeg {
@@ -341,20 +338,19 @@ pub fn derive_with_routing(
 
         // Snapshot on first sighting if we're within the spawn window.
         if mstate.entry.is_none() && since_spawn < ENTRY_ANIMATION_MS {
-            // route_jittered (endpoint restored) so the measured length matches
-            // the rendered leg — same as the wander legs.
-            let path = route_jittered(
+            // Profile covers door→approach PLUS the short settle glide onto the chair
+            // (end settle; the door start has no seat).
+            let profile = snapshot_leg_profile(
                 rctx.router,
                 &layout.walkable,
                 rctx.overlay,
                 slot.agent_id,
                 door,
                 approach,
+                None,
+                chair_settle,
+                WalkIntent::Entry,
             );
-            // Profile covers door→approach PLUS the short settle glide onto the chair
-            // (end settle; the door start has no seat).
-            let path_len = measured_leg_len(&path, None, chair_settle);
-            let profile = walk_profile(path_len, WalkIntent::Entry, slot.agent_id);
             mstate.entry = Some((slot.created_at, profile));
         }
 
@@ -586,19 +582,18 @@ pub fn derive_with_routing(
                         // accel (WalkIntent::SnapBack → WALK_ACCEL_SNAPBACK) keeps the
                         // urgent return brisk under pure physics.
                         let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
-                        // route_jittered (endpoint restored) so the measured length
-                        // matches the rendered leg — same as the wander legs.
-                        let path = route_jittered(
+                        // Glide onto the chair (end settle); `prev` start has no seat.
+                        let p = snapshot_leg_profile(
                             rctx.router,
                             &layout.walkable,
                             rctx.overlay,
                             slot.agent_id,
                             prev,
                             snap_target,
+                            None,
+                            chair_settle,
+                            WalkIntent::SnapBack,
                         );
-                        // Glide onto the chair (end settle); `prev` start has no seat.
-                        let len = measured_leg_len(&path, None, chair_settle);
-                        let p = walk_profile(len, WalkIntent::SnapBack, slot.agent_id);
                         ms_entry.snap_back = Some(WalkLeg {
                             started_at: slot.state_started_at,
                             profile: p,
