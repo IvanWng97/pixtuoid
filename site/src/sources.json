@@ -178,5 +178,20 @@
       "linux": "yes",
       "windows": "experimental"
     }
+  },
+  {
+    "id": "kimi",
+    "badge": "km·",
+    "badge_color": "#c446fe",
+    "name": "Kimi Code CLI",
+    "url": "https://github.com/MoonshotAI/kimi-code",
+    "status": "supported",
+    "featured": false,
+    "transport": "hooks (~/.kimi-code/config.toml [[hooks]], session-id-keyed)",
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   }
 ]

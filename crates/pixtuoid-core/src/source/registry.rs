@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use crate::source::decoder::{extract_top_level_cwd, CwdExtractor, LineDecoder};
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, omp, openclaw,
+    antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, kimi, omp, openclaw,
     opencode, reasonix, AgentEvent,
 };
 
@@ -327,6 +327,7 @@ pub const REGISTRY: &[SourceDescriptor] = &[
     OMP,
     OPENCLAW,
     GROK,
+    KIMI,
 ];
 
 /// Linear scan — at most a handful of entries, called on slot creation and
@@ -818,6 +819,52 @@ const OMP: SourceDescriptor = SourceDescriptor {
     },
 };
 
+/// HOOK-ONLY: Kimi Code CLI (`kimi`, Moonshot AI `MoonshotAI/kimi-code`) DOES
+/// persist a session transcript (`<KIMI_CODE_HOME>/sessions/.../wire.jsonl`), but
+/// that format is EXPLICITLY unstable — a versioned `metadata` envelope + a
+/// `wire/migration/` module + undocumented op `type` strings (the new format
+/// already broke ccusage) — so pixtuoid does NOT watch it (a future seam gated on
+/// `protocol_version`). Its hooks (`<KIMI_CODE_HOME>/config.toml` `[[hooks]]`) are
+/// the stable surface, and the envelope is CLAUDE-CODE-SHAPED (snake_case
+/// `hook_event_name`/`session_id`/`cwd`, PascalCase event values), so it rides the
+/// SHARED CC-shaped arms keyed on `session_id`; the custom `Extend` decoder claims
+/// ONLY Kimi's `PostToolUseFailure`/`StopFailure` variants (no CC equivalent) and
+/// declines the rest. See `source/kimi.rs`.
+const KIMI: SourceDescriptor = SourceDescriptor {
+    name: kimi::SOURCE_NAME,
+    label_prefix: "km",
+    verified_version: "unknown",
+    version_probe: Some(&["kimi", "--version"]),
+    kind: SourceKind::Agent {
+        transcript: None, // hook-only: wire.jsonl is unstable/undocumented (future seam)
+        hook: Some(HookDecoding {
+            // Hook-only: key purely on session_id (the base field on every Kimi
+            // event), matching the custom decoder's own AgentId construction.
+            id_key: IdKey::SessionId,
+            // Kimi is CC-shaped, so most events ride the shared arms; the custom
+            // decoder EXTENDS them for PostToolUseFailure/StopFailure only.
+            custom: Some(HookCustom::Extend(kimi::decode_kimi_hook_custom)),
+        }),
+        caps: SourceCaps {
+            // `SessionEnd` fires on exit (matcher `exit`) — best-effort counts,
+            // CC/Cursor/Hermes class. Abrupt exits fall to the stale-sweep.
+            has_exit_signal: true,
+            // A stale-swept session does not walk back in on a later prompt
+            // (SessionStart is the registration carrier, not UserPromptSubmit) —
+            // moot anyway with an exit signal (short_idle_reap == false).
+            resurrects_on_prompt: false,
+            // Kimi's "agent swarm" subagents are NOT modeled (their hook payload
+            // shape is uncaptured — sessions render flat), so if the dispatch tool
+            // carries `subagent_type` the parent reads Delegating and goes
+            // hook-silent through the delegation. `true` is the conservative
+            // default (Cursor/CodeWhale class): it can only over-retain a dead
+            // Delegating slot, never reap a live one. Revisit with a swarm capture.
+            delegations_are_hook_silent: true,
+        },
+        focus: FocusChannel::ShimStamp,
+    },
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -905,9 +952,10 @@ mod tests {
         assert_eq!(OMP.name, omp::SOURCE_NAME);
         assert_eq!(OPENCLAW.name, openclaw::SOURCE_NAME);
         assert_eq!(GROK.name, grok::SOURCE_NAME);
+        assert_eq!(KIMI.name, kimi::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 12, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 13, "new row? add its name-pin assert above");
     }
 
     #[test]

@@ -34,6 +34,7 @@ pub const REGISTERED_SOURCES: &[&str] = &[
     omp::SOURCE_NAME,
     openclaw::SOURCE_NAME,
     grok::SOURCE_NAME,
+    kimi::SOURCE_NAME,
 ];
 
 #[cfg(test)]
@@ -401,6 +402,7 @@ pub mod hermes;
 pub mod hook;
 #[cfg(feature = "native")]
 pub mod jsonl;
+pub mod kimi;
 #[cfg(feature = "native")]
 pub mod manager;
 // The async transport seam (tagged channel + `Source`/`DynSource`); the

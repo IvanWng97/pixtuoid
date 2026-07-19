@@ -1325,7 +1325,7 @@ mod tests {
     #[test]
     fn every_agent_decoder_caps_its_tool_display() {
         use crate::source::{
-            antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, omp,
+            antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, kimi, omp,
             opencode, reasonix, registry,
         };
         use serde_json::json;
@@ -1456,6 +1456,19 @@ mod tests {
                         "workspaceRoot":"/r","toolName":name,"toolUseId":"c1",
                         "toolInput":{"command":tgt},"toolInputTruncated":false}))
                     .expect("grok decodes")
+                }),
+            ),
+            (
+                // Kimi rides the SHARED CC-shaped arms (its Extend decoder declines
+                // PreToolUse), so route the whole payload through the dispatcher —
+                // the shared `make_tool_detail` is the chokepoint under test.
+                kimi::SOURCE_NAME,
+                Box::new(|| {
+                    decode_hook_payload(json!({
+                        "hook_event_name":"PreToolUse","session_id":"s","cwd":"/r",
+                        "tool_name":name,"tool_input":{"command":tgt},"tool_use_id":"c1",
+                        "_pixtuoid_source":"kimi"}))
+                    .expect("kimi decodes")
                 }),
             ),
         ];

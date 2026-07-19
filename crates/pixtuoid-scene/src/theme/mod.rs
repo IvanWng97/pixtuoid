@@ -178,8 +178,8 @@ pub struct ApplianceColors {
     pub coats: [Rgb; 3],
 }
 
-/// Per-source badge hues. One color per registered source — the 10 agent CLIs +
-/// the OpenClaw daemon (`all()` returns `[Rgb; 11]`, count-pinned to
+/// Per-source badge hues. One color per registered source — the 12 agent CLIs +
+/// the OpenClaw daemon (`all()` returns `[Rgb; 13]`, count-pinned to
 /// `REGISTERED_SOURCES` by `source_colors_cover_every_registered_source`) — drawn
 /// as a leading `[xx]` badge in the agent-dashboard popup (agents only) and the
 /// Sources panel (all sources, incl. the daemon). Each theme supplies its own so
@@ -199,6 +199,7 @@ pub struct SourceColors {
     pub hermes: Rgb,
     pub omp: Rgb,
     pub grok: Rgb,
+    pub kimi: Rgb,
 }
 
 impl SourceColors {
@@ -206,7 +207,7 @@ impl SourceColors {
     /// guard and the count-pin test share, so adding a source forces a new field
     /// HERE (caught by `source_colors_cover_every_registered_source`) instead of
     /// silently escaping the per-theme distinctness check.
-    pub fn all(&self) -> [Rgb; 12] {
+    pub fn all(&self) -> [Rgb; 13] {
         [
             self.claude_code,
             self.codex,
@@ -220,6 +221,7 @@ impl SourceColors {
             self.hermes,
             self.omp,
             self.grok,
+            self.kimi,
         ]
     }
 
@@ -243,6 +245,7 @@ impl SourceColors {
             "hm" => self.hermes,
             "om" => self.omp,
             "gk" => self.grok,
+            "km" => self.kimi,
             _ => return None,
         })
     }

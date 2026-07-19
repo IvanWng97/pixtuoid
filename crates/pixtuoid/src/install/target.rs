@@ -262,8 +262,27 @@ pub(crate) const OPENCLAW: Target = Target {
     verify_schema: crate::install::openclaw::verify_schema,
 };
 
+pub(crate) const KIMI: Target = Target {
+    name: "kimi",
+    core_source: pixtuoid_core::source::kimi::SOURCE_NAME,
+    display_name: "Kimi Code CLI",
+    default_config_path: crate::install::kimi::default_config_path,
+    hook_command: crate::install::kimi::hook_command,
+    merge_install: crate::install::kimi::merge_install,
+    merge_uninstall: crate::install::kimi::merge_uninstall,
+    verify_schema: crate::install::kimi::verify_schema,
+    // Kimi runs the command under a shell with the absolute path embedded (no
+    // PATH reliance), so an unresolvable binary is fatal.
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
+    // Kimi creates its data root (~/.kimi-code) itself but may not create
+    // config.toml until a provider is configured — probe the data dir, not the
+    // file we write (the Reasonix/CodeWhale rule).
+    presence_probe: Some(crate::install::kimi::detect_installed),
+    extra_artifacts: None,
+};
+
 pub const TARGETS: &[&Target] = &[
-    &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &HERMES, &OPENCLAW, &GROK,
+    &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &HERMES, &OPENCLAW, &GROK, &KIMI,
 ];
 
 // Test-gated: lookup-by-CLI-name has no prod caller (prod joins on the source id
@@ -314,6 +333,7 @@ mod tests {
         assert_eq!(by_name("cursor").unwrap().name, "cursor");
         assert_eq!(by_name("hermes").unwrap().name, "hermes");
         assert_eq!(by_name("openclaw").unwrap().name, "openclaw");
+        assert_eq!(by_name("kimi").unwrap().name, "kimi");
         assert!(by_name("nope").is_none());
         assert!(by_name("all").is_none()); // "all" is a meta-value, not a Target
     }

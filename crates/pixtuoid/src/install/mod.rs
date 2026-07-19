@@ -11,6 +11,7 @@ pub(crate) mod cursor;
 pub(crate) mod grok;
 pub(crate) mod hermes;
 mod hook_cmd;
+pub(crate) mod kimi;
 // io stays pub(crate) for a STRONGER reason than its siblings: it holds the
 // config-write authority (invariant #4), which must never be cross-crate
 // reachable — only its three env filters (below) are re-exported.
