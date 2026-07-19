@@ -296,12 +296,7 @@ fn state_driven_pose(
         }
         ActivityState::Waiting { .. } => Some(Pose::StandingAtDesk),
         ActivityState::Idle => {
-            let was_active = slot.last_event_at > slot.created_at;
-            let since_last_event = now
-                .duration_since(slot.last_event_at)
-                .unwrap_or(Duration::ZERO)
-                .as_secs();
-            if was_active && since_last_event < THINKING_WINDOW_SECS {
+            if in_thinking_window(slot, now) {
                 Some(Pose::SeatedThinking)
             } else {
                 Some(idle_pose(slot, desk, layout, elapsed))
@@ -428,11 +423,28 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
     desk_walk_anchor(home_desk)
 }
 
+/// Whether an Idle agent holds `Pose::SeatedThinking`: it recently finished
+/// active work (`last_event_at > created_at` — excludes freshly spawned agents)
+/// and is still within `THINKING_WINDOW_SECS` of that last event. The ONE owner
+/// of the thinking-window GATE — `state_driven_pose` (the stateless overlay) and
+/// `derive_with_routing` (the routed render) both call it, so the gate can't
+/// silently drift between the two (a bool the compiler can't catch, unlike the
+/// exhaustive match arms nearby). `thinking_hold_ms` below computes the same
+/// window's remaining DURATION — a distinct concern that stays separate.
+pub(crate) fn in_thinking_window(slot: &AgentSlot, now: SystemTime) -> bool {
+    let was_active = slot.last_event_at > slot.created_at;
+    let since_last_event = now
+        .duration_since(slot.last_event_at)
+        .unwrap_or(Duration::ZERO)
+        .as_secs();
+    was_active && since_last_event < THINKING_WINDOW_SECS
+}
+
 /// Milliseconds of the current Idle period during which `state_driven_pose`'s
 /// SeatedThinking gate held the agent at its desk: from `state_started_at`
 /// until `last_event_at + THINKING_WINDOW_SECS`. 0 when the agent was never
-/// active (mirrors the gate's `was_active`) or when the window expired before
-/// this Idle period began.
+/// active (mirrors `in_thinking_window`'s `was_active`) or when the window
+/// expired before this Idle period began.
 fn thinking_hold_ms(slot: &AgentSlot) -> u64 {
     if slot.last_event_at <= slot.created_at {
         return 0;

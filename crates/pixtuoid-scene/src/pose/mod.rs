@@ -391,17 +391,12 @@ pub fn derive_with_routing(
     // SeatedThinking still takes priority so the thinking-pose window is intact.
     let is_idle = matches!(slot.state, pixtuoid_core::state::ActivityState::Idle);
     if is_idle && slot.exiting_at.is_none() {
-        // Check thinking-pose seam: if the agent recently finished active
-        // work and is within the thinking window, return SeatedThinking now
-        // regardless of wander phase.  This keeps the existing thinking-pose
-        // behaviour entirely intact (no regression).
-        let was_active = slot.last_event_at > slot.created_at;
-        let since_last_event = now
-            .duration_since(slot.last_event_at)
-            .unwrap_or(Duration::ZERO)
-            .as_secs();
-        if was_active && since_last_event < THINKING_WINDOW_SECS {
-            // Thinking window active — return SeatedThinking directly.
+        // Check thinking-pose seam: if the agent recently finished active work
+        // and is within the thinking window, return SeatedThinking now
+        // regardless of wander phase — before `advance_wander`, so the routed
+        // render and the pure overlay share the ONE `pure::in_thinking_window`
+        // gate and can't drift.
+        if pure::in_thinking_window(slot, now) {
             return Some(Pose::SeatedThinking);
         }
 

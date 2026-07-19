@@ -528,6 +528,27 @@ fn freshly_spawned_idle_skips_thinking() {
     assert_ne!(p, Pose::SeatedThinking);
 }
 
+// `in_thinking_window` is the ONE gate both `state_driven_pose` (the pure
+// overlay) and `derive_with_routing` (the routed render) consult — pin the
+// predicate directly so a change to it is caught here at the interface, not
+// left to drift between the two callers.
+#[test]
+fn in_thinking_window_gates_on_recency_and_prior_activity() {
+    let (mut s, now) = slot(ActivityState::Idle, 5_000);
+
+    // Freshly spawned (last_event_at == created_at): never active → false.
+    assert_eq!(s.last_event_at, s.created_at);
+    assert!(!in_thinking_window(&s, now));
+
+    // Recently active, still inside the window → true.
+    s.last_event_at = now - Duration::from_secs(THINKING_WINDOW_SECS - 1);
+    assert!(in_thinking_window(&s, now));
+
+    // Active, but the window has lapsed → false.
+    s.last_event_at = now - Duration::from_secs(THINKING_WINDOW_SECS + 1);
+    assert!(!in_thinking_window(&s, now));
+}
+
 fn first_trip_cycle_to_kind(
     agent_id: AgentId,
     layout: &SceneLayout,
