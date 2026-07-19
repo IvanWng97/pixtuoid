@@ -131,6 +131,13 @@ const badges = sources.filter((s) => s.status === 'supported');
   .hero__badge {
     display: inline-flex;
     align-items: baseline;
+    /* Label chips, not copy text: without these the pointer flips arrow ↔
+       I-beam per glyph while sweeping the strip — frame-extracted from the
+       user's screen recording as a "vertical shimmer" at the cursor (the
+       row itself is frame-stable) — and a drag would blue-select the codes.
+       The count-link <a> keeps its pointer cursor. */
+    cursor: default;
+    user-select: none;
     /* gap moved INTO .hero__badge-name's inner padding so a collapsed name
        leaves no trailing space after the code */
     gap: 0;
@@ -200,9 +207,13 @@ const badges = sources.filter((s) => s.status === 'supported');
     display: inline-grid;
     grid-template-columns: 0fr;
     opacity: 0;
+    /* steps(), not ease: the track opens in discrete increments, so the clip
+       reveals the name glyph-chunk by glyph-chunk — a terminal TYPING her
+       name, not a drawer sliding (the hero h1's block cursor sets the idiom).
+       Opacity snaps fast so revealed glyphs are already solid. */
     transition:
-      grid-template-columns 0.22s ease,
-      opacity 0.18s ease;
+      grid-template-columns 0.3s steps(12, end),
+      opacity 0.06s linear;
   }
   .hero__badge-name > span {
     min-width: 0;
@@ -212,6 +223,34 @@ const badges = sources.filter((s) => s.status === 'supported');
   .hero__badge:hover .hero__badge-name {
     grid-template-columns: 1fr;
     opacity: 1;
+  }
+  /* The typed name ends on a blinking block caret — the same terminal idiom
+     as the h1's .cursor. It types out WITH the text (it lives inside the
+     clipped track) and blinks once open; the global reduced-motion clamp
+     freezes the blink to a steady bar. */
+  .hero__badge-name > span::after {
+    content: '▍';
+    margin-left: 0.08em;
+    animation: badge-caret 1.1s steps(1) infinite;
+  }
+  @keyframes badge-caret {
+    50% {
+      opacity: 0;
+    }
+  }
+  /* Pressed-key feedback: the hovered cell's tint + border deepen a notch —
+     the hardware "this key is down" read, no geometry change (no translate:
+     the strip must never move vertically — see the cursor-shimmer WHY above).
+     Hover-state contrast audited on rendered pixels across all 13 hues: day
+     26% worst 5.18:1 (grok code), night 42% worst 4.72:1 (grok name) — 46%
+     was rejected (grok code fell to 4.52). The e2e sweep gates REST state;
+     these deepened pairs sit above the same 4.5 floor by audit. */
+  .hero__badge:hover {
+    background: color-mix(in srgb, var(--badge) 26%, var(--surface));
+    border-color: color-mix(in srgb, var(--badge) 62%, var(--border-strong));
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease;
   }
   /* No per-component reduced-motion arm for the name track: global.css's
      universal RM clamp (`* { transition-duration: 0.001ms !important }`)
@@ -225,6 +264,13 @@ const badges = sources.filter((s) => s.status === 'supported');
     background: color-mix(in srgb, var(--badge) 34%, var(--screen));
     border-color: color-mix(in srgb, var(--badge) 60%, var(--chip-line));
     color: var(--chip-ink);
+  }
+  :root[data-theme='night'] .hero__badge:hover,
+  :root[data-theme='dracula'] .hero__badge:hover {
+    /* the pressed-key deepen, night flavor (the higher-specificity night base
+       would otherwise pin hover at the resting 34%) */
+    background: color-mix(in srgb, var(--badge) 42%, var(--screen));
+    border-color: color-mix(in srgb, var(--badge) 74%, var(--chip-line));
   }
   :root[data-theme='night'] .hero__badge-code,
   :root[data-theme='dracula'] .hero__badge-code {
