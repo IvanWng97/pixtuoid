@@ -148,17 +148,6 @@ import tabs from '../install.json';
 </script>
 
 <style>
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
   .install__box {
     max-width: 860px;
   }
@@ -231,10 +220,10 @@ import tabs from '../install.json';
       color 0.18s ease;
   }
   .install__copy:hover {
-    /* AA-capped coral (matches .btn-primary's #b5592f in global.css): raw
-       --coral under #fff is only ~3.1:1; #b5592f keeps the label ≥4.5:1. */
-    background: #b5592f;
-    border-color: #b5592f;
+    /* --coral-cta is the AA-capped coral (white label ≥4.5:1); raw --coral
+       under #fff is only ~3.1:1. Shared with .btn-primary. */
+    background: var(--coral-cta);
+    border-color: var(--coral-cta);
     color: #fff;
   }
   .install__note {

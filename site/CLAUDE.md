@@ -275,7 +275,9 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   that shared init for transient wasm-fetch resilience, but stays INSIDE the one
   `__pixWasm` promise — a per-consumer retry would reintroduce the very
   double-instantiate race above (the retry consts are pinned equal across the two
-  boot scripts by `config/wasm-init-consts.test.mjs`). Schema: `kind:"live"`
+  boot scripts by `config/wasm-init-consts.test.mjs`). On FINAL exhaustion the
+  promise is NULLED so a later-booting consumer re-attempts — safe because it only
+  clears a SETTLED (rejected) promise, never an in-flight one (#671). Schema: `kind:"live"`
   + `variantGroups` (per-group `retint`) + `poster` + `timeSlider` in `showcase.json`,
   resolved by `showcaseGroups` in `consts.ts`, validated by the `astro.config.mjs`
   showcase guard's live branch. Fallback (no-JS / no-wasm / reduced-motion): the
