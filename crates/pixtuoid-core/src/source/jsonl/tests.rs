@@ -116,6 +116,32 @@ fn pid_died_returns_its_ids_and_disarms_the_negative_vouch() {
 }
 
 #[test]
+fn fold_drops_a_pid_emptied_by_a_confirmed_exit_so_a_reused_pid_re_registers() {
+    let span = Duration::from_secs(60);
+    let mut ladder = ProbeLadder::new(span);
+    let t0 = Instant::now();
+    // "sess" is the SOLE id on pid 5 — registered once.
+    assert_eq!(
+        ladder.fold(&snap(&[("sess", 5)]), t0).newly_watched,
+        vec![5]
+    );
+    // Confirm its exit across the span: the confirm-unbind EMPTIES pid 5, which
+    // must be DROPPED (not left as a stale empty binding).
+    ladder.fold(&snap(&[]), t0);
+    assert_eq!(
+        ladder.fold(&snap(&[]), t0 + span).exits,
+        vec!["sess".to_string()]
+    );
+    // A later, unrelated id reusing pid 5 must RE-register with the exit watch —
+    // proving the emptied entry was dropped. A leaked `{5: {}}` would read as
+    // "not newly seen" and silently skip the instant-exit re-registration.
+    assert_eq!(
+        ladder.fold(&snap(&[("other", 5)]), t0 + span).newly_watched,
+        vec![5]
+    );
+}
+
+#[test]
 fn default_id_from_path_returns_normalized_path_key() {
     // Lowercase literal: identity on every platform (the Windows fold is
     // pinned by id.rs's normalize_path_key unit tests + the backslash
