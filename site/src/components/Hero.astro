@@ -108,8 +108,10 @@ const badges = sources.filter((s) => s.status === 'supported');
   }
   .hero__ghost:hover {
     /* brighten to --coral on hover — the shared link idiom (see Nav's coffee).
-       Over the office --coral dips below AA, but only in this transient hover
-       state; the resting halo-carried --fg is AA and is what the sweep gates. */
+       Over the office --coral dips below AA, but ONLY in this transient hover
+       state — the resting colour is the full --fg, kept legible over the office
+       by the chrome-halo (rest is the AA case, hover is the exception). Deliberate
+       trade-off (was #678's A3 underline); don't "re-fix" it back without that history. */
     color: var(--coral);
   }
   .hero__badges {

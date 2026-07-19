@@ -271,8 +271,10 @@ const { floating = false } = Astro.props;
     /* brighten to --coral on hover — the SAME muted→full nudge every sibling nav
        link uses (`.nav__links a:hover`), so the row shares one hover mechanism
        instead of the coffee link alone underlining. --coral dips below AA on the
-       cream day bar, but only in this transient hover state; the resting
-       --coral-deep is AA and is what the e2e sweep gates (rest colours only). */
+       cream day bar, but ONLY in this transient hover state — the resting
+       --coral-deep is AA-safe by design (global.css: ~5:1 on --paper, and light
+       on the night bar). Deliberate trade-off (was #678's A3 underline); don't
+       "re-fix" it back without reading that history. */
     color: var(--coral);
   }
   .nav__burger {
