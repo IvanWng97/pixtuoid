@@ -60,6 +60,14 @@ for (const c of showcase) {
   if (c.status === 'soon') continue;
   const demo = /** @param {string} f */ (f) =>
     existsSync(fileURLToPath(new URL(`./public/demos/${f}`, import.meta.url)));
+  // Channel-level variantsRef is RETIRED (#468 deleted its theme_<id>.png /
+  // weather_<id>.png stills). A stray one on ANY kind would resolve those dead
+  // stills → broken <img>s, so reject it before the per-kind checks — variant-set
+  // channels use inline `variants`, live channels use per-group variantGroups (audit C11).
+  if (c.variantsRef)
+    throw new Error(
+      `astro.config: showcase.json "${c.id}" has a channel-level variantsRef, retired in #468 — variant-set channels use inline "variants", live channels use variantGroups`
+    );
   if (c.kind === 'clip') {
     if (!c.asset)
       throw new Error(
@@ -77,15 +85,8 @@ for (const c of showcase) {
         `astro.config: showcase.json live clip "${c.id}" needs numeric "w"/"h" (intrinsic video dims, for CLS)`
       );
   } else if (c.kind === 'variant-set') {
-    // variantsRef synthesized theme_<id>.png / weather_<id>.png stills that were
-    // retired in #468 — a variant-set channel using it would build clean yet
-    // render broken <img>s (the old guard only string-checked the ref, never the
-    // resolved stills). Only `live` channels' variantGroups reference a manifest
-    // now; variant-set channels must supply inline `variants` (audit C11).
-    if (c.variantsRef)
-      throw new Error(
-        `astro.config: showcase.json variant-set "${c.id}" uses variantsRef, whose stills were retired in #468 — supply inline "variants" instead`
-      );
+    // (channel-level variantsRef already rejected above, audit C11 — variant-set
+    // channels supply inline `variants`.)
     if (!(c.variants && c.variants.length))
       throw new Error(`astro.config: showcase.json variant-set "${c.id}" has no "variants"`);
     for (const v of c.variants)

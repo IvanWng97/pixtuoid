@@ -70,6 +70,8 @@ import { asset } from '../consts';
     // pantry reveals would blank the whole FAQ. The CSS gates the pop on
     // `:not(.is-paused)`, so a paused (or not-yet-revealed) bubble rests at its
     // base opacity:1 — pause stops motion without ever hiding content (audit C9).
+    // (Trade-off: un-pausing after reveal restarts the pop — a brief replay, never
+    // a permanent hide; strictly better than the freeze-at-opacity:0 it replaces.)
     document.addEventListener('pix:paused', function (e) {
       scene.classList.toggle('is-paused', !!(e.detail && e.detail.paused));
     });

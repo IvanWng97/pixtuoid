@@ -9,7 +9,8 @@ const { channels, activeId } = Astro.props as {
 // enriched `c.variants` is [] and the variant-set arm would deref undefined.src
 // → TypeError at build. It renders from its poster instead (audit C8; this
 // component is the currently-unmounted MonitorWall fallback, so the drift was
-// inert, but it breaks the build the moment it's re-mounted).
+// inert, but it breaks the build the moment it's re-mounted). `c.poster` is
+// build-guaranteed for a live channel by the astro.config poster check (audit C14).
 const thumb = (c: EnrichedShowcaseChannel) =>
   c.kind === 'clip'
     ? `demos/${c.asset}-poster.png`
