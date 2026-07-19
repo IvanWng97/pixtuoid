@@ -5,10 +5,18 @@ const { channels, activeId } = Astro.props as {
   channels: EnrichedShowcaseChannel[];
   activeId: string;
 };
+// A `live` channel (vibing) carries variantGroups, not top-level variants, so
+// enriched `c.variants` is [] and the variant-set arm would deref undefined.src
+// → TypeError at build. It renders from its poster instead (audit C8; this
+// component is the currently-unmounted MonitorWall fallback, so the drift was
+// inert, but it breaks the build the moment it's re-mounted). `c.poster` is
+// build-guaranteed for a live channel by the astro.config poster check (audit C14).
 const thumb = (c: EnrichedShowcaseChannel) =>
   c.kind === 'clip'
     ? `demos/${c.asset}-poster.png`
-    : `demos/${(c.variants.find((v: ShowcaseVariant) => v.featured) ?? c.variants[0]).src}`;
+    : c.kind === 'live'
+      ? `demos/${c.poster}`
+      : `demos/${(c.variants.find((v: ShowcaseVariant) => v.featured) ?? c.variants[0]).src}`;
 ---
 
 <div class="wall" role="group" aria-label="Demos">

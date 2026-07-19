@@ -114,13 +114,16 @@ test('pantry FAQ: bubbles pop in sequence, join pix:paused, reduced-motion is st
   await expect
     .poll(() => first.evaluate((el) => getComputedStyle(el).opacity), { timeout: 10_000 })
     .toBe('1');
-  // bubbles are pix:paused CONSUMERS (spec §7: bubbles join the set)
+  // bubbles are pix:paused CONSUMERS (spec §7): pausing toggles .is-paused on the
+  // scene, which drops the pop animation so a bubble rests at its base opacity:1
+  // — never frozen at the backwards-fill opacity:0 (audit C9). (Was an inline
+  // animationPlayState toggle, which blanked a paused-before-reveal FAQ.)
   await page.evaluate(() =>
     document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }))
   );
-  await expect
-    .poll(() => first.evaluate((el) => (el as HTMLElement).style.animationPlayState))
-    .toBe('paused');
+  await expect(page.locator('.pantry__scene')).toHaveClass(/\bis-paused\b/);
+  await expect.poll(() => first.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
+  await expect(first).toBeVisible();
   // reduced-motion: static, no animation, fully visible
   const ctx = await browser.newContext({ reducedMotion: 'reduce' });
   const m = await ctx.newPage();

@@ -619,6 +619,7 @@ import { asset, DIM_RESTING } from '../consts';
     }
 
     function paint(nowMs) {
+      if (!img) return; // sizeBuffer bailed on a <1px viewport → no buffer to write (audit C17)
       office.step(nowMs, bufW, BUF_H);
       // Re-read ptr/len EVERY frame (resize reallocates; memory.grow
       // invalidates views) and copy into the reusable ImageData.
@@ -919,9 +920,12 @@ import { asset, DIM_RESTING } from '../consts';
         if ('audioSession' in navigator) navigator.audioSession.type = 'playback';
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       } catch (e) {
-        audioBooting = false;
-        audioUnavailable = true;
-        return; // no WebAudio → the ♩ simply does nothing
+        // WebAudio unavailable (Tor / hardened Firefox / enterprise lockdown):
+        // tear down AND HIDE the ♩ via the same path as the createBuffer failure.
+        // A bare flag-set left the button visible, so the click handler flipped
+        // it to a silent "playing" state and persisted AUDIO_PREF=1 (audit C5).
+        audioDisable();
+        return;
       }
       office.audio_begin();
       audioPumpWarmup();
@@ -944,6 +948,7 @@ import { asset, DIM_RESTING } from '../consts';
       audioBtn.addEventListener('click', function () {
         if (audioUnavailable) return; // WebAudio failed earlier — ♩ is a no-op
         if (!audioReady && !audioBooting) audioStart(); // first click: gesture-gated boot
+        if (audioUnavailable) return; // audioStart just failed (ctor threw) → don't flip to a silent "playing" (audit C5)
         setAudioPlaying(!audioPlaying);
       });
     }

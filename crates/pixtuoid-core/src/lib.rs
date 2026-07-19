@@ -10,7 +10,6 @@
 pub mod grid;
 pub mod id;
 pub mod platform;
-pub mod render;
 pub mod source;
 pub mod sprite;
 pub mod state;

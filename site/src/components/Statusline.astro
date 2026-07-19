@@ -17,6 +17,7 @@ import {
   FLOOR_SPY_ROOT_MARGIN,
   BOTTOM_CLAMP_EPSILON_PX,
   REPO,
+  asset,
 } from '../consts';
 import { GH_FETCH_TIMEOUT_MS } from '../../config/gh-stars.mjs';
 
@@ -207,7 +208,7 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
     }
     <a
       class="sl__copy"
-      href="#install"
+      href={doc ? `${asset('')}#install` : '#install'}
       data-sl-install-link
       aria-label="Jump to the install section"
     >
@@ -802,9 +803,12 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
     }
     if (installLink) {
       installLink.addEventListener('click', function (e) {
-        e.preventDefault();
         const sec = document.getElementById('install');
+        // Doc/404 pages have no #install here — DON'T preventDefault; let the
+        // href (now the cross-page `/#install`) carry the visitor to the index
+        // install section instead of eating the click and doing nothing (audit C7).
         if (!sec) return;
+        e.preventDefault();
         sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
         sec.setAttribute('tabindex', '-1');
         sec.focus({ preventScroll: true });

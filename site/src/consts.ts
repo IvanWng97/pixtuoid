@@ -164,8 +164,7 @@ export interface ShowcaseChannel {
   // config/vibing-parity.test.mjs.
   w?: number;
   h?: number;
-  variantsRef?: 'themes' | 'weather'; // variant-set backed by an existing manifest
-  variants?: ShowcaseVariant[]; // …or inline variants
+  variants?: ShowcaseVariant[]; // variant-set channels: INLINE variants (channel-level variantsRef was retired with the #468 stills; a live channel's manifest refs live on its variantGroups)
   retint?: boolean; // chips retint the page (themes only)
   variantGroups?: VariantGroup[]; // live channel: multiple independently-labeled chip groups
   timeSlider?: boolean; // live channel: exposes a time-of-day scrub control
@@ -182,8 +181,8 @@ export interface ShowcaseChannel {
 
 // Single source of truth for the Studio Wall → site/src/showcase.json.
 // themes.json / weather.json stay untouched (their README-sync + just gen-media
-// loops + Rust enum guard tests are unaffected); variant-set channels reference
-// them via variantsRef and resolve here.
+// loops + Rust enum guard tests are unaffected); a live channel's variantGroups
+// reference them via a per-group variantsRef and resolve in showcaseGroups.
 // The manifest's kind/status/default/asset invariants are enforced at build time by the showcase guard in astro.config.mjs.
 export const SHOWCASE: ShowcaseChannel[] = showcaseData as unknown as ShowcaseChannel[];
 
@@ -231,13 +230,11 @@ export interface EnrichedShowcaseChannel extends ShowcaseChannel {
   featureDesc: string; // joined features.json row's desc — the dial accordion body, and the caption fallback
 }
 
-// The manifest resolution a `variantsRef` maps to — the SINGLE place both
-// showcaseVariants (channel-level) and showcaseGroups (live-channel, one per
-// group) read THEMES/WEATHERS, so the two callers can never disagree on shape.
-// `src` below is dead weight for a live-channel consumer (showcaseGroups) —
-// ChannelStage's live-chip branch renders only id/name/accent and never reads
-// it (those theme_<id>.png/weather_<id>.png stills are gone, #468); it's kept
-// because variant-set channels' chip branch still `data-src`-swaps with it.
+// The manifest a live channel's per-group `variantsRef` maps to — showcaseGroups
+// is the ONLY caller (channel-level variantsRef was retired, #468). `src` below
+// is dead weight — ChannelStage's live-chip branch renders only id/name/accent
+// and never reads it (those theme_<id>.png/weather_<id>.png stills are gone) —
+// kept only so the ShowcaseVariant shape stays uniform.
 function variantsForRef(ref: 'themes' | 'weather'): ShowcaseVariant[] {
   if (ref === 'themes')
     return THEMES.map((t) => ({
@@ -258,13 +255,11 @@ function variantsForRef(ref: 'themes' | 'weather'): ShowcaseVariant[] {
 }
 
 export function showcaseVariants(c: ShowcaseChannel): ShowcaseVariant[] {
-  // A channel may carry a manifest-backed `variantsRef` AND extra inline
-  // `variants`, appended after it (variant-set channels only) — no current
-  // channel exercises the append, but the shape supports it.
-  const inline = c.variants ?? [];
-  if (c.variantsRef === 'themes' || c.variantsRef === 'weather')
-    return [...variantsForRef(c.variantsRef), ...inline];
-  return inline;
+  // variant-set channels supply INLINE variants only. Channel-level `variantsRef`
+  // resolved the theme_<id>.png/weather_<id>.png stills #468 deleted, so it was
+  // retired (the astro.config guard rejects a stray one); a live channel's
+  // manifest refs live on its variantGroups (showcaseGroups).
+  return c.variants ?? [];
 }
 
 export function showcaseGroups(c: ShowcaseChannel): EnrichedVariantGroup[] {

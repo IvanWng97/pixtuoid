@@ -2324,3 +2324,131 @@ test('proof split: narrow + reduced motion shows the tall poster, not a blank bo
   await expect.poll(() => tall.evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
   await context.close();
 });
+
+// ── Correctness-audit regressions ──────────────────────────────────────────
+// Each pins a fix from the whole-site correctness audit; all were UNTESTED and
+// several were dead-declaration cascade traps (a later/higher-specificity rule
+// silently swallowing an intended one). See the audit-fix PR body for C-ids.
+
+async function resolvedCoral(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--coral)';
+    document.body.appendChild(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return c;
+  });
+}
+
+test('audit C1: night theme does not repaint chrome anchors coral (a:not(.btn) is :where()-scoped)', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem('pix-booted', '1');
+    localStorage.setItem('pix-theme', 'night');
+  });
+  await page.goto('./');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
+  // Pre-fix the global `:root[data-theme='night'] a:not(.btn)` rule (0,3,1)
+  // outranked these anchors' own (0,2,0) colours → all rendered coral AT REST,
+  // breaking Hero's documented AA-at-rest-over-office invariant. Each must keep
+  // its own colour (hero ghost/nav logo = --fg; plaque = --chip-bright).
+  const coral = await resolvedCoral(page);
+  for (const sel of ['.hero__ghost', '.nav__logo', '.tools__plaque-link']) {
+    const color = await page
+      .locator(sel)
+      .first()
+      .evaluate((e) => getComputedStyle(e).color);
+    expect(color, `${sel} must not be the a:not(.btn) coral in night`).not.toBe(coral);
+  }
+});
+
+test('audit C1 (docs): the /config pager link is not coral in night', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pix-theme', 'night'));
+  await page.goto('/config/');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
+  const coral = await resolvedCoral(page);
+  const color = await page
+    .locator('.docs__pager-link')
+    .first()
+    .evaluate((e) => getComputedStyle(e).color);
+  expect(color).not.toBe(coral);
+});
+
+test('audit C3/C4: tools board How column is un-dimmed (opacity 1) and OS cells centre', async ({
+  page,
+}) => {
+  await gotoLive(page);
+  const how = await page
+    .locator('.tools__board td.tools__how')
+    .first()
+    .evaluate((e) => getComputedStyle(e).opacity);
+  expect(how, 'tools__how must be opacity 1 on the board, not the base 0.7 (audit C3)').toBe('1');
+  const align = await page
+    .locator('.tools__cell')
+    .first()
+    .evaluate((e) => getComputedStyle(e).textAlign);
+  expect(align, 'tools__cell must centre its LED (audit C4)').toBe('center');
+});
+
+test('audit C9: pausing the office before the pantry reveals keeps the FAQ visible', async ({
+  page,
+}) => {
+  await gotoLive(page);
+  // pause while the pantry is off-screen, THEN reveal it — the pre-fix inline
+  // animationPlayState froze the pop at its opacity:0 backwards-fill → blank FAQ.
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }))
+  );
+  await page.evaluate(() =>
+    document
+      .querySelector('.pantry__scene')!
+      .scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  const bubble = page.locator('.pantry__bubble').first();
+  await expect(bubble).toBeVisible();
+  await expect
+    .poll(() => bubble.evaluate((e) => parseFloat(getComputedStyle(e).opacity)))
+    .toBeGreaterThan(0.5);
+});
+
+test('audit C7: the doc-page install chip links cross-page, not a dead same-page fragment', async ({
+  page,
+}) => {
+  await page.goto('/config/');
+  const href = await page.locator('[data-sl-install-link]').first().getAttribute('href');
+  // on a doc page there is no local #install — the chip must carry a cross-page
+  // href to the index install section, not the inert same-page '#install'.
+  expect(href).not.toBe('#install');
+  expect(href).toContain('#install');
+});
+
+test('audit C5: ♩ hides and never persists a silent "playing" when the AudioContext constructor throws', async ({
+  page,
+}) => {
+  // WebAudio disabled (Tor / hardened Firefox / enterprise) → `new AudioContext()`
+  // THROWS. Headless Chromium's ctor SUCCEEDS (only createBuffer throws, which the
+  // existing ♩ test covers), so force the ctor-throw path directly. Pre-fix the
+  // ctor-catch only set a flag, leaving the ♩ visible for the click to flip to a
+  // silent "playing" state and persist pix:audio=1 — stuck-silent every visit.
+  const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    const Throwing = function () {
+      throw new Error('WebAudio disabled');
+    } as unknown as typeof AudioContext;
+    window.AudioContext = Throwing;
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext =
+      Throwing;
+  });
+  await gotoLive(page);
+  const btn = page.locator('#office-audio');
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  await btn.click();
+  // audioDisable(): hides the button, stays not-pressed, and the choice is NEVER
+  // persisted as playing (so a later visit's restore path can't re-flip it silent-on).
+  await expect(btn).toBeHidden();
+  await expect(btn).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(() => localStorage.getItem('pix:audio'))).not.toBe('1');
+  expect(errors()).toEqual([]); // caught, not an uncaught page error
+});

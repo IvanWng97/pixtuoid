@@ -101,9 +101,8 @@ cargo run --release --example snapshot -- /tmp/snap.png # render TUI to PNG
 ./target/release/pixtuoid run --headless --projects-root ~/.claude/projects  # live vs real CC
 ```
 
-The `test-renderer` feature is needed by `e2e.rs`; every `just` recipe
-injects it — prefer `just test` over raw `cargo test`. While iterating,
-scope to one crate (seconds vs a full-workspace run).
+Prefer `just test` (nextest if installed) over raw `cargo test`. While
+iterating, scope to one crate (seconds vs a full-workspace run).
 
 > **Don't chain `cargo clippy && cargo test`** — they use separate build
 > caches and recompile the workspace twice. Run `just preflight` (lint →

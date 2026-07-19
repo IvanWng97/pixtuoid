@@ -63,14 +63,17 @@ import { asset } from '../consts';
   // (consumer only; #office-pause stays the one dispatcher). Reduced motion
   // never animates (CSS-gated below), so there's nothing to pause there.
   (function () {
-    const chat = document.querySelector('[data-pantry-chat]');
-    if (!chat) return;
-    const animated = chat.querySelectorAll('.pantry__bubble, .pantry__cite');
+    const scene = document.querySelector('.pantry__scene');
+    if (!scene) return;
+    // Toggle a class, NOT inline animationPlayState: freezing the pop at t=0
+    // paints its backwards-fill from-keyframe (opacity:0), so pausing BEFORE the
+    // pantry reveals would blank the whole FAQ. The CSS gates the pop on
+    // `:not(.is-paused)`, so a paused (or not-yet-revealed) bubble rests at its
+    // base opacity:1 — pause stops motion without ever hiding content (audit C9).
+    // (Trade-off: un-pausing after reveal restarts the pop — a brief replay, never
+    // a permanent hide; strictly better than the freeze-at-opacity:0 it replaces.)
     document.addEventListener('pix:paused', function (e) {
-      const paused = !!(e.detail && e.detail.paused);
-      animated.forEach(function (b) {
-        b.style.animationPlayState = paused ? 'paused' : 'running';
-      });
+      scene.classList.toggle('is-paused', !!(e.detail && e.detail.paused));
     });
   })();
 </script>
@@ -147,8 +150,11 @@ import { asset } from '../consts';
      pre-delay opacity 0 without leaving a permanently-hidden element behind
      (the animation ends back at the base style, which is already opacity 1). */
   @media (prefers-reduced-motion: no-preference) {
-    .pantry__scene.in .pantry__bubble,
-    .pantry__scene.in .pantry__cite {
+    /* :not(.is-paused) — the office-pause consumer toggles .is-paused on the
+       scene; without the animation the bubble rests at base opacity:1 (visible)
+       rather than the backwards-fill's opacity:0 (audit C9). */
+    .pantry__scene.in:not(.is-paused) .pantry__bubble,
+    .pantry__scene.in:not(.is-paused) .pantry__cite {
       animation: pantry-pop 0.3s ease backwards;
       animation-delay: calc(var(--turn) * 1.6s + 0.3s);
     }

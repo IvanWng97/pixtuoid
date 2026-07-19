@@ -250,8 +250,15 @@ a {
   text-underline-offset: 2px;
 }
 /* :not(.btn) keeps this repaint off button-anchors — unscoped it outranks
-   .btn-primary's white label and rendered the CTA coral-on-coral. */
-:root[data-theme='night'] a:not(.btn) {
+   .btn-primary's white label and rendered the CTA coral-on-coral. The theme
+   selector is wrapped in :where() so this night shift carries ZERO extra
+   specificity — the whole selector is (0,1,1). It recolors bare content links
+   (base `a`, (0,0,1)) but must NOT outrank a component's own (0,2,0)+ anchor
+   colour (hero ghost, nav logo, docs pager, plaque) — the old (0,3,1) form
+   flipped those coral AT REST in night only, breaking Hero's documented
+   AA-at-rest-over-office invariant and killing the docs-pager night hover cue
+   (audit C1; day/dracula were already correct). */
+:where(:root[data-theme='night']) a:not(.btn) {
   color: var(--coral);
 }
 

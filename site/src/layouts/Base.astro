@@ -48,7 +48,7 @@ const ogImage = new URL(asset('demos/hero-poster.png'), SITE).href;
 // Per-page canonical/og:url — Astro.url.pathname includes the configured base in
 // the static build, so /config no longer self-declares the homepage as canonical.
 const canonical = new URL(Astro.url.pathname, SITE).href;
-const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
+const version = __PIXTUOID_VERSION__; // the latest release TAG (Cargo.toml is only the tag-less fallback — config/released-version.mjs)
 
 // Escape `<` so no string value can break out of the <script> block (a `</script`
 // or `<!--` in serialized JSON would otherwise close it). Defense-in-depth: every

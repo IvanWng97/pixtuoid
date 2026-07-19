@@ -25,6 +25,53 @@ fn snap(pairs: &[(&str, i32)]) -> ProbeSnapshot {
     }
 }
 
+// ---- the producer-side fd-probe seam (ProbeSnapshot::bind_pid / from_open_fd_pairs) ----
+
+#[test]
+fn bind_pid_keeps_the_larger_pid_in_both_orders() {
+    // Two live processes holding one file (a resume overlap) resolve to the
+    // deterministic #252 winner — larger pid — regardless of bind order.
+    for pids in [[100, 200], [200, 100]] {
+        let mut s = ProbeSnapshot::default();
+        for pid in pids {
+            s.bind_pid("sess".to_string(), pid);
+        }
+        assert_eq!(
+            s.pid_of.get("sess"),
+            Some(&200),
+            "larger pid wins ({pids:?})"
+        );
+    }
+}
+
+#[test]
+fn from_open_fd_pairs_filters_under_root_then_applies_accept() {
+    // The shared producer-side join: keep only under-root, accepted paths,
+    // bound to the owning pid. `accept` here is a trivial "any .jsonl, id =
+    // file stem" so the test pins the MECHANICS (under-root filter + #252
+    // bind), not any source's format.
+    let root = std::path::Path::new("/root");
+    let accept = |p: &std::path::Path| {
+        (p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
+            .then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
+    };
+    let pairs = [
+        (7, std::path::PathBuf::from("/root/a/keep.jsonl")), // under root, accepted
+        (9, std::path::PathBuf::from("/elsewhere/keep.jsonl")), // outside root
+        (11, std::path::PathBuf::from("/root/a/skip.txt")),  // under root, rejected
+    ];
+    let got = ProbeSnapshot::from_open_fd_pairs(root, pairs.into_iter(), accept);
+    assert_eq!(
+        got.ids().cloned().collect::<Vec<_>>(),
+        vec!["keep".to_string()]
+    );
+    assert_eq!(
+        got.pid_of.get("keep"),
+        Some(&7),
+        "only the under-root .jsonl vouches, bound to its pid"
+    );
+}
+
 #[test]
 fn fold_confirms_an_exit_only_after_a_sustained_miss() {
     let span = Duration::from_secs(60);

@@ -15,8 +15,6 @@
 # single-sourced cross-platform (CI never writes inline commands).
 set windows-shell := ["bash", "-cu"]
 
-features := "pixtuoid-core/test-renderer"
-
 # List available recipes.
 default:
     @just --list
@@ -72,7 +70,7 @@ links:
 # Clippy across the workspace, warnings denied.
 [group('rust')]
 clippy:
-    cargo clippy --workspace --all-targets --features {{ features }} -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # Unused-dependency check.
 [group('rust')]
@@ -148,13 +146,13 @@ test *args:
     #!/usr/bin/env bash
     set -euo pipefail
     if command -v cargo-nextest &>/dev/null; then
-        cargo nextest run --workspace --features {{ features }} {{ args }}
+        cargo nextest run --workspace {{ args }}
     else
-        cargo test --workspace --features {{ features }} {{ args }}
+        cargo test --workspace {{ args }}
     fi
 
 # Feature-combination check — every feature subset must compile. Catches code
-# that silently only builds with `test-renderer` on (CI runs with it always on).
+# that silently only builds with `native` on (the wasm core builds without it).
 [group('rust')]
 [doc('Feature-powerset check — every feature subset must compile')]
 hack:
@@ -167,7 +165,7 @@ hack:
 [group('rust')]
 [doc('Cross-lint the workspace for x86_64-pc-windows-msvc via clippy (no linking; ubuntu runner suffices)')]
 check-windows:
-    cargo clippy --workspace --all-targets --features {{ features }} --target x86_64-pc-windows-msvc -- -D warnings
+    cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 
 # Verify the workspace builds on the DECLARED MSRV (rust-version in Cargo.toml).
 # Catches a dep bump (or newer stdlib use) that silently raises the floor past
@@ -205,7 +203,7 @@ semver:
 [group('rust')]
 [doc('Coverage + JUnit XML — the exact command ci.yml runs (needs llvm-cov + nextest)')]
 coverage:
-    cargo llvm-cov nextest --workspace --features {{ features }} --lcov --output-path lcov.info --profile ci
+    cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci
 
 # Snapshot hygiene (cargo-insta): runs the suite under nextest and FAILS on a
 # pending (un-accepted `.snap.new`) OR unreferenced (orphan `.snap` — e.g. a
@@ -217,7 +215,7 @@ coverage:
 [group('rust')]
 [doc('Snapshot hygiene (cargo-insta): fail on pending OR orphan snapshots — CI-only')]
 snapshots:
-    cargo insta test --check --unreferenced=reject --test-runner nextest --workspace --features {{ features }}
+    cargo insta test --check --unreferenced=reject --test-runner nextest --workspace
 
 # Mutation testing (cargo-mutants): inject bugs into the CHANGED lines and check
 # the tests catch them — the "do your assertions have TEETH?" dimension that
@@ -244,7 +242,7 @@ mutants *args:
         echo "error: no Rust changes vs $base — no mutants to test. Run from a feature branch with .rs changes, or set MUTANTS_BASE." >&2
         exit 1
     fi
-    cargo mutants --in-diff target/mutants.diff --features {{ features }} {{ args }}
+    cargo mutants --in-diff target/mutants.diff {{ args }}
 
 # Never-panic fuzz the per-source decoders over a JSONL corpus DIR (on-demand;
 # not in preflight/CI — points at local or public real sessions, not committed

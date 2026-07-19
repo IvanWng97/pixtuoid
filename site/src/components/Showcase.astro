@@ -555,7 +555,11 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
           img.alt = c.dataset.alt;
           if (title) title.textContent = c.dataset.title;
           if (c.dataset.accent) st.style.setProperty('--accent', c.dataset.accent);
-          if (st.dataset.retint) retintPage(c.dataset.accent, c.dataset.accent2);
+          // also guard on c.dataset.accent (like the VIBING handler) so an
+          // accent-less chip never stamps the string "undefined" onto --coral
+          // and invalidates every var(--coral) on the page (audit C13).
+          if (st.dataset.retint && c.dataset.accent)
+            retintPage(c.dataset.accent, c.dataset.accent2);
           st.classList.remove('retint-pulse');
           void st.offsetWidth;
           st.classList.add('retint-pulse');
@@ -584,7 +588,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     function fromHash() {
       const h = location.hash;
       const id = h.indexOf('#showcase-') === 0 ? h.slice('#showcase-'.length) : null;
-      if (!id) return;
+      // channel ids are plain slugs; reject anything else so a crafted hash
+      // (e.g. `#showcase-a"]`) can't build an invalid selector — querySelector
+      // would throw a SyntaxError that also skips the listener wiring (audit C12).
+      if (!id || !/^[\w-]+$/.test(id)) return;
       const exists = studio.querySelector('[data-stage="' + id + '"]');
       if (!exists) return;
       tune(id, true);
@@ -593,8 +600,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       const sec = document.getElementById('showcase');
       if (sec) sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
     }
-    fromHash();
+    // wire the listener BEFORE the initial call so a throw in fromHash can never
+    // leave hashchange unbound (defensive; audit C12).
     window.addEventListener('hashchange', fromHash);
+    fromHash();
   })();
 </script>
 
@@ -620,13 +629,6 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   .dial__ch {
     text-align: left;
   }
-  @media (pointer: coarse) {
-    /* lift the row pitch toward the 44px thumb target — 0.55rem left adjacent
-       demos ~41px centre-to-centre (mis-tap range). */
-    .dial__ch {
-      padding-block: 0.7rem;
-    }
-  }
   .dial__ch {
     background: none;
     border: 0;
@@ -638,6 +640,15 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     color: var(--office-ink);
     cursor: pointer;
     transition: color 0.18s ease;
+  }
+  @media (pointer: coarse) {
+    /* lift the row pitch toward the 44px thumb target (~41px centre-to-centre,
+       mis-tap range). MUST sit AFTER the base `padding: .3rem .2rem` shorthand
+       above — equal specificity, so source order decides; placed before it the
+       shorthand's padding-block clobbered this even on touch (audit C2). */
+    .dial__ch {
+      padding-block: 0.7rem;
+    }
   }
   .dial__ch:hover,
   .dial__ch:focus-visible {
