@@ -18,10 +18,12 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 const dist = process.argv[2] ?? 'dist';
-// Real doc bodies are 8k–19k chars of stripped text; a collapsed render is ~4. A
+// Real doc bodies are ~8k–18k chars of stripped text; a collapsed render is ~4. A
 // generous floor flags the failure class without coupling to any page's real size.
 const MIN_BODY_CHARS = 500;
-const DOC_ARTICLE = /<article class="prose"[^>]*>([\s\S]*?)<\/article>/;
+// \bprose\b (not a sole-class match) so a future `class="prose max-w-none"` or an
+// appended Astro scoped class doesn't drop the article → redden every deploy.
+const DOC_ARTICLE = /<article class="[^"]*\bprose\b[^"]*"[^>]*>([\s\S]*?)<\/article>/;
 
 const failures = [];
 let docPages = 0;

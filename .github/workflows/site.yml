@@ -66,6 +66,9 @@ jobs:
       - run: npm run build
         env:
           GH_STARS_OVERRIDE: 842
+      # the empty-render guard runs in the PR-gating CI too — not only `verify` /
+      # the deploy — so a collapsed doc render is caught pre-merge (#680).
+      - run: npm run check:docs
       # e2e smoke suite vs the PRODUCTION build just produced (astro preview,
       # the official Astro testing posture): pins the page's runtime contracts
       # — wasm office goes live, statusline truth-light, digit-key scrollspy,

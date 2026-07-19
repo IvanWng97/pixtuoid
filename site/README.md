@@ -35,7 +35,7 @@ fails loud on a squatted port by design.
 ## Quality gates
 
 ```sh
-npm run verify     # format:check → lint → astro check → knip → build  (== site CI)
+npm run verify     # format:check → lint → check → knip → test:unit → build → check:docs
 # individually:
 npm run format     # prettier --write .
 npm run lint       # eslint .

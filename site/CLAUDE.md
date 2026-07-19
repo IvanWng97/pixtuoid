@@ -42,7 +42,15 @@ path filters, and the doc itself (the `KNOWLEDGE-BASE → KNOWLEDGE-ENGINEERING`
 rename is the worked example: the *route slug* `/knowledge-base` was kept to
 avoid link rot while the file + display name changed). `ARCHITECTURE.md`'s
 Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
-**why CI installs Chromium**; break the Mermaid syntax and `astro build` fails.
+**why CI installs Chromium**; break the Mermaid *syntax* and `astro build` fails —
+but a Chromium/Playwright *version* mismatch fails DIFFERENTLY: `rehype-mermaid`
+collapses the whole `<Content />` to an empty `<article>` WITHOUT erroring the
+build, so it can silently ship an empty `/architecture` (the deploy's
+`withastro/action` fell back to pnpm → a Playwright unmatched to the installed
+Chromium; #680 pins `package-manager: npm`). Guarded by
+`config/assert-docs-rendered.mjs` (`check:docs`) — run in `verify`/site-check AND
+the deploy's `build-cmd`, asserting every doc page's `<article>` has a body +
+`/architecture` kept its `<svg>` — so a collapsed render reddens, never deploys.
 
 **wb-5 (Lobby + Docs):** the five doc routes now mount the Statusline **doc
 variant** (index-only organs — floor lift, PR feed, env readouts, keys hint —
