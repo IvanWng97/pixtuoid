@@ -258,7 +258,10 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
   .tools tbody th a:hover {
     opacity: 0.8;
   }
-  .tools__cell {
+  /* td-qualified (0,2,1) so `text-align: center` beats the base `.tools td
+     { text-align: left }` (0,1,1) — bare `.tools__cell` (0,1,0) lost the type
+     selector and the LED discs hugged the left of each OS column (audit C4). */
+  .tools td.tools__cell {
     text-align: center;
     font-size: 1.05rem;
   }
@@ -288,7 +291,11 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     /* the neon: the app's real per-CLI hue, glowing on the dark screen */
     text-shadow: 0 0 8px color-mix(in srgb, var(--badge, var(--led)) 55%, transparent);
   }
-  .tools__board td.tools__how {
+  /* `.tools ` prefix lifts this to (0,3,1) so `opacity: 1` beats the base
+     `.tools td.tools__how { opacity: .7 }` below (both were (0,2,1); the base
+     came later and won on order → the board's How column rendered double-dimmed
+     chip-dim×0.7 ≈ sub-AA) (audit C3). */
+  .tools .tools__board td.tools__how {
     color: var(--chip-dim);
     opacity: 1;
   }
