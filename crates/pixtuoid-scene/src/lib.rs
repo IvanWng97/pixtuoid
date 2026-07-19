@@ -36,6 +36,10 @@ pub mod chitchat;
 pub(crate) mod creatures;
 pub mod embedded_pack;
 pub mod floor;
+// The status-footer MODEL the two in-workspace painters consume — their shared
+// single source of truth (like board/overlay), not a stable engine API.
+#[doc(hidden)]
+pub mod footer;
 // Per-agent recolored-sprite cache owned by each painter's `FloorCtx` — an
 // in-workspace render internal, not a stable engine API.
 #[doc(hidden)]

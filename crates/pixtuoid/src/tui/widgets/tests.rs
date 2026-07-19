@@ -125,6 +125,28 @@ fn display_width_counts_terminal_columns_not_chars() {
     assert_eq!(display_width("a\u{0301}"), 1);
 }
 
+// STEP-1 PIN (footer→scene migration): `pixtuoid_scene::footer::build_footer`
+// measures column width via `chars().count()` (no `unicode-width` dep — the
+// `board` discipline keeps `scene` window/terminal-free). That is byte-identical
+// to this binary's `display_width` ONLY while every footer glyph is single-column.
+// This pins the ENTIRE footer vocabulary (incl. ⬢ ▲ ♩ ⚠ … — the ambiguous ones
+// the older test above omitted); a future non-single-column glyph fails HERE,
+// loudly, before it can silently shift the right-flush pad by a column and redden
+// a snapshot / gen-check pixel diff.
+#[test]
+fn footer_vocabulary_is_single_column_so_scene_chars_count_matches_display_width() {
+    let vocab = "\u{b7}\u{d7}\u{2191}\u{2193}\u{25cf}\u{25d0}\u{25cb}\u{25cc}\u{2b22}\u{25b2}\u{2669}\u{26a0}\u{2026}";
+    for c in vocab.chars() {
+        let s = c.to_string();
+        assert_eq!(
+            display_width(&s),
+            s.chars().count(),
+            "footer glyph U+{:04X} {c:?} must be single-column, else scene's chars().count() drifts from display_width",
+            c as u32,
+        );
+    }
+}
+
 #[test]
 fn state_count_maps_each_kind() {
     let c = StateCounts {
