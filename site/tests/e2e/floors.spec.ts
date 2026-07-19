@@ -304,7 +304,7 @@ test('elevator shaft: the ding pulse joins the pix:paused set', async ({ page })
   ).toBe(false);
 });
 
-test('scroll budget: the page fits ~8.75 viewport-heights at 1440×900', async ({ browser }) => {
+test('scroll budget: the page fits ~8.9 viewport-heights at 1440×900', async ({ browser }) => {
   // The spec's original compression target (§4) was 6.5vh — a plan-authoring
   // proxy that turned out to bake in assumptions three LOCKED design
   // decisions invalidate: hold #1 stays full-viewport, the hero stays
@@ -352,12 +352,23 @@ test('scroll budget: the page fits ~8.75 viewport-heights at 1440×900', async (
   // measured value plus ~0.11vh of headroom, the same order as Task 7's
   // margin; the pin keeps catching section ballooning while scaling with
   // the source roster it deliberately tracks.
+  //
+  // The kimi source (13th supported CLI, PR #692) is the same class: one
+  // more tools-table row + one more hero badge chip. CI measured 8.812vh
+  // after the row landed (was 8.637 at 12 — ~0.175vh, consistent with
+  // grok's per-source delta). 8.9 = that measured value plus ~0.09vh of
+  // headroom, the same order as the last two bumps. This is the pin's THIRD
+  // roster-driven bump — the hero badge row's height is O(sources), so the
+  // treadmill is structural; the planned fix is an O(1) hero badge layout
+  // (featured chips + code strip) plus a roster-aware budget
+  // (BASE + N*PER_SOURCE, N from sources.json), after which this constant
+  // stops tracking the roster entirely.
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   await page.waitForLoadState('networkidle');
   const vh = await page.evaluate(() => document.documentElement.scrollHeight / window.innerHeight);
-  expect(vh).toBeLessThanOrEqual(8.75);
+  expect(vh).toBeLessThanOrEqual(8.9);
   await ctx.close();
 });
