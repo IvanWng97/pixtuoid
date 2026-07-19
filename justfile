@@ -381,7 +381,7 @@ site-e2e:
 # Regenerate everything: README sections + docs images + site demos.
 [group('gen')]
 [doc('Regenerate ALL committed artifacts (README sections + docs images + site demos)')]
-gen: gen-readme gen-media gen-icons
+gen: gen-icons gen-media gen-readme
 
 # Sync the README's install/features/tools sections from site/src/*.json.
 [group('gen')]

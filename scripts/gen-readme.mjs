@@ -97,11 +97,15 @@ function regenSection(label, start, end, body) {
 // — so the column reserves real space and the art renders 1:1: crisp, undistorted,
 // sized by README_SCALE in gen-pix-icons.py (bump that const to resize).
 const pixDims = (pix) => {
-  const b = readFileSync(join(root, 'docs', 'images', 'pix-icons', `${pix}.png`));
-  return `width="${b.readUInt32BE(16)}" height="${b.readUInt32BE(20)}"`;
+  // A missing PNG is already recorded by the existsSync guard above (which exits
+  // with a clean, actionable message); don't pre-empt it with a raw ENOENT here.
+  const p = join(root, 'docs', 'images', 'pix-icons', `${pix}.png`);
+  if (!existsSync(p)) return '';
+  const b = readFileSync(p);
+  return ` width="${b.readUInt32BE(16)}" height="${b.readUInt32BE(20)}"`;
 };
 const iconCell = (f) =>
-  f.pix ? `<img src="docs/images/pix-icons/${cell(f.pix)}.png" alt="" ${pixDims(f.pix)}>` : cell(f.icon);
+  f.pix ? `<img src="docs/images/pix-icons/${cell(f.pix)}.png" alt=""${pixDims(f.pix)}>` : cell(f.icon);
 const featureRows = features
   .filter((f) => f.featured !== false)
   .map((f) => `| ${iconCell(f)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
