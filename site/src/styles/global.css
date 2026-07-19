@@ -348,7 +348,13 @@ h3 {
 }
 
 /* blinking block cursor */
-.cursor {
+/* THE blinking-caret idiom — one declaration block, two consumers: the h1's
+   .cursor span and the hero badge strip's typed-name caret (a ::after that
+   can't carry the class attribute, hence the selector list — the caret is
+   ALWAYS a styled box, never a text glyph: glyph fallback metrics caused the
+   Safari badge jitter). A metrics/color tweak here moves BOTH carets. */
+.cursor,
+.hero__badge-name > span::after {
   display: inline-block;
   width: 0.55ch;
   height: 0.92em;
@@ -356,6 +362,9 @@ h3 {
   transform: translateY(0.08em);
   background: var(--coral);
   animation: blink 1.05s steps(1) infinite;
+}
+.hero__badge-name > span::after {
+  content: '';
 }
 @keyframes blink {
   50% {
@@ -717,6 +726,7 @@ code {
     transform: none;
   }
   .cursor,
+  .hero__badge-name > span::after,
   .hl {
     animation: none;
   }
