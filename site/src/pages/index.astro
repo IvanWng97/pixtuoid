@@ -17,8 +17,8 @@ import { asset, REPO, CRATES, floorById, floorName, SITE_ORIGIN } from '../const
 const amenities = floorById('amenities');
 
 // Homepage structured data: a free cross-platform developer tool. Search
-// engines use this for a rich result; the version is single-sourced from the
-// workspace Cargo.toml at build (same define as everywhere else).
+// engines use this for a rich result; the version is the latest release TAG
+// (Cargo.toml is the tag-less fallback), same __PIXTUOID_VERSION__ define as everywhere else.
 const SITE = Astro.site ?? new URL(SITE_ORIGIN);
 const softwareJsonLd = {
   '@context': 'https://schema.org',

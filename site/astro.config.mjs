@@ -77,26 +77,32 @@ for (const c of showcase) {
         `astro.config: showcase.json live clip "${c.id}" needs numeric "w"/"h" (intrinsic video dims, for CLS)`
       );
   } else if (c.kind === 'variant-set') {
-    if (c.variantsRef) {
-      if (c.variantsRef !== 'themes' && c.variantsRef !== 'weather')
-        throw new Error(
-          `astro.config: showcase.json "${c.id}" has unknown variantsRef "${c.variantsRef}" (expected "themes" or "weather")`
-        );
-    } else if (!(c.variants && c.variants.length)) {
+    // variantsRef synthesized theme_<id>.png / weather_<id>.png stills that were
+    // retired in #468 — a variant-set channel using it would build clean yet
+    // render broken <img>s (the old guard only string-checked the ref, never the
+    // resolved stills). Only `live` channels' variantGroups reference a manifest
+    // now; variant-set channels must supply inline `variants` (audit C11).
+    if (c.variantsRef)
       throw new Error(
-        `astro.config: showcase.json variant-set "${c.id}" has neither variantsRef nor variants`
+        `astro.config: showcase.json variant-set "${c.id}" uses variantsRef, whose stills were retired in #468 — supply inline "variants" instead`
       );
-    }
-    for (const v of c.variants ?? [])
+    if (!(c.variants && c.variants.length))
+      throw new Error(`astro.config: showcase.json variant-set "${c.id}" has no "variants"`);
+    for (const v of c.variants)
       if (!demo(v.src))
         throw new Error(
           `astro.config: showcase.json "${c.id}" variant "${v.id}" missing public/demos/${v.src}`
         );
   } else if (c.kind === 'live') {
     // A `live` channel is rendered by the wasm office canvas, not static demo
-    // assets — no asset/w/h required. Only the fallback poster (used when wasm
-    // never loads) and each chip group's manifest ref need validating.
-    if (c.poster && !demo(c.poster))
+    // assets — no asset/w/h required. The fallback poster IS required (it's the
+    // no-JS/no-wasm/reduced-motion image); the old guard only validated it when
+    // present, so a live channel omitting it shipped a blank stage (audit C14).
+    if (!c.poster)
+      throw new Error(
+        `astro.config: showcase.json live channel "${c.id}" needs a "poster" — the no-JS/no-wasm/reduced-motion fallback image`
+      );
+    if (!demo(c.poster))
       throw new Error(
         `astro.config: showcase.json live channel "${c.id}" missing public/demos/${c.poster}`
       );
