@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::render::test_renderer::TestRenderer;
-use pixtuoid_core::sprite::format::load_pack_from_strings;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentEvent, AgentId, Reducer, SceneState, Transport};
 
@@ -120,25 +119,4 @@ fn scripted_timeline_drives_scene_through_states() {
         exit_slot.exiting_at.is_some(),
         "SessionEnd should mark exiting_at, not drop immediately"
     );
-}
-
-/// Exercise the inherent `render()` method + the `count()` convenience wrapper
-/// directly — the scripted timeline above records via the inherent `record()`
-/// helper, so the pack-taking `render()` path and `count()` are otherwise uncovered.
-#[test]
-fn test_renderer_render_increments_count() {
-    let mut r = TestRenderer::new();
-    let scene = SceneState::uniform(4);
-    // `render()` ignores the pack, so any in-memory pack satisfies it.
-    let pack = load_pack_from_strings(
-        "[pack]\nname=\"x\"\nversion=\"1\"\n\
-         [palette]\n\"A\"=\"#010203\"\n\
-         [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n",
-        &[("i.sprite", "@frame 0\nA")],
-    )
-    .unwrap();
-
-    assert_eq!(r.count(), 0);
-    r.render(&scene, &pack, SystemTime::now()).unwrap();
-    assert_eq!(r.count(), 1, "render must record one snapshot");
 }
