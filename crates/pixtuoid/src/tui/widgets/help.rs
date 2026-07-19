@@ -3,9 +3,8 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
 
-use super::{borderless_panel, centered_in, to_color};
+use super::{paint_panel, to_color, Overflow};
 use pixtuoid_scene::theme::Theme;
 
 const SHORTCUTS: &[(&str, &str)] = &[
@@ -34,19 +33,11 @@ const SHORTCUTS: &[(&str, &str)] = &[
 ];
 
 pub(crate) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rect, theme: &Theme) {
-    // Borderless: a title row + 1 lead-blank + the shortcut rows (no top/bottom
-    // border). Title is drawn by `borderless_panel`; content fills below it.
-    let area = centered_in(
-        bounds,
-        36 + 2 * super::PANEL_PAD_X,
-        SHORTCUTS.len() as u16 + 2 + 2 * super::PANEL_PAD_Y,
-    );
-    if area.width < 4 || area.height < 3 {
-        return;
-    }
-    let inner = borderless_panel(f, area, Some("? Keyboard"), theme);
-
-    let mut lines: Vec<Line> = Vec::with_capacity(SHORTCUTS.len() + 1);
+    /// Content width: the 13-col key column + the widest description.
+    const HELP_W: u16 = 36;
+    // A lead-blank then one row per shortcut. `paint_panel` adds the title + pad,
+    // auto-heights to the actual rows, and windows-with-cue on a short terminal.
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(SHORTCUTS.len() + 1);
     lines.push(Line::from(""));
     for (key, desc) in SHORTCUTS {
         lines.push(Line::from(vec![
@@ -63,7 +54,18 @@ pub(crate) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rect, theme
             ),
         ]));
     }
-    f.render_widget(Paragraph::new(lines), inner);
+    paint_panel(
+        f,
+        theme,
+        Some("? Keyboard"),
+        bounds,
+        HELP_W,
+        1.0,
+        vec![],
+        lines,
+        vec![],
+        Overflow::CueOnly,
+    );
 }
 
 #[cfg(test)]
@@ -85,8 +87,8 @@ mod tests {
 
     #[test]
     fn help_overlay_renders_without_panic_across_sizes() {
-        // (2,2): centered_in clamps the area to 2×2, tripping the width<4
-        // early return — must still render Clear-less without panic.
+        // (2,2): PanelGeometry::compute (via paint_panel) guards away below 4×3
+        // → nothing paints — must not panic on the degenerate sizes.
         for (w, h) in [(200, 60), (40, 20), (24, 30), (10, 4), (4, 3), (2, 2)] {
             render_at(w, h);
         }

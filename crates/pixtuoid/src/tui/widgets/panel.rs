@@ -14,11 +14,11 @@ use super::{paint_card_backing, to_color};
 use pixtuoid_scene::theme::Theme;
 
 /// Uniform inner padding for every borderless popup — the breathing room that
-/// stands in for the removed border. Shared (re-exported via `widgets`) so the
-/// version-popup click-rect math derives its offsets from the SAME constants the
-/// painter insets by, and can't drift.
-pub(crate) const PANEL_PAD_X: u16 = 2;
-pub(crate) const PANEL_PAD_Y: u16 = 1;
+/// stands in for the removed border. PRIVATE: the geometry authority
+/// (`compute` / `inner_rect` / `panel_inner_width`) is the ONE place that insets
+/// by it, so no caller reverses the fold or mirrors a click-rect offset any more.
+const PANEL_PAD_X: u16 = 2;
+const PANEL_PAD_Y: u16 = 1;
 
 /// Minimum renderable envelope. Below this the panel paints nothing — the
 /// historical per-caller guard ("nothing legible under 4×3, and `Clear::render`
@@ -153,6 +153,49 @@ pub(crate) fn panel_inner_width(bounds: Rect, content_w: u16, scale: f32) -> Opt
     })
 }
 
+/// The visible slice of a scrollable list + the hidden-below count for the cue.
+pub(crate) struct ListWindow {
+    pub(crate) start: usize,
+    pub(crate) count: usize,
+    pub(crate) cue: Option<usize>,
+}
+
+/// Window a `list_len`-row list into a `viewport`-row region, following
+/// `selected` from `scroll`. On overflow, reserve the last line for the
+/// `⋮ N more ▾` cue — UNLESS the selection has reached the end (nothing below),
+/// then use the full viewport and drop the cue. Pure; reproduces the dashboard's
+/// reserve-a-line logic verbatim so every list panel overflows identically.
+pub(crate) fn window_range(
+    list_len: usize,
+    selected: Option<usize>,
+    scroll: usize,
+    viewport: usize,
+) -> ListWindow {
+    use crate::tui::dashboard::clamp_scroll_idx;
+    let overflow = list_len > viewport;
+    let reserved = if overflow {
+        viewport.saturating_sub(1)
+    } else {
+        viewport
+    };
+    let probe = clamp_scroll_idx(selected, scroll, reserved);
+    let show_cue = overflow && list_len > probe + reserved;
+    let window = if show_cue { reserved } else { viewport };
+    let start = clamp_scroll_idx(selected, scroll, window);
+    ListWindow {
+        start,
+        count: list_len.saturating_sub(start).min(window),
+        // guarded arithmetic → `.then(||)` (lazy), not `then_some` (eager).
+        cue: show_cue.then(|| list_len.saturating_sub(start + window)),
+    }
+}
+
+/// The shared "N rows hidden below" cue text. The module owns the WORDS; the
+/// caller styles the color (`label_idle`).
+pub(crate) fn overflow_cue(hidden: usize) -> String {
+    format!("  \u{22ee} {hidden} more \u{25be}")
+}
+
 /// Paint a borderless panel over `area`: `Clear`, a solid background fill, a
 /// uniform `PANEL_PAD_*` inset, and — when `title` is set and there's room — a
 /// bold brand-colored title line at the top of the padded region. Returns the
@@ -195,6 +238,81 @@ pub(crate) fn borderless_panel(
         );
     }
     inner_rect(area, title.is_some())
+}
+
+/// How [`paint_panel`] treats the windowed `list` band.
+pub(crate) enum Overflow {
+    /// Selection-follow window + `⋮ N more ▾` cue. `cap` limits the visible list
+    /// rows regardless of terminal height (dashboard's 16-row cap); `None` fills.
+    Follow {
+        selected: Option<usize>,
+        scroll: usize,
+        cap: Option<u16>,
+    },
+    /// Window from the top with a cue when it overflows; no selection (help).
+    CueOnly,
+    /// Render the whole list as-is, sized to fit (dashboard's empty state).
+    None,
+}
+
+/// THE one painter for a centered borderless popup. It frames (backing, title),
+/// windows the `list` band into the space between the fixed `above`/`below`
+/// chrome, and appends the overflow cue. Auto-heights to the ACTUAL band lengths
+/// (no caller-side structural row count that can drift from the lines pushed).
+/// `content_w` is the desired content width (clamped to the terminal); `scale`
+/// is 1.0 for the static panels. Callers hand PRE-STYLED lines: per-row marquee,
+/// highlight and badge stay theirs; the module owns framing, windowing and cue.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_panel(
+    f: &mut ratatui::Frame<'_>,
+    theme: &Theme,
+    title: Option<&str>,
+    bounds: Rect,
+    content_w: u16,
+    scale: f32,
+    above: Vec<Line<'static>>,
+    list: Vec<Line<'static>>,
+    below: Vec<Line<'static>>,
+    overflow: Overflow,
+) {
+    let cap = match &overflow {
+        Overflow::Follow { cap, .. } => *cap,
+        _ => None,
+    };
+    // Size for the (capped) list plus the fixed chrome — the ACTUAL Vec lengths.
+    let list_size_rows = cap.map_or(list.len(), |c| list.len().min(c as usize));
+    let content_rows = (above.len() + list_size_rows + below.len()) as u16;
+    let geom = PanelGeometry::compute(bounds, content_w, content_rows, title, scale);
+    let Some(outer) = geom.outer() else {
+        return; // guarded away → paint nothing
+    };
+    let inner = borderless_panel(f, outer, title, theme);
+
+    // The list windows into whatever inner height remains after the fixed chrome.
+    let viewport = (inner.height as usize).saturating_sub(above.len() + below.len());
+    let win = match &overflow {
+        Overflow::None => ListWindow {
+            start: 0,
+            count: list.len().min(viewport),
+            cue: None,
+        },
+        Overflow::CueOnly => window_range(list.len(), Option::None, 0, viewport),
+        Overflow::Follow {
+            selected, scroll, ..
+        } => window_range(list.len(), *selected, *scroll, viewport),
+    };
+
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(inner.height as usize);
+    lines.extend(above);
+    lines.extend(list.into_iter().skip(win.start).take(win.count));
+    if let Some(hidden) = win.cue {
+        lines.push(Line::from(Span::styled(
+            overflow_cue(hidden),
+            Style::default().fg(to_color(theme.ui.label_idle)),
+        )));
+    }
+    lines.extend(below);
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 #[cfg(test)]
@@ -458,5 +576,88 @@ mod tests {
             inner_rect(Rect::new(0, 0, PANEL_PAD_X * 2 + 1, 10), false).width,
             1
         );
+    }
+
+    // ---- window_range / overflow_cue (the shared list overflow) --------------
+
+    #[test]
+    fn window_range_fits_without_a_cue() {
+        let w = window_range(4, Some(0), 0, 10);
+        assert_eq!((w.start, w.count, w.cue), (0, 4, None));
+    }
+
+    #[test]
+    fn window_range_reserves_a_line_for_the_cue_when_overflowing() {
+        // 20 rows, 6-row viewport, selection at top → 5 rows shown + a cue of 15.
+        let w = window_range(20, Some(0), 0, 6);
+        assert_eq!((w.start, w.count), (0, 5));
+        assert_eq!(w.cue, Some(15));
+    }
+
+    #[test]
+    fn window_range_drops_the_cue_when_selection_reaches_the_end() {
+        // Selection is the last row → nothing below → full viewport, no cue.
+        let w = window_range(20, Some(19), 0, 6);
+        assert_eq!(w.cue, None);
+        assert_eq!((w.start, w.count), (14, 6)); // 19 + 1 - 6
+    }
+
+    #[test]
+    fn window_range_follows_selection_below_the_window() {
+        // Selection mid-list drags the window down to keep it visible.
+        let w = window_range(30, Some(12), 0, 8);
+        // reserved = 7; probe = 12+1-7 = 6; 30 > 6+7 → cue; window 7 from start 6.
+        assert_eq!((w.start, w.count), (6, 7));
+        assert_eq!(w.cue, Some(30 - (6 + 7)));
+    }
+
+    #[test]
+    fn overflow_cue_text_is_the_shared_vocabulary() {
+        assert_eq!(overflow_cue(3), "  \u{22ee} 3 more \u{25be}");
+    }
+
+    #[test]
+    fn paint_panel_windows_a_long_list_and_pins_the_chrome() {
+        // The overflow payoff: a long list with fixed above/below chrome on a
+        // short terminal windows the list WITH a cue while the chrome stays put —
+        // the connection/welcome/dashboard "no longer clips the footer" fix.
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut term = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        term.draw(|f| {
+            let above = vec![Line::from("HEADERLINE")];
+            let below = vec![Line::from("FOOTERLINE")];
+            let list: Vec<Line<'static>> =
+                (0..20).map(|i| Line::from(format!("row{i:02}"))).collect();
+            paint_panel(
+                f,
+                &pixtuoid_scene::theme::NORMAL,
+                Some("T"),
+                Rect::new(0, 0, 40, 12),
+                30,
+                1.0,
+                above,
+                list,
+                below,
+                Overflow::Follow {
+                    selected: Some(0),
+                    scroll: 0,
+                    cap: None,
+                },
+            );
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..12 {
+            for x in 0..40 {
+                text.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+        }
+        assert!(text.contains("HEADERLINE"), "above chrome must stay pinned");
+        assert!(text.contains("FOOTERLINE"), "below chrome must stay pinned");
+        assert!(text.contains("more"), "overflow cue must show on overflow");
+        assert!(text.contains("row00"), "the windowed list top shows");
+        assert!(!text.contains("row19"), "far list rows are windowed out");
     }
 }

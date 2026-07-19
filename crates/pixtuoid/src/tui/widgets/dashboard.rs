@@ -6,15 +6,13 @@
 
 use std::time::SystemTime;
 
+use pixtuoid_core::source::registry::descriptor_for;
+use pixtuoid_core::AgentId;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
 
-use pixtuoid_core::source::registry::descriptor_for;
-use pixtuoid_core::AgentId;
-
-use super::{centered_in, marquee_or_truncate, source_badge_span, to_color};
+use super::{marquee_or_truncate, paint_panel, source_badge_span, to_color, Overflow};
 use crate::tui::dashboard::{DashboardRow, RowState, DASHBOARD_VIEWPORT_ROWS};
 use pixtuoid_scene::theme::Theme;
 
@@ -22,7 +20,7 @@ use pixtuoid_scene::theme::Theme;
 const LABEL_W: usize = 32;
 /// Char budget for the activity/detail column.
 const STATE_W: usize = 28;
-/// Popup width (clamped to the terminal by `centered_in`).
+/// Popup content width (clamped to the terminal by the panel geometry).
 const POPUP_W: u16 = 76;
 
 pub(crate) fn paint_dashboard(
@@ -35,74 +33,57 @@ pub(crate) fn paint_dashboard(
     theme: &Theme,
 ) {
     if rows.is_empty() {
-        let area = centered_in(
+        /// Fits "No active agents".
+        const EMPTY_W: u16 = 24;
+        paint_panel(
+            f,
+            theme,
+            Some("Agents"),
             bounds,
-            24 + 2 * super::PANEL_PAD_X,
-            2 + 2 * super::PANEL_PAD_Y,
-        );
-        let inner = super::borderless_panel(f, area, Some("Agents"), theme);
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
+            EMPTY_W,
+            1.0,
+            vec![],
+            vec![Line::from(Span::styled(
                 "No active agents",
                 Style::default().fg(to_color(theme.ui.label_idle)),
-            ))),
-            inner,
+            ))],
+            vec![],
+            Overflow::None,
         );
         return;
     }
 
-    let desired = rows.len().min(DASHBOARD_VIEWPORT_ROWS);
-    // Borderless: 1 title row + the visible content rows (no top/bottom border).
-    let area = centered_in(
-        bounds,
-        POPUP_W + 2 * super::PANEL_PAD_X,
-        desired as u16 + 1 + 2 * super::PANEL_PAD_Y,
-    );
     // Hint in the title (borderless — it's the panel's first inner row).
     let title = format!(
         " Agents ({})  [\u{2191}\u{2193} \u{2190}\u{2192} z \u{23ce} esc] ",
         rows.len()
     );
-    let inner = super::borderless_panel(f, area, Some(&title), theme);
-
-    // `centered_in` clamps the popup to the terminal, so the real visible-row
-    // count can drop below DASHBOARD_VIEWPORT_ROWS on a short terminal. Re-clamp
-    // the scroll against the ACTUAL window (reusing the model's clamp_scroll, so
-    // the math can't drift) — otherwise the selected row could sit in the
-    // event-loop's wider window but below the painted one. `inner.height` already
-    // excludes the title row.
-    let visible = inner.height as usize;
-    // When more rows exist than fit, reserve the bottom line for the overflow
-    // cue and clamp the selection into the SMALLER content window — so the row
-    // we hand to the cue is never the selected one (clamp_scroll parks a
-    // down-navigated selection at the window's bottom edge). But probe first:
-    // if that reduced clamp already reaches the end (the selection IS the last
-    // row, nothing below), no cue is needed, so render the FULL height instead
-    // — otherwise the reserved line would render blank.
-    let overflow = rows.len() > visible;
-    let reserved = if overflow {
-        visible.saturating_sub(1)
-    } else {
-        visible
-    };
-    let probe_scroll = crate::tui::dashboard::clamp_scroll(rows, selected, scroll, reserved);
-    let show_cue = overflow && rows.len() > probe_scroll + reserved;
-    let content_window = if show_cue { reserved } else { visible };
-    let scroll = crate::tui::dashboard::clamp_scroll(rows, selected, scroll, content_window);
-    let mut lines: Vec<Line> = rows
+    // Build EVERY row (styled per selection); `paint_panel` sizes to the 16-row
+    // cap, windows the list at the real inner height, follows the selection, and
+    // appends the `⋮ N more ▾` cue. Selection resolves to an index at the seam:
+    // None (unselected OR exited) keeps the persisted scroll, exactly as the old
+    // `AgentId`-keyed `clamp_scroll` did (which `ui_state` still uses to persist).
+    let selected_idx = selected.and_then(|s| rows.iter().position(|r| r.agent_id == s));
+    let list: Vec<Line<'static>> = rows
         .iter()
-        .skip(scroll)
-        .take(content_window)
         .map(|row| dashboard_line(row, selected == Some(row.agent_id), now, theme))
         .collect();
-    if show_cue {
-        let hidden_below = rows.len().saturating_sub(scroll + content_window);
-        lines.push(Line::from(Span::styled(
-            format!("  \u{22ee} {hidden_below} more \u{25be}"),
-            Style::default().fg(to_color(theme.ui.label_idle)),
-        )));
-    }
-    f.render_widget(Paragraph::new(lines), inner);
+    paint_panel(
+        f,
+        theme,
+        Some(&title),
+        bounds,
+        POPUP_W,
+        1.0,
+        vec![],
+        list,
+        vec![],
+        Overflow::Follow {
+            selected: selected_idx,
+            scroll,
+            cap: Some(DASHBOARD_VIEWPORT_ROWS as u16),
+        },
+    );
 }
 
 fn dashboard_line(

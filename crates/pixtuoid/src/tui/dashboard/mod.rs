@@ -236,10 +236,27 @@ pub fn clamp_scroll(
     scroll: usize,
     visible_height: usize,
 ) -> usize {
+    // No selection → top (dashboard's rule); a selection no longer in `rows` keeps
+    // the current scroll; otherwise the shared index-core slides the window.
     let Some(sel) = selected else {
         return 0;
     };
-    let Some(idx) = rows.iter().position(|r| r.agent_id == sel) else {
+    match rows.iter().position(|r| r.agent_id == sel) {
+        Some(idx) => clamp_scroll_idx(Some(idx), scroll, visible_height),
+        None => scroll,
+    }
+}
+
+/// The pure index core the `AgentId`-keyed [`clamp_scroll`] and the panel's
+/// `window_range` both use, so every list panel slides its viewport identically:
+/// scroll up if `selected` sits above the window, down if below, else leave it.
+/// `None` selection → keep `scroll`.
+pub(crate) fn clamp_scroll_idx(
+    selected: Option<usize>,
+    scroll: usize,
+    visible_height: usize,
+) -> usize {
+    let Some(idx) = selected else {
         return scroll;
     };
     if idx < scroll {

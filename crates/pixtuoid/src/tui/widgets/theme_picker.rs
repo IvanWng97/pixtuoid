@@ -1,8 +1,6 @@
+use super::{paint_panel, to_color, Overflow};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::widgets::Paragraph;
-
-use super::{centered_in, to_color, PANEL_PAD_X, PANEL_PAD_Y};
 
 /// The two colors that characterize a theme in the picker swatch: its
 /// accent (`neon_brand`) and its dominant office surface (`carpet_base`).
@@ -20,17 +18,9 @@ pub(crate) fn paint_theme_picker(
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span as TSpan};
 
-    // `centered_in` clamps to bounds.width: `borderless_panel`'s `Clear` (unlike
-    // Block/Paragraph) does not intersect with the buffer area, so an over-wide
-    // `area` panics on narrow terminals. The floor-transition paint path has no
-    // layout gate, so this is reachable at widths the normal path rejects.
-    // Borderless: 1 title row + the theme rows (no top/bottom border).
-    let area = centered_in(
-        bounds,
-        28 + 2 * PANEL_PAD_X,
-        theme::ALL_THEMES.len() as u16 + 1 + 2 * PANEL_PAD_Y,
-    );
-    let items: Vec<Line> = theme::ALL_THEMES
+    /// Name column (12) + the leading selection marker + the 2-cell swatch.
+    const THEME_W: u16 = 28;
+    let items: Vec<Line<'static>> = theme::ALL_THEMES
         .iter()
         .enumerate()
         .map(|(i, t)| {
@@ -54,13 +44,22 @@ pub(crate) fn paint_theme_picker(
             ])
         })
         .collect();
-    let inner = super::borderless_panel(
+    paint_panel(
         f,
-        area,
-        Some("Theme [\u{2191}\u{2193}/jk] Enter/Esc"),
         theme,
+        Some("Theme [\u{2191}\u{2193}/jk] Enter/Esc"),
+        bounds,
+        THEME_W,
+        1.0,
+        vec![],
+        items,
+        vec![],
+        Overflow::Follow {
+            selected: Some(selected),
+            scroll: 0,
+            cap: None,
+        },
     );
-    f.render_widget(Paragraph::new(items), inner);
 }
 
 #[cfg(test)]

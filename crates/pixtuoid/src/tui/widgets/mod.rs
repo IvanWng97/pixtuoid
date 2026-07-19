@@ -18,9 +18,7 @@ pub(super) use dashboard::paint_dashboard;
 pub(super) use elevator::paint_elevator_indicator;
 pub(super) use footer::{paint_footer, FooterStats};
 pub(super) use help::paint_help_overlay;
-pub(crate) use panel::{
-    borderless_panel, panel_inner_width, PanelGeometry, PANEL_PAD_X, PANEL_PAD_Y,
-};
+pub(crate) use panel::{borderless_panel, paint_panel, panel_inner_width, Overflow, PanelGeometry};
 pub(super) use theme_picker::paint_theme_picker;
 pub use tooltip::paint_chitchat_bubbles;
 pub(super) use tooltip::{
@@ -264,22 +262,6 @@ pub(crate) fn source_badge_span(tag: &str, theme: &Theme) -> ratatui::text::Span
         format!("[{tag:<2}]"),
         Style::default().fg(badge_color_for(tag, theme)),
     )
-}
-
-/// A `desired_w × desired_h` rect clamped to `bounds` and centered within it,
-/// anchored off `bounds`'s origin (not 0,0) so a non-zero-origin bounds rect
-/// positions correctly. Shared by the keyboard-help and theme-picker overlays.
-/// The width-clamp also keeps `Clear::render` (which does not intersect the
-/// buffer area) from panicking on a too-narrow terminal.
-fn centered_in(bounds: Rect, desired_w: u16, desired_h: u16) -> Rect {
-    let w = desired_w.min(bounds.width);
-    let h = desired_h.min(bounds.height);
-    Rect {
-        x: bounds.x + bounds.width.saturating_sub(w) / 2,
-        y: bounds.y + bounds.height.saturating_sub(h) / 2,
-        width: w,
-        height: h,
-    }
 }
 
 /// Truncate to `max` characters (char-safe), appending `…` when clipped. Shared

@@ -5,18 +5,17 @@
 
 use std::time::{Duration, SystemTime};
 
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
-
 use super::{
-    borderless_panel, centered_in, marquee_or_truncate, marquee_window, source_badge_span, to_color,
+    marquee_or_truncate, marquee_window, paint_panel, panel_inner_width, source_badge_span,
+    to_color, Overflow,
 };
 use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveInfo};
 use pixtuoid_scene::theme::Theme;
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 
-/// Popup width (clamped to the terminal by `centered_in`).
+/// Popup content width (clamped to the terminal by the panel geometry).
 const CONNECTION_POPUP_W: u16 = 66;
 /// Char budget for the display-name column (after the badge).
 const NAME_W: usize = 13;
@@ -50,48 +49,47 @@ pub(crate) fn paint_connection_panel(
     bounds: Rect,
     theme: &Theme,
 ) {
-    // title (1) + socket (1) + blank (1) + header (1) + rows + blank (1)
-    // + detail (1) + footer (1) — the title row is drawn by borderless_panel.
-    let area = centered_in(
-        bounds,
-        CONNECTION_POPUP_W + 2 * super::PANEL_PAD_X,
-        rows.len() as u16 + 7 + 2 * super::PANEL_PAD_Y,
-    );
-    if area.width < 4 || area.height < 3 {
-        return;
-    }
-    let inner = borderless_panel(f, area, Some("Sources \u{2014} s/esc close"), theme);
-
     let dim = Style::default().fg(to_color(theme.ui.label_idle));
-    let mut lines: Vec<Line> = Vec::with_capacity(rows.len() + 6);
 
-    lines.push(Line::from(Span::styled(format!("  {socket_line}"), dim)));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(column_header(), dim)));
-    for (i, row) in rows.iter().enumerate() {
-        let li = live.get(i).cloned().unwrap_or_default();
-        lines.push(connection_line(row, &li, selected == i, now, theme));
-    }
-    lines.push(Line::from(""));
+    // The detail marquee's width budget needs the inner WIDTH before the row count
+    // (hence the height) is known — the height-independent two-phase seam. `None`
+    // ⇒ the terminal is too narrow to render at all.
+    let Some(inner_w) = panel_inner_width(bounds, CONNECTION_POPUP_W, 1.0) else {
+        return;
+    };
 
-    // Detail line: armed-confirm prompt > last action result > selected row's
-    // install location > a no-action hint. Char-safe truncated to the panel width.
+    // Above (fixed chrome): the socket line, a blank, the column header.
+    let above = vec![
+        Line::from(Span::styled(format!("  {socket_line}"), dim)),
+        Line::from(""),
+        Line::from(Span::styled(column_header(), dim)),
+    ];
+
+    // List: one row per CLI — paint_panel windows-with-cue + follows the selection
+    // on a short terminal (so the source list no longer clips its footer/detail).
+    let list: Vec<Line<'static>> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let li = live.get(i).cloned().unwrap_or_default();
+            connection_line(row, &li, selected == i, now, theme)
+        })
+        .collect();
+
+    // Below (fixed chrome): a blank, the SELECTED row's detail line, the footer.
+    // Detail priority: armed-confirm prompt > last action result > install path >
+    // no-action hint. (Health verdict preempts the benign per-state line — #309.)
     let detail = if let Some(ci) = confirm {
         let name = rows.get(ci).map_or("", |r| r.display_name);
         format!("\u{26a0} disconnect {name}? (y/n)")
     } else if let Some(res) = last_result {
         res.to_string()
     } else if let Some(row) = rows.get(selected) {
-        // Health verdict first: a broken install / decode drift (#309, the
-        // health-consolidation arc) is what you'd act on here, so it preempts the
-        // benign per-state line. Cached on row build (connected rows only).
         if let Some(h) = &row.health {
             h.clone()
         } else {
-            // State-aware: surface the install path ONLY when our integration is
-            // actually there (Connected). Disconnected shows the action (the path
-            // is just the future destination — meaningless until you connect);
-            // no-CLI explains why it can't be bound.
+            // Surface the install path ONLY when Connected (else the path is a
+            // meaningless future destination); no-CLI explains why it can't bind.
             match row.state {
                 ConnState::Connected => match &row.config_path {
                     Some(p) => format!("installed at: {}", p.display()),
@@ -104,22 +102,37 @@ pub(crate) fn paint_connection_panel(
     } else {
         String::new()
     };
-    // The detail line always shows the SELECTED row's content (path / hint), so
-    // it scrolls (ping-pong) when it overflows — same focused-row treatment as
-    // the selected list row's cells. Width budget reserves BOTH the 2-space left
-    // indent below AND a symmetric 2-col right margin (so a full-width scroll
-    // doesn't run flush to the panel edge — left/right padding stays balanced).
-    let detail_w = inner.width.saturating_sub(4) as usize;
-    lines.push(Line::from(Span::styled(
-        format!("  {}", marquee_window(&detail, detail_w, now)),
-        dim,
-    )));
-    lines.push(Line::from(Span::styled(
-        "  j/k move \u{00b7} t toggle \u{00b7} s/esc close",
-        dim,
-    )));
+    // Width budget reserves the 2-space left indent + a symmetric 2-col right
+    // margin so a full-width scroll never runs flush to the panel edge.
+    let detail_w = (inner_w as usize).saturating_sub(4);
+    let below = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {}", marquee_window(&detail, detail_w, now)),
+            dim,
+        )),
+        Line::from(Span::styled(
+            "  j/k move \u{00b7} t toggle \u{00b7} s/esc close",
+            dim,
+        )),
+    ];
 
-    f.render_widget(Paragraph::new(lines), inner);
+    paint_panel(
+        f,
+        theme,
+        Some("Sources \u{2014} s/esc close"),
+        bounds,
+        CONNECTION_POPUP_W,
+        1.0,
+        above,
+        list,
+        below,
+        Overflow::Follow {
+            selected: Some(selected),
+            scroll: 0,
+            cap: None,
+        },
+    );
 }
 
 /// One CLI row: a colored badge (never reversed), the name (tinted/reversed by
