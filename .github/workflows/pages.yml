@@ -43,22 +43,38 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
-      # withastro/action only runs `astro build`; gate the deploy on lint + types
-      # too, so a build-clean but lint/typecheck-failing commit can't ship. Also
-      # install Chromium here (same runner → cached) so withastro/action's build
-      # can render the /architecture ```mermaid block to an inline SVG.
+      # withastro/action runs `astro build` + uploads the Pages artifact; gate the
+      # deploy on lint + types too (a build-clean but typecheck-failing commit
+      # mustn't ship), and install Chromium here (same runner → global cache) so
+      # the action's build can render /architecture's ```mermaid block to an SVG.
       - name: Validate (lint + types) + Chromium for the diagram
         working-directory: site
         run: npm ci && npm run lint && npm run check && npx playwright install --with-deps chromium
       - uses: withastro/action@v6
-        # the ticker's build-time merged-PR fetch: unauthenticated quota on
-        # shared runner IPs is routinely exhausted -> silent canned-reel
-        # fallback; the ambient token (contents: read) gives real headroom
+        # the ticker's build-time merged-PR fetch: unauthenticated quota on shared
+        # runner IPs is routinely exhausted -> silent canned-reel fallback; the
+        # ambient token (contents: read) gives real headroom
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           path: ./site
           node-version: 26
+          # PIN npm. Without it, v6's detection fell back to pnpm, whose fresh
+          # install resolved a DIFFERENT Playwright than the Chromium installed
+          # above → rehype-mermaid's inline-SVG render of /architecture failed
+          # ("Executable doesn't exist at …/ms-playwright/chromium-XXXX") and
+          # silently shipped an EMPTY page. Forcing npm reuses package-lock.json,
+          # so the build's Playwright matches the cached Chromium and it renders.
+          package-manager: npm
+      # Fail LOUD: a mermaid render failure can collapse the whole ARCHITECTURE.md
+      # <Content /> to an empty article WITHOUT erroring the build. Assert the one
+      # mermaid page rendered its body — the deploy job is `needs: build`, so this
+      # gates it: a broken diagram can never silently ship an empty /architecture.
+      - name: Guard — the mermaid doc rendered its body
+        working-directory: site
+        run: |
+          test -f dist/architecture/index.html || { echo "::error::site/dist/architecture/index.html missing after build"; exit 1; }
+          grep -q 'Data flow' dist/architecture/index.html || { echo "::error::/architecture rendered EMPTY — rehype-mermaid inline-SVG failed (Chromium version mismatch?)"; exit 1; }
   deploy:
     needs: build
     runs-on: ubuntu-latest
