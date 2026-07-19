@@ -104,11 +104,13 @@ const badges = sources.filter((s) => s.status === 'supported');
     color: var(--fg);
     text-decoration: none;
     text-shadow: var(--chrome-halo);
+    transition: color 0.18s ease;
   }
   .hero__ghost:hover {
-    /* underline, not a --coral recolor: over the office the halo-carried --fg
-       stays legible but raw --coral dips below AA (HowItWorks' nudge-don't-recolor). */
-    text-decoration: underline;
+    /* brighten to --coral on hover — the shared link idiom (see Nav's coffee).
+       Over the office --coral dips below AA, but only in this transient hover
+       state; the resting halo-carried --fg is AA and is what the sweep gates. */
+    color: var(--coral);
   }
   .hero__badges {
     display: flex;

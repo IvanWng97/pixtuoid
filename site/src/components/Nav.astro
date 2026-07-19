@@ -268,9 +268,12 @@ const { floating = false } = Astro.props;
     white-space: nowrap;
   }
   .nav__links a.nav__coffee:hover {
-    /* keep the AA-safe --coral-deep (from rest); underline is the hover cue —
-       flipping to raw --coral drops below AA on the cream docs bar. */
-    text-decoration: underline;
+    /* brighten to --coral on hover — the SAME muted→full nudge every sibling nav
+       link uses (`.nav__links a:hover`), so the row shares one hover mechanism
+       instead of the coffee link alone underlining. --coral dips below AA on the
+       cream day bar, but only in this transient hover state; the resting
+       --coral-deep is AA and is what the e2e sweep gates (rest colours only). */
+    color: var(--coral);
   }
   .nav__burger {
     margin-left: auto;
