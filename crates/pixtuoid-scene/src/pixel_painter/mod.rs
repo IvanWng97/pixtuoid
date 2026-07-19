@@ -364,6 +364,58 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     }
 }
 
+/// The soft floor shadow under one home desk. `cy` sits on the desk's z-sort
+/// row — `desk.y + visual.h` — the SAME `visual.h` `enqueue_desk_cubicles` keys
+/// the desk sprite on, read from the one authority (`desk_furniture_def`) rather
+/// than re-hardcoded, so a `DESK_H` retune moves the shadow WITH the sprite's
+/// south base instead of leaving it behind. The half-extents stay inline: a
+/// shadow's width/depth is a per-piece taste value with no source to derive from.
+fn desk_shadow_ellipse(desk: Point) -> Ellipse {
+    Ellipse {
+        cx: desk.x + DESK_W / 2,
+        cy: desk.y + crate::layout::desk_furniture_def().visual.h,
+        half_w: DESK_W / 2 + 1,
+        half_h: 3,
+    }
+}
+
+/// The ceiling-fluorescent light pools, in paint order: one narrow tube per
+/// desk, then a wider fixture over the pantry and the corridor. THE authority
+/// for where the pools sit + how wide each glows, so the paint pass is a short
+/// loop and the per-region ellipse extents aren't anonymous inline literals. The
+/// floor-lamp halo is deliberately NOT here — it is a different painter
+/// (`paint_floor_lamp_halo`) with its own strength + south-offset anchor; the
+/// paint order (pools THEN lamp halo) is load-bearing for byte-identity.
+fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
+    // Half-extents (a fluorescent tube's lit footprint) per pool kind.
+    const DESK_POOL_HALF: (u16, u16) = (10, 5);
+    const PANTRY_POOL_HALF: (u16, u16) = (12, 6);
+    const CORRIDOR_POOL_HALF: (u16, u16) = (14, 5);
+    // The desk tube hangs one row-pair NORTH of the desk origin (above the
+    // monitor, not on the surface); saturating so a top-row desk can't underflow.
+    const DESK_POOL_CY_LIFT: u16 = 2;
+
+    let desks = layout.home_desks.iter().map(|desk| Ellipse {
+        cx: desk.x + DESK_W / 2,
+        cy: desk.y.saturating_sub(DESK_POOL_CY_LIFT),
+        half_w: DESK_POOL_HALF.0,
+        half_h: DESK_POOL_HALF.1,
+    });
+    let pantry = layout.pantry.map(|p| p.bounds).map(|pr| Ellipse {
+        cx: pr.x + pr.width / 2,
+        cy: pr.y + pr.height / 2,
+        half_w: PANTRY_POOL_HALF.0,
+        half_h: PANTRY_POOL_HALF.1,
+    });
+    let corridor = layout.corridor.map(|c| Ellipse {
+        cx: c.x + c.width / 2,
+        cy: c.y + c.height / 2,
+        half_w: CORRIDOR_POOL_HALF.0,
+        half_h: CORRIDOR_POOL_HALF.1,
+    });
+    desks.chain(pantry).chain(corridor)
+}
+
 /// The PAINT half of the frame: blit the world the sim already advanced.
 /// Reads the [`SimFrame`] immutably; every positional/lifecycle decision was
 /// made in `sim_step` — this pass only resolves presentation (theme colors,
@@ -438,46 +490,11 @@ fn paint_frame(
         look.spill_strength * DAYLIGHT_FLOOR_LIFT,
     );
     let pool_strength = (0.15 + 0.30 * look.darkness) * indoor_scale;
-    for desk in &ctx.layout.home_desks {
-        paint_ceiling_pool(
-            ctx.buf,
-            Ellipse {
-                cx: desk.x + DESK_W / 2,
-                cy: desk.y.saturating_sub(2),
-                half_w: 10,
-                half_h: 5,
-            },
-            pool_strength,
-            ctx.theme,
-        );
-    }
-    // Two ceiling fluorescents over the pantry and a third over the
-    // corridor so the floor is lit consistently with the lounge_band gone.
-    if let Some(pr) = ctx.layout.pantry.map(|p| p.bounds) {
-        paint_ceiling_pool(
-            ctx.buf,
-            Ellipse {
-                cx: pr.x + pr.width / 2,
-                cy: pr.y + pr.height / 2,
-                half_w: 12,
-                half_h: 6,
-            },
-            pool_strength,
-            ctx.theme,
-        );
-    }
-    if let Some(corridor) = ctx.layout.corridor {
-        paint_ceiling_pool(
-            ctx.buf,
-            Ellipse {
-                cx: corridor.x + corridor.width / 2,
-                cy: corridor.y + corridor.height / 2,
-                half_w: 14,
-                half_h: 5,
-            },
-            pool_strength,
-            ctx.theme,
-        );
+    // Ceiling fluorescents (one narrow tube per desk + a wider fixture over the
+    // pantry and the corridor) so the floor is lit consistently with the
+    // lounge_band gone — geometry single-sourced in `ceiling_pool_regions`.
+    for pool in ceiling_pool_regions(ctx.layout) {
+        paint_ceiling_pool(ctx.buf, pool, pool_strength, ctx.theme);
     }
     if let Some(lamp) = ctx.layout.floor_lamp {
         paint_floor_lamp_halo(
@@ -557,12 +574,7 @@ fn paint_frame(
     for desk in &ctx.layout.home_desks {
         paint_shadow(
             ctx.buf,
-            Ellipse {
-                cx: desk.x + DESK_W / 2,
-                cy: desk.y + 7,
-                half_w: DESK_W / 2 + 1,
-                half_h: 3,
-            },
+            desk_shadow_ellipse(*desk),
             shadow_strength,
             ctx.theme,
         );

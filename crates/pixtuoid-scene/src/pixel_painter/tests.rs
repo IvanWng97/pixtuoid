@@ -3434,3 +3434,43 @@ fn waypoint_render_anchor_upright_height_recovers_the_feet_row() {
         );
     }
 }
+
+#[test]
+fn desk_shadow_tracks_the_desk_zsort_row_not_a_hardcoded_offset() {
+    // The shadow's cy must derive from the SAME visual.h the desk sprite z-sorts
+    // on (enqueue_desk_cubicles: desk.y + visual.h), so a DESK_H retune keeps the
+    // shadow pinned under the sprite's south base instead of floating 1px off.
+    let desk = Point { x: 40, y: 30 };
+    let e = desk_shadow_ellipse(desk);
+    assert_eq!(e.cy, desk.y + crate::layout::desk_furniture_def().visual.h);
+    assert_eq!(e.cx, desk.x + DESK_W / 2);
+}
+
+#[test]
+fn ceiling_pool_regions_yields_desks_then_pantry_then_corridor_in_order() {
+    let l =
+        Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("192x160 fits");
+    let pools: Vec<_> = ceiling_pool_regions(&l).collect();
+    assert_eq!(
+        pools.len(),
+        l.home_desks.len() + l.pantry.is_some() as usize + l.corridor.is_some() as usize
+    );
+    // The leading run is one pool per desk, centred + lifted 2px north.
+    for (pool, desk) in pools.iter().zip(&l.home_desks) {
+        assert_eq!(pool.cx, desk.x + DESK_W / 2);
+        assert_eq!(pool.cy, desk.y.saturating_sub(2));
+        assert_eq!((pool.half_w, pool.half_h), (10, 5));
+    }
+    // Then the wider pantry fixture (if it fit), centred on its bounds.
+    if let Some(pr) = l.pantry.map(|p| p.bounds) {
+        let p = pools[l.home_desks.len()];
+        assert_eq!((p.cx, p.cy), (pr.x + pr.width / 2, pr.y + pr.height / 2));
+        assert_eq!((p.half_w, p.half_h), (12, 6));
+    }
+    // The corridor fixture is last.
+    if let Some(c) = l.corridor {
+        let p = *pools.last().unwrap();
+        assert_eq!((p.cx, p.cy), (c.x + c.width / 2, c.y + c.height / 2));
+        assert_eq!((p.half_w, p.half_h), (14, 5));
+    }
+}
