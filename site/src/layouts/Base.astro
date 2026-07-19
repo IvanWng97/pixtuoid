@@ -349,7 +349,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
               },
               { threshold: 0.3 }
             );
-            document.querySelectorAll('.crt:not(.crt-manual)').forEach(function (el) {
+            document.querySelectorAll('.crt').forEach(function (el) {
               co.observe(el);
             });
           },
@@ -432,10 +432,11 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
          killed them after any content click — the audit's dead-keys bug).
          Guards: never while typing (input/textarea/contenteditable), never
          during the boot splash, never with a modifier held; the WCAG 2.1.4
-         off-switch (statusline toggle → __pixKeys.enabled()) can disable the
-         whole vocabulary; a focused [data-keys-scope] region (the CRT studio,
-         wb-3) claims the digits locally instead. `t` keeps its stricter gate
-         in the FX script above. -->
+         off-switch (statusline toggle → __pixKeys.enabled()) disables the
+         document-global floor digits; a focused [data-keys-scope] region (the
+         CRT studio, wb-3) claims the digits locally instead — its scoped handler
+         is focus-gated, independently satisfying 2.1.4. `t` keeps its stricter
+         gate in the FX script above. -->
     <script is:inline>
       (function () {
         document.addEventListener('keydown', function (e) {

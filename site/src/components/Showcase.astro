@@ -395,7 +395,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
           });
         })
         .catch(function () {
-          // wasm never loaded: leave the poster showing, no loop
+          // wasm never loaded after the bounded retry: null the shared promise so
+          // a later-booting consumer can retry after a recovered outage (#671).
+          // Leave the poster showing, no loop.
+          window.__pixWasm = null;
         });
     }
     function syncCanvas() {
@@ -629,7 +632,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     border: 0;
     padding: 0.3rem 0.2rem;
     font: inherit;
-    color: var(--fg-muted);
+    /* bare over the dimmed office → the AA-tuned ink, not --fg-muted (which
+       measures ~2.8–3.7:1 there); matches .roster__body. Active/hover/focus
+       below still brighten to --fg. */
+    color: var(--office-ink);
     cursor: pointer;
     transition: color 0.18s ease;
   }
@@ -675,7 +681,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     font-family: var(--font-body);
     font-size: 0.9rem;
     line-height: 1.5;
-    color: var(--fg-muted);
+    /* always-shown, bare over the office → AA ink, not --fg-muted (matches the
+       dial labels + .roster__body). */
+    color: var(--office-ink);
   }
   @keyframes dial-desc-in {
     0% {

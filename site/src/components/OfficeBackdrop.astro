@@ -754,6 +754,7 @@ import { asset, DIM_RESTING } from '../consts';
     let audioPlaying = false; // the ♩ is on (context running)
     let audioBooting = false; // warmup pump in flight (ignore re-clicks)
     let audioUnavailable = false; // WebAudio failed (no device / locked down) — ♩ disabled
+    let restoreArmed = false; // the remembered-pref restore listeners attach ONCE (not per re-show)
     let loopGains = []; // 6 GainNodes (LoopStem::ALL order: 0=Pad … 5=Rain)
     let loopSources = []; // 6 looping AudioBufferSourceNodes
     let oneShotBufs = {}; // pool wire → [AudioBuffer]
@@ -904,6 +905,7 @@ import { asset, DIM_RESTING } from '../consts';
         }
         audioUploadBuffers(); // createBuffer here — the usual failure point
         audioReady = true;
+        audioBooting = false; // pump done — clear the in-flight flag on success too
       } catch (e) {
         audioDisable();
       }
@@ -971,6 +973,8 @@ import { asset, DIM_RESTING } from '../consts';
         audioStart();
         setAudioPlaying(true);
       };
+      if (restoreArmed) return; // reduce→un-reduce re-runs showAudioBtn — don't double-attach
+      restoreArmed = true;
       window.addEventListener('pointerdown', restore, true);
       window.addEventListener('keydown', restore, true);
     }
@@ -1098,8 +1102,11 @@ import { asset, DIM_RESTING } from '../consts';
           });
         })
         .catch(function () {
-          // wasm never loaded: drop the cover so the still poster shows, and
-          // release the boot splash's gate (the engine won't be coming).
+          // wasm never loaded after the bounded retry: null the shared promise so a
+          // LATER-booting consumer (Showcase VIBING, scrolled in after the network
+          // recovers) can retry instead of inheriting this rejection (#671). Drop the
+          // cover so the still poster shows, and release the boot splash's gate.
+          window.__pixWasm = null;
           uncover();
           markEngineResolved();
         });

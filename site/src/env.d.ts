@@ -23,6 +23,10 @@ interface Window {
   /** Office boot RESOLVED (live / failed / unsupported) — set by OfficeBackdrop.
    * The boot splash's Level-2 gate polls it so it lifts straight into the reveal. */
   __pixEngineReady?: boolean;
+  /** The ONE shared wasm-init promise, memoized across the two live-office
+   * consumers (hero backdrop + Showcase VIBING). Nulled on final retry
+   * exhaustion so a later-booting consumer re-attempts (#671). */
+  __pixWasm?: Promise<unknown> | null;
   /** THE theme registry + fallback, seeded parse-first in Base.astro's head. */
   __pixTheme?: {
     KEY: string;

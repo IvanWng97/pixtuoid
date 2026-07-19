@@ -23,15 +23,17 @@ rename/move of any of them FAILS the build:
   released version between a mid-cycle bump and its tag, and the site must
   advertise what users can actually install). Both CI workflows checkout
   with `fetch-depth: 0` so the tag path is the one real deploys take;
-  unit-tested in `config/released-version.test.mjs`.
+  unit-tested in `config/released-version.test.mjs`. Note: `pages.yml` deploys on
+  push to `main` (+ path filter), NOT on a release-tag push — so a fresh tag's
+  version shows only after the next `main` commit (or a manual `workflow_dispatch`).
 - `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING,
   KNOWLEDGE-ENGINEERING, PARALLEL-DELIVERY}.md` → rendered as `/config`,
   `/architecture`, `/contributing`, `/knowledge-base`,
   `/parallel-delivery` respectively, via a `glob` loader in
   `src/content.config.ts` + a `src/pages/*.astro` per route. **Adding a rendered
   doc is the inverse of a rename — a new `glob` collection, a `src/pages/*.astro`,
-  a `DOCS` entry + `current` union arm in `layouts/Docs.astro` (sidebar + pager),
-  a `Nav.astro` link, and both path filters.**
+  a `DOCS` entry in `consts.ts` (the `DocId` union + `Docs.astro`'s `current`
+  type auto-derive; sidebar + pager), a `Nav.astro` link, and both path filters.**
 
 All six are in the `site.yml` / `pages.yml` **path filters**, so editing one
 re-runs the site CI + redeploys. **Renaming a rendered doc is a multi-point

@@ -106,7 +106,9 @@ const badges = sources.filter((s) => s.status === 'supported');
     text-shadow: var(--chrome-halo);
   }
   .hero__ghost:hover {
-    color: var(--coral);
+    /* underline, not a --coral recolor: over the office the halo-carried --fg
+       stays legible but raw --coral dips below AA (HowItWorks' nudge-don't-recolor). */
+    text-decoration: underline;
   }
   .hero__badges {
     display: flex;

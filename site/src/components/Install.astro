@@ -231,8 +231,10 @@ import tabs from '../install.json';
       color 0.18s ease;
   }
   .install__copy:hover {
-    background: var(--coral);
-    border-color: var(--coral);
+    /* AA-capped coral (matches .btn-primary's #b5592f in global.css): raw
+       --coral under #fff is only ~3.1:1; #b5592f keeps the label ≥4.5:1. */
+    background: #b5592f;
+    border-color: #b5592f;
     color: #fff;
   }
   .install__note {

@@ -268,7 +268,9 @@ const { floating = false } = Astro.props;
     white-space: nowrap;
   }
   .nav__links a.nav__coffee:hover {
-    color: var(--coral);
+    /* keep the AA-safe --coral-deep (from rest); underline is the hover cue —
+       flipping to raw --coral drops below AA on the cream docs bar. */
+    text-decoration: underline;
   }
   .nav__burger {
     margin-left: auto;

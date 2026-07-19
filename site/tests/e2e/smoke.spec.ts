@@ -751,6 +751,54 @@ test('a transient wasm-fetch drop self-heals: the office still goes live via ret
   await context.close();
 });
 
+test('#671 cross-trigger recovery: after the hero exhausts its retries, a later VIBING boot re-attempts and comes up', async ({
+  page,
+}) => {
+  // Before #671 the hero's exhausted (rejected) __pixWasm stayed memoized on
+  // window, so a LATER-booting consumer (the Showcase VIBING office, scrolled in
+  // after the network recovered) inherited the rejection and never retried. Now
+  // the hero nulls __pixWasm on final exhaustion, so VIBING's boot re-creates a
+  // fresh shared promise and comes up. Fail the hero's 3 attempts (initial + 2
+  // retries), then let the network recover before VIBING boots.
+  const errors = watchErrors(page);
+  let wasmHits = 0;
+  await page.route('**/pixtuoid_web_bg.wasm', (route) => {
+    wasmHits += 1;
+    if (wasmHits <= 3) return route.abort();
+    return route.continue();
+  });
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  // The hero exhausts its retries and NULLS the shared promise (never goes live) —
+  // VIBING hasn't booted yet (studio is below the fold), so only the hero spent
+  // the 3 aborted fetches.
+  await expect
+    .poll(() => page.evaluate(() => window.__pixWasm === null), { timeout: 15_000 })
+    .toBe(true);
+  await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
+  // Now VIBING scrolls into view with the network recovered: it must re-attempt
+  // off the nulled promise (not inherit the dead one) and paint a frame.
+  await page.evaluate(() =>
+    document.getElementById('studio')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const c = document.querySelector('[data-vibing-canvas]') as HTMLCanvasElement | null;
+          if (!c) return false;
+          const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+          return d.some((v) => v !== 0);
+        }),
+      { timeout: 15_000 }
+    )
+    .toBe(true);
+  // The shared promise was re-created (no longer null) and the recovery re-fetched.
+  expect(await page.evaluate(() => window.__pixWasm !== null)).toBe(true);
+  expect(wasmHits).toBeGreaterThan(3);
+  expect(errors().filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
+});
+
 test('key vocabulary: digits ride globally, typing surfaces stay guarded, t keeps its gate', async ({
   page,
 }) => {
@@ -1667,6 +1715,10 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
       '#showcase .section-head .lead',
       '#showcase .eyebrow',
       '.roster__body',
+      // the channel dial: rest labels + the always-shown accordion desc are bare
+      // over the office too (were --fg-muted, sub-AA — audit finding A1).
+      ".dial__ch:not([aria-pressed='true'])",
+      '.dial__desc',
       '#how .eyebrow',
       '#tools .section-head .lead',
       '#install .section-head .lead',
