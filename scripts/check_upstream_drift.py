@@ -63,6 +63,11 @@ and compares against the live upstream:
                           NousResearch/hermes-agent hermes_cli/hooks.py
                           (one-directional: Hermes fires ~15 shell-hook events and
                           we register 4 by design, so only a VANISHED depended event alarms)
+  * Kimi hooks         -> `KIMI_EVENTS` in crates/pixtuoid/src/install/kimi.rs
+                          vs the PascalCase hook-event names in the raw
+                          MoonshotAI/kimi-code docs/en/customization/hooks.md
+                          (one-directional: Kimi fires 16 events and we register 8
+                          by design, so only a VANISHED depended event alarms)
 
 Beyond the event/TYPE lists above, FIELD-NAME drift is watched wherever the
 upstream field owner is fetchable (a rename → the decoder reads None and the
@@ -400,6 +405,23 @@ HERMES_SHELL_HOOK_URL = (
 # `hook_event_name` is the discriminator (event check covers it). Checked as
 # dict-key literals in _serialize_payload; ONE-DIRECTIONAL (a depended field gone).
 HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
+
+# Kimi Code CLI (MoonshotAI/kimi-code) is HOOK-ONLY; the events we register/decode
+# are Claude-Code-shaped PascalCase `hook_event_name`s (`KIMI_EVENTS` in
+# install/kimi.rs). Kimi is a pnpm/TS monorepo, but the canonical hook-event list
+# lives in the docs (each name appears verbatim in the hooks page — a summary
+# table AND the payload examples), so — like Cursor — the raw markdown is the
+# watchable surface. ONE-DIRECTIONAL (like cursor/hermes/openclaw): Kimi exposes
+# 16 hook events and we register 8 by design, so a "new upstream event" is noise;
+# we alarm only when an event WE DEPEND ON vanishes (a rename the CLI would fire
+# but the decoder maps to nothing). The common-word event `Stop` is intrinsically
+# low-confidence (the doc contains the word regardless), so its disappearance can
+# be masked — the distinctive `PreToolUse`/`PostToolUseFailure`/`SessionStart`/
+# `SessionEnd`/`PermissionRequest` carry the check (the cursor `stop` caveat).
+KIMI_HOOKS_URL = (
+    "https://raw.githubusercontent.com/MoonshotAI/kimi-code/main/"
+    "docs/en/customization/hooks.md"
+)
 
 # grok (Grok Build, xai-org/grok-build) is open Rust with THREE depended
 # surfaces in three files: the hook event enum + payload serde (event.rs), the
@@ -795,6 +817,19 @@ def read_grok_events() -> set[str]:
     return set(re.findall(r'"(\w+)"', m.group(1)))
 
 
+def read_kimi_events() -> set[str]:
+    """The PascalCase hook events we register/decode, read from the `KIMI_EVENTS`
+    const in install/kimi.rs — the SAME registered list the
+    `every_registered_kimi_event_decodes` test pins to the decode path (the shared
+    CC-shaped arms + the source's custom Extend decoder), so this is a leak-free
+    source of truth (mirrors read_cursor_events / read_hermes_events)."""
+    src = (REPO / "crates/pixtuoid/src/install/kimi.rs").read_text()
+    m = re.search(r"const KIMI_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate KIMI_EVENTS in install/kimi.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
+
+
 def upstream_grok_hooks(text: str) -> set[str] | None:
     """The HookEventName enum variants (bare Rust idents — registration keys
     accept the PascalCase spelling, so these ARE the names we register)."""
@@ -908,6 +943,7 @@ def run_checks(
     openclaw_ours: set[str] | None,
     hermes_ours: set[str] | None,
     grok_ours: set[str] | None,
+    kimi_ours: set[str] | None,
     breaking: list[str],
     review: list[str],
     errors: list[str],
@@ -1371,6 +1407,24 @@ def run_checks(
                         f"decoder reads None (no coalesce key / no tool label)."
                     )
 
+    # --- Kimi hook events (only the FETCH is transient) --------------------
+    if kimi_ours is not None:
+        text = try_fetch(KIMI_HOOKS_URL, "Kimi hooks doc", breaking, errors)
+        if text is not None:
+            for ev in sorted(kimi_ours):
+                # Word-boundary token match (the doc renders each PascalCase name
+                # inline / in a summary table, not as a quoted literal). Mirrors
+                # the Cursor check. ONE-DIRECTIONAL: a depended event missing from
+                # the page is breaking; a new upstream event is intentionally
+                # ignored (we map 8 of 16 by design).
+                if not re.search(rf"\b{re.escape(ev)}\b", text):
+                    breaking.append(
+                        f"Kimi hook `{ev}` (registered in KIMI_EVENTS) is GONE from "
+                        f"kimi-code docs/en/customization/hooks.md — likely renamed; "
+                        f"Kimi still fires it but the decoder maps it to nothing "
+                        f"(no sprite / no activity)."
+                    )
+
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:
         tools = try_fetch(CC_TOOLS_URL, "CC tools-reference", breaking, errors)
@@ -1444,6 +1498,7 @@ def main() -> int:
     openclaw_ours = None
     hermes_ours = None
     grok_ours = None
+    kimi_ours = None
     try:
         codex_ours = read_codex_events()
         codex_rollout = read_codex_rollout_types()
@@ -1458,6 +1513,7 @@ def main() -> int:
         openclaw_ours = read_openclaw_events()
         hermes_ours = read_hermes_events()
         grok_ours = read_grok_events()
+        kimi_ours = read_kimi_events()
     except Exception as e:  # noqa: BLE001
         breaking.append(
             f"drift-watch cannot read our own source ({e}) — the parsers in "
@@ -1480,6 +1536,7 @@ def main() -> int:
             openclaw_ours,
             hermes_ours,
             grok_ours,
+            kimi_ours,
             breaking,
             review,
             errors,
