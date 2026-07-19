@@ -37,4 +37,28 @@ mod tests {
         // whole string stays one shell token.
         assert_eq!(shell_single_quote("a'b"), r#"'a'\''b'"#);
     }
+
+    // The WRITE side (`shell_single_quote`, here — cfg(unix)) and the READ side
+    // (`verify::posix_unquote`, a different, all-platform module) must round-trip
+    // byte-for-byte, or the on-disk shim path can't be recovered → a false "shim
+    // binary missing" in `doctor` / the Sources panel. They legitimately can't be
+    // merged (the read side is not cfg-forked — see verify.rs's module doc), so
+    // pin the write/read PAIR directly instead of trusting they stay in sync.
+    #[test]
+    fn quoting_round_trips_through_the_verify_reader() {
+        use crate::install::verify::posix_unquote;
+        for p in [
+            "/opt/bin/pixtuoid-hook",
+            "/Users/Jane Doe/bin/pixtuoid-hook",
+            "/opt/it's mine/pixtuoid-hook",
+            "/a'b'c/pixtuoid-hook",
+            "/weird; path,&(x)/pixtuoid-hook",
+        ] {
+            assert_eq!(
+                posix_unquote(&shell_single_quote(p)),
+                p,
+                "shell_single_quote → posix_unquote drifted for {p:?}"
+            );
+        }
+    }
 }
