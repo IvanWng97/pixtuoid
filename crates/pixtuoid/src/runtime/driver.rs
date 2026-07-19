@@ -391,10 +391,9 @@ async fn headless_loop_with_signal(
             }
             Ok(()) = health_rx.changed() => {
                 let deaths = health_rx.borrow_and_update().clone();
-                for d in deaths.iter().skip(deaths_seen) {
+                for d in super::unseen_deaths(&deaths, &mut deaths_seen) {
                     println!("{}", super::format_source_death(d));
                 }
-                deaths_seen = deaths.len();
             }
             res = &mut ctrl_c => match res {
                 Ok(()) => {

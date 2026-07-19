@@ -204,6 +204,20 @@ fn format_source_death(d: &SourceDeath) -> String {
     )
 }
 
+/// The not-yet-surfaced tail of the grow-only `SourceDeath` health watch,
+/// advancing `seen` past it. The watch value is a `Vec` that only ever grows,
+/// so each consumer surfaces a death exactly once by tracking a running count —
+/// logging the whole borrow on every change would re-warn all prior deaths (N
+/// deaths → N(N+1)/2 lines, reading as repeated crashes in forensics). Both
+/// consumers ride this ONE owner (the headless stdout line in `driver.rs`, the
+/// floating-window `warn!` log in `floating/mod.rs`), so the off-by-one has a
+/// single tested home a future third consumer inherits.
+pub(crate) fn unseen_deaths<'a>(deaths: &'a [SourceDeath], seen: &mut usize) -> &'a [SourceDeath] {
+    let start = (*seen).min(deaths.len());
+    *seen = deaths.len();
+    &deaths[start..]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,6 +250,27 @@ mod tests {
             out.contains("open /tmp/a[2Jb.jsonl: [31mboom"),
             "got {out:?}"
         );
+    }
+
+    #[test]
+    fn unseen_deaths_yields_each_death_exactly_once() {
+        let mut seen = 0usize;
+        let one = vec![SourceDeath::new("codex", "boom")];
+        assert_eq!(unseen_deaths(&one, &mut seen).len(), 1);
+        assert_eq!(seen, 1);
+
+        // The grow-only Vec gains a second death: only the NEW one surfaces —
+        // the first must not be re-logged on every later change.
+        let two = vec![
+            SourceDeath::new("codex", "boom"),
+            SourceDeath::new("claude-code", "bind"),
+        ];
+        let fresh = unseen_deaths(&two, &mut seen);
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].source, "claude-code");
+
+        // No growth → nothing to log.
+        assert!(unseen_deaths(&two, &mut seen).is_empty());
     }
 
     #[test]
