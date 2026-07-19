@@ -106,12 +106,23 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
   .footer__line a {
     color: var(--chip-ink);
     text-decoration: none;
+    /* ease the hover like the nav row does — same shared 0.18s colour nudge */
+    transition: color 0.18s ease;
   }
   .footer__line a:hover {
     color: #fff;
   }
-  .footer__coffee {
-    color: var(--coral) !important;
+  /* support CTA — same coral accent + brighten-on-hover mechanism as Nav's
+     coffee (#686). The compound selector outranks `.footer__line a`(:hover), so
+     the old `!important` hack is gone. Rest is already full --coral (light on
+     the dark chip), so the brighten mixes toward white — on the dark chip more
+     light only GAINS contrast (AA-safe), and mixing FROM var(--coral) keeps the
+     hover riding a gallery retint accent instead of clashing with it. */
+  .footer__line a.footer__coffee {
+    color: var(--coral);
+  }
+  .footer__line a.footer__coffee:hover {
+    color: color-mix(in srgb, var(--coral) 72%, #fff);
   }
   /* shown only when the local clock holds night — toggled by the Base script */
   .footer__clock {
