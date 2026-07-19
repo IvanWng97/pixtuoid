@@ -47,10 +47,18 @@ but a Chromium/Playwright *version* mismatch fails DIFFERENTLY: `rehype-mermaid`
 collapses the whole `<Content />` to an empty `<article>` WITHOUT erroring the
 build, so it can silently ship an empty `/architecture` (the deploy's
 `withastro/action` fell back to pnpm → a Playwright unmatched to the installed
-Chromium; #680 pins `package-manager: npm`). Guarded by
-`config/assert-docs-rendered.mjs` (`check:docs`) — run in `verify`/site-check AND
-the deploy's `build-cmd`, asserting every doc page's `<article>` has a body +
-`/architecture` kept its `<svg>` — so a collapsed render reddens, never deploys.
+Chromium; #680 pins `package-manager: npm`). A SECOND, subtler way it ships empty:
+`withastro/action`'s Astro build cache (`cache: true`, `node_modules/.astro`)
+uses a bare `astro-cache-<os>-` restore-key, so a deploy restores the *previous*
+deploy's cache — and once a broken deploy caches an empty `/architecture`, every
+later deploy serves it back as a **+7ms cache HIT** and never re-renders the
+`mermaid` block (no Chromium launch, no error, still empty). `pages.yml` sets
+`cache: false` so each deploy does a fresh real render; poison can't persist
+(#682). `site.yml` renders fine because it has no cross-run Astro cache. Both
+paths are caught by `config/assert-docs-rendered.mjs` (`check:docs`) — run in
+`verify`/site-check AND the deploy's `build-cmd`, asserting every doc page's
+`<article>` has a body + `/architecture` kept its `<svg>` — so a collapsed render
+reddens, never deploys.
 
 **wb-5 (Lobby + Docs):** the five doc routes now mount the Statusline **doc
 variant** (index-only organs — floor lift, PR feed, env readouts, keys hint —

@@ -59,6 +59,16 @@ jobs:
         with:
           path: ./site
           node-version: 26
+          # DISABLE the action's Astro build cache (node_modules/.astro). It is
+          # keyed with a bare `astro-cache-<os>-` restore-key prefix, so a deploy
+          # RESTORES the most recent prior deploy's cache — and a deploy that once
+          # rendered /architecture EMPTY (the pnpm-era Chromium miss below) cached
+          # that empty <Content /> and every later deploy served it back as a
+          # +7ms cache HIT, never re-rendering the ```mermaid block. `cache: false`
+          # forces a fresh, real mermaid render each deploy — poison can't persist.
+          # (site.yml renders fine precisely because it has no cross-run Astro cache.)
+          # A static 7-page build; the lost speedup is milliseconds, correctness isn't.
+          cache: false
           # PIN npm. Without it, v6's detection fell back to pnpm, whose fresh
           # install resolved a DIFFERENT Playwright than the Chromium installed
           # above → rehype-mermaid's inline-SVG render of /architecture failed
