@@ -2,14 +2,12 @@
   {
     "id": "normal",
     "name": "Coworking",
-    "blurb": "Warm daylight lounge",
     "accent": "#d97757",
     "accent2": "#e6a356"
   },
   {
     "id": "cyberpunk",
     "name": "Cyberpunk",
-    "blurb": "Neon nights",
     "accent": "#ff5cc6",
     "accent2": "#8be9fd",
     "featured": true
@@ -17,28 +15,24 @@
   {
     "id": "dracula",
     "name": "Dracula",
-    "blurb": "Soft plum dark",
     "accent": "#bd93f9",
     "accent2": "#ff79c6"
   },
   {
     "id": "tokyo-night",
     "name": "Tokyo Night",
-    "blurb": "Cool navy calm",
     "accent": "#7aa2f7",
     "accent2": "#bb9af7"
   },
   {
     "id": "catppuccin",
     "name": "Catppuccin",
-    "blurb": "Pastel mocha",
     "accent": "#cba6f7",
     "accent2": "#f5a9c4"
   },
   {
     "id": "gruvbox",
     "name": "Gruvbox",
-    "blurb": "Retro amber",
     "accent": "#fabd2f",
     "accent2": "#fe8019"
   }

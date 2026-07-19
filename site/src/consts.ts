@@ -105,7 +105,6 @@ export type DocId = (typeof DOCS)[number]['id'];
 export interface ThemeShot {
   id: string;
   name: string;
-  blurb: string;
   accent: string; // primary hue (chip + retint)
   accent2: string; // gradient end hue
   featured?: boolean; // shown first in the switcher
@@ -123,7 +122,6 @@ export const THEMES: ThemeShot[] = themesData as ThemeShot[];
 interface WeatherShot {
   id: string; // matches `--weather <id>` (the live VIBING chip's data-weather)
   name: string;
-  blurb: string;
 }
 
 // Single source of truth for the weather chips → site/src/weather.json. Weather
@@ -138,7 +136,6 @@ const WEATHERS: WeatherShot[] = weatherData as WeatherShot[];
 export interface ShowcaseVariant {
   id: string;
   name: string;
-  blurb: string;
   src: string; // public/demos/-relative filename
   accent?: string;
   accent2?: string;
@@ -246,7 +243,6 @@ function variantsForRef(ref: 'themes' | 'weather'): ShowcaseVariant[] {
     return THEMES.map((t) => ({
       id: t.id,
       name: t.name,
-      blurb: t.blurb,
       src: `theme_${t.id}.png`,
       accent: t.accent,
       accent2: t.accent2,
@@ -255,7 +251,6 @@ function variantsForRef(ref: 'themes' | 'weather'): ShowcaseVariant[] {
   return WEATHERS.map((w) => ({
     id: w.id,
     name: w.name,
-    blurb: w.blurb,
     src: `weather_${w.id}.png`,
     // storm is the most striking opener for the weather channel
     featured: w.id === 'storm',

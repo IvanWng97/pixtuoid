@@ -1,42 +1,34 @@
 [
   {
     "id": "clear",
-    "name": "Clear",
-    "blurb": "blue sky, the city crisp behind the glass — the sun rides fully visible"
+    "name": "Clear"
   },
   {
     "id": "rain",
-    "name": "Rain",
-    "blurb": "streaks run down the windows, the sun lost behind the rain"
+    "name": "Rain"
   },
   {
     "id": "storm",
-    "name": "Storm",
-    "blurb": "dark sky, lightning flickers off the walls, the sun swallowed whole"
+    "name": "Storm"
   },
   {
     "id": "snow",
-    "name": "Snow",
-    "blurb": "flakes drift past a softly glowing sky, the sun a faint glow through the flurry"
+    "name": "Snow"
   },
   {
     "id": "fog",
-    "name": "Fog",
-    "blurb": "a luminous white-out swallows the skyline, the sun a pale smear behind it"
+    "name": "Fog"
   },
   {
     "id": "overcast",
-    "name": "Overcast",
-    "blurb": "flat grey daylight, the sun hidden behind the cloud"
+    "name": "Overcast"
   },
   {
     "id": "windy",
-    "name": "Windy",
-    "blurb": "rain slants across the gusts — the sun still blazes through"
+    "name": "Windy"
   },
   {
     "id": "smog",
-    "name": "Smog",
-    "blurb": "a warm, sodium-lit haze, the sun a hazy smear behind it"
+    "name": "Smog"
   }
 ]

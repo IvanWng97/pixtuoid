@@ -242,7 +242,7 @@ need the manifest entry and whatever static screenshots the manifest references.
 
 When pixtuoid ships a new in-app theme, the site is a **one-line** update:
 
-1. Add `{ "id": "...", "name": "...", "blurb": "...", "accent": "#...", "accent2": "#..." }`
+1. Add `{ "id": "...", "name": "...", "accent": "#...", "accent2": "#..." }`
    to [`src/themes.json`](src/themes.json).
 2. Run `just gen-media` to render its screenshot.
 

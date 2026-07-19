@@ -29,14 +29,12 @@
       {
         "id": "tree",
         "name": "Tab ⇥ agent tree",
-        "blurb": "every floor's agents in one foldable tree",
         "src": "agent-tree.png",
         "featured": true
       },
       {
         "id": "zoom",
         "name": "Zoom in",
-        "blurb": "badges, activity tints, the tree up close",
         "src": "agent-tree-zoom_popup.png"
       }
     ],
@@ -73,20 +71,17 @@
       {
         "id": "cubicles",
         "name": "Cubicles",
-        "blurb": "pods with per-tool monitor glow",
         "src": "space_cubicles.png",
         "featured": true
       },
       {
         "id": "meeting",
         "name": "Meeting lounge",
-        "blurb": "sofas where idle agents chitchat",
         "src": "space_meeting.png"
       },
       {
         "id": "pantry",
         "name": "Pantry",
-        "blurb": "coffee runs start here",
         "src": "space_pantry.png"
       }
     ],
