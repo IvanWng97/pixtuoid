@@ -363,8 +363,7 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
         "url",
         "description",
     ];
-    let target = args.and_then(|a| crate::source::decoder::first_present_str(a, KEYS));
-    generic_tool_display(tool, target)
+    crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
 
 // ---------------------------------------------------------------------------

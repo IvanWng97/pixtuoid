@@ -485,6 +485,19 @@ pub(crate) fn generic_tool_display(tool: &str, target: Option<&str>) -> ToolDeta
     }
 }
 
+/// The non-CC "scan a key list, then assemble" last mile: find the first
+/// present target key in `args`, then hand it to [`generic_tool_display`] for
+/// the cap + `: …` formatting. Bundling the scan and the cap in ONE call means a
+/// source's Generic fallback cannot scan a target and format it raw, bypassing
+/// [`MAX_TOOL_TARGET_CHARS`] — the residual chokepoint-bypass bug class a
+/// copy-pasted 9th source would otherwise reintroduce. The per-source `keys`
+/// vocabulary is passed IN as data (invariant #3), so this stays
+/// format-agnostic; CC keeps its own per-tool key dispatch
+/// (`describe_tool_target`), which is a tool→key map, not a key list.
+pub(crate) fn generic_keyed_detail(tool: &str, args: Option<&Value>, keys: &[&str]) -> ToolDetail {
+    generic_tool_display(tool, args.and_then(|a| first_present_str(a, keys)))
+}
+
 /// CC's per-tool target key dispatch: the raw `file/cmd` descriptor for the
 /// Generic display, or `None` for a tool with no keyed target. The cap +
 /// `: …` formatting is applied by [`generic_tool_display`], so this returns
@@ -1267,6 +1280,36 @@ mod tests {
         // A legitimate short name passes through unchanged.
         match make_tool_detail("test", "Read", None) {
             ToolDetail::Generic { display } => assert_eq!(display, "Read"),
+            other => panic!("expected Generic, got {other:?}"),
+        }
+    }
+
+    // The shared non-CC last mile: `generic_keyed_detail` scans the source's
+    // key list for the target, then routes it through the SAME cap chokepoint —
+    // so a source can't scan a target and format it raw past
+    // MAX_TOOL_TARGET_CHARS (the bypass class this helper closes structurally).
+    #[test]
+    fn generic_keyed_detail_scans_keys_then_caps_the_target() {
+        const KEYS: &[&str] = &["command", "path"];
+        // First present key wins; the target rides the `: …` suffix.
+        match generic_keyed_detail("bash", Some(&json!({"command": "ls -la"})), KEYS) {
+            ToolDetail::Generic { display } => assert_eq!(display, "bash: ls -la"),
+            other => panic!("expected Generic, got {other:?}"),
+        }
+        // An over-cap target is ellipsized at MAX_TOOL_TARGET_CHARS through the
+        // composed path — the guarantee a copy-pasted source now inherits.
+        let long = "T".repeat(MAX_TOOL_TARGET_CHARS * 5);
+        match generic_keyed_detail("run", Some(&json!({ "path": long })), KEYS) {
+            ToolDetail::Generic { display } => {
+                let target = display.strip_prefix("run: ").expect("has a target suffix");
+                assert_eq!(target.chars().count(), MAX_TOOL_TARGET_CHARS + 1);
+                assert!(target.ends_with('…'));
+            }
+            other => panic!("expected Generic, got {other:?}"),
+        }
+        // No matching key → bare tool name, no suffix.
+        match generic_keyed_detail("noop", Some(&json!({"other": "x"})), KEYS) {
+            ToolDetail::Generic { display } => assert_eq!(display, "noop"),
             other => panic!("expected Generic, got {other:?}"),
         }
     }

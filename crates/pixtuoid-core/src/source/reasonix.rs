@@ -54,7 +54,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, generic_tool_display, MAX_DECODED_FIELD_CHARS};
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -253,8 +253,7 @@ fn rx_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     // last-mile assembly (name + `: target`, each capped at the decode boundary
     // — pitfall 3) in `generic_tool_display`.
     const KEYS: &[&str] = &["command", "path", "pattern", "url"];
-    let target = args.and_then(|a| crate::source::decoder::first_present_str(a, KEYS));
-    generic_tool_display(tool, target)
+    crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
 
 #[cfg(test)]

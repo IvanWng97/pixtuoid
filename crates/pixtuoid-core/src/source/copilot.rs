@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, generic_tool_display, MAX_DECODED_FIELD_CHARS};
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -348,8 +348,7 @@ fn copilot_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     // view/read/write→path, grep→pattern); the shared last-mile assembly caps +
     // formats the `: …` suffix so the policy can't drift per source.
     const KEYS: &[&str] = &["command", "path", "filePath", "pattern", "query"];
-    let target = args.and_then(|a| crate::source::decoder::first_present_str(a, KEYS));
-    generic_tool_display(tool, target)
+    crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
 
 #[cfg(test)]

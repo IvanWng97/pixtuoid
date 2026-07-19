@@ -62,7 +62,7 @@
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, generic_tool_display, MAX_DECODED_FIELD_CHARS};
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -327,8 +327,7 @@ fn oc_tool_detail(tool: &str, input: Option<&Value>) -> ToolDetail {
         "url",
         "query",
     ];
-    let target = input.and_then(|i| crate::source::decoder::first_present_str(i, KEYS));
-    generic_tool_display(tool, target)
+    crate::source::decoder::generic_keyed_detail(tool, input, KEYS)
 }
 
 #[cfg(test)]

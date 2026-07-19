@@ -58,7 +58,6 @@ use std::path::PathBuf;
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
-use crate::source::decoder::generic_tool_display;
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -187,8 +186,7 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
 /// the `: target` are capped at the decode boundary via `generic_tool_display`.
 fn hermes_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     const KEYS: &[&str] = &["command", "file_path", "path", "pattern", "url"];
-    let target = args.and_then(|a| crate::source::decoder::first_present_str(a, KEYS));
-    generic_tool_display(tool, target)
+    crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
 
 #[cfg(test)]

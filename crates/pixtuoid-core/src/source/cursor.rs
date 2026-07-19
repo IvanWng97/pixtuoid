@@ -63,7 +63,6 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
-use crate::source::decoder::generic_tool_display;
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -210,8 +209,7 @@ fn cursor_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     // last-mile assembly (name + `: target` with the matching caps) in
     // `generic_tool_display`.
     const KEYS: &[&str] = &["command", "file_path", "path", "pattern", "url"];
-    let target = args.and_then(|a| crate::source::decoder::first_present_str(a, KEYS));
-    generic_tool_display(tool, target)
+    crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
 
 #[cfg(test)]
