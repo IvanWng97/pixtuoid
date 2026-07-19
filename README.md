@@ -74,7 +74,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 ## Features
 
 <!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->
-| | Feature | Description |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | Feature | Description |
 |---|---|---|
 | <img src="docs/images/pix-icons/multiagent.png" alt="" width="50" height="50"> | **Multi-agent office** | Every agent session gets its own desk — when a floor fills up, a new floor opens automatically |
 | <img src="docs/images/pix-icons/multifloor.png" alt="" width="50" height="50"> | **Multi-floor office** | Hop between floors with `PageUp`/`PageDown`, `↑`/`↓`, or `j`/`k` — each switch slides into view |

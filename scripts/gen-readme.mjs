@@ -109,11 +109,21 @@ const iconCell = (f) =>
 const featureRows = features
   .filter((f) => f.featured !== false)
   .map((f) => `| ${iconCell(f)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
+// GitHub ignores an <img>'s width/height when its table cell is "shorter" than
+// the image and collapses the column: Safari does this hard (the GitHub-injected
+// `max-width:100%` makes the img's min-content 0), so the icons rendered ~16px in
+// Safari while Chrome kept 50px. The documented GFM fix is non-breaking-space
+// "glue" — real, text-measured cell content the collapse can't undo. Pad the
+// otherwise-empty icon HEADER (one cell, so it doesn't inflate each row's
+// max-content the way padding beside the img would) to clear the widest icon
+// (lobster, 70px ≈ 18 &nbsp; at the README font); 20 leaves margin.
+const ICON_COL_NBSP = 20;
+const iconHeader = '&nbsp;'.repeat(ICON_COL_NBSP);
 regenSection(
   'Features table',
   '<!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->',
   '<!-- features:end -->',
-  ['| | Feature | Description |', '|---|---|---|', ...featureRows].join('\n')
+  [`| ${iconHeader} | Feature | Description |`, '|---|---|---|', ...featureRows].join('\n')
 );
 
 // --- Supported-tools glimpse (FEATURED only + a link to the full site matrix) ---
