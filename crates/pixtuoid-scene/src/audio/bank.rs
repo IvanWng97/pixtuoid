@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use super::mixer::LoopStem;
-use super::{dsp, synth, OneShot, TrackId};
+use super::{dsp, score, synth, OneShot, TrackId};
 
 /// Per-key / per-drop pre-rendered variant pool sizes: playback picks randomly
 /// so typing/rain never sound repeated, while runtime stays synthesis-free.
@@ -86,9 +86,9 @@ pub struct TrackBeds {
 impl TrackBeds {
     /// DAY continues the boot rng stream in the ratified order (drums, then
     /// texture — the pure musical stems draw nothing), keeping every day
-    /// buffer byte-identical to the #642/#643 renders. NIGHT draws from
-    /// wherever the stream stands — its identity is the frozen score plus
-    /// spectral pins, not byte equality.
+    /// buffer byte-identical to the #642/#643 renders. NIGHT and the day
+    /// TAKES (Day2/Day3) draw from wherever the stream stands — their
+    /// identity is the frozen score plus spectral pins, not byte equality.
     pub fn build(rng: &mut dsp::NoiseStream, track: TrackId) -> Self {
         let beds = match track {
             TrackId::Day => [
@@ -98,6 +98,21 @@ impl TrackBeds {
                 Arc::new(synth::stem_drums(rng)),
                 Arc::new(synth::texture_bed(rng)),
             ],
+            TrackId::Day2 | TrackId::Day3 => {
+                let take = if track == TrackId::Day2 {
+                    &score::DAY2
+                } else {
+                    &score::DAY3
+                };
+                [
+                    Arc::new(synth::day_take_pad(take)),
+                    Arc::new(synth::day_take_sparkle(take)),
+                    Arc::new(synth::day_take_keys(take)),
+                    Arc::new(synth::day_take_drums(take, rng)),
+                    // the day room tone is the day room tone in every take
+                    Arc::new(synth::texture_bed(rng)),
+                ]
+            }
             TrackId::Night => [
                 Arc::new(synth::night_pad()),
                 Arc::new(synth::night_sparkle()),

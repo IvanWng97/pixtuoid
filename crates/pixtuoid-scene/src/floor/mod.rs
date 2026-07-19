@@ -511,7 +511,11 @@ impl AudioObserver {
         AudioFrame {
             stems: crate::audio::stem_levels(&counts, precipitation),
             events,
-            track: crate::audio::select_track(crate::pixel_painter::is_day_at(now), precipitation),
+            track: crate::audio::select_track(
+                crate::pixel_painter::is_day_at(now),
+                precipitation,
+                crate::audio::epoch_hours(now),
+            ),
         }
     }
 

@@ -986,8 +986,12 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     );
     assert_eq!(
         frame.track,
-        crate::audio::select_track(crate::pixel_painter::is_day_at(now), precip),
-        "track must equal select_track(is_day_at(now), precip)"
+        crate::audio::select_track(
+            crate::pixel_painter::is_day_at(now),
+            precip,
+            crate::audio::epoch_hours(now),
+        ),
+        "track must equal select_track(is_day_at(now), precip, epoch_hours(now))"
     );
 }
 

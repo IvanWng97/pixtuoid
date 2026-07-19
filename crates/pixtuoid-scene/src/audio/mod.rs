@@ -94,25 +94,46 @@ pub struct AudioFrame {
     pub track: TrackId,
 }
 
-/// The mood-track registry ids (#644). Day = the original ratified
-/// composition; Night = the Lofi Girl-anchored slow take, also chosen
-/// whenever it rains (the office's rainy mood).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// The mood-track registry ids (#644, day pool widened 2026-07-19). The
+/// day mood is a POOL of takes (the Lofi Girl model — one production
+/// chain, many songs): `Day` = the original ratified composition, `Day2`
+/// "morning" (royal-road IV-V-iii-vi, 76 BPM), `Day3` "golden hour"
+/// (I-vi-ii-V turnaround, 74 BPM). Night = the Lofi Girl-anchored slow
+/// take, also chosen whenever it rains (the office's rainy mood).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TrackId {
     #[default]
     Day,
+    Day2,
+    Day3,
     Night,
+}
+
+/// The day-mood take pool `select_track` rotates through, hour by hour.
+pub const DAY_TAKES: [TrackId; 3] = [TrackId::Day, TrackId::Day2, TrackId::Day3];
+
+/// Wall-clock hours since the UNIX epoch — the day-take rotation input,
+/// derived ONCE here so the native observer and the wasm painter can't
+/// drift on the derivation. (Pre-epoch clocks read as hour 0.)
+pub fn epoch_hours(now: std::time::SystemTime) -> u64 {
+    now.duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 3600)
 }
 
 /// Pure track selection: night hours (the painter's OWN sun window via
 /// `pixel_painter::hour_is_day`/`is_day_at`) or any precipitation pick
-/// the night take. Pure in its inputs so wasm can feed its parametric
-/// hour and tests need no clock.
-pub fn select_track(is_day: bool, precipitation: f32) -> TrackId {
+/// the night take; day hours rotate the [`DAY_TAKES`] pool per
+/// `epoch_hours` — hashed (splitmix64), not `% 3`, because 24 divides by
+/// 3: a modulo would pin each hour-of-day to ONE take forever. Pure in
+/// its inputs so wasm can feed its parametric hour and tests need no
+/// clock; within an hour the pick is stable, so the mood-track crossfade
+/// fires at most once an hour (the radio "next song" moment).
+pub fn select_track(is_day: bool, precipitation: f32, epoch_hours: u64) -> TrackId {
     if !is_day || precipitation > 0.0 {
         TrackId::Night
     } else {
-        TrackId::Day
+        let n = pixtuoid_core::id::splitmix64(epoch_hours) % DAY_TAKES.len() as u64;
+        DAY_TAKES[n as usize]
     }
 }
 
@@ -300,12 +321,54 @@ mod tests {
 
     #[test]
     fn select_track_truth_table() {
-        // day + dry = Day; night hours OR any rain = Night
-        assert_eq!(select_track(true, 0.0), TrackId::Day);
-        assert_eq!(select_track(false, 0.0), TrackId::Night);
-        assert_eq!(select_track(true, 0.6), TrackId::Night);
-        assert_eq!(select_track(false, 1.0), TrackId::Night);
-        assert_eq!(select_track(true, f32::MIN_POSITIVE), TrackId::Night);
+        // day + dry = a day take; night hours OR any rain = Night,
+        // whatever the hour
+        for h in 0..48 {
+            assert!(DAY_TAKES.contains(&select_track(true, 0.0, h)));
+            assert_eq!(select_track(false, 0.0, h), TrackId::Night);
+            assert_eq!(select_track(true, 0.6, h), TrackId::Night);
+            assert_eq!(select_track(false, 1.0, h), TrackId::Night);
+            assert_eq!(select_track(true, f32::MIN_POSITIVE, h), TrackId::Night);
+        }
+    }
+
+    #[test]
+    fn day_take_rotation_is_stable_within_an_hour_and_varied_across_hours() {
+        // stable per hour (the crossfade fires at most once an hour) ...
+        for h in 0..24 {
+            assert_eq!(select_track(true, 0.0, h), select_track(true, 0.0, h));
+        }
+        // ... every take actually plays over a work-week of day hours ...
+        let mut seen = [false; DAY_TAKES.len()];
+        for h in 0..24 * 7 {
+            let t = select_track(true, 0.0, h);
+            seen[DAY_TAKES.iter().position(|&x| x == t).expect("a day take")] = true;
+        }
+        assert!(seen.iter().all(|&s| s), "all day takes rotate in: {seen:?}");
+        // ... and the hash breaks the 24 % 3 == 0 trap: the same
+        // hour-of-day does NOT map to one take forever
+        let mut nine_am = std::collections::HashSet::new();
+        for day in 0..14 {
+            nine_am.insert(select_track(true, 0.0, day * 24 + 9));
+        }
+        assert!(
+            nine_am.len() > 1,
+            "9am must not pin to a single take across days: {nine_am:?}"
+        );
+    }
+
+    #[test]
+    fn epoch_hours_derivation() {
+        use std::time::{Duration, UNIX_EPOCH};
+        assert_eq!(epoch_hours(UNIX_EPOCH), 0);
+        assert_eq!(epoch_hours(UNIX_EPOCH + Duration::from_secs(3599)), 0);
+        assert_eq!(epoch_hours(UNIX_EPOCH + Duration::from_secs(3600)), 1);
+        assert_eq!(
+            epoch_hours(UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
+            1_700_000_000 / 3600
+        );
+        // pre-epoch clocks fail safe to hour 0, not a panic
+        assert_eq!(epoch_hours(UNIX_EPOCH - Duration::from_secs(10)), 0);
     }
 
     #[test]
