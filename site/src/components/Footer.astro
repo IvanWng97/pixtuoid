@@ -69,7 +69,6 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
     font-weight: 400;
     font-synthesis: none;
     font-size: 1.1rem;
-    color: var(--chip-bright);
     text-decoration: none;
   }
   .footer__mark {
@@ -112,17 +111,26 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
   .footer__line a:hover {
     color: #fff;
   }
-  /* support CTA — same coral accent + brighten-on-hover mechanism as Nav's
-     coffee (#686). The compound selector outranks `.footer__line a`(:hover), so
-     the old `!important` hack is gone. Rest is already full --coral (light on
-     the dark chip), so the brighten mixes toward white — on the dark chip more
-     light only GAINS contrast (AA-safe), and mixing FROM var(--coral) keeps the
-     hover riding a gallery retint accent instead of clashing with it. */
+  /* support CTA — the same brighten-on-hover IDEA as Nav's coffee (#686), but via
+     a colour-mix toward white rather than Nav's deep→full token swap (footer
+     coffee already rests at full --coral). The compound selector outranks
+     `.footer__line a`(:hover), so the old `!important` hack is gone. Rest --coral
+     is light on the dark chip, so mixing toward white only GAINS contrast
+     (AA-safe), and mixing FROM var(--coral) keeps the hover riding a gallery
+     retint accent. Keep this rest rule AFTER `.footer__line a:hover`: on a
+     pre-color-mix engine the hover value drops and the two tie at equal
+     specificity, so source order is what holds the fallback at coral (no #fff flash). */
   .footer__line a.footer__coffee {
     color: var(--coral);
   }
   .footer__line a.footer__coffee:hover {
     color: color-mix(in srgb, var(--coral) 72%, #fff);
+  }
+  /* the brand mark wants the brighter --chip-bright (its `.footer__logo` rule
+     declared it, but `.footer__line a` swallowed it — the same specificity trap
+     the coffee `!important` papered over; fixed with the compound selector). */
+  .footer__line a.footer__logo {
+    color: var(--chip-bright);
   }
   /* shown only when the local clock holds night — toggled by the Base script */
   .footer__clock {
