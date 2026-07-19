@@ -997,13 +997,12 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     width: cols,
                                     height: rows,
                                 };
-                                let notes_len =
+                                let notes =
                                     crate::version::release_notes(env!("CARGO_PKG_VERSION"))
-                                        .map(|n| n.len())
-                                        .unwrap_or(0);
+                                        .unwrap_or(&[]);
                                 let scale = renderer.last_popup_scale();
                                 if let Some(rect) =
-                                    widgets::version_popup_url_rect(notes_len, bounds, scale)
+                                    widgets::version_popup_url_rect(notes, bounds, scale)
                                 {
                                     if m.column >= rect.x
                                         && m.column < rect.x + rect.width
