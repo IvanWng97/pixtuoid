@@ -382,7 +382,7 @@ src/
 │                       TESTED surface is offscreen.rs (render seam) + geometry.rs (rect math) + input.rs
 │                       (audio keys). Visual check:
 │                       `examples/floating_snapshot.rs` (the floating twin of the `snapshot` example).
-└── tui/                ratatui App + TuiRenderer (inherent `render` flush; core Renderer trait retired #483) — the half-block flush + widgets +
+└── tui/                ratatui App + TuiRenderer (inherent `render` flush) — the half-block flush + widgets +
                         event loop, a thin painter over the pixtuoid-scene crate (the engine is its own crate now) — see src/tui/CLAUDE.md
 
 sprites/                character/environment packs (NOT under pixtuoid-hook; the DEFAULT pack moved OUT to

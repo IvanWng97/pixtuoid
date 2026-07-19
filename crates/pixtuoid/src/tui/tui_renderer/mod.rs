@@ -1,6 +1,5 @@
-//! `TuiRenderer` — the half-block terminal painter. Its `render` method is the
-//! production flush entry point (was the core `Renderer` trait impl, retired in
-//! #483 — inherent now). It owns the cross-frame mutable state (`RgbBuffer`,
+//! `TuiRenderer` — the half-block terminal painter. Its inherent `render` method
+//! is the production flush entry point. It owns the cross-frame mutable state (`RgbBuffer`,
 //! `FrameCache`, `AStarRouter`, `OccupancyOverlay`, `PoseHistory`) per floor and
 //! forwards to `draw_scene`, which recomputes its own layout per frame from
 //! `terminal.size()` because the user can resize at any time.
@@ -731,8 +730,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
-    /// The production terminal flush — was the core `Renderer` trait impl,
-    /// retired inherent in #483.
+    /// The production terminal flush (an inherent method — there is no core
+    /// render trait).
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
         // Auto-expire pet state.
         if self.active_pet.as_ref().is_some_and(|p| !p.is_active(now)) {

@@ -1,5 +1,5 @@
-//! Smoke test that `TuiRenderer::render` (the production flush entry point —
-//! an inherent method since #483, was the core `Renderer` trait impl) drives a
+//! Smoke test that `TuiRenderer::render` (the production flush entry point, an
+//! inherent method) drives a
 //! real half-block frame end to end, not just the in-memory `TestRenderer`.
 
 use std::path::PathBuf;

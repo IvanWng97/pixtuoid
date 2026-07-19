@@ -14,7 +14,7 @@ Workflow + how to add a theme / agent-CLI `Source`: [`CONTRIBUTING.md`](../docs/
 
 ## Architecture invariants (never break these)
 
-1. `pixtuoid-core` **and** `pixtuoid-scene` have **no terminal/window dependencies** — no `ratatui`, `crossterm`, `winit`, or `stdout`/`println!` (compiler-enforced by the crate boundary, checked by `just arch`). Terminal/window concerns live in the binary's thin painters over the engine's render seam (`pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`) (there is no core render trait — a `#[doc(hidden)]` `Renderer` trait misled two design rounds and was retired in #483).
+1. `pixtuoid-core` **and** `pixtuoid-scene` have **no terminal/window dependencies** — no `ratatui`, `crossterm`, `winit`, or `stdout`/`println!` (compiler-enforced by the crate boundary, checked by `just arch`). Terminal/window concerns live in the binary's thin painters over the engine's render seam (`pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`) (there is no core render trait).
 2. Events flow through **one** channel typed `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag is load-bearing (hook-wins dedup). Each `Source` tags its own events — don't hardcode `Transport::Hook` on the consumer side.
 3. The **`Source` trait** is the only seam for adding a transcript-bearing agent CLI (hook-only CLIs like Reasonix instead ship a hook decoder + an install `Target`).
 4. Hook install (`install::install_target`, driven by the in-TUI Sources panel `s` — no `install-hooks` CLI) writes through symlinks (`resolve_symlink`) — don't replace with `fs::rename`.

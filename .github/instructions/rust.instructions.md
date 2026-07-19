@@ -29,7 +29,7 @@ coding-standard slice.
   there (the crate boundary + `just arch` enforce it). Terminal/window code lives
   only in the `pixtuoid` binary's painters over the engine's render seam
   (`pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`).
-  There is no core render trait — a `#[doc(hidden)]` `Renderer` trait was retired in #483.
+  There is no core render trait.
 - Events flow through **one** channel typed `mpsc::Sender<(Transport, AgentEvent)>`.
   Don't hardcode `Transport::Hook` on the consumer side — each `Source` tags its
   own events.

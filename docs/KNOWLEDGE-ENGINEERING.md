@@ -12,7 +12,7 @@ the system we ran, the experiments we ran against it, and the honest results
 
 > **Editor's note (2026-06).** The heavy *process* machinery described below —
 > the review-ledger suppression protocol, the disposition sweep's mechanized
-> attestation (the old `check_dod`/`.dod` gate), and the
+> attestation, and the
 > `census-reminder` / `review-metrics` / `sharp-edge-inventory` automation —
 > has since been **removed** from the repo as a deliberate simplification (the
 > disposition sweep itself survives as a practice in `pr-review.prompt.md`'s
