@@ -2423,3 +2423,32 @@ test('audit C7: the doc-page install chip links cross-page, not a dead same-page
   expect(href).not.toBe('#install');
   expect(href).toContain('#install');
 });
+
+test('audit C5: ♩ hides and never persists a silent "playing" when the AudioContext constructor throws', async ({
+  page,
+}) => {
+  // WebAudio disabled (Tor / hardened Firefox / enterprise) → `new AudioContext()`
+  // THROWS. Headless Chromium's ctor SUCCEEDS (only createBuffer throws, which the
+  // existing ♩ test covers), so force the ctor-throw path directly. Pre-fix the
+  // ctor-catch only set a flag, leaving the ♩ visible for the click to flip to a
+  // silent "playing" state and persist pix:audio=1 — stuck-silent every visit.
+  const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    const Throwing = function () {
+      throw new Error('WebAudio disabled');
+    } as unknown as typeof AudioContext;
+    window.AudioContext = Throwing;
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext =
+      Throwing;
+  });
+  await gotoLive(page);
+  const btn = page.locator('#office-audio');
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  await btn.click();
+  // audioDisable(): hides the button, stays not-pressed, and the choice is NEVER
+  // persisted as playing (so a later visit's restore path can't re-flip it silent-on).
+  await expect(btn).toBeHidden();
+  await expect(btn).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(() => localStorage.getItem('pix:audio'))).not.toBe('1');
+  expect(errors()).toEqual([]); // caught, not an uncaught page error
+});
