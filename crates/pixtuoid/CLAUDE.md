@@ -281,7 +281,9 @@ src/
 │                       An EMPTY office now plays the quiet pad+sparkle+texture "radio on" floor (the
 │                       ratified demo_1) — Phase 1's empty-silent behavior ended when the music landed.
 │                       MOOD TRACKS (#644): TrackId rides AudioFrame (scene's select_track over the
-│                       lighting's OWN sun window + precipitation); run_loop's switch machine holds the
+│                       lighting's OWN sun window + precipitation + the hourly hashed day-take
+│                       rotation — {Day, Day2, Day3} are one mood, three frozen songs; a take
+│                       switch is an ordinary track switch); run_loop's switch machine holds the
 │                       five TRACK_STEMS at 0, synthesizes the new track's TrackBeds under the silence
 │                       (~2s), swap_loop's them (RodioSink drops+recreates the Player at gain 0), ramps
 │                       back — LATCHED per cycle (boundary flapping can't thrash synths); rain is

@@ -66,9 +66,15 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   the binary's audio/ gateway is the consumer, WebAudio can ride the same model later.
 │                   Since Phase 2 (musical stems) every StemLevels lane is AUDIBLE — the binary
 │                   synthesizes the frozen lofi compositions at startup and loops all six beds.
-│                   MOOD TRACKS (#644): TrackId {Day, Night} + pure select_track(is_day, precip)
-│                   ride AudioFrame — night hours (the SAME pixel_painter::hour_is_day sun window
-│                   the lighting renders) or any rain pick the Night take; the binary's switch
+│                   MOOD TRACKS (#644; day pool 2026-07-19): TrackId {Day, Day2, Day3, Night} +
+│                   pure select_track(is_day, precip, epoch_hours) ride AudioFrame — night hours
+│                   (the SAME pixel_painter::hour_is_day sun window the lighting renders) or any
+│                   rain pick the Night take; day hours ROTATE the DAY_TAKES pool hourly via
+│                   splitmix64(epoch_hours) (hashed, NOT %3 — 24 divides by 3, a modulo pins each
+│                   hour-of-day to one take forever; audio::epoch_hours is the shared derivation).
+│                   The day takes are score::DayTake table-driven (synth::day_take_* — same
+│                   production chain, different frozen songs; the Lofi Girl model): Day2 "morning"
+│                   royal-road 76 BPM, Day3 "golden hour" I-vi-ii-V 74 BPM. The binary's switch
 │                   machine crossfades between the tracks (see the pixtuoid audio/ entry)
 ├── layout/             zone-based office geometry (terminal-agnostic; moved from pixtuoid-core —
 │                       the engine owns its geometry; `Layout` = compat alias for SceneLayout;
