@@ -42,11 +42,12 @@ PACK = ROOT / "crates/pixtuoid-scene/sprites/default"
 OUT = ROOT / "site/src/assets/pix-icons"
 README_OUT = ROOT / "docs/images/pix-icons"
 # Nearest-neighbor upscale factor for the README variants: GitHub's markdown
-# renderer strips <img> sizing/CSS, so these must be pre-scaled pixels. 5x turns
-# the 10x10 (or 8x12 sprite) grids into ~40-70px images — gen-readme.mjs then
-# pins each <img> to THESE dimensions (width/height from the PNG's IHDR) so the
-# table column can't collapse them; bump this to resize the README icons.
-README_SCALE = 5
+# renderer strips <img> sizing/CSS, so these must be pre-scaled pixels. 3x turns
+# the 10x10 (or 8x12 sprite) grids into ~24-42px images — gen-readme.mjs then
+# pins each <img> to THESE dimensions (width/height from the PNG's IHDR) AND
+# derives the icon-column &nbsp; padding from the widest one, so the table column
+# can't collapse them (Safari) nor waste space; bump this to resize README icons.
+README_SCALE = 3
 COMPARE = ROOT / "scripts/compare-screenshots.py"
 DIFF_DIR = ROOT / "target/gen-check-diff"
 

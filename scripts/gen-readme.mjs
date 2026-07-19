@@ -96,29 +96,36 @@ function regenSection(label, start, end, body) {
 // from the PNG's own IHDR — GitHub keeps those attrs (it does on the 500px banner)
 // — so the column reserves real space and the art renders 1:1: crisp, undistorted,
 // sized by README_SCALE in gen-pix-icons.py (bump that const to resize).
-const pixDims = (pix) => {
-  // A missing PNG is already recorded by the existsSync guard above (which exits
-  // with a clean, actionable message); don't pre-empt it with a raw ENOENT here.
+// [w, h] from the PNG's IHDR, or null if missing (a missing PNG is already
+// recorded by the existsSync guard above, which exits with a clean, actionable
+// message — don't pre-empt it with a raw ENOENT here).
+const pngWH = (pix) => {
   const p = join(root, 'docs', 'images', 'pix-icons', `${pix}.png`);
-  if (!existsSync(p)) return '';
+  if (!existsSync(p)) return null;
   const b = readFileSync(p);
-  return ` width="${b.readUInt32BE(16)}" height="${b.readUInt32BE(20)}"`;
+  return [b.readUInt32BE(16), b.readUInt32BE(20)];
+};
+const pixDims = (pix) => {
+  const wh = pngWH(pix);
+  return wh ? ` width="${wh[0]}" height="${wh[1]}"` : '';
 };
 const iconCell = (f) =>
   f.pix ? `<img src="docs/images/pix-icons/${cell(f.pix)}.png" alt=""${pixDims(f.pix)}>` : cell(f.icon);
-const featureRows = features
-  .filter((f) => f.featured !== false)
-  .map((f) => `| ${iconCell(f)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
+const featuredFeatures = features.filter((f) => f.featured !== false);
+const featureRows = featuredFeatures.map(
+  (f) => `| ${iconCell(f)} | **${cell(f.name)}** | ${cell(f.desc)} |`
+);
 // GitHub ignores an <img>'s width/height when its table cell is "shorter" than
 // the image and collapses the column: Safari does this hard (the GitHub-injected
-// `max-width:100%` makes the img's min-content 0), so the icons rendered ~16px in
-// Safari while Chrome kept 50px. The documented GFM fix is non-breaking-space
-// "glue" — real, text-measured cell content the collapse can't undo. Pad the
-// otherwise-empty icon HEADER (one cell, so it doesn't inflate each row's
-// max-content the way padding beside the img would) to clear the widest icon
-// (lobster, 70px ≈ 18 &nbsp; at the README font); 20 leaves margin.
-const ICON_COL_NBSP = 20;
-const iconHeader = '&nbsp;'.repeat(ICON_COL_NBSP);
+// `max-width:100%` makes the img's min-content 0), so the icons rendered ~9px in
+// Safari while Chrome kept full size (verified in Playwright WebKit). The
+// documented GFM fix is non-breaking-space "glue" — real, text-measured cell
+// content the collapse can't undo. Pad the otherwise-empty icon HEADER (one cell,
+// so it doesn't inflate each row's max-content the way padding beside the img
+// would) to just clear the WIDEST icon, derived so it tracks README_SCALE.
+const NBSP_PX = 4; // a README-font &nbsp; ≈ 4px (empirically 20 cleared the 70px lobster in WebKit)
+const maxIconW = Math.max(...featuredFeatures.map((f) => pngWH(f.pix)?.[0] ?? 0));
+const iconHeader = '&nbsp;'.repeat(Math.ceil(maxIconW / NBSP_PX) + 2);
 regenSection(
   'Features table',
   '<!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->',
