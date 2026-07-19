@@ -385,6 +385,14 @@ fn agent_cases() -> Vec<WireCase> {
             transport: Transport::Hook,
             seed: SeedStart::None,
         },
+        WireCase {
+            name: "kimi",
+            source: "kimi",
+            fixture: "kimi/tool-run/hook-payloads.jsonl",
+            decode: DecodeKind::Hook,
+            transport: Transport::Hook,
+            seed: SeedStart::None,
+        },
     ]
 }
 
@@ -515,6 +523,11 @@ fn cursor_hook_envelope_renders_a_painted_sprite() {
 #[test]
 fn hermes_hook_envelope_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("hermes"));
+}
+
+#[test]
+fn kimi_hook_envelope_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_case("kimi"));
 }
 
 // =====================================================================

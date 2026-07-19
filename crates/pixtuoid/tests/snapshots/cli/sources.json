@@ -82,5 +82,12 @@
     "display_name": "Grok Build",
     "health": null,
     "id": "grok"
+  },
+  {
+    "cli_present": false,
+    "connected": false,
+    "display_name": "Kimi Code CLI",
+    "health": null,
+    "id": "kimi"
   }
 ]
