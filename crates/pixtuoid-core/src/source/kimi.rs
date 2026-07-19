@@ -35,7 +35,10 @@
 //! uncaptured, so sessions render FLAT (like Cursor/Hermes) — a future byte-real
 //! capture can add nesting. The install target registers only the events decoded
 //! here (`install/kimi.rs` `KIMI_EVENTS`), pinned by
-//! `every_registered_kimi_event_decodes`.
+//! `every_registered_kimi_event_decodes` (registered ⊆ decodable) AND
+//! `kimi_events_pins_the_exact_registered_set` (the membership itself — so
+//! silently DROPPING a registered event can't ship green past the
+//! one-directional drift-watch, which reads the same const).
 
 use std::path::PathBuf;
 

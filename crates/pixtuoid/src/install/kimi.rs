@@ -280,14 +280,61 @@ mod tests {
     }
 
     #[test]
-    fn default_config_path_appends_config_toml_when_a_dir_resolves() {
-        // `default_config_path` is `kimi_config_dir().join("config.toml")`. Assert
-        // the filename structurally (env-independent: CI always has HOME, but if a
-        // stripped env resolves no home the path errs, which is also acceptable —
-        // don't assert on the real env value, only the join shape when Ok).
+    fn default_config_path_honors_kimi_code_home_env() {
+        // std::env is process-global; serialize against other env-mutating tests.
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("KIMI_CODE_HOME");
+
+        // KIMI_CODE_HOME set → <dir>/config.toml VERBATIM (no exists-gate, unlike
+        // codex). Unconditional (not `if let Ok`) so a mutation making
+        // default_config_path always-Err is CAUGHT, not skipped.
+        let custom = std::env::temp_dir().join("pixtuoid-kimi-home-cfg-test");
+        std::env::set_var("KIMI_CODE_HOME", &custom);
+        assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
+
+        // Empty → treated as unset (nonempty_env trims) → falls back to
+        // <home>/.kimi-code; assert only the filename when a home resolves (CI
+        // always has one, a stripped env legitimately errs).
+        std::env::set_var("KIMI_CODE_HOME", "");
         if let Ok(p) = default_config_path() {
             assert_eq!(p.file_name().and_then(|n| n.to_str()), Some("config.toml"));
         }
+
+        match saved {
+            Some(v) => std::env::set_var("KIMI_CODE_HOME", v),
+            None => std::env::remove_var("KIMI_CODE_HOME"),
+        }
+    }
+
+    #[test]
+    fn detect_installed_probes_the_data_root_not_the_config_file() {
+        // std::env is process-global; serialize against other env-mutating tests.
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("KIMI_CODE_HOME");
+
+        let root = std::env::temp_dir().join("pixtuoid-kimi-detect-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::env::set_var("KIMI_CODE_HOME", &root);
+        assert!(!detect_installed(), "an absent data root must not detect");
+
+        // Create the data root WITHOUT a config.toml → still detected: Kimi
+        // creates the root on first run before any config is written, so we probe
+        // the dir, not the file we'd write (the Reasonix/CodeWhale rule).
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(
+            detect_installed(),
+            "an existing data root must detect even with no config.toml"
+        );
+
+        match saved {
+            Some(v) => std::env::set_var("KIMI_CODE_HOME", v),
+            None => std::env::remove_var("KIMI_CODE_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -524,5 +571,31 @@ command = "terminal-notifier -message done"
                  unsupported. Add an arm in pixtuoid-core source/kimi.rs (or the shared arms)."
             );
         }
+    }
+
+    // MEMBERSHIP pin — the completeness half `every_registered_kimi_event_decodes`
+    // can't see (it only proves registered ⊆ decodable, so silently DROPPING an
+    // event ships green: no clean reap if `SessionEnd` goes, a failed tool
+    // lingering Active if `PostToolUseFailure` goes — and the drift-watch reads
+    // this same const one-directionally, so it's blind too; cargo-mutants doesn't
+    // mutate `&[&str]` initializers). Pins the exact set so a drop is a LOUD diff.
+    #[test]
+    fn kimi_events_pins_the_exact_registered_set() {
+        use std::collections::BTreeSet;
+        assert_eq!(
+            KIMI_EVENTS.iter().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "SessionStart",
+                "PreToolUse",
+                "PostToolUse",
+                "PostToolUseFailure",
+                "PermissionRequest",
+                "Stop",
+                "StopFailure",
+                "SessionEnd",
+            ]),
+            "KIMI_EVENTS membership changed — the two `*Failure` variants are the \
+             ones ONLY the custom Extend decoder services; update this pin deliberately."
+        );
     }
 }

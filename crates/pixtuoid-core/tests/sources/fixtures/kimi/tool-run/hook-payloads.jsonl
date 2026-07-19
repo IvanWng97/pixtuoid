@@ -5,4 +5,5 @@
 {"hook_event_name": "PostToolUseFailure", "session_id": "session_abc", "cwd": "/Users/dev/proj", "tool_name": "Read", "tool_use_id": "t2", "_pixtuoid_source": "kimi"}
 {"hook_event_name": "PermissionRequest", "session_id": "session_abc", "cwd": "/Users/dev/proj", "_pixtuoid_source": "kimi"}
 {"hook_event_name": "Stop", "session_id": "session_abc", "cwd": "/Users/dev/proj", "_pixtuoid_source": "kimi"}
+{"hook_event_name": "StopFailure", "session_id": "session_abc", "cwd": "/Users/dev/proj", "_pixtuoid_source": "kimi"}
 {"hook_event_name": "SessionEnd", "session_id": "session_abc", "cwd": "/Users/dev/proj", "_pixtuoid_source": "kimi"}

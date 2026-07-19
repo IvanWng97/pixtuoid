@@ -57,6 +57,9 @@ expression: events
 - ActivityEnd:
     agent_id: 13282019020037904231
     tool_use_id: ~
+- ActivityEnd:
+    agent_id: 13282019020037904231
+    tool_use_id: ~
 - SessionEnd:
     agent_id: 13282019020037904231
     as_child: false
