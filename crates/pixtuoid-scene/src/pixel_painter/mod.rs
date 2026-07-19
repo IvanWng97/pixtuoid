@@ -368,8 +368,8 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
 /// row — `desk.y + visual.h` — the SAME `visual.h` `enqueue_desk_cubicles` keys
 /// the desk sprite on, read from the one authority (`desk_furniture_def`) rather
 /// than re-hardcoded, so a `DESK_H` retune moves the shadow WITH the sprite's
-/// south base instead of leaving it behind. The half-extents stay inline: a
-/// shadow's width/depth is a per-piece taste value with no source to derive from.
+/// south base instead of leaving it behind. `half_w` tracks `DESK_W` (the same
+/// authority `cx` uses); only `half_h` is a source-less per-piece taste literal.
 fn desk_shadow_ellipse(desk: Point) -> Ellipse {
     Ellipse {
         cx: desk.x + DESK_W / 2,
