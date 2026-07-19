@@ -1207,3 +1207,37 @@ fn pantry_and_meeting_procedural_rects_match_the_painted_geometry() {
     };
     assert_eq!(tiny_meeting.doormat_rect(), None);
 }
+
+#[test]
+fn sofa_east_drain_edge_reads_the_placed_sofa_and_is_none_when_bare() {
+    let bounds = Bounds {
+        x: 10,
+        y: 10,
+        width: 40,
+        height: 60,
+    };
+    let sofa_fp_w = crate::layout::furniture_def(crate::layout::Furniture::MeetingSofaBody)
+        .footprint
+        .map_or(0, |s| s.w);
+    // A fitted room: the drain edge reads the REAL placed sofa (sofas[0].x,
+    // x-centred by place_trio) + half the sofa footprint + the obstacle pad.
+    let trio = MeetingRoom::place_trio(bounds, false);
+    let room = MeetingRoom {
+        bounds,
+        trio: Some(trio),
+    };
+    assert_eq!(
+        room.sofa_east_drain_edge(),
+        Some(trio.sofas[0].x + sofa_fp_w / 2 + crate::layout::OBSTACLE_PAD_PX)
+    );
+    // …and place_trio centres the sofa on cx, so it stays byte-identical to the
+    // retired bounds reconstruction (mr.x + mr.width/2 + fp/2 + pad).
+    assert_eq!(
+        room.sofa_east_drain_edge(),
+        Some(bounds.x + bounds.width / 2 + sofa_fp_w / 2 + crate::layout::OBSTACLE_PAD_PX)
+    );
+
+    // A bare room (no trio) has no sofa to route around → None.
+    let bare = MeetingRoom { bounds, trio: None };
+    assert_eq!(bare.sofa_east_drain_edge(), None);
+}

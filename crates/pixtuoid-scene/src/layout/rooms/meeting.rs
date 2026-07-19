@@ -1,6 +1,6 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
-use crate::layout::{furniture_def, pct, Bounds, Furniture, Point};
+use crate::layout::{furniture_def, pct, Bounds, Furniture, Point, OBSTACLE_PAD_PX};
 
 /// One meeting room's furniture trio, grouped so the per-room structure is
 /// explicit instead of reconstructed by index arithmetic over two flat Vecs.
@@ -137,6 +137,22 @@ impl MeetingRoom {
             y: b.y + b.height / 2 - 2,
             width: 4,
             height: 5,
+        })
+    }
+
+    /// The east edge past which the wall-band bookshelf must drain to clear the
+    /// sofa's padded ground — read from the REAL placed sofa (`trio.sofas[0].x`,
+    /// x-centred on the room by `place_trio`), NOT reconstructed from `bounds`,
+    /// so a sofa resize can't desync it from `mask`'s Center-anchored sofa
+    /// stamp. `None` for a bare room (no sofa to route around). The
+    /// `coat_rack_pos`/`doormat_rect` accessor pattern — THE authority
+    /// `place_wall_decor` reads instead of re-deriving the sofa geometry.
+    pub fn sofa_east_drain_edge(&self) -> Option<u16> {
+        self.trio.map(|t| {
+            let sofa_fp_w = furniture_def(Furniture::MeetingSofaBody)
+                .footprint
+                .map_or(0, |s| s.w);
+            t.sofas[0].x + sofa_fp_w / 2 + OBSTACLE_PAD_PX
         })
     }
 }

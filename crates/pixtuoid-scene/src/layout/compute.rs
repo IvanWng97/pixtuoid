@@ -479,7 +479,7 @@ pub(super) fn compute_with_seed(
         top_margin,
         usable_h,
         mid_x,
-        meeting_room,
+        meeting_rooms.first(),
         door,
         has_meeting || has_pantry,
         &home_desks,
@@ -675,7 +675,7 @@ fn place_wall_decor(
     top_margin: u16,
     usable_h: u16,
     mid_x: u16,
-    meeting_room: Option<Bounds>,
+    meeting_room: Option<&MeetingRoom>,
     door: Option<Point>,
     has_side_rooms: bool,
     home_desks: &[Point],
@@ -687,12 +687,9 @@ fn place_wall_decor(
     // — drop it entirely, the same degradation pattern as the bare meeting
     // room and the bookshelf.
     let meeting_screen_x = meeting_room.and_then(|mr| {
-        let sx = mr.x + 1;
-        (sx + screen_w < mr.x + mr.width).then_some(sx)
+        let sx = mr.bounds.x + 1;
+        (sx + screen_w < mr.bounds.x + mr.bounds.width).then_some(sx)
     });
-    let sofa_fp_w = furniture_def(Furniture::MeetingSofaBody)
-        .footprint
-        .map_or(0, |s| s.w);
     let bookshelf_x = {
         let x = pct(buf_w, 18);
         match (meeting_screen_x, meeting_room) {
@@ -709,20 +706,16 @@ fn place_wall_decor(
                 // band, where the first desk pod's pad seals the apron gap
                 // against it instead (sweep sealed-pocket catch at 48×60 —
                 // a bare doll-house room).
-                if room_fits_furniture(&mr) {
-                    // Mirrors MeetingRoom::place_trio's cx + the mask's Center-anchored
-                    // sofa ground east edge (fp/2 + OBSTACLE_PAD_PX) — pinned
-                    // behaviorally by the sweep's connectivity invariant: if
-                    // either side drifts, the drain channel seals and the
-                    // sweep reds.
-                    let sofa_pad_east =
-                        mr.x + mr.width / 2 + sofa_fp_w / 2 + super::OBSTACLE_PAD_PX;
-                    // Past the sofa's shadow by the shelf's OWN 1-px ground
-                    // pad (mask.rs wall-decor stamp uses pad=1, not
-                    // OBSTACLE_PAD_PX) + a ≥2-px walkable channel + slack.
+                if let Some(sofa_pad_east) = mr.sofa_east_drain_edge() {
+                    // Past the sofa's shadow (the room's own placed-sofa drain
+                    // edge) by the shelf's OWN 1-px ground pad (mask.rs
+                    // wall-decor stamp uses pad=1, not OBSTACLE_PAD_PX) + a ≥2-px
+                    // walkable channel + slack. Pinned behaviorally by the
+                    // sweep's connectivity invariant: if the drain edge drifts,
+                    // the channel seals and the sweep reds.
                     const BOOKSHELF_DRAIN_GAP: u16 = 5;
                     let spread = x.max(flush_east).max(sofa_pad_east + BOOKSHELF_DRAIN_GAP);
-                    if spread + bookshelf_w < mr.x + mr.width {
+                    if spread + bookshelf_w < mr.bounds.x + mr.bounds.width {
                         spread
                     } else {
                         // Narrow trio room: the spread slot would pierce the
@@ -754,7 +747,7 @@ fn place_wall_decor(
     // Standard — the shelf visually pierced the glass). Dropping it there
     // reopens the apron channel, same degradation as the exit-sign limit.
     let bookshelf_east_limit = meeting_room
-        .map_or(u16::MAX, |mr| mr.x + mr.width)
+        .map_or(u16::MAX, |mr| mr.bounds.x + mr.bounds.width)
         .min(wall_east_limit);
     let mut wall_decor = Vec::new();
     if bookshelf_x + bookshelf_w < bookshelf_east_limit {
