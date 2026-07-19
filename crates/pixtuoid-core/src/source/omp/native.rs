@@ -11,7 +11,6 @@ use anyhow::Result;
 
 use super::{decode_omp_line, derive_omp_label, omp_agent_dir, omp_id_from_path, SOURCE_NAME};
 use crate::source::decoder::parsed_tail_lines;
-use crate::source::fd_probe;
 use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
@@ -83,16 +82,14 @@ impl Source for OmpSource {
 /// kernel-truncated process name is `bun`, not `omp` — probe both (a future
 /// compiled binary would report `omp`; verified live against omp 16.4.0:
 /// comm `bun`, one `O_APPEND` fd on the root transcript). The under-root +
-/// `.jsonl` join carries the precision — an unrelated bun process holding an
+/// `.jsonl` accept carries the precision — an unrelated bun process holding an
 /// omp session transcript open is the accepted RESIDUAL, not an impossibility:
 /// the fd MODE is not checked, so a long-lived bun tool reading an OLD
 /// transcript (a log analyzer, a session picker) would vouch it for the scan
 /// pass — an intermittent resurrection at worst, reaped again once the fd
-/// closes (the negative-vouch ladder). Failure is explicit (#223): `None` ONLY
-/// when the proc-table enumeration itself fails (the watcher then changes
-/// nothing). An ABSENT sessions root is NOT a failure — omp may simply never
-/// have run — so it returns `Some(empty)`: a healthy "nothing alive"
-/// observation. Per-pid fd failures stay non-failures.
+/// closes (the negative-vouch ladder). The mechanics (canonicalize, under-root
+/// filter, #223 failure semantics, #252 pid bind) live in
+/// `ProbeSnapshot::from_open_fds`; only `omp_accept` is ours.
 ///
 /// Module-private on purpose: the sole consumer is `OmpSource::run` — omp has
 /// no focus point-query (registry: `FocusChannel::Unsupported`), so unlike
@@ -100,60 +97,22 @@ impl Source for OmpSource {
 /// to justify a public path (CONTRIBUTING pitfall 5: pub evades dead-code
 /// lints).
 fn live_omp_session_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
-    // Canonicalize once per probe call: kernel-reported fd paths are fully
-    // resolved (e.g. /tmp → /private/tmp on macOS), so the prefix compare
-    // must run against the canonical root or every transcript misses.
-    let Ok(root) = sessions_root.canonicalize() else {
-        tracing::debug!(
-            "omp probe: sessions root {} not canonicalizable; nothing alive there",
-            sessions_root.display()
-        );
-        return Some(ProbeSnapshot::default());
-    };
-    let mut pids = fd_probe::pids_by_name("bun")?;
-    pids.extend(fd_probe::pids_by_name("omp")?);
-    let pairs = pids.into_iter().flat_map(|pid| {
-        fd_probe::open_vnode_paths(pid)
-            .into_iter()
-            .map(move |path| (pid, path))
-    });
-    Some(session_ids_from_paths(&root, pairs))
+    ProbeSnapshot::from_open_fds(sessions_root, &["bun", "omp"], omp_accept)
 }
 
-/// The pure join half of the probe (unit-testable without FFI): keep the
-/// (pid, path) pairs whose path is a `.jsonl` under `root`, mapped through
-/// `omp_id_from_path` — the watcher's `IdDeriver`, so probe ids and gate ids
-/// can't drift; root transcripts AND nested task children both key on the
-/// stem chain, so a live child file vouches for the child id specifically.
-/// Each surviving pair also binds id → pid for the snapshot's `pid_of` (the
-/// exit-watch half).
-fn session_ids_from_paths(
-    root: &Path,
-    pairs: impl Iterator<Item = (i32, PathBuf)>,
-) -> ProbeSnapshot {
-    let mut snap = ProbeSnapshot::default();
-    for (pid, path) in pairs {
-        if !path.starts_with(root) || path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-            continue;
-        }
-        tracing::debug!("omp probe: pid {pid} holds {} open", path.display());
-        // The watcher's id-space is normalize_path_key-folded at the seam
-        // (walk.rs `id_path`); fold the kernel-reported path the same way or
-        // probe ids miss the first-sight gate on Windows (the CC probe folds
-        // identically in `live_cc_session_ids`).
-        let id = omp_id_from_path(Path::new(&crate::id::normalize_path_key(
+/// The per-source ACCEPT half (invariant #3): a held-open `.jsonl` under the
+/// root vouches; its id is the stem-chain key via `omp_id_from_path` (root
+/// transcripts AND nested task children both key on the chain, so a live child
+/// file vouches for the child id specifically). The path is folded through
+/// `normalize_path_key` first — the watcher's id-space is folded at the seam
+/// (walk.rs `id_path`), so probe ids must fold identically or they miss the
+/// first-sight gate on Windows (the CC probe folds the same way).
+fn omp_accept(path: &Path) -> Option<String> {
+    (path.extension().and_then(|e| e.to_str()) == Some("jsonl")).then(|| {
+        omp_id_from_path(Path::new(&crate::id::normalize_path_key(
             &path.to_string_lossy(),
-        )));
-        // Two live processes holding ONE transcript open (a resume overlap)
-        // must not bind id→pid by proc-enumeration order — the same
-        // determinism rule as the codex probe (#252): larger pid wins,
-        // arbitrary but stable for live processes.
-        let bound = snap.pid_of.entry(id).or_insert(pid);
-        if pid > *bound {
-            *bound = pid;
-        }
-    }
-    snap
+        )))
+    })
 }
 
 /// Attach the probe ONLY for omp's first-party layout: the standard
@@ -245,7 +204,7 @@ mod tests {
     const STEM: &str = "2026-07-10T18-32-27-539Z_019f4d4d-6c93-7000-af7b-59b47b0e8111";
 
     fn snap_of(root: &Path, paths: Vec<PathBuf>) -> ProbeSnapshot {
-        session_ids_from_paths(root, paths.into_iter().map(|p| (42, p)))
+        ProbeSnapshot::from_open_fd_pairs(root, paths.into_iter().map(|p| (42, p)), omp_accept)
     }
 
     #[test]
@@ -283,7 +242,11 @@ mod tests {
         let path = root.join(format!("-dev-proj/{STEM}.jsonl"));
         let stem_key = crate::id::normalize_path_key(STEM);
         for pids in [[100, 200], [200, 100]] {
-            let got = session_ids_from_paths(root, pids.into_iter().map(|p| (p, path.clone())));
+            let got = ProbeSnapshot::from_open_fd_pairs(
+                root,
+                pids.into_iter().map(|p| (p, path.clone())),
+                omp_accept,
+            );
             assert_eq!(
                 got.ids().cloned().collect::<Vec<_>>(),
                 vec![stem_key.clone()]

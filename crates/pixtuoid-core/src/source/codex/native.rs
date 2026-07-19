@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::{codex_home, codex_id_from_path, decode_codex_line, derive_codex_label, SOURCE_NAME};
-use crate::source::fd_probe;
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
@@ -21,64 +20,27 @@ fn codex_session_ended(_tail: &[u8]) -> bool {
 
 /// Codex's liveness probe: the rollout UUIDs (in `codex_id_from_path`
 /// id-space, so they join the watcher's first-sight gate directly) of every
-/// rollout under `sessions_root` held OPEN by a running `codex` process,
-/// plus the owning pid per id.
+/// rollout under `sessions_root` held OPEN by a running `codex` process, plus
+/// the owning pid per id.
 ///
 /// Codex has no session registry (unlike CC's `sessions/<pid>.json`), but a
 /// live `codex` process holds its rollout file open in append mode for the
 /// whole session (upstream `RolloutRecorder` owns the handle), so an open
 /// rollout fd IS the first-party liveness signal: pid → open fd → rollout
-/// path → UUID. Failure is explicit (#223): `None` ONLY when the proc-table
-/// enumeration itself fails (the watcher then changes nothing). An ABSENT
-/// sessions root is NOT a failure — codex may simply never have run — so it
-/// returns `Some(empty)`: a healthy "nothing alive" observation. Per-pid fd
-/// failures stay non-failures (a pid exiting mid-probe is normal).
+/// path → UUID. The mechanics (canonicalize, under-root filter, #223 failure
+/// semantics, #252 pid bind) live in `ProbeSnapshot::from_open_fds`; only
+/// `codex_accept` — the per-source rollout recognition + id derivation
+/// (invariant #3) — is ours.
 pub fn live_codex_rollout_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
-    // Canonicalize once per probe call: kernel-reported fd paths are fully
-    // resolved (e.g. /tmp → /private/tmp on macOS), so the prefix compare
-    // must run against the canonical root or every rollout misses.
-    let Ok(root) = sessions_root.canonicalize() else {
-        tracing::debug!(
-            "codex probe: sessions root {} not canonicalizable; nothing alive there",
-            sessions_root.display()
-        );
-        return Some(ProbeSnapshot::default());
-    };
-    let pids = fd_probe::pids_by_name("codex")?;
-    let pairs = pids.into_iter().flat_map(|pid| {
-        fd_probe::open_vnode_paths(pid)
-            .into_iter()
-            .map(move |path| (pid, path))
-    });
-    Some(rollout_ids_from_paths(&root, pairs))
+    ProbeSnapshot::from_open_fds(sessions_root, &["codex"], codex_accept)
 }
 
-/// The pure join half of the probe (unit-testable without FFI): keep the
-/// (pid, path) pairs whose path is a `rollout-*.jsonl` under `root`, mapped
-/// through `codex_id_from_path` — the watcher's `IdDeriver`, so probe ids and
-/// gate ids can't drift. Each surviving pair also binds id → pid for the
-/// snapshot's `pid_of` (the exit-watch half).
-fn rollout_ids_from_paths(
-    root: &Path,
-    pairs: impl Iterator<Item = (i32, PathBuf)>,
-) -> ProbeSnapshot {
-    let mut snap = ProbeSnapshot::default();
-    for (pid, path) in pairs {
-        if !path.starts_with(root) || !is_rollout_filename(&path) {
-            continue;
-        }
-        tracing::debug!("codex probe: pid {pid} holds {} open", path.display());
-        let id = codex_id_from_path(&path);
-        // Two live processes holding ONE rollout open (a resume overlap) must
-        // not bind id→pid by proc-enumeration order — the same determinism
-        // rule as the CC registry fold's no-startedAt arm (#252): larger pid
-        // wins, arbitrary but stable for live processes.
-        let bound = snap.pid_of.entry(id).or_insert(pid);
-        if pid > *bound {
-            *bound = pid;
-        }
-    }
-    snap
+/// The per-source ACCEPT half (invariant #3 — per-source format knowledge
+/// stays per-source): a held-open path vouches iff it is a `rollout-*.jsonl`,
+/// and its id is the rollout UUID via `codex_id_from_path` (the watcher's
+/// `IdDeriver`, so probe ids and gate ids can't drift).
+fn codex_accept(path: &Path) -> Option<String> {
+    is_rollout_filename(path).then(|| codex_id_from_path(path))
 }
 
 fn is_rollout_filename(path: &Path) -> bool {
@@ -190,7 +152,7 @@ mod tests {
     const UUID: &str = "019e7762-9ded-7e33-be41-946ecf105bf4";
 
     fn snap_of(root: &Path, paths: Vec<PathBuf>) -> ProbeSnapshot {
-        rollout_ids_from_paths(root, paths.into_iter().map(|p| (42, p)))
+        ProbeSnapshot::from_open_fd_pairs(root, paths.into_iter().map(|p| (42, p)), codex_accept)
     }
 
     #[test]
@@ -221,7 +183,11 @@ mod tests {
             "2026/06/10/rollout-2026-06-10T08-00-00-{UUID}.jsonl"
         ));
         for pids in [[100, 200], [200, 100]] {
-            let got = rollout_ids_from_paths(root, pids.into_iter().map(|p| (p, path.clone())));
+            let got = ProbeSnapshot::from_open_fd_pairs(
+                root,
+                pids.into_iter().map(|p| (p, path.clone())),
+                codex_accept,
+            );
             assert_eq!(
                 got.ids().cloned().collect::<Vec<_>>(),
                 vec![UUID.to_string()]

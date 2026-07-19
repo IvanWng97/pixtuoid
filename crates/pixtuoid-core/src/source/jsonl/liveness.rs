@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use tracing::debug;
 
 use crate::source::exit_watch::ExitWatch;
-use crate::source::{AgentEvent, TaggedSender, Transport};
+use crate::source::{fd_probe, AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
 use super::walk::{park_if_truncated_below_cursor, walk_jsonl};
@@ -39,6 +39,85 @@ impl ProbeSnapshot {
     /// Whether the probe saw no live sessions (ran fine, nothing alive).
     pub fn is_empty(&self) -> bool {
         self.pid_of.is_empty()
+    }
+
+    /// Bind `id` to its owning `pid`, resolving a contested id (two live
+    /// processes holding one file open — a resume overlap) deterministically:
+    /// the LARGER pid wins — arbitrary but stable, never proc-enumeration
+    /// order (#252). Shared by every probe that binds ids to pids (the two
+    /// open-FD sources via [`from_open_fd_pairs`], grok's registry join).
+    pub(crate) fn bind_pid(&mut self, id: String, pid: i32) {
+        let bound = self.pid_of.entry(id).or_insert(pid);
+        if pid > *bound {
+            *bound = pid;
+        }
+    }
+
+    /// Build a snapshot from the regular files that live `comm_names`-named
+    /// processes hold open under `root` — THE producer-side skeleton the
+    /// open-FD liveness sources (Codex, omp) share. `accept` is the ONLY
+    /// per-source knowledge (invariant #3): it decides whether a held-open
+    /// path is one of this source's transcripts and, if so, returns its
+    /// session id in the watcher's `IdDeriver` id-space (so probe ids join the
+    /// first-sight gate directly). Everything mechanical lives here so a NEW
+    /// fd-probe source can't re-derive it wrong: the #223 canonicalize-or-
+    /// `Some(empty)` failure semantics, the under-root filter, the #252 bind.
+    ///
+    /// `None` ONLY when the proc-table enumeration itself fails
+    /// (`fd_probe::pids_by_name` → `None`) — the watcher then changes nothing
+    /// (#223). An ABSENT / un-canonicalizable `root` is NOT a failure (the
+    /// source may simply never have run) → `Some(empty)`, a healthy "nothing
+    /// alive" observation.
+    pub(crate) fn from_open_fds(
+        root: &Path,
+        comm_names: &[&str],
+        accept: impl Fn(&Path) -> Option<String>,
+    ) -> Option<Self> {
+        // Canonicalize once per call: kernel-reported fd paths are fully
+        // resolved (/tmp → /private/tmp on macOS), so the under-root compare
+        // must run against the canonical root or every match misses.
+        let Ok(canonical) = root.canonicalize() else {
+            debug!(
+                "fd probe: root {} not canonicalizable; nothing alive there",
+                root.display()
+            );
+            return Some(Self::default());
+        };
+        let mut pids = Vec::new();
+        for name in comm_names {
+            pids.extend(fd_probe::pids_by_name(name)?);
+        }
+        let pairs = pids.into_iter().flat_map(|pid| {
+            fd_probe::open_vnode_paths(pid)
+                .into_iter()
+                .map(move |path| (pid, path))
+        });
+        Some(Self::from_open_fd_pairs(&canonical, pairs, accept))
+    }
+
+    /// The PURE join half of [`from_open_fds`] (unit-testable without FFI —
+    /// drive it with synthetic `(pid, path)` pairs): keep each pair whose path
+    /// is under `root` and `accept`ed, binding id → owning pid via
+    /// [`bind_pid`] (the #252 tiebreak).
+    pub(crate) fn from_open_fd_pairs(
+        root: &Path,
+        pairs: impl Iterator<Item = (i32, PathBuf)>,
+        accept: impl Fn(&Path) -> Option<String>,
+    ) -> Self {
+        let mut snap = Self::default();
+        for (pid, path) in pairs {
+            if !path.starts_with(root) {
+                continue;
+            }
+            if let Some(id) = accept(&path) {
+                debug!(
+                    "fd probe: pid {pid} holds {} open (id {id})",
+                    path.display()
+                );
+                snap.bind_pid(id, pid);
+            }
+        }
+        snap
     }
 }
 

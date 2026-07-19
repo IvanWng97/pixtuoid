@@ -248,11 +248,8 @@ fn grok_ids_from_registry(
             }
         }
         // Duplicate session_id across entries is upstream junk — keep the
-        // deterministic tiebreak winner (larger pid, the codex/#252 rule).
-        let bound = snap.pid_of.entry(e.session_id).or_insert(e.pid);
-        if e.pid > *bound {
-            *bound = e.pid;
-        }
+        // deterministic tiebreak winner (larger pid, the shared #252 rule).
+        snap.bind_pid(e.session_id, e.pid);
     }
     Some(snap)
 }
