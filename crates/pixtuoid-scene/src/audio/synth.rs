@@ -493,9 +493,10 @@ pub fn stem_drums(rng: &mut NoiseStream) -> Vec<f32> {
 // Day fns above are UNTOUCHED: the day take's identity is guarded by its
 // fingerprint pins, which this addition must not move.
 
-/// The night EP voice: velocity-keyed 2nd harmonic (the Rhodes
-/// "bell vs bark" — LOFI-BIBLE.md delta 4). Day keeps the ratified
-/// fixed-harmonic [`ep_pluck`]; only night events ride this.
+/// The velocity-keyed 2nd-harmonic EP voice (the Rhodes "bell vs bark" —
+/// LOFI-BIBLE.md delta 4), shared by the night events AND the day takes'
+/// sparkle/keys. The ORIGINAL day take keeps its ratified fixed-harmonic
+/// [`ep_pluck`].
 fn ep_pluck_vel(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     ep_pluck_h2(midi, dur_s, vel, 0.18 + 0.45 * vel * vel)
 }

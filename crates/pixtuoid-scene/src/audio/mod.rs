@@ -334,9 +334,18 @@ mod tests {
 
     #[test]
     fn day_take_rotation_is_stable_within_an_hour_and_varied_across_hours() {
-        // stable per hour (the crossfade fires at most once an hour) ...
-        for h in 0..24 {
-            assert_eq!(select_track(true, 0.0, h), select_track(true, 0.0, h));
+        // stable per hour END-TO-END through the epoch_hours flooring
+        // (the crossfade fires at most once an hour): two instants inside
+        // the same hour must select the same take
+        use std::time::{Duration, UNIX_EPOCH};
+        for h in 0..24u64 {
+            let early = UNIX_EPOCH + Duration::from_secs(h * 3600 + 1);
+            let late = UNIX_EPOCH + Duration::from_secs(h * 3600 + 3599);
+            assert_eq!(
+                select_track(true, 0.0, epoch_hours(early)),
+                select_track(true, 0.0, epoch_hours(late)),
+                "take must hold steady within hour {h}"
+            );
         }
         // ... every take actually plays over a work-week of day hours ...
         let mut seen = [false; DAY_TAKES.len()];

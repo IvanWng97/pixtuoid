@@ -84,11 +84,14 @@ pub struct TrackBeds {
 }
 
 impl TrackBeds {
-    /// DAY continues the boot rng stream in the ratified order (drums, then
-    /// texture — the pure musical stems draw nothing), keeping every day
-    /// buffer byte-identical to the #642/#643 renders. NIGHT and the day
-    /// TAKES (Day2/Day3) draw from wherever the stream stands — their
-    /// identity is the frozen score plus spectral pins, not byte equality.
+    /// DAY, when it is the FIRST track built on the boot stream, continues
+    /// the rng in the ratified order (drums, then texture — the pure
+    /// musical stems draw nothing), keeping those buffers byte-identical
+    /// to the #642/#643 renders. Under hourly take rotation that is no
+    /// longer the common case: booting on Day2/Day3, or rebuilding Day
+    /// after a swap, draws from wherever the stream stands — there, like
+    /// NIGHT and the day takes always, identity is the frozen score plus
+    /// spectral pins, not byte equality.
     pub fn build(rng: &mut dsp::NoiseStream, track: TrackId) -> Self {
         let beds = match track {
             TrackId::Day => [
