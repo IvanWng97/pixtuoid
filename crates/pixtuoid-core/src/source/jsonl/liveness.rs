@@ -55,12 +55,13 @@ impl ProbeSnapshot {
 
     /// Build a snapshot from the regular files that live `comm_names`-named
     /// processes hold open under `root` — THE producer-side skeleton the
-    /// open-FD liveness sources (Codex, omp) share. `accept` is the ONLY
-    /// per-source knowledge (invariant #3): it decides whether a held-open
-    /// path is one of this source's transcripts and, if so, returns its
-    /// session id in the watcher's `IdDeriver` id-space (so probe ids join the
-    /// first-sight gate directly). Everything mechanical lives here so a NEW
-    /// fd-probe source can't re-derive it wrong: the #223 canonicalize-or-
+    /// open-FD liveness sources (Codex, omp) share. The per-source knowledge
+    /// (invariant #3) is TWO pure fns: `recognize` decides whether a held-open
+    /// path is one of this source's transcripts, and `id_derive` (the watcher's
+    /// own `IdDeriver`) derives its session id — applied to `walk::id_path(path)`
+    /// HERE, so the probe id-space is folded identically to the walk seam (a NEW
+    /// fd-probe source can't forget the fold; omp used to inline it, Codex omit
+    /// it). Everything else mechanical lives here too: the #223 canonicalize-or-
     /// `Some(empty)` failure semantics, the under-root filter, the #252 bind.
     ///
     /// `None` ONLY when the proc-table enumeration itself fails
@@ -71,7 +72,8 @@ impl ProbeSnapshot {
     pub(crate) fn from_open_fds(
         root: &Path,
         comm_names: &[&str],
-        accept: impl Fn(&Path) -> Option<String>,
+        recognize: impl Fn(&Path) -> bool,
+        id_derive: super::IdDeriver,
     ) -> Option<Self> {
         // Canonicalize once per call: kernel-reported fd paths are fully
         // resolved (/tmp → /private/tmp on macOS), so the under-root compare
@@ -92,24 +94,33 @@ impl ProbeSnapshot {
                 .into_iter()
                 .map(move |path| (pid, path))
         });
-        Some(Self::from_open_fd_pairs(&canonical, pairs, accept))
+        Some(Self::from_open_fd_pairs(
+            &canonical, pairs, recognize, id_derive,
+        ))
     }
 
     /// The PURE join half of [`from_open_fds`] (unit-testable without FFI —
     /// drive it with synthetic `(pid, path)` pairs): keep each pair whose path
-    /// is under `root` and `accept`ed, binding id → owning pid via
-    /// [`bind_pid`] (the #252 tiebreak).
+    /// is under `root` and `recognize`d, derive its id via `id_derive` over the
+    /// folded `walk::id_path(path)`, and bind id → owning pid via [`bind_pid`]
+    /// (the #252 tiebreak).
     pub(crate) fn from_open_fd_pairs(
         root: &Path,
         pairs: impl Iterator<Item = (i32, PathBuf)>,
-        accept: impl Fn(&Path) -> Option<String>,
+        recognize: impl Fn(&Path) -> bool,
+        id_derive: super::IdDeriver,
     ) -> Self {
         let mut snap = Self::default();
         for (pid, path) in pairs {
             if !path.starts_with(root) {
                 continue;
             }
-            if let Some(id) = accept(&path) {
+            if recognize(&path) {
+                // The fold lives at the seam (`walk::id_path`), NOT inside each
+                // source's deriver — so the probe id-space matches the walk
+                // seam's and a new fd-probe source can't forget it (omp's
+                // case-carrying stems need it; CC/Codex UUIDs are fold-invariant).
+                let id = (id_derive)(&super::walk::id_path(&path));
                 debug!(
                     "fd probe: pid {pid} holds {} open (id {id})",
                     path.display()

@@ -89,7 +89,8 @@ impl Source for OmpSource {
 /// pass — an intermittent resurrection at worst, reaped again once the fd
 /// closes (the negative-vouch ladder). The mechanics (canonicalize, under-root
 /// filter, #223 failure semantics, #252 pid bind) live in
-/// `ProbeSnapshot::from_open_fds`; only `omp_accept` is ours.
+/// `ProbeSnapshot::from_open_fds`; only the RECOGNIZER (`omp_recognize`) and the
+/// id deriver (`omp_id_from_path`) are ours.
 ///
 /// Module-private on purpose: the sole consumer is `OmpSource::run` — omp has
 /// no focus point-query (registry: `FocusChannel::Unsupported`), so unlike
@@ -97,22 +98,25 @@ impl Source for OmpSource {
 /// to justify a public path (CONTRIBUTING pitfall 5: pub evades dead-code
 /// lints).
 fn live_omp_session_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
-    ProbeSnapshot::from_open_fds(sessions_root, &["bun", "omp"], omp_accept)
+    // A held-open `.jsonl` under the root vouches; its id is the stem-chain key
+    // via `omp_id_from_path` — the SAME fn `with_id_deriver` installs, over the
+    // folded `walk::id_path` (root transcripts AND nested task children both key
+    // on the chain, so a live child vouches for the child id specifically). omp's
+    // case-carrying stems are WHY the fold lives at the SEAM (`from_open_fds`),
+    // not inlined here as it used to be — so the goldens stay platform-invariant.
+    ProbeSnapshot::from_open_fds(
+        sessions_root,
+        &["bun", "omp"],
+        omp_recognize,
+        omp_id_from_path,
+    )
 }
 
-/// The per-source ACCEPT half (invariant #3): a held-open `.jsonl` under the
-/// root vouches; its id is the stem-chain key via `omp_id_from_path` (root
-/// transcripts AND nested task children both key on the chain, so a live child
-/// file vouches for the child id specifically). The path is folded through
-/// `normalize_path_key` first — the watcher's id-space is folded at the seam
-/// (walk.rs `id_path`), so probe ids must fold identically or they miss the
-/// first-sight gate on Windows (the CC probe folds the same way).
-fn omp_accept(path: &Path) -> Option<String> {
-    (path.extension().and_then(|e| e.to_str()) == Some("jsonl")).then(|| {
-        omp_id_from_path(Path::new(&crate::id::normalize_path_key(
-            &path.to_string_lossy(),
-        )))
-    })
+/// The per-source RECOGNIZER (invariant #3): a held-open `.jsonl` under the root
+/// vouches. The id-space fold (`normalize_path_key` via `walk::id_path`) is
+/// applied by `from_open_fds`, not here.
+fn omp_recognize(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()) == Some("jsonl")
 }
 
 /// Attach the probe ONLY for omp's first-party layout: the standard
@@ -204,7 +208,12 @@ mod tests {
     const STEM: &str = "2026-07-10T18-32-27-539Z_019f4d4d-6c93-7000-af7b-59b47b0e8111";
 
     fn snap_of(root: &Path, paths: Vec<PathBuf>) -> ProbeSnapshot {
-        ProbeSnapshot::from_open_fd_pairs(root, paths.into_iter().map(|p| (42, p)), omp_accept)
+        ProbeSnapshot::from_open_fd_pairs(
+            root,
+            paths.into_iter().map(|p| (42, p)),
+            omp_recognize,
+            omp_id_from_path,
+        )
     }
 
     #[test]
@@ -245,7 +254,8 @@ mod tests {
             let got = ProbeSnapshot::from_open_fd_pairs(
                 root,
                 pids.into_iter().map(|p| (p, path.clone())),
-                omp_accept,
+                omp_recognize,
+                omp_id_from_path,
             );
             assert_eq!(
                 got.ids().cloned().collect::<Vec<_>>(),

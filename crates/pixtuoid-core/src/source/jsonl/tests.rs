@@ -45,22 +45,22 @@ fn bind_pid_keeps_the_larger_pid_in_both_orders() {
 }
 
 #[test]
-fn from_open_fd_pairs_filters_under_root_then_applies_accept() {
-    // The shared producer-side join: keep only under-root, accepted paths,
-    // bound to the owning pid. `accept` here is a trivial "any .jsonl, id =
-    // file stem" so the test pins the MECHANICS (under-root filter + #252
-    // bind), not any source's format.
+fn from_open_fd_pairs_filters_under_root_then_recognizes_and_derives() {
+    // The shared producer-side join: keep only under-root, RECOGNIZED paths,
+    // bound to the owning pid. `recognize` = any .jsonl; `id_derive` = file stem
+    // (the fold via `walk::id_path` is identity on Unix) — so the test pins the
+    // MECHANICS (under-root filter + #252 bind), not any source's format.
     let root = std::path::Path::new("/root");
-    let accept = |p: &std::path::Path| {
-        (p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
-            .then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
-    };
+    let recognize = |p: &std::path::Path| p.extension().and_then(|e| e.to_str()) == Some("jsonl");
+    fn stem_id(p: &std::path::Path) -> String {
+        p.file_stem().unwrap().to_string_lossy().into_owned()
+    }
     let pairs = [
-        (7, std::path::PathBuf::from("/root/a/keep.jsonl")), // under root, accepted
+        (7, std::path::PathBuf::from("/root/a/keep.jsonl")), // under root, recognized
         (9, std::path::PathBuf::from("/elsewhere/keep.jsonl")), // outside root
         (11, std::path::PathBuf::from("/root/a/skip.txt")),  // under root, rejected
     ];
-    let got = ProbeSnapshot::from_open_fd_pairs(root, pairs.into_iter(), accept);
+    let got = ProbeSnapshot::from_open_fd_pairs(root, pairs.into_iter(), recognize, stem_id);
     assert_eq!(
         got.ids().cloned().collect::<Vec<_>>(),
         vec!["keep".to_string()]

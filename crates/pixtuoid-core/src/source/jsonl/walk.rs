@@ -38,7 +38,7 @@ pub(super) const MAX_PENDING_BYTES: u64 = 1 << 20;
 /// case-carrying stem chains (`…T…Z_<uuid>/Alpha`) are why the fold must
 /// live HERE at the seam, not inside each deriver — a pure deriver keeps the
 /// fixture-fed conformance goldens platform-invariant. Identity on Unix.
-fn id_path(path: &Path) -> std::path::PathBuf {
+pub(super) fn id_path(path: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(crate::id::normalize_path_key(&path.to_string_lossy()))
 }
 

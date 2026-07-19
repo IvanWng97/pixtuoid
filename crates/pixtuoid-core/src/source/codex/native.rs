@@ -28,19 +28,19 @@ fn codex_session_ended(_tail: &[u8]) -> bool {
 /// whole session (upstream `RolloutRecorder` owns the handle), so an open
 /// rollout fd IS the first-party liveness signal: pid → open fd → rollout
 /// path → UUID. The mechanics (canonicalize, under-root filter, #223 failure
-/// semantics, #252 pid bind) live in `ProbeSnapshot::from_open_fds`; only
-/// `codex_accept` — the per-source rollout recognition + id derivation
-/// (invariant #3) — is ours.
+/// semantics, #252 pid bind, the id-space fold via `walk::id_path`) live in
+/// `ProbeSnapshot::from_open_fds`; only the RECOGNIZER (`is_rollout_filename`)
+/// and the id deriver (`codex_id_from_path`) are ours (invariant #3).
 pub fn live_codex_rollout_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
-    ProbeSnapshot::from_open_fds(sessions_root, &["codex"], codex_accept)
-}
-
-/// The per-source ACCEPT half (invariant #3 — per-source format knowledge
-/// stays per-source): a held-open path vouches iff it is a `rollout-*.jsonl`,
-/// and its id is the rollout UUID via `codex_id_from_path` (the watcher's
-/// `IdDeriver`, so probe ids and gate ids can't drift).
-fn codex_accept(path: &Path) -> Option<String> {
-    is_rollout_filename(path).then(|| codex_id_from_path(path))
+    // A held-open path vouches iff it is a `rollout-*.jsonl`; its id is the
+    // rollout UUID via `codex_id_from_path` — the SAME fn `with_id_deriver`
+    // installs, so probe ids and gate ids can't drift (UUIDs are fold-invariant).
+    ProbeSnapshot::from_open_fds(
+        sessions_root,
+        &["codex"],
+        is_rollout_filename,
+        codex_id_from_path,
+    )
 }
 
 fn is_rollout_filename(path: &Path) -> bool {
@@ -152,7 +152,12 @@ mod tests {
     const UUID: &str = "019e7762-9ded-7e33-be41-946ecf105bf4";
 
     fn snap_of(root: &Path, paths: Vec<PathBuf>) -> ProbeSnapshot {
-        ProbeSnapshot::from_open_fd_pairs(root, paths.into_iter().map(|p| (42, p)), codex_accept)
+        ProbeSnapshot::from_open_fd_pairs(
+            root,
+            paths.into_iter().map(|p| (42, p)),
+            is_rollout_filename,
+            codex_id_from_path,
+        )
     }
 
     #[test]
@@ -186,7 +191,8 @@ mod tests {
             let got = ProbeSnapshot::from_open_fd_pairs(
                 root,
                 pids.into_iter().map(|p| (p, path.clone())),
-                codex_accept,
+                is_rollout_filename,
+                codex_id_from_path,
             );
             assert_eq!(
                 got.ids().cloned().collect::<Vec<_>>(),
