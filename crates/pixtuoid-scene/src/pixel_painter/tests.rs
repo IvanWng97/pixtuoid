@@ -3482,105 +3482,21 @@ fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
         Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("192x160 fits");
     // Ellipse is Copy, not PartialEq — compare by field tuple.
     let e = |el: &Ellipse| (el.cx, el.cy, el.half_w, el.half_h);
-    let shadows: Vec<_> = floor_shadow_ellipses(&l).collect();
 
-    // One shadow per family member; the couch/printer/island waypoints are
-    // dropped from the generic run and re-added with their own fitted shadows.
-    let generic = l
-        .waypoints
-        .iter()
-        .filter(|w| {
-            !matches!(
-                w.kind,
-                WaypointKind::Couch | WaypointKind::Printer | WaypointKind::Island
-            )
-        })
-        .count();
-    let printers = l
-        .waypoints
-        .iter()
-        .filter(|w| w.kind == WaypointKind::Printer)
-        .count();
-    assert_eq!(
-        shadows.len(),
-        l.home_desks.len()
-            + generic
-            + l.pantry.and_then(|p| p.kitchen_island).is_some() as usize
-            + printers
-            + l.couch_sprite_center.is_some() as usize
-            + l.plants.len()
-            + l.floor_lamp.is_some() as usize,
-        "one shadow per family member, in paint order"
-    );
-
-    // The leading run is the desk shadows, verbatim (the taste literal half_h=3).
-    for (s, desk) in shadows.iter().zip(&l.home_desks) {
-        assert_eq!(
-            e(s),
-            e(&desk_shadow_ellipse(*desk)),
-            "desk run leads, unchanged"
-        );
+    // Rebuild the expected shadow run family-by-family in the SAME chain order
+    // the authority emits (desks → generic → island → printers → couch → plants
+    // → lamp), then assert the WHOLE ordered vec. Asserting the full sequence —
+    // not per-family `.any()` membership — is what actually guards the
+    // cross-family paint order (blended overlaps depend on it): a reordered
+    // chain, a dropped family, a per-seat couch, or a retuned taste literal each
+    // fail this one assert_eq.
+    let mut expected: Vec<(u16, u16, u16, u16)> = Vec::new();
+    // Desks lead — verbatim, incl. the taste literal half_h=3.
+    for &desk in &l.home_desks {
+        expected.push(e(&desk_shadow_ellipse(desk)));
     }
-    // The lamp's fitted 2×1 blob (flush with the sprite south) is present iff the
-    // lamp is — a distinctive taste literal a retune must not silently drop.
-    if let Some(lamp) = l.floor_lamp {
-        assert!(
-            shadows
-                .iter()
-                .any(|s| e(s) == (lamp.x, lamp.y + floor_lamp_south_offset(), 2, 1)),
-            "lamp shadow present + fitted 2x1"
-        );
-    }
-    // Every plant gets the 3×1 blob under its OWN south row (not a fixed +3).
-    for &PlantItem { kind, pos } in &l.plants {
-        let want = (
-            pos.x,
-            pos.y
-                + center_pin_south_offset(crate::layout::furniture_def(kind.furniture()).visual.h),
-            3,
-            1,
-        );
-        assert!(
-            shadows.iter().any(|s| e(s) == want),
-            "plant {kind:?} shadow present + fitted 3x1"
-        );
-    }
-    // The couch's 7×2 blob — emitted ONCE from couch_sprite_center (not per seat).
-    if let Some(c) = l.couch_sprite_center {
-        assert!(
-            shadows.iter().any(|s| e(s) == (c.x, c.y + 2, 7, 2)),
-            "couch shadow present + fitted 7x2 (once)"
-        );
-    }
-    // Each printer's flush 5×1 blob at the sprite south (pos.y+1, not the generic +2).
-    for wp in l
-        .waypoints
-        .iter()
-        .filter(|w| w.kind == WaypointKind::Printer)
-    {
-        assert!(
-            shadows
-                .iter()
-                .any(|s| e(s) == (wp.pos.x, wp.pos.y + 1, 5, 1)),
-            "printer shadow present + fitted 5x1"
-        );
-    }
-    // The island BODY's blob under its south row, width tracking the sprite.
-    if let Some(island) = l.pantry.and_then(|p| p.kitchen_island) {
-        let vis = crate::layout::furniture_def(crate::layout::Furniture::KitchenIsland).visual;
-        let want = (
-            island.x,
-            island.y + center_pin_south_offset(vis.h),
-            vis.w / 2 + 1,
-            2,
-        );
-        assert!(
-            shadows.iter().any(|s| e(s) == want),
-            "island shadow present + fitted to the sprite"
-        );
-    }
-    // Each generic (non couch/printer/island) waypoint's +2 blob, width fitted to
-    // its sprite and min-capped at 7.
+    // Generic (non couch/printer/island) waypoints — +2 blob, width fitted to the
+    // sprite and min-capped at 7.
     for wp in l.waypoints.iter().filter(|w| {
         !matches!(
             w.kind,
@@ -3589,12 +3505,48 @@ fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
     }) {
         let vis_w = crate::layout::furniture_def(wp.kind.furniture()).visual.w;
         let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
-        assert!(
-            shadows
-                .iter()
-                .any(|s| e(s) == (wp.pos.x, wp.pos.y + 2, half_w, 2)),
-            "generic waypoint {:?} shadow present + fitted",
-            wp.kind
-        );
+        expected.push((wp.pos.x, wp.pos.y + 2, half_w, 2));
     }
+    // The island BODY's blob under its south row, width tracking the sprite.
+    if let Some(island) = l.pantry.and_then(|p| p.kitchen_island) {
+        let vis = crate::layout::furniture_def(crate::layout::Furniture::KitchenIsland).visual;
+        expected.push((
+            island.x,
+            island.y + center_pin_south_offset(vis.h),
+            vis.w / 2 + 1,
+            2,
+        ));
+    }
+    // Each printer's flush 5×1 blob at the sprite south (pos.y+1, not the generic +2).
+    for wp in l
+        .waypoints
+        .iter()
+        .filter(|w| w.kind == WaypointKind::Printer)
+    {
+        expected.push((wp.pos.x, wp.pos.y + 1, 5, 1));
+    }
+    // The couch's 7×2 blob — emitted ONCE from couch_sprite_center (not per seat).
+    if let Some(c) = l.couch_sprite_center {
+        expected.push((c.x, c.y + 2, 7, 2));
+    }
+    // Every plant's 3×1 blob under its OWN south row (not a fixed +3).
+    for &PlantItem { kind, pos } in &l.plants {
+        expected.push((
+            pos.x,
+            pos.y
+                + center_pin_south_offset(crate::layout::furniture_def(kind.furniture()).visual.h),
+            3,
+            1,
+        ));
+    }
+    // The lamp's fitted 2×1 blob, flush with the sprite south — last in the chain.
+    if let Some(lamp) = l.floor_lamp {
+        expected.push((lamp.x, lamp.y + floor_lamp_south_offset(), 2, 1));
+    }
+
+    let got: Vec<_> = floor_shadow_ellipses(&l).map(|el| e(&el)).collect();
+    assert_eq!(
+        got, expected,
+        "one fitted shadow per family member, emitted in paint order"
+    );
 }
