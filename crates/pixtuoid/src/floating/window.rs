@@ -55,8 +55,9 @@ pub(crate) struct FloatingApp {
     renderer: OfficeRenderer,
     /// The whole mute/volume persist protocol (#633 close-out) — the SAME
     /// `AudioController` the TUI owns (was `audio`/`volume_flash`/`volume_dirty`
-    /// duplicated here). The renderer holds its own handle clone, re-synced by
-    /// `set_audio_ui` + after every lazy spawn. Flash is VOLUME-only now (was
+    /// duplicated here). The renderer holds its own handle clone, handed over
+    /// once by `set_audio_ui`; the shared-Arc handle stays live across a lazy
+    /// respawn, so there is no per-spawn re-sync. Flash is VOLUME-only now (was
     /// every-gesture): a mute toggle shows no transient overlay until a footer
     /// lands to display it — the accepted TUI-parity tradeoff.
     audio_ctl: crate::audio::AudioController,

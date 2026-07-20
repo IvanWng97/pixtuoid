@@ -926,8 +926,9 @@ fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
 /// `night_stems_match_the_ratified_v4_fingerprints`) transitively guard the
 /// params that actually ship. The triple is that lane's core-call args IN
 /// ORDER: sparkle/keys (lanes 1,2) = `(dur_s, cutoff_hz, peak)`; drums
-/// (lane 3) = `(cutoff_hz, drive, peak)`. Pad/texture lanes (0,4) carry no
-/// recipe and never read here; the fallback is unreachable.
+/// (lane 3) = `(cutoff_hz, drive, peak)`. Pad/texture lanes (0,4) have no
+/// recipe — `gen_bed` calls this for every lane, so they read the
+/// `(0.0, 0.0, 0.0)` fallback but ignore it.
 fn lane_recipe(mood: Mood, lane: usize) -> (f32, f32, f32) {
     match (mood, lane) {
         (Mood::Day, 1) => (2.0, 3200.0, 0.6),
@@ -949,9 +950,8 @@ fn lane_recipe(mood: Mood, lane: usize) -> (f32, f32, f32) {
 /// lane, so the chunked and one-shot paths cannot drift.
 pub fn gen_bed(score: &GeneratedScore, lane: usize, rng: &mut NoiseStream) -> Vec<f32> {
     let loop_s = score.loop_secs();
-    // Event/drum lanes read their render params from the ONE lane_recipe
-    // authority the frozen fingerprint pins also render through; pad/texture
-    // lanes (0,4) ignore it (the recipe's unreachable fallback).
+    // Per-lane recipe from the ONE lane_recipe authority; pad/texture lanes
+    // (0,4) read the fallback and ignore it.
     let (r0, r1, r2) = lane_recipe(score.mood, lane);
     let mut bed = match (score.mood, lane) {
         (Mood::Day, 0) => day_pad_core(

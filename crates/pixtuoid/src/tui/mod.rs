@@ -1039,15 +1039,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                         floor_idx: renderer.current_floor(),
                                     }));
                                 }
-                            } else {
-                                focus_clicked_agent(
-                                    &mut renderer,
-                                    &scene_rx,
-                                    &focus_roots,
-                                    m.column,
-                                    m.row,
-                                    now,
-                                );
                             }
                         }
                         _ => {}
