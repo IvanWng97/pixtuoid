@@ -570,6 +570,13 @@ impl SynthTake {
         self.epoch as f64
     }
 
+    /// The loop-stem count — the worker's copy-out bound, read from the ONE
+    /// authority (`LoopStem::ALL`) instead of a JS-side literal. Loops aren't
+    /// self-terminating like the one-shot pools, so JS can't discover it.
+    pub fn loop_count(&self) -> usize {
+        pixtuoid_scene::audio::mixer::LoopStem::ALL.len()
+    }
+
     /// Zero-copy reads, same contract as the `Office::audio_*` getters — the
     /// worker copies (`Float32Array.slice`) before its next wasm call.
     pub fn loop_ptr(&self, idx: usize) -> *const f32 {
@@ -837,7 +844,7 @@ mod tests {
         let mut take = SynthTake::new(now_ms);
         while take.step() > 0 {}
         o.audio_adopt_begin(take.night(), take.epoch());
-        for i in 0..6 {
+        for i in 0..take.loop_count() {
             assert!(
                 o.audio_adopt_loop(i, take.driver.loop_buffer(i)),
                 "loop {i} adopted"
@@ -865,7 +872,7 @@ mod tests {
         // the ♩ click path: audio_begin is a no-op, warmup already done
         o.audio_begin();
         assert_eq!(o.audio_warmup_step(), 0, "click-time synthesis skipped");
-        for i in 0..6 {
+        for i in 0..take.loop_count() {
             assert_eq!(
                 o.audio_loop_len(i),
                 take.driver.loop_buffer(i).len(),
@@ -906,7 +913,7 @@ mod tests {
         while take2.step() > 0 {}
         assert_eq!(take.night(), take2.night());
         assert_eq!(take.epoch(), take2.epoch());
-        for i in 0..6 {
+        for i in 0..take.loop_count() {
             assert_eq!(
                 take.driver.loop_buffer(i),
                 take2.driver.loop_buffer(i),

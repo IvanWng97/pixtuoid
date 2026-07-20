@@ -10,6 +10,8 @@
 // Belt-and-braces vs a non-terminating one-shot pool (mirrors POOL_MAX in
 // OfficeBackdrop's discovery loop; the Rust side pins every pool terminates).
 const POOL_MAX = 1024;
+// = pool_from_wire's 0-4 domain (audio.rs) — mirrors OfficeBackdrop's list;
+// the wire values round-trip-pinned by the Rust commands_json test.
 const ONESHOT_WIRES = [0, 1, 2, 3, 4];
 
 self.onmessage = async function (e) {
@@ -28,7 +30,10 @@ self.onmessage = async function (e) {
     };
     const loops = [];
     const transfers = [];
-    for (let i = 0; i < 6; i++) {
+    // loop_count() reads the ONE authority (LoopStem::ALL) — loops aren't
+    // self-terminating like the pools, so the bound can't be discovered
+    const loopCount = take.loop_count();
+    for (let i = 0; i < loopCount; i++) {
       const t = copy(take.loop_ptr(i), take.loop_len(i));
       loops.push(t);
       transfers.push(t.buffer);

@@ -972,7 +972,9 @@ import { asset, DIM_RESTING } from '../consts';
         return;
       }
       const pieces = [];
-      for (let i = 0; i < 6; i++) pieces.push({ loop: i, buf: data.loops[i] });
+      // the worker's loop list is sized by the Rust-side loop_count()
+      // authority — adopt whatever it sent; audio_adopt_loop validates
+      for (let i = 0; i < data.loops.length; i++) pieces.push({ loop: i, buf: data.loops[i] });
       for (const wire of ONESHOT_WIRES) {
         for (const buf of data.oneshots[wire] || []) pieces.push({ wire: wire, buf: buf });
       }
@@ -986,6 +988,7 @@ import { asset, DIM_RESTING } from '../consts';
                 ? office.audio_adopt_oneshot(p.wire, p.buf)
                 : office.audio_adopt_loop(p.loop, p.buf);
             if (!ok) {
+              office.audio_adopt_finish(); // consume the partial stage (frees the staged MBs)
               prewarmSettle('failed'); // torn handoff → click-time warmup
               return;
             }
@@ -994,6 +997,11 @@ import { asset, DIM_RESTING } from '../consts';
           }
           prewarmSettle(office.audio_adopt_finish() ? 'adopted' : 'failed');
         } catch (e) {
+          try {
+            office.audio_adopt_finish(); // same cleanup on the throw path
+          } catch (e2) {
+            /* wasm gone — nothing left to free */
+          }
           prewarmSettle('failed');
         }
       }
@@ -1001,8 +1009,20 @@ import { asset, DIM_RESTING } from '../consts';
     }
     function prewarmSpawn() {
       // reduced-motion is treated as a low-power signal (the bg-tick stance):
-      // those visitors keep the click-time chunked path
-      if (prewarm !== 'idle' || !office || !wasm || audioUnavailable || mq.matches) return;
+      // those visitors keep the click-time chunked path. audioReady/Booting:
+      // a ♩ click that landed BEFORE this idle callback already warms on the
+      // main thread — spawning would just burn a synthesis the finish guard
+      // then refuses (Lens 1).
+      if (
+        prewarm !== 'idle' ||
+        !office ||
+        !wasm ||
+        audioUnavailable ||
+        audioReady ||
+        audioBooting ||
+        mq.matches
+      )
+        return;
       prewarm = 'running';
       window.__pixAudioPrewarm = 'running';
       try {
