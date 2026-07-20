@@ -29,6 +29,7 @@ use pixtuoid_core::{AgentEvent, AgentId, Transport};
 
 use crate::script::{hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, LOOP_MS};
 
+use pixtuoid_scene::audio::OneShotPool;
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession, FrameInputs};
 use pixtuoid_scene::layout::{Size, CHARACTER_SPRITE_W};
@@ -422,13 +423,13 @@ impl Office {
     /// Uploaded once after warmup.
     pub fn audio_oneshot_ptr(&self, pool: u8, idx: usize) -> *const f32 {
         self.audio.as_ref().map_or(std::ptr::null(), |a| {
-            audio::pool_from_wire(pool)
+            OneShotPool::from_wire(pool)
                 .map_or(std::ptr::null(), |p| a.oneshot_buffer(p, idx).as_ptr())
         })
     }
     pub fn audio_oneshot_len(&self, pool: u8, idx: usize) -> usize {
         self.audio.as_ref().map_or(0, |a| {
-            audio::pool_from_wire(pool).map_or(0, |p| a.oneshot_buffer(p, idx).len())
+            OneShotPool::from_wire(pool).map_or(0, |p| a.oneshot_buffer(p, idx).len())
         })
     }
 

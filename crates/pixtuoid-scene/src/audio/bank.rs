@@ -69,6 +69,27 @@ impl OneShotPool {
             OneShotPool::VendingDrop => 4,
         }
     }
+
+    /// Every pool in wire order — the one-shot mirror of [`LoopStem::ALL`].
+    /// [`OneShotPool::from_wire`] and the wasm round-trip test both derive from
+    /// it, so a new pool is declared in exactly one place.
+    pub const ALL: [OneShotPool; 5] = [
+        OneShotPool::Keystroke,
+        OneShotPool::Drop,
+        OneShotPool::DoorChime,
+        OneShotPool::PrinterWhir,
+        OneShotPool::VendingDrop,
+    ];
+
+    /// The inverse of [`OneShotPool::wire`] — decode a wasm-wire pool index back
+    /// to the pool (`None` for an unknown wire). Derived from [`OneShotPool::ALL`]
+    /// and [`OneShotPool::wire`], so the whole `u8`↔pool bijection lives beside
+    /// the enum and can't drift across the crate seam (was a hand-synced
+    /// `pool_from_wire` in the wasm crate whose `_ => None` let a new pool decode
+    /// to silence with no structural failure).
+    pub fn from_wire(wire: u8) -> Option<Self> {
+        OneShotPool::ALL.into_iter().find(|p| p.wire() == wire)
+    }
 }
 
 /// The ONE-SHOT pools a player keeps for its whole life, synthesized once at
