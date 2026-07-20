@@ -88,7 +88,12 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   `src/features.json` / `src/install.json` (`just gen-readme`); drift is gated by
   the `readme` job (`just gen-readme-check`) on every PR. Edit the JSON, not the
   README prose. `gen-readme.mjs` reads only `icon`/`name`/`desc`/`pix`/`featured` off
-  each row, regardless of the partition below.
+  each row, regardless of the partition below. **`sources.json`'s `featured` is
+  ALSO a gen-readme input** (#694 verified — NOT dead data): it splits the
+  README "Supported-tools glimpse" into the featured table vs the
+  "_Also supported:_" tail line (`gen-readme.mjs`'s `featured`/`otherSupported`
+  filters). The SITE never reads it — its consumer lives in `scripts/`, which
+  is why a site-scoped grep keeps "rediscovering" it as dead.
 - **`features.json` is the TOTAL feature collection, partitioned by `channel`**
   (wb-3.1): a row with a video/live demo carries `channel: "<showcase.json id>"`
   and DRIVES the 5F studio's channel dial — the dial no longer hand-lists 7

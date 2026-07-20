@@ -88,6 +88,10 @@ fn manifest_rows_are_well_formed() {
             matches!(status, "supported" | "planned"),
             "{name}: `status` must be supported|planned, got {status:?}"
         );
+        // `featured`'s consumer is scripts/gen-readme.mjs (the README
+        // "Supported-tools glimpse" featured-table vs "Also supported" split)
+        // — NOT the site, which is why site-scoped greps keep flagging it as
+        // dead data (#694).
         assert!(
             s.get("featured").is_some_and(|v| v.is_boolean()),
             "{name}: `featured` must be a bool"
