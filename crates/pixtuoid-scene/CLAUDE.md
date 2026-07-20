@@ -73,8 +73,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   the binary's audio/ gateway is the consumer, WebAudio can ride the same model later.
 │                   Since Phase 2 (musical stems) every StemLevels lane is AUDIBLE — the binary
 │                   synthesizes the frozen lofi compositions at startup and loops all six beds.
-│                   ALL-GENERATIVE SOUNDTRACK (owner decision 2026-07-20 — "所有的音乐都自动
-│                   生成"): TrackId {GenDay(seed), GenNight(seed)} + pure select_track(is_day,
+│                   ALL-GENERATIVE SOUNDTRACK (owner decision — all music is generated at
+│                   runtime): TrackId {GenDay(seed), GenNight(seed)} + pure select_track(is_day,
 │                   precip, track_epoch) ride AudioFrame — night hours (the SAME
 │                   pixel_painter::hour_is_day sun window the lighting renders) or any rain pick
 │                   the night MOOD; the compose seed is the audio::track_epoch block

@@ -220,4 +220,4 @@ every taste axis is a data table or named const with ONE home:
 
 Mix LANES stay instrument-blind (StemLevels/mixer/players never learn about voices) — a
 lane is a busy-ness ROLE, an instrument is a timbre WITHIN it. That split is what keeps
-"融入一些别的乐器" a minutes-scale edit instead of an arc.
+"blend in another instrument" a minutes-scale edit instead of an arc.
