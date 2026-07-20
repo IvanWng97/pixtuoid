@@ -255,14 +255,15 @@ src/
 │                       `audio::AudioController` (new/apply/tick/flush_on_exit/set_paused/volume_flash/handle;
 │                       `now` injected → the debounce/flash is unit-tested). The TUI keeps ONE controller (was
 │                       5 loop locals + a deleted `run_audio_action`); floating keeps one (was its own
-│                       volume_flash/volume_dirty/flush_volume). Flash is VOLUME-only on both now — a mute
-│                       toggle relies on the footer's `♩` indicator (TUI); floating shows no transient until a
-│                       footer lands (AudioController is that footer's `♩` source). Only the KEY→action decode is painter-specific: crossterm dispatch in
+│                       volume_flash/volume_dirty/flush_volume). BOTH painters now render the shared
+│                       `pixtuoid_scene::footer` model, so the `♩`/`♩ N%` audio state lives in the footer's
+│                       right suffix on BOTH — TUI-consistent (silent when muted; no separate overlay). Only
+│                       the KEY→action decode is painter-specific: crossterm dispatch in
 │                       tui/mod.rs, winit in floating/input.rs (the pure key-map, `m`/`+`=/`-`_, lowercase
 │                       m only; winit's repeat flag swallows a held m — the TUI's crossterm path lacks it).
-│                       window.rs stays thin winit glue; lazy spawn + persistence identical; feedback = a
-│                       transient bottom-right `♩ N%`/`♩ off` AA overlay (offscreen::volume_flash_text +
-│                       paint_volume_flash_into_surface) — the window has no footer. The KeyboardInput arm
+│                       window.rs stays thin winit glue; lazy spawn + persistence identical; audio feedback is
+│                       the footer band's `♩`/`♩ N%` suffix (offscreen::paint_footer_into_surface — the
+│                       standalone volume_flash overlay was retired when the footer landed). The KeyboardInput arm
 │                       gates `is_synthetic: false` (winit replays held keys on focus-gain, X11/Windows —
 │                       the focus-replay twin of the TUI's should_dispatch_key). Footer shows ♩ iff
 │                       enabled && !effective-muted (m OR pause); onboarding carries the one-line m hint.
