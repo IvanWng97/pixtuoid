@@ -124,8 +124,16 @@ const badges = sources.filter((s) => s.status === 'supported');
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
-    margin: 1.15rem 0 0;
-    padding: 0;
+    /* 2px of the old margin moved INSIDE the layer as padding-top (net
+       geometry identical): with padding 0 the first row's 1px chip border
+       sat on the composited layer's exact top edge, and iOS Safari
+       rasterizing the pinned layer at a fractional offset shaved that
+       device-pixel row — the row-1-only "top of the badges is clipped"
+       phone report. Rows 2+ are interior to the layer and were never hit;
+       headless Chromium doesn't reproduce it (different rasterizer). The
+       padding keeps the border off the raster boundary. */
+    margin: calc(1.15rem - 2px) 0 0;
+    padding: 2px 0 0;
     list-style: none;
     /* Permanent compositing layer: Safari promotes/demotes elements around
        hover transitions, and the raster snap on that boundary can read as a
