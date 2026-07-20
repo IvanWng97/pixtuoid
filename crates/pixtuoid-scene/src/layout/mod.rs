@@ -32,12 +32,12 @@ mod rooms;
 // scene crate's own synthetic-mask unit tests. No external caller.
 pub(crate) use approach::{approach_point, stand_point};
 pub use compute::PANTRY_COUNTER_LARGE_W;
-pub(crate) use decor::DESK_GROUND_H;
 pub use decor::{
     desk_furniture_def, desk_walk_anchor, furniture_def, seated_foot_cell, ApproachSides,
     DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
     DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
 };
+pub(crate) use decor::{repels_plants, DESK_GROUND_H};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};

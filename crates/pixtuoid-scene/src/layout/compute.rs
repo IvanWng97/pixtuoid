@@ -365,7 +365,9 @@ pub(super) fn compute_with_seed(
         lounge_west_clear,
     );
 
-    // Plants scatter through the cubicle corridor edges + pantry.
+    // Plants scatter at the cubicle corridor edges + the meeting-room corners
+    // (plus the two gated Ficus below) — NOT the pantry (see the connectivity
+    // note below: pantry plants would seal the only bridge to the cubicle area).
     // Scatter plants avoid the cubicle TOP strip by DEFAULT (the wall-to-
     // couch gap is just 7 px) — the only top-strip greenery is the two
     // gated Ficus pushes below (roomy bands only). No plants in the meeting room interior
@@ -512,34 +514,24 @@ pub(super) fn compute_with_seed(
     // aisle before giving up — the corner appliances share the plants'
     // authored corners at most sizes, and yield-by-deletion stripped the
     // office's greenery (both lenses' catch on the first cut).
-    // Fixed singletons the clearance predicate must also see: the fish tank
-    // is NOT a waypoint, so the elevator Ficus interpenetrated it at buf
-    // widths ~88-123 (lens render catch). Lamp/couch verified clear by the
-    // same census; the side table's 1px adjacency to the lounge Ficus is the
-    // owner-ratified mock look — deliberately NOT repelled.
-    // ...and the meeting trio bodies: sofa/table are neither waypoints (their
-    // SEATS are, footprint-less) nor singletons, so a room plant could merge
-    // into the sofa (pinned by scatter_plants_keep_obstacle_clearance_...).
-    let centered = |pos: Point, v: Size| {
-        (
-            super::placement::anchored_top_left(super::placement::Anchor::Center, pos, v.w, v.h),
-            v,
-        )
-    };
-    let singleton_rects: Vec<(Point, Size)> = fish_tank
-        .map(|t| centered(t, furniture_def(Furniture::FishTank).visual))
-        .into_iter()
-        .chain(meeting_rooms.iter().flat_map(|room| {
-            room.trio.iter().flat_map(|trio| {
-                let sofa_v = furniture_def(Furniture::MeetingSofaBody).visual;
-                [
-                    centered(trio.sofas[0], sofa_v),
-                    centered(trio.sofas[1], sofa_v),
-                    centered(trio.table, furniture_def(Furniture::MeetingTable).visual),
-                ]
-            })
-        }))
-        .collect();
+    // Fixed NON-waypoint singletons the clearance predicate must also see —
+    // derived by `plant_obstacle_rects` (THE ONE census, shared with the
+    // placement-sweep backstop) filtering every singleton by `repels_plants`.
+    // History: the fish tank isn't a waypoint, so the elevator Ficus once
+    // interpenetrated it (~88-123px); later a room plant merged into a meeting
+    // sofa/table — both were census-by-OMISSION bugs the per-kind flag + typed
+    // input now guard against (the flag is exhaustive; a new singleton FIELD is
+    // surfaced by the pieces() no-`..` sweep). The lounge lamp + side table are passed but declared
+    // `repels_plants = false` (the owner-ratified 1px Ficus hug); the pantry
+    // island is `true` (a solid body — today plant-free by the pantry's
+    // connectivity rule, so its inclusion is a no-op).
+    let singleton_rects = plant_obstacle_rects(
+        fish_tank,
+        floor_lamp,
+        lounge_side_table,
+        kitchen_island,
+        &meeting_rooms,
+    );
     let mut plants: Vec<PlantItem> = plant_candidates
         .into_iter()
         .filter_map(|p| settle_plant(p, &home_desks, &waypoints, &singleton_rects, &cubicle_band))
@@ -860,6 +852,50 @@ fn place_lounge_vignette(
         side_table,
         fish_tank,
     }
+}
+
+/// THE non-waypoint obstacle census a scatter plant must clear — the single
+/// derivation shared by the production settle path (`compute_with_seed`) and the
+/// placement-sweep clearance backstop, so the two can't drift (they used to hand-
+/// re-derive it, and each omission shipped an interpenetration bug). Takes EVERY
+/// non-waypoint singleton EXPLICITLY and includes each IFF its kind
+/// [`repels_plants`]: the KIND stance is compiler-forced (the exhaustive match),
+/// while wiring a NEW singleton into this arg list is a deliberate edit surfaced
+/// by `placement_sweep::pieces`'s no-`..` destructure (the FIELD backstop), not a
+/// compile error here. Waypoint obstacles are handled by `first_blocking_waypoint`.
+pub(super) fn plant_obstacle_rects(
+    fish_tank: Option<Point>,
+    floor_lamp: Option<Point>,
+    lounge_side_table: Option<Point>,
+    kitchen_island: Option<Point>,
+    meeting_rooms: &[MeetingRoom],
+) -> Vec<(Point, Size)> {
+    let boxed = |kind: Furniture, pos: Point| -> Option<(Point, Size)> {
+        repels_plants(kind).then(|| {
+            let v = furniture_def(kind).visual;
+            (anchored_top_left(Anchor::Center, pos, v.w, v.h), v)
+        })
+    };
+    [
+        (Furniture::FishTank, fish_tank),
+        (Furniture::FloorLamp, floor_lamp),
+        (Furniture::LoungeSideTable, lounge_side_table),
+        (Furniture::KitchenIsland, kitchen_island),
+    ]
+    .into_iter()
+    .filter_map(|(kind, pos)| pos.and_then(|p| boxed(kind, p)))
+    .chain(meeting_rooms.iter().flat_map(|room| {
+        room.trio.iter().flat_map(|trio| {
+            [
+                (Furniture::MeetingSofaBody, trio.sofas[0]),
+                (Furniture::MeetingSofaBody, trio.sofas[1]),
+                (Furniture::MeetingTable, trio.table),
+            ]
+            .into_iter()
+            .filter_map(|(kind, pos)| boxed(kind, pos))
+        })
+    }))
+    .collect()
 }
 
 /// Settle a scatter-plant candidate: keep its authored spot when clear, else

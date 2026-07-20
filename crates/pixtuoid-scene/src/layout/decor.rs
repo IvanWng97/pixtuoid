@@ -397,6 +397,59 @@ impl Furniture {
     ];
 }
 
+/// Whether a scatter plant must keep clearance from this furniture kind when it
+/// appears as a NON-waypoint singleton — the plant-obstacle census's per-kind
+/// authority (`plant_obstacle_rects` filters every singleton by it). Was curated
+/// by OMISSION inline in `compute_with_seed`, which let the fish tank (then the
+/// meeting-trio bodies) ship with no repulsion → plants interpenetrated them. An
+/// EXHAUSTIVE match, no `_`: a new [`Furniture`] kind can't compile until it
+/// declares a stance — the KIND axis. (Threading a new non-waypoint SINGLETON
+/// into `plant_obstacle_rects`'s arg list is NOT compiler-forced; `pieces()`'s
+/// no-`..` sweep is the backstop that surfaces the new field so the author wires
+/// it in. Waypoint furniture repels plants via `first_blocking_waypoint`, so its
+/// stance here is moot and `false`.)
+pub(crate) const fn repels_plants(kind: Furniture) -> bool {
+    match kind {
+        // Solid non-waypoint singleton BODIES a scatter plant routes around.
+        // The kitchen island is one by nature even though the pantry is
+        // deliberately plant-free today (compute.rs): declaring it honestly
+        // means "if a plant ever reaches the pantry, it avoids the island" is
+        // one flag, already correct.
+        Furniture::FishTank
+        | Furniture::MeetingSofaBody
+        | Furniture::MeetingTable
+        | Furniture::KitchenIsland => true,
+        // The lounge lamp + side table ARE non-waypoint singletons too, but the
+        // owner-ratified mock has the lounge Ficus hug them (1px) — deliberately
+        // NOT repelled.
+        Furniture::FloorLamp | Furniture::LoungeSideTable => false,
+        // Everything else is never a non-waypoint singleton in the plant census:
+        // waypoint furniture (repelled via `first_blocking_waypoint`), the plants
+        // themselves, wall/pod decor, and the footprint-less seat/stand slots.
+        Furniture::Couch
+        | Furniture::Pantry
+        | Furniture::PhoneBooth
+        | Furniture::StandingDesk
+        | Furniture::VendingMachine
+        | Furniture::Printer
+        | Furniture::MeetingSofa
+        | Furniture::MeetingChair
+        | Furniture::PlantFicus
+        | Furniture::PlantTall
+        | Furniture::PlantFlower
+        | Furniture::PlantSucculent
+        | Furniture::Whiteboard
+        | Furniture::Tv
+        | Furniture::Bookshelf
+        | Furniture::BulletinBoard
+        | Furniture::ExitSign
+        | Furniture::MeetingScreen
+        | Furniture::IslandStand
+        | Furniture::SnackShelf
+        | Furniture::Desk => false,
+    }
+}
+
 /// THE furniture table — one row per [`Furniture`] kind, the **single** source
 /// of truth for ground shape (`footprint`) AND sprite size (`visual`) plus
 /// occupancy / dwell / approach. Every geometric dependent (walkable mask,
@@ -1071,6 +1124,40 @@ mod tests {
     const S: (i32, i32) = (0, 1);
     const E: (i32, i32) = (1, 0);
     const W: (i32, i32) = (-1, 0);
+
+    #[test]
+    fn repels_plants_is_exactly_the_solid_non_waypoint_bodies() {
+        // The plant census's per-kind policy. Pin the WHOLE set off Furniture::ALL
+        // so a new kind wrongly set `true` is caught (the exhaustive match already
+        // catches a new kind left undeclared).
+        for k in [
+            Furniture::FishTank,
+            Furniture::MeetingSofaBody,
+            Furniture::MeetingTable,
+            Furniture::KitchenIsland,
+        ] {
+            assert!(
+                repels_plants(k),
+                "{k:?} is a solid body — must repel plants"
+            );
+        }
+        // The owner-ratified 1px Ficus hug: the lounge lamp + side table are
+        // non-waypoint singletons too, but must NEVER repel (a silent flip to
+        // `true` would shove the lounge Ficus off its authored spot).
+        assert!(
+            !repels_plants(Furniture::FloorLamp),
+            "lamp keeps the Ficus hug"
+        );
+        assert!(
+            !repels_plants(Furniture::LoungeSideTable),
+            "side table keeps the Ficus hug"
+        );
+        assert_eq!(
+            Furniture::ALL.iter().filter(|&&k| repels_plants(k)).count(),
+            4,
+            "exactly four kinds repel — a new `true` must be deliberate"
+        );
+    }
 
     fn allowed(sides: ApproachSides, facing: Facing) -> Vec<(i32, i32)> {
         [N, S, E, W]

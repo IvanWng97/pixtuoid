@@ -990,6 +990,33 @@ fn the_sweep_reaches_every_floor_variant() {
 }
 
 #[test]
+fn plant_obstacle_census_honors_repels_plants() {
+    // The ONE census (`compute::plant_obstacle_rects`) includes a singleton IFF
+    // its kind `repels_plants`: the fish tank + kitchen island (solid bodies) are
+    // IN; the lounge lamp + side table (the owner-ratified Ficus hug) are OUT.
+    // Positions are arbitrary — only presence/absence in the census matters.
+    let p = |x: u16, y: u16| Point { x, y };
+    let rects = super::compute::plant_obstacle_rects(
+        Some(p(10, 10)), // fish tank      -> repels -> in
+        Some(p(50, 50)), // floor lamp     -> NOT    -> out
+        Some(p(60, 60)), // side table     -> NOT    -> out
+        Some(p(80, 40)), // kitchen island -> repels -> in
+        &[],             // no meeting rooms
+    );
+    assert_eq!(
+        rects.len(),
+        2,
+        "fish tank + island repel; lamp + side table are the declared Ficus-hug exclusions"
+    );
+    // with none of the repelling singletons present, the census is empty
+    assert!(
+        super::compute::plant_obstacle_rects(None, Some(p(1, 1)), Some(p(2, 2)), None, &[])
+            .is_empty(),
+        "only repels_plants singletons enter the census"
+    );
+}
+
+#[test]
 fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
     // Yield-by-DELETION was
     // structurally universal (the corner appliances share the plants'
@@ -1014,8 +1041,9 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
     };
     // Does the plant box come within PLANT_OBSTACLE_CLEARANCE_PX of the obstacle
     // box (obs_pos, obs_v)? Inflate the obstacle box by the clearance on every side
-    // and test overlap — the shared predicate the three obstacle families (fish
-    // tank / meeting-trio bodies / obstacle waypoints) each need.
+    // and test overlap. The center-anchored predicate the WAYPOINT family needs;
+    // the fixed non-waypoint singletons instead ride the SAME `plant_obstacle_rects`
+    // census the production path uses (TL rects → `overlaps_within_clearance`).
     let within_clearance = |plant_box: (Point, Size), obs_pos: Point, obs_v: Size| {
         let m = PLANT_OBSTACLE_CLEARANCE_PX;
         let (otl, osz) = visual_tl(obs_pos, obs_v);
@@ -1036,38 +1064,27 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
         for p in &l.plants {
             let pv = furniture_def(p.kind.furniture()).visual;
             let plant_box = visual_tl(p.pos, pv);
-            if let Some(t) = l.fish_tank {
-                let tv = furniture_def(Furniture::FishTank).visual;
-                if within_clearance(plant_box, t, tv) {
+            // The fixed non-waypoint singletons — the SAME `plant_obstacle_rects`
+            // census the production settle path uses (fish tank / meeting-trio
+            // bodies / kitchen island, filtered by `repels_plants`), no longer a
+            // hand-re-derived second copy that shipped each interpenetration bug.
+            // A census miss here IS a plant interpenetration.
+            for (otl, osz) in super::compute::plant_obstacle_rects(
+                l.fish_tank,
+                l.floor_lamp,
+                l.lounge_side_table,
+                l.pantry.and_then(|pr| pr.kitchen_island),
+                &l.meeting_rooms,
+            ) {
+                if super::placement::overlaps_within_clearance(
+                    plant_box,
+                    (otl, osz),
+                    PLANT_OBSTACLE_CLEARANCE_PX,
+                ) {
                     v.push(format!(
-                        "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of the fish tank @{:?}",
-                        p.kind, p.pos, t
+                        "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of a repels-plants singleton @{:?}",
+                        p.kind, p.pos, otl
                     ));
-                }
-            }
-            // Meeting trio bodies are neither waypoints nor singletons — a
-            // census that misses them lets a room plant merge into the sofa
-            // (visible at ~110x45).
-            for room in &l.meeting_rooms {
-                let Some(trio) = &room.trio else { continue };
-                let bodies = [
-                    (
-                        trio.sofas[0],
-                        furniture_def(Furniture::MeetingSofaBody).visual,
-                    ),
-                    (
-                        trio.sofas[1],
-                        furniture_def(Furniture::MeetingSofaBody).visual,
-                    ),
-                    (trio.table, furniture_def(Furniture::MeetingTable).visual),
-                ];
-                for (bpos, bv) in bodies {
-                    if within_clearance(plant_box, bpos, bv) {
-                        v.push(format!(
-                            "{w}x{h} seed {seed}: plant {:?}@{:?} within clearance of a trio body @{:?}",
-                            p.kind, p.pos, bpos
-                        ));
-                    }
                 }
             }
             for wp in &l.waypoints {
