@@ -52,9 +52,12 @@ fn to_color(c: Rgb) -> Color {
 
 /// Display columns a string occupies in the terminal — the ONE width authority
 /// (the same `unicode-width` ratatui uses), replacing scattered `chars().count()`
-/// so a wide glyph in the footer/board can't miscount the right-flush. For the
-/// HUD's ambiguous-width glyphs (`·×↑↓●◐○◌`) this equals `chars().count()`; it
-/// diverges only for genuinely wide (2-col) or zero-width (combining) chars.
+/// so a wide glyph in a HUD widget can't miscount its layout. For the HUD's
+/// ambiguous-width glyphs (`·×↑↓●◐○◌`) this equals `chars().count()`; it diverges
+/// only for genuinely wide (2-col) or zero-width (combining) chars. (The footer's
+/// own right-flush now lives in `scene::footer`, measuring `chars().count()` —
+/// byte-identical here because its whole glyph vocabulary is single-column, pinned
+/// by `footer_vocabulary_is_single_column_…`.)
 pub(crate) fn display_width(s: &str) -> usize {
     use unicode_width::UnicodeWidthStr;
     s.width()
@@ -66,9 +69,8 @@ pub(crate) fn display_width(s: &str) -> usize {
 // the wall board too (not just this binary). Re-exported here under their original
 // names, so the footer/board call sites are unchanged. `StateCounts` stays `pub`
 // (reachable via the pub `DrawCtx::per_floor` field, like its peer `FloorInfo`);
-// the binary lib target is not a semver surface. `StateCounts::get` couldn't move
-// as an inherent method (orphan rule — `StateKind` is binary-local), so it's the
-// free fn `state_count` below.
+// the binary lib target is not a semver surface. Per-state tallies are read via
+// `RungKind::count` (the vocabulary re-exported below as `StateKind`).
 pub use pixtuoid_scene::board::StateCounts;
 pub(crate) use pixtuoid_scene::board::{
     compact_hms, gateway_rollup, per_floor_counts, scene_stats,

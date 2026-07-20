@@ -155,11 +155,16 @@ impl FloatingApp {
         };
         // Audio state for the footer's ♩ suffix + the expiry-driven debounced
         // volume persist, both owned by the controller — resolved BEFORE the
-        // surface borrow below. `audio_audible` mirrors the TUI's gate (not muted
-        // AND a live level); `volume_flash` drives the transient `♩ N%` beat.
+        // surface borrow below. `audio_audible` mirrors the TUI's gate EXACTLY
+        // (`audio_audible` in tui_renderer): a LIVE handle AND not muted AND a
+        // live level — so an opted-in-but-dead-device handle (no sink / audio
+        // feature off → `AudioHandle::disabled`) shows no phantom ♩, matching the
+        // TUI. `volume_flash` drives the transient `♩ N%` beat.
         let audio_now = Instant::now();
         self.audio_ctl.tick(audio_now);
-        let audio_audible = !self.audio_ctl.muted() && self.audio_ctl.volume() > 0.0;
+        let audio_audible = self.audio_ctl.handle().is_enabled()
+            && !self.audio_ctl.muted()
+            && self.audio_ctl.volume() > 0.0;
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
         // Office buffer = window / SCALE (kept ~OFFICE_TARGET_H tall → chunky sprites).
         // The ONE projection helper, shared with the boot seed so the two can't drift.

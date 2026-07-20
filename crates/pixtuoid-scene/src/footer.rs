@@ -264,12 +264,20 @@ pub struct FooterInputs<'a> {
     pub keys_alert: &'a str,
 }
 
-/// Column width of a footer string. The footer vocabulary (`·×↑↓●◐○◌⬢▲♩⚠` + the
-/// ASCII warning body) is ALL single-column (East-Asian *ambiguous* = 1 in a
-/// non-CJK terminal), so `chars().count()` equals the terminal display width —
+/// Column width of a footer string. The footer's own vocabulary — the glyphs
+/// `·×↑↓●◐○◌⬢▲♩⚠` and the ASCII warning/keys — is ALL single-column (ambiguous
+/// EAW = 1 in a non-CJK terminal), so `chars().count()` equals the display width —
 /// keeping `unicode-width` OUT of `scene` (the [`crate::board`] discipline). A
 /// binary-side parity test pins `chars().count() == unicode-width` over the full
-/// vocabulary so a future non-single-column glyph can't silently shift the flush.
+/// glyph vocabulary so a future non-single-column glyph can't silently shift the
+/// flush. **Accepted residual** (the board makes the identical single-column bet
+/// for its content): the ONE variable-content field is the tool-tally TOKEN
+/// (`footer_tool_tally`, a raw agent-supplied alphanumeric run) — every real
+/// source's tool names are ASCII, but a hypothetical wide-CJK token would count
+/// short of its display width and nudge the right-flush by the excess. Not worth
+/// pulling `unicode-width` into `scene` for; if a wide token ever appears in the
+/// wild, that's the trigger to reconsider (not a silent bug — it over-runs the
+/// suffix visibly).
 fn cols(s: &str) -> usize {
     s.chars().count()
 }

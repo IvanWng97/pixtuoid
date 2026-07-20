@@ -686,8 +686,9 @@ fn footer_spans_text(
 }
 
 // Drift guard: the colored footer must render the SAME text as the
-// plain-string footer across every tier — they share `status_segments`,
-// so concatenating the spans must equal build_status_summary exactly.
+// plain-string footer across every tier — both render the shared
+// `scene::footer::build_footer` model, so concatenating the spans must equal
+// build_status_summary exactly.
 #[test]
 fn status_spans_text_matches_summary_across_tiers() {
     let theme = &pixtuoid_scene::theme::NORMAL;

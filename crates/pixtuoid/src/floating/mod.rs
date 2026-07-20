@@ -139,8 +139,10 @@ pub fn run(cfg: RunConfig) -> Result<()> {
             }
         });
     }
-    // Source deaths have no footer in floating — log them (the office partially
-    // freezes). Deduped by count exactly like headless_loop's consumer of the
+    // Source deaths are LOGGED here (the office partially freezes). The floating
+    // footer exists now but doesn't thread this health channel yet — it passes
+    // `source_warning: None` (the seam is ready; see `offscreen::footer`).
+    // Deduped by count exactly like headless_loop's consumer of the
     // SAME channel: the watch value is a grow-only Vec, so logging the whole
     // borrow on every change re-warns all prior deaths (N deaths → N(N+1)/2
     // lines, reading as repeated crashes in log forensics).
