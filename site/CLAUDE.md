@@ -238,9 +238,19 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   SAME scene mixer/schedulers/TrackSwitch the desktop app runs); `OfficeBackdrop.astro`
   is dumb WebAudio glue over its per-tick JSON commands (the `overlay_json` split,
   audio edition). **Muted-by-default + gesture-gated** (browser autoplay policy):
-  no `AudioContext` until the first ♩ click, which `office.audio_begin()`s, pumps
-  the chunked `office.audio_warmup_step()` off `setTimeout(0)` (the multi-second
-  bank/rain/beds synth never blocks the main thread), uploads the buffers via the
+  no `AudioContext` until the first ♩ click. **Synthesis, though, needs no
+  gesture and runs OFF the main thread (#705)**: at page idle
+  `public/audio-worker.js` (a module worker; knip-ignored — its only consumer
+  is a runtime `new Worker`) loads its OWN wasm instance, pumps `SynthTake` to
+  done, and transfers the buffers back; the page adopts them
+  (`office.audio_adopt_begin/_loop/_oneshot/_finish`, one small copy per
+  `setTimeout(0)` tick) so the ♩ click is upload-only — near-instant. The
+  click-time chunked `office.audio_warmup_step()` pump stays as the FALLBACK
+  (dead worker / no module-worker support / reduced-motion, which skips the
+  prewarm as a low-power signal), a click mid-prewarm DEFERS to the settle
+  (never two drivers racing one office), and `__pixAudioPrewarm` /
+  `__pixAudioReadyAt` are the e2e observability globals. Either path uploads
+  the buffers via the
   zero-copy `audio_loop_ptr/_len` + `audio_oneshot_ptr/_len` getters (COPIED out —
   a view dangles on `memory.grow`), then `office.audio_tick(nowMs)` per frame,
   applying `{gains[6],plays,swapped}` to looping `AudioBufferSourceNode`s + a

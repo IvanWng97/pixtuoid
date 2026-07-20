@@ -175,6 +175,10 @@ pub struct Office {
     /// `audio_begin` creates it; JS pumps `audio_warmup_step`, uploads the
     /// buffers, then drives `audio_tick` per rAF.
     audio: Option<audio::WebAudioDriver>,
+    /// An in-flight worker-prewarm handoff (#705) — staged by
+    /// `audio_adopt_begin`, filled piece-by-piece, promoted to `audio` by
+    /// `audio_adopt_finish` (unless a click-warmed driver got there first).
+    adopting: Option<audio::Adoption>,
 }
 
 #[wasm_bindgen]
@@ -206,6 +210,7 @@ impl Office {
             caps_size: None,
             weather_override: None,
             audio: None,
+            adopting: None,
         })
     }
 
@@ -455,6 +460,132 @@ impl Office {
             .tick(now_ms, frame);
         audio::commands_json(&cmd)
     }
+
+    // --- worker prewarm adoption (#705) --------------------------------------
+    // A Web Worker synthesizes the whole take in its OWN wasm instance
+    // (`SynthTake`), transfers the buffers over, and JS copies them in here
+    // piece-by-piece off setTimeout(0). After `audio_adopt_finish` the driver
+    // is READY — the ♩ click skips synthesis entirely and only uploads.
+
+    /// Stage a handoff for the worker's spawn-time track (`night` + 10-min
+    /// `epoch` block). A stale epoch at click time self-heals through the
+    /// normal chunked swap. Overwrites any prior stage.
+    pub fn audio_adopt_begin(&mut self, night: bool, epoch: f64) {
+        let epoch = epoch as u64;
+        let track = if night {
+            pixtuoid_scene::audio::TrackId::GenNight(epoch)
+        } else {
+            pixtuoid_scene::audio::TrackId::GenDay(epoch)
+        };
+        self.adopting = Some(audio::Adoption::new(track));
+    }
+
+    /// Copy in one one-shot buffer (the worker's pool-discovery order).
+    /// `false` = refused (no stage / bad pool / overflow) — JS abandons the
+    /// handoff and the click-time warmup takes over.
+    pub fn audio_adopt_oneshot(&mut self, pool: u8, samples: &[f32]) -> bool {
+        let Some(ad) = self.adopting.as_mut() else {
+            return false;
+        };
+        match audio::pool_from_wire(pool) {
+            Some(p) => ad.push_oneshot(p, samples),
+            None => false,
+        }
+    }
+
+    /// Copy in loop stem `idx` (`LoopStem::ALL` order: beds sequentially,
+    /// rain last). Same `false` contract as `audio_adopt_oneshot`.
+    pub fn audio_adopt_loop(&mut self, idx: usize, samples: &[f32]) -> bool {
+        match self.adopting.as_mut() {
+            Some(ad) => ad.push_loop(idx, samples),
+            None => false,
+        }
+    }
+
+    /// Promote a COMPLETE handoff to the live driver. `true` = the ♩ click is
+    /// now upload-only. Refuses a torn handoff, and refuses to stomp a driver
+    /// a click already warmed (first ready wins).
+    pub fn audio_adopt_finish(&mut self) -> bool {
+        let Some(ad) = self.adopting.take() else {
+            return false;
+        };
+        if self.audio.is_some() {
+            return false;
+        }
+        match ad.finish() {
+            Some(driver) => {
+                self.audio = Some(driver);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// The worker-side synthesizer (#705): the audio-prewarm Web Worker
+/// instantiates its OWN wasm module (memories can't be shared), pumps
+/// [`SynthTake::step`] to 0 — blocking is fine off the main thread — then
+/// copies each buffer out through the ptr/len getters (the driver's read
+/// contract) and transfers them to the main thread for `Office::audio_adopt_*`.
+#[wasm_bindgen]
+pub struct SynthTake {
+    driver: audio::WebAudioDriver,
+    night: bool,
+    epoch: u64,
+}
+
+#[wasm_bindgen]
+impl SynthTake {
+    /// `now_ms` = UNIX-epoch milliseconds (the `Office::step` contract) —
+    /// selects the same day/night + weather track the office would at that
+    /// instant (procedural weather; a `weather_override` mismatch on the main
+    /// office self-heals through the normal swap).
+    #[wasm_bindgen(constructor)]
+    pub fn new(now_ms: f64) -> SynthTake {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
+        let epoch = pixtuoid_scene::audio::track_epoch(now);
+        let track = pixtuoid_scene::audio::select_track(
+            pixtuoid_scene::pixel_painter::is_day_at(now),
+            pixtuoid_scene::pixel_painter::precipitation_level(now),
+            epoch,
+        );
+        let night = matches!(track, pixtuoid_scene::audio::TrackId::GenNight(_));
+        SynthTake {
+            driver: audio::WebAudioDriver::new(track),
+            night,
+            epoch,
+        }
+    }
+
+    /// Build ONE synthesis piece; pieces remaining (0 = done).
+    pub fn step(&mut self) -> u32 {
+        self.driver.warmup_step()
+    }
+
+    /// The selected track, split for the adopt wire (`audio_adopt_begin`).
+    pub fn night(&self) -> bool {
+        self.night
+    }
+    pub fn epoch(&self) -> f64 {
+        self.epoch as f64
+    }
+
+    /// Zero-copy reads, same contract as the `Office::audio_*` getters — the
+    /// worker copies (`Float32Array.slice`) before its next wasm call.
+    pub fn loop_ptr(&self, idx: usize) -> *const f32 {
+        self.driver.loop_buffer(idx).as_ptr()
+    }
+    pub fn loop_len(&self, idx: usize) -> usize {
+        self.driver.loop_buffer(idx).len()
+    }
+    pub fn oneshot_ptr(&self, pool: u8, idx: usize) -> *const f32 {
+        audio::pool_from_wire(pool).map_or(std::ptr::null(), |p| {
+            self.driver.oneshot_buffer(p, idx).as_ptr()
+        })
+    }
+    pub fn oneshot_len(&self, pool: u8, idx: usize) -> usize {
+        audio::pool_from_wire(pool).map_or(0, |p| self.driver.oneshot_buffer(p, idx).len())
+    }
 }
 
 impl Office {
@@ -696,6 +827,91 @@ mod tests {
         match Office::new(1) {
             Ok(o) => o,
             Err(_) => panic!("embedded pack must parse"),
+        }
+    }
+
+    /// The worker→main handoff, minus the JS/postMessage hop: pump a
+    /// [`SynthTake`] to done, adopt every piece into `o`. Returns the take
+    /// for byte comparisons.
+    fn adopt_take_into(o: &mut Office, now_ms: f64) -> SynthTake {
+        let mut take = SynthTake::new(now_ms);
+        while take.step() > 0 {}
+        o.audio_adopt_begin(take.night(), take.epoch());
+        for i in 0..6 {
+            assert!(
+                o.audio_adopt_loop(i, take.driver.loop_buffer(i)),
+                "loop {i} adopted"
+            );
+        }
+        for wire in 0u8..5 {
+            let pool = audio::pool_from_wire(wire).expect("known wire");
+            let mut j = 0;
+            while !take.driver.oneshot_buffer(pool, j).is_empty() {
+                assert!(
+                    o.audio_adopt_oneshot(wire, take.driver.oneshot_buffer(pool, j)),
+                    "{pool:?}[{j}] adopted"
+                );
+                j += 1;
+            }
+        }
+        take
+    }
+
+    #[test]
+    fn a_worker_take_adopts_into_an_office_and_the_click_is_upload_only() {
+        let mut o = office();
+        let take = adopt_take_into(&mut o, 1_753_000_000_000.0);
+        assert!(o.audio_adopt_finish(), "complete handoff promotes");
+        // the ♩ click path: audio_begin is a no-op, warmup already done
+        o.audio_begin();
+        assert_eq!(o.audio_warmup_step(), 0, "click-time synthesis skipped");
+        for i in 0..6 {
+            assert_eq!(
+                o.audio_loop_len(i),
+                take.driver.loop_buffer(i).len(),
+                "stem {i} upload reads the adopted bytes"
+            );
+        }
+        assert!(
+            !o.audio_adopt_finish(),
+            "a second finish has nothing staged"
+        );
+    }
+
+    #[test]
+    fn a_click_warmed_driver_wins_over_a_late_adoption() {
+        let mut o = office();
+        o.audio_begin();
+        while o.audio_warmup_step() > 0 {}
+        let baseline = o.audio_loop_len(0);
+        adopt_take_into(&mut o, 1_753_000_600_000.0);
+        assert!(
+            !o.audio_adopt_finish(),
+            "first ready wins — a late adoption must not stomp the live driver"
+        );
+        assert_eq!(o.audio_loop_len(0), baseline, "live driver untouched");
+        // pushes with nothing staged are refused (finish consumed the stage)
+        assert!(!o.audio_adopt_loop(0, &[0.1]));
+        assert!(!o.audio_adopt_oneshot(0, &[0.1]));
+    }
+
+    #[test]
+    fn synth_take_matches_what_the_main_thread_would_have_synthesized() {
+        // worker and main both start a fresh driver at BUILD_SEED for the
+        // same track — the adopted bytes must be exactly what a click-time
+        // warmup would have produced (the determinism the handoff rides on)
+        let mut take = SynthTake::new(1_753_000_000_000.0);
+        while take.step() > 0 {}
+        let mut take2 = SynthTake::new(1_753_000_000_000.0);
+        while take2.step() > 0 {}
+        assert_eq!(take.night(), take2.night());
+        assert_eq!(take.epoch(), take2.epoch());
+        for i in 0..6 {
+            assert_eq!(
+                take.driver.loop_buffer(i),
+                take2.driver.loop_buffer(i),
+                "stem {i} is deterministic for a now_ms"
+            );
         }
     }
 

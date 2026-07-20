@@ -10,17 +10,18 @@
 //! whose `now_ms` jumps seconds neither ramp-snaps the crossfade nor replays a
 //! keystroke backlog (the stall-clock class, web-side).
 //!
-//! MOOD-TRACK SWITCH: the INITIAL bank/rain/beds synthesis is chunked across
-//! `warmup_step` calls — since #705 at ONE BED PER STEP, pumped by JS off
-//! `setTimeout(0)` starting at page idle (pre-warm; synthesis needs no user
-//! gesture — only the AudioContext does), so the ♩ click is near-instant. A mid-visit day↔night switch
-//! rebuilds only the 5 track beds in ONE tick once the stems have ramped to
-//! silence — rare (a real-clock boundary / 10-min weather flip) and inaudible
-//! (it happens under the hold), so it isn't chunked.
+//! SYNTHESIS PATHS (#705): the primary path is a Web Worker — at page idle it
+//! runs [`crate::SynthTake`] in its OWN wasm instance and the buffers are
+//! adopted here ([`Adoption`]) so the ♩ click is upload-only, near-instant.
+//! The chunked `warmup_step` pump (one bed per step, off `setTimeout(0)`)
+//! remains the click-time FALLBACK (dead worker / no module workers /
+//! reduced-motion). A mid-visit track switch rebuilds the 5 beds one per
+//! tick under the ramped-to-silence hold ([`PendingBuild`]) — inaudible, so
+//! it deliberately stays on the main thread rather than the worker.
 
 use std::sync::Arc;
 
-use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds, TRACK_STEMS};
+use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds, DROP_POOL, KEYSTROKE_POOL, TRACK_STEMS};
 use pixtuoid_scene::audio::compose::{compose, GeneratedScore, Mood};
 use pixtuoid_scene::audio::dsp::NoiseStream;
 use pixtuoid_scene::audio::mixer::LoopStem;
@@ -77,6 +78,34 @@ impl WebAudioDriver {
             stage: 0,
             track: initial_track,
             engine: AudioEngine::new(1.0),
+            last_ms: None,
+        }
+    }
+
+    /// A driver assembled from worker-synthesized pieces (#705) — ready
+    /// immediately, state-identical to a locally-warmed one, so the upload /
+    /// tick / swap paths downstream never know the difference. The rng starts
+    /// at position 0 where a locally-warmed driver sits post-warmup: only
+    /// FUTURE swap-bed noise textures differ (the score itself is
+    /// seed-deterministic), and nothing compares those bytes cross-path.
+    pub(crate) fn adopted(
+        track: TrackId,
+        bank: AssetBank,
+        rain: Arc<Vec<f32>>,
+        beds: [Arc<Vec<f32>>; TRACK_STEMS.len()],
+    ) -> Self {
+        let mut engine = AudioEngine::new(1.0);
+        engine.init_track(track);
+        Self {
+            rng: NoiseStream::new(BUILD_SEED),
+            bank: Some(bank),
+            rain: Some(rain),
+            beds: Some(TrackBeds::from_arcs(beds)),
+            warm: None,
+            pending: None,
+            stage: WARMUP_STAGES,
+            track,
+            engine,
             last_ms: None,
         }
     }
@@ -265,6 +294,110 @@ impl LaneBuild {
 struct PendingBuild {
     to: TrackId,
     build: LaneBuild,
+}
+
+/// The worker-prewarm handoff (#705): buffers synthesized in a Web Worker's
+/// OWN wasm instance are copied here piece-by-piece (a postMessage transfer
+/// can't cross wasm memories), then [`Adoption::finish`] assembles a fully
+/// ready driver. Every push validates order/bounds and `finish` validates
+/// completeness against the bank consts, so a torn handoff (worker died
+/// mid-stream) yields `None` and the click-time warmup runs instead.
+pub(crate) struct Adoption {
+    track: TrackId,
+    keystrokes: Vec<Arc<Vec<f32>>>,
+    drops: Vec<Arc<Vec<f32>>>,
+    door_chime: Option<Arc<Vec<f32>>>,
+    printer_whir: Option<Arc<Vec<f32>>>,
+    vending_drop: Option<Arc<Vec<f32>>>,
+    beds: Vec<Arc<Vec<f32>>>,
+    rain: Option<Arc<Vec<f32>>>,
+}
+
+impl Adoption {
+    pub(crate) fn new(track: TrackId) -> Self {
+        Self {
+            track,
+            keystrokes: Vec::new(),
+            drops: Vec::new(),
+            door_chime: None,
+            printer_whir: None,
+            vending_drop: None,
+            beds: Vec::new(),
+            rain: None,
+        }
+    }
+
+    /// Append one one-shot buffer (the worker's pool-discovery order).
+    /// `false` — overflow, duplicate, or empty — aborts the handoff.
+    pub(crate) fn push_oneshot(&mut self, pool: OneShotPool, samples: &[f32]) -> bool {
+        if samples.is_empty() {
+            return false;
+        }
+        let arc = Arc::new(samples.to_vec());
+        let slot = |o: &mut Option<Arc<Vec<f32>>>| {
+            if o.is_some() {
+                return false;
+            }
+            *o = Some(arc.clone());
+            true
+        };
+        match pool {
+            OneShotPool::Keystroke => {
+                if self.keystrokes.len() >= KEYSTROKE_POOL {
+                    return false;
+                }
+                self.keystrokes.push(arc.clone());
+                true
+            }
+            OneShotPool::Drop => {
+                if self.drops.len() >= DROP_POOL {
+                    return false;
+                }
+                self.drops.push(arc.clone());
+                true
+            }
+            OneShotPool::DoorChime => slot(&mut self.door_chime),
+            OneShotPool::PrinterWhir => slot(&mut self.printer_whir),
+            OneShotPool::VendingDrop => slot(&mut self.vending_drop),
+        }
+    }
+
+    /// Loop stem `idx` in `LoopStem::ALL` order: the track beds (sequential —
+    /// out-of-order aborts) then rain last.
+    pub(crate) fn push_loop(&mut self, idx: usize, samples: &[f32]) -> bool {
+        if samples.is_empty() {
+            return false;
+        }
+        let arc = Arc::new(samples.to_vec());
+        if idx < TRACK_STEMS.len() {
+            if idx != self.beds.len() {
+                return false;
+            }
+            self.beds.push(arc);
+            true
+        } else if idx == TRACK_STEMS.len() && self.rain.is_none() {
+            self.rain = Some(arc);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// A COMPLETE handoff becomes a ready driver; anything torn → `None`.
+    pub(crate) fn finish(self) -> Option<WebAudioDriver> {
+        if self.keystrokes.len() != KEYSTROKE_POOL || self.drops.len() != DROP_POOL {
+            return None;
+        }
+        let bank = AssetBank {
+            keystrokes: self.keystrokes,
+            drops: self.drops,
+            door_chime: self.door_chime?,
+            printer_whir: self.printer_whir?,
+            vending_drop: self.vending_drop?,
+        };
+        let beds = <[Arc<Vec<f32>>; TRACK_STEMS.len()]>::try_from(self.beds).ok()?;
+        Some(WebAudioDriver::adopted(self.track, bank, self.rain?, beds))
+    }
 }
 
 pub(crate) fn commands_json(cmd: &TickCommands) -> String {
@@ -531,6 +664,132 @@ mod tests {
             pad_after > 0.0,
             "the night mix ramps back in after the swap"
         );
+    }
+
+    /// Feed every piece of a warmed `src` through an [`Adoption`] — the
+    /// worker-handoff round trip, minus the JS/postMessage hop.
+    fn adopt_all_of(src: &WebAudioDriver, track: TrackId) -> Adoption {
+        let mut ad = Adoption::new(track);
+        for i in 0..LoopStem::ALL.len() {
+            assert!(ad.push_loop(i, src.loop_buffer(i)), "loop {i}");
+        }
+        for (pool, size) in ONESHOT_POOL_SIZES {
+            for j in 0..size {
+                assert!(
+                    ad.push_oneshot(pool, src.oneshot_buffer(pool, j)),
+                    "{pool:?}[{j}]"
+                );
+            }
+        }
+        ad
+    }
+
+    const ONESHOT_POOL_SIZES: [(OneShotPool, usize); 5] = [
+        (OneShotPool::Keystroke, KEYSTROKE_POOL),
+        (OneShotPool::Drop, DROP_POOL),
+        (OneShotPool::DoorChime, 1),
+        (OneShotPool::PrinterWhir, 1),
+        (OneShotPool::VendingDrop, 1),
+    ];
+
+    #[test]
+    fn adoption_round_trips_a_warmed_driver_byte_for_byte() {
+        let track = TrackId::GenNight(3);
+        let mut src = WebAudioDriver::new(track);
+        while src.warmup_step() > 0 {}
+        let dst = adopt_all_of(&src, track)
+            .finish()
+            .expect("complete handoff");
+        assert!(dst.is_ready(), "adopted driver is ready with zero warmup");
+        for i in 0..LoopStem::ALL.len() {
+            assert_eq!(dst.loop_buffer(i), src.loop_buffer(i), "stem {i} bytes");
+        }
+        for (pool, size) in ONESHOT_POOL_SIZES {
+            for j in 0..size {
+                assert_eq!(dst.oneshot_buffer(pool, j), src.oneshot_buffer(pool, j));
+            }
+            assert!(
+                dst.oneshot_buffer(pool, size).is_empty(),
+                "{pool:?} keeps the discovery-loop terminator"
+            );
+        }
+    }
+
+    #[test]
+    fn an_adopted_driver_ticks_and_swaps_like_a_warmed_one() {
+        // downstream must never know the difference: gains ramp, and a track
+        // change still walks the driver's OWN chunked LaneBuild swap
+        let track = TrackId::GenDay(0);
+        let mut src = WebAudioDriver::new(track);
+        while src.warmup_step() > 0 {}
+        let mut d = adopt_all_of(&src, track).finish().expect("handoff");
+        let mk = |track| AudioFrame {
+            stems: pixtuoid_scene::audio::stem_levels(
+                &pixtuoid_scene::board::StateCounts {
+                    active: 1,
+                    waiting: 0,
+                    idle: 0,
+                    exiting: 0,
+                    total: 1,
+                },
+                0.0,
+            ),
+            events: Vec::new(),
+            track,
+        };
+        let mut now = 0.0;
+        let mut pad = 0.0;
+        for _ in 0..40 {
+            now += 50.0;
+            pad = d.tick(now, mk(track)).gains[0];
+        }
+        assert!(pad > 0.0, "adopted mix ramps up");
+        let mut swapped = false;
+        for _ in 0..200 {
+            now += 50.0;
+            if d.tick(now, mk(TrackId::GenNight(9))).swap.is_some() {
+                swapped = true;
+                break;
+            }
+        }
+        assert!(swapped, "the chunked swap path works post-adoption");
+        assert_eq!(d.track, TrackId::GenNight(9));
+    }
+
+    #[test]
+    fn a_torn_adoption_yields_none_and_bad_pushes_are_refused() {
+        let track = TrackId::GenDay(1);
+        let mut src = WebAudioDriver::new(track);
+        while src.warmup_step() > 0 {}
+        // missing rain → torn
+        let mut ad = adopt_all_of(&src, track);
+        ad.rain = None;
+        assert!(ad.finish().is_none(), "missing rain is a torn handoff");
+        // out-of-order bed / empty buffer / pool overflow / duplicate cue
+        let mut ad = Adoption::new(track);
+        assert!(!ad.push_loop(1, src.loop_buffer(1)), "beds are sequential");
+        assert!(!ad.push_loop(0, &[]), "empty buffers are refused");
+        let mut ad = adopt_all_of(&src, track);
+        assert!(
+            !ad.push_oneshot(
+                OneShotPool::Keystroke,
+                src.oneshot_buffer(OneShotPool::Keystroke, 0)
+            ),
+            "keystroke overflow refused"
+        );
+        assert!(
+            !ad.push_oneshot(
+                OneShotPool::DoorChime,
+                src.oneshot_buffer(OneShotPool::DoorChime, 0)
+            ),
+            "duplicate cue refused"
+        );
+        // a short keystroke pool → torn
+        let mut ad = Adoption::new(track);
+        for i in 0..LoopStem::ALL.len() {
+            ad.push_loop(i, src.loop_buffer(i));
+        }
+        assert!(ad.finish().is_none(), "missing one-shots is a torn handoff");
     }
 
     #[test]

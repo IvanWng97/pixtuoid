@@ -20,6 +20,10 @@
   // can't trace. Generated artifact, not site source.
   "ignore": [
     "public/wasm/**",
+    // The #705 audio-prewarm module worker: loaded at runtime via
+    // `new Worker(asset('audio-worker.js'))` from OfficeBackdrop.astro's
+    // is:inline script — no static import for knip to trace.
+    "public/audio-worker.js",
     // The channel dial's documented FALLBACK: if the bare mono dial tests
     // weak on scannability, MonitorWall returns with one import + one grid
     // rule (OPEN FLOOR spec, Showcase section). Deliberately unimported.

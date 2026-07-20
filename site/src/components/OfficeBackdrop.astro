@@ -384,7 +384,13 @@ import { asset, DIM_RESTING } from '../consts';
   }
 </style>
 
-<script is:inline define:vars={{ wasmJsUrl: asset('wasm/pixtuoid_web.js') }}>
+<script
+  is:inline
+  define:vars={{
+    wasmJsUrl: asset('wasm/pixtuoid_web.js'),
+    audioWorkerUrl: asset('audio-worker.js'),
+  }}
+>
   (function () {
     const wrap = document.querySelector('.backdrop');
     const canvas = document.getElementById('office-live');
@@ -887,6 +893,21 @@ import { asset, DIM_RESTING } from '../consts';
       audioPlaying = false;
       audioBooting = false;
       audioUnavailable = true;
+      // tear down any in-flight prewarm too — fields directly (NOT
+      // prewarmSettle: its deferred-click resume would re-enter audio)
+      prewarmClickPending = false;
+      if (prewarmWorker) {
+        prewarmWorker.terminate();
+        prewarmWorker = null;
+      }
+      if (prewarmTimer) {
+        clearTimeout(prewarmTimer);
+        prewarmTimer = 0;
+      }
+      if (prewarm === 'running') {
+        prewarm = 'failed';
+        window.__pixAudioPrewarm = 'failed';
+      }
       if (audioCtx) {
         try {
           audioCtx.close();
@@ -900,16 +921,114 @@ import { asset, DIM_RESTING } from '../consts';
         audioBtn.hidden = true;
       }
     }
-    // #705 idle pre-warm was REVERTED: even one-bed chunks run seconds on
-    // slow hardware, and a main-thread pump at page idle starves clicks +
-    // transient UI (the CI mobile chip-flash test caught it living and
-    // dying entirely inside blocked windows). The real fix is synthesis in
-    // a Web Worker — tracked in #705; until then the warmup starts at the
-    // ♩ click as before, now in per-bed chunks so the UI stays responsive
-    // through it.
+    // --- #705 worker prewarm ------------------------------------------------
+    // Synthesis runs OFF the main thread (an earlier main-thread idle pump
+    // starved clicks/UI on slow hardware and was reverted): at page idle a
+    // module worker loads its OWN wasm instance, builds the whole take, and
+    // transfers the buffers back; adoption then copies them into the page's
+    // driver one small piece per setTimeout(0) tick. After that the ♩ click
+    // is upload-only — near-instant. The click-time chunked pump below stays
+    // as the fallback (dead worker / no module-worker support / reduced
+    // motion), and a click while the worker runs DEFERS to prewarmSettle so
+    // the two paths never race one driver.
+    let prewarm = 'idle'; // 'idle' | 'running' | 'adopted' | 'failed'
+    let prewarmWorker = null;
+    let prewarmTimer = 0;
+    let prewarmClickPending = false;
+    const PREWARM_TIMEOUT_MS = 15000; // a hung worker must never strand a deferred click
+    const PREWARM_IDLE_FALLBACK_MS = 1500; // rIC-less Safari: idle ≈ shortly after load
+    const PREWARM_IDLE_TIMEOUT_MS = 4000; // rIC must fire even on a never-idle page
+    window.__pixAudioPrewarm = 'idle'; // e2e observability (polled global, like __pixLights)
+    function prewarmSettle(state) {
+      prewarm = state;
+      window.__pixAudioPrewarm = state;
+      if (prewarmTimer) {
+        clearTimeout(prewarmTimer);
+        prewarmTimer = 0;
+      }
+      if (prewarmWorker) {
+        prewarmWorker.terminate();
+        prewarmWorker = null;
+      }
+      if (prewarmClickPending) {
+        prewarmClickPending = false;
+        // the deferred ♩ click resumes on whichever path settled: adopted →
+        // upload-only, failed → the normal chunked warmup
+        try {
+          office.audio_begin();
+          audioPumpWarmup();
+        } catch (e) {
+          audioDisable();
+        }
+      }
+    }
+    // Copy the transferred take into the driver, one piece per tick (~30
+    // small memcpys — no single main-thread block bigger than one buffer).
+    function prewarmAdopt(data) {
+      try {
+        office.audio_adopt_begin(!!data.night, data.epoch);
+      } catch (e) {
+        prewarmSettle('failed');
+        return;
+      }
+      const pieces = [];
+      for (let i = 0; i < 6; i++) pieces.push({ loop: i, buf: data.loops[i] });
+      for (const wire of ONESHOT_WIRES) {
+        for (const buf of data.oneshots[wire] || []) pieces.push({ wire: wire, buf: buf });
+      }
+      let at = 0;
+      function pump() {
+        try {
+          if (at < pieces.length) {
+            const p = pieces[at++];
+            const ok =
+              p.loop === undefined
+                ? office.audio_adopt_oneshot(p.wire, p.buf)
+                : office.audio_adopt_loop(p.loop, p.buf);
+            if (!ok) {
+              prewarmSettle('failed'); // torn handoff → click-time warmup
+              return;
+            }
+            setTimeout(pump, 0);
+            return;
+          }
+          prewarmSettle(office.audio_adopt_finish() ? 'adopted' : 'failed');
+        } catch (e) {
+          prewarmSettle('failed');
+        }
+      }
+      pump();
+    }
+    function prewarmSpawn() {
+      // reduced-motion is treated as a low-power signal (the bg-tick stance):
+      // those visitors keep the click-time chunked path
+      if (prewarm !== 'idle' || !office || !wasm || audioUnavailable || mq.matches) return;
+      prewarm = 'running';
+      window.__pixAudioPrewarm = 'running';
+      try {
+        prewarmWorker = new Worker(audioWorkerUrl, { type: 'module' });
+      } catch (e) {
+        prewarmSettle('failed'); // classic-worker-only browsers: fallback path
+        return;
+      }
+      prewarmTimer = setTimeout(function () {
+        prewarmTimer = 0;
+        prewarmSettle('failed');
+      }, PREWARM_TIMEOUT_MS);
+      prewarmWorker.onmessage = function (e) {
+        prewarmWorker = null; // it closes itself after its one message
+        if (!e.data || !e.data.ok) prewarmSettle('failed');
+        else prewarmAdopt(e.data);
+      };
+      prewarmWorker.onerror = function () {
+        prewarmSettle('failed');
+      };
+      prewarmWorker.postMessage({ wasmJsUrl: wasmJsUrl, nowMs: Date.now() });
+    }
     // Pump the chunked synthesis off setTimeout(0) so the main thread never
     // blocks on the multi-second bank/rain/beds build in one go (one bed
-    // per step since #705).
+    // per step since #705). A no-op sprint straight to upload when the
+    // worker prewarm already adopted the take.
     function audioPumpWarmup() {
       try {
         if (office.audio_warmup_step() > 0) {
@@ -919,6 +1038,7 @@ import { asset, DIM_RESTING } from '../consts';
         audioUploadBuffers(); // createBuffer here — the usual failure point
         audioReady = true;
         audioBooting = false; // pump done — clear the in-flight flag on success too
+        window.__pixAudioReadyAt = performance.now(); // e2e: click→sound latency
       } catch (e) {
         audioDisable();
       }
@@ -937,6 +1057,13 @@ import { asset, DIM_RESTING } from '../consts';
         // A bare flag-set left the button visible, so the click handler flipped
         // it to a silent "playing" state and persisted AUDIO_PREF=1 (audit C5).
         audioDisable();
+        return;
+      }
+      // The worker is mid-synthesis: defer to prewarmSettle (audioBooting
+      // stays set, blocking re-clicks) — it resumes this click on either
+      // outcome instead of racing a second driver against the adoption.
+      if (prewarm === 'running') {
+        prewarmClickPending = true;
         return;
       }
       office.audio_begin();
@@ -1103,6 +1230,14 @@ import { asset, DIM_RESTING } from '../consts';
             ctx2d = canvas.getContext('2d');
             sizeBuffer();
             start();
+            // #705: pre-warm the audio synthesis in a worker once the page
+            // idles (rIC-less Safari falls back to a short timer). All the
+            // work is off-thread; the guard set lives in prewarmSpawn.
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(prewarmSpawn, { timeout: PREWARM_IDLE_TIMEOUT_MS });
+            } else {
+              setTimeout(prewarmSpawn, PREWARM_IDLE_FALLBACK_MS);
+            }
             // #434: the pix:install-copy listener above hires a coworker into
             // the background office (engine-capped at 3 concurrent; a no-op
             // before the first frame) and reads the admitted/refused bool

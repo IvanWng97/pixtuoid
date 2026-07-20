@@ -395,6 +395,58 @@ test('background playback: a hidden tab keeps ticking, reduced-motion stops it c
   expect(errors()).toEqual([]);
 });
 
+test('audio prewarm: the idle worker hands the take over and the ♩ click is upload-only', async ({
+  page,
+}) => {
+  // #705: at page idle a module worker synthesizes the whole take off-thread
+  // and the main thread adopts the buffers, so the ♩ click skips synthesis.
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  // worker spawn (idle) + off-thread synthesis + adoption; generous for CI
+  await page.waitForFunction(
+    () => (window as unknown as { __pixAudioPrewarm?: string }).__pixAudioPrewarm === 'adopted',
+    undefined,
+    { timeout: 60_000 }
+  );
+  const t0 = await page.evaluate(() => performance.now());
+  await page.locator('#office-audio').click();
+  await page.waitForFunction(
+    () => (window as unknown as { __pixAudioReadyAt?: number }).__pixAudioReadyAt !== undefined,
+    undefined,
+    { timeout: 10_000 }
+  );
+  const readyAt = await page.evaluate(
+    () => (window as unknown as { __pixAudioReadyAt: number }).__pixAudioReadyAt
+  );
+  // upload-only is tens-to-hundreds of ms even on a throttled runner; the
+  // synthesis path this replaces measures SECONDS — the threshold
+  // discriminates with wide margin in both directions
+  expect(readyAt - t0).toBeLessThan(2_500);
+  expect(errors()).toEqual([]);
+});
+
+test('audio prewarm fallback: a dead worker leaves the click-time chunked warmup intact', async ({
+  page,
+}) => {
+  // the worker is an accelerator, never a dependency: kill its script and
+  // the ♩ click must still reach ready through the chunked main-thread pump
+  const errors = watchErrors(page);
+  await page.route('**/audio-worker.js', (route) => route.abort());
+  await gotoLive(page);
+  await page.waitForFunction(
+    () => (window as unknown as { __pixAudioPrewarm?: string }).__pixAudioPrewarm === 'failed',
+    undefined,
+    { timeout: 30_000 }
+  );
+  await page.locator('#office-audio').click();
+  await page.waitForFunction(
+    () => (window as unknown as { __pixAudioReadyAt?: number }).__pixAudioReadyAt !== undefined,
+    undefined,
+    { timeout: 60_000 }
+  );
+  expect(errors()).toEqual([]);
+});
+
 test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode does not mute the opt-in', async ({
   page,
 }) => {
