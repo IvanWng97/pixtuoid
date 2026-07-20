@@ -235,7 +235,7 @@ fn warn_broken_installs(connected: &std::collections::HashSet<String>) {
         if !connected.contains(t.core_source) {
             continue;
         }
-        let diag = doctor::diagnose(t.core_source, "");
+        let diag = doctor::diagnose(t.core_source, "", None);
         if diag.is_broken() {
             let issues = diag
                 .install

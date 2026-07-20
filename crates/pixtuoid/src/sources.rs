@@ -435,7 +435,7 @@ pub(crate) fn skip_freeze(
     connected: &HashSet<String>,
 ) -> Vec<(&'static str, bool)> {
     freeze_for_skip(detected, connected, |id| {
-        by_source(id).is_some_and(install::has_hooks)
+        by_source(id).is_some_and(|t| install::has_hooks(t, None))
     })
 }
 
@@ -583,7 +583,7 @@ pub fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<ConnectionRow> 
                 facts,
                 connected,
                 health: connected
-                    .then(|| crate::doctor::diagnose(d.name, log).summary())
+                    .then(|| crate::doctor::diagnose(d.name, log, None).summary())
                     .flatten(),
             }
         })

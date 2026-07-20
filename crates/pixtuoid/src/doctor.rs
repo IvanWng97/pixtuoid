@@ -284,10 +284,14 @@ impl SourceDiagnostics {
 /// install check runs whenever the source's target has managed hooks installed
 /// (NOT gated on the connected flag — `run` reports a stale broken install even
 /// on a disconnected source; the boot warning gates on connected itself).
-pub fn diagnose(source: &str, log: &str) -> SourceDiagnostics {
+/// `config` injects a config root (mirroring `verify_target`): prod passes
+/// `None` (real default paths); a fixture test passes a temp dir so an
+/// install-broken verdict is exercisable through the SAME root both the
+/// `has_hooks` gate and `verify_target` read.
+pub fn diagnose(source: &str, log: &str, config: Option<std::path::PathBuf>) -> SourceDiagnostics {
     let install = crate::install::target::by_source(source)
-        .filter(|t| crate::install::has_hooks(t))
-        .map(|t| crate::install::verify_target(t, None));
+        .filter(|t| crate::install::has_hooks(t, config.clone()))
+        .map(|t| crate::install::verify_target(t, config.clone()));
     SourceDiagnostics {
         install,
         drift: scan_log_for_source(log, source),
@@ -747,11 +751,13 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     for src in registry::registered_source_names() {
         let desc = registry::descriptor_for(src);
         let target = crate::install::target::by_source(src);
-        let hooks_installed = target.map(crate::install::has_hooks).unwrap_or(false);
+        let hooks_installed = target
+            .map(|t| crate::install::has_hooks(t, None))
+            .unwrap_or(false);
         // ONE shared rollup (install soundness + drift) — the same `diagnose` the
         // Sources panel + boot preflight read, so the report can't drift apart
         // from the live surfaces.
-        let diag = diagnose(src, &log);
+        let diag = diagnose(src, &log, None);
         let row = DoctorSourceRow {
             prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
             source_id: src,
@@ -1271,6 +1277,37 @@ mod tests {
         let d = diag(None, LogScanResult::default());
         assert!(!d.is_broken());
         assert_eq!(d.summary(), None);
+    }
+
+    #[test]
+    fn diagnose_surfaces_an_install_broken_verdict_through_the_injected_config_root() {
+        // The 3-arg `diagnose(.., config)` makes install soundness fixture-
+        // testable: BOTH the has_hooks gate and verify_target read the SAME
+        // injected root, so a real sentinel'd install whose embedded shim path
+        // can't exist reads as broken — a verdict the old hardcoded
+        // `verify_target(t, None)` + default-path gate could never surface
+        // hermetically.
+        use crate::install::{install_target, target::CLAUDE};
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        std::fs::write(&cfg, "{}\n").unwrap();
+        install_target(
+            &CLAUDE,
+            Some(cfg.clone()),
+            Some(std::path::PathBuf::from("/nonexistent/pixtuoid-hook")),
+        )
+        .unwrap();
+
+        let d = diagnose(CLAUDE.core_source, "", Some(cfg));
+        assert!(
+            d.is_broken(),
+            "a sentinel'd install with a missing shim must read broken through the injected root"
+        );
+        let s = d.summary().unwrap();
+        assert!(
+            s.contains("install broken") && s.contains("shim binary missing"),
+            "unexpected summary: {s:?}"
+        );
     }
 
     #[test]

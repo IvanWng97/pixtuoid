@@ -346,7 +346,7 @@ fn resolve_hook_binary_rejects_a_drive_relative_env_override() {
 fn has_hooks_empty_config_is_false() {
     // FAKE's default_config_path is /nonexistent/fake → read_config returns
     // Ok("") (the missing-file early return), hitting the empty arm → false.
-    assert!(!has_hooks(&FAKE));
+    assert!(!has_hooks(&FAKE, None));
 }
 
 #[test]
@@ -356,7 +356,7 @@ fn has_hooks_unreadable_config_is_true() {
     let dir = fake_dir_config_path();
     let _ = std::fs::remove_file(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    assert!(has_hooks(&FAKE_DIR));
+    assert!(has_hooks(&FAKE_DIR, None));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -365,11 +365,11 @@ fn has_hooks_changed_vs_unchanged_arms() {
     let path = fake2_config_path();
     // Non-empty content → FAKE2.merge_uninstall reports changed=true → true.
     std::fs::write(&path, "model = \"x\"\n").unwrap();
-    assert!(has_hooks(&FAKE2));
+    assert!(has_hooks(&FAKE2, None));
     // Whitespace-only content → read_config returns it, but it trims to empty
     // → the `c.trim().is_empty()` empty arm → false (changed arm not reached).
     std::fs::write(&path, "   \n").unwrap();
-    assert!(!has_hooks(&FAKE2));
+    assert!(!has_hooks(&FAKE2, None));
     let _ = std::fs::remove_file(&path);
 }
 
@@ -381,7 +381,7 @@ fn verify_target_and_has_hooks_handle_unresolvable_config_path() {
     // a single, specific "no config path resolves" issue (so NOT sound). No FS
     // or env needed — the Err comes straight from the fn pointer.
     assert!(
-        !has_hooks(&FAKE_NO_HOME),
+        !has_hooks(&FAKE_NO_HOME, None),
         "no resolvable config path → no hooks"
     );
     let v = verify_target(&FAKE_NO_HOME, None);

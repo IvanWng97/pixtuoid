@@ -48,10 +48,15 @@ pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 /// `doctor::run`'s per-source `hooks_installed` report row, and
 /// `sources::skip_freeze` (the onboarding-skip freeze probes it so a pre-0.12
 /// upgrader's hooks survive a skip).)
-pub(crate) fn has_hooks(t: &'static Target) -> bool {
-    // No resolvable default path (no home dir) → no config to bear hooks.
-    let Ok(path) = (t.default_config_path)() else {
-        return false;
+pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
+    // Mirror `verify_target`'s config resolution: an injected root (fixture
+    // tests, a non-default config) else the target's real default path. The
+    // gate (this) and the verify it guards MUST read the SAME config, or
+    // `diagnose` through an injected root could never observe an install.
+    let path = match config.map(Ok).unwrap_or_else(|| (t.default_config_path)()) {
+        Ok(p) => p,
+        // No resolvable default path (no home dir) → no config to bear hooks.
+        Err(_) => return false,
     };
     match io::read_config(&path) {
         Ok(c) if c.trim().is_empty() => false,
