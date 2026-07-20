@@ -11,8 +11,9 @@
 //! keystroke backlog (the stall-clock class, web-side).
 //!
 //! MOOD-TRACK SWITCH: the INITIAL bank/rain/beds synthesis is chunked across
-//! `warmup_step` calls (JS pumps it off `setTimeout(0)` after the ♩ click so
-//! the main thread never blocks seconds at once). A mid-visit day↔night switch
+//! `warmup_step` calls — since #705 at ONE BED PER STEP, pumped by JS off
+//! `setTimeout(0)` starting at page idle (pre-warm; synthesis needs no user
+//! gesture — only the AudioContext does), so the ♩ click is near-instant. A mid-visit day↔night switch
 //! rebuilds only the 5 track beds in ONE tick once the stems have ramped to
 //! silence — rare (a real-clock boundary / 10-min weather flip) and inaudible
 //! (it happens under the hold), so it isn't chunked.
@@ -35,8 +36,13 @@ pub(crate) struct WebAudioDriver {
     bank: Option<AssetBank>,
     rain: Option<Arc<Vec<f32>>>,
     beds: Option<TrackBeds>,
-    /// 0=bank, 1=rain, 2=beds, 3=ready — the initial warmup cursor.
+    /// 0=bank, 1=rain, 2..=6=one track bed each, 7=ready — the initial
+    /// warmup cursor (see [`WARMUP_STAGES`]).
     stage: u8,
+    /// The warmup's per-lane staging (#705): the composed score + beds
+    /// finished so far, drained into `beds` on the last lane.
+    warm_score: Option<GeneratedScore>,
+    warm_beds: Vec<Arc<Vec<f32>>>,
     /// An in-flight CHUNKED rebuild (one bed per tick): a committed swap
     /// no longer synthesizes all five beds in one rAF tick — at the
     /// 10-minute song cadence that hitched the page every switch. While
@@ -67,6 +73,8 @@ impl WebAudioDriver {
             bank: None,
             rain: None,
             beds: None,
+            warm_score: None,
+            warm_beds: Vec::new(),
             pending: None,
             stage: 0,
             track: initial_track,
@@ -89,18 +97,40 @@ impl WebAudioDriver {
                 self.rain = Some(Arc::new(synth::rain_bed(&mut self.rng)));
                 self.stage = 2;
             }
-            2 => {
-                self.beds = Some(TrackBeds::build(&mut self.rng, self.track));
-                self.engine.init_track(self.track);
-                self.stage = 3;
+            // one bed per step (#705): the old build-all-five stage was
+            // the longest single main-thread block of the whole warmup —
+            // per-lane chunks keep the page smooth during an idle
+            // pre-warm, and the pump loop upstream needs no change
+            s @ 2..=6 => {
+                if self.warm_score.is_none() {
+                    let (mood, seed) = match self.track {
+                        TrackId::GenDay(seed) => (Mood::Day, seed),
+                        TrackId::GenNight(seed) => (Mood::Night, seed),
+                    };
+                    self.warm_score = Some(compose(mood, seed));
+                }
+                let lane = (s - 2) as usize;
+                if let Some(score) = &self.warm_score {
+                    self.warm_beds
+                        .push(Arc::new(synth::gen_bed(score, lane, &mut self.rng)));
+                }
+                if lane + 1 == TRACK_STEMS.len() {
+                    let beds = std::mem::take(&mut self.warm_beds);
+                    if let Ok(beds) = <[Arc<Vec<f32>>; TRACK_STEMS.len()]>::try_from(beds) {
+                        self.beds = Some(TrackBeds::from_arcs(beds));
+                    }
+                    self.warm_score = None;
+                    self.engine.init_track(self.track);
+                }
+                self.stage = s + 1;
             }
             _ => {}
         }
-        (3u8.saturating_sub(self.stage)) as u32
+        (WARMUP_STAGES.saturating_sub(self.stage)) as u32
     }
 
     pub(crate) fn is_ready(&self) -> bool {
-        self.stage >= 3
+        self.stage >= WARMUP_STAGES
     }
 
     /// Advance one tick and record the JS commands. `frame` is built office-side
@@ -219,6 +249,11 @@ pub(crate) fn pool_from_wire(wire: u8) -> Option<OneShotPool> {
 /// Serialize a tick's commands as the compact JSON the site's WebAudio glue
 /// parses: `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}`.
 /// Hand-built (no serde in the wasm artifact — the `overlay_json` precedent).
+/// Warmup piece count: bank + rain + one step per track bed (#705 —
+/// keeps every main-thread block to a single bed even during the idle
+/// pre-warm).
+const WARMUP_STAGES: u8 = 2 + TRACK_STEMS.len() as u8;
+
 /// One chunked track rebuild in flight: the composed score plus the beds
 /// finished so far (`beds.len()` is the next lane to build).
 struct PendingBuild {
@@ -336,14 +371,19 @@ mod tests {
     }
 
     #[test]
-    fn warmup_builds_bank_rain_beds_in_order_then_is_ready() {
+    fn warmup_builds_bank_rain_then_one_bed_per_step_then_is_ready() {
+        // #705: the bed stage is per-lane so no single warmup step blocks
+        // longer than one bed — bank, rain, then exactly five bed steps
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         assert!(!d.is_ready());
-        assert_eq!(d.warmup_step(), 2); // bank built
+        assert_eq!(d.warmup_step(), 6); // bank built
         assert!(!d.oneshot_buffer(OneShotPool::DoorChime, 0).is_empty());
-        assert_eq!(d.warmup_step(), 1); // rain built
+        assert_eq!(d.warmup_step(), 5); // rain built
         assert!(!d.loop_buffer(5).is_empty(), "rain bed (stem 5) ready");
-        assert_eq!(d.warmup_step(), 0); // beds built
+        for remaining in (0..5).rev() {
+            assert!(!d.is_ready(), "not ready before the last bed");
+            assert_eq!(d.warmup_step(), remaining); // one track bed each
+        }
         assert!(d.is_ready());
         assert_eq!(d.warmup_step(), 0, "warmup is idempotent once ready");
         for i in 0..6 {
