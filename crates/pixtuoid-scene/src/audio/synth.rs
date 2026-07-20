@@ -794,6 +794,7 @@ fn night_texture_core(loop_secs: f32, kick_times: &[f32], rng: &mut NoiseStream)
 
 /// The original day pad recipe (harmonic stack, staggered onsets, slow AM)
 /// over a take's changes.
+#[cfg(test)]
 pub(super) fn day_take_pad(take: &score::DayTake) -> Vec<f32> {
     day_pad_core(take.chords, take.bar_s(), score::DAY_TAKE_LOOP_BARS)
 }
@@ -831,6 +832,7 @@ fn day_pad_core(chords: &[[u8; 4]], bar_s: f32, loop_bars: usize) -> Vec<f32> {
 
 /// An at-seconds EP event table rendered at a take's loop length (the
 /// day-take twin of `night_events_stem`).
+#[cfg(test)]
 fn day_take_events_stem(
     take: &score::DayTake,
     events: &[(f32, u8, f32)],
@@ -842,17 +844,20 @@ fn day_take_events_stem(
 }
 
 /// The hand-written lead melody — a day take's singable identity.
+#[cfg(test)]
 pub(super) fn day_take_sparkle(take: &score::DayTake) -> Vec<f32> {
     day_take_events_stem(take, take.sparkle, 2.0, 3200.0, 0.6)
 }
 
 /// RNG-comped mid-register EP, frozen with the v4 swing feel baked in.
+#[cfg(test)]
 pub(super) fn day_take_keys(take: &score::DayTake) -> Vec<f32> {
     day_take_events_stem(take, take.keys, 0.9, 2400.0, 0.8)
 }
 
 /// The full day kit (kick/snare/hats incl. the bar-4/8 open hat) from the
 /// frozen event table; each hit's NOISE content is fresh per call.
+#[cfg(test)]
 pub(super) fn day_take_drums(take: &score::DayTake, rng: &mut NoiseStream) -> Vec<f32> {
     drums_core(take.loop_secs(), take.drums, 7500.0, 2.2, 0.85, rng)
 }

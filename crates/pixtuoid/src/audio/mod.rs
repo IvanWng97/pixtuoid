@@ -958,8 +958,8 @@ mod listen_gate {
         let mut rng = dsp::NoiseStream::new(BUILD_SEED);
         let bank = AssetBank::build(&mut rng);
         let rain = Arc::new(synth::rain_bed(&mut rng));
-        let beds = TrackBeds::build(&mut rng, TrackId::Day);
-        let night = TrackBeds::build(&mut rng, TrackId::Night);
+        let beds = TrackBeds::build(&mut rng, TrackId::GenDay(0));
+        let night = TrackBeds::build(&mut rng, TrackId::GenNight(0));
         // tier levels come from the PRODUCTION mapping, not hand-rolled
         // literals — the wavs audition exactly what the app will mix
         let counts = |active: usize| pixtuoid_scene::board::StateCounts {
@@ -987,7 +987,7 @@ mod listen_gate {
             ("tier_3_busy_oneshot_volley", busy, &volley[..]),
             ("tier_4_rainy_busy", rainy, &[][..]),
         ] {
-            let buf = render_tier(&bank, &beds, &rain, TrackId::Day, stems, events, 60.0);
+            let buf = render_tier(&bank, &beds, &rain, TrackId::GenDay(0), stems, events, 60.0);
             assert!(
                 buf.iter().any(|&s| s.abs() > 0.01),
                 "{name}: every tier is audible in Phase 2"
@@ -997,7 +997,7 @@ mod listen_gate {
         // the NIGHT track (#644): the runtime approximation of the v4 take
         // (no bus glue — rodio has no insert; the owner re-verifies by ear)
         for (name, stems) in [("night_moderate", moderate), ("night_rainy", rainy)] {
-            let buf = render_tier(&bank, &night, &rain, TrackId::Night, stems, &[], 60.0);
+            let buf = render_tier(&bank, &night, &rain, TrackId::GenNight(0), stems, &[], 60.0);
             assert!(
                 buf.iter().any(|&s| s.abs() > 0.01),
                 "{name}: the night track is audible"

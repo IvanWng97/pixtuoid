@@ -468,7 +468,7 @@ impl Office {
                 pixtuoid_scene::pixel_painter::precipitation_level(now),
                 pixtuoid_scene::audio::epoch_hours(now),
             ),
-            None => pixtuoid_scene::audio::TrackId::Day,
+            None => pixtuoid_scene::audio::TrackId::GenDay(0),
         }
     }
 }

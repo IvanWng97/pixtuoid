@@ -73,16 +73,17 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   the binary's audio/ gateway is the consumer, WebAudio can ride the same model later.
 │                   Since Phase 2 (musical stems) every StemLevels lane is AUDIBLE — the binary
 │                   synthesizes the frozen lofi compositions at startup and loops all six beds.
-│                   MOOD TRACKS (#644; day pool 2026-07-19): TrackId {Day, Day2, Day3, Night} +
-│                   pure select_track(is_day, precip, epoch_hours) ride AudioFrame — night hours
-│                   (the SAME pixel_painter::hour_is_day sun window the lighting renders) or any
-│                   rain pick the Night take; day hours ROTATE the DAY_TAKES pool hourly via
-│                   splitmix64(epoch_hours) (hashed, NOT %3 — 24 divides by 3, a modulo pins each
-│                   hour-of-day to one take forever; audio::epoch_hours is the shared derivation).
-│                   The day takes are score::DayTake table-driven (synth::day_take_* — same
-│                   production chain, different frozen songs; the Lofi Girl model): Day2 "morning"
-│                   royal-road 76 BPM, Day3 "golden hour" I-vi-ii-V 74 BPM. The binary's switch
-│                   machine crossfades between the tracks (see the pixtuoid audio/ entry).
+│                   ALL-GENERATIVE SOUNDTRACK (owner decision 2026-07-20 — "所有的音乐都自动
+│                   生成"): TrackId {GenDay(seed), GenNight(seed)} + pure select_track(is_day,
+│                   precip, epoch_hours) ride AudioFrame — night hours (the SAME
+│                   pixel_painter::hour_is_day sun window the lighting renders) or any rain pick
+│                   the night MOOD; the epoch hour IS the compose seed (audio::epoch_hours is
+│                   the shared derivation), so every hour is a new song, deterministic on
+│                   native/wasm/tests, and the hourly id change drives the engine's crossfade
+│                   with no new state. TrackBeds::build composes + renders via gen_beds. The
+│                   FROZEN takes (Day/Day2/Day3/Night tables + synth recipes) left the runtime
+│                   and are #[cfg(test)] TEST ANCHORS: their fingerprint pins guard the shared
+│                   cores the generator renders through — don't delete them as dead code.
 │                   compose.rs — the theory-constrained COMPOSER (generative lofi): pure
 │                   compose(mood, seed) -> GeneratedScore over a vetted progression grammar
 │                   (6 day + 4 night templates ×transpose), melody rules (strong-beat chord

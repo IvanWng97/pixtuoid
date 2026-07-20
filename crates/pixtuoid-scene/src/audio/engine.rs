@@ -210,24 +210,24 @@ mod tests {
     #[test]
     fn is_inert_until_init_track() {
         let mut e = AudioEngine::new(1.0);
-        let cmd = e.tick(0.05, Some(busy_frame(TrackId::Day)));
+        let cmd = e.tick(0.05, Some(busy_frame(TrackId::GenDay(0))));
         assert!(cmd.gains.iter().all(|g| *g == 0.0), "no gains before init");
         assert!(cmd.plays.is_empty(), "no plays before init");
         assert!(cmd.swap.is_none(), "no swap before init");
         // once inited, the same frame ramps
-        e.init_track(TrackId::Day);
-        let cmd = e.tick(0.05, Some(busy_frame(TrackId::Day)));
+        e.init_track(TrackId::GenDay(0));
+        let cmd = e.tick(0.05, Some(busy_frame(TrackId::GenDay(0))));
         assert!(cmd.gains[0] > 0.0, "pad ramps once inited");
     }
 
     #[test]
     fn ramps_loop_gains_and_fires_typing_for_a_busy_office() {
         let mut e = AudioEngine::new(1.0);
-        e.init_track(TrackId::Day);
+        e.init_track(TrackId::GenDay(0));
         let mut typed = 0;
         let mut last_pad = 0.0;
         for _ in 0..200 {
-            let cmd = e.tick(0.05, Some(busy_frame(TrackId::Day)));
+            let cmd = e.tick(0.05, Some(busy_frame(TrackId::GenDay(0))));
             last_pad = cmd.gains[0];
             typed += cmd
                 .plays
@@ -242,13 +242,13 @@ mod tests {
     #[test]
     fn mute_zeroes_every_loop_gain_and_one_shot() {
         let mut e = AudioEngine::new(1.0);
-        e.init_track(TrackId::Day);
-        settle(&mut e, TrackId::Day, 200);
+        e.init_track(TrackId::GenDay(0));
+        settle(&mut e, TrackId::GenDay(0), 200);
         e.set_muted(true);
         for _ in 0..200 {
-            e.tick(0.05, Some(busy_frame(TrackId::Day)));
+            e.tick(0.05, Some(busy_frame(TrackId::GenDay(0))));
         }
-        let cmd = e.tick(0.05, Some(busy_frame(TrackId::Day)));
+        let cmd = e.tick(0.05, Some(busy_frame(TrackId::GenDay(0))));
         assert!(cmd.gains.iter().all(|g| *g == 0.0), "muted loops fall to 0");
         assert!(
             cmd.plays.iter().all(|p| p.gain == 0.0),
@@ -259,16 +259,16 @@ mod tests {
     #[test]
     fn master_zero_silences_the_bus_and_raising_it_ramps_back() {
         let mut e = AudioEngine::new(0.0);
-        e.init_track(TrackId::Day);
+        e.init_track(TrackId::GenDay(0));
         for _ in 0..200 {
-            e.tick(0.05, Some(busy_frame(TrackId::Day)));
+            e.tick(0.05, Some(busy_frame(TrackId::GenDay(0))));
         }
-        let cmd = e.tick(0.05, Some(busy_frame(TrackId::Day)));
+        let cmd = e.tick(0.05, Some(busy_frame(TrackId::GenDay(0))));
         assert!(cmd.gains.iter().all(|g| *g == 0.0), "master 0 = silent");
         e.set_master(1.0);
         let mut pad = 0.0;
         for _ in 0..200 {
-            pad = e.tick(0.05, Some(busy_frame(TrackId::Day))).gains[0];
+            pad = e.tick(0.05, Some(busy_frame(TrackId::GenDay(0)))).gains[0];
         }
         assert!(pad > 0.0, "master up ramps the mix back");
     }
@@ -278,8 +278,8 @@ mod tests {
         // native passes None on a recv_timeout: no new levels, no scene events,
         // but the ramp + schedulers still advance from the held state.
         let mut e = AudioEngine::new(1.0);
-        e.init_track(TrackId::Day);
-        settle(&mut e, TrackId::Day, 100);
+        e.init_track(TrackId::GenDay(0));
+        settle(&mut e, TrackId::GenDay(0), 100);
         let cmd = e.tick(0.05, None);
         assert!(
             cmd.plays.iter().all(|p| !matches!(
@@ -297,9 +297,9 @@ mod tests {
     #[test]
     fn scene_events_become_one_shot_plays() {
         let mut e = AudioEngine::new(1.0);
-        e.init_track(TrackId::Day);
-        settle(&mut e, TrackId::Day, 20);
-        let mut frame = busy_frame(TrackId::Day);
+        e.init_track(TrackId::GenDay(0));
+        settle(&mut e, TrackId::GenDay(0), 20);
+        let mut frame = busy_frame(TrackId::GenDay(0));
         frame.events = vec![OneShot::DoorChime, OneShot::VendingDrop];
         let cmd = e.tick(0.05, Some(frame));
         assert!(cmd.plays.iter().any(|p| p.pool == OneShotPool::DoorChime));
@@ -309,11 +309,11 @@ mod tests {
     #[test]
     fn a_track_change_holds_silent_then_swaps_then_ramps_back_as_a_slew() {
         let mut e = AudioEngine::new(1.0);
-        e.init_track(TrackId::Day);
-        settle(&mut e, TrackId::Day, 80);
+        e.init_track(TrackId::GenDay(0));
+        settle(&mut e, TrackId::GenDay(0), 80);
         let mut swap_track = None;
         for _ in 0..200 {
-            let cmd = e.tick(0.05, Some(busy_frame(TrackId::Night)));
+            let cmd = e.tick(0.05, Some(busy_frame(TrackId::GenNight(0))));
             if let Some(to) = cmd.swap {
                 swap_track = Some(to);
                 for g in &cmd.gains[0..5] {
@@ -322,12 +322,16 @@ mod tests {
                 break;
             }
         }
-        assert_eq!(swap_track, Some(TrackId::Night), "the night switch swapped");
+        assert_eq!(
+            swap_track,
+            Some(TrackId::GenNight(0)),
+            "the night switch swapped"
+        );
         // the ramp back is a slew, never a snap (the bot HIGH: a stalled clock
         // once made dt cover the ~2s synth and snapped gains straight to target)
         let mut first_nonzero = 0.0;
         for _ in 0..200 {
-            let g = e.tick(0.05, Some(busy_frame(TrackId::Night))).gains[0];
+            let g = e.tick(0.05, Some(busy_frame(TrackId::GenNight(0)))).gains[0];
             if g > 0.0 {
                 first_nonzero = g;
                 break;
@@ -347,14 +351,16 @@ mod tests {
         // "bot HIGH" pop. Pins the ceiling VALUE, not just the shells' clamp.
         let one_tick = |dt: f32| {
             let mut e = AudioEngine::new(1.0);
-            e.init_track(TrackId::Day);
-            e.tick(dt, Some(busy_frame(TrackId::Day))).gains[0]
+            e.init_track(TrackId::GenDay(0));
+            e.tick(dt, Some(busy_frame(TrackId::GenDay(0)))).gains[0]
         };
         let mut settled = AudioEngine::new(1.0);
-        settled.init_track(TrackId::Day);
+        settled.init_track(TrackId::GenDay(0));
         let mut full = 0.0;
         for _ in 0..500 {
-            full = settled.tick(0.05, Some(busy_frame(TrackId::Day))).gains[0];
+            full = settled
+                .tick(0.05, Some(busy_frame(TrackId::GenDay(0))))
+                .gains[0];
         }
         assert!(
             one_tick(MAX_DT_S) < full * 0.5,

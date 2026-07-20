@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use super::mixer::LoopStem;
-use super::{dsp, score, synth, OneShot, TrackId};
+use super::{compose, dsp, synth, OneShot, TrackId};
 
 /// Per-key / per-drop pre-rendered variant pool sizes: playback picks randomly
 /// so typing/rain never sound repeated, while runtime stays synthesis-free.
@@ -136,47 +136,22 @@ pub struct TrackBeds {
 }
 
 impl TrackBeds {
-    /// DAY, when it is the FIRST track built on the boot stream, continues
-    /// the rng in the ratified order (drums, then texture — the pure
-    /// musical stems draw nothing), keeping those buffers byte-identical
-    /// to the #642/#643 renders. Under hourly take rotation that is no
-    /// longer the common case: booting on Day2/Day3, or rebuilding Day
-    /// after a swap, draws from wherever the stream stands — there, like
-    /// NIGHT and the day takes always, identity is the frozen score plus
-    /// spectral pins, not byte equality.
+    /// Compose the id's take (the seed is the epoch hour) and render it
+    /// through the SAME cores the owner-ratified takes were built on —
+    /// ALL-GENERATIVE runtime (owner decision 2026-07-20). Identity is
+    /// the generated score + the cores' fingerprint pins (the frozen
+    /// tables in `score`/`synth` remain as those pins' test anchors);
+    /// noise content draws from wherever `rng` stands, like every
+    /// non-boot build always did.
     pub fn build(rng: &mut dsp::NoiseStream, track: TrackId) -> Self {
-        let beds = match track {
-            TrackId::Day => [
-                Arc::new(synth::stem_pad()),
-                Arc::new(synth::stem_sparkle()),
-                Arc::new(synth::stem_keys()),
-                Arc::new(synth::stem_drums(rng)),
-                Arc::new(synth::texture_bed(rng)),
-            ],
-            TrackId::Day2 | TrackId::Day3 => {
-                let take = if track == TrackId::Day2 {
-                    &score::DAY2
-                } else {
-                    &score::DAY3
-                };
-                [
-                    Arc::new(synth::day_take_pad(take)),
-                    Arc::new(synth::day_take_sparkle(take)),
-                    Arc::new(synth::day_take_keys(take)),
-                    Arc::new(synth::day_take_drums(take, rng)),
-                    // the day room tone is the day room tone in every take
-                    Arc::new(synth::texture_bed(rng)),
-                ]
-            }
-            TrackId::Night => [
-                Arc::new(synth::night_pad()),
-                Arc::new(synth::night_sparkle()),
-                Arc::new(synth::night_keys()),
-                Arc::new(synth::night_drums(rng)),
-                Arc::new(synth::night_texture(rng)),
-            ],
+        let (mood, seed) = match track {
+            TrackId::GenDay(seed) => (compose::Mood::Day, seed),
+            TrackId::GenNight(seed) => (compose::Mood::Night, seed),
         };
-        Self { beds }
+        let score = compose::compose(mood, seed);
+        Self {
+            beds: synth::gen_beds(&score, rng).map(Arc::new),
+        }
     }
 
     pub fn bed(&self, stem: LoopStem) -> Arc<Vec<f32>> {
@@ -214,31 +189,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn track_beds_sit_in_the_ratified_centroid_order_with_the_right_lengths() {
-        // The four musical beds are told apart by their ratified spectral
-        // centroid ordering (drums < pad < keys < sparkle); the noise beds
-        // carry the 2^19 loop length. Pins that `TrackBeds::build` wires each
-        // stem to the RIGHT synth (a `bed()` arm swap must fail) — relocated
-        // from the native run_loop thread test so it needs no device.
+    fn track_beds_wire_each_lane_to_the_right_synth() {
+        // Generated takes vary per seed, so the frozen take's exact
+        // centroid ORDER no longer holds — the lane-wiring pin becomes
+        // structural: the lead (sparkle) is the brightest musical bed by
+        // register + voice design, the day texture free-runs the 2^19
+        // noise loop, and the four musical beds phase-lock. (A bed() arm
+        // swap still fails: pad↔sparkle flips the centroid gap, and a
+        // texture mixup breaks the length contract.)
         let mut rng = dsp::NoiseStream::new(crate::audio::BUILD_SEED);
-        let day = TrackBeds::build(&mut rng, TrackId::Day);
+        let day = TrackBeds::build(&mut rng, TrackId::GenDay(0));
         let rain = synth::rain_bed(&mut rng);
         assert_eq!(
             day.bed_slice(LoopStem::Texture).len(),
             1 << 19,
-            "texture = the noise-bed loop"
+            "day texture = the free-running noise-bed loop"
         );
         assert_eq!(rain.len(), 1 << 19, "rain = the noise-bed loop");
+        let n = day.bed_slice(LoopStem::Pad).len();
+        for stem in [LoopStem::Sparkle, LoopStem::Keys, LoopStem::Drums] {
+            assert_eq!(day.bed_slice(stem).len(), n, "musical beds phase-lock");
+        }
         let c = |s| dsp::centroid_hz(day.bed_slice(s));
-        let (d, p, k, sp) = (
-            c(LoopStem::Drums),
-            c(LoopStem::Pad),
-            c(LoopStem::Keys),
-            c(LoopStem::Sparkle),
-        );
         assert!(
-            d < p && p < k && k < sp,
-            "ratified centroid order: drums {d:.0} < pad {p:.0} < keys {k:.0} < sparkle {sp:.0}"
+            c(LoopStem::Sparkle) > c(LoopStem::Pad) * 1.5,
+            "the lead must sit clearly above the pad: {:.0} vs {:.0}",
+            c(LoopStem::Sparkle),
+            c(LoopStem::Pad)
         );
     }
 
@@ -256,8 +233,8 @@ mod tests {
         // TrackBeds::build Night arm — relocated from the retired native
         // track-switch thread test, which asserted `night_pad_len != day_pad_len`.
         let mut rng = dsp::NoiseStream::new(crate::audio::BUILD_SEED);
-        let day = TrackBeds::build(&mut rng, TrackId::Day);
-        let night = TrackBeds::build(&mut rng, TrackId::Night);
+        let day = TrackBeds::build(&mut rng, TrackId::GenDay(0));
+        let night = TrackBeds::build(&mut rng, TrackId::GenNight(0));
         assert_ne!(
             day.bed_slice(LoopStem::Pad).len(),
             night.bed_slice(LoopStem::Pad).len(),

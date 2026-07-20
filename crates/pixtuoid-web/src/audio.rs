@@ -219,7 +219,7 @@ mod tests {
         // discover the pool size; a pool that returns non-empty for EVERY index
         // would spin the browser's main thread forever (the review HIGH). Pin
         // that every pool terminates, at its true size.
-        let mut d = WebAudioDriver::new(TrackId::Day);
+        let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
         let pools = [
             (OneShotPool::Keystroke, bank::KEYSTROKE_POOL),
@@ -258,7 +258,7 @@ mod tests {
                     gain: 0.5,
                 },
             ],
-            swap: Some(TrackId::Night),
+            swap: Some(TrackId::GenNight(0)),
         };
         let json = commands_json(&cmd);
         let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn warmup_builds_bank_rain_beds_in_order_then_is_ready() {
-        let mut d = WebAudioDriver::new(TrackId::Day);
+        let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         assert!(!d.is_ready());
         assert_eq!(d.warmup_step(), 2); // bank built
         assert!(!d.oneshot_buffer(OneShotPool::DoorChime, 0).is_empty());
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn tick_ramps_loop_gains_and_fires_scheduled_typing() {
-        let mut d = WebAudioDriver::new(TrackId::Day);
+        let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
         // a busy office: typing level high, all music stems up
         let busy = pixtuoid_scene::audio::stem_levels(
@@ -318,7 +318,7 @@ mod tests {
         let frame = AudioFrame {
             stems: busy,
             events: Vec::new(),
-            track: TrackId::Day,
+            track: TrackId::GenDay(0),
         };
         // 200 ticks × 50ms = 10s: the crossfade climbs from 0 in the first ~2s,
         // and the typing scheduler's first burst gap (~2-3s at this rate) fires
@@ -347,7 +347,7 @@ mod tests {
     fn a_big_time_gap_does_not_snap_the_ramp_or_burst_typing() {
         // the stall-clock class, web-side: a backgrounded tab whose now_ms
         // jumps must clamp dt (no ramp snap) and not replay a keystroke backlog.
-        let mut d = WebAudioDriver::new(TrackId::Day);
+        let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
         let busy = pixtuoid_scene::audio::stem_levels(
             &pixtuoid_scene::board::StateCounts {
@@ -362,7 +362,7 @@ mod tests {
         let frame = AudioFrame {
             stems: busy,
             events: Vec::new(),
-            track: TrackId::Day,
+            track: TrackId::GenDay(0),
         };
         d.tick(0.0, frame.clone()); // establish last_ms
                                     // jump 30 SECONDS forward in one tick
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn a_track_change_holds_silent_then_swaps() {
-        let mut d = WebAudioDriver::new(TrackId::Day);
+        let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
         let day = AudioFrame {
             stems: pixtuoid_scene::audio::stem_levels(
@@ -397,7 +397,7 @@ mod tests {
                 0.0,
             ),
             events: Vec::new(),
-            track: TrackId::Day,
+            track: TrackId::GenDay(0),
         };
         // settle the day mix up
         let mut now = 0.0;
@@ -407,7 +407,7 @@ mod tests {
         }
         // request night: the stems must ramp DOWN to silence, then swap once
         let mut night = day.clone();
-        night.track = TrackId::Night;
+        night.track = TrackId::GenNight(0);
         let mut swapped_seen = false;
         for _ in 0..80 {
             now += 50.0;
