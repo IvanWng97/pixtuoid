@@ -770,3 +770,41 @@ fn moon_glow_dims_at_new_moon() {
          new={new_moon_glow} full={full_moon_glow}"
     );
 }
+
+#[test]
+fn window_columns_tiles_from_the_start_and_keeps_absolute_idx_across_a_skip() {
+    // Wide enough for several panes: start at FIRST_WINDOW_X, stride
+    // WINDOW_W+WINDOW_GAP while x + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w.
+    let buf_w = FIRST_WINDOW_X + 4 * (WINDOW_W + WINDOW_GAP) + WINDOW_W + WINDOW_EDGE_MARGIN;
+    let all: Vec<_> = window_columns(buf_w, None).collect();
+    assert!(all.len() >= 3, "expected several panes, got {}", all.len());
+    for (k, w) in all.iter().enumerate() {
+        assert_eq!(w.idx as usize, k, "idx is the 0-based absolute position");
+        assert_eq!(
+            w.x_left,
+            FIRST_WINDOW_X + k as u16 * (WINDOW_W + WINDOW_GAP)
+        );
+        assert_eq!(w.center_x, w.x_left + WINDOW_W / 2);
+        assert!(w.x_left + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w);
+    }
+
+    // Skip the SECOND pane's x-range (the elevator door): it drops out, but every
+    // surviving pane keeps its ABSOLUTE idx — the pane after the door is STILL 2,
+    // not renumbered (the load-bearing nuance the floor pass relies on).
+    let doomed = all[1];
+    let skip = Some((doomed.x_left, doomed.x_left + WINDOW_W));
+    let kept: Vec<_> = window_columns(buf_w, skip).collect();
+    assert_eq!(
+        kept.len(),
+        all.len() - 1,
+        "exactly the overlapping pane is skipped"
+    );
+    assert!(
+        kept.iter().all(|w| w.idx != doomed.idx),
+        "the skipped pane's idx never appears"
+    );
+    assert!(
+        kept.iter().any(|w| w.idx == 2),
+        "the pane after the door keeps idx 2"
+    );
+}

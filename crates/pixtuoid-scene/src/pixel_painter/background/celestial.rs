@@ -11,7 +11,7 @@ use pixtuoid_core::sprite::Rgb;
 
 use super::epoch_ms;
 use super::sky::{self, Weather};
-use super::{WINDOW_GAP, WINDOW_W};
+use super::{window_columns, WINDOW_W};
 use crate::theme::Theme;
 
 /// One frame's celestial disc (sun by day, moon by night), arcing across the
@@ -59,7 +59,7 @@ pub(super) const MOON_SHADOW: Rgb = Rgb {
 /// painted). The inset keeps the disc fully inside the glass at the arc
 /// extremes, its low-altitude ends landing near the outer frame edges rather
 /// than dead-centre on a mullion, and still lets a single-window buffer sweep.
-const FIRST_WINDOW_X: f32 = 3.0;
+const FIRST_WINDOW_X: f32 = super::FIRST_WINDOW_X as f32;
 // "Real low window": the horizon sits low in the band, and the apex climbs
 // high enough to leave the glass entirely (clipped) rather than the disc
 // tracking the full window height.
@@ -91,15 +91,16 @@ pub(super) fn compute_disc(
     // low-altitude arc ends land near the outer frame edges rather than pinned
     // dead-centre on a mullion (which perfectly bisected the disc at its most
     // visible moment; a single-window buffer also froze cx on that mullion).
-    // `k_max` (the last PAINTED window's index) is derived from the same
-    // `x=3, stride=WINDOW_W+WINDOW_GAP, while x+WINDOW_W+2<=buf_w` tiling the
-    // window loop uses, for ANY buffer width (a linear `buf_w - WINDOW_W`
-    // bound only coincidentally works at buf_w=96).
-    let stride = (WINDOW_W + WINDOW_GAP) as f32;
-    let k_max = (((buf_w as f32) - WINDOW_W as f32 - 5.0) / stride)
-        .floor()
-        .max(0.0);
-    let last_window_right = FIRST_WINDOW_X + k_max * stride + WINDOW_W as f32;
+    // The last PAINTED window's right edge, taken from the SAME `window_columns`
+    // tiling the floor + spill passes ride (door-blind here — the disc span is
+    // pure geometry, for ANY buffer width; a linear `buf_w - WINDOW_W` bound only
+    // coincidentally works at buf_w=96). An empty buffer falls back to the first
+    // pane's nominal right edge, matching the old `k_max.max(0.0)` clamp.
+    let last_window_right = window_columns(buf_w, None)
+        .last()
+        .map_or(FIRST_WINDOW_X + WINDOW_W as f32, |w| {
+            (w.x_left + WINDOW_W) as f32
+        });
     let span_left = FIRST_WINDOW_X + DISC_RADIUS_PX;
     let span_right = (last_window_right - DISC_RADIUS_PX).max(span_left);
     let cx = span_left + sky.azimuth * (span_right - span_left);
