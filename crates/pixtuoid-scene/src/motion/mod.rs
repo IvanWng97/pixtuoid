@@ -130,6 +130,32 @@ impl WanderKind {
             WanderKind::Aimless => None,
         }
     }
+
+    /// The pose an agent holds AT this wander destination — the ONE map both the
+    /// pure `idle_pose` overlay and the routed `derive_with_routing` read (was
+    /// hand-copied in each). `dest` is the resolved target point, used for the
+    /// aimless case which has no waypoint.
+    pub(crate) fn at_pose(self, dest: Point) -> crate::pose::Pose {
+        match self {
+            WanderKind::Named { wp_idx, kind, .. } => {
+                crate::pose::Pose::AtWaypoint { wp: wp_idx, kind }
+            }
+            WanderKind::Aimless => crate::pose::Pose::AimlessAt { dest },
+        }
+    }
+
+    /// Whether an agent walking BACK from this destination carries a coffee —
+    /// true iff the destination was the pantry (the return-from-Pantry flag both
+    /// pose paths derived independently).
+    pub(crate) fn carries_coffee(self) -> bool {
+        matches!(
+            self,
+            WanderKind::Named {
+                kind: WaypointKind::Pantry,
+                ..
+            }
+        )
+    }
 }
 
 /// The elastic cyclic-wander timeline state machine for one agent (desk → waypoint

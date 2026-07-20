@@ -609,10 +609,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     let target =
         resolve_wander_target(slot.agent_id, cycle_n, layout, desk, &SpotClaims::default());
     let dest = target.dest;
-    let at_dest_pose: Pose = match target.kind {
-        WanderKind::Named { wp_idx, kind, .. } => Pose::AtWaypoint { wp: wp_idx, kind },
-        WanderKind::Aimless => Pose::AimlessAt { dest: target.dest },
-    };
+    let at_dest_pose: Pose = target.kind.at_pose(target.dest);
 
     if phase_t < seated_end {
         Pose::SeatedIdle
@@ -637,13 +634,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         debug_assert!(span > 0, "idle_pose walk-back span invariant violated");
         let t = ((phase_t - at_wp_end) * 1000 / span) as u16;
         let frame = walking_frame(elapsed_ms);
-        let carrying_coffee = matches!(
-            at_dest_pose,
-            Pose::AtWaypoint {
-                kind: WaypointKind::Pantry,
-                ..
-            }
-        );
+        let carrying_coffee = target.kind.carries_coffee();
         Pose::Walking {
             from: dest,
             to: desk,

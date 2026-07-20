@@ -36,7 +36,7 @@ pub use pure::{
 // to widen their `pub(crate)` visibility.
 pub(crate) use pure::{resolve_wander_target, SpotClaims};
 
-use crate::layout::{desk_walk_anchor, Layout, Point, WaypointKind};
+use crate::layout::{desk_walk_anchor, Layout, Point};
 use crate::pathfind::Router;
 
 /// The per-frame routing engine state threaded through pose derivation,
@@ -437,10 +437,7 @@ pub fn derive_with_routing(
                 );
             }
             WanderPhase::AtWaypoint(_) => {
-                let pose = match wf.kind {
-                    WanderKind::Named { wp_idx, kind, .. } => Pose::AtWaypoint { wp: wp_idx, kind },
-                    WanderKind::Aimless => Pose::AimlessAt { dest: wf.dest },
-                };
+                let pose = wf.kind.at_pose(wf.dest);
                 // Record the RENDERED position so snap-back/exit (which read
                 // history.recent as their walk origin) start where the sprite
                 // actually is: the seat cell for a seat waypoint (the sprite sits
@@ -458,13 +455,7 @@ pub fn derive_with_routing(
                 // The trip facts come from the `wf` snapshot, so no `motion`
                 // borrow is held here — `route_walking_pose` can take `&mut motion`
                 // freely (the old copy-off-`ms`-first borrow dance is gone).
-                let carrying_coffee = matches!(
-                    wf.kind,
-                    WanderKind::Named {
-                        kind: WaypointKind::Pantry,
-                        ..
-                    }
-                );
+                let carrying_coffee = wf.kind.carries_coffee();
                 let seat = wf.kind.seat();
                 // Arrive at the desk via the approach cell (a reachable N/E/W
                 // side), never up through the south front: `to` is the approach
