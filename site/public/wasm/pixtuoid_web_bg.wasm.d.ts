@@ -25,6 +25,7 @@ export const office_set_theme: (a: number, b: number, c: number) => void;
 export const office_set_weather: (a: number, b: number, c: number) => void;
 export const office_step: (a: number, b: number, c: number, d: number) => void;
 export const synthtake_epoch: (a: number) => number;
+export const synthtake_loop_count: (a: number) => number;
 export const synthtake_loop_len: (a: number, b: number) => number;
 export const synthtake_loop_ptr: (a: number, b: number) => number;
 export const synthtake_new: (a: number) => number;

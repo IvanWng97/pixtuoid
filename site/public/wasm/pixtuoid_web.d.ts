@@ -173,6 +173,12 @@ export class SynthTake {
     free(): void;
     [Symbol.dispose](): void;
     epoch(): number;
+    /**
+     * The loop-stem count — the worker's copy-out bound, read from the ONE
+     * authority (`LoopStem::ALL`) instead of a JS-side literal. Loops aren't
+     * self-terminating like the one-shot pools, so JS can't discover it.
+     */
+    loop_count(): number;
     loop_len(idx: number): number;
     /**
      * Zero-copy reads, same contract as the `Office::audio_*` getters — the
@@ -226,6 +232,7 @@ export interface InitOutput {
     readonly office_set_weather: (a: number, b: number, c: number) => void;
     readonly office_step: (a: number, b: number, c: number, d: number) => void;
     readonly synthtake_epoch: (a: number) => number;
+    readonly synthtake_loop_count: (a: number) => number;
     readonly synthtake_loop_len: (a: number, b: number) => number;
     readonly synthtake_loop_ptr: (a: number, b: number) => number;
     readonly synthtake_new: (a: number) => number;

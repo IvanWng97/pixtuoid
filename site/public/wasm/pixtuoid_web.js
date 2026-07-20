@@ -322,6 +322,16 @@ export class SynthTake {
         return ret;
     }
     /**
+     * The loop-stem count — the worker's copy-out bound, read from the ONE
+     * authority (`LoopStem::ALL`) instead of a JS-side literal. Loops aren't
+     * self-terminating like the one-shot pools, so JS can't discover it.
+     * @returns {number}
+     */
+    loop_count() {
+        const ret = wasm.synthtake_loop_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @param {number} idx
      * @returns {number}
      */
