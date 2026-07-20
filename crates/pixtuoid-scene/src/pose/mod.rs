@@ -840,10 +840,9 @@ fn route_walking_pose(
 }
 
 pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
-    use crate::pathfind::{OCTILE_DIAGONAL_COST, OCTILE_STRAIGHT_COST};
     let dx = (a.x as i32 - b.x as i32).unsigned_abs();
     let dy = (a.y as i32 - b.y as i32).unsigned_abs();
-    OCTILE_DIAGONAL_COST * dx.min(dy) + OCTILE_STRAIGHT_COST * (dx.max(dy) - dx.min(dy))
+    crate::pathfind::octile_cost(dx, dy)
 }
 
 /// Half-range (px) of the per-agent destination jitter — the offset spans

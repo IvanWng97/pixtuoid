@@ -767,3 +767,24 @@ fn find_path_none_when_two_regions_split_by_a_full_wall() {
         "a wall with no gap must leave the two regions unconnected (loop exhausts → None)"
     );
 }
+
+#[test]
+fn octile_cost_is_the_shared_diag_straight_formula() {
+    // DIAG·min + STRAIGHT·(max−min), symmetric in (dx,dy). The ONE formula the
+    // A* heuristic and pose::octile_distance now both call.
+    assert_eq!(
+        octile_cost(3, 5),
+        OCTILE_DIAGONAL_COST * 3 + OCTILE_STRAIGHT_COST * 2
+    );
+    assert_eq!(octile_cost(5, 3), octile_cost(3, 5), "symmetric in dx/dy");
+    assert_eq!(
+        octile_cost(0, 4),
+        OCTILE_STRAIGHT_COST * 4,
+        "pure orthogonal"
+    );
+    assert_eq!(octile_cost(4, 4), OCTILE_DIAGONAL_COST * 4, "pure diagonal");
+    // Parity with pose::octile_distance on the same delta (both ride octile_cost).
+    let a = crate::layout::Point { x: 2, y: 7 };
+    let b = crate::layout::Point { x: 9, y: 3 };
+    assert_eq!(crate::pose::octile_distance(a, b), octile_cost(7, 4));
+}

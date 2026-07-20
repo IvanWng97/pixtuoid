@@ -210,10 +210,19 @@ impl PartialOrd for Node {
 pub(crate) const OCTILE_STRAIGHT_COST: u32 = 10;
 pub(crate) const OCTILE_DIAGONAL_COST: u32 = 14;
 
+/// The octile distance for deltas `(dx, dy)`: `DIAG·min + STRAIGHT·(max − min)`.
+/// THE combining formula shared by the A* [`heuristic`] (coarse cells) and
+/// `pose::octile_distance` (pixel Points) — it was written byte-identically at
+/// both sites, guarded only by the shared consts (the formula itself was a
+/// second copy, the drift class the magic-number convention hunts).
+pub(crate) fn octile_cost(dx: u32, dy: u32) -> u32 {
+    OCTILE_DIAGONAL_COST * dx.min(dy) + OCTILE_STRAIGHT_COST * (dx.max(dy) - dx.min(dy))
+}
+
 fn heuristic(a: (u16, u16), b: (u16, u16)) -> u32 {
     let dx = (a.0 as i32 - b.0 as i32).unsigned_abs();
     let dy = (a.1 as i32 - b.1 as i32).unsigned_abs();
-    OCTILE_DIAGONAL_COST * dx.min(dy) + OCTILE_STRAIGHT_COST * (dx.max(dy) - dx.min(dy))
+    octile_cost(dx, dy)
 }
 
 /// Is the center of cell `(cx, cy)` inside `zone`? Used by the preferred-
