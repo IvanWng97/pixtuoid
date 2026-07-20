@@ -457,6 +457,19 @@ pub fn waypoint_kind_of(
 }
 
 /// Office-wide cross-frame AUDIO bookkeeping — the sound twin of [`CoffeeState`].
+/// The mood [`TrackId`](crate::audio::TrackId) for `now` — the ONE place the
+/// day/precip/epoch input wiring lives, so the office observer (per-tick) and
+/// the web hero's boot pick can't drift on WHICH inputs feed `select_track`.
+/// Lives here (not `audio`) because it reaches the lighting layer's
+/// `is_day_at`/`precipitation_level`, which `audio` must not depend on.
+pub fn track_for(now: std::time::SystemTime) -> crate::audio::TrackId {
+    crate::audio::select_track(
+        crate::pixel_painter::is_day_at(now),
+        crate::pixel_painter::precipitation_level(now),
+        crate::audio::track_epoch(now),
+    )
+}
+
 /// Wraps the pure `crate::audio` model (`stem_levels`/`select_track`/`observe`)
 /// into the ONE per-frame [`AudioFrame`] composition all three painters used to
 /// hand-roll. Holds the [`AudioCueTracker`] (cross-frame edge state) plus the
@@ -511,11 +524,7 @@ impl AudioObserver {
         AudioFrame {
             stems: crate::audio::stem_levels(&counts, precipitation),
             events,
-            track: crate::audio::select_track(
-                crate::pixel_painter::is_day_at(now),
-                precipitation,
-                crate::audio::track_epoch(now),
-            ),
+            track: track_for(now),
         }
     }
 

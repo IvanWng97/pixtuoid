@@ -602,11 +602,7 @@ impl Office {
     /// Day before the first `step` (no clock yet).
     fn current_track(&self) -> pixtuoid_scene::audio::TrackId {
         match self.last_now {
-            Some(now) => pixtuoid_scene::audio::select_track(
-                pixtuoid_scene::pixel_painter::is_day_at(now),
-                pixtuoid_scene::pixel_painter::precipitation_level(now),
-                pixtuoid_scene::audio::track_epoch(now),
-            ),
+            Some(now) => pixtuoid_scene::floor::track_for(now),
             None => pixtuoid_scene::audio::TrackId::GenDay(0),
         }
     }
