@@ -250,8 +250,9 @@ async fn assert_no_session_end_within(
 
 /// #223 rung 2 — THE negative-vouch exit: a previously-vouched session id
 /// missing from two healthy snapshots ≥ the confirmation span apart gets the
-/// `SessionEnd` its CLI never wrote (Codex has no exit signal at all; CC's
-/// hook is best-effort), instead of ghosting until the 10–30 min stale-sweep.
+/// `SessionEnd` its CLI never wrote (Codex's #710 SessionEnd hook and CC's
+/// are both best-effort, and abrupt exits fire neither), instead of ghosting
+/// until the 10–30 min stale-sweep.
 /// Also pins the self-heal: the confirmation un-claims `seen`, so a LATER
 /// append (a resumed session) re-registers through `emit_first_sight`.
 #[tokio::test]

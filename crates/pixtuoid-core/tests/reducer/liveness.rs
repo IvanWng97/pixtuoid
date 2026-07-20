@@ -166,10 +166,11 @@ fn stale_active_agent_uses_shorter_timeout_than_idle() {
 #[test]
 fn codex_idle_agent_reaps_faster_than_claude_idle() {
     use pixtuoid_core::state::reducer::{STALE_IDLE_TIMEOUT, STALE_SHORT_IDLE_TIMEOUT};
-    // Codex exposes no SessionEnd of any kind (no hook, no PID, no durable rollout
-    // marker), so a closed Codex session can ONLY be reaped by the stale-sweep —
-    // hence a much shorter idle window than CC, which has real SessionEnd signals
-    // and keeps the long lunch-break-safe timeout.
+    // Codex exposes no exit signal a short reaper could RELY on (its #710
+    // SessionEnd hook is teardown-only best-effort; no PID, no durable rollout
+    // marker), so an abruptly-closed Codex session is still reaped only by the
+    // stale-sweep — hence a much shorter idle window than CC, which keeps the
+    // long lunch-break-safe timeout.
     assert!(
         STALE_SHORT_IDLE_TIMEOUT < STALE_IDLE_TIMEOUT,
         "codex idle timeout must be shorter than the generic idle timeout"

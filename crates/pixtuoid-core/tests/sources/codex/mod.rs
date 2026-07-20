@@ -63,7 +63,8 @@ fn codex_subagent_hook_lifecycle_links_child_and_exits_on_stop() {
         "subagent must be linked to its parent session"
     );
     // SubagentStop ends the CHILD (prompt removal); the parent keeps running
-    // (its `Stop` is only turn-end → idle, Codex has no SessionEnd).
+    // (its `Stop` is only turn-end → idle; the parent's own end is the
+    // teardown-only SessionEnd hook, #710 — not fired here).
     assert!(
         child_slot.exiting_at.is_some(),
         "SubagentStop must mark the subagent exiting"

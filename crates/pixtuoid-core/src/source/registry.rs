@@ -435,6 +435,13 @@ const CODEX: SourceDescriptor = SourceDescriptor {
             custom: Some(HookCustom::Extend(codex::decode_codex_hook_custom)),
         }),
         caps: SourceCaps {
+            // DELIBERATELY still false after #710 registered Codex's new
+            // SessionEnd hook: the field means "an exit signal reliable
+            // enough to retire the 5-min short-idle reaper", and a
+            // teardown-only best-effort hook (abrupt exits fire nothing)
+            // does not qualify — flipping this would regress abrupt-exit
+            // reaping from 5 to 30 minutes. The hook still ends clean exits
+            // immediately; the reaper stays as the backstop.
             has_exit_signal: false,
             resurrects_on_prompt: true,
             delegations_are_hook_silent: false,

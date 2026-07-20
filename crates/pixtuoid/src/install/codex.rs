@@ -15,11 +15,12 @@ const CODEX_EVENTS: &[&str] = &[
     "SubagentStop",
     "Stop",
     "PermissionRequest",
-    // #710 drift: upstream added a SessionEnd hook (fires on close/rotate,
-    // stdin `{session_id, transcript_path, cwd, hook_event_name:"SessionEnd",
+    // #710 drift: upstream added a SessionEnd hook (fires at graceful
+    // teardown only — shutdown signals, reason const "other"; stdin
+    // `{session_id, transcript_path, cwd, hook_event_name:"SessionEnd",
     // reason}` — hooks/src/schema.rs SessionEndCommandInput). Decodes through
-    // the SHARED SessionEnd arm (decoder.rs) → an immediate clean exit walk
-    // instead of waiting out the open-rollout-FD probe ladder.
+    // the SHARED SessionEnd arm (decoder.rs) → an immediate clean exit walk;
+    // abrupt exits still ride the probe ladder + short-idle reap.
     "SessionEnd",
 ];
 

@@ -77,14 +77,15 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 /// Idle timeout for sources with `SourceCaps::short_idle_reap()` — much
 /// shorter than the generic [`STALE_IDLE_TIMEOUT`]. The capability is
 /// `!has_exit_signal && resurrects_on_prompt`, and the motivating case is
-/// **Codex**, which exposes **no session-end signal of any kind**: it has no
-/// `SessionEnd` hook (its `HookEventName` enum has none — only `Stop`, which
-/// is *turn* end), its payloads carry no PID, and its internal
+/// **Codex**, which exposes **no exit signal a short reaper could rely on**:
+/// its `SessionEnd` hook (upstream added one, registered since #710) covers
+/// only graceful teardown and is best-effort — an abrupt exit or a dropped
+/// hook writes nothing — its payloads carry no PID, and its internal
 /// `ShutdownComplete` event is not persisted to the rollout (so there is no
-/// durable marker to tail-scan). All three were verified against upstream
-/// `openai/codex`. The stale-sweep is therefore the ONLY reaper such a closed
-/// session ever gets — at the 30-min generic timeout it lingers as a ghost
-/// long after the process is gone.
+/// durable marker to tail-scan; both verified against upstream
+/// `openai/codex`). The stale-sweep is therefore the only reaper an
+/// abruptly-closed session ever gets — at the 30-min generic timeout it
+/// lingers as a ghost long after the process is gone.
 ///
 /// The shorter window is safe specifically for this capability pair: the only
 /// false-positive is a *live* session that sits idle between turns past the
@@ -100,9 +101,10 @@ pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// The state-adaptive stale timeout for one slot. Unknown-cwd ghosts reap on the
 /// shortest window (almost always startup-seeding artifacts). Otherwise the
 /// timeout follows the activity state — with one carve-out: an idle slot whose
-/// source has `caps.short_idle_reap()` (today: Codex and grok — no exit signal of any
-/// kind, so the sweep is its only reaper, AND the lone false positive — a
-/// live-but-idle session past the window — self-heals on its next
+/// source has `caps.short_idle_reap()` (today: Codex and grok — no exit signal
+/// a short reaper could rely on (Codex's #710 SessionEnd hook is teardown-only
+/// best-effort), so the sweep is the abrupt-exit reaper, AND the lone false
+/// positive — a live-but-idle session past the window — self-heals on its next
 /// `UserPromptSubmit`) uses [`STALE_SHORT_IDLE_TIMEOUT`] instead of the long
 /// [`STALE_IDLE_TIMEOUT`]. CC keeps the long window — its real `SessionEnd`
 /// signals make a short reaper all cost, no benefit; Antigravity also lacks an

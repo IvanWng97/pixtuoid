@@ -233,7 +233,7 @@ REASONIX_HOOK_URL = (
 # no ids and is already covered by the parent's `task` PostToolUse.
 # PostToolUseFailure/StopFailure (#710): NATIVE hooks registered under
 # PostToolUse/Stop already receive failures — the runner re-fires them with the
-# event re-labeled (hook/runner.go `PostToolUseFailure`/`StopResult`:
+# event re-labeled (internal/hook/runner.go `PostToolUseFailure`/`StopResult`:
 # `legacy := r.nativeHooks(PostToolUse|Stop); p.Event = ...; Run(...)`), and
 # our install writes native-format hooks. Registering the failure events TOO
 # would double-fire every failed tool/turn; both paths decode to the same
