@@ -8,7 +8,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 
-use super::{compact_hms, display_width, source_badge_span, to_color, StateKind};
+use super::{compact_hms, display_width, source_badge_span, state_color, to_color, StateKind};
 use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_scene::layout::{Layout, DESK_W};
 use pixtuoid_scene::overlay::disambig_suffix;
@@ -164,7 +164,7 @@ pub(crate) fn paint_hover_tooltip(
     // hue from the TYPED kind — C7) when Active. The detail/reason goes below.
     let mut state_spans = vec![Span::styled(
         format!("{} {}", kind.glyph(), kind.word()),
-        Style::default().fg(kind.color(theme)),
+        Style::default().fg(state_color(kind, theme)),
     )];
     // An EXITING agent shows none of the live tool/reason affordances — the card
     // already reads `◌ Exiting`, so the walking-out slot's retained Active/Waiting

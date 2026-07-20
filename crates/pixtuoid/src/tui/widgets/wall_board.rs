@@ -32,7 +32,7 @@ fn board_cell_origin(scene_rect: Rect) -> (u16, u16) {
 
 /// Map a backend-agnostic `BoardTone` to this theme's ratatui color. Mirrors the
 /// footer's role→color map so the board's tones (brand/star/state/dim/gateway)
-/// resolve to the SAME hues the footer's `SegRole` uses.
+/// resolve to the SAME hues the footer's `FooterTone` uses.
 fn board_tone_color(
     tone: pixtuoid_scene::board::BoardTone,
     theme: &pixtuoid_scene::theme::Theme,

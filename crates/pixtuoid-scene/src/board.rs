@@ -221,8 +221,8 @@ pub fn gateway_label(state: DaemonState) -> &'static str {
     }
 }
 
-/// The gateway chip's tone — mirrors the footer's `SegRole::Gateway` severity
-/// map (Idle→Idle, Busy→Active, Degraded/Down→Waiting), but returns a plain
+/// The gateway chip's tone — mirrors the footer's `FooterTone::Gateway` severity
+/// map (in `crate::footer`; Idle→Idle, Busy→Active, Degraded/Down→Waiting), but returns a plain
 /// `BoardTone` so `DaemonState` is only ever an INPUT to the model, never leaks
 /// a color out of `scene`.
 pub fn gateway_tone(state: DaemonState) -> BoardTone {

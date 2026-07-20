@@ -17,6 +17,9 @@ use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
 use pixtuoid_core::state::SceneState;
 
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs};
+use pixtuoid_scene::footer::{
+    build_footer, footer_tone_rgb, footer_tool_tally, FooterInputs, FooterModel,
+};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
 
@@ -117,6 +120,37 @@ impl OfficeRenderer {
     pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
         self.session.board(scene, now, None)
     }
+
+    /// The status-footer model for the current scene — full TUI parity via the
+    /// shared [`build_footer`]. Single-floor, so `floor = None` (no breadcrumb).
+    /// `budget` is the caller's column budget ([`footer_budget`] at the live
+    /// width); `audio_audible`/`volume_flash` drive the ♩ suffix exactly as the
+    /// TUI's do. Source-death is deferred here (`source_warning: None`) — floating
+    /// doesn't thread the `SourceDeath` health channel yet; the seam is ready the
+    /// day it does.
+    pub fn footer(
+        &self,
+        scene: &SceneState,
+        budget: u16,
+        audio_audible: bool,
+        volume_flash: Option<u8>,
+    ) -> FooterModel {
+        let per_floor = pixtuoid_scene::board::per_floor_counts(scene);
+        let tools = footer_tool_tally(scene);
+        let inputs = FooterInputs {
+            counts: pixtuoid_scene::board::scene_stats(scene),
+            per_floor: &per_floor,
+            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons()),
+            floor: None,
+            tools: &tools,
+            audio_audible,
+            volume_flash,
+            source_warning: None,
+            keys_stats: FOOTER_KEYS,
+            keys_alert: FOOTER_KEYS,
+        };
+        build_footer(&inputs, budget)
+    }
 }
 
 impl Default for OfficeRenderer {
@@ -197,6 +231,15 @@ const HOVER_INK: Rgb = Rgb {
     g: 240,
     b: 240,
 };
+
+/// The floating footer's keybind-hint tail — floating's REAL controls (`m` mute,
+/// `+`/`-` volume; no terminal `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE
+/// painter-specific input to the shared footer model; the TUI supplies its own
+/// terminal tail. Everything else (stats/rungs/tools/gateway/♩) is TUI-identical.
+const FOOTER_KEYS: &str = " [m]ute [+/-]vol ";
+/// Breathing room from the window edges for the footer band (both the paint and
+/// the [`footer_budget`] column math read it, so they can't drift).
+const FOOTER_MARGIN_PX: i32 = 6;
 
 /// Alpha-composite `color` over the surface pixel at `(x, y)` by `coverage` (the
 /// AA rasterizer's per-pixel strength), a straight linear blend in `0x00RRGGBB`
@@ -375,29 +418,38 @@ pub fn paint_wall_board_into_surface(
     }
 }
 
-/// The transient readout's TEXT (`♩ N%` unmuted / `♩ off` muted) — pure so
-/// the muted/percent branch is unit-tested off the codecov-ignored redraw.
-pub fn volume_flash_text(muted: bool, volume: f32) -> String {
-    if muted {
-        "\u{2669} off".to_string()
-    } else {
-        format!("\u{2669} {}%", (volume * 100.0).round() as u8)
-    }
+/// Column budget for the floating footer at `win_w` px — how many monospace
+/// Monaspace advances fit between the margins. [`build_footer`] right-flushes to
+/// it, so the footer spans margin-to-margin; Monaspace is fixed-advance, so a
+/// column budget maps cleanly to pixels (the board's `chars().count()` discipline).
+pub fn footer_budget(win_w: usize) -> u16 {
+    let advance = crate::aa_text::text_width("M", LABEL_FONT_PX).max(1);
+    (((win_w as i32 - 2 * FOOTER_MARGIN_PX).max(0)) / advance) as u16
 }
 
-/// Paint the transient volume readout (`♩ 45%` / `♩ off`) into the window's
-/// bottom-right corner — the floating twin of the TUI footer's flash and the
-/// m/+/- keys' ONLY visual feedback (this window has no footer). Fixed
-/// caption height like the name badges (crisp at any office scale), the
-/// shared [`HOVER_INK`] near-white over the shared 1px shadow.
-pub fn paint_volume_flash_into_surface(sb: &mut [u32], win_w: usize, win_h: usize, text: &str) {
-    // breathing room from the window edges
-    const FLASH_MARGIN_PX: i32 = 6;
-    let color = pack_xrgb(HOVER_INK);
-    let tw = crate::aa_text::text_width(text, LABEL_FONT_PX);
-    let x = (win_w as i32 - tw - FLASH_MARGIN_PX).max(0);
-    let y = (win_h as i32 - crate::aa_text::line_height(LABEL_FONT_PX) - FLASH_MARGIN_PX).max(0);
-    draw_badge_text(sb, win_w, win_h, text, x, y, LABEL_FONT_PX, color);
+/// Paint the shared status footer as a bottom-overlay band — the floating twin of
+/// the TUI's status row, rendering the SAME [`build_footer`] model so the two
+/// can't drift. Each segment is toned via the ONE shared [`footer_tone_rgb`], then
+/// packed to the surface XRGB; laid left-to-right from the left margin, the model's
+/// baked right-flush padding pushes the ♩/keys suffix to the right edge. Fixed
+/// caption height like the name badges (crisp at any office scale); an OVERLAY over
+/// the office's bottom rows — it never insets the buffer (that would shift the
+/// desk-capacity lockstep). This carries the ♩/♩N% audio feedback the standalone
+/// volume flash used to (now TUI-consistent: silent when muted).
+pub fn paint_footer_into_surface(
+    sb: &mut [u32],
+    win_w: usize,
+    win_h: usize,
+    model: &FooterModel,
+    theme: &Theme,
+) {
+    let y = (win_h as i32 - crate::aa_text::line_height(LABEL_FONT_PX) - FOOTER_MARGIN_PX).max(0);
+    let mut x = FOOTER_MARGIN_PX;
+    for seg in &model.segments {
+        let color = pack_xrgb(footer_tone_rgb(seg.tone, theme));
+        draw_badge_text(sb, win_w, win_h, &seg.text, x, y, LABEL_FONT_PX, color);
+        x += crate::aa_text::text_width(&seg.text, LABEL_FONT_PX);
+    }
 }
 
 #[cfg(test)]
@@ -771,36 +823,54 @@ mod tests {
     }
 
     #[test]
-    fn volume_flash_text_reads_off_when_muted_else_the_rounded_percent() {
-        assert_eq!(volume_flash_text(true, 0.42), "\u{2669} off");
-        assert_eq!(volume_flash_text(false, 0.45), "\u{2669} 45%");
-        assert_eq!(volume_flash_text(false, 0.0), "\u{2669} 0%");
-        assert_eq!(volume_flash_text(false, 1.0), "\u{2669} 100%");
-        // rounds, not truncates (0.455 → 46%, the footer-percent convention)
-        assert_eq!(volume_flash_text(false, 0.455), "\u{2669} 46%");
-    }
-
-    #[test]
-    fn volume_flash_blits_into_the_bottom_right_quadrant() {
-        // The m/+/- keys' only feedback surface: the readout must actually
-        // land pixels, and land them where the doc says (bottom-right, inside
-        // the margins) — the phantom-feedback twin of the label blit tests.
-        let (w, h) = (200usize, 120usize);
+    fn paint_footer_blits_into_the_bottom_band_and_tones_via_the_shared_authority() {
+        // The floating footer's parity with the TUI: it renders the SHARED
+        // build_footer model into the bottom band, toned through footer_tone_rgb
+        // (the same authority the TUI uses). The pure tier/policy is pinned in
+        // scene::footer; this pins the blit region + the tone routing — the
+        // phantom-feedback twin of the label/volume blit tests it replaces.
+        use pixtuoid_scene::board::{per_floor_counts, scene_stats};
+        use pixtuoid_scene::footer::{FooterTone, RungKind};
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
+        let slot = active_on("/p/a.jsonl", 0, 0);
+        scene.agents.insert(slot.agent_id, slot);
+        let per_floor = per_floor_counts(&scene);
+        let tools = footer_tool_tally(&scene);
+        let inputs = FooterInputs {
+            counts: scene_stats(&scene),
+            per_floor: &per_floor,
+            gateway: None,
+            floor: None,
+            tools: &tools,
+            audio_audible: true,
+            volume_flash: None,
+            source_warning: None,
+            keys_stats: FOOTER_KEYS,
+            keys_alert: FOOTER_KEYS,
+        };
+        let (w, h) = (400usize, 160usize);
+        let model = build_footer(&inputs, footer_budget(w));
         let mut sb = vec![0u32; w * h];
-        paint_volume_flash_into_surface(&mut sb, w, h, "\u{2669} 45%");
+        paint_footer_into_surface(&mut sb, w, h, &model, theme);
         let changed: Vec<usize> = sb
             .iter()
             .enumerate()
             .filter(|(_, p)| **p != 0)
             .map(|(i, _)| i)
             .collect();
-        assert!(!changed.is_empty(), "the readout painted something");
+        assert!(!changed.is_empty(), "the footer painted something");
         assert!(
-            changed.iter().all(|&i| {
-                let (x, y) = (i % w, i / w);
-                x >= w / 2 && y >= h / 2
-            }),
-            "the readout stays in the bottom-right quadrant"
+            changed.iter().all(|&i| i / w >= h / 2),
+            "the footer stays in the bottom band"
+        );
+        // The ●A rung tones via the shared authority (parity with the TUI adapter).
+        assert!(
+            sb.contains(&pack_xrgb(footer_tone_rgb(
+                FooterTone::Rung(RungKind::Active),
+                theme
+            ))),
+            "the ●A rung paints the shared label_active hue"
         );
     }
 

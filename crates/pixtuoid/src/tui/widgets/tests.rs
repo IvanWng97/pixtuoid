@@ -102,8 +102,14 @@ fn state_vocab_is_total_and_distinct() {
     // The reserved amber "needs-you" hue and the exiting hue map to their
     // existing theme roles (label_waiting is amber; label_exiting is live).
     let t = &pixtuoid_scene::theme::NORMAL;
-    assert_eq!(StateKind::Waiting.color(t), to_color(t.ui.label_waiting));
-    assert_eq!(StateKind::Exiting.color(t), to_color(t.ui.label_exiting));
+    assert_eq!(
+        state_color(StateKind::Waiting, t),
+        to_color(t.ui.label_waiting)
+    );
+    assert_eq!(
+        state_color(StateKind::Exiting, t),
+        to_color(t.ui.label_exiting)
+    );
 }
 
 #[test]
@@ -125,8 +131,32 @@ fn display_width_counts_terminal_columns_not_chars() {
     assert_eq!(display_width("a\u{0301}"), 1);
 }
 
+// STEP-1 PIN (footer→scene migration): `pixtuoid_scene::footer::build_footer`
+// measures column width via `chars().count()` (no `unicode-width` dep — the
+// `board` discipline keeps `scene` window/terminal-free). That is byte-identical
+// to this binary's `display_width` ONLY while every footer glyph is single-column.
+// This pins the ENTIRE footer vocabulary (incl. ⬢ ▲ ♩ ⚠ … — the ambiguous ones
+// the older test above omitted); a future non-single-column glyph fails HERE,
+// loudly, before it can silently shift the right-flush pad by a column and redden
+// a snapshot / gen-check pixel diff.
+#[test]
+fn footer_vocabulary_is_single_column_so_scene_chars_count_matches_display_width() {
+    let vocab = "\u{b7}\u{d7}\u{2191}\u{2193}\u{25cf}\u{25d0}\u{25cb}\u{25cc}\u{2b22}\u{25b2}\u{2669}\u{26a0}\u{2026}";
+    for c in vocab.chars() {
+        let s = c.to_string();
+        assert_eq!(
+            display_width(&s),
+            s.chars().count(),
+            "footer glyph U+{:04X} {c:?} must be single-column, else scene's chars().count() drifts from display_width",
+            c as u32,
+        );
+    }
+}
+
 #[test]
 fn state_count_maps_each_kind() {
+    // `StateKind` is the re-exported `scene::footer::RungKind`; `count` is the
+    // shared tally accessor the footer model and this binary both read.
     let c = StateCounts {
         active: 3,
         waiting: 2,
@@ -134,10 +164,10 @@ fn state_count_maps_each_kind() {
         exiting: 1,
         total: 13,
     };
-    assert_eq!(state_count(c, StateKind::Active), 3);
-    assert_eq!(state_count(c, StateKind::Waiting), 2);
-    assert_eq!(state_count(c, StateKind::Idle), 7);
-    assert_eq!(state_count(c, StateKind::Exiting), 1);
+    assert_eq!(StateKind::Active.count(c), 3);
+    assert_eq!(StateKind::Waiting.count(c), 2);
+    assert_eq!(StateKind::Idle.count(c), 7);
+    assert_eq!(StateKind::Exiting.count(c), 1);
 }
 
 // --- office-wide plumbing (per-floor + gateway rollup) ------------------
@@ -656,8 +686,9 @@ fn footer_spans_text(
 }
 
 // Drift guard: the colored footer must render the SAME text as the
-// plain-string footer across every tier — they share `status_segments`,
-// so concatenating the spans must equal build_status_summary exactly.
+// plain-string footer across every tier — both render the shared
+// `scene::footer::build_footer` model, so concatenating the spans must equal
+// build_status_summary exactly.
 #[test]
 fn status_spans_text_matches_summary_across_tiers() {
     let theme = &pixtuoid_scene::theme::NORMAL;

@@ -153,13 +153,19 @@ impl FloatingApp {
         let (Some(nw), Some(nh)) = (NonZeroU32::new(win_w), NonZeroU32::new(win_h)) else {
             return; // a 0-area window: nothing to draw
         };
-        // The transient ♩ readout + its expiry-driven debounced volume persist,
-        // both owned by the controller — resolved BEFORE the surface borrow below.
+        // Audio state for the footer's ♩ suffix + the expiry-driven debounced
+        // volume persist, both owned by the controller — resolved BEFORE the
+        // surface borrow below. `audio_audible` mirrors the TUI's gate EXACTLY
+        // (`audio_audible` in tui_renderer): a LIVE handle AND not muted AND a
+        // live level — so an opted-in-but-dead-device handle (no sink / audio
+        // feature off → `AudioHandle::disabled`) shows no phantom ♩, matching the
+        // TUI. `volume_flash` drives the transient `♩ N%` beat.
         let audio_now = Instant::now();
         self.audio_ctl.tick(audio_now);
-        let flash_text = self.audio_ctl.volume_flash(audio_now).map(|_pct| {
-            super::offscreen::volume_flash_text(self.audio_ctl.muted(), self.audio_ctl.volume())
-        });
+        let audio_audible = self.audio_ctl.handle().is_enabled()
+            && !self.audio_ctl.muted()
+            && self.audio_ctl.volume() > 0.0;
+        let volume_flash = self.audio_ctl.volume_flash(audio_now);
         // Office buffer = window / SCALE (kept ~OFFICE_TARGET_H tall → chunky sprites).
         // The ONE projection helper, shared with the boot seed so the two can't drift.
         let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(win_w, win_h);
@@ -235,9 +241,14 @@ impl FloatingApp {
             scale as i32,
             self.theme,
         );
-        if let Some(text) = &flash_text {
-            super::offscreen::paint_volume_flash_into_surface(&mut sb, win_w, win_h, text);
-        }
+        // The status footer (full TUI parity) as a bottom-overlay band — carries
+        // the ♩/♩N% audio suffix the standalone volume flash used to, plus the
+        // office stats/rungs/tools/gateway. `win_w`/`win_h` are usize surface dims.
+        let budget = super::offscreen::footer_budget(win_w);
+        let footer = self
+            .renderer
+            .footer(&scene, budget, audio_audible, volume_flash);
+        super::offscreen::paint_footer_into_surface(&mut sb, win_w, win_h, &footer, self.theme);
         window.pre_present_notify();
         let _ = sb.present();
     }
