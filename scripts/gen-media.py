@@ -202,6 +202,26 @@ def run_matrix(job, out_dirs, work, intermediates):
                  hour=job["hour"], **kwargs)
 
 
+# The even-dimensions scale filter both encoders need — H.264 and VP9 both
+# require even width/height. The ONE definition clip + proof jobs share.
+SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+# VP9 constant-quality knob (with `-b:v 0`, no target bitrate).
+VP9_CRF = "36"
+
+
+def encode_mp4_webm(frames_glob, fps, vf, out_stem):
+    """Encode an `f%04d.png` frame sequence at `fps`, through the `vf` filter, to
+    BOTH `{out_stem}.mp4` (H.264 +faststart yuv420p) and `{out_stem}.webm`
+    (VP9 crf/row-mt yuv420p). The two-container recipe clip + proof jobs share,
+    so a codec/quality retune touches one place."""
+    ffmpeg("-framerate", str(fps), "-i", frames_glob,
+           "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-vf", vf,
+           f"{out_stem}.mp4")
+    ffmpeg("-framerate", str(fps), "-i", frames_glob,
+           "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", VP9_CRF, "-row-mt", "1",
+           "-pix_fmt", "yuv420p", "-vf", vf, f"{out_stem}.webm")
+
+
 def run_clip(job, out_dirs, work, intermediates):
     gif = work / f"{job['id']}.gif"
     snap(gif, cols=job["cols"], rows=job["rows"], hour=job["hour"],
@@ -216,8 +236,7 @@ def run_clip(job, out_dirs, work, intermediates):
     # kind:"crop" job (run_crop), which reads a plural `crops` dict off a `from`
     # render — different mechanism, different key.
     crop = job.get("crop")
-    scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
-    vf = f"crop={crop},{scale}" if crop else scale
+    vf = f"crop={crop},{SCALE_EVEN}" if crop else SCALE_EVEN
     poster_vf = ["-vf", f"crop={crop}"] if crop else []
     for d in out_dirs:
         frames = work / f"frames-{cid}"
@@ -225,12 +244,7 @@ def run_clip(job, out_dirs, work, intermediates):
         # re-encode from frames so it's a true loop at `fps` (the GIF's own frame
         # delays otherwise confuse ffmpeg into a fast clip).
         ffmpeg("-i", str(gif), str(frames / "f%04d.png"))
-        ffmpeg("-framerate", str(fps), "-i", str(frames / "f%04d.png"),
-               "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-vf", vf,
-               str(d / f"{cid}.mp4"))
-        ffmpeg("-framerate", str(fps), "-i", str(frames / "f%04d.png"),
-               "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "36", "-row-mt", "1",
-               "-pix_fmt", "yuv420p", "-vf", vf, str(d / f"{cid}.webm"))
+        encode_mp4_webm(str(frames / "f%04d.png"), fps, vf, str(d / cid))
         # poster frame: `poster` (seconds into the clip) lets a staged clip
         # (e.g. meetings, whose opening seconds are pre-action) poster on the
         # money shot instead of frame 0. Posters are presence-only in --check.
@@ -302,7 +316,6 @@ def run_proof(job, out_dirs, work, intermediates):
          "--now-hour", str(job["hour"]), "--theme", job["theme"], "--weather", "clear"],
         check=True, stdout=subprocess.DEVNULL,
     )
-    scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
     for layout, suffix in (("wide", ""), ("tall", "-tall")):
         ldir = frames / layout
         for d in out_dirs:
@@ -310,13 +323,8 @@ def run_proof(job, out_dirs, work, intermediates):
                             d / f"{job['id']}{suffix}-poster.png")
             if CHECK_MODE:
                 continue
-            ffmpeg("-framerate", str(fps), "-i", str(ldir / "f%04d.png"),
-                   "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-vf", scale,
-                   str(d / f"{job['id']}{suffix}.mp4"))
-            ffmpeg("-framerate", str(fps), "-i", str(ldir / "f%04d.png"),
-                   "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "36", "-row-mt", "1",
-                   "-pix_fmt", "yuv420p", "-vf", scale,
-                   str(d / f"{job['id']}{suffix}.webm"))
+            encode_mp4_webm(str(ldir / "f%04d.png"), fps, SCALE_EVEN,
+                            str(d / f"{job['id']}{suffix}"))
 
 
 HANDLERS = {
