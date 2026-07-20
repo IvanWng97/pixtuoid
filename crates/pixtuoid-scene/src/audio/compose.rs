@@ -29,6 +29,19 @@ pub enum Mood {
     Night,
 }
 
+/// The lead-instrument registry — WHICH voice sings the sparkle lane.
+/// This is the add-an-instrument seam: a new timbre = one synth voice
+/// fn, one variant here, a draw weight in `compose`, a listen batch. The
+/// mix lanes (StemLevels/mixer/players) are instrument-blind by design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeadVoice {
+    /// The velocity-keyed EP (the ratified night/day-take Rhodes).
+    EpVel,
+    /// Plucked-string lead ("nylon" family): sharper attack, longer
+    /// fundamental ring, brighter early harmonics.
+    Pluck,
+}
+
 /// A generated 8-bar composition — the runtime-sized twin of the frozen
 /// `score` tables (same event vocabulary, `Vec` instead of `'static`).
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +61,9 @@ pub struct GeneratedScore {
     /// Night only: kick timestamps for the texture's baked duck
     /// (empty for day — the day texture free-runs).
     pub(super) kick_times: Vec<f32>,
+    /// Which instrument sings the lead (drawn LAST in the seed stream so
+    /// adding voices never redraws a blessed take's notes).
+    pub(super) lead_voice: LeadVoice,
 }
 
 /// Every generated take is 8 bars of 4/4 — the anti-fatigue loop length
@@ -65,6 +81,14 @@ impl GeneratedScore {
 
     pub fn loop_secs(&self) -> f32 {
         self.bar_s() * GEN_LOOP_BARS as f32
+    }
+
+    /// The lead instrument's display name (audition listings).
+    pub fn lead_voice_name(&self) -> &'static str {
+        match self.lead_voice {
+            LeadVoice::EpVel => "ep",
+            LeadVoice::Pluck => "pluck",
+        }
     }
 
     /// Read only by the seed-sweep property suite (production synthesis
@@ -703,6 +727,15 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         roots
     });
 
+    // drawn AFTER every musical draw, so a voice-registry change can
+    // never silently recompose an already-blessed seed's notes. Night
+    // keeps the ratified EP (the sleepy identity); day draws variety.
+    let lead_voice = if mood == Mood::Day && chance(&mut rng, 0.35) {
+        LeadVoice::Pluck
+    } else {
+        LeadVoice::EpVel
+    };
+
     GeneratedScore {
         mood,
         bpm,
@@ -717,6 +750,7 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         } else {
             Vec::new()
         },
+        lead_voice,
     }
 }
 

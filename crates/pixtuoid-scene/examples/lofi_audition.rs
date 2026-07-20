@@ -29,6 +29,7 @@ fn main() {
     let mut seeds = 12u64;
     let mut start = 0u64;
     let mut out = PathBuf::from("audio-demos");
+    let mut solo: Option<usize> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -41,6 +42,14 @@ fn main() {
             "--seeds" => seeds = args.next().and_then(|v| v.parse().ok()).unwrap_or(12),
             "--start" => start = args.next().and_then(|v| v.parse().ok()).unwrap_or(0),
             "--out" => out = args.next().map(PathBuf::from).unwrap_or(out),
+            // fast voice/lane iteration: hear one stem alone
+            "--solo" => {
+                solo = args.next().as_deref().and_then(|v| {
+                    ["pad", "sparkle", "keys", "drums", "texture"]
+                        .iter()
+                        .position(|&l| l == v)
+                })
+            }
             _ => {}
         }
     }
@@ -63,16 +72,27 @@ fn main() {
         let loops = (SOAK_SECS * SAMPLE_RATE as f32 / take_len as f32).ceil() as usize;
         let total = take_len * loops.max(1);
         let mut mixdown = vec![0.0f32; total];
-        for (bed, gain) in beds.iter().zip(mix) {
-            for (i, slot) in mixdown.iter_mut().enumerate() {
-                *slot += bed[i % bed.len()] * gain;
+        for (lane, (bed, gain)) in beds.iter().zip(mix).enumerate() {
+            match solo {
+                Some(s) if s != lane => continue,
+                Some(_) => {
+                    for (i, slot) in mixdown.iter_mut().enumerate() {
+                        *slot += bed[i % bed.len()] * 0.8;
+                    }
+                }
+                None => {
+                    for (i, slot) in mixdown.iter_mut().enumerate() {
+                        *slot += bed[i % bed.len()] * gain;
+                    }
+                }
             }
         }
         let path = out.join(format!("gen_{tag}_{seed:03}.wav"));
         write_wav(&path, &mixdown);
         println!(
-            "  seed {seed:3}  {:>3.0} bpm  {}",
+            "  seed {seed:3}  {:>3.0} bpm  lead={:5}  {}",
             score.bpm,
+            score.lead_voice_name(),
             path.display()
         );
         listing.push(path);

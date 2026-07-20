@@ -510,6 +510,29 @@ fn ep_pluck_vel(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     ep_pluck_h2(midi, dur_s, vel, 0.18 + 0.45 * vel * vel)
 }
 
+/// The plucked-string lead voice ("nylon" family) — the SECOND entry in
+/// the lead-instrument registry (`compose::LeadVoice`), added end-to-end
+/// to prove the add-an-instrument seam: sharper 4ms pick attack, a
+/// longer-ringing fundamental, brighter velocity-keyed early harmonics,
+/// and a slightly inharmonic pick zing that dies fast.
+fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
+    let n = n_samples(dur_s);
+    let f = midi_freq(midi as f32);
+    let tau = std::f32::consts::TAU;
+    let h2 = 0.30 + 0.30 * vel;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SR;
+            let attack = (t / 0.004).min(1.0);
+            let sig = (tau * f * t).sin() * (-t * 3.4).exp()
+                + h2 * (tau * 2.0 * f * t).sin() * (-t * 6.0).exp()
+                + 0.18 * (tau * 3.004 * f * t).sin() * (-t * 10.0).exp()
+                + 0.07 * (tau * 4.21 * f * t).sin() * (-t * 22.0).exp();
+            sig * attack * vel
+        })
+        .collect()
+}
+
 fn night_bar_s() -> f32 {
     score::night_beat_s() * score::BEATS_PER_BAR
 }
@@ -594,9 +617,22 @@ fn events_stem_core(
     cutoff_hz: f32,
     peak: f32,
 ) -> Vec<f32> {
+    events_stem_voiced(loop_secs, events, dur_s, cutoff_hz, peak, ep_pluck_vel)
+}
+
+/// The instrument-parameterized event renderer — THE dispatch point a new
+/// lead voice plugs into (`note_fn` renders one note: midi, dur, vel).
+fn events_stem_voiced(
+    loop_secs: f32,
+    events: &[(f32, u8, f32)],
+    dur_s: f32,
+    cutoff_hz: f32,
+    peak: f32,
+    note_fn: fn(u8, f32, f32) -> Vec<f32>,
+) -> Vec<f32> {
     let mut buf = vec![0.0f32; n_samples(loop_secs)];
     for &(at, note, vel) in events {
-        place(&mut buf, &ep_pluck_vel(note, dur_s, vel), at, 1.0);
+        place(&mut buf, &note_fn(note, dur_s, vel), at, 1.0);
     }
     let mut buf = lowpass(&buf, cutoff_hz);
     normalize(&mut buf, peak);
@@ -808,7 +844,15 @@ pub(super) fn day_take_drums(take: &score::DayTake, rng: &mut NoiseStream) -> Ve
 // generator's spectral identity is therefore the ratified production
 // chain by construction; only the notes are new.
 
-use super::compose::{GeneratedScore, Mood};
+use super::compose::{GeneratedScore, LeadVoice, Mood};
+
+/// The lead-voice registry's render map — one arm per instrument.
+fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
+    match score.lead_voice {
+        LeadVoice::EpVel => ep_pluck_vel,
+        LeadVoice::Pluck => pluck_note,
+    }
+}
 
 /// Synthesize a generated take's five beds in `bank::TRACK_STEMS` order
 /// (pad, sparkle, keys, drums, texture). Noise content draws from `rng`
@@ -819,7 +863,14 @@ pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 5] 
     match score.mood {
         Mood::Day => [
             day_pad_core(&score.chords, score.bar_s(), super::compose::GEN_LOOP_BARS),
-            events_stem_core(loop_s, &score.sparkle, 2.0, 3200.0, 0.6),
+            events_stem_voiced(
+                loop_s,
+                &score.sparkle,
+                2.0,
+                3200.0,
+                0.6,
+                lead_voice_fn(score),
+            ),
             events_stem_core(loop_s, &score.keys, 0.9, 2400.0, 0.8),
             drums_core(loop_s, &score.drums, 7500.0, 2.2, 0.85, rng),
             texture_bed(rng),
@@ -831,7 +882,14 @@ pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 5] 
                 score.bar_s(),
                 super::compose::GEN_LOOP_BARS,
             ),
-            events_stem_core(loop_s, &score.sparkle, 2.2, 2800.0, 0.5),
+            events_stem_voiced(
+                loop_s,
+                &score.sparkle,
+                2.2,
+                2800.0,
+                0.5,
+                lead_voice_fn(score),
+            ),
             events_stem_core(loop_s, &score.keys, 1.1, 2000.0, 0.7),
             drums_core(loop_s, &score.drums, 6000.0, 2.0, 0.8, rng),
             night_texture_core(loop_s, &score.kick_times, rng),

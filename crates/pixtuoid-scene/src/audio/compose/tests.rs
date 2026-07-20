@@ -34,6 +34,38 @@ fn template_chords_and_roots_are_diatonic() {
 }
 
 #[test]
+fn lead_voice_varies_by_day_and_night_keeps_the_ep() {
+    // the instrument registry: day draws real variety over the sweep;
+    // night stays the ratified EP (the sleepy identity)
+    let mut saw = (false, false);
+    for seed in 0..SWEEP {
+        match compose(Mood::Day, seed).lead_voice {
+            LeadVoice::EpVel => saw.0 = true,
+            LeadVoice::Pluck => saw.1 = true,
+        }
+        assert_eq!(
+            compose(Mood::Night, seed).lead_voice,
+            LeadVoice::EpVel,
+            "seed {seed}: night must keep the EP lead"
+        );
+    }
+    assert!(saw.0 && saw.1, "both day lead voices must appear: {saw:?}");
+}
+
+#[test]
+fn day_lead_voice_distribution_tracks_the_draw_weight() {
+    // p(Pluck)=0.35: over 400 seeds expect ~140; a generous ±3.5σ band
+    // (~±33) catches a biased/misplaced draw without flaking
+    let plucks = (0..400)
+        .filter(|&s| compose(Mood::Day, s).lead_voice == LeadVoice::Pluck)
+        .count();
+    assert!(
+        (107..=173).contains(&plucks),
+        "pluck drew {plucks}/400 vs p=0.35"
+    );
+}
+
+#[test]
 fn compose_is_deterministic() {
     for mood in [Mood::Day, Mood::Night] {
         for seed in 0..8 {

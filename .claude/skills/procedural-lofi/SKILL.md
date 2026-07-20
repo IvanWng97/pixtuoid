@@ -187,3 +187,37 @@ imports `phase2_audition.py` — both are bundled. Adapt the voices to your own 
 The whole discipline in one line: **fingerprint a reference you love, drive your own
 synthesis to the numbers, freeze the one take a human blesses, then let a long-enough loop +
 runtime-stochastic layers + busy-ness stem-gating keep it from ever sounding the same.**
+
+---
+
+## The GENERATOR loop (pixtuoid's Rust composer — iterate in minutes, not arcs)
+
+Once a project graduates from frozen takes to a theory-constrained generator
+(`pixtuoid-scene/src/audio/compose.rs` + `synth::gen_beds`), the iteration loop changes
+shape: the LISTEN gate becomes **statistical** (blind-audition a batch of seeds; all
+acceptable = the GENERATOR is ratified — a dud = tighten a constraint and re-batch), and
+every taste axis is a data table or named const with ONE home:
+
+| Want to change…            | Edit (all in `compose.rs` unless noted)                  |
+|----------------------------|----------------------------------------------------------|
+| harmony vocabulary         | `DAY_PROGRESSIONS` / `NIGHT_PROGRESSIONS` (pre-voiced templates + `roots_pc` + `scale_pcs`) |
+| tempo feel                 | `DAY_BPM` / `NIGHT_BPM` windows                          |
+| melody character           | `lead_events` rules (density draws, leap bound, peak bar, grid) + `*_LEAD_LO/HI` registers |
+| groove feel                | `DAY_GROOVES` templates / `night_drums` pattern + the swing/drag consts |
+| comping density            | `keys_events` density draws                              |
+| room-tone crackle          | `synth::CRACKLE_POPS_PER_SEC` (one knob, both beds)      |
+| **a new instrument**       | see the checklist below                                  |
+
+**Add-an-instrument checklist** (executed once for the `Pluck` lead — repeat verbatim):
+1. Write the voice as a pure note fn in `synth.rs` (`fn my_voice(midi, dur_s, vel) -> Vec<f32>`),
+   physics-first then tuned by ear/fingerprint (Phase 1-2 of this skill still apply).
+2. Add a `compose::LeadVoice` variant + its arm in `synth::lead_voice_fn` (the ONE dispatch).
+3. Give it a draw weight at the END of `compose()` — the voice draw is deliberately LAST in
+   the seed stream so new voices never redraw an already-blessed seed's notes.
+4. Extend the distribution property test; run the compose suite (fast — no synthesis).
+5. Render a batch (`cargo run --release -p pixtuoid-scene --example lofi_audition -- --seeds N`;
+   `--solo sparkle` isolates the lane) → owner listens → tighten or ship.
+
+Mix LANES stay instrument-blind (StemLevels/mixer/players never learn about voices) — a
+lane is a busy-ness ROLE, an instrument is a timbre WITHIN it. That split is what keeps
+"融入一些别的乐器" a minutes-scale edit instead of an arc.

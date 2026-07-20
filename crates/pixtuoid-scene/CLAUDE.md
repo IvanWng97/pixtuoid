@@ -85,7 +85,13 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   night_pad_core/events_stem_core/drums_core/night_texture_core — the frozen
 │                   fns are thin delegations, pins prove byte-fidelity). Quality gate is
 │                   STATISTICAL: examples/lofi_audition renders N seeds for a blind owner
-│                   batch; the seed-sweep property suite (compose/tests.rs) pins the rules.
+│                   batch (--solo <lane> isolates a stem); the seed-sweep property suite
+│                   (compose/tests.rs) pins the rules. compose::LeadVoice is the
+│                   INSTRUMENT registry (EpVel + Pluck): lanes are busy-ness roles,
+│                   instruments are timbres within a lane — synth::lead_voice_fn is the
+│                   one dispatch; the voice draw sits LAST in the seed stream so adding
+│                   voices never redraws a blessed seed's notes. The add-an-instrument
+│                   checklist lives in .claude/skills/procedural-lofi (the generator loop).
 │                   Runtime wiring (TrackId seed variants + lofi_mode config, generative
 │                   default / frozen-pool "radio" fallback) lands AFTER the AudioEngine fold
 ├── layout/             zone-based office geometry (terminal-agnostic; moved from pixtuoid-core —
