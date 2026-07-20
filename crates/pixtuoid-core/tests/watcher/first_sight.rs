@@ -620,19 +620,32 @@ async fn codex_rollout_yields_uuid_keyed_session_start() {
 
     let expected = AgentId::from_parts("codex", uuid);
     let mut saw_session_start = false;
+    // This watcher has NO `.with_label_deriver` override, so it exercises the
+    // DEFAULT LabelDeriver wired in `JsonlWatcher::new` (#5) — assert the
+    // derived Rename label too, the only watcher-level cover that the default
+    // path is live (every OTHER label assertion rides CC's/custom override).
+    let mut default_label = None;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline {
         match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
             Ok(Some((_t, AgentEvent::SessionStart { agent_id, .. }))) => {
                 assert_eq!(agent_id, expected, "Codex SessionStart must be UUID-keyed");
                 saw_session_start = true;
-                break;
             }
+            Ok(Some((_t, AgentEvent::Rename { label, .. }))) => default_label = Some(label),
             Ok(Some(_)) => {}
             Ok(None) | Err(_) => {}
         }
+        if saw_session_start && default_label.is_some() {
+            break;
+        }
     }
     assert!(saw_session_start, "expected a SessionStart event");
+    assert_eq!(
+        default_label.as_deref(),
+        Some("cx·dotfiles"),
+        "the default LabelDeriver must emit the source-prefixed cwd basename"
+    );
     handle.abort();
 }
 
