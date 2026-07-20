@@ -1177,13 +1177,36 @@ import { asset, DIM_RESTING } from '../consts';
         if (paused && live) paint(pausedAt - pauseOffset);
       });
     });
+    // Background PLAYBACK (owner decision, #707): the office is a radio
+    // first — switching tabs freezes the PICTURE but keeps the music
+    // going. The rAF loop stops with the tab, so a low-rate interval
+    // keeps feeding audioTick (gain ramps, schedulers, the 10-min song
+    // switches); Chrome exempts audibly-playing tabs from intensive
+    // timer throttling, and the driver's dt clamp absorbs the coarser
+    // cadence. The explicit PAUSE button still silences everything —
+    // that intent is the user's, unchanged.
+    let bgAudioTimer = 0;
+    function stopBgAudio() {
+      if (bgAudioTimer) clearInterval(bgAudioTimer);
+      bgAudioTimer = 0;
+    }
     document.addEventListener('visibilitychange', function () {
-      if (document.hidden) stop();
-      else start();
-      // Suspend the audio graph while hidden (the rAF loop stops, so the loops
-      // would otherwise drone unfed); resume only if the ♩ is on and not paused.
+      if (document.hidden) {
+        stop();
+        if (audioCtx && audioPlaying && !paused && !bgAudioTimer) {
+          bgAudioTimer = setInterval(function () {
+            if (paused || !audioPlaying) return;
+            audioTick(Date.now() - pauseOffset);
+          }, 500);
+        }
+      } else {
+        stopBgAudio();
+        start();
+      }
+      // Paused stays silent whatever the visibility; otherwise the graph
+      // keeps running in the background by design.
       if (audioCtx && audioPlaying) {
-        if (document.hidden || paused) audioCtx.suspend();
+        if (paused) audioCtx.suspend();
         else audioCtx.resume();
       }
     });
