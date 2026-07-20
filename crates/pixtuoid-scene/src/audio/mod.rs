@@ -18,6 +18,8 @@
 #[doc(hidden)]
 pub mod bank;
 #[doc(hidden)]
+pub mod compose;
+#[doc(hidden)]
 pub mod dsp;
 #[doc(hidden)]
 pub mod mixer;

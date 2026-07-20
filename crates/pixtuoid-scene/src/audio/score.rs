@@ -167,6 +167,9 @@ pub(super) const NIGHT_CHORDS: [[u8; 4]; 4] = [
 /// signature the day track deliberately lacks.
 pub(super) const NIGHT_BASS_ROOTS: [u8; 4] = [33, 29, 36, 28];
 
+/// Read only by the night drift-guard test since the pad synthesis moved
+/// onto the table-parameterized core (`synth::night_pad_core`).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn night_chord_at_bar(bar: usize) -> ([u8; 4], u8) {
     (
         NIGHT_CHORDS[bar % NIGHT_CHORDS.len()],
@@ -351,6 +354,9 @@ impl DayTake {
         self.bar_s() * DAY_TAKE_LOOP_BARS as f32
     }
 
+    /// Read only by the frozen-table drift test since the pad synthesis
+    /// moved onto the table-parameterized core (`synth::day_pad_core`).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn chord_at_bar(&self, bar: usize) -> [u8; 4] {
         self.chords[bar % self.chords.len()]
     }

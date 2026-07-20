@@ -75,7 +75,19 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   The day takes are score::DayTake table-driven (synth::day_take_* — same
 │                   production chain, different frozen songs; the Lofi Girl model): Day2 "morning"
 │                   royal-road 76 BPM, Day3 "golden hour" I-vi-ii-V 74 BPM. The binary's switch
-│                   machine crossfades between the tracks (see the pixtuoid audio/ entry)
+│                   machine crossfades between the tracks (see the pixtuoid audio/ entry).
+│                   compose.rs — the theory-constrained COMPOSER (generative lofi): pure
+│                   compose(mood, seed) -> GeneratedScore over a vetted progression grammar
+│                   (6 day + 4 night templates ×transpose), melody rules (strong-beat chord
+│                   tones / diatonic passing / bounded resolved leaps / two-phrase form with
+│                   peak + loop-closing resolution), humanized groove templates; synth::gen_beds
+│                   renders it through the SAME cores the frozen takes use (day_pad_core/
+│                   night_pad_core/events_stem_core/drums_core/night_texture_core — the frozen
+│                   fns are thin delegations, pins prove byte-fidelity). Quality gate is
+│                   STATISTICAL: examples/lofi_audition renders N seeds for a blind owner
+│                   batch; the seed-sweep property suite (compose/tests.rs) pins the rules.
+│                   Runtime wiring (TrackId seed variants + lofi_mode config, generative
+│                   default / frozen-pool "radio" fallback) lands AFTER the AudioEngine fold
 ├── layout/             zone-based office geometry (terminal-agnostic; moved from pixtuoid-core —
 │                       the engine owns its geometry; `Layout` = compat alias for SceneLayout;
 │                       the WalkableMask VOCABULARY it stamps stays in core, coherence-bound to Grid):
