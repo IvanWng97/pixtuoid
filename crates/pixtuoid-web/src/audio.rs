@@ -19,7 +19,8 @@
 
 use std::sync::Arc;
 
-use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds};
+use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds, TRACK_STEMS};
+use pixtuoid_scene::audio::compose::{compose, GeneratedScore, Mood};
 use pixtuoid_scene::audio::dsp::NoiseStream;
 use pixtuoid_scene::audio::mixer::LoopStem;
 use pixtuoid_scene::audio::{
@@ -36,6 +37,13 @@ pub(crate) struct WebAudioDriver {
     beds: Option<TrackBeds>,
     /// 0=bank, 1=rain, 2=beds, 3=ready — the initial warmup cursor.
     stage: u8,
+    /// An in-flight CHUNKED rebuild (one bed per tick): a committed swap
+    /// no longer synthesizes all five beds in one rAF tick — at the
+    /// 10-minute song cadence that hitched the page every switch. While
+    /// pending, the incoming frame's track stems are silenced (the
+    /// caller-hold pattern), and JS learns of the swap only when the
+    /// last bed lands.
+    pending: Option<PendingBuild>,
     /// The track the CURRENT `beds` were built for (also the warmup target).
     track: TrackId,
 
@@ -59,6 +67,7 @@ impl WebAudioDriver {
             bank: None,
             rain: None,
             beds: None,
+            pending: None,
             stage: 0,
             track: initial_track,
             engine: AudioEngine::new(1.0),
@@ -106,14 +115,51 @@ impl WebAudioDriver {
         };
         self.last_ms = Some(now_ms);
 
-        let cmds = self.engine.tick(dt, Some(frame));
+        // While a chunked rebuild is in flight, keep the track stems
+        // silent at the SOURCE (the caller-hold pattern the pre-fold
+        // players used): the engine's mixer then ramps toward zero
+        // targets and ramps back smoothly when the swap lands — no
+        // output clamping, no pop.
+        let mut frame = frame;
+        if self.pending.is_some() {
+            frame.stems.silence_track_stems();
+        }
+        let mut cmds = self.engine.tick(dt, Some(frame));
 
-        // The BUILD stays caller-side (the engine's sharp edge): on a committed
-        // swap, rebuild this track's beds in ONE tick (rare, under the crossfade
-        // silence) so `loop_buffer` hands JS the fresh samples to hot-swap.
-        if let Some(to) = cmds.swap {
-            self.beds = Some(TrackBeds::build(&mut self.rng, to));
-            self.track = to;
+        // The BUILD stays caller-side (the engine's sharp edge), but NOT
+        // in one tick: a committed swap stages a per-lane build (the
+        // 10-minute cadence made the one-tick five-bed synthesis a
+        // recurring main-thread hitch). A newer swap mid-build restarts
+        // the stage (latest wins).
+        if let Some(to) = cmds.swap.take() {
+            let (mood, seed) = match to {
+                TrackId::GenDay(seed) => (Mood::Day, seed),
+                TrackId::GenNight(seed) => (Mood::Night, seed),
+            };
+            self.pending = Some(PendingBuild {
+                to,
+                score: compose(mood, seed),
+                beds: Vec::new(),
+            });
+        }
+        // advance ONE lane per tick; on the last lane, hot-swap and tell JS
+        let finished = match self.pending.as_mut() {
+            Some(p) => {
+                let lane = p.beds.len();
+                p.beds
+                    .push(Arc::new(synth::gen_bed(&p.score, lane, &mut self.rng)));
+                p.beds.len() == TRACK_STEMS.len()
+            }
+            None => false,
+        };
+        if finished {
+            if let Some(p) = self.pending.take() {
+                if let Ok(beds) = <[Arc<Vec<f32>>; TRACK_STEMS.len()]>::try_from(p.beds) {
+                    self.beds = Some(TrackBeds::from_arcs(beds));
+                    self.track = p.to;
+                    cmds.swap = Some(p.to);
+                }
+            }
         }
         cmds
     }
@@ -173,6 +219,14 @@ pub(crate) fn pool_from_wire(wire: u8) -> Option<OneShotPool> {
 /// Serialize a tick's commands as the compact JSON the site's WebAudio glue
 /// parses: `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}`.
 /// Hand-built (no serde in the wasm artifact — the `overlay_json` precedent).
+/// One chunked track rebuild in flight: the composed score plus the beds
+/// finished so far (`beds.len()` is the next lane to build).
+struct PendingBuild {
+    to: TrackId,
+    score: GeneratedScore,
+    beds: Vec<Arc<Vec<f32>>>,
+}
+
 pub(crate) fn commands_json(cmd: &TickCommands) -> String {
     let mut out = String::from("{\"gains\":[");
     for (i, g) in cmd.gains.iter().enumerate() {
@@ -432,5 +486,62 @@ mod tests {
             pad_after > 0.0,
             "the night mix ramps back in after the swap"
         );
+    }
+
+    #[test]
+    fn a_swap_builds_one_bed_per_tick_and_signals_js_only_when_done() {
+        // the chunked-rebuild contract (the 10-min cadence fix): the tick
+        // that COMMITS the swap must not hand JS `swapped` yet — the five
+        // beds land one per tick, stems stay silent throughout, and JS
+        // learns of the swap exactly once, when the last bed is in
+        let mut d = WebAudioDriver::new(TrackId::GenDay(0));
+        while d.warmup_step() > 0 {}
+        let mk = |track| AudioFrame {
+            stems: pixtuoid_scene::audio::stem_levels(
+                &pixtuoid_scene::board::StateCounts {
+                    active: 1,
+                    waiting: 0,
+                    idle: 0,
+                    exiting: 0,
+                    total: 1,
+                },
+                0.0,
+            ),
+            events: Vec::new(),
+            track,
+        };
+        let mut now = 0.0;
+        for _ in 0..40 {
+            now += 50.0;
+            d.tick(now, mk(TrackId::GenDay(0)));
+        }
+        // drive the switch until the engine commits (stems reach silence)
+        let mut ticks_after_commit = None;
+        let mut swap_tick = None;
+        for i in 0..200 {
+            now += 50.0;
+            let cmd = d.tick(now, mk(TrackId::GenNight(7)));
+            if d.pending.is_some() && ticks_after_commit.is_none() {
+                ticks_after_commit = Some(i);
+                assert!(cmd.swap.is_none(), "the commit tick must not signal JS");
+            }
+            if cmd.swap.is_some() {
+                swap_tick = Some(i);
+                break;
+            }
+        }
+        let (commit, swap) = (
+            ticks_after_commit.expect("a rebuild staged"),
+            swap_tick.expect("the swap eventually signalled"),
+        );
+        // one lane per tick: commit tick builds lane 0, the swap lands on
+        // the tick that builds lane 4 — exactly TRACK_STEMS.len() ticks
+        assert_eq!(
+            swap - commit,
+            TRACK_STEMS.len() - 1,
+            "five beds, one per tick"
+        );
+        assert_eq!(d.track, TrackId::GenNight(7));
+        assert!(d.pending.is_none(), "the stage is consumed by the swap");
     }
 }

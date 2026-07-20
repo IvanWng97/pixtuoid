@@ -466,7 +466,7 @@ impl Office {
             Some(now) => pixtuoid_scene::audio::select_track(
                 pixtuoid_scene::pixel_painter::is_day_at(now),
                 pixtuoid_scene::pixel_painter::precipitation_level(now),
-                pixtuoid_scene::audio::epoch_hours(now),
+                pixtuoid_scene::audio::track_epoch(now),
             ),
             None => pixtuoid_scene::audio::TrackId::GenDay(0),
         }

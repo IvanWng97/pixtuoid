@@ -77,16 +77,18 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   生成"): TrackId {GenDay(seed), GenNight(seed)} + pure select_track(is_day,
 │                   precip, epoch_hours) ride AudioFrame — night hours (the SAME
 │                   pixel_painter::hour_is_day sun window the lighting renders) or any rain pick
-│                   the night MOOD; the epoch hour IS the compose seed (audio::epoch_hours is
-│                   the shared derivation), so every hour is a new song, deterministic on
-│                   native/wasm/tests, and the hourly id change drives the engine's crossfade
+│                   the night MOOD; the compose seed is the audio::track_epoch block
+│                   (TRACK_EPOCH_SECS = 600 — 10-min song cadence, owner-tuned for short
+│                   agent sessions), so every block is a new song, deterministic on
+│                   native/wasm/tests, and the block id change drives the engine's crossfade
 │                   with no new state. TrackBeds::build composes + renders via gen_beds. The
 │                   FROZEN takes (Day/Day2/Day3/Night tables + synth recipes) left the runtime
 │                   and are #[cfg(test)] TEST ANCHORS: their fingerprint pins guard the shared
 │                   cores the generator renders through — don't delete them as dead code.
 │                   compose.rs — the theory-constrained COMPOSER (generative lofi): pure
 │                   compose(mood, seed) -> GeneratedScore over a vetted progression grammar
-│                   (6 day + 4 night templates ×transpose), melody rules (strong-beat chord
+│                   (8 day templates — 6 diatonic + 2 owner-adopted chromatic (V7/vi, borrowed
+│                   iv) — + 4 night, ×transpose), melody rules (strong-beat chord
 │                   tones / diatonic passing / bounded resolved leaps / two-phrase form with
 │                   peak + loop-closing resolution), humanized groove templates; synth::gen_beds
 │                   renders it through the SAME cores the frozen takes use (day_pad_core/
@@ -99,9 +101,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   instruments are timbres within a lane — synth::lead_voice_fn is the
 │                   one dispatch; the voice draw sits LAST in the seed stream so adding
 │                   voices never redraws a blessed seed's notes. The add-an-instrument
-│                   checklist lives in .claude/skills/procedural-lofi (the generator loop).
-│                   Runtime wiring (TrackId seed variants + lofi_mode config, generative
-│                   default / frozen-pool "radio" fallback) lands AFTER the AudioEngine fold
+│                   checklist lives in .claude/skills/procedural-lofi (the generator loop)
 ├── layout/             zone-based office geometry (terminal-agnostic; moved from pixtuoid-core —
 │                       the engine owns its geometry; `Layout` = compat alias for SceneLayout;
 │                       the WalkableMask VOCABULARY it stamps stays in core, coherence-bound to Grid):

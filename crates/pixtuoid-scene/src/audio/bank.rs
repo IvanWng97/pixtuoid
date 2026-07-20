@@ -136,7 +136,7 @@ pub struct TrackBeds {
 }
 
 impl TrackBeds {
-    /// Compose the id's take (the seed is the epoch hour) and render it
+    /// Compose the id's take (the seed is the track-epoch block) and render it
     /// through the SAME cores the owner-ratified takes were built on —
     /// ALL-GENERATIVE runtime (owner decision 2026-07-20). Identity is
     /// the generated score + the cores' fingerprint pins (the frozen
@@ -152,6 +152,12 @@ impl TrackBeds {
         Self {
             beds: synth::gen_beds(&score, rng).map(Arc::new),
         }
+    }
+
+    /// Assemble from beds already built lane-by-lane (the wasm driver's
+    /// chunked rebuild) — `TRACK_STEMS` order, like [`TrackBeds::build`].
+    pub fn from_arcs(beds: [Arc<Vec<f32>>; TRACK_STEMS.len()]) -> Self {
+        Self { beds }
     }
 
     pub fn bed(&self, stem: LoopStem) -> Arc<Vec<f32>> {

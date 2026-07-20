@@ -289,9 +289,10 @@ src/
 │                       ratified demo_1) — Phase 1's empty-silent behavior ended when the music landed.
 │                       MOOD TRACKS (#644; ALL-GENERATIVE 2026-07-20): TrackId {GenDay(seed),
 │                       GenNight(seed)} rides AudioFrame (scene's select_track over the
-│                       lighting's OWN sun window + precipitation; seed = the epoch hour, so
-│                       every hour composes a fresh take and the hourly id change is an
-│                       ordinary track switch); the engine's TrackSwitch holds the
+│                       lighting's OWN sun window + precipitation; seed = the audio::track_epoch
+│                       block (600s — a new song every 10 minutes, owner-tuned for short agent
+│                       sessions) and the block id change is an ordinary track switch); the
+│                       engine's TrackSwitch holds the
 │                       five TRACK_STEMS at 0, and when they reach silence `tick` returns `swap: Some(to)` →
 │                       run_loop synthesizes that track's TrackBeds under the silence (~2s) and swap_loop's
 │                       them (RodioSink drops+recreates the Player at gain 0), then ramps back — LATCHED per
@@ -299,7 +300,7 @@ src/
 │                       right mood — booting Day at night would synth a track just to fade it away).
 │                       The night MOOD keeps the Lofi Girl anchor (sub-bass floor in the pad,
 │                       kick+hat-only groove, duck-baked texture, phase-locked) — now COMPOSED
-│                       hourly by scene's compose.rs rather than replayed from the frozen v4
+│                       per track-epoch by scene's compose.rs rather than replayed from the frozen v4
 │                       take; bus glue is deliberately NOT runtime (rodio has no insert) — the
 │                       listen gate renders the honest no-glue approximation.
 ├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM

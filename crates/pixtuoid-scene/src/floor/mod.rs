@@ -514,7 +514,7 @@ impl AudioObserver {
             track: crate::audio::select_track(
                 crate::pixel_painter::is_day_at(now),
                 precipitation,
-                crate::audio::epoch_hours(now),
+                crate::audio::track_epoch(now),
             ),
         }
     }

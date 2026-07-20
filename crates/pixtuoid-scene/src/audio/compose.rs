@@ -12,12 +12,14 @@
 //! a generator with unbounded output can't, so its gate is STATISTICAL —
 //! the owner blind-auditions a batch of seeds (`examples/lofi_audition`)
 //! and the generator as a whole is ratified (or its constraints
-//! tightened). The frozen pool stays as the `radio` fallback mode.
+//! tightened). The frozen takes are #[cfg(test)] fingerprint anchors,
+//! not a runtime fallback (ALL-GENERATIVE owner decision 2026-07-20).
 //!
-//! Runtime model (wired post-#AudioEngine-fold): seed = splitmix64 of the
-//! epoch hour, so generation is DETERMINISTIC — the same hour renders the
-//! same song everywhere (native, wasm, tests), and "never repeats" comes
-//! from the hour advancing, not from entropy.
+//! Runtime model: the seed is the [`super::track_epoch`] block (10-min
+//! cadence, owner-tuned for short agent sessions), so generation is
+//! DETERMINISTIC — the same block renders the same song everywhere
+//! (native, wasm, tests), and "never repeats" comes from the clock
+//! advancing, not from entropy.
 
 use super::dsp::NoiseStream;
 use super::score::DrumKind;
@@ -56,8 +58,10 @@ pub struct GeneratedScore {
     pub(super) sparkle: Vec<(f32, u8, f32)>,
     pub(super) keys: Vec<(f32, u8, f32)>,
     pub(super) drums: Vec<(f32, DrumKind, f32)>,
-    /// Night only: the sub-bass floor per bar (empty for day).
-    pub(super) bass_roots: Option<[u8; 4]>,
+    /// The sub-bass floor per template bar — ALWAYS derived (cheap);
+    /// only the night renderer reads it, so no Option and no fallback
+    /// (review finding: the old `unwrap_or` re-hardcoded a magic array).
+    pub(super) bass_roots: [u8; 4],
     /// Night only: kick timestamps for the texture's baked duck
     /// (empty for day — the day texture free-runs).
     pub(super) kick_times: Vec<f32>,
@@ -302,6 +306,9 @@ const SWING_HATS_DAY: f32 = 0.56;
 const SWING_HATS_NIGHT: f32 = 0.58;
 const SWING_KICK: f32 = 0.53;
 const DRAG_KICK_S: f32 = 0.015;
+/// Night drags harder than day (the ratified night v4 value) — a
+/// separate lag on purpose, not a drifted copy of [`DRAG_KICK_S`].
+const DRAG_KICK_NIGHT_S: f32 = 0.018;
 
 // ------------------------------------------------------------- rng helpers
 
@@ -496,7 +503,10 @@ fn lead_events(
             .map(|_| LEAD_GRID[pick(rng, LEAD_GRID.len())])
             .collect();
         // the lofi push (R13): occasionally a note lands a 16th AHEAD of
-        // a strong beat — the anticipation the straight-8th grid lacked
+        // a strong beat — the anticipation the straight-8th grid lacked.
+        // (In the answer phrase, a ±0.5 mutation of an inherited push can
+        // land on x.25 — the anticipated OFF-8th, same push family, legal
+        // on the grid.)
         for b in beats.iter_mut() {
             if max_per_bar > 1 && b.fract() == 0.0 && chance(rng, 0.15) {
                 *b -= 0.25;
@@ -732,7 +742,7 @@ fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>
         let b0 = bar as f32 * bar_s;
         let wobble = 0.9 + 0.2 * rng.unit();
         for (at_beat, g) in [(0.0f32, 0.6f32), (2.5, 0.4)] {
-            let mut at = b0 + at_beat * beat_s + 0.018;
+            let mut at = b0 + at_beat * beat_s + DRAG_KICK_NIGHT_S;
             if (at_beat * 2.0) % 2.0 != 0.0 {
                 at += swing_delay(SWING_KICK, eighth);
             }
@@ -856,21 +866,18 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         Mood::Night => night_drums(&mut rng, beat_s),
     };
 
-    let bass_roots = (mood == Mood::Night).then(|| {
-        let mut roots = [0u8; 4];
-        for (i, &pc) in roots_pc.iter().enumerate() {
-            // place the root pc in the ratified sub window (26..=38)
-            let mut b = 24 + pc;
-            while b < 26 {
-                b += 12;
-            }
-            while b > 38 {
-                b -= 12;
-            }
-            roots[i] = b;
+    let mut bass_roots = [0u8; 4];
+    for (i, &pc) in roots_pc.iter().enumerate() {
+        // place the root pc in the ratified sub window (26..=38)
+        let mut b = 24 + pc;
+        while b < 26 {
+            b += 12;
         }
-        roots
-    });
+        while b > 38 {
+            b -= 12;
+        }
+        bass_roots[i] = b;
+    }
 
     // drawn AFTER every musical draw, so a voice-registry change can
     // never silently recompose an already-blessed seed's notes. Night

@@ -119,7 +119,7 @@ fn every_seed_is_well_formed_day() {
             s.drums.iter().any(|&(_, k, _)| k == DrumKind::Snare),
             "seed {seed}: a day take carries a backbeat"
         );
-        assert!(s.bass_roots.is_none() && s.kick_times.is_empty());
+        assert!(s.kick_times.is_empty());
         for &(_, note, _) in &s.sparkle {
             assert!(
                 (DAY_LEAD_LO..=DAY_LEAD_HI).contains(&note),
@@ -158,8 +158,7 @@ fn every_seed_is_well_formed_night() {
         kt.sort_by(f32::total_cmp);
         assert_eq!(kicks, kt, "seed {seed}: kick_times desynced from drums");
         // the sub floor: in the ratified window, diatonic, root-true
-        let roots = s.bass_roots.expect("night carries the sub floor");
-        for &b in &roots {
+        for &b in &s.bass_roots {
             assert!(
                 (26..=38).contains(&b),
                 "seed {seed}: bass {b} out of window"

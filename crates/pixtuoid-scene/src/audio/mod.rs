@@ -68,8 +68,8 @@ const KEYS_GAIN: [f32; 3] = [0.0, 0.60, 0.70];
 const DRUMS_GAIN: [f32; 3] = [0.0, 0.35, 0.60];
 // ×2.8 vs the Phase-0 ratification (owner-adopted "air bed audible"
 // finding, 2026-07-20): the hiss+crackle layer measured 15-40dB under
-// the bible's spec and was inaudible. Rate stays CRACKLE_POPS_PER_SEC.
-// GLOBAL: frozen takes hear this too — it is a mix knob, one-line revert.
+// the bible's spec and was inaudible. Rate stays CRACKLE_POPS_PER_SEC;
+// a mix knob, one-line revert.
 const TEXTURE_GAIN: [f32; 3] = [0.78, 0.84, 0.78];
 const TYPING_GAIN: [f32; 3] = [0.0, 0.50, 0.80];
 
@@ -109,20 +109,20 @@ pub struct AudioFrame {
 }
 
 /// The soundtrack ids — ALL-GENERATIVE by owner decision (2026-07-20,
-/// "所有的音乐都自动生成"): every hour COMPOSES a fresh take through the
-/// ratified production chain. The payload is the compose seed (= the
-/// epoch hour), so the id changing IS the hourly song change and the
-/// [`TrackSwitch`] crossfade machinery needs no new state. Deterministic
-/// everywhere: the same hour renders the same song on native, wasm, and
-/// in tests. (The frozen owner-blessed takes — Day/Day2/Day3/Night —
+/// "所有的音乐都自动生成"): every [`TRACK_EPOCH_SECS`] block COMPOSES a
+/// fresh take through the ratified production chain. The payload is the
+/// compose seed (= the [`track_epoch`] block), so the id changing IS the
+/// song change and the [`TrackSwitch`] crossfade machinery needs no new
+/// state. Deterministic everywhere: the same block renders the same
+/// song on native, wasm, and in tests. (The frozen owner-blessed takes — Day/Day2/Day3/Night —
 /// left the runtime with this decision; their tables + synth recipes
 /// stay as the TEST ANCHORS whose fingerprint pins guard the shared
 /// cores the generator renders through.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TrackId {
-    /// The hour's generated day-mood take.
+    /// The block's generated day-mood take.
     GenDay(u64),
-    /// The hour's generated night-mood take (also the rainy mood).
+    /// The block's generated night-mood take (also the rainy mood).
     GenNight(u64),
 }
 
@@ -132,25 +132,33 @@ impl Default for TrackId {
     }
 }
 
-/// Wall-clock hours since the UNIX epoch — the day-take rotation input,
-/// derived ONCE here so the native observer and the wasm painter can't
-/// drift on the derivation. (Pre-epoch clocks read as hour 0.)
-pub fn epoch_hours(now: std::time::SystemTime) -> u64 {
+/// One song per this many wall-clock seconds. 10 minutes, owner-tuned
+/// (2026-07-20): agent sessions are usually SHORT — an hourly rotation
+/// meant most sessions never heard the song change. Coincidentally the
+/// weather's own re-roll cadence (its 600 lives in `sky.rs`, a separate
+/// domain — deliberately not shared).
+pub const TRACK_EPOCH_SECS: u64 = 600;
+
+/// The soundtrack epoch (10-minute blocks since UNIX epoch) — the
+/// compose-seed input, derived ONCE here so the native observer and the
+/// wasm painter can't drift on the derivation. (Pre-epoch clocks read
+/// as block 0.)
+pub fn track_epoch(now: std::time::SystemTime) -> u64 {
     now.duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() / 3600)
+        .map_or(0, |d| d.as_secs() / TRACK_EPOCH_SECS)
 }
 
 /// Pure track selection: night hours (the painter's OWN sun window via
 /// `pixel_painter::hour_is_day`/`is_day_at`) or any precipitation pick
-/// the night MOOD; the epoch hour is the compose seed. Pure in its
-/// inputs so wasm can feed its parametric hour and tests need no clock;
-/// within an hour the pick is stable, so the mood-track crossfade fires
-/// at most once an hour (the radio "next song" moment).
-pub fn select_track(is_day: bool, precipitation: f32, epoch_hours: u64) -> TrackId {
+/// the night MOOD; the [`track_epoch`] block is the compose seed. Pure
+/// in its inputs so wasm can feed its parametric clock and tests need
+/// none; within a block the pick is stable, so the crossfade fires at
+/// most once per [`TRACK_EPOCH_SECS`] (the radio "next song" moment).
+pub fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -> TrackId {
     if !is_day || precipitation > 0.0 {
-        TrackId::GenNight(epoch_hours)
+        TrackId::GenNight(track_epoch)
     } else {
-        TrackId::GenDay(epoch_hours)
+        TrackId::GenDay(track_epoch)
     }
 }
 
@@ -354,36 +362,42 @@ mod tests {
     }
 
     #[test]
-    fn track_is_stable_within_an_hour_and_changes_across_hours() {
+    fn track_is_stable_within_a_block_and_changes_across_blocks() {
         use std::time::{Duration, UNIX_EPOCH};
-        for h in 0..24u64 {
-            let early = UNIX_EPOCH + Duration::from_secs(h * 3600 + 1);
-            let late = UNIX_EPOCH + Duration::from_secs(h * 3600 + 3599);
+        for b in 0..24u64 {
+            let early = UNIX_EPOCH + Duration::from_secs(b * TRACK_EPOCH_SECS + 1);
+            let late = UNIX_EPOCH + Duration::from_secs((b + 1) * TRACK_EPOCH_SECS - 1);
             assert_eq!(
-                select_track(true, 0.0, epoch_hours(early)),
-                select_track(true, 0.0, epoch_hours(late)),
-                "take must hold steady within hour {h}"
+                select_track(true, 0.0, track_epoch(early)),
+                select_track(true, 0.0, track_epoch(late)),
+                "take must hold steady within block {b}"
             );
             assert_ne!(
-                select_track(true, 0.0, h),
-                select_track(true, 0.0, h + 1),
-                "the crossfade must fire at the hour boundary"
+                select_track(true, 0.0, b),
+                select_track(true, 0.0, b + 1),
+                "the crossfade must fire at the block boundary"
             );
         }
     }
 
     #[test]
-    fn epoch_hours_derivation() {
+    fn track_epoch_derivation() {
         use std::time::{Duration, UNIX_EPOCH};
-        assert_eq!(epoch_hours(UNIX_EPOCH), 0);
-        assert_eq!(epoch_hours(UNIX_EPOCH + Duration::from_secs(3599)), 0);
-        assert_eq!(epoch_hours(UNIX_EPOCH + Duration::from_secs(3600)), 1);
+        assert_eq!(track_epoch(UNIX_EPOCH), 0);
         assert_eq!(
-            epoch_hours(UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
-            1_700_000_000 / 3600
+            track_epoch(UNIX_EPOCH + Duration::from_secs(TRACK_EPOCH_SECS - 1)),
+            0
         );
-        // pre-epoch clocks fail safe to hour 0, not a panic
-        assert_eq!(epoch_hours(UNIX_EPOCH - Duration::from_secs(10)), 0);
+        assert_eq!(
+            track_epoch(UNIX_EPOCH + Duration::from_secs(TRACK_EPOCH_SECS)),
+            1
+        );
+        assert_eq!(
+            track_epoch(UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
+            1_700_000_000 / TRACK_EPOCH_SECS
+        );
+        // pre-epoch clocks fail safe to block 0, not a panic
+        assert_eq!(track_epoch(UNIX_EPOCH - Duration::from_secs(10)), 0);
     }
 
     #[test]
