@@ -261,6 +261,27 @@ impl PidIdentity {
 }
 
 impl AgentEvent {
+    /// A hook `Identity` event with `pid: None` — the pid is stamped LATER by the
+    /// daemon's `_pid` peek (`patch_identity_pids`), never at decode. THE
+    /// constructor every source's custom decoder mints its `Identity` through, so
+    /// a future field addition (as `pid` was in #221, which touched all ~8 sites
+    /// at once) lands in ONE place. `source`/`session_id` take `impl Into<String>`
+    /// to absorb the per-decoder `.to_string()`/`.clone()`.
+    pub(crate) fn identity(
+        agent_id: AgentId,
+        source: impl Into<String>,
+        session_id: impl Into<String>,
+        cwd: Option<PathBuf>,
+    ) -> Self {
+        AgentEvent::Identity {
+            agent_id,
+            source: source.into(),
+            session_id: session_id.into(),
+            cwd,
+            pid: None,
+        }
+    }
+
     pub fn agent_id(&self) -> AgentId {
         match self {
             AgentEvent::SessionStart { agent_id, .. } => *agent_id,

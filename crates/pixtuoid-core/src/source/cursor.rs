@@ -124,12 +124,13 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);
     let cwd = workspace.unwrap_or("");
 
-    let identity = || AgentEvent::Identity {
-        agent_id,
-        source: SOURCE_NAME.to_string(),
-        session_id: key.to_string(),
-        cwd: (!cwd.is_empty()).then(|| cwd.into()),
-        pid: None,
+    let identity = || {
+        AgentEvent::identity(
+            agent_id,
+            SOURCE_NAME,
+            key,
+            (!cwd.is_empty()).then(|| cwd.into()),
+        )
     };
 
     match event {

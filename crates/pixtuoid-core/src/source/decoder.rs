@@ -268,16 +268,16 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     // on PreToolUse fixtures) but absent on e.g. Codex PermissionRequest/CC
     // PostToolUse — absent or empty maps to `None` so the reducer's cwd-less
     // registration path (ordinal label, reap-exempt) applies.
-    let identity = || AgentEvent::Identity {
-        agent_id,
-        source: source.to_string(),
-        session_id: session_id.clone(),
-        cwd: obj
-            .get("cwd")
-            .and_then(|s| s.as_str())
-            .filter(|s| !s.is_empty())
-            .map(std::path::PathBuf::from),
-        pid: None,
+    let identity = || {
+        AgentEvent::identity(
+            agent_id,
+            source,
+            session_id.clone(),
+            obj.get("cwd")
+                .and_then(|s| s.as_str())
+                .filter(|s| !s.is_empty())
+                .map(std::path::PathBuf::from),
+        )
     };
 
     // Burn-tier effort observation (CC): tool-context hook payloads carry an

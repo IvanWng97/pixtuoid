@@ -83,13 +83,7 @@ pub(crate) fn decode_kimi_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent
                 .and_then(|s| s.as_str())
                 .map(String::from);
             Ok(Some(vec![
-                AgentEvent::Identity {
-                    agent_id,
-                    source: SOURCE_NAME.to_string(),
-                    session_id,
-                    cwd,
-                    pid: None,
-                },
+                AgentEvent::identity(agent_id, SOURCE_NAME, session_id, cwd),
                 AgentEvent::ActivityEnd {
                     agent_id,
                     tool_use_id,

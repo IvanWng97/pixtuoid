@@ -110,15 +110,9 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .ok_or_else(|| anyhow!("reasonix payload missing/empty cwd"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, cwd);
 
-    let identity = || AgentEvent::Identity {
-        agent_id,
-        source: SOURCE_NAME.to_string(),
-        // Mirrors the SessionStart arm: no upstream session id exists; the
-        // cwd IS the session key.
-        session_id: cwd.to_string(),
-        cwd: Some(cwd.into()),
-        pid: None,
-    };
+    // Mirrors the SessionStart arm: no upstream session id exists; the cwd IS
+    // the session key.
+    let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, cwd, Some(cwd.into()));
 
     match event {
         // SessionStart fires lazily on the first turn; UserPromptSubmit fires
