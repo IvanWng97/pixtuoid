@@ -11,6 +11,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Write as _};
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use pixtuoid_scene::audio::compose::{compose, Mood};
 use pixtuoid_scene::audio::dsp::{NoiseStream, SAMPLE_RATE};
@@ -28,7 +29,17 @@ const SOAK_SECS: f32 = 90.0;
 /// audit measured 1.6 LU spread under peak normalization).
 const TARGET_RMS_DBFS: f32 = -16.0;
 
-fn main() {
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("lofi_audition: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> std::io::Result<()> {
     let mut mood = Mood::Day;
     let mut seeds = 12u64;
     let mut start = 0u64;
@@ -57,7 +68,7 @@ fn main() {
             _ => {}
         }
     }
-    std::fs::create_dir_all(&out).expect("create out dir");
+    std::fs::create_dir_all(&out)?;
 
     let tag = match mood {
         Mood::Day => "day",
@@ -93,7 +104,7 @@ fn main() {
         }
         rms_normalize(&mut mixdown);
         let path = out.join(format!("gen_{tag}_{seed:03}.wav"));
-        write_wav(&path, &mixdown);
+        write_wav(&path, &mixdown)?;
         println!(
             "  seed {seed:3}  {:>3.0} bpm  lead={:5}  {}",
             score.bpm,
@@ -106,6 +117,7 @@ fn main() {
     for p in &listing {
         println!("  afplay {}", p.display());
     }
+    Ok(())
 }
 
 /// One-figure loudness: scale the mixdown to TARGET_RMS_DBFS (gain
@@ -121,27 +133,28 @@ fn rms_normalize(x: &mut [f32]) {
 
 /// 16-bit stereo RIFF/WAVE (mono mixdown duplicated L/R) with the
 /// audition soft clip — the same tanh(1.1)·0.85 the python gate used.
-fn write_wav(path: &PathBuf, mono: &[f32]) {
-    let mut w = BufWriter::new(File::create(path).expect("create wav"));
+fn write_wav(path: &PathBuf, mono: &[f32]) -> std::io::Result<()> {
+    let mut w = BufWriter::new(File::create(path)?);
     let n = mono.len() as u32;
     let data_len = n * 4; // 2 channels × i16
     let byte_rate = SAMPLE_RATE * 2 * 2;
-    w.write_all(b"RIFF").unwrap();
-    w.write_all(&(36 + data_len).to_le_bytes()).unwrap();
-    w.write_all(b"WAVEfmt ").unwrap();
-    w.write_all(&16u32.to_le_bytes()).unwrap();
-    w.write_all(&1u16.to_le_bytes()).unwrap(); // PCM
-    w.write_all(&2u16.to_le_bytes()).unwrap(); // stereo
-    w.write_all(&SAMPLE_RATE.to_le_bytes()).unwrap();
-    w.write_all(&byte_rate.to_le_bytes()).unwrap();
-    w.write_all(&4u16.to_le_bytes()).unwrap(); // block align
-    w.write_all(&16u16.to_le_bytes()).unwrap();
-    w.write_all(b"data").unwrap();
-    w.write_all(&data_len.to_le_bytes()).unwrap();
+    w.write_all(b"RIFF")?;
+    w.write_all(&(36 + data_len).to_le_bytes())?;
+    w.write_all(b"WAVEfmt ")?;
+    w.write_all(&16u32.to_le_bytes())?;
+    w.write_all(&1u16.to_le_bytes())?; // PCM
+    w.write_all(&2u16.to_le_bytes())?; // stereo
+    w.write_all(&SAMPLE_RATE.to_le_bytes())?;
+    w.write_all(&byte_rate.to_le_bytes())?;
+    w.write_all(&4u16.to_le_bytes())?; // block align
+    w.write_all(&16u16.to_le_bytes())?;
+    w.write_all(b"data")?;
+    w.write_all(&data_len.to_le_bytes())?;
     for &s in mono {
         let clipped = (s * 1.1).tanh() * 0.85;
         let pcm = (clipped * 32767.0) as i16;
-        w.write_all(&pcm.to_le_bytes()).unwrap();
-        w.write_all(&pcm.to_le_bytes()).unwrap();
+        w.write_all(&pcm.to_le_bytes())?;
+        w.write_all(&pcm.to_le_bytes())?;
     }
+    Ok(())
 }
