@@ -228,7 +228,7 @@ fn build_run_config(
 /// hint, so the fully-passive user who never opens the Sources panel still learns.
 /// Routed through the SHARED `doctor::diagnose` rollup (empty log = skip the drift
 /// scan; warns on broken installs only) so this surface can't drift from the panel
-/// and the CLI report. Iterates TARGETS, not REGISTERED_SOURCES: only an
+/// and the CLI report. Iterates TARGETS, not the source registry: only an
 /// install-bearing source can be install-BROKEN.
 fn warn_broken_installs(connected: &std::collections::HashSet<String>) {
     for &t in install::TARGETS {

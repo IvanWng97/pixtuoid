@@ -57,8 +57,8 @@ tests/
 1. **Always:** add `tests/sources/fixtures/<registered-source>/<scenario>/` — at
    minimum a `SessionStart` conformance scenario. `conformance.rs` auto-discovers
    it; `supported_sources_manifest` forces the manifest row; `cargo insta review`
-   to accept the new snapshot. The dir name MUST equal the `REGISTERED_SOURCES`
-   name (`claude-code`, not `claude`).
+   to accept the new snapshot. The dir name MUST equal the registered source
+   name (`registered_source_names()`: `claude-code`, not `claude`).
 2. **Only if the CLI has unique behavior** (subagent hooks, custom lifecycle): add
    `tests/sources/<cli>.rs` (or `<cli>/mod.rs` if it needs private fixtures) and
    register `mod <cli>;` in `tests/sources/main.rs`. Plain CLIs (antigravity,

@@ -389,15 +389,15 @@ mod tests {
 
     // Bridge: the install TARGETS registry and core's source registry must not
     // silently diverge. The site manifest is already bridge-tested against
-    // REGISTERED_SOURCES (`supported_sources_manifest`); the install targets were
+    // the source registry (`supported_sources_manifest`); the install targets were
     // NOT — the one dual-source-of-truth this codebase otherwise rigorously kills.
     #[test]
     fn every_target_names_a_registered_source() {
-        use pixtuoid_core::source::REGISTERED_SOURCES;
+        use pixtuoid_core::source::registry;
         for t in TARGETS {
             assert!(
-                REGISTERED_SOURCES.contains(&t.core_source),
-                "install target {:?} names core_source {:?}, which is not a REGISTERED_SOURCE \
+                registry::registered_source_names().any(|s| s == t.core_source),
+                "install target {:?} names core_source {:?}, which is not a registered source \
                  (typo, or a renamed source) — fix the target or register the source",
                 t.name,
                 t.core_source
@@ -415,8 +415,8 @@ mod tests {
     // drift.
     #[test]
     fn every_hook_only_source_has_an_install_target() {
-        use pixtuoid_core::source::{registry::descriptor_for, REGISTERED_SOURCES};
-        for &src in REGISTERED_SOURCES {
+        use pixtuoid_core::source::registry::{self, descriptor_for};
+        for src in registry::registered_source_names() {
             let d = descriptor_for(src).expect("registered source must have a descriptor row");
             if d.line_decoder().is_none() {
                 assert!(

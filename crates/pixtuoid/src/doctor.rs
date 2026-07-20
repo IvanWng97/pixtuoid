@@ -18,7 +18,7 @@
 //! `sanitize`d before display (R0615-06) — `doctor` is the third consumer of
 //! those breadcrumbs and must hold the same line as the headless path + footer.
 
-use pixtuoid_core::source::{drift, registry, REGISTERED_SOURCES};
+use pixtuoid_core::source::{drift, registry};
 
 /// Per-source drift tallied from the log, by `kind`, plus a sanitized sample of
 /// the distinctive values (new event/tool names) and the most recent timestamp.
@@ -167,8 +167,7 @@ pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
 /// Source label-prefixes (e.g. `"cc"`) that have ANY decode-drift breadcrumb in
 /// the log — for the live footer nudge. Reuses `scan_log_for_source` (tested).
 pub(crate) fn drifted_sources(log: &str) -> Vec<String> {
-    REGISTERED_SOURCES
-        .iter()
+    registry::registered_source_names()
         .filter(|s| scan_log_for_source(log, s).total() > 0)
         .filter_map(|s| registry::descriptor_for(s).map(|d| d.label_prefix.to_string()))
         .collect()
@@ -298,7 +297,7 @@ pub fn diagnose(source: &str, log: &str) -> SourceDiagnostics {
 /// One source's diagnosis row (plain data, so `format_doctor_row` is pure/tested).
 pub(crate) struct DoctorSourceRow {
     pub prefix: &'static str,
-    /// The REGISTERED_SOURCES id (e.g. "claude-code"), NOT a display name — it's
+    /// The registry source id (e.g. "claude-code"), NOT a display name — it's
     /// the registry key, distinct from `install::Target.name`/`display_name`.
     pub source_id: &'static str,
     pub connected: bool,
@@ -613,7 +612,7 @@ pub(crate) fn focus_section(
     let mut shim_stamp = Vec::new();
     let mut plugin_stamp = Vec::new();
     let mut no_channel = Vec::new();
-    for &src in REGISTERED_SOURCES {
+    for src in registry::registered_source_names() {
         let Some(d) = registry::descriptor_for(src) else {
             continue;
         };
@@ -745,7 +744,7 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
 
     let mut any_drift = false;
     let mut broken: Vec<String> = Vec::new(); // prefixes of broken installs (locally fixable)
-    for &src in REGISTERED_SOURCES {
+    for src in registry::registered_source_names() {
         let desc = registry::descriptor_for(src);
         let target = crate::install::target::by_source(src);
         let hooks_installed = target.map(crate::install::has_hooks).unwrap_or(false);
@@ -774,7 +773,7 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     // Rolled-up footer: a broken install is locally fixable (reconnect); decode
     // drift is a report-upstream concern — distinct remediation paths.
     out.push_str(&health_summary(
-        REGISTERED_SOURCES.len(),
+        registry::registered_source_names().count(),
         &broken,
         any_drift,
     ));

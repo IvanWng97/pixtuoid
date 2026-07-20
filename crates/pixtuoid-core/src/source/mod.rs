@@ -4,63 +4,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::AgentId;
 
-/// CLI sources this build supports. The canonical NAME list the conformance
-/// tests iterate; all other per-source facts (label prefix, decoders, hook
-/// keying, reducer caps) live in ONE row per source in [`registry::REGISTRY`].
-/// Every entry MUST have, enforced by tests so omissions fail CI rather than
-/// ship as the silent two-sprite-ghost bug:
-///   - a coalescing fixture under `tests/sources/fixtures/<name>/` —
-///     `tests/sources/conformance.rs`'s
-///     `every_registered_source_has_a_coalescing_fixture` (shape per the row:
-///     hook+JSONL for CC/Codex, JSONL-only for antigravity, hook-only for
-///     reasonix — `hook-payloads.jsonl` with no transcript), and
-///   - a [`registry::SourceDescriptor`] row — pinned below by
-///     `registry_covers_exactly_the_registered_sources` (the prefix/decoder
-///     shape checks live with the registry's own tests).
-///
-/// Each entry is keyed off its module's `SOURCE_NAME` const so a rename is a
-/// compile error, not a silent two-sprite-ghost. (Stable Rust can't const-
-/// project the names out of `REGISTRY`, hence two lists + the bridge test.)
-pub const REGISTERED_SOURCES: &[&str] = &[
-    claude_code::SOURCE_NAME,
-    codex::SOURCE_NAME,
-    antigravity::SOURCE_NAME,
-    reasonix::SOURCE_NAME,
-    codewhale::SOURCE_NAME,
-    opencode::SOURCE_NAME,
-    copilot::SOURCE_NAME,
-    cursor::SOURCE_NAME,
-    hermes::SOURCE_NAME,
-    omp::SOURCE_NAME,
-    openclaw::SOURCE_NAME,
-    grok::SOURCE_NAME,
-    kimi::SOURCE_NAME,
-];
-
-#[cfg(test)]
-mod registry_bridge_tests {
-    use super::*;
-
-    // The names list and the fact table must cover EXACTLY the same sources —
-    // a REGISTERED_SOURCES entry without a descriptor row (or vice versa) is
-    // the new flavor of the registered-but-not-wired bug class.
-    #[test]
-    fn registry_covers_exactly_the_registered_sources() {
-        for src in REGISTERED_SOURCES {
-            assert!(
-                registry::descriptor_for(src).is_some(),
-                "registered source {src:?} has no SourceDescriptor row — add it to registry::REGISTRY"
-            );
-        }
-        for d in registry::REGISTRY {
-            assert!(
-                REGISTERED_SOURCES.contains(&d.name),
-                "descriptor {:?} is not in REGISTERED_SOURCES — add it there",
-                d.name
-            );
-        }
-    }
-}
+// THE roster of CLI sources this build supports is `registry::REGISTRY` — one
+// row per source, all per-source facts (label prefix, decoders, hook keying,
+// reducer caps) in that ONE place — projected to just the names by
+// `registry::registered_source_names`. (The old hand-maintained
+// `REGISTERED_SOURCES` names list + its `registry_bridge_tests` were deleted:
+// Stable Rust can't const-project names out of `REGISTRY`, so the two-list sync
+// was pure ceremony; every consumer iterates at runtime.) Each row is keyed off
+// its module's `SOURCE_NAME` const so a rename is a compile error, not a silent
+// two-sprite-ghost, and every source MUST also carry a coalescing fixture
+// (`tests/sources/conformance.rs::every_registered_source_has_a_coalescing_fixture`).
 
 /// Backpressure bound for the workspace-wide `(Transport, AgentEvent)` event
 /// channel — the ONE place this capacity is defined. The runtime reducer feed

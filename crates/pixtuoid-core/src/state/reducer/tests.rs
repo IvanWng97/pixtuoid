@@ -1,5 +1,5 @@
 use super::source_label_prefix;
-use crate::source::REGISTERED_SOURCES;
+use crate::source::registry;
 
 /// Every registered source needs a 2-char prefix. The unregistered-source
 /// fallback silently degrades a missing/short prefix to the long source
@@ -9,7 +9,7 @@ use crate::source::REGISTERED_SOURCES;
 /// the registry-local shape check, which can't see a name↔row mismatch.
 #[test]
 fn every_registered_source_has_two_char_label_prefix() {
-    for src in REGISTERED_SOURCES {
+    for src in registry::registered_source_names() {
         let prefix = source_label_prefix(src);
         assert_eq!(
             prefix.chars().count(),

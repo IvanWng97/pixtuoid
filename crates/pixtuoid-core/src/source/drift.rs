@@ -11,7 +11,7 @@
 //! from the real stream", `pixtuoid-core/CLAUDE.md`) finally made VISIBLE instead
 //! of stranded in a log nobody reads — the gap the Task→Agent rename exposed.
 //!
-//! `source` is a static `REGISTERED_SOURCES` name (safe). The free-form values
+//! `source` is a static registry source name (safe). The free-form values
 //! (`name`/`field`/`tool`/`detail`) are untrusted wire content — every consumer
 //! sanitizes (the headless path's `sanitize_line`, the footer's cell buffer).
 

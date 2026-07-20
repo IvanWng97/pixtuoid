@@ -1,5 +1,5 @@
 //! Pins the marketing manifest's "supported" set to the code's
-//! `REGISTERED_SOURCES`.
+//! the source registry (`registry::registered_source_names`).
 //!
 //! `site/src/sources.json` single-sources the README "Supported Tools" glimpse
 //! (`scripts/gen-readme.mjs`) AND the site's full tool × OS support matrix
@@ -18,7 +18,7 @@
 
 use std::collections::BTreeSet;
 
-use pixtuoid_core::source::REGISTERED_SOURCES;
+use pixtuoid_core::source::registry;
 
 const MANIFEST_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../site/src/sources.json");
 
@@ -36,7 +36,7 @@ fn str_field<'a>(s: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     s.get(key).and_then(|v| v.as_str())
 }
 
-/// The load-bearing invariant: manifest `supported` ⇔ code `REGISTERED_SOURCES`.
+/// The load-bearing invariant: manifest `supported` ⇔ the code's `registry::registered_source_names`.
 #[test]
 fn manifest_supported_set_matches_registered_sources() {
     let manifest_supported: BTreeSet<String> = manifest()
@@ -51,15 +51,14 @@ fn manifest_supported_set_matches_registered_sources() {
         })
         .collect();
 
-    let registered: BTreeSet<String> = REGISTERED_SOURCES
-        .iter()
-        .map(|s| (*s).to_string())
+    let registered: BTreeSet<String> = registry::registered_source_names()
+        .map(|s| s.to_string())
         .collect();
 
     assert_eq!(
         manifest_supported,
         registered,
-        "site/src/sources.json `supported` set must EXACTLY match REGISTERED_SOURCES.\n  \
+        "site/src/sources.json `supported` set must EXACTLY match the source registry.\n  \
          claims supported but NOT wired: {:?}\n  \
          wired but NOT 'supported' in the manifest: {:?}\n  \
          Fix: edit site/src/sources.json (then `just gen-readme`).",

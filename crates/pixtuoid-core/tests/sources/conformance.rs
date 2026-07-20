@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use pixtuoid_core::source::decoder::decode_hook_payload;
 use pixtuoid_core::source::jsonl::LineDecoder;
-use pixtuoid_core::source::{registry, AgentEvent, REGISTERED_SOURCES};
+use pixtuoid_core::source::{registry, AgentEvent};
 
 /// A fixture source's JSONL line decoder, from the source registry. A
 /// hook-only source (`transcript: None`) ships no transcript and never
@@ -195,7 +195,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
 #[test]
 fn every_registered_source_has_a_coalescing_fixture() {
     let root = fixtures_root();
-    for src in REGISTERED_SOURCES {
+    for src in registry::registered_source_names() {
         let dir = root.join(src);
         let shape = if is_hook_only(src) {
             "hook-payloads.jsonl ONLY (hook-only row)"

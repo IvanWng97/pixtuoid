@@ -10,7 +10,8 @@
 // `node scripts/gen-readme.mjs`) after editing any JSON. `--check` writes
 // nothing and exits non-zero on drift (used by CI's gen-check / `just gen-check`).
 //
-// NOTE: the manifest's *supported* set is pinned to the code's REGISTERED_SOURCES
+// NOTE: the manifest's *supported* set is pinned to the code's source registry
+// (`registered_source_names()`)
 // by a Rust test (crates/pixtuoid-core/tests/supported_sources_manifest.rs) that
 // runs in the main CI — so the marketing list can never claim "supported" for a
 // source that isn't actually wired (and a newly-wired source forces a manifest

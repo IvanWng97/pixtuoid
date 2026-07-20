@@ -452,7 +452,7 @@ mod tests {
     // daemon (OpenClaw) are absent by design (they ride the router's socket).
     #[test]
     fn build_source_set_wires_every_transcript_bearing_source_plus_the_hook_router() {
-        use pixtuoid_core::source::{registry::descriptor_for, REGISTERED_SOURCES};
+        use pixtuoid_core::source::registry::{self, descriptor_for};
         use std::collections::BTreeSet;
 
         let sources = build_source_set(PathBuf::from("/tmp/pixtuoid-test.sock"), None, None, None);
@@ -472,9 +472,7 @@ mod tests {
             .copied()
             .filter(|&n| n != "hook-router")
             .collect();
-        let expected: BTreeSet<&str> = REGISTERED_SOURCES
-            .iter()
-            .copied()
+        let expected: BTreeSet<&str> = registry::registered_source_names()
             .filter(|&name| descriptor_for(name).is_some_and(|d| d.line_decoder().is_some()))
             .collect();
         assert_eq!(

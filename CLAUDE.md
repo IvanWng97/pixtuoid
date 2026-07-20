@@ -298,10 +298,11 @@ signature, update **all four** test areas (`tests/reducer/`, `tests/e2e.rs`,
 new `AgentEvent` variant also needs an `agent_id()` arm.
 
 **Adding a new agent CLI**: source module + one `SourceDescriptor` row in
-`source/registry.rs` + the name in `REGISTERED_SOURCES` + runtime wiring in
+`source/registry.rs` (its `name` field IS the roster — `registered_source_names()`
+projects `REGISTRY`) + runtime wiring in
 `runtime/driver.rs::run_async` (transcript-bearing CLIs only; hook-only CLIs
 ship a `hook.custom` decoder + an `install/` target instead) + a row in
-`site/src/sources.json` (bridge-tested against `REGISTERED_SOURCES`). Full
+`site/src/sources.json` (bridge-tested against `registered_source_names()`). Full
 steps: `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding" + the tests
 guide — or invoke the `add-source` skill (which foregrounds the test-teeth steps
 a diff-scoped edit misses). A new theme has an analogous `add-theme` skill.

@@ -180,7 +180,7 @@ pub struct ApplianceColors {
 
 /// Per-source badge hues. One color per registered source — the 12 agent CLIs +
 /// the OpenClaw daemon (`all()` returns `[Rgb; 13]`, count-pinned to
-/// `REGISTERED_SOURCES` by `source_colors_cover_every_registered_source`) — drawn
+/// the source registry by `source_colors_cover_every_registered_source`) — drawn
 /// as a leading `[xx]` badge in the agent-dashboard popup (agents only) and the
 /// Sources panel (all sources, incl. the daemon). Each theme supplies its own so
 /// the badge harmonizes with the palette and stays legible on `tooltip_bg`
@@ -507,10 +507,10 @@ mod tests {
     // shipping an unchecked badge color.
     #[test]
     fn source_colors_cover_every_registered_source() {
-        use pixtuoid_core::source::REGISTERED_SOURCES;
+        use pixtuoid_core::source::registry;
         assert_eq!(
             NORMAL.source.all().len(),
-            REGISTERED_SOURCES.len(),
+            registry::registered_source_names().count(),
             "SourceColors has a different hue count than the registered sources — add the \
              new source's field to SourceColors + all() (and a hue in every theme file)"
         );

@@ -336,6 +336,16 @@ pub fn descriptor_for(name: &str) -> Option<&'static SourceDescriptor> {
     REGISTRY.iter().find(|d| d.name == name)
 }
 
+/// Every registered source's stable id, in `REGISTRY` order — THE roster
+/// authority. Replaces the hand-maintained `REGISTERED_SOURCES` parallel list:
+/// Stable Rust can't const-project these names out of `REGISTRY`, so that list +
+/// its bridge test existed only to keep two rosters in sync, yet every consumer
+/// iterates at RUNTIME — so a runtime projection collapses the duplicate (and its
+/// whole drift failure-class) into `REGISTRY` as the single source of truth.
+pub fn registered_source_names() -> impl Iterator<Item = &'static str> {
+    REGISTRY.iter().map(|d| d.name)
+}
+
 /// The first-sight cwd extractor for the source being scanned. Registry-driven
 /// (invariant #3): the JSONL walker calls this with the source it is scanning,
 /// so one source's head shape is never tried against another source's
@@ -956,6 +966,21 @@ mod tests {
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
         assert_eq!(REGISTRY.len(), 13, "new row? add its name-pin assert above");
+    }
+
+    #[test]
+    fn registered_source_names_are_unique() {
+        // The roster is now `registered_source_names()` over REGISTRY alone (the
+        // old parallel `REGISTERED_SOURCES` list + its bridge test are gone). A
+        // duplicate row would silently double a source everywhere the roster is
+        // iterated — the dedup the two-list bridge comparison gave incidentally.
+        let names: Vec<&str> = registered_source_names().collect();
+        let unique: std::collections::BTreeSet<&str> = names.iter().copied().collect();
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "duplicate source name in REGISTRY: {names:?}"
+        );
     }
 
     #[test]

@@ -409,7 +409,7 @@ mod tests {
             pixtuoid_core::source::codex::SOURCE_NAME,
             pixtuoid_core::source::grok::SOURCE_NAME,
         ];
-        for &src in pixtuoid_core::source::REGISTERED_SOURCES {
+        for src in pixtuoid_core::source::registry::registered_source_names() {
             let Some(d) = pixtuoid_core::source::registry::descriptor_for(src) else {
                 continue;
             };

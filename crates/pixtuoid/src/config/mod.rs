@@ -389,9 +389,7 @@ pub(crate) fn save_floating(
 /// onboarding wizard replays and they re-connect there — acceptable, that IS
 /// the connect flow.
 pub fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String> {
-    pixtuoid_core::source::REGISTERED_SOURCES
-        .iter()
-        .copied()
+    pixtuoid_core::source::registry::registered_source_names()
         .filter(|src| config.sources.get(*src).copied().unwrap_or(false))
         .map(String::from)
         .collect()

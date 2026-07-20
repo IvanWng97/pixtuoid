@@ -407,7 +407,7 @@ fn agent_case(source: &str) -> WireCase {
         .unwrap_or_else(|| panic!("no wire-to-pixels case for source {source:?}"))
 }
 
-/// The matrix is truth-complete: every source in `REGISTERED_SOURCES` is
+/// The matrix is truth-complete: every registered source is
 /// exercised by this suite — the agent matrix covers every AGENT source, and
 /// each DAEMON source has its own presence test (the openclaw lobster below).
 /// A newly registered source with no wire case FAILS here instead of silently
@@ -442,10 +442,8 @@ fn wire_matrix_covers_every_registered_source() {
     }
 
     let covered: BTreeSet<&str> = agents.iter().copied().chain(daemons_covered).collect();
-    let registered: BTreeSet<&str> = pixtuoid_core::source::REGISTERED_SOURCES
-        .iter()
-        .copied()
-        .collect();
+    let registered: BTreeSet<&str> =
+        pixtuoid_core::source::registry::registered_source_names().collect();
     assert_eq!(
         covered,
         registered,

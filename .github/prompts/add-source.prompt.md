@@ -15,8 +15,9 @@ decoding" / "Adding a new agent CLI") first, then:
    source's **own decoder fn** (injected into `JsonlWatcher` via fn pointers), not
    a shared decoder.
 2. Add ONE `SourceDescriptor` row in `source/registry.rs` (label prefix, decoders,
-   hook keying, reducer caps) and the name to `source::REGISTERED_SOURCES` — the
-   bridge + conformance tests force a coalescing fixture and table↔list equality.
+   hook keying, reducer caps) — its `name` field IS the roster (`registered_source_names()`
+   projects `REGISTRY`; uniqueness pinned by `registered_source_names_are_unique`), and
+   the conformance test forces a coalescing fixture.
 3. Wire it into `runtime/driver.rs::build_source_set` (the one construction site,
    called by `run_async`) — the registry gates conformance tests, not spawning,
    but a bridge test (`build_source_set_wires_every_transcript_bearing_source_plus_the_hook_router`)
@@ -32,7 +33,7 @@ decoding" / "Adding a new agent CLI") first, then:
    layout + add-a-CLI steps are in `crates/pixtuoid-core/tests/CLAUDE.md`.
 7. Add a row to `site/src/sources.json` (the tool × OS matrix + README glimpse);
    `tests/supported_sources_manifest.rs` pins its `supported` set to
-   `REGISTERED_SOURCES`, so a new source **fails that test** until the row exists.
+   `registered_source_names()`, so a new source **fails that test** until the row exists.
    Then `just gen-readme` to sync the README's Supported Tools section.
 8. Add the per-source badge hue: a `Theme::source` (`SourceColors`) field in EVERY
    theme file + a `match` arm in `tui/widgets/dashboard.rs::dashboard_line`

@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use pixtuoid_core::source::REGISTERED_SOURCES;
+use pixtuoid_core::source::registry;
 
 use crate::config;
 use crate::install::{
@@ -174,14 +174,14 @@ pub struct SourceStatus {
 /// (the CLI surface takes arbitrary input; `config::save_source_connected`
 /// needs `&'static str`). Mirrors how the panel only ever feeds registry ids.
 pub fn registered_id(id: &str) -> Result<&'static str> {
-    REGISTERED_SOURCES
-        .iter()
-        .copied()
+    registry::registered_source_names()
         .find(|s| *s == id)
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "unknown source '{id}' (known: {})",
-                REGISTERED_SOURCES.join(", ")
+                registry::registered_source_names()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
         })
 }
@@ -310,16 +310,14 @@ pub enum Action {
 /// registered source's action. The declarative "connected set = exactly these"
 /// semantics the Raycast checkbox-form / `sources set` needs: a source in
 /// `desired` but not `current` → Connect; in `current` but not `desired` →
-/// Disconnect; otherwise NoOp. Ids outside `REGISTERED_SOURCES` are ignored
+/// Disconnect; otherwise NoOp. Ids outside the source registry are ignored
 /// here (the I/O wrapper validates them up front so an unknown id is a loud
 /// error, not a silent drop).
 pub(crate) fn plan_reconcile(
     current: &HashSet<String>,
     desired: &HashSet<String>,
 ) -> Vec<(&'static str, Action)> {
-    REGISTERED_SOURCES
-        .iter()
-        .copied()
+    registry::registered_source_names()
         .map(|sid| {
             let want = desired.contains(sid);
             let have = current.contains(sid);
@@ -627,9 +625,7 @@ pub fn status(cfg: &Path, log: &str) -> Vec<SourceStatus> {
 /// Which agent CLIs are installed on this machine (target-bearing + probed present)
 /// — the "offer to connect these" set for first-run onboarding.
 pub fn detect() -> Vec<&'static str> {
-    REGISTERED_SOURCES
-        .iter()
-        .copied()
+    registry::registered_source_names()
         .filter(|sid| by_source(sid).is_some_and(is_present))
         .collect()
 }

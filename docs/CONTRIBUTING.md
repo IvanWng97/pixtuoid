@@ -225,8 +225,9 @@ you:
    non-empty by `every_descriptor_has_a_verified_version`) and `version_probe`
    (the `<cli> --version` argv for `pixtuoid doctor`, or `None`). Lifecycle
    policy derives from the flags; you do **not** edit the reducer.
-5. **Add the name to `source::REGISTERED_SOURCES`** — a bridge test pins
-   table↔list equality, and the conformance suite then REQUIRES a fixture.
+5. **The descriptor's `name` field IS the roster** — `registered_source_names()`
+   projects `REGISTRY` (uniqueness pinned by `registered_source_names_are_unique`),
+   and the conformance suite then REQUIRES a fixture for it.
 6. **Drop a sanitized real-capture fixture** under
    `crates/pixtuoid-core/tests/sources/fixtures/<name>/<scenario>/`
    (transcript + hook payloads as applicable — see the fixtures README for the
@@ -249,7 +250,7 @@ you:
    single source of truth for the README "Supported Tools" glimpse AND the
    site's full tool × OS support matrix. Set `status`, `featured` (shown in the
    README glimpse), and per-OS `platforms`; then `just gen-readme` to regenerate
-   the README. The `supported` set is pinned to `REGISTERED_SOURCES` by
+   the README. The `supported` set is pinned to `registered_source_names()` by
    `crates/pixtuoid-core/tests/supported_sources_manifest.rs`, so a newly
    registered source FAILS that test until its manifest row exists.
 10. **Add the per-source badge hue** — a new field on `SourceColors` in

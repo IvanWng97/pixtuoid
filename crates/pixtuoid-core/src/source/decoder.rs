@@ -1320,7 +1320,7 @@ mod tests {
     // residual (#272) is a per-decoder BYPASS — a display minted from raw wire
     // content without `ellipsize` (3 hook-only decoders, copilot twice). Before
     // this, only CC had a firing cap test; the other 9 were unpinned. The
-    // completeness assert vs REGISTERED_SOURCES-minus-daemons makes a NEW source
+    // completeness assert vs the registry-minus-daemons makes a NEW source
     // fail until it gets a cap row (#612 FIND-36).
     #[test]
     fn every_agent_decoder_caps_its_tool_display() {
@@ -1500,7 +1500,7 @@ mod tests {
         // Completeness (anti-drift teeth): the table must cover EXACTLY the
         // non-daemon registered sources — a new one reds until it gets a row.
         let covered: HashSet<&str> = table.iter().map(|(n, _)| *n).collect();
-        for &s in crate::source::REGISTERED_SOURCES {
+        for s in crate::source::registry::registered_source_names() {
             let daemon = registry::descriptor_for(s).is_some_and(|d| d.is_daemon());
             if !daemon {
                 assert!(covered.contains(s), "add {s} to the decoder cap table");

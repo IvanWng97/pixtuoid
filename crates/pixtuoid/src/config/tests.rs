@@ -998,22 +998,22 @@ fn resolve_connected_absent_sources_table_connects_nothing() {
 }
 
 // A newly-added source must self-gate on first boot: resolve_connected
-// iterates the registry, so every REGISTERED_SOURCES entry is decided
+// iterates the registry, so every registered source is decided
 // (here, all explicitly connected). A source added to the registry without
 // a config flag can't silently fall through — and a flag for an
 // UNREGISTERED id never leaks into the set.
 #[test]
 fn resolve_connected_covers_every_registered_source() {
     let mut cfg = AppConfig::default();
-    for src in pixtuoid_core::source::REGISTERED_SOURCES {
-        cfg.sources.insert((*src).into(), true);
+    for src in pixtuoid_core::source::registry::registered_source_names() {
+        cfg.sources.insert(src.into(), true);
     }
     cfg.sources.insert("not-a-registered-source".into(), true);
     let set = resolve_connected(&cfg);
-    let expected: std::collections::HashSet<String> = pixtuoid_core::source::REGISTERED_SOURCES
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let expected: std::collections::HashSet<String> =
+        pixtuoid_core::source::registry::registered_source_names()
+            .map(|s| s.to_string())
+            .collect();
     assert_eq!(
         set, expected,
         "resolve_connected must decide every registered source and only those"
