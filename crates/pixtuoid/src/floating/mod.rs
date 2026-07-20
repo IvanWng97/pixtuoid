@@ -1,10 +1,9 @@
 //! `pixtuoid floating` — the frameless, always-on-top desktop window that renders the
 //! live office (every agent across every connected CLI) without opening the TUI.
 //!
-//! A binary-only front-end on the shared engine: it runs the SAME
-//! `source → reducer → SceneState` pipeline the TUI uses (reusing
-//! `runtime::driver::build_source_set` — the ONE source-construction site — and
-//! `reducer_task`), but presents each frame as a full-resolution
+//! A binary-only front-end on the shared engine: it boots the SAME
+//! `runtime::pipeline::spawn_pipeline` spine the TUI uses (source → reducer →
+//! SceneState; #714), but presents each frame as a full-resolution
 //! [`offscreen::OfficeRenderer`] `RgbBuffer` blitted into a `winit` +
 //! `softbuffer` window instead of half-block terminal cells. `pixtuoid-core` stays
 //! window-free (invariant #1) — all windowing lives here.
@@ -78,8 +77,8 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     // (window::sync_floor_caps) agree — reusing the TUI's footer-subtracting,
     // scale-ignorant boot_capacities_for over-seeds and can strand a boot-race agent.
     let boot_caps = offscreen::boot_capacities_for_window(floating_cfg.width, floating_cfg.height);
-    // `_source_handles` must stay BOUND until `run` returns — dropping it
-    // drops the source tasks.
+    // The source tasks live on `rt` (kept alive to the end of `run`);
+    // `_source_handles` is an inert anchor (see Pipeline's doc).
     let crate::runtime::pipeline::Pipeline {
         scene_rx,
         health_rx,

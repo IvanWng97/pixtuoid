@@ -195,9 +195,10 @@ src/
 │                       floating::run. boot_caps / socket_path / ConnectedSources stay CALLER-side (the
 │                       documented divergences: TUI measures the terminal, floating its window pixels;
 │                       both need socket/connected after boot). Needs an ambient tokio context
-│                       (run_async's block_on / floating's rt.enter). `_source_handles` must stay BOUND
-│                       at the call site — dropping the Pipeline kills the source tasks.
-│                       codecov-excluded like driver.rs)
+│                       (run_async's block_on / floating's rt.enter) — the RUNTIME is what keeps the
+│                       spawned tasks alive (a dropped tokio JoinHandle DETACHES, never stops);
+│                       `_source_handles` is an inert anchor for future abort/join.
+│                       codecov-excluded + mutants-excluded like driver.rs)
 ├── init_pack.rs        extracts the embedded skeleton pack to a target dir for `init-pack`
 ├── validate.rs         the `validate-pack` presenter; pack.name/version are UNTRUSTED TOML strings (can
 │                       embed ESC/OSC via \u escapes), so every printed line routes through

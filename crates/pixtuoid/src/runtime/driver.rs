@@ -90,8 +90,8 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     };
     // The shared spine (#714): presence channel + exit watch, the source set,
     // event/scene/health channels, floor-caps atomics, reducer + source task
-    // spawns — ONE authority with `floating::run`. `_source_handles` must stay
-    // BOUND to the end of this fn (dropping it drops the source tasks).
+    // spawns — ONE authority with `floating::run`. The tasks live on this
+    // fn's runtime; `_source_handles` is an inert anchor (see Pipeline's doc).
     let super::pipeline::Pipeline {
         scene_rx,
         health_rx,

@@ -38,10 +38,12 @@ use tokio::task::JoinHandle;
 use super::driver::{build_source_set, reducer_task};
 use super::ConnectedSources;
 
-/// The live pipeline's caller-facing handles. `_source_handles` keeps the
-/// source tasks alive — destructure it into a `_source_handles` BINDING held
-/// for the painter's whole scope (both callers do), never into `..`/`_`,
-/// which would drop the tasks at the call site.
+/// The live pipeline's caller-facing handles. The spawned source tasks are
+/// kept alive by the caller's tokio RUNTIME (floating's `rt`, `run_async`'s
+/// `block_on`), not by `_source_handles` — dropping a tokio `JoinHandle`
+/// DETACHES the task, it doesn't stop it (this fn itself discards the
+/// reducer's handle). The field is a harmless anchor that also lets a future
+/// caller `.abort()`/join the sources.
 pub(crate) struct Pipeline {
     pub(crate) scene_rx: watch::Receiver<Arc<SceneState>>,
     pub(crate) health_rx: watch::Receiver<Vec<SourceDeath>>,
