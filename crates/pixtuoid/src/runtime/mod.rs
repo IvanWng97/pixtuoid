@@ -5,6 +5,7 @@
 //! (issue #103).
 
 pub(crate) mod driver;
+pub(crate) mod pipeline;
 
 pub use driver::run;
 

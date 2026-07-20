@@ -25,13 +25,12 @@ use pixtuoid_core::source::daemon::{self, PresenceMsg};
 use pixtuoid_core::source::grok::GrokSource;
 use pixtuoid_core::source::hook::HookRouter;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
-use pixtuoid_core::source::manager::SourceManager;
 use pixtuoid_core::source::omp::OmpSource;
 use pixtuoid_core::source::registry;
 use pixtuoid_core::source::DynSource;
 use pixtuoid_core::state::MAX_FLOORS;
-use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver, Transport};
-use tokio::sync::{mpsc, watch};
+use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver};
+use tokio::sync::watch;
 
 use super::{
     boot_capacities_for, cap_boot_capacities, summarize, ConnectedSources, RunConfig, SceneRx,
@@ -76,31 +75,9 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // The live, shared connected-source set: the reducer-task gate reads it, the
     // Sources panel mutates it. Seeded from the resolved boot flags.
     let connected = ConnectedSources::new(connected);
-    // The runtime source set, built in ONE place (`build_source_set`): the
-    // `HookRouter` (the shared-socket owner — every source's hooks ride it) plus
-    // the transcript-bearing watchers (CC / Antigravity / Codex / Copilot / omp).
-    // The hook-only sources (Reasonix / CodeWhale / opencode / Cursor / Hermes) and the daemon
-    // (OpenClaw) have no watchable JSONL — their payloads ride the router's socket,
-    // attributed per-payload by `_pixtuoid_source` — so they have no entry here.
     // Resolve the bound socket (Unix) / pipe (Windows) the HookRouter binds; the
     // Sources panel shows the same path (explicit --socket override, else default).
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
-    // Daemon-presence SIDE channel (invariant #2: NOT the AgentEvent channel). The
-    // HookRouter demux decodes daemon payloads into source-tagged presence deltas
-    // sent here; the shared exit watch drains gateway-pid deaths into the SAME
-    // channel as `(source, PidExited)`; the reducer task merges both into
-    // SceneState::daemons.
-    let (presence_tx, presence_rx) = tokio::sync::mpsc::unbounded_channel::<PresenceMsg>();
-    let presence_exit_watch = daemon::spawn_presence_exit_watch(presence_tx.clone());
-    let sources = build_source_set(
-        socket_path.clone(),
-        projects_root,
-        codex_sessions_root,
-        Some(presence_tx),
-    );
-
-    let (tx, rx) =
-        mpsc::channel::<(Transport, AgentEvent)>(pixtuoid_core::source::EVENT_CHANNEL_CAPACITY);
     let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {
         // Headless: no terminal to measure. Honor the cap as-is, else the fallback.
         (Some(cap), true) => [cap; MAX_FLOORS],
@@ -111,31 +88,22 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         // an over-seed strands agents on non-existent desks until the terminal grows.
         (cap, false) => cap_boot_capacities(compute_boot_capacities(), cap),
     };
-    let (scene_tx, scene_rx) = watch::channel(Arc::new(SceneState::new(boot_caps)));
-
-    let floor_caps: Arc<[AtomicUsize; MAX_FLOORS]> =
-        Arc::new(std::array::from_fn(|i| AtomicUsize::new(boot_caps[i])));
-
-    tokio::spawn(reducer_task(
-        rx,
-        scene_tx,
-        Arc::clone(&floor_caps),
+    // The shared spine (#714): presence channel + exit watch, the source set,
+    // event/scene/health channels, floor-caps atomics, reducer + source task
+    // spawns — ONE authority with `floating::run`. The tasks live on this
+    // fn's runtime; `_source_handles` is an inert anchor (see Pipeline's doc).
+    let super::pipeline::Pipeline {
+        scene_rx,
+        health_rx,
+        floor_caps,
+        _source_handles,
+    } = super::pipeline::spawn_pipeline(
+        socket_path.clone(),
+        projects_root,
+        codex_sessions_root,
         connected.clone(),
-        presence_rx,
-        presence_exit_watch,
-    ));
-
-    // Source-health side channel (#157): a fatal source exit must reach the
-    // TUI footer — in default TUI mode tracing only reaches the log file, and
-    // the office silently freezing is the worst failure class. Deliberately
-    // NOT an AgentEvent: the one event channel carries agent activity (its
-    // Transport tag drives hook-wins dedup), not source lifecycle.
-    let (health_tx, health_rx) = tokio::sync::watch::channel(Vec::new());
-    let mut manager = SourceManager::new();
-    for src in sources {
-        manager = manager.with_source(src);
-    }
-    let _source_handles = manager.spawn_with_health(tx, health_tx);
+        boot_caps,
+    );
 
     if headless {
         headless_loop(scene_rx, health_rx).await
@@ -431,6 +399,7 @@ fn compute_boot_capacities() -> [usize; MAX_FLOORS] {
 mod tests {
     use super::*;
     use pixtuoid_core::source::manager::SourceDeath;
+    use pixtuoid_core::Transport;
 
     type HealthPair = (
         watch::Sender<Vec<SourceDeath>>,

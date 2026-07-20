@@ -6,7 +6,7 @@
 test_tool = "nextest"
 
 exclude_globs = [
-    # Untestable painter / async + winit glue — these five are the painter files
+    # Untestable painter / async + winit glue — these six are the painter files
     # codecov.yml ALSO ignores; no headless test can kill their mutants, so every
     # one "survives" = noise. The two ignore lists OVERLAP, not subset: codecov
     # also ignores crash/logging/sources_cli (pure helpers stay unit-tested —
@@ -15,6 +15,7 @@ exclude_globs = [
     "crates/pixtuoid/src/main.rs",
     "crates/pixtuoid/src/tui/mod.rs",
     "crates/pixtuoid/src/runtime/driver.rs",
+    "crates/pixtuoid/src/runtime/pipeline.rs",
     "crates/pixtuoid/src/floating/mod.rs",
     "crates/pixtuoid/src/floating/window.rs",
     # Timing / FFI liveness probes: their tests assert wall-clock + OS behavior and

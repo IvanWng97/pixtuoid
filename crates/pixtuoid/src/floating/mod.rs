@@ -1,10 +1,9 @@
 //! `pixtuoid floating` — the frameless, always-on-top desktop window that renders the
 //! live office (every agent across every connected CLI) without opening the TUI.
 //!
-//! A binary-only front-end on the shared engine: it runs the SAME
-//! `source → reducer → SceneState` pipeline the TUI uses (reusing
-//! `runtime::driver::build_source_set` — the ONE source-construction site — and
-//! `reducer_task`), but presents each frame as a full-resolution
+//! A binary-only front-end on the shared engine: it boots the SAME
+//! `runtime::pipeline::spawn_pipeline` spine the TUI uses (source → reducer →
+//! SceneState; #714), but presents each frame as a full-resolution
 //! [`offscreen::OfficeRenderer`] `RgbBuffer` blitted into a `winit` +
 //! `softbuffer` window instead of half-block terminal cells. `pixtuoid-core` stays
 //! window-free (invariant #1) — all windowing lives here.
@@ -14,20 +13,11 @@ mod input;
 pub mod offscreen;
 mod window;
 
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
-use pixtuoid_core::source::daemon;
-use pixtuoid_core::source::manager::SourceManager;
-use pixtuoid_core::state::{SceneState, MAX_FLOORS};
-use pixtuoid_core::{AgentEvent, Transport};
-use tokio::sync::{mpsc, watch};
 use winit::event_loop::EventLoop;
 
 use crate::config;
-use crate::runtime::driver::{build_source_set, reducer_task};
 use crate::runtime::{ConnectedSources, RunConfig};
 use window::{FloatingApp, FloatingEvent};
 
@@ -76,43 +66,31 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     // (presence watch, source manager) have a runtime context. We never `block_on` here.
     let _guard = rt.enter();
 
-    // --- the live pipeline (mirrors runtime::driver::run_async; build_source_set is the
-    //     shared ONE source-construction site, reused not duplicated) ---
+    // --- the live pipeline: the SAME runtime::pipeline spine the TUI boots
+    //     (#714 — was a hand-mirrored copy of run_async's wiring). The
+    //     rt.enter() guard above provides the ambient runtime its spawns land
+    //     on; only the genuinely floating-specific pieces stay here. ---
     let connected = ConnectedSources::new(connected);
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
-    let (presence_tx, presence_rx) = mpsc::unbounded_channel();
-    let presence_exit_watch = daemon::spawn_presence_exit_watch(presence_tx.clone());
-    let sources = build_source_set(
-        socket_path,
-        projects_root,
-        codex_sessions_root,
-        Some(presence_tx),
-    );
-    let (tx, rx) =
-        mpsc::channel::<(Transport, AgentEvent)>(pixtuoid_core::source::EVENT_CHANNEL_CAPACITY);
     // Boot capacity from the WINDOW at the SAME geometry the window renders (office
     // buffer = window / office_scale, no footer) so the boot seed and the first redraw
     // (window::sync_floor_caps) agree — reusing the TUI's footer-subtracting,
     // scale-ignorant boot_capacities_for over-seeds and can strand a boot-race agent.
     let boot_caps = offscreen::boot_capacities_for_window(floating_cfg.width, floating_cfg.height);
-    let (scene_tx, scene_rx) = watch::channel(Arc::new(SceneState::new(boot_caps)));
-    let floor_caps: Arc<[AtomicUsize; MAX_FLOORS]> =
-        Arc::new(std::array::from_fn(|i| AtomicUsize::new(boot_caps[i])));
-    rt.spawn(reducer_task(
-        rx,
-        scene_tx,
-        Arc::clone(&floor_caps),
-        connected.clone(),
-        presence_rx,
-        presence_exit_watch,
-    ));
-    let (health_tx, health_rx) = watch::channel(Vec::new());
-    let mut manager = SourceManager::new();
-    for src in sources {
-        manager = manager.with_source(src);
-    }
-    // Held until `run` returns — dropping the handles would drop the source tasks.
-    let _source_handles = manager.spawn_with_health(tx, health_tx);
+    // The source tasks live on `rt` (kept alive to the end of `run`);
+    // `_source_handles` is an inert anchor (see Pipeline's doc).
+    let crate::runtime::pipeline::Pipeline {
+        scene_rx,
+        health_rx,
+        floor_caps,
+        _source_handles,
+    } = crate::runtime::pipeline::spawn_pipeline(
+        socket_path,
+        projects_root,
+        codex_sessions_root,
+        connected,
+        boot_caps,
+    );
 
     // --- the window event loop (main thread) ---
     let mut builder = EventLoop::<FloatingEvent>::with_user_event();
