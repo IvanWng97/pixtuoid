@@ -21,8 +21,8 @@ use crate::{due_navigations, SnapshotArgs, CELL_H, CELL_W};
 /// Also runs a BFS from the door threshold and prints how many walkable
 /// pixels are reachable vs total — if the two numbers differ, the mask
 /// has an isolated region and A* will fall back to a straight line when
-/// crossing into it. That's the root cause of any remaining "闪现"
-/// (character teleport) the user sees.
+/// crossing into it. That's the root cause of any remaining
+/// character teleport the user sees.
 pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> Result<()> {
     use pixtuoid_scene::layout::SceneLayout;
 
@@ -103,7 +103,7 @@ pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> 
     // RgbBuffer in draw_scene) already visualizes the mask + approach/seat
     // markers + routes at pixel resolution. A crude full-cell wash here would
     // just overwrite it. The text report above is the unique value this pass
-    // adds (the BFS isolated-region "闪现" detector), so keep that and stop.
+    // adds (the BFS isolated-region teleport detector), so keep that and stop.
     Ok(())
 }
 

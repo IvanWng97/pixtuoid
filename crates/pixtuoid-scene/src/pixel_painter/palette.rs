@@ -249,8 +249,8 @@ const OUTFITS: &[Outfit; 16] = &[
     },
 ];
 
-/// 8 hair colors — was 5. Added silver/grey for older-coded agents,
-/// ginger / strawberry blonde / jet black for more silhouette variety.
+/// 8 hair colors: silver/grey for older-coded agents, ginger /
+/// strawberry blonde / jet black for silhouette variety.
 const HAIR_PRESETS: &[Rgb] = &[
     Rgb {
         r: 0x14,

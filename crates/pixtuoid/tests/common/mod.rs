@@ -11,8 +11,7 @@
 macro_rules! make_draw_ctx {
     ($name:ident $(, $key:ident : $val:expr)* ) => {
         let mut _buf = pixtuoid_core::sprite::RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-        // The per-floor sim/paint stores, grouped (was six separate locals):
-        // DrawCtx now borrows them as ONE `store` field.
+        // The per-floor sim/paint stores, borrowed by DrawCtx as ONE `store` field.
         let mut _store = pixtuoid_scene::floor::FloorCtx::new();
         let mut _chitchat_state = std::collections::HashMap::new();
 
