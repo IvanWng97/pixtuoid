@@ -263,7 +263,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     let buf_w = scene_rect.width;
     let buf_h = scene_rect.height.saturating_mul(2);
-    ctx.buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
+    ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
     // Always compute maximum layout capacity — floor overflow handles the rest.
     // The shared memoized prologue (FloorCtx::frame_layout): compute + the router
     // corridor re-point, cached on (w, h, seed) so a steady frame skips the

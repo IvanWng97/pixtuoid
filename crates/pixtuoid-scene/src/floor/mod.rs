@@ -386,7 +386,7 @@ pub fn render_floor(
         floor_pet,
         debug_walkable,
     } = inputs;
-    buf.ensure_size(size.w, size.h, theme.surface.bg_fallback);
+    buf.resize_fill(size.w, size.h, theme.surface.bg_fallback);
     let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
     let result = render_to_rgb_buffer(&mut PixelCtx {
         // Reborrow: `frame_epilogue` uses `fctx` after this render.

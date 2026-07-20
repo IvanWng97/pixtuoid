@@ -165,12 +165,6 @@ impl RgbBuffer {
         let i = (y as usize) * w + (x as usize);
         self.0.as_mut_slice()[i] = rgb;
     }
-
-    /// Resize and fill in one shot, reusing the existing allocation when
-    /// possible. Cheaper than `RgbBuffer::filled(...)` once per frame.
-    pub fn ensure_size(&mut self, width: u16, height: u16, fill: Rgb) {
-        self.0.resize_fill(width, height, fill)
-    }
 }
 
 #[cfg(test)]
