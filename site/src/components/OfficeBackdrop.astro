@@ -1178,29 +1178,35 @@ import { asset, DIM_RESTING } from '../consts';
       });
     });
     // Background PLAYBACK (owner decision, #707): the office is a radio
-    // first — switching tabs freezes the PICTURE but keeps the music
-    // going. The rAF loop stops with the tab, so a low-rate interval
-    // keeps feeding audioTick (gain ramps, schedulers, the 10-min song
-    // switches); Chrome exempts audibly-playing tabs from intensive
-    // timer throttling, and the driver's dt clamp absorbs the coarser
-    // cadence. The explicit PAUSE button still silences everything —
-    // that intent is the user's, unchanged.
-    let bgAudioTimer = 0;
-    function stopBgAudio() {
-      if (bgAudioTimer) clearInterval(bgAudioTimer);
-      bgAudioTimer = 0;
+    // first — switching tabs must not stop the music. The SYNC MODEL:
+    // audio and picture already share one pause-shifted wall clock and
+    // one code path (frame() = paint → audioTick), so the background
+    // mode is simply that SAME full tick at 1 Hz instead of 60 — the sim
+    // keeps advancing (script beats fire on time, busy-ness stays live,
+    // the cue tracker sees real edges instead of a return-burst volley),
+    // and coming back to the tab is seamless by construction: the next
+    // rAF frame reads the same clock the background ticks did. Chrome
+    // exempts audibly-playing tabs from intensive timer throttling; the
+    // driver's dt clamp absorbs any coarser cadence. The explicit PAUSE
+    // button still silences everything — that intent is the user's.
+    let bgTimer = 0;
+    function stopBgTicks() {
+      if (bgTimer) clearInterval(bgTimer);
+      bgTimer = 0;
     }
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
         stop();
-        if (audioCtx && audioPlaying && !paused && !bgAudioTimer) {
-          bgAudioTimer = setInterval(function () {
+        if (audioCtx && audioPlaying && !paused && !bgTimer) {
+          bgTimer = setInterval(function () {
             if (paused || !audioPlaying) return;
-            audioTick(Date.now() - pauseOffset);
-          }, 500);
+            const nowMs = Date.now() - pauseOffset;
+            paint(nowMs); // the full frame body at 1 Hz: sim + blit…
+            audioTick(nowMs); // …then sound, same order as frame()
+          }, 1000);
         }
       } else {
-        stopBgAudio();
+        stopBgTicks();
         start();
       }
       // Paused stays silent whatever the visibility; otherwise the graph
