@@ -124,20 +124,20 @@ const badges = sources.filter((s) => s.status === 'supported');
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
-    /* 2px of the old margin moved INSIDE the element as padding-top (net
-       geometry identical): with padding 0 the first row's 1px chip border
-       sat on the element's exact top paint edge, and iOS Safari
-       rasterizing at a fractional offset (composited or not — the rise
-       animation's fill overrides the translateZ below at steady state)
-       shaved that device-pixel row — the row-1-only "top of the badges is
-       clipped ~1px" phone report, confirmed on-device. Rows 2+ are
-       interior and were never hit; headless Chromium doesn't reproduce it
-       (different rasterizer). The padding keeps the border off the paint
-       boundary under every rasterization variant. The calc compensation is
-       LOAD-BEARING, not cosmetic: padding-only would grow the page ~2px
-       and red the ≤7.9vh scroll-budget e2e pin (~1px headroom). */
-    margin: calc(1.15rem - 2px) 0 0;
-    padding: 2px 0 0;
+    /* 2px of margin moved INSIDE the element as padding on BOTH the top AND
+       bottom (net geometry identical — the margin compensates on both ends):
+       with no padding an edge row's 1px chip border sat on the element's own
+       paint edge, and Safari rasterizing at a fractional device-pixel offset
+       shaved that row. A TOP-only pad (the first cut) just moved the shave to
+       the BOTTOM edge on a differently-scaled display (desktop Safari clipped
+       the last row) — the border must be held off BOTH raster edges, so the
+       padding + the compensating negative margin are symmetric. The calc/
+       negative-margin compensation is LOAD-BEARING, not cosmetic: padding
+       without it would grow the page ~4px and red the ≤7.9vh scroll-budget
+       e2e pin (~1px headroom). Headless Chromium doesn't reproduce the shave
+       (different rasterizer), so this is device-verified, not e2e-gated. */
+    margin: calc(1.15rem - 2px) 0 -2px;
+    padding: 2px 0;
     list-style: none;
     /* Permanent compositing layer: Safari promotes/demotes elements around
        hover transitions, and the raster snap on that boundary can read as a
