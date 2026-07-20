@@ -93,19 +93,34 @@ fn fft(re: &mut [f32], im: &mut [f32], inverse: bool) {
     }
 }
 
-/// Brickwall band-pass via FFT bin zeroing (the audition prototype's filter).
-/// Construction-time only — a linear-phase FIR would be overkill for
-/// pre-rendered assets. Keeps `buf.len()` (internally pads to a power of 2).
-pub fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
+/// Zero-pad `buf` to a power-of-two length, forward-FFT it, and return
+/// `(re, im, n, hz_per_bin)`. THE real-signal spectrum preamble shared by
+/// `bandpass`/`centroid_hz`/`band_energy_share` (byte-identical at all three).
+fn forward_spectrum(buf: &[f32]) -> (Vec<f32>, Vec<f32>, usize, f32) {
     let n = buf.len().next_power_of_two().max(2);
     let mut re = vec![0.0f32; n];
     re[..buf.len()].copy_from_slice(buf);
     let mut im = vec![0.0f32; n];
     fft(&mut re, &mut im, false);
     let hz_per_bin = SAMPLE_RATE as f32 / n as f32;
+    (re, im, n, hz_per_bin)
+}
+
+/// Mirror-aware frequency of FFT bin `k` in an `n`-point spectrum: bins above
+/// `n/2` are NEGATIVE frequencies, folded back to `n − k`. The load-bearing
+/// subtlety shared by `bandpass` + `shaped_noise_loop` — a copy that drops the
+/// fold would band-pass the wrong half of the spectrum.
+fn bin_freq(k: usize, n: usize, hz_per_bin: f32) -> f32 {
+    (if k <= n / 2 { k } else { n - k }) as f32 * hz_per_bin
+}
+
+/// Brickwall band-pass via FFT bin zeroing (the audition prototype's filter).
+/// Construction-time only — a linear-phase FIR would be overkill for
+/// pre-rendered assets. Keeps `buf.len()` (internally pads to a power of 2).
+pub fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
+    let (mut re, mut im, n, hz_per_bin) = forward_spectrum(buf);
     for k in 0..n {
-        // mirror-aware bin frequency (bins above n/2 are negative freqs)
-        let f = if k <= n / 2 { k } else { n - k } as f32 * hz_per_bin;
+        let f = bin_freq(k, n, hz_per_bin);
         if f < lo_hz || f > hi_hz {
             re[k] = 0.0;
             im[k] = 0.0;
@@ -175,7 +190,7 @@ pub fn shaped_noise_loop(
         let bins = ((hi - lo) / hz_per_bin).max(1.0);
         let g = (pct / 100.0 / bins).sqrt();
         for (k, gk) in gain.iter_mut().enumerate() {
-            let f = if k <= n_pow2 / 2 { k } else { n_pow2 - k } as f32 * hz_per_bin;
+            let f = bin_freq(k, n_pow2, hz_per_bin);
             if f >= lo && f < hi {
                 *gk = g;
             }
@@ -225,12 +240,7 @@ fn moving_average(x: &[f32], window: usize) -> Vec<f32> {
 /// composition test reads it CROSS-CRATE (a dependency's test-cfg items are
 /// invisible), and the web driver's tests will too.
 pub fn centroid_hz(buf: &[f32]) -> f32 {
-    let n = buf.len().next_power_of_two().max(2);
-    let mut re = vec![0.0f32; n];
-    re[..buf.len()].copy_from_slice(buf);
-    let mut im = vec![0.0f32; n];
-    fft(&mut re, &mut im, false);
-    let hz_per_bin = SAMPLE_RATE as f32 / n as f32;
+    let (re, im, n, hz_per_bin) = forward_spectrum(buf);
     let (mut num, mut den) = (0.0f64, 0.0f64);
     for k in 0..=n / 2 {
         let p = (re[k] * re[k] + im[k] * im[k]) as f64;
@@ -244,12 +254,7 @@ pub fn centroid_hz(buf: &[f32]) -> f32 {
 /// energy metric of the Phase 0 analyzers, for the rain-envelope pin.
 #[cfg(test)]
 pub fn band_energy_share(buf: &[f32], lo_hz: f32, hi_hz: f32) -> f32 {
-    let n = buf.len().next_power_of_two().max(2);
-    let mut re = vec![0.0f32; n];
-    re[..buf.len()].copy_from_slice(buf);
-    let mut im = vec![0.0f32; n];
-    fft(&mut re, &mut im, false);
-    let hz_per_bin = SAMPLE_RATE as f32 / n as f32;
+    let (re, im, n, hz_per_bin) = forward_spectrum(buf);
     let (mut band, mut total) = (0.0f64, 0.0f64);
     for k in 1..=n / 2 {
         let p = (re[k] * re[k] + im[k] * im[k]) as f64;
