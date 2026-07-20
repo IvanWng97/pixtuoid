@@ -662,6 +662,39 @@ fn swing_delay(s: f32, eighth_s: f32) -> f32 {
     (s - 0.5) * eighth_s
 }
 
+/// Place ONE humanized kick at bar-relative beat `at_beat` — applying the drag,
+/// the off-beat swing, the jitter, and a non-negative clamp — pushing it to `out`
+/// and its time to `kicks`. Shared by [`day_drums`]/[`night_drums`], which differ
+/// only in their `drag` const and beat/gain set. The RNG DRAW ORDER is LOAD-BEARING
+/// (frozen-seed fidelity — bank.rs "don't reorder the synth calls"): the jitter
+/// draw FIRST, then the gain-wobble draw, exactly as the inlined loops did.
+#[allow(clippy::too_many_arguments)]
+fn push_kick(
+    out: &mut Vec<(f32, DrumKind, f32)>,
+    kicks: &mut Vec<f32>,
+    b0: f32,
+    at_beat: f32,
+    gain: f32,
+    drag: f32,
+    wobble: f32,
+    beat_s: f32,
+    eighth: f32,
+    rng: &mut NoiseStream,
+) {
+    let mut at = b0 + at_beat * beat_s + drag;
+    if (at_beat * 2.0) % 2.0 != 0.0 {
+        at += swing_delay(SWING_KICK, eighth);
+    }
+    let jit = (rng.unit() - 0.3) * 0.010;
+    let at = (at + jit).max(0.0);
+    out.push((
+        at,
+        DrumKind::Kick,
+        gain * wobble * (0.95 + 0.1 * rng.unit()),
+    ));
+    kicks.push(at);
+}
+
 /// The day kit from a groove template — humanized boom-bap/half-time,
 /// clamped non-negative (a bar-0 jitter can't leave the loop).
 fn day_drums(
@@ -686,18 +719,18 @@ fn day_drums(
             kick_beats.push((3.75, 0.35));
         }
         for (at_beat, gain) in kick_beats {
-            let mut at = b0 + at_beat * beat_s + DRAG_KICK_S;
-            if (at_beat * 2.0) % 2.0 != 0.0 {
-                at += swing_delay(SWING_KICK, eighth);
-            }
-            let jit = (rng.unit() - 0.3) * 0.010;
-            let at = (at + jit).max(0.0);
-            out.push((
-                at,
-                DrumKind::Kick,
-                gain * wobble * (0.95 + 0.1 * rng.unit()),
-            ));
-            kicks.push(at);
+            push_kick(
+                &mut out,
+                &mut kicks,
+                b0,
+                at_beat,
+                gain,
+                DRAG_KICK_S,
+                wobble,
+                beat_s,
+                eighth,
+                rng,
+            );
         }
         let snare_beats: &[f32] = if g.half_time { &[2.0] } else { &[1.0, 3.0] };
         for &sb in snare_beats {
@@ -742,14 +775,18 @@ fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>
         let b0 = bar as f32 * bar_s;
         let wobble = 0.9 + 0.2 * rng.unit();
         for (at_beat, g) in [(0.0f32, 0.6f32), (2.5, 0.4)] {
-            let mut at = b0 + at_beat * beat_s + DRAG_KICK_NIGHT_S;
-            if (at_beat * 2.0) % 2.0 != 0.0 {
-                at += swing_delay(SWING_KICK, eighth);
-            }
-            let jit = (rng.unit() - 0.3) * 0.010;
-            let at = (at + jit).max(0.0);
-            out.push((at, DrumKind::Kick, g * wobble * (0.95 + 0.1 * rng.unit())));
-            kicks.push(at);
+            push_kick(
+                &mut out,
+                &mut kicks,
+                b0,
+                at_beat,
+                g,
+                DRAG_KICK_NIGHT_S,
+                wobble,
+                beat_s,
+                eighth,
+                rng,
+            );
         }
         for e in 0..8 {
             if e % 2 == 0 || chance(rng, 0.45) {
