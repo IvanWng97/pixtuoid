@@ -1074,7 +1074,14 @@ fn enqueue_lounge_pantry_appliances<'a>(
                     .visual
                     .h,
             ),
-            kind: DrawableKind::WaypointCouch { pos: center },
+            // The lounge couch IS a vertical-mirrored meeting sofa (same 20×7
+            // sprite, back facing NORTH toward the windows) — folded into the
+            // MeetingSofa arm rather than a duplicate DrawableKind. Its z-key
+            // stays the Couch furniture row (unchanged above).
+            kind: DrawableKind::MeetingSofa {
+                pos: center,
+                mirrored: true,
+            },
         });
         if let Some(table) = layout.lounge_side_table() {
             drawables.push(Drawable {

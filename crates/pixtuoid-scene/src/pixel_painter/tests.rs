@@ -1244,7 +1244,7 @@ fn back_view_seats_sort_over_their_sitter() {
     // meeting sofa (`sofa.y + 3`) both satisfy it.
     let base: u16 = 40;
     let sitter = (base - 7) + 9; // = base + 2
-    let couch_furniture = base + 3; // WaypointCouch drawable
+    let couch_furniture = base + 3; // lounge couch (MeetingSofa{mirrored:true})
     let back_meeting_sofa = base + 3; // faces_away meeting sofa
     assert!(couch_furniture > sitter, "couch must sort over its sitter");
     assert!(

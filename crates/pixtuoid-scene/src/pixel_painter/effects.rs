@@ -4,7 +4,7 @@ use crate::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::epoch_ms;
-use super::palette::blend_rgb;
+use super::palette::{blend_pixel, blend_rgb};
 use crate::layout::Point;
 use crate::theme::Theme;
 
@@ -26,11 +26,7 @@ pub(super) fn paint_screen_glow(
     let glow_bright = blend_rgb(tint, white, 0.4);
     let scanline = blend_rgb(tint, white, 0.7);
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
-        let px = desk_x + dx;
-        let py = desk_y + dy;
-        if px < buf.width() && py < buf.height() {
-            buf.put(px, py, c);
-        }
+        buf.put_checked(desk_x + dx, desk_y + dy, c);
     };
     for dx in 3..=10 {
         put(buf, dx, 0, frame_lit);
@@ -87,12 +83,7 @@ pub(super) fn paint_sleep_z(
     let z_y = head_anchor.y.saturating_sub(rise + 3);
     const GLYPH: &[(u16, u16)] = &[(0, 0), (1, 0), (1, 1), (0, 2), (1, 2)];
     for (dx, dy) in GLYPH {
-        let px = z_x + dx;
-        let py = z_y + dy;
-        if px < buf.width() && py < buf.height() {
-            let cur = buf.get(px, py);
-            buf.put(px, py, blend_rgb(cur, z_color, alpha));
-        }
+        blend_pixel(buf, z_x + dx, z_y + dy, z_color, alpha);
     }
 }
 
@@ -115,10 +106,7 @@ pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTi
         };
         let px = base.x + wiggle;
         let py = base.y.saturating_sub(rise + 2);
-        if px < buf.width() && py < buf.height() {
-            let cur = buf.get(px, py);
-            buf.put(px, py, blend_rgb(cur, steam, alpha * 0.55));
-        }
+        blend_pixel(buf, px, py, steam, alpha * 0.55);
     }
 }
 
@@ -131,10 +119,7 @@ pub(super) fn paint_walking_dust(
     let dust = theme.effects.walking_dust;
     let foot_y = walker_anchor.y + WALKING_Y_OFF;
     let foot_x = walker_anchor.x + if frame_idx == 0 { 6 } else { 1 };
-    if foot_x < buf.width() && foot_y < buf.height() {
-        let cur = buf.get(foot_x, foot_y);
-        buf.put(foot_x, foot_y, blend_rgb(cur, dust, 0.45));
-    }
+    blend_pixel(buf, foot_x, foot_y, dust, 0.45);
 }
 
 /// Floating heart particles for the "pet the cat" interaction.
@@ -171,12 +156,7 @@ pub(super) fn paint_pet_hearts(buf: &mut RgbBuffer, cat_pos: Point, elapsed_ms: 
         // 2x2 pixel heart
         for dy in 0..2u16 {
             for ddx in 0..2u16 {
-                let px = hx + ddx;
-                let py = hy + dy;
-                if px < buf.width() && py < buf.height() {
-                    let cur = buf.get(px, py);
-                    buf.put(px, py, blend_rgb(cur, heart_color, alpha * 0.8));
-                }
+                blend_pixel(buf, hx + ddx, hy + dy, heart_color, alpha * 0.8);
             }
         }
     }

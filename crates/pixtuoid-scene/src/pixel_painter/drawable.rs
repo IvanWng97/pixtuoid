@@ -19,7 +19,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
@@ -48,6 +48,13 @@ const PANTRY_STEAM_DX_SMALL: i16 = 1;
 // the idle trim paints and the busy can-drop lands; the pixel test derives
 // the same cell from here.
 pub(crate) const VENDING_PICKUP_SLOT: (u16, u16) = (2, 4);
+
+/// Vending machine + printer body sizes — CENTER-anchored on their waypoint
+/// `pos` (origin = `pos − body/2`). The ONE source the painter's origin offset,
+/// its per-cell loop bounds, AND the render tests read, so a body-dim retune
+/// touches one place (each dim was encoded three times: offset, loop, test).
+pub(crate) const VENDING_BODY: Size = Size { w: 4, h: 6 };
+pub(crate) const PRINTER_BODY: Size = Size { w: 5, h: 4 };
 
 pub(super) struct Drawable<'a> {
     pub(super) anchor_y: u16,
@@ -87,10 +94,6 @@ pub(super) enum DrawableKind<'a> {
         sleep_z_seed: Option<u64>,
         waiting_bubble: bool,
         walking_dust_frame: Option<usize>,
-    },
-    /// Lounge couch (mirror_vertical'd — back at bottom, seat at top).
-    WaypointCouch {
-        pos: Point,
     },
     /// Pantry counter (with coffee steam attached so steam rides above
     /// the counter in z-order). `use_large` picks the detailed 32×10
@@ -263,6 +266,26 @@ fn paint_mascot_bubbles(buf: &mut RgbBuffer, pos: Point, frame_h: u16, runs: u32
     }
 }
 
+/// Blit `frame` CENTRED on `pos` (origin = `pos − size/2`, saturating). THE
+/// centering formula the y-sorted drawable arms share — point decor, the
+/// meeting sofa, the pet, and the gateway mascot all park a sprite on a centre
+/// point, and each open-coded this `saturating_sub(w/2)` / `saturating_sub(h/2)`
+/// pair.
+fn blit_centered(frame: &Frame, pos: Point, buf: &mut RgbBuffer) {
+    let px = pos.x.saturating_sub(frame.width() / 2);
+    let py = pos.y.saturating_sub(frame.height() / 2);
+    blit_frame(frame, px, py, buf);
+}
+
+/// Look up `anim_name`, take its FIRST frame, and [`blit_centered`] it on `pos`
+/// — a no-op if the pack lacks the animation. The point-decor idiom (pantry,
+/// snack shelf, plant, pod decor, floor lamp) that repeated verbatim per arm.
+fn blit_centered_first_frame(pack: &Pack, anim_name: &str, pos: Point, buf: &mut RgbBuffer) {
+    if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
+        blit_centered(f, pos, buf);
+    }
+}
+
 /// Dispatch one Drawable's paint. Effects attached to characters paint
 /// inline so they ride along with the character in z-order.
 pub(super) fn paint_drawable(
@@ -342,35 +365,16 @@ pub(super) fn paint_drawable(
                 paint_waiting_bubble(buf, *anchor, theme);
             }
         }
-        DrawableKind::WaypointCouch { pos } => {
-            // Lounge couch reuses the meeting_sofa sprite (20×7) so
-            // both seating areas have the same readable 3-cushion
-            // silhouette. Flipped vertically so the back faces NORTH
-            // (toward the windows the viewer is looking at).
-            if let Some(f) = pack
-                .animation("meeting_sofa")
-                .and_then(|a| a.frames.first())
-            {
-                let cx = pos.x.saturating_sub(f.width() / 2);
-                let cy = pos.y.saturating_sub(f.height() / 2);
-                let flipped = f.mirror_vertical();
-                blit_frame(&flipped, cx, cy, buf);
-            }
-        }
         DrawableKind::WaypointPantry { pos, use_large } => {
             // Pick the big detailed kitchen sprite when the pantry is
             // large enough; fall back to the compact 20×8 layout on
             // narrow terminals.
             let anim_name = if *use_large { "pantry" } else { "pantry_small" };
-            if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
-                let cx = pos.x.saturating_sub(f.width() / 2);
-                let cy = pos.y.saturating_sub(f.height() / 2);
-                // A character behind the counter is occluded by the counter's own
-                // sprite (it y-sorts at the south base → paints over a north-
-                // stander). The mask south-anchors a shallow strip to that base so
-                // the walker parks deep behind the visual; no synthetic cap.
-                blit_frame(f, cx, cy, buf);
-            }
+            // A character behind the counter is occluded by the counter's own
+            // sprite (it y-sorts at the south base → paints over a north-stander).
+            // The mask south-anchors a shallow strip to that base so the walker
+            // parks deep behind the visual; no synthetic cap.
+            blit_centered_first_frame(pack, anim_name, *pos, buf);
             // The coffee machine occupies `PANTRY_COFFEE_COLS_{LARGE,SMALL}` (the
             // shared source of truth, also used by the binary's hit-test). The
             // steam plumes from within that column range — hand-tuned per sprite
@@ -397,13 +401,12 @@ pub(super) fn paint_drawable(
                 .animation("meeting_sofa")
                 .and_then(|a| a.frames.first())
             {
-                let sx = pos.x.saturating_sub(f.width() / 2);
-                let sy = pos.y.saturating_sub(f.height() / 2);
+                // Mirrored (south sofa / lounge couch): back faces NORTH toward
+                // the windows. `mirror_vertical` allocates a flipped frame.
                 if *mirrored {
-                    let flipped = f.mirror_vertical();
-                    blit_frame(&flipped, sx, sy, buf);
+                    blit_centered(&f.mirror_vertical(), *pos, buf);
                 } else {
-                    blit_frame(f, sx, sy, buf);
+                    blit_centered(f, *pos, buf);
                 }
             }
         }
@@ -424,38 +427,20 @@ pub(super) fn paint_drawable(
             paint_kitchen_island(buf, pos.x, pos.y, theme);
         }
         DrawableKind::SnackShelf { pos } => {
-            if let Some(f) = pack.animation("snack_shelf").and_then(|a| a.frames.first()) {
-                let px = pos.x.saturating_sub(f.width() / 2);
-                let py = pos.y.saturating_sub(f.height() / 2);
-                blit_frame(f, px, py, buf);
-            }
+            blit_centered_first_frame(pack, "snack_shelf", *pos, buf);
         }
         DrawableKind::Plant { kind, pos } => {
-            let anim_name = kind.sprite_name();
-            if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
-                let px = pos.x.saturating_sub(f.width() / 2);
-                let py = pos.y.saturating_sub(f.height() / 2);
-                // Occlusion is the sprite's own job: the foliage overhangs north
-                // of the mask's shallow south-anchored pot strip, so a walker
-                // parks deep behind the pot and the leaves (y-sorted over them)
-                // hide their lower body. No synthetic back-cap.
-                blit_frame(f, px, py, buf);
-            }
+            // Occlusion is the sprite's own job: the foliage overhangs north of
+            // the mask's shallow south-anchored pot strip, so a walker parks deep
+            // behind the pot and the leaves (y-sorted over them) hide their lower
+            // body. No synthetic back-cap.
+            blit_centered_first_frame(pack, kind.sprite_name(), *pos, buf);
         }
         DrawableKind::PodDecorItem { kind, pos } => {
-            let anim_name = kind.sprite_name();
-            if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
-                let px = pos.x.saturating_sub(f.width() / 2);
-                let py = pos.y.saturating_sub(f.height() / 2);
-                blit_frame(f, px, py, buf);
-            }
+            blit_centered_first_frame(pack, kind.sprite_name(), *pos, buf);
         }
         DrawableKind::FloorLamp { pos } => {
-            if let Some(f) = pack.animation("floor_lamp").and_then(|a| a.frames.first()) {
-                let px = pos.x.saturating_sub(f.width() / 2);
-                let py = pos.y.saturating_sub(f.height() / 2);
-                blit_frame(f, px, py, buf);
-            }
+            blit_centered_first_frame(pack, "floor_lamp", *pos, buf);
         }
         DrawableKind::Door { pos, frame_idx } => {
             if let Some(f) = pack.animation("door").and_then(|a| frame_at(a, *frame_idx)) {
@@ -496,9 +481,7 @@ pub(super) fn paint_drawable(
             } else {
                 frame.clone()
             };
-            let px = pos.x.saturating_sub(final_frame.width() / 2);
-            let py = pos.y.saturating_sub(final_frame.height() / 2);
-            blit_frame(&final_frame, px, py, buf);
+            blit_centered(&final_frame, *pos, buf);
             if let Some(elapsed) = pet_elapsed_ms {
                 paint_pet_hearts(buf, *pos, *elapsed);
             } else if *anim_name == kind.sleep_anim() {
@@ -518,13 +501,11 @@ pub(super) fn paint_drawable(
             let Some(frame) = frame_at(anim, *frame_idx) else {
                 return;
             };
-            let px = pos.x.saturating_sub(frame.width() / 2);
-            let py = pos.y.saturating_sub(frame.height() / 2);
             // Degraded (#317): blit a sickly-red tinted copy of the frame.
             if *degraded {
-                blit_frame(&super::palette::degraded_frame(frame), px, py, buf);
+                blit_centered(&super::palette::degraded_frame(frame), *pos, buf);
             } else {
-                blit_frame(frame, px, py, buf);
+                blit_centered(frame, *pos, buf);
             }
             // Busy (an in-flight agent run) → a rising activity-bubble stream
             // above the lobster's head. `run_count > 0` IS the busy gate (busy ⟺
@@ -603,9 +584,7 @@ fn paint_desk_coffee(
         return;
     }
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
-        if x < buf.width() && y < buf.height() {
-            buf.put(x, y, c);
-        }
+        buf.put_checked(x, y, c);
     };
     let cx = desk.x + 2;
     let cy = desk.y + 2;
@@ -644,9 +623,7 @@ fn paint_token_stack(
         return;
     }
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
-        if x < buf.width() && y < buf.height() {
-            buf.put(x, y, c);
-        }
+        buf.put_checked(x, y, c);
     };
     // Base row = the desk surface (same row the coffee cup's shadow sits on).
     let base_y = desk.y + STACK_BASE_DY;
@@ -1048,8 +1025,8 @@ mod tests {
             kind: DrawableKind::VendingMachine { pos, busy: false },
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
-        let vx = pos.x - 2;
-        let vy = pos.y - 3;
+        let vx = pos.x - VENDING_BODY.w / 2;
+        let vy = pos.y - VENDING_BODY.h / 2;
         // dy==0 row → panel.
         assert_eq!(
             buf.get(vx, vy),
@@ -1097,8 +1074,8 @@ mod tests {
             kind: DrawableKind::Printer { pos, busy: false },
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
-        let px0 = pos.x - 2;
-        let py0 = pos.y - 2;
+        let px0 = pos.x - PRINTER_BODY.w / 2;
+        let py0 = pos.y - PRINTER_BODY.h / 2;
         // dy==0, dx in 1..=3 → glass.
         assert_eq!(
             buf.get(px0 + 2, py0),
@@ -1129,6 +1106,25 @@ mod tests {
             th.appliance.printer_body,
             "interior = body"
         );
+    }
+
+    #[test]
+    fn blit_centered_lands_top_left_at_pos_minus_half_size() {
+        // The ONE centering seam all decor/sofa/pet/mascot arms now route through.
+        // A 3×2 frame (ODD width) pins the FLOOR division (3/2 == 1, not a rounded
+        // 2): top-left = (pos.x − w/2, pos.y − h/2) = (10−1, 10−1) = (9, 9). Dropping
+        // the `/2`, a `saturating_add`, or a rounding change all move this — none of
+        // which the "two renders differ" sofa/pet tests catch (both shift equally),
+        // and vending/printer center on a SEPARATE cell-loop path.
+        let bg = Rgb { r: 0, g: 0, b: 0 };
+        let marker = Rgb { r: 9, g: 8, b: 7 };
+        let frame = Frame::from_pixels(3, 2, vec![Some(marker); 6]);
+        let mut buf = RgbBuffer::filled(20, 20, bg);
+        blit_centered(&frame, Point { x: 10, y: 10 }, &mut buf);
+        assert_eq!(buf.get(9, 9), marker, "top-left lands at pos − size/2");
+        assert_eq!(buf.get(11, 10), marker, "bottom-right at (9+2, 9+1)");
+        assert_eq!(buf.get(8, 9), bg, "one column west of the frame stays bg");
+        assert_eq!(buf.get(9, 8), bg, "one row north of the frame stays bg");
     }
 
     #[test]

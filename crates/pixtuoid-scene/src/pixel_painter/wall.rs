@@ -12,7 +12,7 @@
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::drawable::{Drawable, DrawableKind};
-use super::palette::blend_over;
+use super::palette::blend_pixel;
 use crate::layout::{crossing_h_rows, stitch_vertical_wall, Layout, WallSegment};
 
 // Room-divider frosted-glass partitions. The E-W (horizontal) wall shows its
@@ -113,8 +113,7 @@ pub(super) fn paint_glass_wall_h(
             } else {
                 (mid, 0.58)
             };
-            let color = blend_over(buf, x, y, g, a);
-            buf.put(x, y, color);
+            blend_pixel(buf, x, y, g, a);
         }
     }
 }
@@ -149,8 +148,7 @@ pub(super) fn paint_glass_wall_v(
             } else {
                 (mid, 0.6)
             };
-            let color = blend_over(buf, x, y, g, a);
-            buf.put(x, y, color);
+            blend_pixel(buf, x, y, g, a);
         }
     }
 }

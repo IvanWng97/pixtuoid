@@ -140,30 +140,52 @@ impl RgbBuffer {
         RgbBuffer(Grid::from_vec(width, height, pixels))
     }
 
-    pub fn get(&self, x: u16, y: u16) -> Rgb {
-        // Unchecked index in release (every caller clips first), but a stray
-        // x >= width would silently read the WRONG row rather than fault — catch
-        // it in debug/tests. (This is a public primitive the v2 PNG/web renderers
-        // are meant to reuse.)
+    /// The row-major flat index — the ONE `y*w + x` formula `get`/`put`/
+    /// `put_checked` share (a second copy is the drift bug the sprite guide warns
+    /// about). No bounds check: callers that can't guarantee `(x, y)` in range
+    /// use [`checked_index`](Self::checked_index) or [`put_checked`](Self::put_checked).
+    #[inline]
+    fn raw_index(&self, x: u16, y: u16) -> usize {
+        (y as usize) * (self.0.width as usize) + (x as usize)
+    }
+
+    /// [`raw_index`](Self::raw_index) guarded by a debug-only bounds assert — a
+    /// stray `x >= width` would silently read/write the WRONG row rather than
+    /// fault, so catch it in debug/tests. Unchecked in release (the hot path).
+    #[inline]
+    fn checked_index(&self, x: u16, y: u16) -> usize {
         debug_assert!(
             x < self.0.width && y < self.0.height,
-            "RgbBuffer::get out of bounds: ({x},{y}) in {}x{}",
+            "RgbBuffer index out of bounds: ({x},{y}) in {}x{}",
             self.0.width,
             self.0.height
         );
-        self.0.as_slice()[(y as usize) * (self.0.width as usize) + (x as usize)]
+        self.raw_index(x, y)
+    }
+
+    pub fn get(&self, x: u16, y: u16) -> Rgb {
+        // Unchecked index in release (every caller clips first); this is a
+        // public primitive the v2 PNG/web renderers are meant to reuse.
+        self.0.as_slice()[self.checked_index(x, y)]
     }
 
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
-        debug_assert!(
-            x < self.0.width && y < self.0.height,
-            "RgbBuffer::put out of bounds: ({x},{y}) in {}x{}",
-            self.0.width,
-            self.0.height
-        );
-        let w = self.0.width as usize;
-        let i = (y as usize) * w + (x as usize);
+        let i = self.checked_index(x, y);
         self.0.as_mut_slice()[i] = rgb;
+    }
+
+    /// Bounds-checked write: a no-op when `(x, y)` falls outside the buffer.
+    /// THE clip primitive for procedural painters, which would otherwise each
+    /// guard the unchecked [`put`](Self::put) with `if x < width && y < height`
+    /// (the idiom this collapses at ~20 sites). Deliberately distinct from
+    /// `put` — the hot blit path clips its loop bounds once and keeps the
+    /// unchecked write; per-pixel scatter (glyphs, particles, coffee cups) that
+    /// can't pre-clip uses this. The v2 PNG/web renderers reuse it too.
+    pub fn put_checked(&mut self, x: u16, y: u16, rgb: Rgb) {
+        if x < self.0.width && y < self.0.height {
+            let i = self.raw_index(x, y);
+            self.0.as_mut_slice()[i] = rgb;
+        }
     }
 }
 
@@ -243,5 +265,28 @@ mod tests {
             }
         );
         assert_eq!(b.get(0, 0), Rgb { r: 0, g: 0, b: 0 });
+    }
+
+    #[test]
+    fn put_checked_writes_in_bounds_and_noops_out_of_bounds() {
+        let bg = Rgb { r: 0, g: 0, b: 0 };
+        let fg = Rgb { r: 9, g: 8, b: 7 };
+        let mut b = RgbBuffer::filled(3, 2, bg);
+        // In bounds: writes, exactly like `put`.
+        b.put_checked(2, 1, fg);
+        assert_eq!(b.get(2, 1), fg);
+        // Out of bounds on either axis (and both): silent no-op, no panic — the
+        // clip contract the ~20 guard closures relied on. `get` would debug-panic
+        // here, so probe the buffer's unchanged state instead of reading OOB.
+        for (x, y) in [(3, 0), (0, 2), (3, 2), (99, 99)] {
+            b.put_checked(x, y, fg);
+        }
+        // The only written cell is (2,1); every other cell is still `bg`.
+        for y in 0..2 {
+            for x in 0..3 {
+                let want = if (x, y) == (2, 1) { fg } else { bg };
+                assert_eq!(b.get(x, y), want, "cell ({x},{y})");
+            }
+        }
     }
 }

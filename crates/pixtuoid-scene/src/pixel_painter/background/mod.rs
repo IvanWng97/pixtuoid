@@ -37,7 +37,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{blend, blend_rgb, mix_lab};
+use super::palette::{blend, blend_pixel, blend_rgb, mix_lab};
 
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`, decoded
 /// via chrono. The ambient/sky clock-decode funnel: the day-ramp / sunset /
@@ -56,11 +56,19 @@ pub(in crate::pixel_painter) fn local_hour_frac(now: std::time::SystemTime) -> f
 use crate::layout::{Layout, ELEVATOR_W};
 use crate::theme::Theme;
 
-/// Floor-to-ceiling window stride. Mirrors `paint_floor_and_walls` —
-/// kept in sync so `window_spill_columns` returns the same x positions
-/// the floor pass paints.
+/// Floor-to-ceiling window width + inter-pane gap. [`window_columns`] owns the
+/// tiling LAW (start / stride / edge-margin / door-skip) both the spill pass and
+/// the floor pass ride, so the pane x-positions can't drift between them.
 const WINDOW_W: u16 = 22;
 const WINDOW_GAP: u16 = 3;
+/// Left edge of the first window — the ONE start [`window_columns`] begins at.
+/// `celestial::FIRST_WINDOW_X` (the disc-span left edge) derives its f32 form
+/// from this, so the tiling start lives in exactly one place.
+const FIRST_WINDOW_X: u16 = 3;
+/// The tiling stops when the next pane wouldn't leave this many px before the
+/// right buffer edge (`x + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w`). Folded (with
+/// `FIRST_WINDOW_X`) into what used to be a bare `- 5.0` in `compute_disc`.
+const WINDOW_EDGE_MARGIN: u16 = 2;
 /// Vertical depth of the warm spill band below each window. Mirrors the
 /// `DEPTH` constant inside `paint_window_light_spill`.
 const SPILL_DEPTH: u16 = 12;
@@ -255,28 +263,62 @@ fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
     }
 }
 
-/// Returns one `SunbeamColumn` per floor-to-ceiling window, centred on
+/// One PAINTED floor-to-ceiling window: its left edge, its centre column, and
+/// its ABSOLUTE position `idx` (counted across the whole wall — door-skipped
+/// panes still advance it, so a pane after the elevator keeps its true index).
+#[derive(Clone, Copy)]
+pub(super) struct WindowColumn {
+    pub x_left: u16,
+    pub center_x: u16,
+    pub idx: u16,
+}
+
+/// THE window-tiling law, single-sourced: panes start at [`FIRST_WINDOW_X`],
+/// stride `WINDOW_W + WINDOW_GAP`, and stop once the next pane wouldn't clear
+/// [`WINDOW_EDGE_MARGIN`] before `buf_w`. Yields only panes whose x-range does
+/// NOT overlap `skip` (the elevator-door range `(dx0, dx1)`) — but `idx` still
+/// counts the skipped ones, so the floor pass's per-window index is stable.
+/// The spill pass, the floor pass, AND `compute_disc`'s span all ride this, so
+/// the `x=3, stride, edge-margin` geometry lives in exactly one place (it was
+/// open-coded in two loops plus a `- 5.0` floor-division re-derivation).
+pub(super) fn window_columns(
+    buf_w: u16,
+    skip: Option<(u16, u16)>,
+) -> impl Iterator<Item = WindowColumn> {
+    let mut x = FIRST_WINDOW_X;
+    let mut idx: u16 = 0;
+    std::iter::from_fn(move || {
+        while x + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w {
+            let (this_x, this_idx) = (x, idx);
+            x += WINDOW_W + WINDOW_GAP;
+            idx += 1;
+            if !skip.is_some_and(|(dx0, dx1)| this_x < dx1 && this_x + WINDOW_W > dx0) {
+                return Some(WindowColumn {
+                    x_left: this_x,
+                    center_x: this_x + WINDOW_W / 2,
+                    idx: this_idx,
+                });
+            }
+        }
+        None
+    })
+}
+
+/// Returns one `SunbeamColumn` per PAINTED floor-to-ceiling window, centred on
 /// the window and starting at the floor row (just below the wall band).
-/// Elevator-door windows are excluded — mirroring the `overlaps_door`
-/// guard in `paint_floor_and_walls`. Used by `paint_dust_motes` so the
-/// motes drift through the same warm spill the floor pass paints.
+/// Elevator-door windows are excluded (the [`window_columns`] skip). Used by
+/// `paint_dust_motes` so the motes drift through the same warm spill the floor
+/// pass paints — same tiling, so the columns can't diverge.
 pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
     let top_wall_h = layout.wall_band_h();
     let skip = layout.door.map(|d| (d.x, d.x + ELEVATOR_W));
-    let mut out = Vec::new();
-    let mut x = 3u16;
-    while x + WINDOW_W + 2 <= layout.buf_w {
-        let overlaps_door = skip.is_some_and(|(dx0, dx1)| x < dx1 && x + WINDOW_W > dx0);
-        if !overlaps_door {
-            out.push(SunbeamColumn {
-                x: x + WINDOW_W / 2,
-                top_y: top_wall_h,
-                depth: SPILL_DEPTH,
-            });
-        }
-        x += WINDOW_W + WINDOW_GAP;
-    }
-    out
+    window_columns(layout.buf_w, skip)
+        .map(|w| SunbeamColumn {
+            x: w.center_x,
+            top_y: top_wall_h,
+            depth: SPILL_DEPTH,
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -340,58 +382,48 @@ pub(super) fn paint_floor_and_walls(
     // `compute_disc`'s doc comment for why `cx` is absolute across the wall.
     let disc = compute_disc(now, weather, buf_w, top_wall_h, theme);
     let star_strength = night_star_strength(now, look.darkness, weather);
-    let mut x = 3u16;
-    let mut idx: u32 = 0;
-    while x + WINDOW_W + 2 <= buf_w {
-        // Skip any window whose x-range overlaps the elevator door —
-        // the elevator sits in the wall and would otherwise show the
-        // window's glass + skyline behind its frame.
-        let overlaps_door =
-            skip_window_x_range.is_some_and(|(dx0, dx1)| x < dx1 && x + WINDOW_W > dx0);
-        if !overlaps_door {
-            // The disc paints ONLY in the window its centre currently sits over.
-            // Without this gate, a disc whose `cx` lands near an inter-window gap
-            // is wide enough (radius+glow) to reach the glass of BOTH neighbours,
-            // so the same sun/moon rendered in two panes at once — bleeding
-            // through the solid wall pillar (frame + WINDOW_GAP + frame) between
-            // them. Restricting to the containing window makes that pillar occlude
-            // the body correctly: it hides behind the pillar between panes and
-            // re-emerges in the next window, "one disc across the wall".
-            let win_disc = disc.filter(|d| d.cx >= x as f32 && d.cx < (x + WINDOW_W) as f32);
-            paint_floor_to_ceiling_window(
+    for w in window_columns(buf_w, skip_window_x_range) {
+        let x = w.x_left;
+        // The disc paints ONLY in the window its centre currently sits over.
+        // Without this gate, a disc whose `cx` lands near an inter-window gap
+        // is wide enough (radius+glow) to reach the glass of BOTH neighbours,
+        // so the same sun/moon rendered in two panes at once — bleeding
+        // through the solid wall pillar (frame + WINDOW_GAP + frame) between
+        // them. Restricting to the containing window makes that pillar occlude
+        // the body correctly: it hides behind the pillar between panes and
+        // re-emerges in the next window, "one disc across the wall".
+        let win_disc = disc.filter(|d| d.cx >= x as f32 && d.cx < (x + WINDOW_W) as f32);
+        paint_floor_to_ceiling_window(
+            buf,
+            x,
+            window_y,
+            WINDOW_W,
+            window_h,
+            window_frame,
+            w.idx,
+            now,
+            weather,
+            altitude,
+            &lit_colors,
+            building,
+            &sky_row,
+            win_disc,
+            star_strength,
+        );
+        // look.spill_strength already includes atmospheric attenuation
+        // (time_of_day_look multiplies by atmo.intensity), so heavy
+        // weather automatically dims the spill below windows.
+        if look.spill_strength > 0.0 {
+            paint_window_light_spill(
                 buf,
                 x,
-                window_y,
                 WINDOW_W,
-                window_h,
-                window_frame,
-                idx as u16,
-                now,
-                weather,
-                altitude,
-                &lit_colors,
-                building,
-                &sky_row,
-                win_disc,
-                star_strength,
+                top_wall_h,
+                look.spill_strength,
+                look.spill_slant,
+                theme,
             );
-            // look.spill_strength already includes atmospheric attenuation
-            // (time_of_day_look multiplies by atmo.intensity), so heavy
-            // weather automatically dims the spill below windows.
-            if look.spill_strength > 0.0 {
-                paint_window_light_spill(
-                    buf,
-                    x,
-                    WINDOW_W,
-                    top_wall_h,
-                    look.spill_strength,
-                    look.spill_slant,
-                    theme,
-                );
-            }
         }
-        x += WINDOW_W + WINDOW_GAP;
-        idx += 1;
     }
 
     // Wall trim line at the bottom of the wall band.
@@ -551,11 +583,8 @@ fn paint_streaks(
                     let dx = if drift { dy / 2 } else { 0 };
                     let px = glass_x0 + (sx + dx) % gw;
                     let py = glass_y0 + ((phase as u16 + dy) % gh);
-                    if px < buf.width() && py < buf.height() {
-                        let alpha = alpha_base - (dy as f32 / len as f32) * alpha_falloff;
-                        let cur = buf.get(px, py);
-                        buf.put(px, py, blend_rgb(cur, spec.color, alpha));
-                    }
+                    let alpha = alpha_base - (dy as f32 / len as f32) * alpha_falloff;
+                    blend_pixel(buf, px, py, spec.color, alpha);
                 }
             }
             Particle::Flake => {
@@ -583,12 +612,7 @@ fn paint_streaks(
 fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb, alpha: f32) {
     for dy in 1..h.saturating_sub(1) {
         for dx in 1..w.saturating_sub(1) {
-            let px = x0 + dx;
-            let py = y0 + dy;
-            if px < buf.width() && py < buf.height() {
-                let cur = buf.get(px, py);
-                buf.put(px, py, blend_rgb(cur, color, alpha));
-            }
+            blend_pixel(buf, x0 + dx, y0 + dy, color, alpha);
         }
     }
 }

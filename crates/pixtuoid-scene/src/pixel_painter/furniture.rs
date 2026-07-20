@@ -567,10 +567,11 @@ pub(super) fn paint_vending_machine(
     let body = theme.appliance.vending_body;
     let panel = theme.appliance.vending_panel;
     let drinks = theme.appliance.vending_drinks;
-    let vx = pos.x.saturating_sub(2);
-    let vy = pos.y.saturating_sub(3);
-    for dy in 0..6u16 {
-        for dx in 0..4u16 {
+    let vend = super::drawable::VENDING_BODY;
+    let vx = pos.x.saturating_sub(vend.w / 2);
+    let vy = pos.y.saturating_sub(vend.h / 2);
+    for dy in 0..vend.h {
+        for dx in 0..vend.w {
             let px = vx + dx;
             let py = vy + dy;
             if px < buf.width() && py < buf.height() {
@@ -638,10 +639,11 @@ pub(super) fn paint_printer(
     let glass = theme.appliance.printer_glass;
     let paper = theme.appliance.printer_paper;
     let tray = theme.appliance.printer_tray;
-    let px0 = pos.x.saturating_sub(2);
-    let py0 = pos.y.saturating_sub(2);
-    for dy in 0..4u16 {
-        for dx in 0..5u16 {
+    let pbody = super::drawable::PRINTER_BODY;
+    let px0 = pos.x.saturating_sub(pbody.w / 2);
+    let py0 = pos.y.saturating_sub(pbody.h / 2);
+    for dy in 0..pbody.h {
+        for dx in 0..pbody.w {
             let px = px0 + dx;
             let py = py0 + dy;
             if px < buf.width() && py < buf.height() {
