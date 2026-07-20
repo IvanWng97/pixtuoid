@@ -19,61 +19,12 @@
 
 use std::sync::Arc;
 
-use pixtuoid_scene::audio::bank::{self, AssetBank, TrackBeds};
+use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds};
 use pixtuoid_scene::audio::dsp::NoiseStream;
-use pixtuoid_scene::audio::mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
+use pixtuoid_scene::audio::mixer::LoopStem;
 use pixtuoid_scene::audio::{
-    synth, AudioFrame, OneShot, StemLevels, TrackId, TrackSwitch, BUILD_SEED, DROP_SEED, PICK_SEED,
-    TYPING_SEED,
+    synth, AudioEngine, AudioFrame, OneShotPool, TickCommands, TrackId, BUILD_SEED, MAX_DT_S,
 };
-
-/// dt ceiling (s): a bigger inter-tick gap (backgrounded tab, GC pause) is
-/// clamped so the crossfade can't snap and the scheduler can't burst-replay.
-const MAX_DT_S: f32 = 0.10;
-
-/// Which pre-uploaded one-shot pool a [`PlayCmd`] draws from — JS holds one
-/// `AudioBuffer` per (pool, index).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OneShotPool {
-    Keystroke,
-    Drop,
-    DoorChime,
-    PrinterWhir,
-    VendingDrop,
-}
-
-impl OneShotPool {
-    /// Stable index for the JSON wire (JS maps it back to its buffer bank).
-    pub(crate) fn wire(self) -> u8 {
-        match self {
-            OneShotPool::Keystroke => 0,
-            OneShotPool::Drop => 1,
-            OneShotPool::DoorChime => 2,
-            OneShotPool::PrinterWhir => 3,
-            OneShotPool::VendingDrop => 4,
-        }
-    }
-}
-
-/// One one-shot to spawn this tick: a fresh source from `(pool, index)` at `gain`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct PlayCmd {
-    pub(crate) pool: OneShotPool,
-    pub(crate) index: usize,
-    pub(crate) gain: f32,
-}
-
-/// What one [`WebAudioDriver::tick`] produces for the JS glue.
-pub(crate) struct TickCommands {
-    /// Target gain per LOOP stem, in `LoopStem::ALL` order (0=Pad … 5=Rain) —
-    /// JS ramps each stem's `GainNode` toward it.
-    pub(crate) gains: [f32; LoopStem::ALL.len()],
-    /// One-shots to fire this tick (keystrokes / raindrops / appliance cues).
-    pub(crate) plays: Vec<PlayCmd>,
-    /// The mood track just swapped — JS re-reads every loop buffer (the 5 track
-    /// stems changed) and hot-swaps its looping sources.
-    pub(crate) swapped: bool,
-}
 
 /// The web audio engine. Native-constructible + unit-testable (the rlib target);
 /// the wasm-bindgen surface in `lib.rs` wraps it for JS.
@@ -89,16 +40,11 @@ pub(crate) struct WebAudioDriver {
     track: TrackId,
 
     // --- runtime ---
-    mixer: Mixer,
-    typing: TypingScheduler,
-    drops: DropScheduler,
-    pick: NoiseStream,
-    switch: TrackSwitch,
-    typing_level: f32,
-    rain_level: f32,
-    wanted: StemLevels,
-    /// Monotonic scheduler clock (s), advanced by the CLAMPED dt — gap-immune.
-    sched_s: f64,
+    /// The shared per-tick engine (mixer, schedulers, switch machine) — the
+    /// SAME `pixtuoid_scene::audio::AudioEngine` the native gateway runs, so the
+    /// two soundtracks can't drift. dt is clamped to `MAX_DT_S` before it here.
+    engine: AudioEngine,
+    /// Last JS timestamp (ms); the clamped delta feeds the engine's clock.
     last_ms: Option<f64>,
 }
 
@@ -115,15 +61,7 @@ impl WebAudioDriver {
             beds: None,
             stage: 0,
             track: initial_track,
-            mixer: Mixer::new(1.0),
-            typing: TypingScheduler::new(TYPING_SEED),
-            drops: DropScheduler::new(DROP_SEED),
-            pick: NoiseStream::new(PICK_SEED),
-            switch: TrackSwitch::new(),
-            typing_level: 0.0,
-            rain_level: 0.0,
-            wanted: StemLevels::default(),
-            sched_s: 0.0,
+            engine: AudioEngine::new(1.0),
             last_ms: None,
         }
     }
@@ -144,7 +82,7 @@ impl WebAudioDriver {
             }
             2 => {
                 self.beds = Some(TrackBeds::build(&mut self.rng, self.track));
-                self.switch.init(self.track);
+                self.engine.init_track(self.track);
                 self.stage = 3;
             }
             _ => {}
@@ -167,82 +105,17 @@ impl WebAudioDriver {
             None => 0.0,
         };
         self.last_ms = Some(now_ms);
-        self.sched_s += dt as f64;
 
-        self.typing_level = frame.stems.typing;
-        self.rain_level = frame.stems.rain;
-        self.wanted = frame.stems;
+        let cmds = self.engine.tick(dt, Some(frame));
 
-        // Track machine: after warmup the switch is already `init`ed, so a
-        // changed track only ever `request`s (never re-inits). The BEDS rebuild
-        // happens caller-side in `try_swap` below.
-        if self.is_ready() {
-            self.switch.request(frame.track);
-        }
-
-        // hold the 5 track stems silent while a switch settles
-        let mut target = self.wanted;
-        if self.switch.is_holding() {
-            target.silence_track_stems();
-        }
-        self.mixer.set_target(target);
-        let gain_pairs = self.mixer.step(dt);
-
-        // once the held stems reach silence, rebuild + swap this ONE tick
-        let swapped = if let Some(to) = self.switch.try_swap(bank::track_stems_silent(&gain_pairs))
-        {
+        // The BUILD stays caller-side (the engine's sharp edge): on a committed
+        // swap, rebuild this track's beds in ONE tick (rare, under the crossfade
+        // silence) so `loop_buffer` hands JS the fresh samples to hot-swap.
+        if let Some(to) = cmds.swap {
             self.beds = Some(TrackBeds::build(&mut self.rng, to));
             self.track = to;
-            true
-        } else {
-            false
-        };
-
-        let mut gains = [0.0f32; LoopStem::ALL.len()];
-        for (i, (_, g)) in gain_pairs.iter().enumerate() {
-            gains[i] = *g;
         }
-
-        // one-shots: the scene's fired events + the typing/rain schedulers
-        let mut plays = Vec::new();
-        let os_gain = self.mixer.one_shot_gain();
-        if let Some(bank) = &self.bank {
-            for event in &frame.events {
-                plays.push(PlayCmd {
-                    pool: match event {
-                        OneShot::DoorChime => OneShotPool::DoorChime,
-                        OneShot::PrinterWhir => OneShotPool::PrinterWhir,
-                        OneShot::VendingDrop => OneShotPool::VendingDrop,
-                    },
-                    index: 0,
-                    gain: bank::ONE_SHOT_GAIN * os_gain,
-                });
-            }
-            for _ in 0..self.typing.tick(self.sched_s, self.typing_level) {
-                let index = (self.pick.unit() * bank.keystrokes.len() as f32) as usize
-                    % bank.keystrokes.len();
-                plays.push(PlayCmd {
-                    pool: OneShotPool::Keystroke,
-                    index,
-                    gain: bank::KEYSTROKE_GAIN * os_gain,
-                });
-            }
-            for _ in 0..self.drops.tick(self.sched_s, self.rain_level) {
-                let index =
-                    (self.pick.unit() * bank.drops.len() as f32) as usize % bank.drops.len();
-                plays.push(PlayCmd {
-                    pool: OneShotPool::Drop,
-                    index,
-                    gain: bank::DROP_GAIN * self.rain_level * os_gain,
-                });
-            }
-        }
-
-        TickCommands {
-            gains,
-            plays,
-            swapped,
-        }
+        cmds
     }
 
     /// The looping bed samples for `LoopStem::ALL[idx]` (0=Pad … 5=Rain) — JS
@@ -320,7 +193,7 @@ pub(crate) fn commands_json(cmd: &TickCommands) -> String {
             fmt_f32(p.gain)
         ));
     }
-    out.push_str(&format!("],\"swapped\":{}}}", cmd.swapped));
+    out.push_str(&format!("],\"swapped\":{}}}", cmd.swap.is_some()));
     out
 }
 
@@ -338,6 +211,7 @@ fn fmt_f32(v: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pixtuoid_scene::audio::{bank, PlayCmd};
 
     #[test]
     fn every_oneshot_pool_has_a_finite_end_the_js_discovery_loop_can_find() {
@@ -384,7 +258,7 @@ mod tests {
                     gain: 0.5,
                 },
             ],
-            swapped: true,
+            swap: Some(TrackId::Night),
         };
         let json = commands_json(&cmd);
         let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
@@ -538,7 +412,7 @@ mod tests {
         for _ in 0..80 {
             now += 50.0;
             let cmd = d.tick(now, night.clone());
-            if cmd.swapped {
+            if cmd.swap.is_some() {
                 swapped_seen = true;
                 // at the swap tick the track stems were silent
                 for g in &cmd.gains[0..5] {

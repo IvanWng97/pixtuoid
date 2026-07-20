@@ -225,11 +225,17 @@ src/
 │                       try_sent in that window drop harmlessly (levels re-send every render frame) and MUTE
 │                       rides an AtomicBool on the handle — NOT the droppable frame channel — so an m/p press
 │                       mid-window can never be lost; run_loop = the device-agnostic thread body; rain at spawn,
-│                       track beds on the first frame). The PURE synth stack (dsp/score/synth/mixer) MOVED to
-│                       `pixtuoid_scene::audio` (web-audio #633) so the native gateway here AND the wasm
-│                       WebAudio painter build the SAME buffers — the binary imports `pixtuoid_scene::audio::
-│                       {dsp, synth, mixer}` + `mixer::{LoopStem, Mixer, ...}`; AssetBank/TrackBeds/run_loop
-│                       stay HERE (device-owning). Only
+│                       track beds on the first frame). The PURE synth stack (dsp/score/synth/mixer) AND the
+│                       per-tick `AudioEngine` MOVED to `pixtuoid_scene::audio` (web-audio #633) so the native
+│                       gateway here AND the wasm WebAudio painter run the SAME mixing/crossfade/scheduling —
+│                       the binary imports `pixtuoid_scene::audio::{AudioEngine, dsp, synth, MAX_DT_S}`;
+│                       AssetBank/TrackBeds + the device half stay HERE. `run_loop` is now a THIN SHELL over
+│                       `AudioEngine`: the clamped-dt clock, the mute/volume atomics (`engine.set_muted/
+│                       set_master`), the caller-side bed BUILD (on `TickCommands.swap`), and forwarding each
+│                       tick's `{gains, plays}` to the sink (`bank.sample(pool, index)` resolves a play). The
+│                       old `resync_after_stall` is GONE — the engine owns the (clamped) clock so a build stall
+│                       can't burst the schedulers; only a post-build channel drain remains (`merge_backlog_levels`
+│                       on the first frame keeps its events but adopts the backlog's freshest levels). Only
 │                       sink.rs (AudioSink seam: NullSink for CI/no-device, RodioSink = rodio 0.22 Player
 │                       glue, codecov-excluded winit-class) + spawn/run_loop remain binary-side behind the
 │                       `audio` feature (the rodio dep). Audio NEVER blocks render: bounded channel,
@@ -283,11 +289,11 @@ src/
 │                       MOOD TRACKS (#644): TrackId rides AudioFrame (scene's select_track over the
 │                       lighting's OWN sun window + precipitation + the hourly hashed day-take
 │                       rotation — {Day, Day2, Day3} are one mood, three frozen songs; a take
-│                       switch is an ordinary track switch); run_loop's switch machine holds the
-│                       five TRACK_STEMS at 0, synthesizes the new track's TrackBeds under the silence
-│                       (~2s), swap_loop's them (RodioSink drops+recreates the Player at gain 0), ramps
-│                       back — LATCHED per cycle (boundary flapping can't thrash synths); rain is
-│                       weather, never swapped. Track beds register on the FIRST frame (it names the
+│                       switch is an ordinary track switch); the engine's TrackSwitch holds the
+│                       five TRACK_STEMS at 0, and when they reach silence `tick` returns `swap: Some(to)` →
+│                       run_loop synthesizes that track's TrackBeds under the silence (~2s) and swap_loop's
+│                       them (RodioSink drops+recreates the Player at gain 0), then ramps back — LATCHED per
+│                       cycle (boundary flapping can't thrash synths); rain is weather, never swapped. Track beds register on the FIRST frame (it names the
 │                       right mood — booting Day at night would synth a track just to fade it away).
 │                       NIGHT = the Lofi Girl-anchored v4 take (LOFI-BIBLE.md; BPM 68, sub-bass floor
 │                       in the pad, at-seconds frozen humanization, duck-baked texture at the night

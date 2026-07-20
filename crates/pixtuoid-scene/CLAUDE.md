@@ -53,10 +53,17 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   build the SAME buffers: dsp.rs (radix-2 FFT + bands + spectral-envelope noise shaping +
 │                   warp_resample + splitmix64 NoiseStream + centroid_hz), score.rs (the FROZEN day/night
 │                   lofi const tables + checksums), synth.rs (the ratified per-voice recipes + fingerprint
-│                   pins), mixer.rs (LoopStem + Mixer gain ramps + typing/drop schedulers + master_amp). NO
-│                   audio-device deps (pure math; the rodio/cpal ban still holds — `just arch`). All four are
+│                   pins), mixer.rs (LoopStem + Mixer gain ramps + typing/drop schedulers + master_amp),
+│                   engine.rs (THE shared per-tick authority `AudioEngine::tick(dt, frame: Option<AudioFrame>)
+│                   -> TickCommands {gains, plays, swap}` — mixer + schedulers + pick + TrackSwitch behind ONE
+│                   seam, so the native run_loop AND the wasm WebAudioDriver::tick are thin device/JSON shells
+│                   over the SAME mixing/crossfade/scheduling, not two hand-synced copies; the BUILD stays
+│                   caller-side [`swap` SIGNALS it, per the TrackSwitch sharp edge], dt is a clamped PARAMETER
+│                   [MAX_DT_S] so both shells are gap-immune; OneShotPool + AssetBank::sample live in bank.rs). NO
+│                   audio-device deps (pure math; the rodio/cpal ban still holds — `just arch`). All five are
 │                   `#[doc(hidden)] pub` (workspace-internal, overlay/board pattern). The binary keeps only
-│                   the DEVICE half (sink/spawn/run_loop). mod.rs MODEL — the sound twin of overlay/board: StemLevels
+│                   the DEVICE shell (sink/spawn/run_loop — the clock, mute/volume atomics, bed BUILD,
+│                   sink forwarding). mod.rs MODEL — the sound twin of overlay/board: StemLevels
 │                   (owner-ratified tier gains: empty/moderate/busy × pad/sparkle/keys/drums/texture/rain/typing;
 │                   rain scales on pixel_painter::precipitation_level) + OneShot events + AudioCueTracker
 │                   (cross-frame edge emitter: door chime capped 1/frame, printer/vending off the SAME

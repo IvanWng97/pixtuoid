@@ -22,26 +22,24 @@ use std::sync::Arc;
 use std::time::Instant;
 
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
+use pixtuoid_scene::audio::mixer::LoopStem;
 use pixtuoid_scene::audio::AudioFrame;
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::{dsp, synth, BUILD_SEED, DROP_SEED, PICK_SEED, TYPING_SEED};
+use pixtuoid_scene::audio::{dsp, synth, AudioEngine, BUILD_SEED, MAX_DT_S};
 // OneShot + TrackId are named only in the test fixtures now (run_loop infers
-// both — `frame.events` / `switch.init(frame.track)`), so import them test-side
-// to keep the prod build warning-free.
+// both — `frame.events` / `frame.track`), so import them test-side to keep the
+// prod build warning-free.
 #[cfg(all(feature = "audio", test))]
 use pixtuoid_scene::audio::{OneShot, TrackId};
 #[cfg(feature = "audio")]
 use sink::AudioSink;
 
-// AssetBank / TrackBeds / TRACK_STEMS + the pool/gain consts MOVED to
-// `pixtuoid_scene::audio::bank` (web-audio #633): pure builders, so the wasm
-// WebAudio painter builds byte-identical banks from the SAME source. run_loop
-// imports them below.
+// AssetBank / TrackBeds / TRACK_STEMS MOVED to `pixtuoid_scene::audio::bank`
+// (web-audio #633): pure builders, so the wasm WebAudio painter builds
+// byte-identical banks from the SAME source. The per-tick mixing/scheduling
+// (mixer, schedulers, the pool/gain consts) now lives behind `AudioEngine`.
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::bank::{
-    AssetBank, TrackBeds, DROP_GAIN, KEYSTROKE_GAIN, ONE_SHOT_GAIN, TRACK_STEMS,
-};
+use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds, TRACK_STEMS};
 
 /// The +/- keys' volume increment — ONE definition for BOTH painters' key
 /// handlers (`tui/mod.rs` dispatch + `floating::input`), so the two surfaces
@@ -574,40 +572,37 @@ pub(crate) fn spawn(volume: f32) -> AudioHandle {
     }
 }
 
-/// After a blocking `TrackBeds::build` (~2s release / >10s debug) the
-/// thread's clocks are stale and the frame channel holds a backlog. ONE
-/// recovery routine for both build arms (first-frame + pending-switch):
-/// reset the ramp clock (a stale `last_step` snaps gains to target — the
-/// bot HIGH), re-anchor the schedulers via their level-0 clock-hold arm
-/// (else they fire the stall's backlog as a burst), and drain the queued
-/// frames keeping the freshest LEVELS while discarding edge-EVENTS
-/// (replayed stacked they are a clank pile; losing a chime under a track
-/// change is the better artifact).
+/// After the first-frame `TrackBeds::build` (~2s release / >10s debug) the
+/// channel holds a backlog. Adopt its freshest LEVELS (they re-send every
+/// render frame) but drop its event backlog — a replayed stack of chimes is a
+/// clank pile — while KEEPING the first frame's own events, which haven't
+/// played yet. The scheduler re-anchor the old `resync_after_stall` also did is
+/// now inherent: the engine owns the (clamped) clock, so the build can't burst it.
 #[cfg(feature = "audio")]
-#[allow(clippy::too_many_arguments)] // the loop's mutable locals, passed once from two arms
-fn resync_after_stall(
-    rx: &mpsc::Receiver<AudioFrame>,
-    started: Instant,
-    last_step: &mut Instant,
-    typing: &mut TypingScheduler,
-    drops: &mut DropScheduler,
-    typing_level: &mut f32,
-    rain_level: &mut f32,
-    wanted_stems: &mut pixtuoid_scene::audio::StemLevels,
-) {
-    *last_step = Instant::now();
-    let resync = last_step.duration_since(started).as_secs_f64();
-    typing.tick(resync, 0.0);
-    drops.tick(resync, 0.0);
+fn merge_backlog_levels(rx: &mpsc::Receiver<AudioFrame>, mut first: AudioFrame) -> AudioFrame {
     while let Ok(f) = rx.try_recv() {
-        *typing_level = f.stems.typing;
-        *rain_level = f.stems.rain;
-        *wanted_stems = f.stems;
+        first.stems = f.stems;
     }
+    first
 }
 
-/// The audio thread body — device-agnostic over [`AudioSink`], so the test
-/// probe and the LISTEN-gate wav renderer drive the SAME loop.
+/// The per-tick dt, CLAMPED to `MAX_DT_S` — the shell's half of the engine's
+/// gap-immunity (the wasm painter clamps its `now_ms` delta the same way). A
+/// ~2s track-build stall or a scheduler-starvation gap can't cover seconds and
+/// snap the crossfade (the "bot HIGH" pop) or burst the schedulers; this is
+/// what REPLACED `resync_after_stall`'s clock re-anchor. Pure so the clamp has
+/// teeth without a device or thread.
+#[cfg(feature = "audio")]
+fn clamped_dt(prev: Instant, now: Instant) -> f32 {
+    now.saturating_duration_since(prev)
+        .as_secs_f32()
+        .min(MAX_DT_S)
+}
+
+/// The audio thread body — the DEVICE shell over the shared [`AudioEngine`]:
+/// the clamped clock, the mute/volume atomics, the caller-side bed BUILD, and
+/// forwarding each tick's `TickCommands` to the [`AudioSink`] (the test probe
+/// drives the SAME loop). All mixing/crossfade/scheduling lives in the engine.
 #[cfg(feature = "audio")]
 fn run_loop(
     rx: mpsc::Receiver<AudioFrame>,
@@ -615,6 +610,8 @@ fn run_loop(
     muted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     volume: std::sync::Arc<std::sync::atomic::AtomicU32>,
 ) {
+    use std::sync::atomic::Ordering::Relaxed;
+
     // the ~2s (release; >10s debug) synthesis window: frames try_sent
     // meanwhile drop harmlessly (levels are re-sent every render frame),
     // and mute rides the atomic so a keypress here can never be lost
@@ -631,110 +628,63 @@ fn run_loop(
         "audio: one-shots + rain synthesized; track beds await the first frame"
     );
 
-    let mut mixer = Mixer::new(f32::from_bits(
-        volume.load(std::sync::atomic::Ordering::Relaxed),
-    ));
-    let mut typing = TypingScheduler::new(TYPING_SEED);
-    let mut drops = DropScheduler::new(DROP_SEED);
-    let mut pick = dsp::NoiseStream::new(PICK_SEED);
-    let mut typing_level = 0.0f32;
-    let mut rain_level = 0.0f32;
-    let started = Instant::now();
-    let mut last_step = started;
-    // The mood-track machine (#644) — the state half is the SHARED
-    // `pixtuoid_scene::audio::TrackSwitch` (native + wasm run the same
-    // latch/hold/silent-gate); only the BUILD (blocking synth here) is
-    // caller-side. The cycle: hold the five track stems at target 0 → when
-    // their gains reach silence, synthesize + swap (the silence covers the
-    // ~2s) → release the hold.
-    let mut switch = pixtuoid_scene::audio::TrackSwitch::new();
-    let mut wanted_stems = pixtuoid_scene::audio::StemLevels::default();
+    let mut engine = AudioEngine::new(f32::from_bits(volume.load(Relaxed)));
+    let mut inited = false;
+    let mut last_step = Instant::now();
 
     loop {
         let msg = rx.recv_timeout(std::time::Duration::from_millis(TICK_MS));
-        mixer.set_muted(muted.load(std::sync::atomic::Ordering::Relaxed));
-        mixer.set_master(f32::from_bits(
-            volume.load(std::sync::atomic::Ordering::Relaxed),
-        ));
-        match msg {
+        engine.set_muted(muted.load(Relaxed));
+        engine.set_master(f32::from_bits(volume.load(Relaxed)));
+
+        // dt is CLAMPED (like the wasm shell): a build stall or scheduler
+        // hiccup can neither snap the crossfade nor burst the schedulers, so
+        // the old per-build clock re-anchor is no longer needed.
+        let now = Instant::now();
+        let dt = clamped_dt(last_step, now);
+        last_step = now;
+
+        let frame = match msg {
             Ok(frame) => {
-                typing_level = frame.stems.typing;
-                rain_level = frame.stems.rain;
-                wanted_stems = frame.stems;
-                if let Some(track) = switch.init(frame.track) {
-                    // first frame: build + register the RIGHT track
-                    let beds = TrackBeds::build(&mut rng, track);
+                if !inited {
+                    // First frame: build + register the RIGHT mood's beds, then
+                    // init the engine's switch. The ~2s synth stalls the thread;
+                    // drop the backlog it queued (keep the freshest levels) and
+                    // re-anchor the clock so the build's seconds ramp nothing.
+                    let beds = TrackBeds::build(&mut rng, frame.track);
                     for stem in TRACK_STEMS {
                         device.start_loop(stem, beds.bed(stem));
                     }
-                    resync_after_stall(
-                        &rx,
-                        started,
-                        &mut last_step,
-                        &mut typing,
-                        &mut drops,
-                        &mut typing_level,
-                        &mut rain_level,
-                        &mut wanted_stems,
-                    );
+                    engine.init_track(frame.track);
+                    inited = true;
+                    let fresh = merge_backlog_levels(&rx, frame);
+                    last_step = Instant::now();
+                    Some(fresh)
                 } else {
-                    switch.request(frame.track);
-                }
-                for event in frame.events {
-                    device.play_once(bank.one_shot(event), ONE_SHOT_GAIN * mixer.one_shot_gain());
+                    Some(frame)
                 }
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
-        }
+        };
 
-        // while a switch is pending, hold the track stems silent (rain and
-        // typing keep following the scene — weather is not the track's)
-        let mut target = wanted_stems;
-        if switch.is_holding() {
-            target.silence_track_stems();
-        }
-        mixer.set_target(target);
+        let cmds = engine.tick(dt, frame);
 
-        let now = Instant::now();
-        let dt = now.duration_since(last_step).as_secs_f32();
-        last_step = now;
-        let gains = mixer.step(dt);
-        for (stem, gain) in gains {
+        for (stem, gain) in LoopStem::ALL.into_iter().zip(cmds.gains) {
             device.set_loop_gain(stem, gain);
         }
-
-        if let Some(to) = switch.try_swap(pixtuoid_scene::audio::bank::track_stems_silent(&gains)) {
-            // ~2s of synthesis under silence; the ramp back in is the
-            // same crossfade every tier change rides
+        // A committed mood switch: build + swap the five track beds under the
+        // silence, then drain the backlog + re-anchor (as on the first build).
+        if let Some(to) = cmds.swap {
             let beds = TrackBeds::build(&mut rng, to);
             for stem in TRACK_STEMS {
                 device.swap_loop(stem, beds.bed(stem));
             }
-            resync_after_stall(
-                &rx,
-                started,
-                &mut last_step,
-                &mut typing,
-                &mut drops,
-                &mut typing_level,
-                &mut rain_level,
-                &mut wanted_stems,
-            );
+            for _ in rx.try_iter() {}
+            last_step = Instant::now();
         }
-
-        let now_s = now.duration_since(started).as_secs_f64();
-        let os_gain = mixer.one_shot_gain();
-        for _ in 0..typing.tick(now_s, typing_level) {
-            let idx = (pick.unit() * bank.keystrokes.len() as f32) as usize % bank.keystrokes.len();
-            device.play_once(Arc::clone(&bank.keystrokes[idx]), KEYSTROKE_GAIN * os_gain);
-        }
-        for _ in 0..drops.tick(now_s, rain_level) {
-            let idx = (pick.unit() * bank.drops.len() as f32) as usize % bank.drops.len();
-            device.play_once(
-                Arc::clone(&bank.drops[idx]),
-                DROP_GAIN * rain_level * os_gain,
-            );
+        for play in cmds.plays {
+            device.play_once(bank.sample(play.pool, play.index), play.gain);
         }
     }
 }
@@ -826,161 +776,32 @@ mod tests {
             rec.one_shots, 2,
             "the unmuted frame's 2 events played; the post-mute frame's 2 did not"
         );
-        // each stem got the RIGHT bed, not just A bed (a bed() arm swap
-        // must fail): noise beds carry the bed-loop length, and the four
-        // musical beds are told apart by their ratified centroid ordering
-        // drums(215) < pad(291) < keys(350) < sparkle(608)
-        let len_of = |s: LoopStem| rec.loop_samples[&s].len();
-        assert_eq!(len_of(LoopStem::Rain), 1 << 19, "rain = the noise-bed loop");
-        assert_eq!(
-            len_of(LoopStem::Texture),
-            1 << 19,
-            "texture = the noise-bed loop"
-        );
-        let c = |s: LoopStem| dsp::centroid_hz(&rec.loop_samples[&s]);
-        let (d, p, k, sp) = (
-            c(LoopStem::Drums),
-            c(LoopStem::Pad),
-            c(LoopStem::Keys),
-            c(LoopStem::Sparkle),
-        );
-        assert!(
-            d < p && p < k && k < sp,
-            "musical beds must sit in the ratified centroid order: drums {d:.0} < pad {p:.0} < keys {k:.0} < sparkle {sp:.0}"
-        );
+        // Bed IDENTITY (each stem got the RIGHT bed, not just A bed) is pinned
+        // by the fast, device-free `track_beds_sit_in_the_ratified_centroid_order`
+        // in `pixtuoid_scene::audio::bank`; the per-tick mixing / crossfade /
+        // scheduling correctness by the `AudioEngine` value tests. This smoke
+        // proves only the run_loop WIRING: registration, one-shots, mute, exit.
     }
-}
-
-#[cfg(all(test, feature = "audio"))]
-mod track_switch_tests {
-    use super::*;
-    use pixtuoid_scene::audio::StemLevels;
 
     #[test]
-    fn track_switch_ramps_to_silence_swaps_and_restores() {
-        let (tx, rx) = mpsc::sync_channel(64);
-        let recorder = Arc::new(std::sync::Mutex::new(sink::NullSink::default()));
-        struct Probe(Arc<std::sync::Mutex<sink::NullSink>>);
-        impl AudioSink for Probe {
-            fn start_loop(&mut self, stem: LoopStem, s: Arc<Vec<f32>>) {
-                self.0.lock().unwrap().start_loop(stem, s);
-            }
-            fn swap_loop(&mut self, stem: LoopStem, s: Arc<Vec<f32>>) {
-                self.0.lock().unwrap().swap_loop(stem, s);
-            }
-            fn set_loop_gain(&mut self, stem: LoopStem, g: f32) {
-                self.0.lock().unwrap().set_loop_gain(stem, g);
-            }
-            fn play_once(&mut self, s: Arc<Vec<f32>>, g: f32) {
-                self.0.lock().unwrap().play_once(s, g);
-            }
-        }
-        let probe = Probe(Arc::clone(&recorder));
-        let muted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let vol = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits()));
-        let join = std::thread::spawn(move || run_loop(rx, Box::new(probe), muted, vol));
-
-        let day_frame = || AudioFrame {
-            stems: StemLevels {
-                pad: 0.7,
-                ..Default::default()
-            },
-            events: vec![],
-            track: TrackId::Day,
-        };
-        // first frame registers the DAY beds
-        tx.send(day_frame()).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-        loop {
-            {
-                let rec = recorder.lock().unwrap();
-                if rec
-                    .loops_started
-                    .iter()
-                    .filter(|s| TRACK_STEMS.contains(s))
-                    .count()
-                    == 5
-                {
-                    break;
-                }
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "day beds never registered"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let day_pad_len = recorder.lock().unwrap().loop_samples[&LoopStem::Pad].len();
-
-        // keep frames flowing so the ramp progresses; request NIGHT
-        let night_frame = || AudioFrame {
-            stems: StemLevels {
-                pad: 0.7,
-                ..Default::default()
-            },
-            events: vec![],
-            track: TrackId::Night,
-        };
-        loop {
-            let _ = tx.try_send(night_frame());
-            {
-                let rec = recorder.lock().unwrap();
-                if rec.swaps.len() == TRACK_STEMS.len() {
-                    break;
-                }
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the switch never completed"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        {
-            let rec = recorder.lock().unwrap();
-            // every track stem swapped exactly once, rain untouched
-            for stem in TRACK_STEMS {
-                assert_eq!(
-                    rec.swaps.iter().filter(|(s, _)| *s == stem).count(),
-                    1,
-                    "{stem:?} swaps exactly once"
-                );
-            }
-            assert!(
-                !rec.swaps.iter().any(|(s, _)| *s == LoopStem::Rain),
-                "rain is weather — never swapped by a mood change"
-            );
-            // the night pad is a DIFFERENT loop length (68 vs 72 BPM)
-            let night_pad_len = rec.loop_samples[&LoopStem::Pad].len();
-            assert_ne!(
-                night_pad_len, day_pad_len,
-                "the swap installed the night bed"
-            );
-        }
-
-        // after the swap the pad RAMPS back — the first nonzero gain must
-        // be a slew step, not the full goal (the bot HIGH: a stalled ramp
-        // clock made dt cover the ~2s synth and snap gains to target)
-        let first_gain = loop {
-            let _ = tx.try_send(night_frame());
-            {
-                let rec = recorder.lock().unwrap();
-                let g = rec.last_gain.get(&LoopStem::Pad).copied().unwrap_or(0.0);
-                if g > 0.0 {
-                    break g;
-                }
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "pad never ramped back"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        };
-        assert!(
-            first_gain < 0.1,
-            "post-swap gain must fade in (first step {first_gain}), not snap to target"
+    fn clamped_dt_caps_a_build_stall_gap_but_passes_a_normal_tick() {
+        // The native shell's gap-immunity (what replaced `resync_after_stall`'s
+        // clock re-anchor): a ~2s track-build stall clamps to the ceiling so the
+        // next `mixer.step` can't snap the crossfade (the "bot HIGH" pop). If the
+        // `.min(MAX_DT_S)` is ever dropped, this fails; the engine's
+        // `the_dt_clamp_ceiling_stays_a_slew_*` test proves the ceiling VALUE is
+        // small enough to keep that clamped step a slew.
+        let t0 = Instant::now();
+        assert_eq!(
+            clamped_dt(t0, t0 + std::time::Duration::from_secs(2)),
+            MAX_DT_S,
+            "a multi-second build stall clamps to the ceiling"
         );
-        drop(tx);
-        join.join().unwrap();
+        let dt = clamped_dt(t0, t0 + std::time::Duration::from_millis(20));
+        assert!(
+            (dt - 0.020).abs() < 1e-4,
+            "a normal tick passes through: {dt}"
+        );
     }
 }
 
@@ -1082,6 +903,7 @@ mod listen_gate {
         bank: &AssetBank,
         beds: &TrackBeds,
         rain: &Arc<Vec<f32>>,
+        track: TrackId,
         stems: StemLevels,
         events_at: &[(f32, OneShot)],
         secs: f32,
@@ -1091,33 +913,36 @@ mod listen_gate {
         for stem in TRACK_STEMS {
             sink.start_loop(stem, beds.bed(stem));
         }
-        let mut mixer = Mixer::new(1.0);
-        mixer.set_target(stems);
-        let mut typing = TypingScheduler::new(TYPING_SEED);
-        let mut drops = DropScheduler::new(DROP_SEED);
-        let mut pick = dsp::NoiseStream::new(PICK_SEED);
+        // Drive the SAME shared `AudioEngine` the app runs, so the audition
+        // mixes exactly what ships (incl. the production bus trim on the
+        // one-shots — the old hand-rolled loop played them untrimmed).
+        let mut engine = AudioEngine::new(1.0);
+        engine.init_track(track);
         let step_s = 0.05f32;
         let step_n = (step_s * dsp::SAMPLE_RATE as f32) as usize;
         let mut fired = vec![false; events_at.len()];
         let mut now_s = 0.0f64;
         while now_s < secs as f64 {
-            for (stem, gain) in mixer.step(step_s) {
-                sink.set_loop_gain(stem, gain);
-            }
+            let mut events = Vec::new();
             for (i, (at, ev)) in events_at.iter().enumerate() {
                 if !fired[i] && now_s >= *at as f64 {
                     fired[i] = true;
-                    sink.play_once(bank.one_shot(*ev), ONE_SHOT_GAIN);
+                    events.push(*ev);
                 }
             }
-            for _ in 0..typing.tick(now_s, stems.typing) {
-                let idx =
-                    (pick.unit() * bank.keystrokes.len() as f32) as usize % bank.keystrokes.len();
-                sink.play_once(Arc::clone(&bank.keystrokes[idx]), KEYSTROKE_GAIN);
+            let cmds = engine.tick(
+                step_s,
+                Some(AudioFrame {
+                    stems,
+                    events,
+                    track,
+                }),
+            );
+            for (stem, gain) in LoopStem::ALL.into_iter().zip(cmds.gains) {
+                sink.set_loop_gain(stem, gain);
             }
-            for _ in 0..drops.tick(now_s, stems.rain) {
-                let idx = (pick.unit() * bank.drops.len() as f32) as usize % bank.drops.len();
-                sink.play_once(Arc::clone(&bank.drops[idx]), DROP_GAIN * stems.rain);
+            for play in cmds.plays {
+                sink.play_once(bank.sample(play.pool, play.index), play.gain);
             }
             sink.advance(step_n);
             now_s += step_s as f64;
@@ -1162,7 +987,7 @@ mod listen_gate {
             ("tier_3_busy_oneshot_volley", busy, &volley[..]),
             ("tier_4_rainy_busy", rainy, &[][..]),
         ] {
-            let buf = render_tier(&bank, &beds, &rain, stems, events, 60.0);
+            let buf = render_tier(&bank, &beds, &rain, TrackId::Day, stems, events, 60.0);
             assert!(
                 buf.iter().any(|&s| s.abs() > 0.01),
                 "{name}: every tier is audible in Phase 2"
@@ -1172,7 +997,7 @@ mod listen_gate {
         // the NIGHT track (#644): the runtime approximation of the v4 take
         // (no bus glue — rodio has no insert; the owner re-verifies by ear)
         for (name, stems) in [("night_moderate", moderate), ("night_rainy", rainy)] {
-            let buf = render_tier(&bank, &night, &rain, stems, &[], 60.0);
+            let buf = render_tier(&bank, &night, &rain, TrackId::Night, stems, &[], 60.0);
             assert!(
                 buf.iter().any(|&s| s.abs() > 0.01),
                 "{name}: the night track is audible"

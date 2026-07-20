@@ -20,11 +20,19 @@ pub mod bank;
 #[doc(hidden)]
 pub mod dsp;
 #[doc(hidden)]
+pub mod engine;
+#[doc(hidden)]
 pub mod mixer;
 #[doc(hidden)]
 pub mod score;
 #[doc(hidden)]
 pub mod synth;
+
+// The shared per-tick engine surface — both audio painters build on these, so
+// they can't drift (the whole point of the #633 shared stack). Re-exported at
+// `pixtuoid_scene::audio::*` so consumers don't reach into the submodule.
+pub use bank::OneShotPool;
+pub use engine::{AudioEngine, PlayCmd, TickCommands, MAX_DT_S};
 
 use crate::board::StateCounts;
 
