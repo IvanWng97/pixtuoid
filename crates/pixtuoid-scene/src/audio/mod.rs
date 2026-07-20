@@ -58,8 +58,12 @@ pub const PICK_SEED: u64 = 0xDEAD;
 /// typing). 1..BUSY_ACTIVE_MIN is the moderate anchor tier; 0 is empty.
 const BUSY_ACTIVE_MIN: usize = 3;
 
-/// The rain stem's gain at full precipitation (demo_4's ratified mix gain).
-const RAIN_GAIN: f32 = 0.55;
+/// The rain stem's gain at full precipitation. Re-ratified 2026-07-20 (owner:
+/// the demo_4-era 0.55 sat only ~5.6 dB under the tier-1 music RMS — broadband
+/// rain at that spacing masks the tonal music, "盖过了lofi音乐"); 0.30 puts the
+/// bed ~10.9 dB under, the rainy-lofi reference placement. The rain-DROP
+/// one-shots follow automatically (engine gain = DROP_GAIN × wanted.rain).
+const RAIN_GAIN: f32 = 0.30;
 
 /// Per-tier stem gains, `[empty, moderate, busy]` — the ratified demo mixes.
 const PAD_GAIN: [f32; 3] = [0.75, 0.70, 0.65];
