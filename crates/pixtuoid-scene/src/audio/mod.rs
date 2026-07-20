@@ -58,8 +58,10 @@ pub const PICK_SEED: u64 = 0xDEAD;
 /// typing). 1..BUSY_ACTIVE_MIN is the moderate anchor tier; 0 is empty.
 const BUSY_ACTIVE_MIN: usize = 3;
 
-/// The rain stem's gain at full precipitation (demo_4's ratified mix gain).
-const RAIN_GAIN: f32 = 0.55;
+/// The rain stem's gain at full precipitation (re-ratified 2026-07-20: ~11 dB
+/// under the tier-1 music — the old 0.55's ~6 dB let the broadband rain mask
+/// the mix). The drop one-shots derive from this via DROP_GAIN × wanted.rain.
+const RAIN_GAIN: f32 = 0.30;
 
 /// Per-tier stem gains, `[empty, moderate, busy]` — the ratified demo mixes.
 const PAD_GAIN: [f32; 3] = [0.75, 0.70, 0.65];
