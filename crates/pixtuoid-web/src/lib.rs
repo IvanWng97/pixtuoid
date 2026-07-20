@@ -544,13 +544,14 @@ impl SynthTake {
     #[wasm_bindgen(constructor)]
     pub fn new(now_ms: f64) -> SynthTake {
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
-        let epoch = pixtuoid_scene::audio::track_epoch(now);
-        let track = pixtuoid_scene::audio::select_track(
-            pixtuoid_scene::pixel_painter::is_day_at(now),
-            pixtuoid_scene::pixel_painter::precipitation_level(now),
-            epoch,
-        );
-        let night = matches!(track, pixtuoid_scene::audio::TrackId::GenNight(_));
+        // The ONE track-pick authority (floor::track_for) — shared with the
+        // per-tick observer + Office::current_track; recover (night, epoch) for
+        // the adopt wire from the returned TrackId (its payload IS track_epoch).
+        let track = pixtuoid_scene::floor::track_for(now);
+        let (night, epoch) = match track {
+            pixtuoid_scene::audio::TrackId::GenNight(e) => (true, e),
+            pixtuoid_scene::audio::TrackId::GenDay(e) => (false, e),
+        };
         SynthTake {
             driver: audio::WebAudioDriver::new(track),
             night,
