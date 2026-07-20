@@ -186,7 +186,18 @@ src/
 │                       — handed to the HookRouter (hook-tee PRODUCER) + ClaudeCodeSource & CodexSource & GrokSource (watcher
 │                       CONSUMERS). Daemon presence (OpenClaw) rides a source-tagged sibling channel into
 │                       SceneState::daemons; reducer_task's presence/sweep arms are registry-driven
-│                       (daemon_sources()) so N daemons need no driver edit)
+│                       (daemon_sources()) so N daemons need no driver edit),
+│                       pipeline.rs (#714 — `spawn_pipeline(socket_path, roots…, connected, boot_caps)
+│                       -> Pipeline {scene_rx, health_rx, floor_caps, _source_handles}`: the ONE
+│                       source→reducer spine BOTH painters boot through — presence chan + exit watch →
+│                       build_source_set → event/scene/health chans → floor-caps atomics → reducer_task
+│                       + SourceManager::spawn_with_health; was hand-mirrored across run_async and
+│                       floating::run. boot_caps / socket_path / ConnectedSources stay CALLER-side (the
+│                       documented divergences: TUI measures the terminal, floating its window pixels;
+│                       both need socket/connected after boot). Needs an ambient tokio context
+│                       (run_async's block_on / floating's rt.enter). `_source_handles` must stay BOUND
+│                       at the call site — dropping the Pipeline kills the source tasks.
+│                       codecov-excluded like driver.rs)
 ├── init_pack.rs        extracts the embedded skeleton pack to a target dir for `init-pack`
 ├── validate.rs         the `validate-pack` presenter; pack.name/version are UNTRUSTED TOML strings (can
 │                       embed ESC/OSC via \u escapes), so every printed line routes through
@@ -366,8 +377,9 @@ src/
 │                         that detects "nothing changed".)
 ├── floating/           `pixtuoid floating` — the frameless, always-on-top DESKTOP WINDOW (winit + softbuffer,
 │                       binary-only; pixtuoid-core stays window-free, invariant #1). ALL floating-only source
-│                       lives here: mod.rs (run: reuses the SAME pipeline as the TUI — build_source_set [the
-│                       ONE source-construction site] + reducer_task, both relaxed to pub(crate) — spawned on
+│                       lives here: mod.rs (run: boots the SAME `runtime::pipeline::spawn_pipeline` spine
+│                       as the TUI (#714 — the old hand-mirrored wiring is gone; only window boot_caps,
+│                       socket resolution and ConnectedSources stay local) — spawned on
 │                       a bg runtime, NEVER block_on [winit owns the main thread]; an EventLoopProxy bridges
 │                       scene changes → redraw), offscreen.rs (OfficeRenderer — owns one
 │                       pixtuoid_scene::floor::FloorSession, the scene-owned painter session over the shared
