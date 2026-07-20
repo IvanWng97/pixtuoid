@@ -416,6 +416,106 @@ fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
     desks.chain(pantry).chain(corridor)
 }
 
+/// THE authority for the soft floor shadows, in PAINT ORDER (the shadow twin of
+/// [`ceiling_pool_regions`]) — one place for every piece's floor-contact ellipse
+/// so the ~120-line inline block became a short loop and the per-piece extents
+/// aren't anonymous inline literals scattered through `paint_frame`. Painted
+/// BEFORE the y-sorted entity pass so every entity sits on its own shadow. Order
+/// is preserved verbatim so the blended overlaps stay byte-identical.
+///
+/// The per-piece `half_w`/`half_h` are owner-tuned taste literals and the
+/// couch/printer/island special-cases are irreducible — this HOUSES them in one
+/// spot, it does not normalize them (the island/plant/lamp south offsets DO
+/// derive from the shared `center_pin_south_offset`, so those move with a retune;
+/// the generic/printer/couch `+2`/`+1` offsets stay literal by design).
+fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
+    use crate::layout::{furniture_def, Furniture, WaypointKind};
+
+    let desks = layout
+        .home_desks
+        .iter()
+        .map(|desk| desk_shadow_ellipse(*desk));
+    // Generic waypoint blob. Couch/Printer/Island are handled with fitted
+    // shadows below, so skip them here: a per-seat couch shadow (3 seats) would
+    // overlap-darken; the printer's 4px sprite souths at +1 not the generic +2;
+    // the island STANDS are empty floor beside the body (which carries its own
+    // shadow) so a blob at each stand paints phantom shadows.
+    let generic = layout
+        .waypoints
+        .iter()
+        .filter(|w| {
+            !matches!(
+                w.kind,
+                WaypointKind::Couch | WaypointKind::Printer | WaypointKind::Island
+            )
+        })
+        .map(|wp| {
+            // Fit the ellipse to the sprite width — a flat 7 half-width doubles a
+            // narrow shelf's shadow; `.min(7)` caps a future wide piece.
+            let vis_w = furniture_def(wp.kind.furniture()).visual.w;
+            let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
+            Ellipse {
+                cx: wp.pos.x,
+                cy: wp.pos.y + 2,
+                half_w,
+                half_h: 2,
+            }
+        });
+    // One fitted shadow under the island BODY (its stands are skipped above):
+    // south edge = the visual south row, width tracks the sprite.
+    let island = layout.pantry.and_then(|p| p.kitchen_island).map(|island| {
+        let vis = furniture_def(Furniture::KitchenIsland).visual;
+        Ellipse {
+            cx: island.x,
+            cy: island.y + center_pin_south_offset(vis.h),
+            half_w: vis.w / 2 + 1,
+            half_h: 2,
+        }
+    });
+    // Flush against the printer's sprite south (pos.y+1), one per printer.
+    let printers = layout
+        .waypoints
+        .iter()
+        .filter(|w| w.kind == WaypointKind::Printer)
+        .map(|wp| Ellipse {
+            cx: wp.pos.x,
+            cy: wp.pos.y + 1,
+            half_w: 5,
+            half_h: 1,
+        });
+    let couch = layout.couch_sprite_center.map(|center| Ellipse {
+        cx: center.x,
+        cy: center.y + 2,
+        half_w: 7,
+        half_h: 2,
+    });
+    // Under the sprite's south row — same offset the z-anchor uses, off the same
+    // height (a fixed +3 only suited the taller Ficus/Tall, floating the others).
+    let plants = layout
+        .plants
+        .iter()
+        .map(|&PlantItem { kind, pos }| Ellipse {
+            cx: pos.x,
+            cy: pos.y + center_pin_south_offset(furniture_def(kind.furniture()).visual.h),
+            half_w: 3,
+            half_h: 1,
+        });
+    let lamp = layout.floor_lamp.map(|lamp| Ellipse {
+        cx: lamp.x,
+        cy: lamp.y + floor_lamp_south_offset(), // flush with the lamp base (sprite south)
+        half_w: 2,
+        half_h: 1,
+    });
+
+    desks
+        .chain(generic)
+        .chain(island)
+        .chain(printers)
+        .chain(couch)
+        .chain(plants)
+        .chain(lamp)
+}
+
 /// The PAINT half of the frame: blit the world the sim already advanced.
 /// Reads the [`SimFrame`] immutably; every positional/lifecycle decision was
 /// made in `sim_step` — this pass only resolves presentation (theme colors,
@@ -571,123 +671,8 @@ fn paint_frame(
     // function of daylight so noon shadows are crisp and night shadows
     // are subtle.
     let shadow_strength = 0.5 - 0.3 * look.darkness;
-    for desk in &ctx.layout.home_desks {
-        paint_shadow(
-            ctx.buf,
-            desk_shadow_ellipse(*desk),
-            shadow_strength,
-            ctx.theme,
-        );
-    }
-    for wp in &ctx.layout.waypoints {
-        use crate::layout::WaypointKind;
-        // Couch shadow is emitted once below (3 seat waypoints; per-seat
-        // shadows would overlap). Printer is handled just after — its 4px-tall
-        // sprite's south is pos.y+1, so the generic +2 would float 1px below.
-        // Island stands are EMPTY FLOOR cells beside the island (the body
-        // carries its own fitted shadow below) — a generic blob at each stand
-        // painted phantom shadows left/right of the island.
-        if matches!(
-            wp.kind,
-            WaypointKind::Couch | WaypointKind::Printer | WaypointKind::Island
-        ) {
-            continue;
-        }
-        // Fit the ellipse to the piece's actual sprite width — a flat 7
-        // half-width doubles a narrow shelf's shadow. The .min(7) caps a
-        // future wide piece from over-shadowing.
-        let vis_w = crate::layout::furniture_def(wp.kind.furniture()).visual.w;
-        let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
-        paint_shadow(
-            ctx.buf,
-            Ellipse {
-                cx: wp.pos.x,
-                cy: wp.pos.y + 2,
-                half_w,
-                half_h: 2,
-            },
-            shadow_strength,
-            ctx.theme,
-        );
-    }
-    if let Some(island) = ctx.layout.pantry.and_then(|p| p.kitchen_island) {
-        // One fitted shadow under the island BODY (its stands are skipped
-        // above): south edge = the visual south row, width tracks the sprite.
-        let vis = crate::layout::furniture_def(crate::layout::Furniture::KitchenIsland).visual;
-        paint_shadow(
-            ctx.buf,
-            Ellipse {
-                cx: island.x,
-                cy: island.y + center_pin_south_offset(vis.h),
-                half_w: vis.w / 2 + 1,
-                half_h: 2,
-            },
-            shadow_strength,
-            ctx.theme,
-        );
-    }
-    for wp in ctx
-        .layout
-        .waypoints
-        .iter()
-        .filter(|w| w.kind == crate::layout::WaypointKind::Printer)
-    {
-        // Flush against the printer's sprite south (pos.y+1).
-        paint_shadow(
-            ctx.buf,
-            Ellipse {
-                cx: wp.pos.x,
-                cy: wp.pos.y + 1,
-                half_w: 5,
-                half_h: 1,
-            },
-            shadow_strength,
-            ctx.theme,
-        );
-    }
-    if let Some(center) = ctx.layout.couch_sprite_center {
-        paint_shadow(
-            ctx.buf,
-            Ellipse {
-                cx: center.x,
-                cy: center.y + 2,
-                half_w: 7,
-                half_h: 2,
-            },
-            shadow_strength,
-            ctx.theme,
-        );
-    }
-    for &PlantItem { kind, pos } in &ctx.layout.plants {
-        // Shadow sits under the sprite's south row — same offset the z-anchor
-        // uses, off the same height (Succulent/Flower were floating at a fixed
-        // +3 that only suited the taller Ficus/Tall).
-        let cy = pos.y
-            + center_pin_south_offset(crate::layout::furniture_def(kind.furniture()).visual.h);
-        paint_shadow(
-            ctx.buf,
-            Ellipse {
-                cx: pos.x,
-                cy,
-                half_w: 3,
-                half_h: 1,
-            },
-            shadow_strength,
-            ctx.theme,
-        );
-    }
-    if let Some(lamp) = ctx.layout.floor_lamp {
-        paint_shadow(
-            ctx.buf,
-            Ellipse {
-                cx: lamp.x,
-                cy: lamp.y + floor_lamp_south_offset(), // flush with the lamp base (sprite south)
-                half_w: 2,
-                half_h: 1,
-            },
-            shadow_strength,
-            ctx.theme,
-        );
+    for ell in floor_shadow_ellipses(ctx.layout) {
+        paint_shadow(ctx.buf, ell, shadow_strength, ctx.theme);
     }
 
     // Ceiling halos gate on the sim's `seated_agents` so a tool-glow halo
