@@ -672,7 +672,7 @@ fn every_home_desk_has_a_reachable_north_approach() {
 #[test]
 fn sofas_seat_three_people() {
     // Both venues seat 3: each meeting sofa (3 seats per sofa) and the
-    // lounge couch (was 1 seat → 3). Seats are dx ∈ {-6, 0, +6} on the
+    // lounge couch (3 seats). Seats are dx ∈ {-6, 0, +6} on the
     // 20px sprite. The lounge keeps room_id = None — its group-chat
     // grouping happens at the chitchat venue-key layer, not via the
     // meeting-only room_id field.

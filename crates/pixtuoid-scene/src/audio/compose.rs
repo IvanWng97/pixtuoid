@@ -1,5 +1,5 @@
 //! The theory-constrained COMPOSER — generative lofi as constrained
-//! sampling ("the LLM feel", owner-directed 2026-07-19): a pure function
+//! sampling ("the LLM feel", owner-directed): a pure function
 //! `seed -> GeneratedScore`. Harmony walks a vetted progression grammar,
 //! the lead obeys melody rules (strong-beat chord tones, diatonic passing
 //! tones, bounded leaps with stepwise resolution, two-phrase form with a
@@ -13,7 +13,7 @@
 //! the owner blind-auditions a batch of seeds (`examples/lofi_audition`)
 //! and the generator as a whole is ratified (or its constraints
 //! tightened). The frozen takes are #[cfg(test)] fingerprint anchors,
-//! not a runtime fallback (ALL-GENERATIVE owner decision 2026-07-20).
+//! not a runtime fallback (ALL-GENERATIVE owner decision).
 //!
 //! Runtime model: the seed is the [`super::track_epoch`] block (10-min
 //! cadence, owner-tuned for short agent sessions), so generation is

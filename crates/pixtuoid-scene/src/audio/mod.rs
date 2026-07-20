@@ -58,18 +58,19 @@ pub const PICK_SEED: u64 = 0xDEAD;
 /// typing). 1..BUSY_ACTIVE_MIN is the moderate anchor tier; 0 is empty.
 const BUSY_ACTIVE_MIN: usize = 3;
 
-/// The rain stem's gain at full precipitation (demo_4's ratified mix gain).
-const RAIN_GAIN: f32 = 0.55;
+/// The rain stem's gain at full precipitation (re-ratified 2026-07-20: ~11 dB
+/// under the tier-1 music — the old 0.55's ~6 dB let the broadband rain mask
+/// the mix). The drop one-shots derive from this via DROP_GAIN × wanted.rain.
+const RAIN_GAIN: f32 = 0.30;
 
 /// Per-tier stem gains, `[empty, moderate, busy]` — the ratified demo mixes.
 const PAD_GAIN: [f32; 3] = [0.75, 0.70, 0.65];
 const SPARKLE_GAIN: [f32; 3] = [0.70, 0.0, 0.0];
 const KEYS_GAIN: [f32; 3] = [0.0, 0.60, 0.70];
 const DRUMS_GAIN: [f32; 3] = [0.0, 0.35, 0.60];
-// ×2.8 vs the Phase-0 ratification (owner-adopted "air bed audible"
-// finding, 2026-07-20): the hiss+crackle layer measured 15-40dB under
-// the bible's spec and was inaudible. Rate stays CRACKLE_POPS_PER_SEC;
-// a mix knob, one-line revert.
+// ×2.8 vs the Phase-0 ratification: the hiss+crackle layer measured
+// 15-40dB under the bible's spec and was inaudible. Rate stays
+// CRACKLE_POPS_PER_SEC.
 const TEXTURE_GAIN: [f32; 3] = [0.78, 0.84, 0.78];
 const TYPING_GAIN: [f32; 3] = [0.0, 0.50, 0.80];
 
@@ -108,8 +109,8 @@ pub struct AudioFrame {
     pub track: TrackId,
 }
 
-/// The soundtrack ids — ALL-GENERATIVE by owner decision (2026-07-20,
-/// "所有的音乐都自动生成"): every [`TRACK_EPOCH_SECS`] block COMPOSES a
+/// The soundtrack ids — ALL-GENERATIVE by owner decision: every
+/// [`TRACK_EPOCH_SECS`] block COMPOSES a
 /// fresh take through the ratified production chain. The payload is the
 /// compose seed (= the [`track_epoch`] block), so the id changing IS the
 /// song change and the [`TrackSwitch`] crossfade machinery needs no new
@@ -132,9 +133,9 @@ impl Default for TrackId {
     }
 }
 
-/// One song per this many wall-clock seconds. 10 minutes, owner-tuned
-/// (2026-07-20): agent sessions are usually SHORT — an hourly rotation
-/// meant most sessions never heard the song change. Coincidentally the
+/// One song per this many wall-clock seconds. 10 minutes, owner-tuned:
+/// agent sessions are usually SHORT — an hourly rotation meant most
+/// sessions never heard the song change. Coincidentally the
 /// weather's own re-roll cadence (its 600 lives in `sky.rs`, a separate
 /// domain — deliberately not shared).
 pub const TRACK_EPOCH_SECS: u64 = 600;

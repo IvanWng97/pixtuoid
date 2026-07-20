@@ -151,7 +151,7 @@ pub struct TrackBeds {
 impl TrackBeds {
     /// Compose the id's take (the seed is the track-epoch block) and render it
     /// through the SAME cores the owner-ratified takes were built on —
-    /// ALL-GENERATIVE runtime (owner decision 2026-07-20). Identity is
+    /// ALL-GENERATIVE runtime (owner decision). Identity is
     /// the generated score + the cores' fingerprint pins (the frozen
     /// tables in `score`/`synth` remain as those pins' test anchors);
     /// noise content draws from wherever `rng` stands, like every
