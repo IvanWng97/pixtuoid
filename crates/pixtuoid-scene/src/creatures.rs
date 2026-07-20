@@ -470,16 +470,43 @@ mod tests {
             .filter_map(|r| r.trio.as_ref())
             .map(|t| t.sofas.len())
             .sum();
-        // Exactly one spot per pantry(≤1) + each sofa + couch(≤1): the social
-        // gathering both roamers share — no desks, no corridor, no more, no less.
-        assert_eq!(
-            social_visit_spots(&l).len(),
-            has_pantry + n_sofas + has_couch
-        );
+        let spots = social_visit_spots(&l);
+        // Exactly one spot per pantry(≤1) + each sofa + couch(≤1): no desks, no
+        // corridor, no more, no less.
+        assert_eq!(spots.len(), has_pantry + n_sofas + has_couch);
         assert!(
             has_pantry + n_sofas + has_couch > 0,
             "a 240x170 office has venues"
         );
+        // ORDER is load-bearing (pet/mascot index this list via golden_index, so a
+        // same-count reorder silently changes which venue is visited at a cycle),
+        // and so is the per-venue offset fn. Pin pantry-corner FIRST, couch-corner
+        // LAST (sofa spots between), each via its correct offset fn — a reorder or a
+        // wrong offset fn breaks one of these even when the count still matches.
+        if has_pantry == 1 {
+            let pantry = l
+                .waypoints
+                .iter()
+                .find(|w| matches!(w.kind, WaypointKind::Pantry))
+                .unwrap();
+            assert_eq!(
+                spots[0],
+                corner_visit_spot(pantry.pos),
+                "pantry corner leads"
+            );
+        }
+        if has_couch == 1 {
+            let couch = l
+                .waypoints
+                .iter()
+                .find(|w| matches!(w.kind, WaypointKind::Couch))
+                .unwrap();
+            assert_eq!(
+                *spots.last().unwrap(),
+                corner_visit_spot(couch.pos),
+                "couch corner trails"
+            );
+        }
     }
 
     #[test]
@@ -604,7 +631,9 @@ mod tests {
         // fallback would panic here, not pass silently).
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(5_000);
         let seed = 0u64;
-        let pick = |n: u64| spots[(n.wrapping_mul(0x9e37_79b9_7f4a_7c15) as usize) % spots.len()];
+        // Ride the SAME golden_index production picks with, so this oracle can't
+        // drift from `pet_position`'s pick (which it replicates).
+        let pick = |n: u64| spots[golden_index(n, spots.len())];
         let dest = pick(seed);
         let prev = pick(seed.wrapping_sub(1));
         assert_ne!(prev, dest, "seed must make the leg cross the wall");
