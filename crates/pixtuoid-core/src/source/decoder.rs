@@ -395,10 +395,12 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                 parent_id: None,
             }])
         }
-        // Turn end — Codex fires no SessionEnd, so keep the slot; just settle to
-        // idle (harmless no-op if the agent is already idle). NO Identity: a
-        // turn end for an unknown agent proves nothing worth registering, so it
-        // must keep riding the reducer's blank-synthesis fallback.
+        // Turn end — keep the slot; just settle to idle (harmless no-op if the
+        // agent is already idle). NO Identity: a turn end for an unknown agent
+        // proves nothing worth registering, so it must keep riding the
+        // reducer's blank-synthesis fallback. (Codex grew a real SessionEnd
+        // hook in #710 — the arm below now serves it too — but Stop still must
+        // not end the session: turns end many times per session.)
         "Stop" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,

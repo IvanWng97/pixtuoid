@@ -41,7 +41,13 @@ use crate::install::SENTINEL_KEY;
 /// `every_registered_reasonix_event_decodes` below. PostLLMCall / PreCompact /
 /// SubagentStop are deliberately absent: per-model-turn noise, compaction
 /// internals, and a no-id subagent signal already covered by the parent's
-/// `task` PostToolUse. `PermissionRequest` (#302) is the structured approval
+/// `task` PostToolUse. PostToolUseFailure / StopFailure (#710) are ALSO
+/// deliberately absent: the runner re-fires failures to NATIVE hooks
+/// registered under PostToolUse / Stop with the event re-labeled
+/// (`internal/hook/runner.go` `PostToolUseFailure`/`StopResult` legacy
+/// blocks), and ours are native-format — registering both spellings would
+/// double-fire every failed tool/turn for the same decoded ActivityEnd.
+/// `PermissionRequest` (#302) is the structured approval
 /// gate → Waiting, fired alongside `Notification` (idempotent).
 const REASONIX_EVENTS: &[&str] = &[
     "SessionStart",

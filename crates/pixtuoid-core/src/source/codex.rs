@@ -400,6 +400,33 @@ mod tests {
         assert!(matches!(decode_codex_hook_custom(&json!("nope")), Ok(None)));
     }
 
+    #[test]
+    fn session_end_hook_decodes_to_a_clean_session_end() {
+        // #710: upstream's SessionEnd hook (stdin: session_id / cwd /
+        // transcript_path / reason — schema.rs SessionEndCommandInput) rides
+        // the SHARED SessionEnd arm via the fall-through above, keyed on the
+        // same session_id the rollout filename carries — the immediate clean
+        // exit the FD-probe ladder previously had to time out toward.
+        let payload = json!({
+            "hook_event_name": "SessionEnd",
+            "session_id": "019e7762-9ded-7e33-be41-946ecf105bf4",
+            "cwd": "/repo",
+            "reason": "other",
+            "_pixtuoid_source": SOURCE_NAME,
+        });
+        assert!(matches!(decode_codex_hook_custom(&payload), Ok(None)));
+        let events = crate::source::decoder::decode_hook_payload(payload).unwrap();
+        let expected = AgentId::from_parts(SOURCE_NAME, "019e7762-9ded-7e33-be41-946ecf105bf4");
+        assert!(
+            matches!(
+                events.as_slice(),
+                [AgentEvent::SessionEnd { agent_id, as_child: false }] if *agent_id == expected
+            ),
+            "SessionEnd must decode to exactly one clean SessionEnd for the \
+             rollout-coalesced id, got {events:?}"
+        );
+    }
+
     fn ev(line: Value) -> Vec<AgentEvent> {
         decode_codex_line(
             "/x/rollout-1-019e7762-9ded-7e33-be41-946ecf105bf4.jsonl",

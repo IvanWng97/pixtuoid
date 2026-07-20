@@ -231,7 +231,20 @@ REASONIX_HOOK_URL = (
 # Reasonix hook events we DELIBERATELY do not register: PostLLMCall fires per
 # model turn (noise), PreCompact is a compaction internal, SubagentStop carries
 # no ids and is already covered by the parent's `task` PostToolUse.
-REASONIX_KNOWN_OMITTED = {"PostLLMCall", "PreCompact", "SubagentStop"}
+# PostToolUseFailure/StopFailure (#710): NATIVE hooks registered under
+# PostToolUse/Stop already receive failures — the runner re-fires them with the
+# event re-labeled (hook/runner.go `PostToolUseFailure`/`StopResult`:
+# `legacy := r.nativeHooks(PostToolUse|Stop); p.Event = ...; Run(...)`), and
+# our install writes native-format hooks. Registering the failure events TOO
+# would double-fire every failed tool/turn; both paths decode to the same
+# ActivityEnd anyway.
+REASONIX_KNOWN_OMITTED = {
+    "PostLLMCall",
+    "PreCompact",
+    "SubagentStop",
+    "PostToolUseFailure",
+    "StopFailure",
+}
 
 # Payload fields decode_rx_hook_payload reads — a renamed json tag upstream
 # silently zeroes the decode (`event`/`cwd` are load-bearing: a payload without
