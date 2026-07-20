@@ -166,6 +166,40 @@ impl ActiveChitchat {
     }
 }
 
+/// How a waypoint kind participates in chitchat — the ONE declared social fact
+/// both [`supports_chitchat`] and [`venue_wp_idx`] read. Matched EXHAUSTIVELY
+/// (no `_`), so a new [`WaypointKind`] must classify itself or the build fails,
+/// instead of silently defaulting to non-social + un-collapsed (the old
+/// `matches!` / `_ => wp_idx` gap). Pinned over `WaypointKind::ALL` by
+/// `every_waypoint_kind_declares_a_chitchat_venue`, the twin of
+/// `no_exclusive_waypoint_kind_ever_steps_aside`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChitchatVenue {
+    /// Not a social spot (phone booth, standing desk).
+    None,
+    /// Eligible; chats key to the agent's own waypoint slot.
+    Solo,
+    /// Eligible; every slot of this kind collapses to ONE venue, keyed to the
+    /// first-of-kind waypoint (couch seats, island stands — all chat together).
+    /// ORTHOGONAL to meeting-room group chat, which is keyed by `room_id`.
+    Group,
+}
+
+/// The single social classification `supports_chitchat` + `venue_wp_idx` derive
+/// from — see [`ChitchatVenue`] for why the match is exhaustive.
+fn chitchat_venue(kind: WaypointKind) -> ChitchatVenue {
+    match kind {
+        WaypointKind::Couch | WaypointKind::Island => ChitchatVenue::Group,
+        WaypointKind::Pantry
+        | WaypointKind::VendingMachine
+        | WaypointKind::Printer
+        | WaypointKind::MeetingSofa
+        | WaypointKind::MeetingChair
+        | WaypointKind::SnackShelf => ChitchatVenue::Solo,
+        WaypointKind::PhoneBooth | WaypointKind::StandingDesk => ChitchatVenue::None,
+    }
+}
+
 /// The chitchat `wp_idx` a waypoint visitor groups under. Multi-slot venues
 /// (the 3 lounge-couch seats, the kitchen island's stands) collapse to ONE
 /// venue — the first waypoint OF THAT KIND — so each hosts a single group
@@ -179,28 +213,19 @@ pub fn venue_wp_idx(
     wp_idx: usize,
     waypoints: &[crate::layout::Waypoint],
 ) -> usize {
-    match kind {
-        WaypointKind::Couch | WaypointKind::Island => waypoints
+    match chitchat_venue(kind) {
+        ChitchatVenue::Group => waypoints
             .iter()
             .position(|w| w.kind == kind)
             .unwrap_or(wp_idx),
-        _ => wp_idx,
+        ChitchatVenue::Solo | ChitchatVenue::None => wp_idx,
     }
 }
 
-/// Whether agents at this waypoint kind can start a chitchat.
+/// Whether agents at this waypoint kind can start a chitchat — any venue but
+/// [`ChitchatVenue::None`].
 pub fn supports_chitchat(kind: WaypointKind) -> bool {
-    matches!(
-        kind,
-        WaypointKind::Pantry
-            | WaypointKind::Couch
-            | WaypointKind::VendingMachine
-            | WaypointKind::Printer
-            | WaypointKind::MeetingSofa
-            | WaypointKind::MeetingChair
-            | WaypointKind::Island
-            | WaypointKind::SnackShelf
-    )
+    chitchat_venue(kind) != ChitchatVenue::None
 }
 
 /// A single speech bubble ready for the widget layer to render.
@@ -576,5 +601,32 @@ mod tests {
         assert!(supports_chitchat(WaypointKind::MeetingChair));
         assert!(!supports_chitchat(WaypointKind::PhoneBooth));
         assert!(!supports_chitchat(WaypointKind::StandingDesk));
+    }
+
+    #[test]
+    fn every_waypoint_kind_declares_a_chitchat_venue() {
+        // The forcing twin of no_exclusive_waypoint_kind_ever_steps_aside:
+        // chitchat_venue is matched exhaustively, so a new WaypointKind fails to
+        // compile until classified; this pins the derivations to it over ALL so
+        // supports_chitchat / venue_wp_idx can never drift from the one fact.
+        let (mut social, mut group) = (0, 0);
+        for &kind in WaypointKind::ALL {
+            let venue = chitchat_venue(kind);
+            assert_eq!(
+                supports_chitchat(kind),
+                venue != ChitchatVenue::None,
+                "{kind:?}: supports_chitchat must track chitchat_venue"
+            );
+            social += usize::from(venue != ChitchatVenue::None);
+            group += usize::from(venue == ChitchatVenue::Group);
+        }
+        assert_eq!(
+            social, 8,
+            "8 kinds are social (all but phone booth + standing desk)"
+        );
+        assert_eq!(
+            group, 2,
+            "couch + island are the two multi-slot group venues"
+        );
     }
 }
