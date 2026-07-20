@@ -133,6 +133,25 @@ pub struct Waypoint {
 /// (the pre-move façade name this crate re-exported `SceneLayout` under).
 pub type Layout = SceneLayout;
 
+/// The lounge vignette placed as one unit — the open-floor sibling of the
+/// enclosed [`MeetingRoom`]/[`PantryRoom`] aggregates. Couch + floor lamp +
+/// side table are all gated on `lounge_fits` (they live and die together, so
+/// they're non-optional here); the aquarium carries an EXTRA east-clearance
+/// gate against the elevator door, so it stays `Option`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lounge {
+    /// Centre of the 3-seat couch sprite — the couch is 3 seat waypoints; the
+    /// sprite + rug + side table paint once, centred here.
+    pub couch_center: Point,
+    /// Floor lamp, just east of the couch (its halo bathes the seating area).
+    pub floor_lamp: Point,
+    /// Side table (7×4 wood + magazine) on the couch's opposite (west) flank.
+    pub side_table: Point,
+    /// Aquarium centre, east of the lamp against the north wall band — `None`
+    /// when the elevator-door east clearance fails.
+    pub fish_tank: Option<Point>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SceneLayout {
     pub buf_w: u16,
@@ -152,15 +171,14 @@ pub struct SceneLayout {
     /// item paints its sprite centred on `pos` and marks it as an obstacle
     /// in the walkable mask.
     pub pod_decor: Vec<PodDecorItem>,
-    pub floor_lamp: Option<Point>,
-    /// Lounge side table (7×4 wood + magazine) placed next to the
-    /// viewing couch on the side opposite the floor lamp.
-    pub lounge_side_table: Option<Point>,
-    /// Aquarium center, east of the floor lamp against the north wall band.
-    /// Rides the lounge gate (couch/lamp/table/tank live and die together)
-    /// plus an east-clearance gate against the elevator door; `None` when
-    /// either fails.
-    pub fish_tank: Option<Point>,
+    /// The lounge vignette as ONE unit — couch + floor lamp + side table are
+    /// placed together (all gated on `lounge_fits`), so they live and die
+    /// together; the aquarium keeps an EXTRA east-clearance gate. `None` when
+    /// the vignette doesn't fit. Read the individual pieces via the accessors
+    /// ([`Self::couch_sprite_center`], [`Self::floor_lamp`], …). Mirrors
+    /// [`MeetingRoom`]/[`PantryRoom`]: one aggregate per area, the co-presence
+    /// invariant typed instead of four parallel `Option<Point>`.
+    pub lounge: Option<Lounge>,
     pub door: Option<Point>,
     pub door_threshold: Option<Point>,
     /// Meeting rooms in floor order — index IS the `room_id` every waypoint
@@ -180,10 +198,6 @@ pub struct SceneLayout {
     pub doorways: Vec<Doorway>,
     pub top_margin: u16,
     pub corridor: Option<Bounds>,
-    /// Centre point of the lounge couch sprite (the middle of its 3 seats).
-    /// The couch is 3 separate seat waypoints; the sprite + rug + side table
-    /// paint once, centred here. `None` when no couch fits.
-    pub couch_sprite_center: Option<Point>,
     pub walkable: WalkableMask,
     /// Coarse-cell reachable component (the walkable area an agent can A\*-route
     /// to). Computed once from a known in-component seed; consumed by
@@ -371,6 +385,30 @@ impl SceneLayout {
     /// accessor so consumers don't hand-roll the lookup.
     pub fn meeting_room_bounds(&self, room_id: usize) -> Option<Bounds> {
         self.meeting_rooms.get(room_id).map(|r| r.bounds)
+    }
+
+    /// Couch sprite centre (middle of the 3 seats) — `Some` iff the lounge
+    /// vignette fits. The couch sprite + rug + side table paint once, here.
+    pub fn couch_sprite_center(&self) -> Option<Point> {
+        self.lounge.as_ref().map(|l| l.couch_center)
+    }
+
+    /// The lounge floor lamp — `Some` iff the vignette fits (co-present with
+    /// the couch + side table).
+    pub fn floor_lamp(&self) -> Option<Point> {
+        self.lounge.as_ref().map(|l| l.floor_lamp)
+    }
+
+    /// The lounge side table — `Some` iff the vignette fits (co-present with
+    /// the couch + floor lamp).
+    pub fn lounge_side_table(&self) -> Option<Point> {
+        self.lounge.as_ref().map(|l| l.side_table)
+    }
+
+    /// The aquarium centre — `Some` only when the vignette fits AND the
+    /// east-clearance gate against the elevator door passes.
+    pub fn fish_tank(&self) -> Option<Point> {
+        self.lounge.as_ref().and_then(|l| l.fish_tank)
     }
 
     /// The pantry counter's footprint, or the [`rooms::pantry::COMPACT_COUNTER`]

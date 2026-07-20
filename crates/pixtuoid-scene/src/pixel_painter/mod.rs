@@ -483,7 +483,7 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
             half_w: 5,
             half_h: 1,
         });
-    let couch = layout.couch_sprite_center.map(|center| Ellipse {
+    let couch = layout.couch_sprite_center().map(|center| Ellipse {
         cx: center.x,
         cy: center.y + 2,
         half_w: 7,
@@ -500,7 +500,7 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
             half_w: 3,
             half_h: 1,
         });
-    let lamp = layout.floor_lamp.map(|lamp| Ellipse {
+    let lamp = layout.floor_lamp().map(|lamp| Ellipse {
         cx: lamp.x,
         cy: lamp.y + floor_lamp_south_offset(), // flush with the lamp base (sprite south)
         half_w: 2,
@@ -596,7 +596,7 @@ fn paint_frame(
     for pool in ceiling_pool_regions(ctx.layout) {
         paint_ceiling_pool(ctx.buf, pool, pool_strength, ctx.theme);
     }
-    if let Some(lamp) = ctx.layout.floor_lamp {
+    if let Some(lamp) = ctx.layout.floor_lamp() {
         paint_floor_lamp_halo(
             ctx.buf,
             lamp.x,
@@ -1054,7 +1054,7 @@ fn enqueue_lounge_pantry_appliances<'a>(
     // Lounge couch — pushed before the character loop so the y-sort tie-break
     // keeps the couch behind its sitters. The rug anchors north of the couch
     // (y-sort at its top) so the couch sits on it.
-    if let Some(center) = layout.couch_sprite_center {
+    if let Some(center) = layout.couch_sprite_center() {
         drawables.push(Drawable {
             anchor_y: center.y.saturating_sub(2),
             kind: DrawableKind::AreaRug {
@@ -1076,7 +1076,7 @@ fn enqueue_lounge_pantry_appliances<'a>(
             ),
             kind: DrawableKind::WaypointCouch { pos: center },
         });
-        if let Some(table) = layout.lounge_side_table {
+        if let Some(table) = layout.lounge_side_table() {
             drawables.push(Drawable {
                 anchor_y: z_sort_row(
                     Anchor::Center,
@@ -1169,7 +1169,7 @@ fn enqueue_floor_fixtures<'a>(
     agents: &[AgentSlot],
     drawables: &mut Vec<Drawable<'a>>,
 ) {
-    if let Some(lamp) = ctx.layout.floor_lamp {
+    if let Some(lamp) = ctx.layout.floor_lamp() {
         drawables.push(Drawable {
             anchor_y: lamp.y + floor_lamp_south_offset(),
             kind: DrawableKind::FloorLamp { pos: lamp },
@@ -1193,7 +1193,7 @@ fn enqueue_floor_fixtures<'a>(
             },
         });
     }
-    if let Some(tank) = ctx.layout.fish_tank {
+    if let Some(tank) = ctx.layout.fish_tank() {
         // Center anchor: z at the sprite's south (cabinet base) row, via the
         // SAME center-pin helper the lamp derives its base from.
         let h = crate::layout::furniture_def(crate::layout::Furniture::FishTank)

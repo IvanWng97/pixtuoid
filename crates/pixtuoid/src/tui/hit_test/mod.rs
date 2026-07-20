@@ -163,7 +163,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     // Lounge couch: one 20px hover region centred on the sofa. It's 3 seat
     // waypoints now, so per-seat boxes would over-cover and multi-fire — hit
     // it once at couch_sprite_center, mirroring the single furniture paint.
-    if let Some(c) = layout.couch_sprite_center {
+    if let Some(c) = layout.couch_sprite_center() {
         if hit(c.x.saturating_sub(10), c.y.saturating_sub(3), 20, 7) {
             return Some("Lounge Sofa");
         }
@@ -267,7 +267,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Fish tank — center-anchored like its mask stamp.
-    if let Some(tank) = layout.fish_tank {
+    if let Some(tank) = layout.fish_tank() {
         let Size { w, h } = visual(Furniture::FishTank);
         if hit(
             tank.x.saturating_sub(w / 2),
@@ -296,7 +296,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Floor lamp
-    if let Some(lamp) = layout.floor_lamp {
+    if let Some(lamp) = layout.floor_lamp() {
         let Size { w, h } = visual(Furniture::FloorLamp); // full 4×10 lamp sprite
         if hit(
             lamp.x.saturating_sub(w / 2),
@@ -342,7 +342,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Lounge side table
-    if let Some(t) = layout.lounge_side_table {
+    if let Some(t) = layout.lounge_side_table() {
         if hit(t.x.saturating_sub(3), t.y.saturating_sub(2), 7, 4) {
             return Some("Side Table");
         }

@@ -695,7 +695,9 @@ fn sofas_seat_three_people() {
     xs.sort_unstable();
     assert_eq!(xs[1] - xs[0], 6, "couch seats are 6px apart");
     assert_eq!(xs[2] - xs[1], 6, "couch seats are 6px apart");
-    let center = l.couch_sprite_center.expect("couch sprite center recorded");
+    let center = l
+        .couch_sprite_center()
+        .expect("couch sprite center recorded");
     assert_eq!(center.x, xs[1], "sprite center sits on the middle seat");
 
     // 1 meeting room → 2 sofas (per room) → 3 seats each.
@@ -933,8 +935,8 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
     // the SAME lounge gate as lamp/side table, plus an east-clearance gate so
     // it never crowds the elevator door threshold.
     let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
-    let lamp = l.floor_lamp.expect("lounge fits at this size");
-    let tank = l.fish_tank.expect("tank fits at this size");
+    let lamp = l.floor_lamp().expect("lounge fits at this size");
+    let tank = l.fish_tank().expect("tank fits at this size");
     let half_w = furniture_def(Furniture::FishTank).visual.w / 2;
     let lamp_east = lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
     assert_eq!(
@@ -952,9 +954,9 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
         let Some(l) = SceneLayout::compute(w, h, Some(TEST_DEFAULT_DESKS)) else {
             continue;
         };
-        if l.fish_tank.is_some() {
+        if l.fish_tank().is_some() {
             assert!(
-                l.couch_sprite_center.is_some(),
+                l.couch_sprite_center().is_some(),
                 "{w}x{h}: tank requires the lounge"
             );
         }
@@ -1121,7 +1123,7 @@ fn ficus_greets_at_the_elevator_and_fills_the_lounge_west_flank() {
             .any(|p| p.pos.x + 12 > door.x && p.pos.y < l.cubicle_band.y + 12),
         "one ficus greets beside the elevator"
     );
-    let couch = l.couch_sprite_center.expect("lounge");
+    let couch = l.couch_sprite_center().expect("lounge");
     assert!(
         ficus.iter().any(|p| p.pos.x < couch.x),
         "one ficus fills the lounge west flank"

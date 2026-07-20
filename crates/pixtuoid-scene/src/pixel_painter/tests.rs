@@ -3526,7 +3526,7 @@ fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
         expected.push((wp.pos.x, wp.pos.y + 1, 5, 1));
     }
     // The couch's 7×2 blob — emitted ONCE from couch_sprite_center (not per seat).
-    if let Some(c) = l.couch_sprite_center {
+    if let Some(c) = l.couch_sprite_center() {
         expected.push((c.x, c.y + 2, 7, 2));
     }
     // Every plant's 3×1 blob under its OWN south row (not a fixed +3).
@@ -3540,7 +3540,7 @@ fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
         ));
     }
     // The lamp's fitted 2×1 blob, flush with the sprite south — last in the chain.
-    if let Some(lamp) = l.floor_lamp {
+    if let Some(lamp) = l.floor_lamp() {
         expected.push((lamp.x, lamp.y + floor_lamp_south_offset(), 2, 1));
     }
 

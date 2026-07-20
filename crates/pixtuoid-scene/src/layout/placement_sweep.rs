@@ -174,9 +174,9 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         plants,
         wall_decor,
         pod_decor,
-        floor_lamp,
-        lounge_side_table,
-        fish_tank,
+        // The lounge vignette (couch + lamp + side table + aquarium) as one
+        // aggregate — its pieces enumerate below; the couch contributes none.
+        lounge,
         door: _, // wall-band architecture, not furniture: it PUNCHES walkability
         //                    through the blocked band (DOOR_CUT); pinned by the
         //                    connectivity invariant + door_threshold below
@@ -188,9 +188,8 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         //                invariant proves every room drains through them
         top_margin: _, // wall-band geometry, read via wall_band_h() in invariants
         corridor: _,   // router/pet zone, spans the full width by design
-        couch_sprite_center,
-        walkable: _,  // probed directly by the connectivity invariant
-        reachable: _, // conservative routing truth, exercised by pathfind tests
+        walkable: _,   // probed directly by the connectivity invariant
+        reachable: _,  // conservative routing truth, exercised by pathfind tests
     } = l;
 
     let mut out = Vec::new();
@@ -379,41 +378,39 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
     // the lamp hugs its east side BY DESIGN, so they share overlap group 2
     // (like the pantry cluster). Their internal geometry is pinned by the
     // layout goldens, not the overlap invariant.
-    if let Some(p) = floor_lamp {
+    if let Some(lounge) = lounge {
         out.push(Piece::table(
             "floor_lamp".into(),
             Anchor::Center,
-            *p,
+            lounge.floor_lamp,
             Furniture::FloorLamp,
             Container::Band,
             Some(2),
         ));
-    }
-    if let Some(p) = lounge_side_table {
         out.push(Piece::table(
             "lounge_side_table".into(),
             Anchor::Center,
-            *p,
+            lounge.side_table,
             Furniture::LoungeSideTable,
             Container::Band,
             Some(2),
         ));
+        if let Some(tank) = lounge.fish_tank {
+            // Joins the lounge cluster: it backs onto the wall band beside the
+            // lamp by design, so it shares the vignette's overlap group.
+            out.push(Piece::table(
+                "fish_tank".into(),
+                Anchor::Center,
+                tank,
+                Furniture::FishTank,
+                Container::Band,
+                Some(2),
+            ));
+        }
+        // lounge.couch_center: geometry comes from the 3 seat waypoints above
+        // (the mask's truth), so it contributes no Piece; presence still feeds
+        // the every-kind coverage test via SceneLayout::couch_sprite_center().
     }
-    if let Some(p) = fish_tank {
-        // Joins the lounge cluster: it backs onto the wall band beside the
-        // lamp by design, so it shares the vignette's overlap group.
-        out.push(Piece::table(
-            "fish_tank".into(),
-            Anchor::Center,
-            *p,
-            Furniture::FishTank,
-            Container::Band,
-            Some(2),
-        ));
-    }
-    // couch_sprite_center: geometry comes from the 3 seat waypoints above
-    // (the mask's truth); presence still feeds the every-kind coverage test.
-    let _ = couch_sprite_center;
 
     // Tooth #2 on the pantry aggregate (same rationale as MeetingRoom above).
     let island = pantry.as_ref().and_then(|p| {
@@ -819,7 +816,7 @@ fn couch_survives_a_narrow_band_that_clears_the_door() {
     for &(w, h, seed) in &[(40u16, 160u16, 1u64), (48, 160, 0)] {
         let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
         assert!(
-            l.couch_sprite_center.is_some(),
+            l.couch_sprite_center().is_some(),
             "{w}x{h} seed {seed}: the lounge couch must survive a band that clears the door"
         );
     }
@@ -869,19 +866,19 @@ fn every_kind_is_placed_somewhere_in_the_sweep() {
         for wd in &l.wall_decor {
             seen.insert(format!("wall:{:?}", wd.kind));
         }
-        if l.floor_lamp.is_some() {
+        if l.floor_lamp().is_some() {
             seen.insert("floor_lamp".into());
         }
-        if l.lounge_side_table.is_some() {
+        if l.lounge_side_table().is_some() {
             seen.insert("lounge_side_table".into());
         }
-        if l.fish_tank.is_some() {
+        if l.fish_tank().is_some() {
             seen.insert("fish_tank".into());
         }
         if l.pantry.is_some_and(|p| p.kitchen_island.is_some()) {
             seen.insert("kitchen_island".into());
         }
-        if l.couch_sprite_center.is_some() {
+        if l.couch_sprite_center().is_some() {
             seen.insert("couch".into());
         }
     });
@@ -1070,9 +1067,9 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
             // hand-re-derived second copy that shipped each interpenetration bug.
             // A census miss here IS a plant interpenetration.
             for (otl, osz) in super::compute::plant_obstacle_rects(
-                l.fish_tank,
-                l.floor_lamp,
-                l.lounge_side_table,
+                l.fish_tank(),
+                l.floor_lamp(),
+                l.lounge_side_table(),
                 l.pantry.and_then(|pr| pr.kitchen_island),
                 &l.meeting_rooms,
             ) {

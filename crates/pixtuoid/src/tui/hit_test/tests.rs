@@ -484,7 +484,15 @@ fn furniture_hit_test_finds_lounge_sofa_via_synthetic_center() {
     use pixtuoid_scene::layout::Point;
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let c = Point { x: 40, y: 50 };
-    layout.couch_sprite_center = Some(c);
+    // The lounge is one aggregate now — place the tested piece at the probed
+    // point and park the co-present pieces far from every probe in this test.
+    let park = Point { x: 130, y: 6 };
+    layout.lounge = Some(pixtuoid_scene::layout::Lounge {
+        couch_center: c,
+        floor_lamp: park,
+        side_table: park,
+        fish_tank: None,
+    });
     assert_eq!(
         hit_test_furniture(&layout, c.x, c.y / 2),
         Some("Lounge Sofa")
@@ -501,7 +509,13 @@ fn furniture_hit_test_finds_floor_lamp_via_synthetic() {
     use pixtuoid_scene::layout::Point;
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let p = Point { x: 40, y: 40 };
-    layout.floor_lamp = Some(p);
+    let park = Point { x: 130, y: 6 };
+    layout.lounge = Some(pixtuoid_scene::layout::Lounge {
+        couch_center: park,
+        floor_lamp: p,
+        side_table: park,
+        fish_tank: None,
+    });
     assert_eq!(
         hit_test_furniture(&layout, p.x, p.y / 2),
         Some("Floor Lamp")
@@ -513,7 +527,13 @@ fn furniture_hit_test_finds_fish_tank_via_synthetic() {
     use pixtuoid_scene::layout::Point;
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let p = Point { x: 40, y: 40 };
-    layout.fish_tank = Some(p);
+    let park = Point { x: 130, y: 6 };
+    layout.lounge = Some(pixtuoid_scene::layout::Lounge {
+        couch_center: park,
+        floor_lamp: park,
+        side_table: park,
+        fish_tank: Some(p),
+    });
     assert_eq!(hit_test_furniture(&layout, p.x, p.y / 2), Some("Fish Tank"));
 }
 
@@ -585,7 +605,13 @@ fn furniture_hit_test_finds_side_table_via_synthetic() {
     use pixtuoid_scene::layout::Point;
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let t = Point { x: 30, y: 90 };
-    layout.lounge_side_table = Some(t);
+    let park = Point { x: 130, y: 6 };
+    layout.lounge = Some(pixtuoid_scene::layout::Lounge {
+        couch_center: park,
+        floor_lamp: park,
+        side_table: t,
+        fish_tank: None,
+    });
     assert_eq!(
         hit_test_furniture(&layout, t.x, t.y / 2),
         Some("Side Table")

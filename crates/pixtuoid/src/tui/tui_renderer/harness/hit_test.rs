@@ -142,16 +142,16 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
                 "seed {seed}: Kitchen Island"
             );
         }
-        if layout.floor_lamp.is_some() {
+        if layout.floor_lamp().is_some() {
             assert!(labels.contains("Floor Lamp"), "seed {seed}: Floor Lamp");
         }
-        if layout.fish_tank.is_some() {
+        if layout.fish_tank().is_some() {
             assert!(labels.contains("Fish Tank"), "seed {seed}: Fish Tank");
         }
-        if layout.couch_sprite_center.is_some() {
+        if layout.couch_sprite_center().is_some() {
             assert!(labels.contains("Lounge Sofa"), "seed {seed}: Lounge Sofa");
         }
-        if layout.lounge_side_table.is_some() {
+        if layout.lounge_side_table().is_some() {
             assert!(labels.contains("Side Table"), "seed {seed}: Side Table");
         }
         for item in &layout.plants {

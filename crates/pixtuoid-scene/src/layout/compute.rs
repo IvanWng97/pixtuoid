@@ -614,6 +614,21 @@ pub(super) fn compute_with_seed(
     // ReachSet's seed snap pulls a blocked seed into the adjacent component.
     let reachable = ReachSet::from_mask(&walkable, conn_seed);
 
+    // The lounge vignette as ONE unit: couch + lamp + side table are Some
+    // exactly iff `lounge_fits` (so the zip yields Some iff all three exist —
+    // the aggregate is None precisely when the vignette doesn't fit); the
+    // aquarium rides along as its own Option (its extra east-clearance gate,
+    // never Some without the lamp).
+    let lounge = couch_sprite_center
+        .zip(floor_lamp)
+        .zip(lounge_side_table)
+        .map(|((couch_center, floor_lamp), side_table)| Lounge {
+            couch_center,
+            floor_lamp,
+            side_table,
+            fish_tank,
+        });
+
     Some(SceneLayout {
         buf_w,
         buf_h,
@@ -624,9 +639,7 @@ pub(super) fn compute_with_seed(
         plants,
         wall_decor,
         pod_decor,
-        floor_lamp,
-        lounge_side_table,
-        fish_tank,
+        lounge,
         door,
         door_threshold,
         meeting_rooms,
@@ -639,7 +652,6 @@ pub(super) fn compute_with_seed(
         doorways,
         top_margin,
         corridor,
-        couch_sprite_center,
         walkable,
         reachable,
     })
