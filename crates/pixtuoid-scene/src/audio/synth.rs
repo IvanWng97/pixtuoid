@@ -1151,8 +1151,8 @@ mod tests {
 
     #[test]
     fn night_stems_match_the_ratified_v4_fingerprints() {
-        // reference = the owner-LISTEN-passed v4 float chain (2026-07-17);
-        // same tolerances as the day pins: centroid ±20%, shares ±0.10
+        // reference = the owner-LISTEN-passed v4 float chain; same
+        // tolerances as the day pins: centroid ±20%, shares ±0.10
         // (drums ±0.15 — fresh noise per build)
         type Case = (&'static str, Vec<f32>, f32, f32, &'static [(f32, f32, f32)]);
         let cases: [Case; 4] = [
@@ -1207,8 +1207,8 @@ mod tests {
 
     #[test]
     fn day_take_stems_match_the_ratified_fingerprints() {
-        // reference = the owner-LISTEN-passed candidates A/B (2026-07-19)
-        // measured on the python float chain with the RUST formulas
+        // reference = the owner-LISTEN-passed candidates A/B, measured
+        // on the python float chain with the RUST formulas
         // (export_day2_score.py); same tolerances as the day/night pins:
         // centroid ±20%, shares ±0.10 (drums ±0.15 — fresh noise per build)
         type Case = (&'static str, Vec<f32>, f32, f32, &'static [(f32, f32, f32)]);

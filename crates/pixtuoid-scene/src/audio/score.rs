@@ -1,6 +1,6 @@
 //! The FROZEN musical composition (#633 Phase 2). The Phase 0 python's
 //! seeded rng was the COMPOSER; the owner ratified one specific realization
-//! (the 8-bar `p3_*` renders, 2026-07-16) — these tables ARE that
+//! (the 8-bar `p3_*` renders) — these tables ARE that
 //! realization's events, so the Rust port is deterministic data, not a
 //! re-roll. Regenerate via `export_score` in
 //! `docs/superpowers/specs/2026-07-16-ambient-sound-phase0/` — a regen is a
@@ -333,8 +333,8 @@ mod night_tests {
 // still produce the owner-ratified sound — so they are #[cfg(test)]
 // fixtures now, not dead code.
 // Additional DAY-mood compositions (the Lofi Girl model: ONE production
-// chain, many songs) — owner LISTEN-passed 2026-07-19. Same freeze contract
-// as night: humanization (differential swing hats 56% / kick 53%, 15ms
+// chain, many songs) — owner LISTEN-passed. Same freeze contract as night:
+// humanization (differential swing hats 56% / kick 53%, 15ms
 // kick drag, jitter, velocity breathing,
 // played-not-sequenced lead lag) baked into the at-seconds timestamps.
 // Regenerate via export_day2_score.py in the spec dir; a regen is a NEW

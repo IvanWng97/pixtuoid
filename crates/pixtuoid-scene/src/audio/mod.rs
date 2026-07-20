@@ -107,7 +107,7 @@ pub struct AudioFrame {
     pub track: TrackId,
 }
 
-/// The soundtrack ids — ALL-GENERATIVE by owner decision (2026-07-20): every
+/// The soundtrack ids — ALL-GENERATIVE by owner decision: every
 /// [`TRACK_EPOCH_SECS`] block COMPOSES a
 /// fresh take through the ratified production chain. The payload is the
 /// compose seed (= the [`track_epoch`] block), so the id changing IS the
