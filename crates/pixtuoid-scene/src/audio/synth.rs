@@ -269,6 +269,13 @@ pub fn rain_drop(rng: &mut NoiseStream) -> Vec<f32> {
     buf
 }
 
+/// Vinyl-crackle pop density for BOTH room-tone beds (day free-running +
+/// night duck-baked — one knob, the textures must age identically).
+/// History: 9/s read "haunted" (v1) -> 4/s ratified with Phase 2 -> 1.5/s
+/// after the generator batch ("背景的黑胶的次啦声有点过于频繁了",
+/// owner 2026-07-19).
+const CRACKLE_POPS_PER_SEC: f32 = 1.5;
+
 /// The vinyl/room texture bed: tape hiss + a faint warm room hum + sparse
 /// soft crackle. Mixed 25-35dB below the music (the noise-floor rule); the
 /// per-stem hiss stacking bug lives in the spec's cautionary tales. Its
@@ -288,8 +295,8 @@ pub fn texture_bed(rng: &mut NoiseStream) -> Vec<f32> {
             hiss[i] * 0.010 + room
         })
         .collect();
-    // sparse soft crackle: ~4 pops/s
-    let n_pops = (n as f32 / SR * 4.0) as usize;
+    // sparse soft crackle
+    let n_pops = (n as f32 / SR * CRACKLE_POPS_PER_SEC) as usize;
     for _ in 0..n_pops {
         let at = rng.unit() * (n as f32 / SR - 0.01);
         let pn = n_samples(0.003 + 0.004 * rng.unit());
@@ -683,7 +690,7 @@ fn night_texture_core(loop_secs: f32, kick_times: &[f32], rng: &mut NoiseStream)
             hiss[i] * 0.010 + room
         })
         .collect();
-    let n_pops = (n as f32 / SR * 4.0) as usize;
+    let n_pops = (n as f32 / SR * CRACKLE_POPS_PER_SEC) as usize;
     for _ in 0..n_pops {
         let at = rng.unit() * (n as f32 / SR - 0.01);
         let pn = n_samples(0.003 + 0.004 * rng.unit());
