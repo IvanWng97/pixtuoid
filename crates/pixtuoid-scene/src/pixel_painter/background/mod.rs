@@ -37,7 +37,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{blend, blend_rgb, mix_lab};
+use super::palette::{blend, blend_pixel, blend_rgb, mix_lab};
 
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`, decoded
 /// via chrono. The ambient/sky clock-decode funnel: the day-ramp / sunset /
@@ -551,11 +551,8 @@ fn paint_streaks(
                     let dx = if drift { dy / 2 } else { 0 };
                     let px = glass_x0 + (sx + dx) % gw;
                     let py = glass_y0 + ((phase as u16 + dy) % gh);
-                    if px < buf.width() && py < buf.height() {
-                        let alpha = alpha_base - (dy as f32 / len as f32) * alpha_falloff;
-                        let cur = buf.get(px, py);
-                        buf.put(px, py, blend_rgb(cur, spec.color, alpha));
-                    }
+                    let alpha = alpha_base - (dy as f32 / len as f32) * alpha_falloff;
+                    blend_pixel(buf, px, py, spec.color, alpha);
                 }
             }
             Particle::Flake => {
@@ -583,12 +580,7 @@ fn paint_streaks(
 fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb, alpha: f32) {
     for dy in 1..h.saturating_sub(1) {
         for dx in 1..w.saturating_sub(1) {
-            let px = x0 + dx;
-            let py = y0 + dy;
-            if px < buf.width() && py < buf.height() {
-                let cur = buf.get(px, py);
-                buf.put(px, py, blend_rgb(cur, color, alpha));
-            }
+            blend_pixel(buf, x0 + dx, y0 + dy, color, alpha);
         }
     }
 }

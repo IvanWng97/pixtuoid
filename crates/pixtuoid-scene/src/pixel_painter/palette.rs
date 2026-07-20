@@ -526,6 +526,19 @@ pub(super) fn blend_over(buf: &RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32) -> 
     blend_rgb(buf.get(x, y), tint, t)
 }
 
+/// Composite `tint` over the buffer pixel at `(x, y)` by `t` AND write it back —
+/// the clip-then-read-blend-write primitive the procedural painters open-coded
+/// ~a-dozen times as `if in_bounds { let c = blend_rgb(get, tint, t); put(c) }`.
+/// Clips like [`RgbBuffer::put_checked`]: a no-op outside the buffer. Use
+/// [`blend_over`] when you need the blended color WITHOUT writing (to feed a
+/// further composite); use this when the blend lands straight back on the buffer.
+pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32) {
+    if x < buf.width() && y < buf.height() {
+        let blended = blend_over(buf, x, y, tint, t);
+        buf.put(x, y, blended);
+    }
+}
+
 /// Perceptually-correct Lab-space mix between two sRGB colors. Twilight
 /// (orange → navy) and dim overlays travel cleanly through Lab without the
 /// muddy desaturated midpoint that naive sRGB lerp produces. Slower than
@@ -541,5 +554,34 @@ pub(super) fn mix_lab(a: Rgb, b: Rgb, t: f32) -> Rgb {
         r: (mixed.red.clamp(0.0, 1.0) * 255.0).round() as u8,
         g: (mixed.green.clamp(0.0, 1.0) * 255.0).round() as u8,
         b: (mixed.blue.clamp(0.0, 1.0) * 255.0).round() as u8,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blend_pixel_composites_in_bounds_and_noops_out_of_bounds() {
+        let base = Rgb {
+            r: 100,
+            g: 100,
+            b: 100,
+        };
+        let tint = Rgb { r: 0, g: 0, b: 0 };
+        let mut buf = RgbBuffer::filled(2, 2, base);
+        // In bounds: byte-identical to the old `put(blend_rgb(get, tint, t))` idiom.
+        blend_pixel(&mut buf, 1, 1, tint, 0.5);
+        assert_eq!(buf.get(1, 1), blend_rgb(base, tint, 0.5));
+        assert_eq!(buf.get(0, 0), base, "neighbor untouched");
+        // Out of bounds on either axis: silent no-op, no panic (the clip contract).
+        blend_pixel(&mut buf, 2, 0, tint, 0.5);
+        blend_pixel(&mut buf, 0, 2, tint, 0.5);
+        assert_eq!(buf.get(0, 0), base);
+        assert_eq!(
+            buf.get(1, 1),
+            blend_rgb(base, tint, 0.5),
+            "in-bounds pixel unchanged"
+        );
     }
 }

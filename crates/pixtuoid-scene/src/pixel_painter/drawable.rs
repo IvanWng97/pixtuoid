@@ -603,9 +603,7 @@ fn paint_desk_coffee(
         return;
     }
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
-        if x < buf.width() && y < buf.height() {
-            buf.put(x, y, c);
-        }
+        buf.put_checked(x, y, c);
     };
     let cx = desk.x + 2;
     let cy = desk.y + 2;
@@ -644,9 +642,7 @@ fn paint_token_stack(
         return;
     }
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
-        if x < buf.width() && y < buf.height() {
-            buf.put(x, y, c);
-        }
+        buf.put_checked(x, y, c);
     };
     // Base row = the desk surface (same row the coffee cup's shadow sits on).
     let base_y = desk.y + STACK_BASE_DY;

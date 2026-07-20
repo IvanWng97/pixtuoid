@@ -15,7 +15,7 @@ use crate::pixel_painter::background::{
     beam_strength, paint_radial_falloff, sun_on_wall, window_spill_columns, RadialFalloff,
     TimeOfDayLook, WallSide,
 };
-use crate::pixel_painter::palette::blend_rgb;
+use crate::pixel_painter::palette::{blend_pixel, blend_rgb};
 use crate::pixel_painter::PaintCtx;
 use crate::theme::Theme;
 
@@ -243,12 +243,8 @@ pub(super) fn paint_dust_motes(
     let warm = theme.lighting.sun_spill;
     for col in window_spill_columns(layout) {
         for DustMote { x, y, alpha } in dust_mote_positions(floor_seed, now, &col) {
-            if x >= buf.width() || y >= buf.height() {
-                continue;
-            }
-            let cur = buf.get(x, y);
             let strength = alpha * 0.7 * visibility;
-            buf.put(x, y, blend_rgb(cur, warm, strength));
+            blend_pixel(buf, x, y, warm, strength);
         }
     }
 }
