@@ -640,7 +640,6 @@ import { asset, DIM_RESTING } from '../consts';
         wrap.classList.add('is-live');
         document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
         showAudioBtn(); // a live office exists → offer the ♩ sound toggle
-        scheduleAudioPrewarm(); // #705: synthesize at idle so ♩ is instant
       }
       const rt = mq.matches ? 1 : (nowMs - revealStartSim) / REVEAL_MS;
       if (rt < 1) {
@@ -897,33 +896,13 @@ import { asset, DIM_RESTING } from '../consts';
         audioBtn.hidden = true;
       }
     }
-    // #705 pre-warm: SYNTHESIS needs no user gesture (only the
-    // AudioContext does), so run the whole chunked warmup at page idle —
-    // the ♩ click then only creates the context + uploads buffers,
-    // near-instant. One bed per step since #705, so no idle chunk blocks
-    // longer than a single bed. The click path is untouched: audio_begin
-    // is idempotent and its pump falls straight through to the upload
-    // when the pre-warm already finished (or takes over mid-flight).
-    function scheduleAudioPrewarm() {
-      const kick = () => {
-        if (audioBooting || audioReady || audioUnavailable || !office || !wasm) return;
-        try {
-          office.audio_begin();
-          (function pump() {
-            if (audioBooting || audioReady) return; // the ♩ click took over
-            if (office.audio_warmup_step() > 0) setTimeout(pump, 0);
-          })();
-        } catch (e) {
-          // pre-warm is best-effort: leave real error handling (and the
-          // ♩ teardown path) to the click's audioStart
-        }
-      };
-      if ('requestIdleCallback' in window) {
-        requestIdleCallback(kick, { timeout: 5000 });
-      } else {
-        setTimeout(kick, 1500); // Safari: no rIC
-      }
-    }
+    // #705 idle pre-warm was REVERTED: even one-bed chunks run seconds on
+    // slow hardware, and a main-thread pump at page idle starves clicks +
+    // transient UI (the CI mobile chip-flash test caught it living and
+    // dying entirely inside blocked windows). The real fix is synthesis in
+    // a Web Worker — tracked in #705; until then the warmup starts at the
+    // ♩ click as before, now in per-bed chunks so the UI stays responsive
+    // through it.
     // Pump the chunked synthesis off setTimeout(0) so the main thread never
     // blocks on the multi-second bank/rain/beds build in one go (one bed
     // per step since #705).
