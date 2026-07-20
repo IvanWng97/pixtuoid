@@ -11,7 +11,7 @@ const stars = __GH_STARS__;
 
 // Single source of truth → site/src/sources.json. The README "Supported Tools"
 // glimpse is generated from the SAME file (scripts/gen-readme.mjs), and the
-// `supported` set is pinned to the code's REGISTERED_SOURCES by a Rust test
+// `supported` set is pinned to the code's source registry (`registered_source_names()`) by a Rust test
 // (crates/pixtuoid-core/tests/supported_sources_manifest.rs) — so this matrix,
 // the README glimpse, and what's actually wired can't drift. The per-CLI
 // `badge` prefixes and `badge_color` hexes are likewise pinned: prefixes to

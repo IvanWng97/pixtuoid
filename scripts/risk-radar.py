@@ -129,9 +129,10 @@ SEAMS: tuple[Seam, ...] = (
         ),
         source=("CLAUDE.md", "write_config_atomic"),
     ),
-    # json-contract deliberately fires on ANY source/mod.rs edit (not only
-    # contract-shape changes): it holds REGISTERED_SOURCES + AgentEvent + the
-    # Source trait, the contract-bearing items — over-firing is the safe side
+    # json-contract deliberately fires on ANY source/registry.rs + source/mod.rs
+    # edit (not only contract-shape changes): they hold the source roster
+    # (registered_source_names() over REGISTRY) + AgentEvent + the Source trait,
+    # the contract-bearing items — over-firing is the safe side
     # for a wire contract (a 5s "shape unchanged" dismissal beats a missed
     # gen-contract). Same rationale for justfile under ci-gates: the justfile
     # IS the single source of truth for every gate, so any edit can weaken one.
@@ -143,8 +144,8 @@ SEAMS: tuple[Seam, ...] = (
         or p.startswith("integrations/raycast/contract/")
         or p.endswith("site/src/sources.json"),
         audit=(
-            "Touched the `--json` / `SourceStatus` / `OutcomeRow` / `WireOutcome` shape (their home is `crates/pixtuoid/src/sources.rs`) or `REGISTERED_SOURCES`? Run `just gen-contract` (else the Raycast `gen:contract` diff + `tsc` go red).",
-            "The registry↔`REGISTERED_SOURCES`↔`sources.json` bridges + the committed `integrations/raycast/contract/*.schema.json` goldens are test-pinned — keep them in lockstep.",
+            "Touched the `--json` / `SourceStatus` / `OutcomeRow` / `WireOutcome` shape (their home is `crates/pixtuoid/src/sources.rs`) or the source roster (`registered_source_names()`)? Run `just gen-contract` (else the Raycast `gen:contract` diff + `tsc` go red).",
+            "The registry (`registered_source_names()`)↔`sources.json` bridge + the committed `integrations/raycast/contract/*.schema.json` goldens are test-pinned — keep them in lockstep.",
         ),
         source=("CLAUDE.md", "gen-contract"),
     ),
