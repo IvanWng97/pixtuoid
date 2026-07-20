@@ -102,8 +102,14 @@ fn state_vocab_is_total_and_distinct() {
     // The reserved amber "needs-you" hue and the exiting hue map to their
     // existing theme roles (label_waiting is amber; label_exiting is live).
     let t = &pixtuoid_scene::theme::NORMAL;
-    assert_eq!(StateKind::Waiting.color(t), to_color(t.ui.label_waiting));
-    assert_eq!(StateKind::Exiting.color(t), to_color(t.ui.label_exiting));
+    assert_eq!(
+        state_color(StateKind::Waiting, t),
+        to_color(t.ui.label_waiting)
+    );
+    assert_eq!(
+        state_color(StateKind::Exiting, t),
+        to_color(t.ui.label_exiting)
+    );
 }
 
 #[test]
@@ -149,6 +155,8 @@ fn footer_vocabulary_is_single_column_so_scene_chars_count_matches_display_width
 
 #[test]
 fn state_count_maps_each_kind() {
+    // `StateKind` is the re-exported `scene::footer::RungKind`; `count` is the
+    // shared tally accessor the footer model and this binary both read.
     let c = StateCounts {
         active: 3,
         waiting: 2,
@@ -156,10 +164,10 @@ fn state_count_maps_each_kind() {
         exiting: 1,
         total: 13,
     };
-    assert_eq!(state_count(c, StateKind::Active), 3);
-    assert_eq!(state_count(c, StateKind::Waiting), 2);
-    assert_eq!(state_count(c, StateKind::Idle), 7);
-    assert_eq!(state_count(c, StateKind::Exiting), 1);
+    assert_eq!(StateKind::Active.count(c), 3);
+    assert_eq!(StateKind::Waiting.count(c), 2);
+    assert_eq!(StateKind::Idle.count(c), 7);
+    assert_eq!(StateKind::Exiting.count(c), 1);
 }
 
 // --- office-wide plumbing (per-floor + gateway rollup) ------------------

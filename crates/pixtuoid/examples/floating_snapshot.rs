@@ -177,6 +177,11 @@ fn main() -> Result<()> {
         scale as i32,
         theme,
     );
+    // The status footer band (full TUI parity) — audible so the ♩ suffix shows;
+    // no transient flash in a static snapshot.
+    let budget = pixtuoid::floating::offscreen::footer_budget(ww);
+    let footer = renderer.footer(&scene, budget, true, None);
+    pixtuoid::floating::offscreen::paint_footer_into_surface(&mut sb, ww, wh, &footer, theme);
 
     let mut img = RgbImage::new(win_w, win_h);
     for wy in 0..win_h {

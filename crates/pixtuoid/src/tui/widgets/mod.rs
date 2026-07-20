@@ -74,92 +74,30 @@ pub(crate) use pixtuoid_scene::board::{
     compact_hms, gateway_rollup, per_floor_counts, scene_stats,
 };
 
-/// The count for one [`StateKind`] — lets a consumer iterate [`StateKind::ALL`]
-/// and pull the matching tally without re-matching. A free fn (not the old
-/// `StateCounts::get`) because `StateCounts` is now a foreign type
-/// (`pixtuoid_scene::board`) and `StateKind` is binary-local — an inherent impl
-/// would violate the orphan rule.
-pub(crate) fn state_count(counts: StateCounts, kind: StateKind) -> usize {
-    match kind {
-        StateKind::Active => counts.active,
-        StateKind::Waiting => counts.waiting,
-        StateKind::Idle => counts.idle,
-        StateKind::Exiting => counts.exiting,
-    }
-}
-
 // --- Shared state vocabulary (glyph + letter + word + hue) --------------------
-// ONE source for how an activity state reads on EVERY surface (footer, board,
-// tooltip, and — later — the dashboard). Each state carries FOUR redundant
-// channels; hue is never the sole carrier, so the design survives colour
-// removal, a colour-blind viewer, and a terminal that tofus a glyph.
+// The vocabulary (glyph/letter/word/ALL/count) lives ONCE in
+// `pixtuoid_scene::footer::RungKind` — so the footer MODEL and this binary's
+// tooltip/dashboard read the SAME channels, with no parallel enum to keep in
+// step. Re-exported here as `StateKind` so every existing call site is unchanged.
+// The hue can't be an inherent method (it returns a ratatui `Color`, and
+// `RungKind` is a foreign type — orphan rule), so it's the `state_color` shim
+// below over the shared `footer_tone_rgb` — the ONE tone→theme-role authority
+// both footer painters ride. Each state still carries FOUR redundant channels;
+// hue is never the sole carrier, so the design survives colour removal, a
+// colour-blind viewer, and a terminal that tofus a glyph.
 
-/// The four agent activity buckets as a shared vocabulary. `Waiting` owns the
-/// reserved amber "needs-you" hue.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StateKind {
-    Active,
-    Waiting,
-    Idle,
-    Exiting,
-}
+/// The four-state activity vocabulary, re-exported from `scene::footer`.
+pub(crate) use pixtuoid_scene::footer::RungKind as StateKind;
 
-impl StateKind {
-    /// Canonical render order (the footer's left-to-right rung order).
-    pub(crate) const ALL: [StateKind; 4] = [
-        StateKind::Active,
-        StateKind::Waiting,
-        StateKind::Idle,
-        StateKind::Exiting,
-    ];
-
-    /// A distinct geometric glyph per state — all East-Asian *ambiguous* width
-    /// (1 cell in a non-CJK terminal): `●` active, `◐` waiting, `○` idle, `◌`
-    /// exiting. The fill gradient IS the language: full=working, half=paused
-    /// on you, empty=idle, dotted=leaving. (Every glyph is Monaspace-Neon-native
-    /// — the single-face vocabulary gate in `aa_text`.)
-    pub(crate) fn glyph(self) -> char {
-        match self {
-            StateKind::Active => '\u{25cf}',
-            StateKind::Waiting => '\u{25d0}',
-            StateKind::Idle => '\u{25cb}',
-            StateKind::Exiting => '\u{25cc}',
-        }
-    }
-
-    /// A distinct single letter — the primary colour-blind channel at the
-    /// footer's narrow tier where the full word doesn't fit.
-    pub(crate) fn letter(self) -> char {
-        match self {
-            StateKind::Active => 'A',
-            StateKind::Waiting => 'W',
-            StateKind::Idle => 'I',
-            StateKind::Exiting => 'x',
-        }
-    }
-
-    /// The full capitalized state word — the tooltip dossier's state line reads
-    /// `{glyph} {word}` (the board uses its own casual `work`/`wait`/`idle`).
-    pub(crate) fn word(self) -> &'static str {
-        match self {
-            StateKind::Active => "Active",
-            StateKind::Waiting => "Waiting",
-            StateKind::Idle => "Idle",
-            StateKind::Exiting => "Exiting",
-        }
-    }
-
-    /// The themed hue — reuses the existing `label_*` roles so state colour is
-    /// identical to the name-badges and every other surface (`label_waiting` is
-    /// the amber attention hue; `label_exiting` is already live).
-    pub(crate) fn color(self, theme: &Theme) -> Color {
-        to_color(match self {
-            StateKind::Active => theme.ui.label_active,
-            StateKind::Waiting => theme.ui.label_waiting,
-            StateKind::Idle => theme.ui.label_idle,
-            StateKind::Exiting => theme.ui.label_exiting,
-        })
-    }
+/// A [`StateKind`]'s themed ratatui hue — the binary shim over the shared
+/// [`footer_tone_rgb`](pixtuoid_scene::footer::footer_tone_rgb) authority
+/// (reproducing the retired `StateKind::color`), so the footer/tooltip/dashboard
+/// state colours can't drift from the footer model's.
+pub(crate) fn state_color(kind: StateKind, theme: &Theme) -> Color {
+    to_color(pixtuoid_scene::footer::footer_tone_rgb(
+        pixtuoid_scene::footer::FooterTone::Rung(kind),
+        theme,
+    ))
 }
 
 // --- Shared borderless-card backing (shadow + clear + bg fill) ----------------
