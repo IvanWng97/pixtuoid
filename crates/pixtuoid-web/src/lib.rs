@@ -488,7 +488,7 @@ impl Office {
         let Some(ad) = self.adopting.as_mut() else {
             return false;
         };
-        match audio::pool_from_wire(pool) {
+        match OneShotPool::from_wire(pool) {
             Some(p) => ad.push_oneshot(p, samples),
             None => false,
         }
@@ -587,12 +587,12 @@ impl SynthTake {
         self.driver.loop_buffer(idx).len()
     }
     pub fn oneshot_ptr(&self, pool: u8, idx: usize) -> *const f32 {
-        audio::pool_from_wire(pool).map_or(std::ptr::null(), |p| {
+        OneShotPool::from_wire(pool).map_or(std::ptr::null(), |p| {
             self.driver.oneshot_buffer(p, idx).as_ptr()
         })
     }
     pub fn oneshot_len(&self, pool: u8, idx: usize) -> usize {
-        audio::pool_from_wire(pool).map_or(0, |p| self.driver.oneshot_buffer(p, idx).len())
+        OneShotPool::from_wire(pool).map_or(0, |p| self.driver.oneshot_buffer(p, idx).len())
     }
 }
 
@@ -852,7 +852,7 @@ mod tests {
             );
         }
         for wire in 0u8..5 {
-            let pool = audio::pool_from_wire(wire).expect("known wire");
+            let pool = OneShotPool::from_wire(wire).expect("known wire");
             let mut j = 0;
             while !take.driver.oneshot_buffer(pool, j).is_empty() {
                 assert!(
