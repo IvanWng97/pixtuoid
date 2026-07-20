@@ -73,17 +73,21 @@ pub(super) fn ground_rect(
 /// (`pos.y + h/2`) — the walk-behind shape. Shared by the mask stamp AND the
 /// placement sweep so the bespoke math can't fork.
 pub(super) fn pantry_ground_rect(pos: Point, counter: Size) -> (Point, Size) {
+    // The runtime counter rides the SAME offset formula as every other piece
+    // (Center-anchored visual, south-aligned `PANTRY_FOOTPRINT_DEPTH` strip)
+    // rather than a forked copy of the math — byte-identical for the even
+    // counter heights in use. Only the runtime depth is pantry-specific.
     let depth = PANTRY_FOOTPRINT_DEPTH.min(counter.h);
-    let south = pos.y + counter.h / 2;
-    (
-        Point {
-            x: pos.x.saturating_sub(counter.w / 2),
-            y: south.saturating_sub(depth),
-        },
+    ground_rect(
+        Anchor::Center,
+        pos,
         Size {
             w: counter.w,
             h: depth,
         },
+        counter,
+        GroundAlign::Center,
+        GroundAlign::End,
     )
 }
 

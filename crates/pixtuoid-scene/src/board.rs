@@ -464,6 +464,24 @@ mod tests {
         assert_eq!(gateway_tone(DaemonState::Down), BoardTone::Waiting);
         assert_eq!(gateway_label(DaemonState::Idle), "ok");
         assert_eq!(gateway_label(DaemonState::Down), "down");
+        // Actually pin the name's promise: board and footer resolve the SAME
+        // color for every gateway state — board via BoardTone, footer via its
+        // own FooterTone::Gateway arm — so the (deliberately disjoint) tone
+        // vocabularies can't drift on the gateway severity policy. Was only
+        // half-pinned: the board mapping above, but nothing held the footer side.
+        let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+        for st in [
+            DaemonState::Idle,
+            DaemonState::Busy,
+            DaemonState::Degraded,
+            DaemonState::Down,
+        ] {
+            assert_eq!(
+                crate::footer::footer_tone_rgb(crate::footer::FooterTone::Gateway(st), theme),
+                tone_rgb(gateway_tone(st), theme),
+                "board and footer must resolve the same gateway color for {st:?}"
+            );
+        }
     }
 
     #[test]
