@@ -741,19 +741,16 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     crate::audio::AudioAction::ToggleMute,
                                     ui.paused(),
                                     std::time::Instant::now(),
-                                    crate::audio::spawn,
+                                    crate::audio::respawn,
                                 );
-                                // a lazy spawn mints a new handle — re-sync the feed
-                                renderer.set_audio(audio_ctl.handle().clone());
                             }
                             KeyAction::AdjustVolume(up) => {
                                 audio_ctl.apply(
                                     crate::audio::AudioAction::Volume(up),
                                     ui.paused(),
                                     std::time::Instant::now(),
-                                    crate::audio::spawn,
+                                    crate::audio::respawn,
                                 );
-                                renderer.set_audio(audio_ctl.handle().clone());
                             }
                             KeyAction::ToggleWalkableDebug => {
                                 let on = renderer.debug_walkable();

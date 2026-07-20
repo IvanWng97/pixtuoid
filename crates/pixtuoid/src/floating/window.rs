@@ -388,10 +388,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                     // controller persists mute NOW + debounces the volume + arms
                     // the (volume-only) readout.
                     self.audio_ctl
-                        .apply(action, false, Instant::now(), crate::audio::spawn);
-                    // a lazy spawn mints a NEW handle — reinstall so the
-                    // renderer's frame feed reaches the live thread
-                    self.renderer.set_audio(self.audio_ctl.handle().clone());
+                        .apply(action, false, Instant::now(), crate::audio::respawn);
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }

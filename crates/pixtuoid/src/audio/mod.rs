@@ -91,13 +91,13 @@ pub(crate) struct Persist {
 /// (re)fires whenever sound is wanted but the system is down (`+`/`m` are
 /// never dead keys — boot-muted and failed-spawn both recover); volume clamps
 /// to [0, 1] by [`VOLUME_STEP`]. `paused` folds an external hold (the TUI's
-/// `[p]ause`) into the effective mute; floating passes `false`. `spawn` is
+/// `[p]ause`) into the effective mute; floating passes `false`. `respawn` is
 /// injected so the transition is testable without a device.
 pub(crate) fn apply_audio_action(
     st: &mut AudioUi,
     action: AudioAction,
     paused: bool,
-    spawn: impl FnOnce(f32) -> AudioHandle,
+    respawn: impl FnOnce(&AudioHandle, f32),
 ) -> Persist {
     let mut persist = Persist {
         muted: false,
@@ -120,9 +120,10 @@ pub(crate) fn apply_audio_action(
         }
     }
     if !st.muted && !st.handle.is_enabled() {
-        // lazy (re)spawn: muted costs nothing, so the device/thread/buffers
-        // only come up when sound is actually wanted
-        st.handle = spawn(st.volume);
+        // lazy (re)spawn IN PLACE: muted costs nothing, so the device/thread/
+        // buffers only come up when sound is wanted — and swapping the sender
+        // into the SAME handle keeps every cached clone live (no re-sync).
+        respawn(&st.handle, st.volume);
     }
     st.handle.set_muted(paused || st.muted);
     st.handle.set_volume(st.volume);
@@ -158,16 +159,16 @@ impl AudioController {
     }
 
     /// Run one gesture: the shared transition, then persist — mute NOW, volume
-    /// debounced (dirty + readout armed). A lazy spawn may mint a new handle;
-    /// read it back via [`Self::handle`].
+    /// debounced (dirty + readout armed). A lazy respawn fills the live handle
+    /// IN PLACE — consumers' cached clones stay valid, so no read-back.
     pub(crate) fn apply(
         &mut self,
         action: AudioAction,
         paused: bool,
         now: std::time::Instant,
-        spawn: impl FnOnce(f32) -> AudioHandle,
+        respawn: impl FnOnce(&AudioHandle, f32),
     ) {
-        let persist = apply_audio_action(&mut self.ui, action, paused, spawn);
+        let persist = apply_audio_action(&mut self.ui, action, paused, respawn);
         if persist.muted {
             // persist like a theme commit: next launch boots as the user left it
             if let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted) {
@@ -229,8 +230,9 @@ impl AudioController {
         self.ui.volume
     }
 
-    /// The live audio handle — the renderer/window feeds frames to it. Re-sync
-    /// the consumer after [`Self::apply`], which may have lazily spawned a new one.
+    /// The live audio handle — the renderer/window feeds frames to it. Stable
+    /// across a lazy respawn (the sender is swapped in place), so a consumer's
+    /// cached clone never goes stale — hand it out ONCE, no re-sync.
     pub(crate) fn handle(&self) -> &AudioHandle {
         &self.ui.handle
     }
@@ -257,9 +259,7 @@ mod controller_tests {
     fn mute_persists_immediately_and_does_not_arm_the_volume_flash() {
         let (mut c, _d) = ctl(false, 0.4);
         let t0 = Instant::now();
-        c.apply(AudioAction::ToggleMute, false, t0, |_| {
-            AudioHandle::disabled()
-        });
+        c.apply(AudioAction::ToggleMute, false, t0, |_, _| {});
         assert!(
             std::fs::read_to_string(&c.config_path)
                 .unwrap()
@@ -274,9 +274,7 @@ mod controller_tests {
         let (mut c, _d) = ctl(false, 0.50);
         let t0 = Instant::now();
         let saved = |c: &AudioController| std::fs::read_to_string(&c.config_path).unwrap();
-        c.apply(AudioAction::Volume(true), false, t0, |_| {
-            AudioHandle::disabled()
-        });
+        c.apply(AudioAction::Volume(true), false, t0, |_, _| {});
         assert_eq!(c.volume_flash(t0), Some(55), "readout armed immediately");
         assert!(
             !saved(&c).contains("volume"),
@@ -299,9 +297,7 @@ mod controller_tests {
     #[test]
     fn flush_on_exit_writes_a_pending_nudge() {
         let (mut c, _d) = ctl(false, 0.50);
-        c.apply(AudioAction::Volume(false), false, Instant::now(), |_| {
-            AudioHandle::disabled()
-        });
+        c.apply(AudioAction::Volume(false), false, Instant::now(), |_, _| {});
         c.flush_on_exit();
         assert!(
             std::fs::read_to_string(&c.config_path)
@@ -323,11 +319,10 @@ mod controls_tests {
             muted: true,
             volume: 0.4,
         };
-        let (live, _rx) = AudioHandle::test_pair();
         let mut spawned_at = None;
-        let p = apply_audio_action(&mut st, AudioAction::ToggleMute, false, |v| {
+        let p = apply_audio_action(&mut st, AudioAction::ToggleMute, false, |h, v| {
             spawned_at = Some(v);
-            live.clone()
+            h.install_test_channel();
         });
         assert!(!st.muted);
         assert_eq!(
@@ -344,7 +339,7 @@ mod controls_tests {
             }
         );
         // muting back must NOT spawn again
-        let p = apply_audio_action(&mut st, AudioAction::ToggleMute, false, |_| {
+        let p = apply_audio_action(&mut st, AudioAction::ToggleMute, false, |_, _| {
             panic!("mute must never spawn")
         });
         assert!(st.muted && st.handle.is_muted());
@@ -365,11 +360,10 @@ mod controls_tests {
             muted: true,
             volume: 0.5,
         };
-        let (live, _rx) = AudioHandle::test_pair();
         let mut spawns = 0;
-        let p = apply_audio_action(&mut st, AudioAction::Volume(true), false, |_| {
+        let p = apply_audio_action(&mut st, AudioAction::Volume(true), false, |h, _| {
             spawns += 1;
-            live.clone()
+            h.install_test_channel();
         });
         assert!(!st.muted, "volume-up IS the un-mute gesture");
         assert_eq!(spawns, 1);
@@ -383,7 +377,7 @@ mod controls_tests {
         assert!((st.volume - (0.5 + VOLUME_STEP)).abs() < 1e-6);
         assert!((st.handle.volume() - st.volume).abs() < 1e-6);
         // volume-down while unmuted: no mute persist, no respawn
-        let p = apply_audio_action(&mut st, AudioAction::Volume(false), false, |_| {
+        let p = apply_audio_action(&mut st, AudioAction::Volume(false), false, |_, _| {
             panic!("live system must not respawn")
         });
         assert_eq!(
@@ -408,7 +402,7 @@ mod controls_tests {
             &mut st,
             AudioAction::Volume(true),
             false,
-            |_| unreachable!(),
+            |_, _| unreachable!(),
         );
         assert_eq!(st.volume, 1.0, "top rail");
         st.volume = 0.0;
@@ -416,7 +410,7 @@ mod controls_tests {
             &mut st,
             AudioAction::Volume(false),
             false,
-            |_| unreachable!(),
+            |_, _| unreachable!(),
         );
         assert_eq!(st.volume, 0.0, "bottom rail");
     }
@@ -431,9 +425,37 @@ mod controls_tests {
             muted: false,
             volume: 0.5,
         };
-        apply_audio_action(&mut st, AudioAction::Volume(true), true, |_| unreachable!());
+        apply_audio_action(
+            &mut st,
+            AudioAction::Volume(true),
+            true,
+            |_, _| unreachable!(),
+        );
         assert!(!st.muted, "the user's flag stays unmuted");
         assert!(st.handle.is_muted(), "but paused silences the handle");
+    }
+
+    #[test]
+    fn a_consumer_clone_survives_a_lazy_respawn_in_place() {
+        // The drift the in-place swap fixes: apply() USED to replace the
+        // handle, stranding every clone a renderer cached (frames fed a dead
+        // channel until a manual re-sync). Now the sender is swapped INTO the
+        // shared handle, so a clone taken BEFORE the respawn stays live and the
+        // re-sync obligation is gone.
+        let handle = AudioHandle::disabled();
+        let cached = handle.clone(); // what a renderer caches once, at init
+        assert!(!cached.is_enabled());
+        let rx = handle.install_test_channel(); // a lazy respawn fills the shared tx
+        assert!(
+            cached.is_enabled(),
+            "the pre-respawn clone must see the swapped-in channel"
+        );
+        cached.frame(AudioFrame::default());
+        assert_eq!(
+            drain_frames(&rx).len(),
+            1,
+            "frames from the pre-respawn clone reach the live channel"
+        );
     }
 }
 
@@ -441,7 +463,12 @@ mod controls_tests {
 /// (audio off in config, or no device) swallows everything.
 #[derive(Clone)]
 pub(crate) struct AudioHandle {
-    tx: Option<mpsc::SyncSender<AudioFrame>>,
+    /// The live device sender, swappable IN PLACE behind a shared cell. A lazy
+    /// respawn ([`AudioHandle::respawn_in_place`]) fills it, and because every
+    /// clone shares this `Arc`, a consumer's cached clone never goes stale — no
+    /// re-sync after [`AudioController::apply`]. `None` = disabled (no device,
+    /// or sound not requested yet).
+    tx: std::sync::Arc<std::sync::Mutex<Option<mpsc::SyncSender<AudioFrame>>>>,
     /// Mute is STATE, not an event: it rides this atomic instead of the
     /// droppable frame channel. During the bank-synthesis window the
     /// channel saturates and try_sends drop — an `m`/`p` keypress there
@@ -460,20 +487,20 @@ impl AudioHandle {
     /// call is a no-op.
     pub(crate) fn disabled() -> Self {
         Self {
-            tx: None,
+            tx: std::sync::Arc::new(std::sync::Mutex::new(None)),
             muted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             volume: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
         }
     }
 
     pub(crate) fn is_enabled(&self) -> bool {
-        self.tx.is_some()
+        self.tx.lock().unwrap_or_else(|e| e.into_inner()).is_some()
     }
 
     /// Push one frame of audio intent. `try_send` — a saturated audio
     /// thread drops frames rather than ever stalling the render loop.
     pub(crate) fn frame(&self, frame: AudioFrame) {
-        if let Some(tx) = &self.tx {
+        if let Some(tx) = self.tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             let _ = tx.try_send(frame);
         }
     }
@@ -504,6 +531,33 @@ impl AudioHandle {
         self.muted.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// (Re)open the output device + audio thread and swap the live sender INTO
+    /// this handle in place. Because `tx` is shared across clones, every
+    /// consumer that cached a clone (the renderers' per-frame feed) keeps
+    /// working — there is NO re-sync obligation after a lazy respawn. A
+    /// no-device / feature-off system leaves the handle disabled. Injected into
+    /// [`apply_audio_action`] via [`respawn`] so the transition stays
+    /// device-free in tests.
+    pub(crate) fn respawn_in_place(&self, volume: f32) {
+        self.set_volume(volume);
+        #[cfg(feature = "audio")]
+        {
+            let Some(device) = sink::rodio_sink::RodioSink::open() else {
+                return;
+            };
+            let (tx, rx) = mpsc::sync_channel(64);
+            let muted_for_loop = std::sync::Arc::clone(&self.muted);
+            let vol_for_loop = std::sync::Arc::clone(&self.volume);
+            match std::thread::Builder::new()
+                .name("pixtuoid-audio".into())
+                .spawn(move || run_loop(rx, Box::new(device), muted_for_loop, vol_for_loop))
+            {
+                Ok(_) => *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx),
+                Err(e) => tracing::warn!("audio: thread spawn failed, running silent: {e}"),
+            }
+        }
+    }
+
     /// Test seam: a live handle whose receiver the test drains — the ONE
     /// way to observe what the render path actually feeds the audio thread
     /// (the online-review HIGH: the floor-scoping wiring needs a pin).
@@ -512,12 +566,22 @@ impl AudioHandle {
         let (tx, rx) = mpsc::sync_channel(256);
         (
             Self {
-                tx: Some(tx),
+                tx: std::sync::Arc::new(std::sync::Mutex::new(Some(tx))),
                 muted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 volume: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
             },
             rx,
         )
+    }
+
+    /// Test seam: fill the shared sender in place (as a lazy respawn would),
+    /// returning the receiver — lets a test show a clone taken BEFORE the
+    /// respawn stays live (the staleness the in-place swap fixes).
+    #[cfg(test)]
+    pub(crate) fn install_test_channel(&self) -> mpsc::Receiver<AudioFrame> {
+        let (tx, rx) = mpsc::sync_channel(256);
+        *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        rx
     }
 }
 
@@ -536,40 +600,24 @@ pub(crate) fn drain_frames(rx: &mpsc::Receiver<AudioFrame>) -> Vec<AudioFrame> {
 #[cfg(feature = "audio")]
 const TICK_MS: u64 = 50;
 
-/// Spawn the audio thread. `volume` arrives pre-clamped from config
-/// resolve. Returns a disabled handle when the `audio` feature is off or
-/// no output device exists — callers never need a cfg.
+/// Boot the audio thread. `volume` arrives pre-clamped from config resolve.
+/// Returns a disabled handle when the `audio` feature is off or no output
+/// device exists — callers never need a cfg. Same path as the lazy re-spawn
+/// (a fresh disabled handle, then a swap in place), so boot and re-spawn can't
+/// drift.
 pub(crate) fn spawn(volume: f32) -> AudioHandle {
-    #[cfg(not(feature = "audio"))]
-    {
-        let _ = volume;
-        AudioHandle::disabled()
-    }
-    #[cfg(feature = "audio")]
-    {
-        let Some(device) = sink::rodio_sink::RodioSink::open() else {
-            return AudioHandle::disabled();
-        };
-        let (tx, rx) = mpsc::sync_channel(64);
-        let muted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let vol = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(
-            volume.clamp(0.0, 1.0).to_bits(),
-        ));
-        let muted_for_loop = std::sync::Arc::clone(&muted);
-        let vol_for_loop = std::sync::Arc::clone(&vol);
-        std::thread::Builder::new()
-            .name("pixtuoid-audio".into())
-            .spawn(move || run_loop(rx, Box::new(device), muted_for_loop, vol_for_loop))
-            .map(|_| AudioHandle {
-                tx: Some(tx),
-                muted,
-                volume: vol,
-            })
-            .unwrap_or_else(|e| {
-                tracing::warn!("audio: thread spawn failed, running silent: {e}");
-                AudioHandle::disabled()
-            })
-    }
+    let handle = AudioHandle::disabled();
+    handle.respawn_in_place(volume);
+    handle
+}
+
+/// The production lazy-respawn injected into [`apply_audio_action`] /
+/// [`AudioController::apply`]: (re)open the device + thread and swap the live
+/// sender into `handle` in place, so every cached clone keeps working. A named
+/// free fn (not an inline closure at each call site) so the two callers can't
+/// drift, and device-free-injectable in tests.
+pub(crate) fn respawn(handle: &AudioHandle, volume: f32) {
+    handle.respawn_in_place(volume);
 }
 
 /// After the first-frame `TrackBeds::build` (~2s release / >10s debug) the
