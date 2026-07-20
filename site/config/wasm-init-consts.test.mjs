@@ -24,9 +24,12 @@ for (const name of ['WASM_INIT_RETRIES', 'WASM_INIT_BACKOFF_MS']) {
   });
 
   test(`${name} is not re-inlined in either live-office consumer`, () => {
+    // Match a DECLARATION (`const NAME =`), not a bare mention — a comment
+    // cross-referencing the const by name must not spuriously red this in
+    // a codebase this comment-dense.
     for (const rel of CONSUMERS) {
       assert.ok(
-        !read(rel).includes(name),
+        !new RegExp(`const ${name}\\s*=`).test(read(rel)),
         `${rel} re-inlined ${name} — it must ride the shared office-driver.js`
       );
     }

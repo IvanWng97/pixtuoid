@@ -366,6 +366,10 @@ would make browsers *ignore* `'unsafe-inline'`. Consequences to not "fix":
 - **`script-src` carries no `'unsafe-inline'`** — every inline script is
   whitelisted by content hash, recomputed on each build. Adding/editing an
   `is:inline` script needs NO manual CSP step.
+- **A hand-written `public/*.js` module loaded by URL** (`audio-worker.js` via
+  `new Worker`, `office-driver.js` via `import()`) rides `script-src 'self'` as
+  an EXTERNAL resource — it is not hashed and needs no CSP step; only its
+  runtime-loading `is:inline` caller is (auto-)rehashed when its content changes.
 - **`style-src` keeps `'unsafe-inline'` and must stay hash-free**: Shiki
   spans, the build-time mermaid SVG, and the few `style={}` attributes are
   inline style ATTRIBUTES, which hashes cannot express (one present hash
