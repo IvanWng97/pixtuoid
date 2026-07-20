@@ -67,7 +67,7 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
 
 /// Verify a target's installed config is structurally SOUND (the silent-dead
 /// check, #309) — read-only, false-positive-free. Call only when hooks are
-/// claimed installed (`has_hooks(t)`). Returns the per-source `verify_schema`
+/// claimed installed (`has_hooks(t, config)`, same `config`). Returns the per-source `verify_schema`
 /// verdict (sentinel + event-set + target extras) PLUS the shim-on-disk check
 /// this (the only I/O) layer adds: an embedded absolute path is stat'd for
 /// exists+executable (HARD); a Claude/Unix bare name is a soft PATH note (a
