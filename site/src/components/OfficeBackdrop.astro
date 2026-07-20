@@ -389,6 +389,7 @@ import { asset, DIM_RESTING } from '../consts';
   define:vars={{
     wasmJsUrl: asset('wasm/pixtuoid_web.js'),
     audioWorkerUrl: asset('audio-worker.js'),
+    officeDriverUrl: asset('office-driver.js'),
   }}
 >
   (function () {
@@ -455,6 +456,7 @@ import { asset, DIM_RESTING } from '../consts';
 
     let office = null;
     let wasm = null;
+    let officeDriver = null; // { sharedWasm, officeFrameView } from office-driver.js (#721)
     let ctx2d = null;
     let img = null;
     let bufW = 0;
@@ -627,13 +629,10 @@ import { asset, DIM_RESTING } from '../consts';
     function paint(nowMs) {
       if (!img) return; // sizeBuffer bailed on a <1px viewport → no buffer to write (audit C17)
       office.step(nowMs, bufW, BUF_H);
-      // Re-read ptr/len EVERY frame (resize reallocates; memory.grow
-      // invalidates views) and copy into the reusable ImageData.
-      const view = new Uint8ClampedArray(
-        wasm.memory.buffer,
-        office.frame_ptr(),
-        office.frame_len()
-      );
+      // The frame-memory view (re-read ptr/len every frame — resize/memory.grow
+      // moves them) is single-sourced in office-driver.js. paint only runs
+      // after boot set officeDriver alongside office/wasm, so it's non-null here.
+      const view = officeDriver.officeFrameView(office, wasm);
       if (view.length !== img.data.length) return;
       // First good frame = engine is up: release the boot splash's Level-2 gate.
       markEngineResolved();
@@ -1206,41 +1205,18 @@ import { asset, DIM_RESTING } from '../consts';
       // Office built against the losing instance reading the wrong linear
       // memory forever. Memoize ONE shared init promise on `window` so every
       // consumer awaits the same instantiation (site/CLAUDE.md VIBING entry).
-      // A transient drop on the ~874KB wasm-binary fetch (a flaky link) used to
-      // strand the office on the poster until a manual reload — the rejected
-      // init promise was memoized on window and never retried. Retry
-      // import+instantiate a bounded number of times with backoff so a
-      // recoverable blip self-heals; on exhaustion the promise rejects → poster
-      // (the deliberate no-wasm fallback). Scope: this re-fetches the binary; a
-      // first-load GLUE-import() failure is import-map-cached and not covered.
-      // The retry MUST stay INSIDE this one shared promise — a per-consumer
-      // retry would reintroduce the double-instantiate race __pixWasm closes
-      // (site/CLAUDE.md, VIBING entry). Retry consts mirror Showcase.astro's
-      // bootCanvas(), pinned by config/wasm-init-consts.test.mjs.
-      window.__pixWasm =
-        window.__pixWasm ||
-        (function initSharedWasm() {
-          const WASM_INIT_RETRIES = 2; // extra attempts after the first
-          const WASM_INIT_BACKOFF_MS = 400;
-          function attempt(left) {
-            return import(wasmJsUrl)
-              .then(function (m) {
-                return m.default().then(function () {
-                  return m;
-                });
-              })
-              .catch(function (err) {
-                if (left <= 0) throw err;
-                return new Promise(function (res) {
-                  setTimeout(res, WASM_INIT_BACKOFF_MS);
-                }).then(function () {
-                  return attempt(left - 1);
-                });
-              });
-          }
-          return attempt(WASM_INIT_RETRIES);
-        })();
-      window.__pixWasm
+      // The init retry + the frame-memory contract are single-sourced in the
+      // shared office-driver.js module (#721 — was a byte-identical copy in
+      // Showcase.astro). Dynamic-import it (this is an is:inline script the
+      // bundler doesn't process, so no static import), then drive the ONE
+      // shared __pixWasm promise through drv.sharedWasm. A failed driver fetch
+      // falls through to the same poster .catch below — graceful, like a wasm
+      // fetch failure.
+      import(officeDriverUrl)
+        .then(function (drv) {
+          officeDriver = drv; // paint() reads drv.officeFrameView off this
+          return drv.sharedWasm(wasmJsUrl);
+        })
         .then(function (mod) {
           // __wbg_init is idempotent once resolved, so this just hands back
           // the already-instantiated exports (no second fetch/instantiate).
