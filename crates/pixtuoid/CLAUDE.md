@@ -118,7 +118,7 @@ src/
 │                       drifted_sources/footer_warning (also pure, tested) feed the LIVE footer nudge —
 │                       run_tui throttle-scans the same log (≤15s) → ⚠ decode drift footer (see tui guide).
 │                       **THE unified source-HEALTH module** (#309 health-consolidation): `SourceDiagnostics`
-│                       { install: Option<SchemaVerifyResult>, drift } + `diagnose(src, log)` (install
+│                       { install: Option<SchemaVerifyResult>, drift } + `diagnose(src, log, cfg)` (install
 │                       soundness via install::verify_target + drift scan) + `summary()` (⚠ install-broken
 │                       > decode-drift) is the ONE rollup the Sources panel detail, the boot preflight
 │                       (main.rs), AND `run` (the CLI report) all read — surfaces can't drift apart. Version
@@ -310,7 +310,7 @@ src/
 │                       mod.rs (install_target/uninstall_target = structured core → InstallReport/UninstallReport,
 │                         driven SOLELY by the in-TUI Sources panel's connect/disconnect (no CLI orchestration —
 │                         plan_targets/interactive_pick/run_install/run_uninstall + inquire were deleted with the
-│                         install-hooks CLI); has_hooks(t) is `pub(crate)` — its callers are doctor (diagnose's verify
+│                         install-hooks CLI); has_hooks(t, cfg) is `pub(crate)` — its callers are doctor (diagnose's verify
 │                         gate + run's per-source hooks_installed report row) and the onboarding-skip freeze
 │                         (`sources::skip_freeze`, which probes it to keep a pre-0.12 upgrader's hooks); 0.12.0 dropped
 │                         resolve_connected's install-state migrate inference),
@@ -323,7 +323,7 @@ src/
 │                         calls verify_schema + stats the shim + (for `extra_artifacts` targets like OpenClaw)
 │                         stats each wholly-owned plugin file for existence — a missing one is a HARD break, the
 │                         silent-dead class the config check is blind to (#332; paths are hook-path-independent so a
-│                         placeholder arg yields the install locations without resolving the binary). ONLY call when has_hooks(t) — the load-bearing gate
+│                         placeholder arg yields the install locations without resolving the binary). ONLY call when has_hooks(t, cfg) — the load-bearing gate
 │                         (an uninstalled config verifies "broken"; a disconnect removes hooks → has_hooks=false →
 │                         never called → never a false broken)),
 │                       merge.rs (the install-WRITE shared helpers, split OUT of verify.rs so the read/write
