@@ -49,6 +49,13 @@ const PANTRY_STEAM_DX_SMALL: i16 = 1;
 // the same cell from here.
 pub(crate) const VENDING_PICKUP_SLOT: (u16, u16) = (2, 4);
 
+/// Vending machine + printer body sizes — CENTER-anchored on their waypoint
+/// `pos` (origin = `pos − body/2`). The ONE source the painter's origin offset,
+/// its per-cell loop bounds, AND the render tests read, so a body-dim retune
+/// touches one place (each dim was encoded three times: offset, loop, test).
+pub(crate) const VENDING_BODY: Size = Size { w: 4, h: 6 };
+pub(crate) const PRINTER_BODY: Size = Size { w: 5, h: 4 };
+
 pub(super) struct Drawable<'a> {
     pub(super) anchor_y: u16,
     pub(super) kind: DrawableKind<'a>,
@@ -1018,8 +1025,8 @@ mod tests {
             kind: DrawableKind::VendingMachine { pos, busy: false },
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
-        let vx = pos.x - 2;
-        let vy = pos.y - 3;
+        let vx = pos.x - VENDING_BODY.w / 2;
+        let vy = pos.y - VENDING_BODY.h / 2;
         // dy==0 row → panel.
         assert_eq!(
             buf.get(vx, vy),
@@ -1067,8 +1074,8 @@ mod tests {
             kind: DrawableKind::Printer { pos, busy: false },
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
-        let px0 = pos.x - 2;
-        let py0 = pos.y - 2;
+        let px0 = pos.x - PRINTER_BODY.w / 2;
+        let py0 = pos.y - PRINTER_BODY.h / 2;
         // dy==0, dx in 1..=3 → glass.
         assert_eq!(
             buf.get(px0 + 2, py0),
