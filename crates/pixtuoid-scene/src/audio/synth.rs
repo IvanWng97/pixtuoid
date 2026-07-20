@@ -866,6 +866,23 @@ pub(super) fn day_take_drums(take: &score::DayTake, rng: &mut NoiseStream) -> Ve
 
 use super::compose::{GeneratedScore, LeadVoice, Mood};
 
+/// The owner-adopted "bright" master for GENERATED takes (the mix
+/// critic's top finding: the effective corner sat at ~1kHz, 2-3× steeper
+/// than the genre LTAS): a one-pole tilt shelf (+0.8× highs above
+/// ~1.2kHz ≈ +5dB above 2kHz) then re-normalize to the bed's pre-tilt
+/// peak. FROZEN takes keep their ratified darker chain untouched (their
+/// fingerprint pins stay valid; brightening them is a separate re-bless).
+fn brighten(buf: &mut [f32]) {
+    let pre_peak = buf.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+    let a = (-std::f32::consts::TAU * 1200.0 / SR).exp();
+    let mut lp = 0.0f32;
+    for s in buf.iter_mut() {
+        lp = a * lp + (1.0 - a) * *s;
+        *s += 0.8 * (*s - lp);
+    }
+    normalize(buf, pre_peak.max(1e-6));
+}
+
 /// The lead-voice registry's render map — one arm per instrument.
 fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
     match score.lead_voice {
@@ -880,7 +897,7 @@ fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
 /// the shared cores, not stream byte equality).
 pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 5] {
     let loop_s = score.loop_secs();
-    match score.mood {
+    let mut beds = match score.mood {
         Mood::Day => [
             day_pad_core(
                 &score.bar_chords,
@@ -918,7 +935,11 @@ pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 5] 
             drums_core(loop_s, &score.drums, 6000.0, 2.0, 0.8, rng),
             night_texture_core(loop_s, &score.kick_times, rng),
         ],
+    };
+    for bed in beds.iter_mut() {
+        brighten(bed);
     }
+    beds
 }
 
 #[cfg(test)]

@@ -9,19 +9,30 @@ use super::*;
 const SWEEP: u64 = 64;
 
 #[test]
-fn template_chords_and_roots_are_diatonic() {
+fn template_chords_and_roots_are_diatonic_or_deliberately_chromatic() {
     for (name, progs) in [
         ("day", &DAY_PROGRESSIONS[..]),
         ("night", &NIGHT_PROGRESSIONS[..]),
     ] {
         for (i, p) in progs.iter().enumerate() {
-            for chord in &p.chords {
-                for &n in chord {
-                    assert!(
-                        p.scale_pcs.contains(&(n % 12)),
-                        "{name}[{i}]: chord tone {n} outside its scale"
-                    );
-                }
+            let color_tones = p
+                .chords
+                .iter()
+                .flatten()
+                .filter(|&&n| !p.scale_pcs.contains(&(n % 12)))
+                .count();
+            if p.chromatic {
+                // a curated color template carries SOME chromatic move —
+                // but stays mostly inside the key (one chord's worth)
+                assert!(
+                    (1..=4).contains(&color_tones),
+                    "{name}[{i}]: chromatic template carries {color_tones} color tones"
+                );
+            } else {
+                assert_eq!(
+                    color_tones, 0,
+                    "{name}[{i}]: diatonic template leaked a color tone"
+                );
             }
             for &r in &p.roots_pc {
                 assert!(
@@ -37,7 +48,7 @@ fn template_chords_and_roots_are_diatonic() {
 fn every_day_template_chord_carries_a_third_and_seventh() {
     // the shell voicings are only well-defined over true 7th chords —
     // the grammar-level lint that caught the Am7/C-without-G voicing
-    for progs in [&DAY_PROGRESSIONS[..], &CHROMATIC_PROBE_PROGRESSIONS[..]] {
+    for progs in [&DAY_PROGRESSIONS[..]] {
         for (i, p) in progs.iter().enumerate() {
             for (bar, chord) in p.chords.iter().enumerate() {
                 let root = p.roots_pc[bar];
@@ -235,16 +246,19 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
             "seed {seed}: bar {bar} lead density {n} > {max_per_bar}"
         );
     }
-    // every TEMPLATE chord tone diatonic post-transpose, and the timeline
-    // matches the template on bars 0-6 (bar 7 may be the turnaround)
-    for chord in &s.chords {
-        for &n in chord {
-            assert!(
-                s.scale_pcs.contains(&(n % 12)),
-                "seed {seed}: chord tone {n} off-scale"
-            );
-        }
-    }
+    // template chord tones stay in key post-transpose — except a curated
+    // chromatic template's single color chord (≤ one chord's worth), and
+    // the timeline matches the template on bars 0-6 (bar 7 = turnaround)
+    let color_tones = s
+        .chords
+        .iter()
+        .flatten()
+        .filter(|&&n| !s.scale_pcs.contains(&(n % 12)))
+        .count();
+    assert!(
+        color_tones <= 4,
+        "seed {seed}: {color_tones} color tones — more than one chromatic chord"
+    );
     for bar in 0..7 {
         assert_eq!(
             s.bar_chords[bar],
@@ -349,35 +363,36 @@ fn the_answer_quotes_the_statements_opening() {
 }
 
 #[test]
-fn night_probe_doubles_hats_and_chromatic_probe_carries_color() {
-    for seed in 0..8 {
-        let base = compose(Mood::Night, seed);
-        let bright = compose_night_probe_bright(seed);
-        let sum = |sc: &GeneratedScore| -> f32 {
-            sc.drums
-                .iter()
-                .filter(|&&(_, k, _)| k == DrumKind::Hat)
-                .map(|&(_, _, g)| g)
-                .sum()
-        };
-        assert!(
-            sum(&bright) > sum(&base) * 1.8,
-            "seed {seed}: bright probe hats not raised"
-        );
-        // same notes, only the hats differ
-        assert_eq!(base.sparkle, bright.sparkle);
-        assert_eq!(base.keys, bright.keys);
-
-        let chroma = compose_day_probe_chromatic(seed);
-        let chromatic_tone = chroma
-            .bar_chords
+fn adopted_color_templates_actually_rotate_in() {
+    // the two chromatic templates are ordinary grammar rows now: over the
+    // sweep some day seed draws one (color tones appear in bars 0-6)
+    let mut seen_color = false;
+    for seed in 0..SWEEP {
+        let s = compose(Mood::Day, seed);
+        if s.chords
             .iter()
-            .take(7)
             .flatten()
-            .any(|&n| !chroma.scale_pcs.contains(&(n % 12)));
-        assert!(
-            chromatic_tone,
-            "seed {seed}: chromatic probe carries no color tone"
-        );
+            .any(|&n| !s.scale_pcs.contains(&(n % 12)))
+        {
+            seen_color = true;
+        }
+    }
+    assert!(seen_color, "no chromatic template drawn across the sweep");
+}
+
+#[test]
+fn night_hats_articulate_above_the_v1_floor() {
+    // the adopted articulation fix: every night hat now sits at ≥0.36
+    // pre-wobble (was 0.2-0.32) — the groove tick is audible by
+    // construction, the sub untouched
+    for seed in 0..SWEEP {
+        let s = compose(Mood::Night, seed);
+        for &(_, k, g) in s.drums.iter().filter(|&&(_, k, _)| k == DrumKind::Hat) {
+            let _ = k;
+            assert!(
+                g >= 0.40 * 0.9 * 0.95,
+                "seed {seed}: hat gain {g} below the adopted floor"
+            );
+        }
     }
 }

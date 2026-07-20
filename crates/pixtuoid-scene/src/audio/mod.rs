@@ -66,7 +66,11 @@ const PAD_GAIN: [f32; 3] = [0.75, 0.70, 0.65];
 const SPARKLE_GAIN: [f32; 3] = [0.70, 0.0, 0.0];
 const KEYS_GAIN: [f32; 3] = [0.0, 0.60, 0.70];
 const DRUMS_GAIN: [f32; 3] = [0.0, 0.35, 0.60];
-const TEXTURE_GAIN: [f32; 3] = [0.28, 0.30, 0.28];
+// ×2.8 vs the Phase-0 ratification (owner-adopted "air bed audible"
+// finding, 2026-07-20): the hiss+crackle layer measured 15-40dB under
+// the bible's spec and was inaudible. Rate stays CRACKLE_POPS_PER_SEC.
+// GLOBAL: frozen takes hear this too — it is a mix knob, one-line revert.
+const TEXTURE_GAIN: [f32; 3] = [0.78, 0.84, 0.78];
 const TYPING_GAIN: [f32; 3] = [0.0, 0.50, 0.80];
 
 /// Target mix levels (0..=1) for every stem, derived once per frame. A VALUE

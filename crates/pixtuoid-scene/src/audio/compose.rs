@@ -111,6 +111,11 @@ struct Progression {
     chords: [[u8; 4]; 4],
     roots_pc: [u8; 4],
     scale_pcs: [u8; 7],
+    /// Carries ONE deliberate out-of-scale color move (secondary
+    /// dominant / borrowed chord) — exempt from the diatonic pin, which
+    /// instead asserts the color tone EXISTS. Read only by that pin.
+    #[cfg_attr(not(test), allow(dead_code))]
+    chromatic: bool,
 }
 
 /// C major pitch classes.
@@ -120,7 +125,7 @@ const F_MAJOR: [u8; 7] = [0, 2, 4, 5, 7, 9, 10];
 
 /// The day grammar — every chord tone is in the template's scale
 /// (pinned by `template_chords_are_diatonic`).
-const DAY_PROGRESSIONS: [Progression; 6] = [
+const DAY_PROGRESSIONS: [Progression; 8] = [
     // royal road: Fmaj7 G7 Em7 Am7 (the Day2 ratified changes)
     Progression {
         chords: [
@@ -131,6 +136,7 @@ const DAY_PROGRESSIONS: [Progression; 6] = [
         ],
         roots_pc: [5, 7, 4, 9],
         scale_pcs: C_MAJOR,
+        chromatic: false,
     },
     // I-vi-ii-V turnaround with voice-led inversions (the Day3 changes;
     // bar 2 is Am7/C as a TRUE 7th-chord pc set — C E G A — the original
@@ -144,6 +150,7 @@ const DAY_PROGRESSIONS: [Progression; 6] = [
         ],
         roots_pc: [0, 9, 2, 7],
         scale_pcs: C_MAJOR,
+        chromatic: false,
     },
     // the original day take's modal set: Dm7 Gm7 B♭maj7 Am7
     Progression {
@@ -155,6 +162,7 @@ const DAY_PROGRESSIONS: [Progression; 6] = [
         ],
         roots_pc: [2, 7, 10, 9],
         scale_pcs: F_MAJOR,
+        chromatic: false,
     },
     // stepwise descent: Fmaj7 Em7 Dm7 Cmaj7
     Progression {
@@ -166,6 +174,7 @@ const DAY_PROGRESSIONS: [Progression; 6] = [
         ],
         roots_pc: [5, 4, 2, 0],
         scale_pcs: C_MAJOR,
+        chromatic: false,
     },
     // pop cadence: Am7 Fmaj7 Cmaj7 G7
     Progression {
@@ -177,6 +186,7 @@ const DAY_PROGRESSIONS: [Progression; 6] = [
         ],
         roots_pc: [9, 5, 0, 7],
         scale_pcs: C_MAJOR,
+        chromatic: false,
     },
     // gentle lift: Cmaj7 Fmaj7 Em7 Am7
     Progression {
@@ -188,6 +198,33 @@ const DAY_PROGRESSIONS: [Progression; 6] = [
         ],
         roots_pc: [0, 5, 4, 9],
         scale_pcs: C_MAJOR,
+        chromatic: false,
+    },
+    // V7/vi: Fmaj7 E7 Am7 G7 — the E7's G# pulls into Am (owner-adopted
+    // chromatic color, the composition critic's curated-template route)
+    Progression {
+        chords: [
+            [53, 57, 60, 64],
+            [52, 56, 59, 62],
+            [57, 60, 64, 67],
+            [55, 59, 62, 65],
+        ],
+        roots_pc: [5, 4, 9, 7],
+        scale_pcs: C_MAJOR,
+        chromatic: true,
+    },
+    // borrowed iv: Cmaj7 Fmaj7 Fm7 Cmaj7 — the Ab/Eb minor-plagal fade,
+    // the single most beloved lofi cadence (owner-adopted)
+    Progression {
+        chords: [
+            [48, 52, 55, 59],
+            [53, 57, 60, 64],
+            [53, 56, 60, 63],
+            [48, 52, 55, 59],
+        ],
+        roots_pc: [0, 5, 5, 0],
+        scale_pcs: C_MAJOR,
+        chromatic: true,
     },
 ];
 
@@ -204,6 +241,7 @@ const NIGHT_PROGRESSIONS: [Progression; 4] = [
         ],
         roots_pc: [9, 5, 0, 4],
         scale_pcs: C_MAJOR,
+        chromatic: false,
     },
     // minor descent: Am7 G7 Fmaj7 Em7
     Progression {
@@ -215,6 +253,7 @@ const NIGHT_PROGRESSIONS: [Progression; 4] = [
         ],
         roots_pc: [9, 7, 5, 4],
         scale_pcs: C_MAJOR,
+        chromatic: false,
     },
     // suspended drift: Dm7 Am7 B♭maj7 Fmaj7
     Progression {
@@ -226,6 +265,7 @@ const NIGHT_PROGRESSIONS: [Progression; 4] = [
         ],
         roots_pc: [2, 9, 10, 5],
         scale_pcs: F_MAJOR,
+        chromatic: false,
     },
     // deep water: Am7 Em7 Fmaj7 Cmaj7
     Progression {
@@ -237,38 +277,7 @@ const NIGHT_PROGRESSIONS: [Progression; 4] = [
         ],
         roots_pc: [9, 4, 5, 0],
         scale_pcs: C_MAJOR,
-    },
-];
-
-/// The A/B-probe chromatic templates (NOT in `DAY_PROGRESSIONS` until the
-/// owner votes them in): each carries exactly ONE chromatic move, the
-/// curated-template way to add color without abandoning
-/// well-formed-by-construction. Their chromatic tones are deliberately
-/// outside `scale_pcs` — probe scores are exempt from the diatonic pins.
-const CHROMATIC_PROBE_PROGRESSIONS: [Progression; 2] = [
-    // V7/vi: Fmaj7 E7 Am7 G7 — the E7's G# pulls into Am (royal-road
-    // cousin with a real leading-tone ache)
-    Progression {
-        chords: [
-            [53, 57, 60, 64],
-            [52, 56, 59, 62],
-            [57, 60, 64, 67],
-            [55, 59, 62, 65],
-        ],
-        roots_pc: [5, 4, 9, 7],
-        scale_pcs: C_MAJOR,
-    },
-    // borrowed iv: Cmaj7 Fmaj7 Fm7 Cmaj7 — the Ab/Eb minor-plagal fade,
-    // the single most beloved lofi cadence
-    Progression {
-        chords: [
-            [48, 52, 55, 59],
-            [53, 57, 60, 64],
-            [53, 56, 60, 63],
-            [48, 52, 55, 59],
-        ],
-        roots_pc: [0, 5, 5, 0],
-        scale_pcs: C_MAJOR,
+        chromatic: false,
     },
 ];
 
@@ -738,10 +747,12 @@ fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>
             }
             let mut at = b0 + e as f32 * eighth + swing_delay(SWING_HATS_NIGHT, eighth);
             at += (rng.unit() - 0.5) * 0.012;
+            // ×2 vs v1 (owner-adopted articulation fix: hats measured
+            // ~50dB under the sub — an inaudible tick, no groove)
             out.push((
                 at.max(0.0),
                 DrumKind::Hat,
-                (0.2 + 0.12 * rng.unit()) * wobble,
+                (0.40 + 0.24 * rng.unit()) * wobble,
             ));
         }
     }
@@ -811,40 +822,13 @@ fn keys_events(
 /// (no clock, no I/O): the pure composer both painters and every test
 /// share. Synthesis lives in `synth::gen_beds`.
 pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
-    compose_inner(mood, seed, None, 1.0)
-}
-
-/// A/B PROBE (not in the default grammar): compose from the curated
-/// chromatic-color templates — a secondary dominant (V7/vi) and the
-/// borrowed iv — for the owner's ear-vote on widening the day grammar.
-pub fn compose_day_probe_chromatic(seed: u64) -> GeneratedScore {
-    let prog = &CHROMATIC_PROBE_PROGRESSIONS[(seed % 2) as usize];
-    compose_inner(Mood::Day, seed, Some(prog), 1.0)
-}
-
-/// A/B PROBE: the night groove with its closed hats at ×2 gain — the
-/// candidate fix for "night measures darker than its own reference"
-/// that does NOT touch the sub or densify anything.
-pub fn compose_night_probe_bright(seed: u64) -> GeneratedScore {
-    compose_inner(Mood::Night, seed, None, 2.0)
-}
-
-fn compose_inner(
-    mood: Mood,
-    seed: u64,
-    forced: Option<&Progression>,
-    night_hat_mult: f32,
-) -> GeneratedScore {
     let mut rng = NoiseStream::new(pixtuoid_core::id::splitmix64(seed ^ 0x10F1_C0DE));
 
     let (progs, bpm_win): (&[Progression], (f32, f32)) = match mood {
         Mood::Day => (&DAY_PROGRESSIONS, DAY_BPM),
         Mood::Night => (&NIGHT_PROGRESSIONS, NIGHT_BPM),
     };
-    let prog = match forced {
-        Some(p) => p,
-        None => &progs[pick(&mut rng, progs.len())],
-    };
+    let prog = &progs[pick(&mut rng, progs.len())];
     let t = TRANSPOSE_MIN + pick(&mut rng, (TRANSPOSE_MAX - TRANSPOSE_MIN + 1) as usize) as i8;
     let (chords, roots_pc, scale_pcs) = transpose(prog, t);
     let (bar_chords, bar_roots) = timeline(&chords, &roots_pc, mood);
@@ -864,20 +848,13 @@ fn compose_inner(
 
     let keys = keys_events(&mut rng, &bar_chords, &bar_roots, beat_s, mood);
 
-    let (mut drums, kicks) = match mood {
+    let (drums, kicks) = match mood {
         Mood::Day => {
             let g = &DAY_GROOVES[pick(&mut rng, DAY_GROOVES.len())];
             day_drums(&mut rng, g, beat_s)
         }
         Mood::Night => night_drums(&mut rng, beat_s),
     };
-    if night_hat_mult != 1.0 {
-        for (_, kind, gain) in drums.iter_mut() {
-            if *kind == DrumKind::Hat {
-                *gain = (*gain * night_hat_mult).min(0.95);
-            }
-        }
-    }
 
     let bass_roots = (mood == Mood::Night).then(|| {
         let mut roots = [0u8; 4];
