@@ -305,10 +305,17 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   stomp the single module-global `wasm`. A bounded retry (2×, 400ms backoff) wraps
   that shared init for transient wasm-fetch resilience, but stays INSIDE the one
   `__pixWasm` promise — a per-consumer retry would reintroduce the very
-  double-instantiate race above (the retry consts are pinned equal across the two
-  boot scripts by `config/wasm-init-consts.test.mjs`). On FINAL exhaustion the
-  promise is NULLED so a later-booting consumer re-attempts — safe because it only
-  clears a SETTLED (rejected) promise, never an in-flight one (#671). Schema: `kind:"live"`
+  double-instantiate race above. Since #721 that shared init AND the frame-memory
+  contract (`new Uint8ClampedArray(wasm.memory.buffer, office.frame_ptr(),
+  office.frame_len())`, re-read per frame) live ONCE in the runtime-loaded
+  **`public/office-driver.js`** module (`sharedWasm` / `officeFrameView`), which both
+  is:inline consumers dynamic-`import()` at boot (the audio-worker.js precedent — a
+  bundled `src/` import can't reach an is:inline script); the divergent blit stays
+  per-consumer (OfficeBackdrop's reveal-roll sits between the view read and the
+  `putImageData`). `config/wasm-init-consts.test.mjs` now pins that single source (the
+  consts live in office-driver.js and neither consumer re-inlines them). On FINAL
+  exhaustion the promise is NULLED so a later-booting consumer re-attempts — safe
+  because it only clears a SETTLED (rejected) promise, never an in-flight one (#671). Schema: `kind:"live"`
   + `variantGroups` (per-group `retint`) + `poster` + `timeSlider` in `showcase.json`,
   resolved by `showcaseGroups` in `consts.ts`, validated by the `astro.config.mjs`
   showcase guard's live branch. Fallback (no-JS / no-wasm / reduced-motion): the

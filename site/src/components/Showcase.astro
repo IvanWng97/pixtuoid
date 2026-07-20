@@ -142,7 +142,13 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   </div>
 </section>
 
-<script is:inline define:vars={{ wasmJsUrl: asset('wasm/pixtuoid_web.js') }}>
+<script
+  is:inline
+  define:vars={{
+    wasmJsUrl: asset('wasm/pixtuoid_web.js'),
+    officeDriverUrl: asset('office-driver.js'),
+  }}
+>
   (function () {
     const studio = document.getElementById('studio');
     if (!studio) return;
@@ -266,6 +272,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     const VIBING_SEED = 11; // fixed u32 — distinct from OfficeBackdrop's page office (seed 0)
     let vWasm = null;
     let vOffice = null;
+    let vDriver = null; // { sharedWasm, officeFrameView } from office-driver.js (#721)
     let vCtx = null;
     let vImg = null;
     let vRaf = 0;
@@ -308,12 +315,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     function vPaint() {
       const now = anchorForHour(scrubHour) + (Date.now() - vStart);
       vOffice.step(now, vibingCanvas.width, vibingCanvas.height);
-      // re-read ptr/len every frame — a resize/memory.grow moves them
-      const view = new Uint8ClampedArray(
-        vWasm.memory.buffer,
-        vOffice.frame_ptr(),
-        vOffice.frame_len()
-      );
+      // frame-memory view (re-read every frame) single-sourced in
+      // office-driver.js; vPaint only runs after bootCanvas set vDriver.
+      const view = vDriver.officeFrameView(vOffice, vWasm);
       if (view.length !== vImg.data.length) return;
       vImg.data.set(view);
       vCtx.putImageData(vImg, 0, 0);
@@ -339,36 +343,17 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       // resolves would instantiate two wasm instances and stomp the single
       // module-global `wasm` (see OfficeBackdrop.astro's `boot()` for the
       // full race + site/CLAUDE.md's VIBING entry).
-      // Bounded retry with backoff so a transient wasm-binary fetch drop
-      // self-heals instead of stranding the office on the poster until a manual
-      // reload — the retry MUST stay inside the one shared __pixWasm promise (a
-      // per-consumer retry would reintroduce the double-instantiate race). Full
-      // rationale: OfficeBackdrop.astro's boot() + site/CLAUDE.md; retry consts
-      // pinned by config/wasm-init-consts.test.mjs.
-      window.__pixWasm =
-        window.__pixWasm ||
-        (function initSharedWasm() {
-          const WASM_INIT_RETRIES = 2; // extra attempts after the first
-          const WASM_INIT_BACKOFF_MS = 400;
-          function attempt(left) {
-            return import(wasmJsUrl)
-              .then(function (m) {
-                return m.default().then(function () {
-                  return m;
-                });
-              })
-              .catch(function (err) {
-                if (left <= 0) throw err;
-                return new Promise(function (res) {
-                  setTimeout(res, WASM_INIT_BACKOFF_MS);
-                }).then(function () {
-                  return attempt(left - 1);
-                });
-              });
-          }
-          return attempt(WASM_INIT_RETRIES);
-        })();
-      window.__pixWasm
+      // The init retry + the frame-memory contract are single-sourced in the
+      // shared office-driver.js module (#721 — was a byte-identical copy in
+      // OfficeBackdrop.astro). Dynamic-import it (is:inline, so no static
+      // import), then drive the ONE shared __pixWasm promise through
+      // drv.sharedWasm. A failed driver fetch falls through to the poster
+      // .catch below, like a wasm fetch failure.
+      import(officeDriverUrl)
+        .then(function (drv) {
+          vDriver = drv; // vPaint() reads drv.officeFrameView off this
+          return drv.sharedWasm(wasmJsUrl);
+        })
         .then(function (mod) {
           // idempotent once resolved — hands back the shared exports/memory
           return mod.default().then(function (w) {
