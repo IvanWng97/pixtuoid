@@ -1488,17 +1488,6 @@ impl Reducer {
         }
     }
 
-    /// Remove agents whose exit animation has finished. Called at the top
-    /// of every event apply, so any subsequent event naturally triggers
-    /// the cleanup of expired slots.
-    ///
-    /// Removing a parent does NOT null any surviving child's `parent_id` — that
-    /// pointer is left dangling intentionally. The scope walks tolerate it (the
-    /// `None => break` guards in `scope::{refresh_lineage, has_waiting_ancestor}`),
-    /// so it never crashes; in practice `cascade_exit` reaps the subtree alongside
-    /// the parent, so a lingering dangle is only observable for a true orphan
-    /// (JSONL-first child of a never-created parent). Scanning every child on each
-    /// parent removal to null the pointer would add cost with no behavioral benefit.
     /// Drop the per-slot correlation a departing agent id owns — the triple
     /// (`active_tasks` + `gated_before_waiting` + `pending_b1_cascades`)
     /// reclaimed on BOTH a resurrect-in-place and a slot removal (tick's
@@ -1511,6 +1500,17 @@ impl Reducer {
         self.pending_b1_cascades.remove(id);
     }
 
+    /// Remove agents whose exit animation has finished. Called at the top
+    /// of every event apply, so any subsequent event naturally triggers
+    /// the cleanup of expired slots.
+    ///
+    /// Removing a parent does NOT null any surviving child's `parent_id` — that
+    /// pointer is left dangling intentionally. The scope walks tolerate it (the
+    /// `None => break` guards in `scope::{refresh_lineage, has_waiting_ancestor}`),
+    /// so it never crashes; in practice `cascade_exit` reaps the subtree alongside
+    /// the parent, so a lingering dangle is only observable for a true orphan
+    /// (JSONL-first child of a never-created parent). Scanning every child on each
+    /// parent removal to null the pointer would add cost with no behavioral benefit.
     fn sweep_exited(&mut self, scene: &mut SceneState, now: SystemTime) {
         let expired: Vec<AgentId> = scene
             .agents
