@@ -674,12 +674,14 @@ fn events_stem_voiced(
 
 #[cfg(test)]
 pub fn night_keys() -> Vec<f32> {
-    night_events_stem(&score::NIGHT_KEYS, 1.1, 2000.0, 0.7)
+    let (dur, cutoff, peak) = lane_recipe(Mood::Night, 2);
+    night_events_stem(&score::NIGHT_KEYS, dur, cutoff, peak)
 }
 
 #[cfg(test)]
 pub fn night_sparkle() -> Vec<f32> {
-    night_events_stem(&score::NIGHT_SPARKLE, 2.2, 2800.0, 0.5)
+    let (dur, cutoff, peak) = lane_recipe(Mood::Night, 1);
+    night_events_stem(&score::NIGHT_SPARKLE, dur, cutoff, peak)
 }
 
 /// One frozen drum event's hit buffer — the kind dispatch shared by every
@@ -698,12 +700,13 @@ fn drum_hit(rng: &mut NoiseStream, kind: score::DrumKind) -> Vec<f32> {
 /// (humanization baked); each hit's NOISE content is fresh per call.
 #[cfg(test)]
 pub fn night_drums(rng: &mut NoiseStream) -> Vec<f32> {
+    let (cutoff, drive, peak) = lane_recipe(Mood::Night, 3);
     drums_core(
         score::night_loop_secs(),
         &score::NIGHT_DRUMS,
-        6000.0,
-        2.0,
-        0.8,
+        cutoff,
+        drive,
+        peak,
         rng,
     )
 }
@@ -863,20 +866,23 @@ fn day_take_events_stem(
 /// The hand-written lead melody — a day take's singable identity.
 #[cfg(test)]
 pub(super) fn day_take_sparkle(take: &score::DayTake) -> Vec<f32> {
-    day_take_events_stem(take, take.sparkle, 2.0, 3200.0, 0.6)
+    let (dur, cutoff, peak) = lane_recipe(Mood::Day, 1);
+    day_take_events_stem(take, take.sparkle, dur, cutoff, peak)
 }
 
 /// RNG-comped mid-register EP, frozen with the v4 swing feel baked in.
 #[cfg(test)]
 pub(super) fn day_take_keys(take: &score::DayTake) -> Vec<f32> {
-    day_take_events_stem(take, take.keys, 0.9, 2400.0, 0.8)
+    let (dur, cutoff, peak) = lane_recipe(Mood::Day, 2);
+    day_take_events_stem(take, take.keys, dur, cutoff, peak)
 }
 
 /// The full day kit (kick/snare/hats incl. the bar-4/8 open hat) from the
 /// frozen event table; each hit's NOISE content is fresh per call.
 #[cfg(test)]
 pub(super) fn day_take_drums(take: &score::DayTake, rng: &mut NoiseStream) -> Vec<f32> {
-    drums_core(take.loop_secs(), take.drums, 7500.0, 2.2, 0.85, rng)
+    let (cutoff, drive, peak) = lane_recipe(Mood::Day, 3);
+    drums_core(take.loop_secs(), take.drums, cutoff, drive, peak, rng)
 }
 
 // ------------------------------------------------- generated takes
@@ -913,6 +919,27 @@ fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
     }
 }
 
+/// The per-`(mood, lane)` event/drum render recipe — the ONE authority both
+/// the generative [`gen_bed`] arms (the ALL-GENERATIVE shipping path) AND the
+/// frozen `#[cfg(test)]` delegations (`day_take_*` / `night_*`) read, so the
+/// frozen fingerprint pins (`day_take_stems_match_the_ratified_fingerprints`,
+/// `night_stems_match_the_ratified_v4_fingerprints`) transitively guard the
+/// params that actually ship. The triple is that lane's core-call args IN
+/// ORDER: sparkle/keys (lanes 1,2) = `(dur_s, cutoff_hz, peak)`; drums
+/// (lane 3) = `(cutoff_hz, drive, peak)`. Pad/texture lanes (0,4) carry no
+/// recipe and never read here; the fallback is unreachable.
+fn lane_recipe(mood: Mood, lane: usize) -> (f32, f32, f32) {
+    match (mood, lane) {
+        (Mood::Day, 1) => (2.0, 3200.0, 0.6),
+        (Mood::Day, 2) => (0.9, 2400.0, 0.8),
+        (Mood::Day, 3) => (7500.0, 2.2, 0.85),
+        (Mood::Night, 1) => (2.2, 2800.0, 0.5),
+        (Mood::Night, 2) => (1.1, 2000.0, 0.7),
+        (Mood::Night, 3) => (6000.0, 2.0, 0.8),
+        _ => (0.0, 0.0, 0.0),
+    }
+}
+
 /// One lane of a generated take (`bank::TRACK_STEMS` order: pad,
 /// sparkle, keys, drums, texture) — the CHUNKED build unit the wasm
 /// driver spreads across ticks (a full five-bed build in one rAF tick
@@ -922,22 +949,21 @@ fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
 /// lane, so the chunked and one-shot paths cannot drift.
 pub fn gen_bed(score: &GeneratedScore, lane: usize, rng: &mut NoiseStream) -> Vec<f32> {
     let loop_s = score.loop_secs();
+    // Event/drum lanes read their render params from the ONE lane_recipe
+    // authority the frozen fingerprint pins also render through; pad/texture
+    // lanes (0,4) ignore it (the recipe's unreachable fallback).
+    let (r0, r1, r2) = lane_recipe(score.mood, lane);
     let mut bed = match (score.mood, lane) {
         (Mood::Day, 0) => day_pad_core(
             &score.bar_chords,
             score.bar_s(),
             super::compose::GEN_LOOP_BARS,
         ),
-        (Mood::Day, 1) => events_stem_voiced(
-            loop_s,
-            &score.sparkle,
-            2.0,
-            3200.0,
-            0.6,
-            lead_voice_fn(score),
-        ),
-        (Mood::Day, 2) => events_stem_core(loop_s, &score.keys, 0.9, 2400.0, 0.8),
-        (Mood::Day, 3) => drums_core(loop_s, &score.drums, 7500.0, 2.2, 0.85, rng),
+        (Mood::Day, 1) => {
+            events_stem_voiced(loop_s, &score.sparkle, r0, r1, r2, lead_voice_fn(score))
+        }
+        (Mood::Day, 2) => events_stem_core(loop_s, &score.keys, r0, r1, r2),
+        (Mood::Day, 3) => drums_core(loop_s, &score.drums, r0, r1, r2, rng),
         (Mood::Day, 4) => texture_bed(rng),
         (Mood::Night, 0) => night_pad_core(
             &score.bar_chords,
@@ -945,16 +971,11 @@ pub fn gen_bed(score: &GeneratedScore, lane: usize, rng: &mut NoiseStream) -> Ve
             score.bar_s(),
             super::compose::GEN_LOOP_BARS,
         ),
-        (Mood::Night, 1) => events_stem_voiced(
-            loop_s,
-            &score.sparkle,
-            2.2,
-            2800.0,
-            0.5,
-            lead_voice_fn(score),
-        ),
-        (Mood::Night, 2) => events_stem_core(loop_s, &score.keys, 1.1, 2000.0, 0.7),
-        (Mood::Night, 3) => drums_core(loop_s, &score.drums, 6000.0, 2.0, 0.8, rng),
+        (Mood::Night, 1) => {
+            events_stem_voiced(loop_s, &score.sparkle, r0, r1, r2, lead_voice_fn(score))
+        }
+        (Mood::Night, 2) => events_stem_core(loop_s, &score.keys, r0, r1, r2),
+        (Mood::Night, 3) => drums_core(loop_s, &score.drums, r0, r1, r2, rng),
         (Mood::Night, 4) => night_texture_core(loop_s, &score.kick_times, rng),
         _ => Vec::new(),
     };
@@ -974,6 +995,23 @@ pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 5] 
 mod tests {
     use super::*;
     use crate::audio::dsp::{band_energy_share, centroid_hz};
+
+    #[test]
+    fn lane_recipe_is_the_ratified_shipping_params() {
+        // gen_bed (the ALL-GENERATIVE shipping path) and the frozen
+        // #[cfg(test)] day_take_*/night_* delegations BOTH read lane_recipe,
+        // so these ARE the params that reach the speakers. Pinned to the
+        // fingerprint-blessed triples: an audible-param edit is a deliberate
+        // re-bless caught here AND by the frozen day_take_/night_ fingerprint
+        // pins together (the generator now carries a param guard it lacked).
+        use crate::audio::compose::Mood;
+        assert_eq!(lane_recipe(Mood::Day, 1), (2.0, 3200.0, 0.6));
+        assert_eq!(lane_recipe(Mood::Day, 2), (0.9, 2400.0, 0.8));
+        assert_eq!(lane_recipe(Mood::Day, 3), (7500.0, 2.2, 0.85));
+        assert_eq!(lane_recipe(Mood::Night, 1), (2.2, 2800.0, 0.5));
+        assert_eq!(lane_recipe(Mood::Night, 2), (1.1, 2000.0, 0.7));
+        assert_eq!(lane_recipe(Mood::Night, 3), (6000.0, 2.0, 0.8));
+    }
 
     #[test]
     fn one_shot_synth_spectral_sanity() {
