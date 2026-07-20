@@ -3550,3 +3550,39 @@ fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
         "one fitted shadow per family member, emitted in paint order"
     );
 }
+
+#[test]
+fn character_render_names_resolve_in_the_animation_registry() {
+    // The CHARACTER twin of the furniture registry-subset test
+    // (decor.rs role_enum_sprite_names_resolve_…): the pose->sprite lookups in
+    // sim.rs + seat.rs (pack.animation("seated"/"typing"/…)) are validated-vs-
+    // rendered only for furniture today, so a TYPO'd character render literal
+    // would draw nothing and only redden gen-check, not validate-pack. Pin
+    // every character lookup name to core's REQUIRED_/OPTIONAL_CHARACTER_
+    // ANIMATIONS. Hand-listed because the pose arms carry no enumerable seam —
+    // catches a typo/rename, not a NEW pose's omission (that gap stays with
+    // gen-check + the embedded-pack registry-known test).
+    use pixtuoid_core::sprite::format::{
+        OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
+    };
+    for n in [
+        "seated",
+        "typing",
+        "standing",
+        "walking",
+        "walking_back",
+        "walking_coffee",
+        "holding_coffee",
+        "seated_sleeping",
+        "seated_sleeping_alt",
+        "back_couch",
+        "side_seated",
+    ] {
+        assert!(
+            REQUIRED_CHARACTER_ANIMATIONS.contains(&n)
+                || OPTIONAL_CHARACTER_ANIMATIONS.contains(&n),
+            "character render name {n:?} is not a registered \
+             REQUIRED_/OPTIONAL_CHARACTER_ANIMATIONS key"
+        );
+    }
+}
