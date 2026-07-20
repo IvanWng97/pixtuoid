@@ -4,7 +4,7 @@ use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tracing::{debug, warn};
 
-use crate::source::decoder::decode_hook_payload;
+use crate::source::decoder::{checked_pid, decode_hook_payload};
 use crate::source::{AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
@@ -279,15 +279,12 @@ pub(crate) async fn handle_conn(
                 // Deliberately NOT gated on `pid_watch`: the exit-watch backend
                 // failing to init (pre-5.3 Linux kernel, Windows) must not
                 // take the focus-jump pid cache down with it — only the BIND
-                // below needs the watch. `as_u64` already rejects negatives;
-                // the `> 0` filter drops a crafted `_pid: 0` too (kill(0)
-                // targets the process GROUP — same guard as
-                // cc_probe/fd_probe/openclaw).
+                // below needs the watch. The pid narrowing (i32 range + `> 0`
+                // reject) is the shared `checked_pid` guard — see its doc.
                 let pid = v
                     .get("_pid")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|p| i32::try_from(p).ok())
-                    .filter(|p| *p > 0);
+                    .and_then(serde_json::Value::as_i64)
+                    .and_then(checked_pid);
                 match decode_hook_payload(v) {
                     // One payload can decode to multiple events (an Identity
                     // attached ahead of a tool/permission event, #221) — sent

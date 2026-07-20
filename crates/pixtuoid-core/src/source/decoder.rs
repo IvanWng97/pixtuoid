@@ -33,6 +33,17 @@ pub type CwdExtractor = fn(&Value) -> Option<PathBuf>;
 /// on every transcript line (and Antigravity's row points here too — its steps
 /// carry no cwd field, so the shape simply never matches and the label falls
 /// back); also the fallback for sources with no registry row (test harnesses).
+/// Narrow a raw JSON integer to a valid POSIX pid: in `i32` range AND strictly
+/// positive. The `> 0` reject is load-bearing — `kill(0)`/`kill(-n)` target
+/// process GROUPS, and a bogus/zero `_pid` would otherwise synthesize a phantom
+/// exit that flaps a LIVE gateway Down. The ONE narrowing every JSON `_pid`
+/// ingress rides (the hook peek + the openclaw decode), so a new ingress can't
+/// ship the N-th unchecked pid — the sibling set the openclaw
+/// `nonpositive_pid_is_dropped_like_every_sibling_pid_ingest` test names.
+pub(crate) fn checked_pid(raw: i64) -> Option<i32> {
+    i32::try_from(raw).ok().filter(|&p| p > 0)
+}
+
 pub(crate) fn extract_top_level_cwd(v: &Value) -> Option<PathBuf> {
     v.get("cwd").and_then(Value::as_str).map(PathBuf::from)
 }
