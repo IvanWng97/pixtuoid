@@ -161,9 +161,9 @@ fn mascot_hit_test_inside_and_outside() {
     // 14x12 sprite centered at (50, 80) → top-left pixel (43, 74).
     let pos = Point { x: 50, y: 80 };
     // cell my=39 → pixel 78 ∈ [74..86); mx=50 ∈ [43..57).
-    assert!(hit_test_mascot(pos, 50, 39));
+    assert!(hit_test_mascot(pos, 14, 12, 50, 39));
     // Far away.
-    assert!(!hit_test_mascot(pos, 10, 10));
+    assert!(!hit_test_mascot(pos, 14, 12, 10, 10));
 }
 
 // --- hit_test_from_tui (click-to-pin, home-desk-only) -----------------

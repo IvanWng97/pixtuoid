@@ -405,23 +405,37 @@ pub fn hit_test_pet(
     mx: u16,
     my: u16,
 ) -> bool {
-    let Size { w, h } = kind.hitbox(anim_name);
-    let tl_x = pet_pos.x.saturating_sub(w / 2);
-    let tl_y = pet_pos.y.saturating_sub(h / 2);
+    center_hit(pet_pos, kind.hitbox(anim_name), mx, my)
+}
+
+/// Whether cell `(mx, my)` falls on a `size`-px sprite CENTER-anchored at `pos`
+/// (pixel coords). Owns the half-block `my * 2` sub-pixel conversion, the
+/// `pos − size/2` top-left, and the saturating box test — the idiom every
+/// center-anchored hover box (pet, gateway mascot) shares, so the `* 2` can't be
+/// dropped at one site.
+fn center_hit(pos: pixtuoid_scene::layout::Point, size: Size, mx: u16, my: u16) -> bool {
+    let tl_x = pos.x.saturating_sub(size.w / 2);
+    let tl_y = pos.y.saturating_sub(size.h / 2);
     let cell_y = my * 2;
-    mx >= tl_x && mx < tl_x.saturating_add(w) && cell_y >= tl_y && cell_y < tl_y.saturating_add(h)
+    mx >= tl_x
+        && mx < tl_x.saturating_add(size.w)
+        && cell_y >= tl_y
+        && cell_y < tl_y.saturating_add(size.h)
 }
 
 /// True if `(mx, my)` (terminal cell coords) falls on the gateway mascot's
-/// 14×12 sprite, centered at `pos` (pixel coords). The lobster is symmetric and
-/// a single sprite size, so no per-anim hitbox is needed.
-pub fn hit_test_mascot(pos: pixtuoid_scene::layout::Point, mx: u16, my: u16) -> bool {
-    const W: u16 = 14;
-    const H: u16 = 12;
-    let tl_x = pos.x.saturating_sub(W / 2);
-    let tl_y = pos.y.saturating_sub(H / 2);
-    let cell_y = my * 2;
-    mx >= tl_x && mx < tl_x.saturating_add(W) && cell_y >= tl_y && cell_y < tl_y.saturating_add(H)
+/// `w`×`h`-px sprite, centered at `pos` (pixel coords). `w`/`h` come from the
+/// PAINTED frame (`MascotFrame`, which reads the pack's real size) — the derive-
+/// from-source discipline every other hit-test uses, so a re-tuned or custom-pack
+/// lobster keeps its click box aligned with what's drawn (was a hardcoded 14×12).
+pub fn hit_test_mascot(
+    pos: pixtuoid_scene::layout::Point,
+    w: u16,
+    h: u16,
+    mx: u16,
+    my: u16,
+) -> bool {
+    center_hit(pos, pixtuoid_scene::layout::Size { w, h }, mx, my)
 }
 
 #[cfg(test)]

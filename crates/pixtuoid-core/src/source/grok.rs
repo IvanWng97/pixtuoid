@@ -125,13 +125,7 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);
     let cwd_path = || cwd.map(PathBuf::from);
 
-    let identity = || AgentEvent::Identity {
-        agent_id,
-        source: SOURCE_NAME.to_string(),
-        session_id: key.to_string(),
-        cwd: cwd_path(),
-        pid: None,
-    };
+    let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, key, cwd_path());
     let tool_use_id = || {
         obj.get("toolUseId")
             .and_then(|s| s.as_str())

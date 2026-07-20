@@ -220,6 +220,25 @@ fn is_fresh(now: SystemTime, ts: SystemTime, ttl: Duration) -> bool {
     now.duration_since(ts).is_ok_and(|d| d < ttl)
 }
 
+/// Whether `ttl` has ELAPSED since `ts` — the `>=` (inclusive) complement of
+/// [`is_fresh`]. Clock-regression-safe like `is_fresh`: a backward clock
+/// (`now < ts`) makes `duration_since` `Err`, read as NOT-yet-elapsed, never a
+/// panic. The reducer's grace/expiry timers ride this so the clock-safe elapsed
+/// check lives in ONE place for both directions (a hand-rolled
+/// `duration_since(ts).unwrap()` would panic on a backward clock). See
+/// [`elapsed_past`] for the strict `>` variant — the boundary case differs and is
+/// separately test-pinned, so the two are deliberately distinct.
+pub(super) fn elapsed_at_least(now: SystemTime, ts: SystemTime, ttl: Duration) -> bool {
+    now.duration_since(ts).is_ok_and(|d| d >= ttl)
+}
+
+/// [`elapsed_at_least`] with a STRICT `>`: `ttl` must be strictly exceeded. The
+/// exit-grace GC uses this (its boundary is pinned), so it stays distinct from
+/// the inclusive variant.
+pub(super) fn elapsed_past(now: SystemTime, ts: SystemTime, ttl: Duration) -> bool {
+    now.duration_since(ts).is_ok_and(|d| d > ttl)
+}
+
 impl Correlation {
     /// Whether a hook `SessionEnd` for `id` (which had no slot) is still inside
     /// its [`HOOK_SESSION_END_TOMBSTONE_TTL`]: a trailing hook event delivered
@@ -290,6 +309,28 @@ impl Correlation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn elapsed_helpers_pin_inclusive_vs_strict_and_survive_a_backward_clock() {
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+        let ttl = Duration::from_millis(1500);
+        // Exactly AT the boundary: `>=` fires, strict `>` does NOT — the
+        // load-bearing distinction (exit-grace GC uses `>`, grace timers `>=`).
+        let at = t0 + ttl;
+        assert!(elapsed_at_least(at, t0, ttl), ">= fires at the boundary");
+        assert!(
+            !elapsed_past(at, t0, ttl),
+            "> does NOT fire at the boundary"
+        );
+        // One tick past: both fire. One tick before: neither.
+        let past = t0 + ttl + Duration::from_millis(1);
+        assert!(elapsed_at_least(past, t0, ttl) && elapsed_past(past, t0, ttl));
+        let before = t0 + Duration::from_millis(1499);
+        assert!(!elapsed_at_least(before, t0, ttl) && !elapsed_past(before, t0, ttl));
+        // Backward clock (now < ts): duration_since is Err → NOT elapsed, no panic.
+        let backward = t0 - Duration::from_secs(10);
+        assert!(!elapsed_at_least(backward, t0, ttl) && !elapsed_past(backward, t0, ttl));
+    }
 
     // Deterministic exact-boundary pins for every TTL comparison in this
     // module: freshness is STRICT (`elapsed < TTL`), so an entry queried at

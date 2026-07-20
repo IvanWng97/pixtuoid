@@ -289,13 +289,7 @@ fn decode_permission(props: &Value) -> Result<Vec<AgentEvent>> {
 /// not `directory`; the reducer back-fills cwd first-wins from the session's
 /// `session.created`.
 fn oc_identity(agent_id: AgentId, session_id: &str) -> AgentEvent {
-    AgentEvent::Identity {
-        agent_id,
-        source: SOURCE_NAME.to_string(),
-        session_id: session_id.to_string(),
-        cwd: None,
-        pid: None,
-    }
+    AgentEvent::identity(agent_id, SOURCE_NAME, session_id, None)
 }
 
 /// opencode-side tool detail: the `task` dispatch tool (by NAME) →

@@ -67,6 +67,11 @@ pub struct PixelPassResult {
 #[derive(Clone, Copy)]
 pub struct MascotFrame {
     pub pos: Point,
+    /// The painted sprite's pixel size (from the pack's real frame) — so the
+    /// binary's `hit_test_mascot` click box derives from what's drawn, not a
+    /// hardcoded constant.
+    pub w: u16,
+    pub h: u16,
     /// Human-readable gateway name (e.g. "OpenClaw").
     pub name: &'static str,
     /// An agent run is in flight (the tooltip's idle-vs-working verb). Keyed on
@@ -946,14 +951,14 @@ fn enqueue_gateway_mascot<'a>(
         else {
             continue;
         };
-        let h = ctx
+        let (mascot_w, mascot_h) = ctx
             .pack
             .animation(anim_name)
             .and_then(|a| a.frames.first())
-            .map_or(12, |f| f.height());
+            .map_or((14, 12), |f| (f.width(), f.height()));
         let run_count = presence.in_flight_run_keys.len() as u32;
         drawables.push(Drawable {
-            anchor_y: z_sort_row(Anchor::Center, pos, h),
+            anchor_y: z_sort_row(Anchor::Center, pos, mascot_h),
             kind: DrawableKind::GatewayMascot {
                 pos,
                 anim_name,
@@ -965,6 +970,8 @@ fn enqueue_gateway_mascot<'a>(
         // First present gateway wins the hover frame (single-gateway today).
         hover.get_or_insert(MascotFrame {
             pos,
+            w: mascot_w,
+            h: mascot_h,
             name: def.display_name,
             busy: presence.is_busy(),
             degraded: presence.display_state() == pixtuoid_core::state::DaemonState::Degraded,

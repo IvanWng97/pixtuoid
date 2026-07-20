@@ -237,9 +237,10 @@ fn parse_registry_entry(bytes: &[u8]) -> RegistryParse {
     let Some(pid) = v.get("pid").and_then(|p| p.as_i64()) else {
         return RegistryParse::ShapeDrift("pid");
     };
-    // pid <= 0 is never a single process (kill(0)/kill(-n) target process
-    // GROUPS — a corrupt entry must not probe our own group as "alive").
-    let Some(pid) = i32::try_from(pid).ok().filter(|p| *p > 0) else {
+    // The i32-range + strictly-positive narrowing every JSON pid ingress shares
+    // (the kill(0)/kill(-n)-targets-a-GROUP rationale lives on `checked_pid`; a
+    // corrupt entry must not probe our own group as "alive").
+    let Some(pid) = crate::source::decoder::checked_pid(pid) else {
         return RegistryParse::Skip;
     };
     let Some(session_id) = v.get("sessionId").and_then(|s| s.as_str()) else {
@@ -332,6 +333,28 @@ mod liveness_tests {
                 .to_string(),
         )
         .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nonpositive_registry_pid_is_dropped_via_checked_pid() {
+        // cc_probe routes the registry `pid` through decoder::checked_pid, so a
+        // zero/negative pid (kill(0)/kill(-n) target a process GROUP) is Skipped
+        // like every other JSON pid ingress — the sibling of openclaw's drop.
+        for bad in [0i64, -1, -12345] {
+            let bytes =
+                serde_json::json!({ "pid": bad, "sessionId": "s", "status": "idle" }).to_string();
+            assert!(
+                matches!(parse_registry_entry(bytes.as_bytes()), RegistryParse::Skip),
+                "pid {bad} must be dropped"
+            );
+        }
+        // Control: a valid positive pid still parses to an Entry.
+        let ok = serde_json::json!({ "pid": 4321, "sessionId": "s", "status": "idle" }).to_string();
+        assert!(matches!(
+            parse_registry_entry(ok.as_bytes()),
+            RegistryParse::Entry(_)
+        ));
     }
 
     #[cfg(unix)]

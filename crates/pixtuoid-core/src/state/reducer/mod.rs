@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::source::{AgentEvent, Transport};
-use crate::state::correlation::{Correlation, ToolEventKind};
+use crate::state::correlation::{elapsed_at_least, elapsed_past, Correlation, ToolEventKind};
 use crate::state::{fsm, scope, ActivityState, AgentSlot, SceneState, ToolKind};
 use crate::AgentId;
 
@@ -1349,10 +1349,7 @@ impl Reducer {
         let due: Vec<AgentId> = self
             .pending_b1_cascades
             .iter()
-            .filter(|(_, armed)| {
-                now.duration_since(**armed)
-                    .is_ok_and(|d| d >= B1_CASCADE_GRACE)
-            })
+            .filter(|(_, armed)| elapsed_at_least(now, **armed, B1_CASCADE_GRACE))
             .map(|(id, _)| *id)
             .collect();
         for id in due {
@@ -1386,10 +1383,7 @@ impl Reducer {
             let Some(pending) = slot.pending_idle_at else {
                 continue;
             };
-            if now
-                .duration_since(pending)
-                .is_ok_and(|d| d >= ACTIVE_GRACE_WINDOW)
-            {
+            if elapsed_at_least(now, pending, ACTIVE_GRACE_WINDOW) {
                 // A Waiting slot only carries `pending_idle_at` when its gated
                 // permission tool resolved (ActivityEnd arm); a *parallel*-prompt
                 // Waiting never gets the timer armed, so it isn't reached here.
@@ -1517,7 +1511,7 @@ impl Reducer {
             .iter()
             .filter_map(|(id, slot)| {
                 slot.exiting_at
-                    .filter(|t| now.duration_since(*t).is_ok_and(|d| d > EXIT_GRACE_WINDOW))
+                    .filter(|t| elapsed_past(now, *t, EXIT_GRACE_WINDOW))
                     .map(|_| *id)
             })
             .collect();

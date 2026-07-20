@@ -397,7 +397,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                     );
                 } else if let Some(m) = ctx
                     .last_mascot_pos
-                    .filter(|m| hit_test_mascot(m.pos, mx, my))
+                    .filter(|m| hit_test_mascot(m.pos, m.w, m.h, mx, my))
                 {
                     paint_mascot_tooltip(
                         f,
