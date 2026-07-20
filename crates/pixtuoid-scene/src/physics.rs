@@ -131,6 +131,48 @@ pub fn pause_ms_for(agent_id: AgentId) -> u64 {
 ///   Trapezoidal (L ≥ L_crit): T = 2·(v/a) + (L - L_crit)/v   [= 2·t_a + t_c]
 ///
 /// Zero-length paths: duration_ms = 0 so walk_progress returns 1000 immediately.
+/// The motion SHAPE of a walk leg: which regime the trapezoidal/triangular
+/// kinematics resolves to for `(length, cruise, accel)`, plus its phase
+/// boundaries. `walk_profile` sums it to a total duration; `walk_progress`
+/// evaluates the piecewise position against the SAME boundaries — so the regime
+/// selection (`l < l_crit`) and the accel/cruise times are computed ONCE and the
+/// two can't disagree (a disagreement renders as a sprite teleporting mid-leg,
+/// which is why `regime_boundary_lengths_keep_the_invariants` exists).
+enum WalkKinematics {
+    /// `L < L_crit`: accel-limited, never reaches cruise. `t_half` = ms to the
+    /// peak (mid-leg); total = `2·t_half`.
+    Triangular { t_half: f32 },
+    /// `L ≥ L_crit`: accel `t_a`, cruise `t_c`, decel `t_a`; total = `2·t_a + t_c`.
+    Trapezoidal { t_a: f32, t_c: f32 },
+}
+
+impl WalkKinematics {
+    /// Resolve the regime + boundaries for a leg of octile length `l` at cruise
+    /// `v` and accel `a` (both > 0). `L_crit = v²/a` is the length below which the
+    /// leg is accel-limited (triangular).
+    fn resolve(l: f32, v: f32, a: f32) -> Self {
+        let l_crit = v * v / a;
+        if l < l_crit {
+            WalkKinematics::Triangular {
+                t_half: (l / a).sqrt(),
+            }
+        } else {
+            WalkKinematics::Trapezoidal {
+                t_a: v / a,
+                t_c: (l - l_crit) / v,
+            }
+        }
+    }
+
+    /// Total leg duration (ms) — `walk_profile`'s answer.
+    fn total_ms(&self) -> f32 {
+        match self {
+            WalkKinematics::Triangular { t_half } => 2.0 * t_half,
+            WalkKinematics::Trapezoidal { t_a, t_c } => 2.0 * t_a + t_c,
+        }
+    }
+}
+
 pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId) -> WalkProfile {
     let v_base = match intent {
         WalkIntent::SnapBack => V_CRUISE_SNAPBACK,
@@ -150,19 +192,8 @@ pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId)
     let duration_ms = if path_len_octile == 0 {
         0u64
     } else {
-        // L_crit = v²/a; compare in octile units.
-        let l_crit = v * v / a;
-        let t_ms = if l < l_crit {
-            // Triangular: T = 2·sqrt(L/a)
-            2.0 * (l / a).sqrt()
-        } else {
-            // Trapezoidal: T = 2·(v/a) + (L - L_crit)/v
-            let t_a = v / a;
-            let t_c = (l - l_crit) / v;
-            2.0 * t_a + t_c
-        };
         // Already in ms (a is octile/ms², so T = sqrt(octile / (octile/ms²)) = ms).
-        t_ms.round() as u64
+        WalkKinematics::resolve(l, v, a).total_ms().round() as u64
     };
 
     WalkProfile {
@@ -191,38 +222,34 @@ pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
     let l = p.path_len_octile as f32;
     let v = p.v_cruise;
     let a = p.accel;
-    // t in ms; a in octile/ms² → s in octile
+    // t in ms; a in octile/ms² → s in octile. Same regime + boundaries
+    // `walk_profile` summed to `duration_ms` (one `WalkKinematics::resolve`), so
+    // the position curve can't drift from the leg's own duration.
     let t = elapsed_ms as f32;
-    let l_crit = v * v / a;
-
-    let s = if l < l_crit {
-        // Triangular regime.
-        let t_half = (l / a).sqrt(); // ms to peak velocity
-        if t <= t_half {
-            0.5 * a * t * t
-        } else {
-            let t_total = 2.0 * t_half;
-            let dt = t_total - t;
-            l - 0.5 * a * dt * dt
+    let s = match WalkKinematics::resolve(l, v, a) {
+        WalkKinematics::Triangular { t_half } => {
+            if t <= t_half {
+                0.5 * a * t * t
+            } else {
+                let dt = 2.0 * t_half - t;
+                l - 0.5 * a * dt * dt
+            }
         }
-    } else {
-        // Trapezoidal regime.
-        let t_a = v / a; // accel time (ms)
-        let t_c = (l - l_crit) / v; // cruise time (ms)
-        let t_cruise_end = t_a + t_c;
-        let t_total = 2.0 * t_a + t_c;
-
-        if t <= t_a {
-            // Accel phase.
-            0.5 * a * t * t
-        } else if t <= t_cruise_end {
-            // Cruise phase: constant velocity.
-            let d_a = 0.5 * a * t_a * t_a;
-            d_a + v * (t - t_a)
-        } else {
-            // Decel phase.
-            let dt = t_total - t;
-            l - 0.5 * a * dt * dt
+        WalkKinematics::Trapezoidal { t_a, t_c } => {
+            let t_cruise_end = t_a + t_c;
+            let t_total = 2.0 * t_a + t_c;
+            if t <= t_a {
+                // Accel phase.
+                0.5 * a * t * t
+            } else if t <= t_cruise_end {
+                // Cruise phase: constant velocity.
+                let d_a = 0.5 * a * t_a * t_a;
+                d_a + v * (t - t_a)
+            } else {
+                // Decel phase.
+                let dt = t_total - t;
+                l - 0.5 * a * dt * dt
+            }
         }
     };
 
