@@ -1109,6 +1109,25 @@ mod tests {
     }
 
     #[test]
+    fn blit_centered_lands_top_left_at_pos_minus_half_size() {
+        // The ONE centering seam all decor/sofa/pet/mascot arms now route through.
+        // A 3×2 frame (ODD width) pins the FLOOR division (3/2 == 1, not a rounded
+        // 2): top-left = (pos.x − w/2, pos.y − h/2) = (10−1, 10−1) = (9, 9). Dropping
+        // the `/2`, a `saturating_add`, or a rounding change all move this — none of
+        // which the "two renders differ" sofa/pet tests catch (both shift equally),
+        // and vending/printer center on a SEPARATE cell-loop path.
+        let bg = Rgb { r: 0, g: 0, b: 0 };
+        let marker = Rgb { r: 9, g: 8, b: 7 };
+        let frame = Frame::from_pixels(3, 2, vec![Some(marker); 6]);
+        let mut buf = RgbBuffer::filled(20, 20, bg);
+        blit_centered(&frame, Point { x: 10, y: 10 }, &mut buf);
+        assert_eq!(buf.get(9, 9), marker, "top-left lands at pos − size/2");
+        assert_eq!(buf.get(11, 10), marker, "bottom-right at (9+2, 9+1)");
+        assert_eq!(buf.get(8, 9), bg, "one column west of the frame stays bg");
+        assert_eq!(buf.get(9, 8), bg, "one row north of the frame stays bg");
+    }
+
+    #[test]
     fn gateway_mascot_missing_anim_is_a_noop() {
         // A GatewayMascot whose anim_name is absent early-returns (913-914) and
         // paints nothing — the exact analogue of pet_drawable_missing_anim_is_a_noop.
