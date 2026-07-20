@@ -99,13 +99,6 @@ impl GeneratedScore {
             LeadVoice::Pluck => "pluck",
         }
     }
-
-    /// Read only by the seed-sweep property suite (production synthesis
-    /// indexes `bar_chords` directly through the shared cores).
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn chord_at_bar(&self, bar: usize) -> [u8; 4] {
-        self.bar_chords[bar % self.bar_chords.len()]
-    }
 }
 
 // ---------------------------------------------------------------- grammar
