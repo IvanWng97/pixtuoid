@@ -150,7 +150,7 @@ fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static
     col: u16,
     row: u16,
     now: SystemTime,
-) {
+) -> bool {
     let snap = scene_rx.borrow().clone();
     // Project to the VISIBLE floor first — hit_test_agent_at → character_anchor
     // reads floor-local desk indices; the click now follows the LIVE sprite (like hover).
@@ -158,6 +158,9 @@ fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static
     let hit = renderer.hit_test_agent_at(&floor_scene, now, col, row);
     if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
         crate::focus::focus_slot(slot, focus_roots);
+        true
+    } else {
+        false
     }
 }
 
@@ -1003,6 +1006,19 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     });
                             if on_star {
                                 let _ = open::that(widgets::REPO_URL);
+                            } else if focus_clicked_agent(
+                                &mut renderer,
+                                &scene_rx,
+                                &focus_roots,
+                                m.column,
+                                m.row,
+                                now,
+                            ) {
+                                // The clicked agent takes focus — agent wins over the
+                                // coffee Easter egg and the pet, matching the hover
+                                // ladder (renderer.rs), where a hovered agent suppresses
+                                // coffee/pet/furniture. Also focuses an agent on a floor
+                                // with NO pet (the check was previously nested in the pet arm).
                             } else if renderer.cached_layout().is_some_and(|layout| {
                                 renderer::hit_test_coffee_machine(layout, m.column, m.row)
                             }) {
@@ -1022,15 +1038,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                         kind,
                                         floor_idx: renderer.current_floor(),
                                     }));
-                                } else {
-                                    focus_clicked_agent(
-                                        &mut renderer,
-                                        &scene_rx,
-                                        &focus_roots,
-                                        m.column,
-                                        m.row,
-                                        now,
-                                    );
                                 }
                             } else {
                                 focus_clicked_agent(
