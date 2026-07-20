@@ -37,6 +37,20 @@ impl LoopStem {
             LoopStem::Rain => s.rain,
         }
     }
+
+    /// The mutable twin of [`Self::level_of`] — lets a caller address a stem's
+    /// gain by `LoopStem`, so `StemLevels::silence_track_stems` can zero exactly
+    /// the `bank::TRACK_STEMS` set instead of re-listing the track-owned fields.
+    pub(super) fn field_mut(self, s: &mut StemLevels) -> &mut f32 {
+        match self {
+            LoopStem::Pad => &mut s.pad,
+            LoopStem::Sparkle => &mut s.sparkle,
+            LoopStem::Keys => &mut s.keys,
+            LoopStem::Drums => &mut s.drums,
+            LoopStem::Texture => &mut s.texture,
+            LoopStem::Rain => &mut s.rain,
+        }
+    }
 }
 
 /// Full-scale gain travel per second — a tier change crossfades over ~2s

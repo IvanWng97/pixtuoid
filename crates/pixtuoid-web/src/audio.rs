@@ -22,7 +22,7 @@
 use std::sync::Arc;
 
 use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds, DROP_POOL, KEYSTROKE_POOL, TRACK_STEMS};
-use pixtuoid_scene::audio::compose::{compose, GeneratedScore, Mood};
+use pixtuoid_scene::audio::compose::GeneratedScore;
 use pixtuoid_scene::audio::dsp::NoiseStream;
 use pixtuoid_scene::audio::mixer::LoopStem;
 use pixtuoid_scene::audio::{
@@ -254,12 +254,8 @@ struct LaneBuild {
 
 impl LaneBuild {
     fn new(track: TrackId) -> Self {
-        let (mood, seed) = match track {
-            TrackId::GenDay(seed) => (Mood::Day, seed),
-            TrackId::GenNight(seed) => (Mood::Night, seed),
-        };
         Self {
-            score: compose(mood, seed),
+            score: pixtuoid_scene::audio::compose_track(track),
             beds: Vec::new(),
         }
     }

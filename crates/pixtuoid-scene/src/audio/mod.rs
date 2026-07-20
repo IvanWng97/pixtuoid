@@ -162,17 +162,30 @@ pub fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -> Track
     }
 }
 
+/// Decode a [`TrackId`] to its composed score — the ONE
+/// `TrackId → (Mood, seed) → compose` bridge both build shells call (native
+/// [`crate::audio::bank::TrackBeds::build`] + the wasm `WebAudioDriver`), so the
+/// mood decode lives once instead of a hand-synced match per shell.
+pub fn compose_track(track: TrackId) -> compose::GeneratedScore {
+    let (mood, seed) = match track {
+        TrackId::GenDay(seed) => (compose::Mood::Day, seed),
+        TrackId::GenNight(seed) => (compose::Mood::Night, seed),
+    };
+    compose::compose(mood, seed)
+}
+
 impl StemLevels {
     /// Zero the five TRACK-owned musical stems (pad/sparkle/keys/drums/
     /// texture), leaving rain + typing (weather + activity, track-independent).
     /// The "hold silent" half of the mood-track crossfade — a player calls it
     /// on the target while a switch is [`TrackSwitch::is_holding`].
     pub fn silence_track_stems(&mut self) {
-        self.pad = 0.0;
-        self.sparkle = 0.0;
-        self.keys = 0.0;
-        self.drums = 0.0;
-        self.texture = 0.0;
+        // Derived from the ONE track-owned set (`bank::TRACK_STEMS`) via the
+        // mixer's field accessor, so a forgotten new music stem's zero is
+        // compiler-caught rather than a silently un-zeroed field here.
+        for stem in crate::audio::bank::TRACK_STEMS {
+            *stem.field_mut(self) = 0.0;
+        }
     }
 }
 

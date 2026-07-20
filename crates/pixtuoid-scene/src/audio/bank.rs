@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use super::mixer::LoopStem;
-use super::{compose, dsp, synth, OneShot, TrackId};
+use super::{dsp, synth, OneShot, TrackId};
 
 /// Per-key / per-drop pre-rendered variant pool sizes: playback picks randomly
 /// so typing/rain never sound repeated, while runtime stays synthesis-free.
@@ -165,11 +165,7 @@ impl TrackBeds {
     /// noise content draws from wherever `rng` stands, like every
     /// non-boot build always did.
     pub fn build(rng: &mut dsp::NoiseStream, track: TrackId) -> Self {
-        let (mood, seed) = match track {
-            TrackId::GenDay(seed) => (compose::Mood::Day, seed),
-            TrackId::GenNight(seed) => (compose::Mood::Night, seed),
-        };
-        let score = compose::compose(mood, seed);
+        let score = super::compose_track(track);
         Self {
             beds: synth::gen_beds(&score, rng).map(Arc::new),
         }
