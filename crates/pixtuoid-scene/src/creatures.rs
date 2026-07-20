@@ -28,15 +28,16 @@ fn epoch_ms(now: SystemTime) -> u64 {
 /// (both are corner appliances the creature stands beside), so `corner_visit_spot`
 /// serves both; the desk and the meeting sofa have their own offsets.
 ///
-/// Only the FURNITURE-GEOMETRY offset is shared here — these are derived from the
-/// `DESK_W`/`DESK_H` consts, NOT from any creature's sprite, and both creatures
-/// then `walk_between` + `snap_point_to_walkable` to a "near this furniture"
-/// target (no pixel-precise stand pose), so a sprite's footprint never enters
-/// the math. The creature-specific spot SELECTION stays DELIBERATELY separate and
-/// must NOT be folded in: `pet_position` gathers every spot + an `is_idle` bool +
-/// the corridor, while `mascot_spots` gathers conditionally on `DaemonState`
-/// (Busy → desks, Idle → social) with no corridor. They share where-beside-the-
-/// furniture, not which-furniture-when — two different domains.
+/// TWO things are shared: the per-furniture OFFSET (`*_visit_spot`, derived from
+/// the `DESK_W`/`DESK_H` consts — NOT any creature's sprite; both then
+/// `walk_between` + `snap_point_to_walkable` to a "near this furniture" target, so
+/// a footprint never enters the math) AND the social-venue GATHERING
+/// (`social_visit_spots`: pantry + sofas + couch, in that order), which both
+/// roamers visit. What stays DELIBERATELY per-creature is the state-conditional
+/// SELECTION — WHICH set to roam: `pet_position` takes every spot + an `is_idle`
+/// bool + the corridor; `mascot_spots` switches on `DaemonState` (Busy → desks,
+/// Idle → the social set) with no corridor. They share where-beside-the-furniture
+/// AND the social set, not which-furniture-WHEN.
 fn desk_visit_spot(desk: Point) -> Point {
     // Below the desk's own GROUND (walk-behind End: the blocked strip reaches
     // DESK_GROUND_H under the Point, deeper than the DESK_H slot) and on the
@@ -98,25 +99,9 @@ pub(crate) fn pet_position(
             idle_desk_indices.contains(&FloorLocalDeskIndex(i)),
         ));
     }
-    if let Some(wp) = layout
-        .waypoints
-        .iter()
-        .find(|w| matches!(w.kind, crate::layout::WaypointKind::Pantry))
-    {
-        spots.push((corner_visit_spot(wp.pos), false));
-    }
-    for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
-        for sofa in trio.sofas {
-            spots.push((sofa_visit_spot(sofa), false));
-        }
-    }
-    if let Some(wp) = layout
-        .waypoints
-        .iter()
-        .find(|w| matches!(w.kind, crate::layout::WaypointKind::Couch))
-    {
-        spots.push((corner_visit_spot(wp.pos), false));
-    }
+    // The social venues (pantry / sofas / couch) — the shared gathering; none is
+    // an idle desk, so each rides in with `false`.
+    spots.extend(social_visit_spots(layout).into_iter().map(|pt| (pt, false)));
     if let Some(corridor) = layout.corridor {
         spots.push((
             Point {
@@ -130,10 +115,7 @@ pub(crate) fn pet_position(
         return None;
     }
 
-    let pick = |n: u64| -> (Point, bool) {
-        let h = n.wrapping_mul(0x9e37_79b9_7f4a_7c15) as usize;
-        spots[h % spots.len()]
-    };
+    let pick = |n: u64| -> (Point, bool) { spots[golden_index(n, spots.len())] };
     let (dest, is_idle_spot) = pick(cycle_n);
     let (prev, _) = pick(cycle_n.wrapping_sub(1));
 
@@ -246,9 +228,46 @@ pub(crate) fn gateway_mascot_def(source: &str) -> Option<GatewayMascotDef> {
     }
 }
 
+/// Golden-ratio hash of wander-cycle `n` into `[0, len)` — the index both roamers
+/// pick a wander spot with (the mascot's `Point` list here, the pet's
+/// `(Point, bool)` list in `pet_position`), so the `0x9e37…` multiplier + modulo
+/// live once instead of a copy per pick.
+fn golden_index(n: u64, len: usize) -> usize {
+    (n.wrapping_mul(0x9e37_79b9_7f4a_7c15) as usize) % len
+}
+
 fn hash_pick(spots: &[Point], n: u64) -> Point {
-    let h = n.wrapping_mul(0x9e37_79b9_7f4a_7c15) as usize;
-    spots[h % spots.len()]
+    spots[golden_index(n, spots.len())]
+}
+
+/// The office's SOCIAL visit-spots — a stand-beside point for the pantry, each
+/// meeting sofa, and the lounge couch (in that order). The "where are the social
+/// venues" GATHERING both roamers share: `pet_position` appends it to its full
+/// spot list, `mascot_spots` uses it as its Idle-state set. This is furniture
+/// gathering, NOT the state-conditional SELECTION (which set to roam) the module
+/// doc reserves per-creature — the two stay distinct.
+fn social_visit_spots(layout: &Layout) -> Vec<Point> {
+    let mut spots = Vec::new();
+    if let Some(wp) = layout
+        .waypoints
+        .iter()
+        .find(|w| matches!(w.kind, crate::layout::WaypointKind::Pantry))
+    {
+        spots.push(corner_visit_spot(wp.pos));
+    }
+    for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
+        for sofa in trio.sofas {
+            spots.push(sofa_visit_spot(sofa));
+        }
+    }
+    if let Some(wp) = layout
+        .waypoints
+        .iter()
+        .find(|w| matches!(w.kind, crate::layout::WaypointKind::Couch))
+    {
+        spots.push(corner_visit_spot(wp.pos));
+    }
+    spots
 }
 
 /// A* on the STATIC mask with a throwaway EMPTY overlay (identical inputs every
@@ -310,25 +329,7 @@ fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> 
             spots.push(desk_visit_spot(*desk));
         }
     } else {
-        if let Some(wp) = layout
-            .waypoints
-            .iter()
-            .find(|w| matches!(w.kind, crate::layout::WaypointKind::Pantry))
-        {
-            spots.push(corner_visit_spot(wp.pos));
-        }
-        for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
-            for sofa in trio.sofas {
-                spots.push(sofa_visit_spot(sofa));
-            }
-        }
-        if let Some(wp) = layout
-            .waypoints
-            .iter()
-            .find(|w| matches!(w.kind, crate::layout::WaypointKind::Couch))
-        {
-            spots.push(corner_visit_spot(wp.pos));
-        }
+        spots.extend(social_visit_spots(layout));
     }
     spots
 }
@@ -438,6 +439,47 @@ mod tests {
 
     fn p(x: u16, y: u16) -> Point {
         Point { x, y }
+    }
+
+    #[test]
+    fn golden_index_is_deterministic_and_in_range() {
+        for len in [1usize, 3, 7, 50] {
+            for n in [0u64, 1, 2, 999, u64::MAX] {
+                let i = golden_index(n, len);
+                assert!(i < len, "index {i} out of range for len {len}");
+                assert_eq!(i, golden_index(n, len), "deterministic per (n, len)");
+            }
+        }
+    }
+
+    #[test]
+    fn social_visit_spots_gathers_exactly_pantry_sofas_couch() {
+        use crate::layout::{SceneLayout, WaypointKind};
+        let l = SceneLayout::compute_with_seed(240, 170, None, 3).expect("fits");
+        let has_pantry = l
+            .waypoints
+            .iter()
+            .any(|w| matches!(w.kind, WaypointKind::Pantry)) as usize;
+        let has_couch = l
+            .waypoints
+            .iter()
+            .any(|w| matches!(w.kind, WaypointKind::Couch)) as usize;
+        let n_sofas: usize = l
+            .meeting_rooms
+            .iter()
+            .filter_map(|r| r.trio.as_ref())
+            .map(|t| t.sofas.len())
+            .sum();
+        // Exactly one spot per pantry(≤1) + each sofa + couch(≤1): the social
+        // gathering both roamers share — no desks, no corridor, no more, no less.
+        assert_eq!(
+            social_visit_spots(&l).len(),
+            has_pantry + n_sofas + has_couch
+        );
+        assert!(
+            has_pantry + n_sofas + has_couch > 0,
+            "a 240x170 office has venues"
+        );
     }
 
     #[test]
