@@ -354,6 +354,47 @@ test('the hero ♩ sound toggle: muted by default, gesture-gated, no AudioContex
   expect(errors()).toEqual([]);
 });
 
+test('background playback: a hidden tab keeps ticking, reduced-motion stops it cold', async ({
+  page,
+}) => {
+  // #707 background playback + the review-caught invariant: with the tab
+  // hidden and music on, a 1Hz full-frame timer keeps sim+audio going —
+  // but reduced-motion engaging while hidden must stop it (the poster-
+  // still office must NOT be re-livened by a stray background paint).
+  const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    const w = window as unknown as { __onairLive: number };
+    w.__onairLive = 0;
+    document.addEventListener('pix:onair', (e) => {
+      if ((e as CustomEvent).detail?.live) w.__onairLive++;
+    });
+  });
+  await gotoLive(page);
+  const btn = page.locator('#office-audio');
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  await btn.click(); // the one gesture; headless may degrade gracefully
+  await page.waitForTimeout(3000); // warmup + a few ticks
+  const liveFires = () =>
+    page.evaluate(() => (window as unknown as { __onairLive: number }).__onairLive);
+  const baseline = await liveFires();
+  // simulate a hidden tab (document.hidden is read-only — shadow it)
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { get: () => true, configurable: true });
+    Object.defineProperty(document, 'visibilityState', {
+      get: () => 'hidden',
+      configurable: true,
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForTimeout(2500); // ≥2 background ticks
+  // now reduced-motion engages WHILE hidden: the mq listener de-lives the
+  // office; the background timer must not re-live it on its next tick
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.waitForTimeout(2500);
+  expect(await liveFires()).toBe(baseline); // no pix:onair(live:true) re-fire
+  expect(errors()).toEqual([]);
+});
+
 test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode does not mute the opt-in', async ({
   page,
 }) => {

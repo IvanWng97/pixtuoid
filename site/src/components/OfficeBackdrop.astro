@@ -634,7 +634,11 @@ import { asset, DIM_RESTING } from '../consts';
       // Hold on the bg-tone cover until the boot splash has lifted, so the roll is
       // never played hidden behind the overlay (the office keeps stepping meanwhile).
       if (!splashCleared) return;
-      if (!live) {
+      // Under reduced motion the office is a poster-still: NO paint caller
+      // may re-live it (the mq listener de-lives; a stray repaint — a
+      // resize, a background tick — must not undo that). The un-reduce
+      // path re-lives through boot()/start() as before.
+      if (!live && !mq.matches) {
         live = true;
         revealStartSim = nowMs; // sim-clock t0 → pause freezes the roll too
         wrap.classList.add('is-live');
@@ -1178,7 +1182,9 @@ import { asset, DIM_RESTING } from '../consts';
         stop();
         if (audioCtx && audioPlaying && !paused && !bgTimer) {
           bgTimer = setInterval(function () {
-            if (paused || !audioPlaying) return;
+            // reduced-motion may engage while hidden: paint() would re-live
+            // the poster-still office (the review-caught invariant break)
+            if (paused || !audioPlaying || mq.matches) return;
             const nowMs = Date.now() - pauseOffset;
             paint(nowMs); // the full frame body at 1 Hz: sim + blit…
             audioTick(nowMs); // …then sound, same order as frame()
@@ -1199,6 +1205,7 @@ import { asset, DIM_RESTING } from '../consts';
       mq.addEventListener('change', function () {
         if (mq.matches) {
           stop();
+          stopBgTicks(); // hidden-tab playback must not re-animate a poster-still office
           // Reduced motion IS the poster-still design: nothing auto-animates, so
           // reset the pause flag (syncPauseBtn hides the control below).
           paused = false;
