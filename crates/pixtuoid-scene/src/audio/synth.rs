@@ -272,9 +272,11 @@ pub fn rain_drop(rng: &mut NoiseStream) -> Vec<f32> {
 /// Vinyl-crackle pop density for BOTH room-tone beds (day free-running +
 /// night duck-baked — one knob, the textures must age identically).
 /// History: 9/s read "haunted" (v1) -> 4/s ratified with Phase 2 -> 1.5/s
-/// after the generator batch ("背景的黑胶的次啦声有点过于频繁了",
-/// owner 2026-07-19).
-const CRACKLE_POPS_PER_SEC: f32 = 1.5;
+/// after the generator batch ("背景的黑胶的次啦声有点过于频繁了") ->
+/// 0.18/s to the owner's stated target ("我预计是5s - 10s 有一次
+/// crackle", 2026-07-19): one pop every ~5.5-7s on both beds (the day
+/// bed's ~12s loop carries 2, the ~28s night loop carries 5).
+const CRACKLE_POPS_PER_SEC: f32 = 0.18;
 
 /// The vinyl/room texture bed: tape hiss + a faint warm room hum + sparse
 /// soft crackle. Mixed 25-35dB below the music (the noise-floor rule); the
