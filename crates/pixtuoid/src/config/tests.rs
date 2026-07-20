@@ -1,7 +1,7 @@
 #[test]
 fn audio_resolve_clamps_and_defaults() {
     // absent table → MUTED, full volume: the office starts silent and
-    // `m` is the one opt-in (#633 — the enabled knob was owner-cut)
+    // `m` is the one opt-in
     let cfg = AppConfig::default();
     let a = resolve_audio(&cfg);
     assert!(a.muted, "audio starts muted (strictly opt-in via m)");

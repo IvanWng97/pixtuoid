@@ -382,8 +382,8 @@ fn adopted_color_templates_actually_rotate_in() {
 #[test]
 fn night_hats_articulate_above_the_v1_floor() {
     // the adopted articulation fix: every night hat now sits at ≥0.36
-    // pre-wobble (was 0.2-0.32) — the groove tick is audible by
-    // construction, the sub untouched
+    // pre-wobble — the groove tick is audible by construction, the sub
+    // untouched
     for seed in 0..SWEEP {
         let s = compose(Mood::Night, seed);
         for &(_, k, g) in s.drums.iter().filter(|&&(_, k, _)| k == DrumKind::Hat) {

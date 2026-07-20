@@ -271,11 +271,9 @@ pub fn rain_drop(rng: &mut NoiseStream) -> Vec<f32> {
 
 /// Vinyl-crackle pop density for BOTH room-tone beds (day free-running +
 /// night duck-baked — one knob, the textures must age identically).
-/// History: 9/s read "haunted" (v1) -> 4/s ratified with Phase 2 -> 1.5/s
-/// after the generator batch ("背景的黑胶的次啦声有点过于频繁了") ->
-/// 0.18/s to the owner's stated target ("我预计是5s - 10s 有一次
-/// crackle", 2026-07-19): one pop every ~5.5-7s on both beds (the day
-/// bed's ~12s loop carries 2, the ~28s night loop carries 5).
+/// Tuned to the target of one crackle every 5-10s: at 0.18/s that's a pop
+/// every ~5.5-7s on both beds (the day bed's ~12s loop carries 2, the ~28s
+/// night loop carries 5).
 const CRACKLE_POPS_PER_SEC: f32 = 0.18;
 
 /// The vinyl/room texture bed: tape hiss + a faint warm room hum + sparse
@@ -316,10 +314,10 @@ pub fn texture_bed(rng: &mut NoiseStream) -> Vec<f32> {
 // realizations' pins prove the SHARED cores below still render the
 // owner-ratified sound. The cores + voices stay live (gen_beds).
 // The ratified 8-bar lofi composition (#633) — the frozen `score` tables
-// realized 1:1 from the Phase 0 python (`p3_*` renders, owner LISTEN-passed
-// 2026-07-16). All-procedural by owner decision: no open model emits 4
-// semantic phase-locked seamless-loop stems, and the ratified sound IS this
-// synthesis. Fingerprint pins below anchor each stem to the p3 measurement.
+// realized 1:1 from the Phase 0 python (`p3_*` renders). All-procedural by
+// owner decision: no open model emits 4 semantic phase-locked
+// seamless-loop stems, and the ratified sound IS this synthesis.
+// Fingerprint pins below anchor each stem to the p3 measurement.
 
 use super::score;
 
@@ -507,8 +505,8 @@ pub fn stem_drums(rng: &mut NoiseStream) -> Vec<f32> {
 }
 
 // ------------------------------------------------- night track (#644)
-// The v4 realization, owner LISTEN-passed 2026-07-17 — Lofi Girl-anchored
-// (sub-bass floor, differential swing baked into score.rs timestamps).
+// Lofi Girl-anchored (sub-bass floor, differential swing baked into
+// score.rs timestamps).
 // Day fns above are UNTOUCHED: the day take's identity is guarded by its
 // fingerprint pins, which this addition must not move.
 
@@ -804,7 +802,7 @@ fn night_texture_core(loop_secs: f32, kick_times: &[f32], rng: &mut NoiseStream)
 }
 
 // ------------------------------------------------- day takes
-// Additional day-mood compositions, owner LISTEN-passed 2026-07-19 — the
+// Additional day-mood compositions (owner LISTEN-passed) — the
 // SAME production chain as the ratified original day take (its pad recipe,
 // kit, tape post), parameterized over the frozen `score::DayTake` tables;
 // sparkle/keys ride the velocity-keyed EP voice (`ep_pluck_vel`). The

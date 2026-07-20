@@ -242,7 +242,7 @@ fn validation_detects_unknown_animations() {
     );
 }
 
-// ---- path-traversal guards (security-relevant; previously untested) -------
+// ---- path-traversal guards (security-relevant) ----------------------------
 
 fn write_pack_files(dir: &Path, pack_toml: &str, frames: &[(&str, &str)]) {
     std::fs::write(dir.join("pack.toml"), pack_toml).unwrap();
@@ -287,7 +287,7 @@ fn load_pack_rejects_absolute_frame_path_escaping_dir() {
     );
 }
 
-// ---- Pack::merge_from (load-bearing for every custom pack; was untested) --
+// ---- Pack::merge_from (load-bearing for every custom pack) -----------------
 
 #[test]
 fn merge_from_inherits_furniture_only_and_never_clobbers_own() {

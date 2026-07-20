@@ -73,7 +73,7 @@ pub(super) fn paint_area_rug(
 }
 
 /// Lounge side table — 7×4 wood block next to the viewing couch
-/// (opposite side from the floor lamp). Bumped from 5×3 to clear the
+/// (opposite side from the floor lamp), sized to clear the
 /// skill's ~5-cell-wide subzone threshold. Carries a 3-cell magazine
 /// stack on top so the silhouette reads as "side table with a book".
 pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &crate::theme::Theme) {

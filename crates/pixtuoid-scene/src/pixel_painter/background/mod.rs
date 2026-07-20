@@ -321,7 +321,7 @@ pub(super) fn paint_floor_and_walls(
         }
     }
 
-    // Floor-to-ceiling windows: 落地窗 — height grows with the wall band so
+    // Floor-to-ceiling windows: height grows with the wall band so
     // taller terminals get dramatic floor-to-ceiling glass. Width stays
     // fixed (mullion every 22 px) so the skyline detail reads consistently.
     // WINDOW_W / WINDOW_GAP are module constants — kept in sync with
