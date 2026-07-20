@@ -28,9 +28,9 @@ pub(crate) async fn capture_live_scene(
         root.clone(),
         pixtuoid_core::source::claude_code::SOURCE_NAME.to_string(),
         pixtuoid_core::source::claude_code::decode_cc_line,
-        pixtuoid_core::source::claude_code::cc_derive_label,
         pixtuoid_core::source::claude_code::cc_session_ended,
     )
+    .with_label_deriver(pixtuoid_core::source::claude_code::cc_derive_label)
     // The SAME UUID keying the real CC source wires (claude_code/native.rs):
     // without it the watcher registers under the path-hash id while every
     // line-decoded event (activity, ModelInfo) keys on the UUID — nothing

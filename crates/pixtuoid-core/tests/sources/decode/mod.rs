@@ -1232,10 +1232,10 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
         projects_root.clone(),
         "claude-code".to_string(),
         decode_cc_line,
-        cc_derive_label,
         cc_session_ended,
     )
-    .with_id_deriver(cc_id_from_path);
+    .with_id_deriver(cc_id_from_path)
+    .with_label_deriver(cc_derive_label);
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     tokio::time::sleep(Duration::from_millis(50)).await;

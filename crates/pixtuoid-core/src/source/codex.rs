@@ -302,10 +302,6 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
     }
 }
 
-pub fn derive_codex_label(_path: &Path, source: &str, cwd: &Path) -> String {
-    crate::source::decoder::derive_prefixed_label(source, cwd)
-}
-
 /// The Codex home dir — honors `CODEX_HOME` when it points at an existing dir,
 /// else `~/.codex` (codex's own precedence). The public entry the installer
 /// routes its `config.toml` path through too, so the watched sessions root and
@@ -569,22 +565,6 @@ mod tests {
             "last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}}}),
         );
         assert!(out.is_empty(), "zero reading must be silent, got {out:?}");
-    }
-
-    #[test]
-    fn label_is_cx_basename() {
-        assert_eq!(
-            derive_codex_label(
-                Path::new("/x.jsonl"),
-                SOURCE_NAME,
-                Path::new("/Users/me/dotfiles")
-            ),
-            "cx·dotfiles"
-        );
-        assert_eq!(
-            derive_codex_label(Path::new("/x.jsonl"), SOURCE_NAME, Path::new("")),
-            "cx"
-        );
     }
 
     #[test]

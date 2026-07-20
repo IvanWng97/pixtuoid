@@ -119,7 +119,7 @@ async fn watcher_registers_stale_file_when_probe_says_live() {
 #[tokio::test]
 async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     fast_watch();
-    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line, derive_codex_label};
+    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line};
 
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -139,13 +139,9 @@ async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     set_file_mtime(&rollout, backdated).unwrap();
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    let watcher = JsonlWatcher::new(
-        root.clone(),
-        "codex".to_string(),
-        decode_codex_line,
-        derive_codex_label,
-        |_t| false,
-    )
+    let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
+        false
+    })
     .with_id_deriver(codex_id_from_path)
     .with_initial_window(Duration::from_secs(60))
     .with_liveness_probe(std::sync::Arc::new(move || vouch_snapshot(&[uuid])));
@@ -180,7 +176,7 @@ async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
 #[tokio::test]
 async fn codex_first_sight_session_start_carries_bare_uuid_session_id() {
     fast_watch();
-    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line, derive_codex_label};
+    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line};
 
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -197,13 +193,9 @@ async fn codex_first_sight_session_start_carries_bare_uuid_session_id() {
         .unwrap();
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    let watcher = JsonlWatcher::new(
-        root.clone(),
-        "codex".to_string(),
-        decode_codex_line,
-        derive_codex_label,
-        |_t| false,
-    )
+    let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
+        false
+    })
     .with_id_deriver(codex_id_from_path);
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
@@ -540,9 +532,9 @@ async fn watcher_custom_label_deriver() {
         projects_root.clone(),
         "claude-code".to_string(),
         decode_cc_line,
-        custom_label,
         cc_session_ended,
-    );
+    )
+    .with_label_deriver(custom_label);
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -589,7 +581,7 @@ async fn watcher_custom_label_deriver() {
 #[tokio::test]
 async fn codex_rollout_yields_uuid_keyed_session_start() {
     fast_watch();
-    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line, derive_codex_label};
+    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line};
 
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -597,13 +589,9 @@ async fn codex_rollout_yields_uuid_keyed_session_start() {
     let transcript = root.join(format!("rollout-2026-05-29T22-36-52-{uuid}.jsonl"));
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    let watcher = JsonlWatcher::new(
-        root.clone(),
-        "codex".to_string(),
-        decode_codex_line,
-        derive_codex_label,
-        |_t| false,
-    )
+    let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
+        false
+    })
     .with_id_deriver(codex_id_from_path);
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
@@ -667,9 +655,9 @@ async fn default_id_deriver_stays_path_keyed() {
         root.clone(),
         "antigravity".to_string(),
         decode_cc_line,
-        cc_derive_label,
         cc_session_ended,
-    );
+    )
+    .with_label_deriver(cc_derive_label);
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     tokio::time::sleep(Duration::from_millis(50)).await;

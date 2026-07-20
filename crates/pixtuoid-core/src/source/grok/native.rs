@@ -15,13 +15,6 @@ use super::{
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
-/// Label deriver: prefixed `gk·<basename>` from the cwd — which the
-/// `with_cwd_deriver` PATH fallback fills before this runs, so a grok label is
-/// never the bare prefix in the normal layout.
-fn derive_grok_label(_path: &Path, source: &str, cwd: &Path) -> String {
-    crate::source::decoder::derive_prefixed_label(source, cwd)
-}
-
 /// Only `updates.jsonl` is the tailable transcript. Every session dir carries
 /// SIBLING `.jsonl` files that must never be walked: `chat_history.jsonl` and
 /// `rewind_points.jsonl` are REWRITTEN via temp+rename (a tail would replay
@@ -366,7 +359,6 @@ impl Source for GrokSource {
             self.sessions_root.clone(),
             SOURCE_NAME.to_string(),
             decode_grok_line,
-            derive_grok_label,
             grok_session_ended,
         )
         .with_id_deriver(grok_id_from_path)

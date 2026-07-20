@@ -101,10 +101,10 @@ impl Source for ClaudeCodeSource {
             self.projects_root.clone(),
             SOURCE_NAME.to_string(),
             decode_cc_line,
-            cc_derive_label,
             cc_session_ended,
         )
-        .with_id_deriver(cc_id_from_path);
+        .with_id_deriver(cc_id_from_path)
+        .with_label_deriver(cc_derive_label);
         if let Some(sessions_dir) = cc_sessions_dir(&self.projects_root) {
             watcher = watcher.with_liveness_probe(std::sync::Arc::new(move || {
                 live_cc_session_ids(&sessions_dir)

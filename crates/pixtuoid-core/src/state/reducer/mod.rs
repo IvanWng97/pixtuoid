@@ -153,9 +153,9 @@ fn stale_threshold_with_caps(
 
 /// Display prefix for a source's labels (`cc·`, `ag·`, `cx·`, `rx·`), from the
 /// source registry (the per-source fact table). Applied at `SessionStart`; the
-/// JSONL `LabelDeriver` Renames (`cc_derive_label`/`derive_codex_label`/
-/// `derive_ag_label`) produce the same prefixed string and so reinforce this
-/// idempotently. A hook-only source (reasonix) has no JSONL Rename, so this is
+/// JSONL `LabelDeriver` Renames (`cc_derive_label`, else the shared default
+/// `derive_prefixed_label`) produce the same prefixed string and so reinforce
+/// this idempotently. A hook-only source (reasonix) has no JSONL Rename, so this is
 /// the sole place its `rx·` label is established. An unregistered source falls
 /// back to its own name (the same `other => other` contract as the old match).
 fn source_label_prefix(source: &str) -> &str {

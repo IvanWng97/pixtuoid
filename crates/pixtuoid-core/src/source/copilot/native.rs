@@ -9,9 +9,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use super::{
-    copilot_home, copilot_id_from_path, decode_copilot_line, derive_copilot_label, SOURCE_NAME,
-};
+use super::{copilot_home, copilot_id_from_path, decode_copilot_line, SOURCE_NAME};
 use crate::source::decoder::parsed_tail_lines;
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};
@@ -58,7 +56,6 @@ impl Source for CopilotSource {
             self.sessions_root.clone(),
             SOURCE_NAME.to_string(),
             decode_copilot_line,
-            derive_copilot_label,
             copilot_session_ended,
         )
         .with_id_deriver(copilot_id_from_path)

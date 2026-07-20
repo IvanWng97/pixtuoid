@@ -48,7 +48,6 @@ impl Source for AntigravitySource {
             self.brain_root.clone(),
             SOURCE_NAME.to_string(),
             decode_ag_line,
-            derive_ag_label,
             ag_session_ended,
         )
         .with_path_filter(skip_transcript_full);
@@ -80,34 +79,9 @@ fn skip_transcript_full(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()) != Some("transcript_full.jsonl")
 }
 
-fn derive_ag_label(_path: &Path, source: &str, cwd: &Path) -> String {
-    crate::source::decoder::derive_prefixed_label(source, cwd)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn label_is_ag_basename_or_bare_prefix() {
-        assert_eq!(
-            derive_ag_label(
-                Path::new("/x"),
-                SOURCE_NAME,
-                Path::new("/Users/me/dotfiles")
-            ),
-            "ag·dotfiles"
-        );
-        // Empty / root cwd fall back to the bare prefix.
-        assert_eq!(
-            derive_ag_label(Path::new("/x"), SOURCE_NAME, Path::new("")),
-            "ag"
-        );
-        assert_eq!(
-            derive_ag_label(Path::new("/x"), SOURCE_NAME, Path::new("/")),
-            "ag"
-        );
-    }
 
     #[test]
     fn ag_session_ended_is_always_false() {

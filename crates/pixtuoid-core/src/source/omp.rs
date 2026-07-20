@@ -176,10 +176,6 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
     (chain.len() > 1).then(|| chain[..chain.len() - 1].join("/"))
 }
 
-pub fn derive_omp_label(_path: &Path, source: &str, cwd: &Path) -> String {
-    crate::source::decoder::derive_prefixed_label(source, cwd)
-}
-
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream reference loader is itself lenient (`parseJsonlLenient`), so a
@@ -469,19 +465,6 @@ mod tests {
         );
         assert_eq!(omp_id_from_path(Path::new(&p)), ROOT_KEY);
         assert_eq!(omp_parent_key_from_path(Path::new(&p)), None);
-    }
-
-    #[test]
-    fn label_is_om_dot_basename_with_bare_prefix_fallback() {
-        assert_eq!(
-            derive_omp_label(Path::new(ROOT), SOURCE_NAME, Path::new("/home/u/proj")),
-            "om·proj"
-        );
-        assert_eq!(
-            derive_omp_label(Path::new(ROOT), SOURCE_NAME, Path::new("")),
-            "om",
-            "an empty cwd falls back to the bare prefix"
-        );
     }
 
     // ── header / lifecycle ──

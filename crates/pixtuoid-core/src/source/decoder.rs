@@ -1179,9 +1179,10 @@ mod tests {
 
     /// Pin: every transcript-bearing source's `LabelDeriver`, on an EMPTY cwd,
     /// falls back to EXACTLY its registry `label_prefix` — no deriver hardcodes
-    /// a prefix that could silently drift from the registry (invariant #3). The
-    /// codex/copilot/antigravity derivers share [`derive_prefixed_label`]; CC's
-    /// bespoke deriver (subagent + project-dir branches) is exercised directly.
+    /// a prefix that could silently drift from the registry (invariant #3).
+    /// Every non-CC source rides the DEFAULT deriver ([`derive_prefixed_label`],
+    /// wired once in `JsonlWatcher::new`); CC's bespoke deriver (subagent +
+    /// project-dir branches) is the sole override, exercised directly.
     #[test]
     fn transcript_deriver_empty_cwd_fallback_equals_registry_prefix() {
         use crate::source::{claude_code, registry};
@@ -1201,6 +1202,13 @@ mod tests {
                 d.name
             );
         }
+        // A non-empty cwd composes `prefix·basename` — the composed sample the
+        // deleted per-source wrapper unit tests used to pin, now on the ONE
+        // shared body every non-CC source rides.
+        assert_eq!(
+            derive_prefixed_label("codex", Path::new("/Users/me/dotfiles")),
+            "cx·dotfiles"
+        );
     }
 
     /// CC's per-tool target keys: the file-tool family reads `file_path`,

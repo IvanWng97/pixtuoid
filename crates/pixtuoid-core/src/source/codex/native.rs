@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{codex_home, codex_id_from_path, decode_codex_line, derive_codex_label, SOURCE_NAME};
+use super::{codex_home, codex_id_from_path, decode_codex_line, SOURCE_NAME};
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
@@ -120,7 +120,6 @@ impl Source for CodexSource {
             self.sessions_root.clone(),
             SOURCE_NAME.to_string(),
             decode_codex_line,
-            derive_codex_label,
             codex_session_ended,
         )
         .with_id_deriver(codex_id_from_path);

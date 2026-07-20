@@ -46,10 +46,10 @@ fn cc_watcher(root: std::path::PathBuf) -> JsonlWatcher {
         root,
         "claude-code".to_string(),
         decode_cc_line,
-        cc_derive_label,
         cc_session_ended,
     )
     .with_id_deriver(cc_id_from_path)
+    .with_label_deriver(cc_derive_label)
 }
 
 // ── Shared watcher harness + builders ───────────────────────────────────────

@@ -75,10 +75,6 @@ pub fn copilot_id_from_path(path: &Path) -> String {
         .to_string()
 }
 
-pub fn derive_copilot_label(_path: &Path, source: &str, cwd: &Path) -> String {
-    crate::source::decoder::derive_prefixed_label(source, cwd)
-}
-
 fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(|x| x.as_str())
 }
@@ -403,19 +399,6 @@ mod tests {
         assert_eq!(
             copilot_id_from_path(Path::new(PATH)),
             "65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3"
-        );
-    }
-
-    #[test]
-    fn label_is_cp_dot_basename_with_bare_prefix_fallback() {
-        assert_eq!(
-            derive_copilot_label(Path::new(PATH), SOURCE_NAME, Path::new("/home/u/proj")),
-            "cp·proj"
-        );
-        assert_eq!(
-            derive_copilot_label(Path::new(PATH), SOURCE_NAME, Path::new("")),
-            "cp",
-            "an empty cwd falls back to the bare prefix"
         );
     }
 

@@ -43,7 +43,19 @@ use walk::{scan_root, walk_jsonl};
 // re-exported so watcher-facing callers keep the `jsonl::LineDecoder` path —
 // a second local alias would be the two-copies drift bug.
 pub use crate::source::decoder::LineDecoder;
+
+/// Derives an agent's display label from its transcript `(path, source, cwd)`.
+/// The default (`default_prefixed_label`) is the source-prefixed cwd basename
+/// (`cx·dotfiles`) that EVERY transcript-bearing source except CC uses — it
+/// reads only `(source, cwd)`, ignoring the path. **CC** overrides it with
+/// `cc_derive_label` (which falls back to the project-dir name when a Rename's
+/// seed line has no cwd, so `cc·dotfiles` never degrades to a bare `cc`).
 pub type LabelDeriver = fn(&Path, &str, &Path) -> String;
+
+fn default_prefixed_label(_path: &Path, source: &str, cwd: &Path) -> String {
+    crate::source::decoder::derive_prefixed_label(source, cwd)
+}
+
 pub type SessionEndChecker = fn(&[u8]) -> bool;
 
 /// Derives the opaque session-id string used to build the generic
@@ -191,7 +203,6 @@ impl JsonlWatcher {
         root: PathBuf,
         source: String,
         decode_line: LineDecoder,
-        derive_label: LabelDeriver,
         check_session_ended: SessionEndChecker,
     ) -> Self {
         Self {
@@ -199,7 +210,7 @@ impl JsonlWatcher {
             initial_window: DEFAULT_INITIAL_WINDOW,
             source_name: source,
             decode_line,
-            derive_label,
+            derive_label: default_prefixed_label,
             check_session_ended,
             id_derive: default_id_from_path,
             path_filter: accept_all_paths,
@@ -239,6 +250,15 @@ impl JsonlWatcher {
 
     pub fn with_id_deriver(mut self, id_derive: IdDeriver) -> Self {
         self.id_derive = id_derive;
+        self
+    }
+
+    /// Override the display-label derivation (default: the source-prefixed cwd
+    /// basename via [`LabelDeriver`]). Only **CC** needs this — `cc_derive_label`
+    /// adds the empty-cwd project-dir fallback; every other transcript source
+    /// rides the default.
+    pub fn with_label_deriver(mut self, derive_label: LabelDeriver) -> Self {
+        self.derive_label = derive_label;
         self
     }
 

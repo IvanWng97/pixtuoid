@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{decode_omp_line, derive_omp_label, omp_agent_dir, omp_id_from_path, SOURCE_NAME};
+use super::{decode_omp_line, omp_agent_dir, omp_id_from_path, SOURCE_NAME};
 use crate::source::decoder::parsed_tail_lines;
 use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
@@ -58,7 +58,6 @@ impl Source for OmpSource {
             self.sessions_root.clone(),
             SOURCE_NAME.to_string(),
             decode_omp_line,
-            derive_omp_label,
             omp_session_ended,
         )
         .with_id_deriver(omp_id_from_path);
