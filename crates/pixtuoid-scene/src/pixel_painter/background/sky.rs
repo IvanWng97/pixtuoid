@@ -304,6 +304,25 @@ pub(in crate::pixel_painter) fn sun_on_wall(now: SystemTime) -> Option<SunSpot> 
     })
 }
 
+/// Blend `tint` over every floor pixel in the band `top_y..bottom_y` (clamped to
+/// the buffer) at an ALREADY-CLAMPED strength `s`. THE floor-tint loop shared by
+/// the night dim and the day lift — the two differ only in their clamp ceiling and
+/// tint, so those stay caller-side. A full-floor pass, so `s <= 0.0` early-returns
+/// (`blend_rgb(cur, _, 0.0)` is a per-pixel no-op → byte-identical, but skips the
+/// pass every clear frame). Loop-bounded, so the unchecked `get`/`put` stay (not
+/// `blend_pixel`, which would add a per-pixel bounds check to a hot full-floor loop).
+fn blend_floor_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s: f32) {
+    if s <= 0.0 {
+        return;
+    }
+    for y in top_y..bottom_y.min(buf.height()) {
+        for x in 0..buf.width() {
+            let cur = buf.get(x, y);
+            buf.put(x, y, blend_rgb(cur, tint, s));
+        }
+    }
+}
+
 /// Multiplicative dim applied to floor pixels at night. Pulls everything
 /// toward a dark navy so the artificial-light pools have something to
 /// stand out against. `strength` is 0..1 (no dim..full dim).
@@ -314,20 +333,8 @@ pub(in crate::pixel_painter) fn dim_floor_overlay(
     strength: f32,
     theme: &Theme,
 ) {
-    let night_tint = theme.lighting.night_tint;
     let s = strength.clamp(0.0, 0.55);
-    // Skip the full-floor blend on a clear-sky day (s == 0): blend_rgb(cur, _, 0.0)
-    // is a per-pixel no-op, so the early return is byte-identical (mirrors
-    // daylight_floor_overlay) and saves a full floor-area pass every clear daytime frame.
-    if s <= 0.0 {
-        return;
-    }
-    for y in top_y..bottom_y.min(buf.height()) {
-        for x in 0..buf.width() {
-            let cur = buf.get(x, y);
-            buf.put(x, y, blend_rgb(cur, night_tint, s));
-        }
-    }
+    blend_floor_band(buf, top_y, bottom_y, theme.lighting.night_tint, s);
 }
 
 /// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`].
@@ -352,15 +359,7 @@ pub(in crate::pixel_painter) fn daylight_floor_overlay(
         b: 224,
     };
     let s = strength.clamp(0.0, 0.40);
-    if s <= 0.0 {
-        return;
-    }
-    for y in top_y..bottom_y.min(buf.height()) {
-        for x in 0..buf.width() {
-            let cur = buf.get(x, y);
-            buf.put(x, y, blend_rgb(cur, SUN_TINT, s));
-        }
-    }
+    blend_floor_band(buf, top_y, bottom_y, SUN_TINT, s);
 }
 
 /// The physical sky emitter — sun by day, moon by night — resolved from the
@@ -450,6 +449,34 @@ pub(in crate::pixel_painter) fn moon_phase(now: SystemTime) -> f32 {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn blend_floor_band_tints_only_the_band_and_noops_at_zero() {
+        let base = Rgb {
+            r: 100,
+            g: 100,
+            b: 100,
+        };
+        let tint = Rgb { r: 0, g: 0, b: 0 };
+        // s <= 0 is a no-op (the clear-frame early return): the whole buffer stays.
+        let mut buf = RgbBuffer::filled(3, 4, base);
+        blend_floor_band(&mut buf, 1, 3, tint, 0.0);
+        for y in 0..4 {
+            for x in 0..3 {
+                assert_eq!(buf.get(x, y), base, "s=0 leaves ({x},{y}) untouched");
+            }
+        }
+        // s > 0 blends ONLY rows [top_y, bottom_y): row 0 (above) + row 3 (at/below)
+        // stay `base`; rows 1..3 become blend_rgb(base, tint, s).
+        blend_floor_band(&mut buf, 1, 3, tint, 0.5);
+        let blended = blend_rgb(base, tint, 0.5);
+        for x in 0..3 {
+            assert_eq!(buf.get(x, 0), base, "row above the band untouched");
+            assert_eq!(buf.get(x, 1), blended);
+            assert_eq!(buf.get(x, 2), blended);
+            assert_eq!(buf.get(x, 3), base, "bottom_y is exclusive");
+        }
+    }
 
     #[test]
     fn daylight_floor_overlay_brightens_at_positive_strength() {
