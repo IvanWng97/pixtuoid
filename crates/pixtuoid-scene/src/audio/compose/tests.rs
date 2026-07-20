@@ -34,6 +34,26 @@ fn template_chords_and_roots_are_diatonic() {
 }
 
 #[test]
+fn every_day_template_chord_carries_a_third_and_seventh() {
+    // the shell voicings are only well-defined over true 7th chords —
+    // the grammar-level lint that caught the Am7/C-without-G voicing
+    for progs in [&DAY_PROGRESSIONS[..], &CHROMATIC_PROBE_PROGRESSIONS[..]] {
+        for (i, p) in progs.iter().enumerate() {
+            for (bar, chord) in p.chords.iter().enumerate() {
+                let root = p.roots_pc[bar];
+                let has = |offs: [u8; 2]| {
+                    chord
+                        .iter()
+                        .any(|&n| offs.iter().any(|&o| n % 12 == (root + o) % 12))
+                };
+                assert!(has([3, 4]), "template {i} bar {bar}: no third");
+                assert!(has([10, 11]), "template {i} bar {bar}: no seventh");
+            }
+        }
+    }
+}
+
+#[test]
 fn lead_voice_varies_by_day_and_night_keeps_the_ep() {
     // the instrument registry: day draws real variety over the sweep;
     // night stays the ratified EP (the sleepy identity)
@@ -166,21 +186,28 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
         );
         assert!(gain > 0.0 && gain <= 1.5, "seed {seed}: drum gain {gain}");
     }
-    // comping draws from the chord pool: strict chord tones ±octaves
+    // comping: bar-chord tones ±octaves, or the bar root's NINTH (the
+    // shell voicing's R6 color note)
     for &(at, note, _) in &s.keys {
-        let chord = s.chord_at_bar((at / bar_s) as usize);
+        let bar = ((at / bar_s) as usize).min(GEN_LOOP_BARS - 1);
+        let chord = s.bar_chords[bar];
+        let ninth_pc = (s.bar_roots[bar] + 2) % 12;
         assert!(
             chord
                 .iter()
-                .any(|&c| note == c || note == c + 12 || note == c + 24),
-            "seed {seed}: keys note {note} at {at}s not a tone of {chord:?}"
+                .any(|&c| note == c || note == c + 12 || note == c + 24)
+                || note % 12 == ninth_pc,
+            "seed {seed}: keys note {note} at {at}s not a tone/ninth of {chord:?}"
         );
     }
-    // the lead lives in the take's key
+    // the lead lives in the take's key — except over the bar-8 turnaround
+    // dominant, whose tones are the hinge's deliberate tension
     for &(at, note, _) in &s.sparkle {
+        let bar = ((at / bar_s) as usize).min(GEN_LOOP_BARS - 1);
+        let in_turnaround = s.bar_chords[bar].iter().any(|&c| note % 12 == c % 12);
         assert!(
-            s.scale_pcs.contains(&(note % 12)),
-            "seed {seed}: lead note {note} at {at}s outside the key"
+            s.scale_pcs.contains(&(note % 12)) || in_turnaround,
+            "seed {seed}: lead note {note} at {at}s outside key AND bar chord"
         );
     }
     // density: a lead phrase, not a solo — and never silence
@@ -208,7 +235,8 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
             "seed {seed}: bar {bar} lead density {n} > {max_per_bar}"
         );
     }
-    // every chord tone diatonic post-transpose (grammar survived the shift)
+    // every TEMPLATE chord tone diatonic post-transpose, and the timeline
+    // matches the template on bars 0-6 (bar 7 may be the turnaround)
     for chord in &s.chords {
         for &n in chord {
             assert!(
@@ -216,5 +244,140 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
                 "seed {seed}: chord tone {n} off-scale"
             );
         }
+    }
+    for bar in 0..7 {
+        assert_eq!(
+            s.bar_chords[bar],
+            s.chords[bar % 4],
+            "seed {seed}: bar {bar} drifted from the template"
+        );
+    }
+}
+
+#[test]
+fn day_bar8_is_the_turnaround_dominant_and_night_is_not() {
+    for seed in 0..SWEEP {
+        let d = compose(Mood::Day, seed);
+        // the hinge: a dominant 7th of the returning bar-1 root
+        let dom_pc = (d.roots_pc[0] + 7) % 12;
+        let want: Vec<u8> = [0u8, 4, 7, 10].iter().map(|o| (dom_pc + o) % 12).collect();
+        let got: Vec<u8> = d.bar_chords[7].iter().map(|&n| n % 12).collect();
+        assert_eq!(got, want, "seed {seed}: bar 8 is not V7 of the loop root");
+        assert_eq!(d.bar_roots[7], dom_pc);
+        let n = compose(Mood::Night, seed);
+        assert_eq!(
+            n.bar_chords[7], n.chords[3],
+            "seed {seed}: night must keep the plain cycle (the sleepy loop)"
+        );
+    }
+}
+
+#[test]
+fn day_keys_comp_in_rolled_shell_pairs() {
+    for seed in 0..SWEEP {
+        let s = compose(Mood::Day, seed);
+        assert_eq!(s.keys.len() % 2, 0, "seed {seed}: unpaired shell note");
+        for pair in s.keys.chunks(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let roll = b.0 - a.0;
+            assert!(
+                (0.010..=0.022).contains(&roll),
+                "seed {seed}: shell roll {roll}s outside the hand's range"
+            );
+            assert!(
+                b.2 < a.2,
+                "seed {seed}: the rolled upper voice rides softer"
+            );
+            assert_ne!(a.1 % 12, b.1 % 12, "seed {seed}: shell voices collapsed");
+        }
+    }
+}
+
+#[test]
+fn day_lead_uses_sixteenth_anticipations_somewhere_in_the_sweep() {
+    // p≈0.15 per strong beat: the sweep must surface pushed notes, and
+    // every event still lands on the 8th grid or a x.75 anticipation
+    let mut seen_push = false;
+    for seed in 0..SWEEP {
+        let s = compose(Mood::Day, seed);
+        let beat_s = s.beat_s();
+        for &(at, _, _) in &s.sparkle {
+            // strip the played-not-sequenced lag before reading the grid
+            let beats = (at - 0.015) / beat_s;
+            let frac = beats - beats.floor();
+            let on_grid = [0.0f32, 0.25, 0.5, 0.75]
+                .iter()
+                .any(|g| (frac - g).abs() < 0.07 || (frac - g - 1.0).abs() < 0.07);
+            assert!(on_grid, "seed {seed}: lead event off-grid (frac {frac})");
+            let bar_beat = beats % 4.0;
+            if [0.75f32, 1.75, 2.75]
+                .iter()
+                .any(|g| (bar_beat - g).abs() < 0.07)
+            {
+                seen_push = true;
+            }
+        }
+    }
+    assert!(seen_push, "no 16th anticipation surfaced across the sweep");
+}
+
+#[test]
+fn the_answer_quotes_the_statements_opening() {
+    for seed in 0..SWEEP {
+        let s = compose(Mood::Day, seed);
+        let bar_s = s.bar_s();
+        let bar_of = |at: f32| ((at / bar_s) as usize).min(GEN_LOOP_BARS - 1);
+        let bar0: Vec<u8> = s
+            .sparkle
+            .iter()
+            .filter(|&&(at, _, _)| bar_of(at) == 0)
+            .map(|&(_, n, _)| n)
+            .collect();
+        let bar4: Vec<u8> = s
+            .sparkle
+            .iter()
+            .filter(|&&(at, _, _)| bar_of(at) == 4)
+            .map(|&(_, n, _)| n)
+            .collect();
+        if !bar0.is_empty() && !bar4.is_empty() {
+            assert_eq!(
+                bar4[0], bar0[0],
+                "seed {seed}: the answer must open on the statement's pitch"
+            );
+        }
+    }
+}
+
+#[test]
+fn night_probe_doubles_hats_and_chromatic_probe_carries_color() {
+    for seed in 0..8 {
+        let base = compose(Mood::Night, seed);
+        let bright = compose_night_probe_bright(seed);
+        let sum = |sc: &GeneratedScore| -> f32 {
+            sc.drums
+                .iter()
+                .filter(|&&(_, k, _)| k == DrumKind::Hat)
+                .map(|&(_, _, g)| g)
+                .sum()
+        };
+        assert!(
+            sum(&bright) > sum(&base) * 1.8,
+            "seed {seed}: bright probe hats not raised"
+        );
+        // same notes, only the hats differ
+        assert_eq!(base.sparkle, bright.sparkle);
+        assert_eq!(base.keys, bright.keys);
+
+        let chroma = compose_day_probe_chromatic(seed);
+        let chromatic_tone = chroma
+            .bar_chords
+            .iter()
+            .take(7)
+            .flatten()
+            .any(|&n| !chroma.scale_pcs.contains(&(n % 12)));
+        assert!(
+            chromatic_tone,
+            "seed {seed}: chromatic probe carries no color tone"
+        );
     }
 }

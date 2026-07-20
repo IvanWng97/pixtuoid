@@ -520,17 +520,37 @@ fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let f = midi_freq(midi as f32);
     let tau = std::f32::consts::TAU;
     let h2 = 0.30 + 0.30 * vel;
-    (0..n)
+    // humanization (measurement finding: every note decayed within a
+    // 25ms band — "stamped from one mold"): decay follows pitch (higher
+    // strings die faster) and breathes per note; the velocity bits are
+    // the deterministic jitter source, so identical inputs still render
+    // identical buffers (the purity contract).
+    let pitch_k = 1.0 + (midi as f32 - 72.0) * 0.02;
+    let breath = 0.85 + 0.30 * (vel * 137.5).fract();
+    let d = 3.4 * pitch_k * breath;
+    let mut buf: Vec<f32> = (0..n)
         .map(|i| {
             let t = i as f32 / SR;
             let attack = (t / 0.004).min(1.0);
-            let sig = (tau * f * t).sin() * (-t * 3.4).exp()
-                + h2 * (tau * 2.0 * f * t).sin() * (-t * 6.0).exp()
-                + 0.18 * (tau * 3.004 * f * t).sin() * (-t * 10.0).exp()
+            let sig = (tau * f * t).sin() * (-t * d).exp()
+                + h2 * (tau * 2.0 * f * t).sin() * (-t * d * 1.76).exp()
+                + 0.18 * (tau * 3.004 * f * t).sin() * (-t * d * 2.94).exp()
                 + 0.07 * (tau * 4.21 * f * t).sin() * (-t * 22.0).exp();
             sig * attack * vel
         })
-        .collect()
+        .collect();
+    // the pick itself: ~6ms of 2-5kHz finger/nail noise on the onset —
+    // what separates "nylon pluck" from "brighter Rhodes"
+    let pn = n_samples(0.006);
+    let mut prng = NoiseStream::new(((midi as u64) << 32) ^ vel.to_bits() as u64);
+    let raw: Vec<f32> = (0..pn).map(|_| prng.norm()).collect();
+    let pick_noise = bandpass(&raw, 2000.0, 5000.0);
+    for (i, &v) in pick_noise.iter().enumerate() {
+        if let Some(slot) = buf.get_mut(i) {
+            *slot += v * (-(i as f32 / SR) * 700.0).exp() * 0.10 * vel;
+        }
+    }
+    buf
 }
 
 fn night_bar_s() -> f32 {
@@ -552,7 +572,7 @@ pub fn night_pad() -> Vec<f32> {
 /// and the composer's generated night takes share this one body (the
 /// frozen fingerprint pins prove the delegation is byte-faithful).
 fn night_pad_core(
-    chords: &[[u8; 4]; 4],
+    chords: &[[u8; 4]],
     bass_roots: &[u8; 4],
     bar_s: f32,
     loop_bars: usize,
@@ -780,7 +800,7 @@ pub(super) fn day_take_pad(take: &score::DayTake) -> Vec<f32> {
 
 /// The day pad recipe over arbitrary changes — the frozen day takes and
 /// the composer's generated day takes share this one body.
-fn day_pad_core(chords: &[[u8; 4]; 4], bar_s: f32, loop_bars: usize) -> Vec<f32> {
+fn day_pad_core(chords: &[[u8; 4]], bar_s: f32, loop_bars: usize) -> Vec<f32> {
     let tau = std::f32::consts::TAU;
     let mut buf = vec![0.0f32; n_samples(bar_s * loop_bars as f32)];
     for bar in 0..loop_bars {
@@ -862,7 +882,11 @@ pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 5] 
     let loop_s = score.loop_secs();
     match score.mood {
         Mood::Day => [
-            day_pad_core(&score.chords, score.bar_s(), super::compose::GEN_LOOP_BARS),
+            day_pad_core(
+                &score.bar_chords,
+                score.bar_s(),
+                super::compose::GEN_LOOP_BARS,
+            ),
             events_stem_voiced(
                 loop_s,
                 &score.sparkle,
@@ -877,7 +901,7 @@ pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 5] 
         ],
         Mood::Night => [
             night_pad_core(
-                &score.chords,
+                &score.bar_chords,
                 &score.bass_roots.unwrap_or([33, 29, 36, 28]),
                 score.bar_s(),
                 super::compose::GEN_LOOP_BARS,
