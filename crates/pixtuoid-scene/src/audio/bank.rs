@@ -122,14 +122,6 @@ impl AssetBank {
         }
     }
 
-    pub fn one_shot(&self, event: OneShot) -> Arc<Vec<f32>> {
-        match event {
-            OneShot::DoorChime => Arc::clone(&self.door_chime),
-            OneShot::PrinterWhir => Arc::clone(&self.printer_whir),
-            OneShot::VendingDrop => Arc::clone(&self.vending_drop),
-        }
-    }
-
     /// Resolve an [`AudioEngine`](super::engine::AudioEngine)-emitted
     /// `(pool, index)` play to its buffer — the native gateway's counterpart to
     /// the wasm painter's zero-copy `(wire, index)` JS export. `index` is

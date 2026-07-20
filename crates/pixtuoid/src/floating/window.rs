@@ -163,9 +163,7 @@ impl FloatingApp {
         // TUI. `volume_flash` drives the transient `♩ N%` beat.
         let audio_now = Instant::now();
         self.audio_ctl.tick(audio_now);
-        let audio_audible = self.audio_ctl.handle().is_enabled()
-            && !self.audio_ctl.muted()
-            && self.audio_ctl.volume() > 0.0;
+        let audio_audible = self.audio_ctl.handle().is_audible();
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
         // Office buffer = window / SCALE (kept ~OFFICE_TARGET_H tall → chunky sprites).
         // The ONE projection helper, shared with the boot seed so the two can't drift.
