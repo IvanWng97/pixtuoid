@@ -73,17 +73,21 @@ pub(super) fn ground_rect(
 /// (`pos.y + h/2`) — the walk-behind shape. Shared by the mask stamp AND the
 /// placement sweep so the bespoke math can't fork.
 pub(super) fn pantry_ground_rect(pos: Point, counter: Size) -> (Point, Size) {
+    // The runtime counter rides the SAME offset formula as every other piece
+    // (Center-anchored visual, south-aligned `PANTRY_FOOTPRINT_DEPTH` strip)
+    // rather than a forked copy of the math — byte-identical for the even
+    // counter heights in use. Only the runtime depth is pantry-specific.
     let depth = PANTRY_FOOTPRINT_DEPTH.min(counter.h);
-    let south = pos.y + counter.h / 2;
-    (
-        Point {
-            x: pos.x.saturating_sub(counter.w / 2),
-            y: south.saturating_sub(depth),
-        },
+    ground_rect(
+        Anchor::Center,
+        pos,
         Size {
             w: counter.w,
             h: depth,
         },
+        counter,
+        GroundAlign::Center,
+        GroundAlign::End,
     )
 }
 
@@ -608,6 +612,42 @@ mod tests {
                 "{kind:?}: TopLeft x-centering diverges at opposite parity \
                  (visual.w={}, footprint.w={}) — decide the 1px offset explicitly",
                 def.visual.w, fp.w
+            );
+        }
+    }
+
+    #[test]
+    fn pantry_south_strip_delegation_is_parity_safe() {
+        // `pantry_ground_rect` delegates to `ground_rect(.., GroundAlign::End)`,
+        // whose south edge is `pos.y + ⌈counter.h/2⌉`, whereas the pre-refactor
+        // forked strip anchored its base at `pos.y + ⌊counter.h/2⌋` (the doc's
+        // "sprite base (pos.y + h/2)"). The two agree ONLY when counter.h is
+        // EVEN (⌈⌉ == ⌊⌋); they diverge by 1px for an ODD height. Every counter
+        // `pantry_counter_size()` can return (COMPACT_COUNTER h=8, the large
+        // kitchen h=10) is even, so the delegation is byte-identical to the
+        // forked math. This FAILS the day an odd-height counter ships — at which
+        // point the 1px offset is a conscious decision, not silent drift. (The
+        // x-axis is parity-immune: GroundAlign::Center's visual term cancels —
+        // see its doc / `topleft_wall_decor_x_centering_is_parity_safe`.)
+        let mut counters = vec![crate::layout::rooms::pantry::COMPACT_COUNTER];
+        // Sweep widths so the large kitchen counter is exercised from the ONE
+        // authority (`compute_with_seed`), never a copy of the `h: 10` literal.
+        // Duplicates are harmless — the assertion below is idempotent per size.
+        for w in (60u16..=260).step_by(20) {
+            if let Some(l) = crate::layout::SceneLayout::compute_with_seed(w, 130, None, 0) {
+                counters.push(l.pantry_counter_size());
+            }
+        }
+        let pos = Point { x: 100, y: 60 };
+        for counter in counters {
+            let (tl, sz) = pantry_ground_rect(pos, counter);
+            let delegated_south = tl.y + sz.h;
+            let forked_south = pos.y + counter.h / 2; // the pre-refactor base anchor
+            assert_eq!(
+                delegated_south, forked_south,
+                "pantry counter h={} is ODD: the south strip diverges 1px from \
+                 the pre-refactor base anchor — decide the offset explicitly",
+                counter.h
             );
         }
     }

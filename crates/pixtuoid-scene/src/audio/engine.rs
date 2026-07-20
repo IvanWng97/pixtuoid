@@ -64,9 +64,10 @@ pub struct AudioEngine {
     /// One-shot variant picker — its draw order is part of the ratified sound.
     pick: NoiseStream,
     switch: TrackSwitch,
-    typing_level: f32,
-    rain_level: f32,
     /// The last frame's target levels — held across a timeout tick (`None`).
+    /// The typing/rain schedulers read their spawn rate straight off this (they
+    /// always equalled the old `typing_level`/`rain_level` shadows, both set
+    /// from `f.stems` on the same tick).
     wanted: StemLevels,
     /// Monotonic scheduler clock (s), advanced by the passed (clamped) dt.
     sched_s: f64,
@@ -82,8 +83,6 @@ impl AudioEngine {
             drops: DropScheduler::new(DROP_SEED),
             pick: NoiseStream::new(PICK_SEED),
             switch: TrackSwitch::new(),
-            typing_level: 0.0,
-            rain_level: 0.0,
             wanted: StemLevels::default(),
             sched_s: 0.0,
         }
@@ -114,8 +113,6 @@ impl AudioEngine {
         self.sched_s += dt as f64;
 
         let events: Vec<OneShot> = if let Some(f) = frame {
-            self.typing_level = f.stems.typing;
-            self.rain_level = f.stems.rain;
             self.wanted = f.stems;
             self.switch.request(f.track); // no-op before init / on an unchanged track
             f.events
@@ -159,7 +156,7 @@ impl AudioEngine {
                 gain: ONE_SHOT_GAIN * os_gain,
             });
         }
-        for _ in 0..self.typing.tick(self.sched_s, self.typing_level) {
+        for _ in 0..self.typing.tick(self.sched_s, self.wanted.typing) {
             let index = (self.pick.unit() * KEYSTROKE_POOL as f32) as usize % KEYSTROKE_POOL;
             plays.push(PlayCmd {
                 pool: OneShotPool::Keystroke,
@@ -167,12 +164,12 @@ impl AudioEngine {
                 gain: KEYSTROKE_GAIN * os_gain,
             });
         }
-        for _ in 0..self.drops.tick(self.sched_s, self.rain_level) {
+        for _ in 0..self.drops.tick(self.sched_s, self.wanted.rain) {
             let index = (self.pick.unit() * DROP_POOL as f32) as usize % DROP_POOL;
             plays.push(PlayCmd {
                 pool: OneShotPool::Drop,
                 index,
-                gain: DROP_GAIN * self.rain_level * os_gain,
+                gain: DROP_GAIN * self.wanted.rain * os_gain,
             });
         }
 

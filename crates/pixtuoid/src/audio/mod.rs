@@ -222,14 +222,6 @@ impl AudioController {
         self.ui.handle.set_muted(paused || self.ui.muted);
     }
 
-    pub(crate) fn muted(&self) -> bool {
-        self.ui.muted
-    }
-
-    pub(crate) fn volume(&self) -> f32 {
-        self.ui.volume
-    }
-
     /// The live audio handle — the renderer/window feeds frames to it. Stable
     /// across a lazy respawn (the sender is swapped in place), so a consumer's
     /// cached clone never goes stale — hand it out ONCE, no re-sync.
@@ -529,6 +521,15 @@ impl AudioHandle {
     /// stores the combined value), read by the footer's ♩ indicator.
     pub(crate) fn is_muted(&self) -> bool {
         self.muted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Whether audio would actually be heard — enabled, not effective-muted
+    /// (m OR pause), and above zero volume (a 0% ♩ would advertise sound that
+    /// isn't playing). The ONE audibility predicate both painters' footer ♩
+    /// indicators read; a method on the handle (which owns all three reads)
+    /// keeps the caller's disjoint borrow of the rest of the renderer.
+    pub(crate) fn is_audible(&self) -> bool {
+        self.is_enabled() && !self.is_muted() && self.volume() > 0.0
     }
 
     /// (Re)open the output device + audio thread and swap the live sender INTO

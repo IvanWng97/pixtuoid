@@ -81,15 +81,12 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdat
     // Checked narrowing: a crafted out-of-range `_pid` (e.g. 2^32+1) must NOT
     // silently truncate to a valid pid (arming ExitWatch on PID 1) — an
     // unrepresentable pid is dropped (None); the TTL backstop still covers it.
-    // Zero/negative pids are dropped the same way (matching cc_probe/fd_probe/
-    // the hook `_pid` peek): kill(0)/kill(-n) target process GROUPS, and a
-    // bogus pid's ESRCH registration receipt would synthesize an instant exit
-    // that flaps the LIVE gateway Down.
+    // The pid narrowing (i32 range + `> 0` reject) is the shared `checked_pid`
+    // guard — see its doc for why a bogus/zero pid must be dropped here.
     let pid = obj
         .get("_pid")
         .and_then(|p| p.as_i64())
-        .and_then(|p| i32::try_from(p).ok())
-        .filter(|p| *p > 0);
+        .and_then(crate::source::decoder::checked_pid);
     let mut out = match event {
         "gateway_start" => vec![DaemonPresenceUpdate::GatewayUp { pid }],
         "gateway_stop" => vec![DaemonPresenceUpdate::GatewayDown],

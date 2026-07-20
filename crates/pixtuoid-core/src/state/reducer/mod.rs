@@ -962,9 +962,7 @@ impl Reducer {
                 // per-slot. Pinned by
                 // resurrect_in_place_clears_stale_active_tasks_so_fresh_session_hooks_apply
                 // + resurrect_in_place_cancels_stale_pending_b1_cascade.
-                self.corr.active_tasks.remove(&agent_id);
-                self.corr.gated_before_waiting.remove(&agent_id);
-                self.pending_b1_cascades.remove(&agent_id);
+                self.remove_agent_correlation(&agent_id);
             }
             return;
         }
@@ -1490,6 +1488,18 @@ impl Reducer {
         }
     }
 
+    /// Drop the per-slot correlation a departing agent id owns — the triple
+    /// (`active_tasks` + `gated_before_waiting` + `pending_b1_cascades`)
+    /// reclaimed on BOTH a resurrect-in-place and a slot removal (tick's
+    /// `retain` prunes the same maps for orphans in a batch). Death-only
+    /// teardown (`recent_proof_of_life`, the `child_ledger` stamp) stays at the
+    /// sweep site — it must NOT run on a resurrect, which keeps proof-of-life.
+    fn remove_agent_correlation(&mut self, id: &AgentId) {
+        self.corr.active_tasks.remove(id);
+        self.corr.gated_before_waiting.remove(id);
+        self.pending_b1_cascades.remove(id);
+    }
+
     /// Remove agents whose exit animation has finished. Called at the top
     /// of every event apply, so any subsequent event naturally triggers
     /// the cleanup of expired slots.
@@ -1513,13 +1523,10 @@ impl Reducer {
             .collect();
         for id in expired {
             scene.agents.remove(&id);
-            self.corr.active_tasks.remove(&id);
-            // Symmetric with active_tasks: sweep_exited runs on the apply path
-            // (not just tick), where the tick-time `gated_before_waiting.retain`
-            // doesn't run — so reclaim it here too, else a Waiting slot that was
-            // swept mid-turn leaks its gated tool_use_id until the next tick.
-            self.corr.gated_before_waiting.remove(&id);
-            self.pending_b1_cascades.remove(&id);
+            // The per-id triple — sweep runs on the apply path too, where the
+            // tick-time `retain` doesn't, so a mid-turn-swept Waiting slot's
+            // gated tool_use_id must be reclaimed here, not left until next tick.
+            self.remove_agent_correlation(&id);
             // The gc TTL retain bounds this map anyway; evicting with the slot
             // (like the per-agent siblings above) keeps a removed id from
             // exempting a same-id resurrect ghost inside the TTL window.
