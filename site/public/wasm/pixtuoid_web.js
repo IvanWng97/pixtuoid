@@ -19,6 +19,53 @@ export class Office {
         wasm.__wbg_office_free(ptr, 0);
     }
     /**
+     * Stage a handoff for the worker's spawn-time track (`night` + 10-min
+     * `epoch` block). A stale epoch at click time self-heals through the
+     * normal chunked swap. Overwrites any prior stage.
+     * @param {boolean} night
+     * @param {number} epoch
+     */
+    audio_adopt_begin(night, epoch) {
+        wasm.office_audio_adopt_begin(this.__wbg_ptr, night, epoch);
+    }
+    /**
+     * Promote a COMPLETE handoff to the live driver. `true` = the ♩ click is
+     * now upload-only. Refuses a torn handoff, and refuses to stomp a driver
+     * a click already warmed (first ready wins).
+     * @returns {boolean}
+     */
+    audio_adopt_finish() {
+        const ret = wasm.office_audio_adopt_finish(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Copy in loop stem `idx` (`LoopStem::ALL` order: beds sequentially,
+     * rain last). Same `false` contract as `audio_adopt_oneshot`.
+     * @param {number} idx
+     * @param {Float32Array} samples
+     * @returns {boolean}
+     */
+    audio_adopt_loop(idx, samples) {
+        const ptr0 = passArrayF32ToWasm0(samples, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.office_audio_adopt_loop(this.__wbg_ptr, idx, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
+     * Copy in one one-shot buffer (the worker's pool-discovery order).
+     * `false` = refused (no stage / bad pool / overflow) — JS abandons the
+     * handoff and the click-time warmup takes over.
+     * @param {number} pool
+     * @param {Float32Array} samples
+     * @returns {boolean}
+     */
+    audio_adopt_oneshot(pool, samples) {
+        const ptr0 = passArrayF32ToWasm0(samples, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.office_audio_adopt_oneshot(this.__wbg_ptr, pool, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
      * Create the audio engine for the CURRENT day/night + weather (from the
      * last `step`'s clock). Idempotent — a second call is ignored, so JS can
      * call it freely on the ♩ click. Costs nothing until `audio_warmup_step`
@@ -248,6 +295,99 @@ export class Office {
     }
 }
 if (Symbol.dispose) Office.prototype[Symbol.dispose] = Office.prototype.free;
+
+/**
+ * The worker-side synthesizer (#705): the audio-prewarm Web Worker
+ * instantiates its OWN wasm module (memories can't be shared), pumps
+ * [`SynthTake::step`] to 0 — blocking is fine off the main thread — then
+ * copies each buffer out through the ptr/len getters (the driver's read
+ * contract) and transfers them to the main thread for `Office::audio_adopt_*`.
+ */
+export class SynthTake {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        SynthTakeFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_synthtake_free(ptr, 0);
+    }
+    /**
+     * @returns {number}
+     */
+    epoch() {
+        const ret = wasm.synthtake_epoch(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} idx
+     * @returns {number}
+     */
+    loop_len(idx) {
+        const ret = wasm.synthtake_loop_len(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * Zero-copy reads, same contract as the `Office::audio_*` getters — the
+     * worker copies (`Float32Array.slice`) before its next wasm call.
+     * @param {number} idx
+     * @returns {number}
+     */
+    loop_ptr(idx) {
+        const ret = wasm.synthtake_loop_ptr(this.__wbg_ptr, idx);
+        return ret >>> 0;
+    }
+    /**
+     * `now_ms` = UNIX-epoch milliseconds (the `Office::step` contract) —
+     * selects the same day/night + weather track the office would at that
+     * instant (procedural weather; a `weather_override` mismatch on the main
+     * office self-heals through the normal swap).
+     * @param {number} now_ms
+     */
+    constructor(now_ms) {
+        const ret = wasm.synthtake_new(now_ms);
+        this.__wbg_ptr = ret;
+        SynthTakeFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * The selected track, split for the adopt wire (`audio_adopt_begin`).
+     * @returns {boolean}
+     */
+    night() {
+        const ret = wasm.synthtake_night(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} pool
+     * @param {number} idx
+     * @returns {number}
+     */
+    oneshot_len(pool, idx) {
+        const ret = wasm.synthtake_oneshot_len(this.__wbg_ptr, pool, idx);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} pool
+     * @param {number} idx
+     * @returns {number}
+     */
+    oneshot_ptr(pool, idx) {
+        const ret = wasm.synthtake_oneshot_ptr(this.__wbg_ptr, pool, idx);
+        return ret >>> 0;
+    }
+    /**
+     * Build ONE synthesis piece; pieces remaining (0 = done).
+     * @returns {number}
+     */
+    step() {
+        const ret = wasm.synthtake_step(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+}
+if (Symbol.dispose) SynthTake.prototype[Symbol.dispose] = SynthTake.prototype.free;
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -290,6 +430,17 @@ function __wbg_get_imports() {
 const OfficeFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_office_free(ptr, 1));
+const SynthTakeFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_synthtake_free(ptr, 1));
+
+let cachedFloat32ArrayMemory0 = null;
+function getFloat32ArrayMemory0() {
+    if (cachedFloat32ArrayMemory0 === null || cachedFloat32ArrayMemory0.byteLength === 0) {
+        cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
+    }
+    return cachedFloat32ArrayMemory0;
+}
 
 function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
@@ -305,6 +456,13 @@ function getUint8ArrayMemory0() {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArrayF32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {
@@ -384,6 +542,7 @@ function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
+    cachedFloat32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

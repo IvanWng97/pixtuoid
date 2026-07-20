@@ -12,6 +12,29 @@ export class Office {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Stage a handoff for the worker's spawn-time track (`night` + 10-min
+     * `epoch` block). A stale epoch at click time self-heals through the
+     * normal chunked swap. Overwrites any prior stage.
+     */
+    audio_adopt_begin(night: boolean, epoch: number): void;
+    /**
+     * Promote a COMPLETE handoff to the live driver. `true` = the ♩ click is
+     * now upload-only. Refuses a torn handoff, and refuses to stomp a driver
+     * a click already warmed (first ready wins).
+     */
+    audio_adopt_finish(): boolean;
+    /**
+     * Copy in loop stem `idx` (`LoopStem::ALL` order: beds sequentially,
+     * rain last). Same `false` contract as `audio_adopt_oneshot`.
+     */
+    audio_adopt_loop(idx: number, samples: Float32Array): boolean;
+    /**
+     * Copy in one one-shot buffer (the worker's pool-discovery order).
+     * `false` = refused (no stage / bad pool / overflow) — JS abandons the
+     * handoff and the click-time warmup takes over.
+     */
+    audio_adopt_oneshot(pool: number, samples: Float32Array): boolean;
+    /**
      * Create the audio engine for the CURRENT day/night + weather (from the
      * last `step`'s clock). Idempotent — a second call is ignored, so JS can
      * call it freely on the ♩ click. Costs nothing until `audio_warmup_step`
@@ -139,11 +162,52 @@ export class Office {
     step(now_ms: number, w: number, h: number): void;
 }
 
+/**
+ * The worker-side synthesizer (#705): the audio-prewarm Web Worker
+ * instantiates its OWN wasm module (memories can't be shared), pumps
+ * [`SynthTake::step`] to 0 — blocking is fine off the main thread — then
+ * copies each buffer out through the ptr/len getters (the driver's read
+ * contract) and transfers them to the main thread for `Office::audio_adopt_*`.
+ */
+export class SynthTake {
+    free(): void;
+    [Symbol.dispose](): void;
+    epoch(): number;
+    loop_len(idx: number): number;
+    /**
+     * Zero-copy reads, same contract as the `Office::audio_*` getters — the
+     * worker copies (`Float32Array.slice`) before its next wasm call.
+     */
+    loop_ptr(idx: number): number;
+    /**
+     * `now_ms` = UNIX-epoch milliseconds (the `Office::step` contract) —
+     * selects the same day/night + weather track the office would at that
+     * instant (procedural weather; a `weather_override` mismatch on the main
+     * office self-heals through the normal swap).
+     */
+    constructor(now_ms: number);
+    /**
+     * The selected track, split for the adopt wire (`audio_adopt_begin`).
+     */
+    night(): boolean;
+    oneshot_len(pool: number, idx: number): number;
+    oneshot_ptr(pool: number, idx: number): number;
+    /**
+     * Build ONE synthesis piece; pieces remaining (0 = done).
+     */
+    step(): number;
+}
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_office_free: (a: number, b: number) => void;
+    readonly __wbg_synthtake_free: (a: number, b: number) => void;
+    readonly office_audio_adopt_begin: (a: number, b: number, c: number) => void;
+    readonly office_audio_adopt_finish: (a: number) => number;
+    readonly office_audio_adopt_loop: (a: number, b: number, c: number, d: number) => number;
+    readonly office_audio_adopt_oneshot: (a: number, b: number, c: number, d: number) => number;
     readonly office_audio_begin: (a: number) => void;
     readonly office_audio_loop_len: (a: number, b: number) => number;
     readonly office_audio_loop_ptr: (a: number, b: number) => number;
@@ -161,10 +225,18 @@ export interface InitOutput {
     readonly office_set_theme: (a: number, b: number, c: number) => void;
     readonly office_set_weather: (a: number, b: number, c: number) => void;
     readonly office_step: (a: number, b: number, c: number, d: number) => void;
+    readonly synthtake_epoch: (a: number) => number;
+    readonly synthtake_loop_len: (a: number, b: number) => number;
+    readonly synthtake_loop_ptr: (a: number, b: number) => number;
+    readonly synthtake_new: (a: number) => number;
+    readonly synthtake_night: (a: number) => number;
+    readonly synthtake_oneshot_len: (a: number, b: number, c: number) => number;
+    readonly synthtake_oneshot_ptr: (a: number, b: number, c: number) => number;
+    readonly synthtake_step: (a: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
-    readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_start: () => void;
 }
