@@ -438,11 +438,19 @@ mod tests {
     // (its id has no slot yet), slips the gate once, and `synthesize_hook_
     // registration` mints a BLANK-source slot for it. The reconciler is the
     // documented safety net that sweeps that blank slot (its `""` source is not
-    // in the connected set). So the accepted residual is exactly ONE transient
-    // slot per disconnected session, cleared on the next tick — not a persistent
-    // leak, and not worth a third gating layer (a `contains_key`-style guard for
-    // a self-correcting state is the defensive-arm smell the review taxonomy
-    // warns against). Returns (slots BEFORE the reconcile, live slots AFTER) so
+    // in the connected set). The residual is bounded but NOT instant: the
+    // reconcile MARKS the slot exiting (`cascade_exit`), then it walks out over
+    // `EXIT_GRACE_WINDOW` (4.5s) before `sweep_exited` removes it — a few-second
+    // blank `#N`, not a one-tick disappearance. Bounded to at most ONE such slot
+    // per session id AT A TIME: a later event for the same id coalesces onto that
+    // one slot (AgentId identity) rather than adding another — so the transient
+    // never multiplies within a session, though a source that keeps firing
+    // re-mints one each GC cycle. Still not worth a third
+    // gating layer: an AgentId-keyed "gated ids" map with its own TTL/GC, to shave
+    // a self-correcting cosmetic that rides out alongside the source's real
+    // walk-out, is the defensive-arm smell the review taxonomy warns against — and
+    // it contradicts the documented "swept too. Stateless on purpose (no prev-set
+    // bookkeeping)" design. Returns (slots BEFORE the reconcile, live slots AFTER) so
     // each layer gets independent teeth: a source-carrying event (SessionStart/
     // Identity) is dropped by the GATE — 0 before reconcile — while a bare
     // activity event only clears at the RECONCILE. A single "after" count would
