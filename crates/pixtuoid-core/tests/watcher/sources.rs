@@ -454,3 +454,105 @@ async fn omp_ended_transcript_is_gated_at_first_sight_and_a_live_one_seeds() {
         handle.abort();
     }
 }
+
+// The COMMITTED permission-flow fixture, folded through the REAL `Reducer` —
+// the assertion `codex_source_run_emits_events_from_rollout` above cannot make.
+// That test stops at "an ActivityStart arrived" over two inline JSON lines; it
+// never observes an `ActivityState`, so nothing in the suite has ever checked
+// that a real Codex rollout drives the state machine anywhere.
+//
+// That coverage existed only in `scripts/replay-fixture.sh`, a MANUAL script
+// whose success branch was `if ! grep -q ...; then echo; fi` — the `if` takes
+// its status from the `echo`, so it exited 0 unconditionally. It was also
+// reading the developer's real config, where an unconnected `codex` made the
+// driver drop every event. It therefore reported success for five weeks while
+// producing no agent at all. A script nobody can fail is not coverage.
+#[tokio::test]
+async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
+    use pixtuoid_core::state::ActivityState;
+    use pixtuoid_core::{Reducer, SceneState};
+
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let sessions_root = dir.path().to_path_buf();
+
+    // `codex_id_from_path` keys on the filename's trailing UUID, so the replay
+    // name (not the fixture's own) is what identifies the session.
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/sources/fixtures/codex/permission-flow")
+        .join("rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000001.jsonl");
+    let body = std::fs::read_to_string(&fixture).expect("committed permission-flow fixture");
+    let transcript = sessions_root
+        .join("rollout-2026-01-01T00-00-00-0a0a0a0a-0b0b-0c0c-0d0d-0e0e0e0e0e0e.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let src = CodexSource {
+        sessions_root,
+        child_end_unclaims: None,
+    };
+    let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Written in one shot: first sight reads the whole file from the top, so the
+    // events arrive in file order without a per-line sleep to make this flaky.
+    tokio::fs::write(&transcript, &body).await.unwrap();
+
+    // `SceneState::uniform` — NOT `default()`, whose all-zero floor_capacities
+    // make `total_capacity()` 0 so `register_slot` refuses every SessionStart
+    // and the scene stays silently empty.
+    let mut scene = SceneState::uniform(8);
+    let mut reducer = Reducer::new();
+    let mut states: Vec<ActivityState> = Vec::new();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+            Ok(Some((transport, ev))) => {
+                reducer.apply(&mut scene, ev, std::time::SystemTime::now(), transport);
+                if let Some(slot) = scene.agents.values().next() {
+                    // Distinct-consecutive, mirroring what the replay printed.
+                    if states.last() != Some(&slot.state) {
+                        states.push(slot.state.clone());
+                    }
+                }
+            }
+            // A quiet gap once the whole file has been folded: the fixture is
+            // finite, so this is the normal exit, not a timeout failure.
+            Ok(None) | Err(_) if !states.is_empty() => break,
+            _ => {}
+        }
+    }
+    handle.abort();
+
+    let slot = scene
+        .agents
+        .values()
+        .next()
+        .expect("the rollout must register exactly one cx· agent");
+    assert_eq!(scene.agents.len(), 1, "one rollout is one agent");
+    assert_eq!(
+        &*slot.label.text(),
+        "cx·demo-project",
+        "label derives from the session_meta cwd basename"
+    );
+
+    assert!(
+        matches!(states.first(), Some(ActivityState::Idle)),
+        "registration lands Idle, got {states:?}"
+    );
+    assert!(
+        states
+            .iter()
+            .any(|s| matches!(s, ActivityState::Active { .. })),
+        "the fixture's function_call must drive Active, got {states:?}"
+    );
+    // THE point of this scenario: an escalation-requiring exec_command parks the
+    // agent on a permission prompt. This is the only state in the progression a
+    // decoder-level test can't reach — it is a reducer decision.
+    assert!(
+        states
+            .iter()
+            .any(|s| matches!(s, ActivityState::Waiting { .. })),
+        "the escalated exec_command must drive Waiting(permission), got {states:?}"
+    );
+}
