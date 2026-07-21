@@ -159,6 +159,25 @@ enum SeedStart {
     GrokDir,
 }
 
+/// The `ActivityState` classes a fixture's wire legitimately drives the slot
+/// THROUGH during the fold — asserted as reached-at-some-point, NOT as the
+/// terminal state. Terminal-state would be wrong: `mark_exiting` sets only
+/// `exiting_at` and never resets `slot.state` (`fsm.rs`), so a fixture whose
+/// last activity its own wire never resolves legitimately ends non-Idle
+/// (opencode ends Waiting, cursor ends Delegating). `Delegating` is `Active`
+/// with `kind == ToolKind::Task` — `ActivityState` has no separate variant.
+///
+/// A CLASS pin on purpose, not a ToolKind pin: `from_display` is case-sensitive,
+/// so a lowercase wire tool name (`"bash"`) renders `Active(Other)` while
+/// `"Bash"` renders `Active(Bash)` — a cosmetic glow-tint difference across
+/// sources that must not be frozen into a lifecycle assertion.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Reach {
+    Active,
+    Waiting,
+    Delegating,
+}
+
 struct WireCase {
     name: &'static str,
     source: &'static str,
@@ -167,6 +186,14 @@ struct WireCase {
     decode: DecodeKind,
     transport: Transport,
     seed: SeedStart,
+    /// The state classes this fixture's committed wire must drive the slot
+    /// through. Derived from a measurement pass judged per-source against each
+    /// decoder's documented semantics (not guessed): the seven `&[Active]` rows
+    /// are FIXTURE-LIMITED (their fixture carries no permission/dispatch event),
+    /// the richer rows carry a real permission (`Waiting`) or Task dispatch
+    /// (`Delegating`). Registration alone was the only prior pin — this proves
+    /// the wire drives the reducer to the RIGHT lifecycle state, not merely a slot.
+    must_reach: &'static [Reach],
 }
 
 /// Build the synthetic `SessionStart` a transcript-only source needs (its slot
@@ -243,17 +270,58 @@ fn assert_renders_a_sprite(case: &WireCase) {
     );
 
     // Fold through a real reducer into a real SceneState, on the SAME transport
-    // production tags this source's events with.
+    // production tags this source's events with. Capture the state class reached
+    // after each event, since `must_reach` pins reached-during-fold, not the
+    // terminal state (a slot exits via `exiting_at` without its `state` reset).
+    use pixtuoid_core::state::{ActivityState, ToolKind};
     let mut scene = SceneState::uniform(8);
     let mut reducer = Reducer::new();
+    let mut reached: Vec<Reach> = Vec::new();
+    let mut note = |slot: &pixtuoid_core::state::AgentSlot| {
+        let r = match &slot.state {
+            ActivityState::Active {
+                kind: ToolKind::Task,
+                ..
+            } => Some(Reach::Delegating),
+            ActivityState::Active { .. } => Some(Reach::Active),
+            ActivityState::Waiting { .. } => Some(Reach::Waiting),
+            ActivityState::Idle => None,
+        };
+        if let Some(r) = r {
+            if !reached.contains(&r) {
+                reached.push(r);
+            }
+        }
+    };
     for ev in events {
         reducer.apply(&mut scene, ev, t0(), case.transport);
+        // A settle tick mirrors production (pending-idle arms on ActivityEnd),
+        // but the class is captured PRE-tick too so a transient Active/Waiting
+        // that a later event resolves is still counted as reached.
+        if let Some(slot) = scene.agents.values().next() {
+            note(slot);
+        }
+        reducer.tick(&mut scene, t0() + Duration::from_secs(3));
+        if let Some(slot) = scene.agents.values().next() {
+            note(slot);
+        }
     }
     assert!(
         !scene.agents.is_empty(),
         "{}: the wire bytes must register at least one agent slot (got 0)",
         case.name
     );
+    // Lifecycle pin: the wire must drive the reducer THROUGH each documented
+    // state class, not merely register a slot. A decoder that degraded to
+    // emitting only a bare SessionStart would still pass the registration and
+    // paint checks; this is what catches it.
+    for want in case.must_reach {
+        assert!(
+            reached.contains(want),
+            "{}: the wire must drive the slot through {want:?}; reached only {reached:?}",
+            case.name
+        );
+    }
 
     // Render the EMPTY office and the OCCUPIED office through the identical
     // settle sequence, then count the subpixels the agent changed. Both skies
@@ -291,6 +359,7 @@ fn agent_cases() -> Vec<WireCase> {
             // CC's transcript carries only tool activity → seed a SessionStart
             // keyed the cc_id_from_path (filename-stem) way.
             seed: SeedStart::CcStem,
+            must_reach: &[Reach::Active],
         },
         WireCase {
             name: "codex",
@@ -302,6 +371,7 @@ fn agent_cases() -> Vec<WireCase> {
             // (or the UserPromptSubmit hook) registers the slot in production;
             // seed a SessionStart keyed the codex_id_from_path (rollout-UUID) way.
             seed: SeedStart::CodexUuid,
+            must_reach: &[Reach::Active],
         },
         WireCase {
             name: "antigravity",
@@ -311,6 +381,7 @@ fn agent_cases() -> Vec<WireCase> {
             transport: Transport::Jsonl,
             // Antigravity's decoder emits only activity → seed keyed from_parts.
             seed: SeedStart::FromParts,
+            must_reach: &[Reach::Active],
         },
         WireCase {
             name: "copilot",
@@ -320,6 +391,7 @@ fn agent_cases() -> Vec<WireCase> {
             transport: Transport::Jsonl,
             // The events.jsonl carries a session.start → its own SessionStart.
             seed: SeedStart::None,
+            must_reach: &[Reach::Active],
         },
         WireCase {
             name: "omp",
@@ -329,6 +401,7 @@ fn agent_cases() -> Vec<WireCase> {
             transport: Transport::Jsonl,
             // The session header line carries its own SessionStart.
             seed: SeedStart::None,
+            must_reach: &[Reach::Active],
         },
         WireCase {
             name: "grok",
@@ -340,6 +413,7 @@ fn agent_cases() -> Vec<WireCase> {
             // first-sight or any hook registers it in production) → seed keyed
             // the grok_id_from_path (parent-dir) way.
             seed: SeedStart::GrokDir,
+            must_reach: &[Reach::Active],
         },
         // ---- hook-only sources (decode_hook_payload, Hook transport) ----
         // A hook event for an unknown session id REGISTERS it (hooks are proof
@@ -352,6 +426,7 @@ fn agent_cases() -> Vec<WireCase> {
             decode: DecodeKind::Hook,
             transport: Transport::Hook,
             seed: SeedStart::None,
+            must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "codewhale",
@@ -360,6 +435,7 @@ fn agent_cases() -> Vec<WireCase> {
             decode: DecodeKind::Hook,
             transport: Transport::Hook,
             seed: SeedStart::None,
+            must_reach: &[Reach::Active],
         },
         WireCase {
             name: "opencode",
@@ -368,6 +444,7 @@ fn agent_cases() -> Vec<WireCase> {
             decode: DecodeKind::Hook,
             transport: Transport::Hook,
             seed: SeedStart::None,
+            must_reach: &[Reach::Active, Reach::Waiting, Reach::Delegating],
         },
         WireCase {
             name: "cursor",
@@ -376,6 +453,7 @@ fn agent_cases() -> Vec<WireCase> {
             decode: DecodeKind::Hook,
             transport: Transport::Hook,
             seed: SeedStart::None,
+            must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "hermes",
@@ -384,6 +462,7 @@ fn agent_cases() -> Vec<WireCase> {
             decode: DecodeKind::Hook,
             transport: Transport::Hook,
             seed: SeedStart::None,
+            must_reach: &[Reach::Active],
         },
         WireCase {
             name: "kimi",
@@ -392,6 +471,7 @@ fn agent_cases() -> Vec<WireCase> {
             decode: DecodeKind::Hook,
             transport: Transport::Hook,
             seed: SeedStart::None,
+            must_reach: &[Reach::Active, Reach::Waiting],
         },
     ]
 }
