@@ -234,12 +234,29 @@ mutants *args:
     base="${MUTANTS_BASE:-origin/main}"
     mkdir -p target
     git diff "$base...HEAD" > target/mutants.diff
-    # A diff with NO Rust changes (dispatched from `main` where HEAD==origin/main,
-    # or a docs/justfile/site-only branch) makes `--in-diff` test ZERO mutants and
-    # exit 0 — a vacuous green reading as "teeth verified" having checked nothing
-    # (cargo-mutants has no --error-on-zero flag). Gate on actual `.rs` changes.
-    if ! git diff --name-only "$base...HEAD" -- '*.rs' | grep -q .; then
-        echo "error: no Rust changes vs $base — no mutants to test. Run from a feature branch with .rs changes, or set MUTANTS_BASE." >&2
+    # Gate on the MUTANT COUNT, not on `.rs` changes. cargo-mutants has no
+    # --error-on-zero and exits 0 having tested nothing when the diff yields no
+    # mutants — a vacuous green reading as "teeth verified". A `.rs`-changes
+    # check is NOT sufficient: a diff of test files plus `exclude_globs` entries
+    # yields zero mutants and passes it. `--list` enumerates without running
+    # (sub-second), so the pre-check is cheap.
+    #
+    # A FAILING tool and an empty result are reported separately. Folding them
+    # sends the reader to inspect their diff when the real cause is a missing
+    # cargo-mutants or an unparseable .cargo/mutants.toml — misdirection is the
+    # failure class this gate exists to remove, so it must not commit it.
+    if ! listed=$(cargo mutants --in-diff target/mutants.diff --list 2>/dev/null); then
+        echo "error: \`cargo mutants --list\` failed — the mutant count is unknown." >&2
+        echo "  Usually a missing cargo-mutants (\`just setup-tools\`) or an" >&2
+        echo "  unparseable .cargo/mutants.toml. Rerunning with stderr shown:" >&2
+        cargo mutants --in-diff target/mutants.diff --list >/dev/null || true
+        exit 1
+    fi
+    if [ -z "$listed" ]; then
+        echo "error: the diff vs $base yields ZERO mutants — nothing would be tested." >&2
+        echo "  Either there are no .rs changes, or every changed .rs is test code" >&2
+        echo "  or listed in .cargo/mutants.toml exclude_globs." >&2
+        echo "  Run from a branch touching mutable production Rust, or set MUTANTS_BASE." >&2
         exit 1
     fi
     cargo mutants --in-diff target/mutants.diff {{ args }}
@@ -266,6 +283,16 @@ fuzz dir:
     [ -n "$(find "$dir" -name '*.jsonl' -print -quit)" ] || { echo "error: no .jsonl files under '$dir' — nothing to fuzz" >&2; exit 1; }
     cargo build --release --example decoder_fuzz -p pixtuoid-core
     find "$dir" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz
+
+# Hermetic OpenClaw daemon live-e2e: drives the REAL shim with crafted gateway
+# envelopes on an isolated socket and asserts the lobster's
+# idle/busy/degraded/down via the headless `daemons=` line. Zero gateway, zero
+# model calls. Same on-demand local tier as `fuzz` — it needs a release build
+# and an ExitWatch backend (macOS kqueue / Linux pidfd), so it is not a CI gate.
+[group('rust')]
+[doc('Hermetic OpenClaw daemon live-e2e (needs `just build --release`)')]
+openclaw-e2e:
+    scripts/openclaw-live-e2e.sh
 
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
@@ -479,7 +506,8 @@ gen-wasm: gen-wasm-tools wasm-build
 # Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
 # a lazy-load behind the poster, so a silent size regression (a dep pulling in
 # formatting machinery, an accidental debug build) fails loudly — 1 MiB raw ≈
-# ~350-400 KB gzipped; the artifact is ~700 KB today. Pair (#424): the
+# The artifact is ~900 KB (the recipe prints the exact figure and the headroom
+# left against the cap — read it there rather than trusting this line). Pair (#424): the
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
 # a one-sided merge resolution or partial regen ships a silent runtime throw,
 # so every committed file must match gen-wasm's sha256 manifest AND every file
@@ -498,6 +526,10 @@ gen-wasm-check:
     CAP=1048576
     SIZE=$(wc -c < "$W" | tr -d ' ')
     test "$SIZE" -le "$CAP" || { echo "$W is $SIZE bytes (> $CAP cap) — investigate the bloat"; exit 1; }
+    # Report the headroom, don't just pass silently. A ratchet you can only read
+    # at the moment it breaks gives no warning that it is about to — and a prose
+    # estimate of the size drifts unnoticed precisely because every run is green.
+    echo "wasm $SIZE / $CAP bytes ($((SIZE * 100 / CAP))% of cap, $(((CAP - SIZE) / 1024)) KB headroom)"
     test -f "$M" || { echo "missing $M — run 'just gen-wasm' (the wasm/glue pair manifest)"; exit 1; }
     (cd site/public/wasm && shasum -a 256 --strict -c manifest.sha256 >/dev/null) \
         || { echo "wasm/glue pair MISMATCH vs $M — a partial regen or one-sided merge; run 'just gen-wasm' and commit all of site/public/wasm/"; exit 1; }
@@ -519,7 +551,7 @@ gen-wasm-check:
 # + a release build of the snapshot example.
 [group('gen')]
 [doc('Fail if any committed README section or rendered image has drifted')]
-gen-check: gen-readme-check gen-wasm-check
+gen-check: compare-selftest gen-readme-check gen-wasm-check
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
@@ -727,6 +759,22 @@ setup-tools:
     # would otherwise be the only gate). Idempotent. CI re-runs `just preflight`
     # regardless, so a skipped local hook still meets the same checks at merge.
     git config core.hooksPath .githooks
+
+# The pixel comparator is the primitive under `gen-check` and the smoke job, and
+# it had no test of its own — an always-green comparator reports success for any
+# render at all. Its own recipe, matching the other two selftests, because it
+# needs only Pillow while `gen-check` needs the venv plus ffmpeg, node, a release
+# snapshot build and the wasm pair: a developer who cannot run that gate should
+# still be able to run this.
+[group('meta')]
+[doc('Self-test the pixel comparator that gen-check and smoke ride on')]
+compare-selftest:
+    #!/usr/bin/env sh
+    set -eu
+    # Prefer the venv (the same Pillow gen-media.py uses), but do not require it:
+    # any python3 with Pillow answers the question this recipe asks.
+    if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
+    "$py" scripts/compare-screenshots.py --selftest
 
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
 # is a silent monitor death (the script returns empty / raises, the weekly job

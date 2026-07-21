@@ -220,6 +220,14 @@ pub(crate) async fn reducer_task(
     // Disabled once the presence channel closes (all senders dropped) so its
     // `recv() -> None` branch can't busy-loop the select.
     let mut presence_open = true;
+    // Registered sources already announced as gated (see the connection gate).
+    // Bounded by the registry, NOT by the wire: `_pixtuoid_source` arrives
+    // verbatim from socket JSON with no registry check and no length cap, and an
+    // unknown name is a supported, tested decode path — so keying this on the
+    // raw string would let a long-lived `run` accumulate one entry per distinct
+    // name seen. An unregistered source is a DRIFT story, not a connection-gate
+    // one, and `source/drift.rs` already owns it.
+    let mut gate_logged: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
     let initial_caps: [usize; MAX_FLOORS] =
         std::array::from_fn(|i| floor_caps[i].load(Ordering::Relaxed));
     let mut scene = SceneState::new(initial_caps);
@@ -239,7 +247,22 @@ pub(crate) async fn reducer_task(
                 let now = SystemTime::now();
                 // Connection gate: drop a disconnected source's events before
                 // they register/refresh a sprite. No scene change → no send.
-                if event_source(&scene, &ev).is_some_and(|src| !connected.is_connected(src)) {
+                //
+                // Announced once per registered source, because this `continue`
+                // sits above the only `debug!` below: without it a gated source
+                // emits zero lines at every log level, making "connected but no
+                // sprite" indistinguishable from "not connected" — the two
+                // hypotheses a reader most needs to separate. Per-source, never
+                // per-event: a disconnected watcher streams indefinitely.
+                if let Some(src) = event_source(&scene, &ev).filter(|s| !connected.is_connected(s)) {
+                    if let Some(known) = registry::descriptor_for(src) {
+                        if gate_logged.insert(known.name) {
+                            tracing::debug!(
+                                source = known.name,
+                                "dropping events: source not connected"
+                            );
+                        }
+                    }
                     continue;
                 }
                 tracing::debug!(?transport, ?ev, "event");

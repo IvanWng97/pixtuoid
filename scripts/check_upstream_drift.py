@@ -578,12 +578,122 @@ def try_fetch(
         return None
 
 
-def read_codex_events() -> set[str]:
-    src = (REPO / "crates/pixtuoid/src/install/codex.rs").read_text()
-    m = re.search(r"const CODEX_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
+def rust_const_str_array(rel_path: str, const_name: str) -> set[str]:
+    """The quoted words of a `const NAME: &[&str] = &[ … ];` array, COMMENTS EXCLUDED.
+
+    Comment-stripping is load-bearing, not tidiness. A bare `"(\\w+)"` scrape over
+    the raw block also captures every quoted word inside an explanatory comment —
+    and this repo's comment convention actively encourages those. It fired for
+    real: a WHY comment added inside CODEX_EVENTS mentioned the SessionEnd
+    payload's `reason const "other"`, the watcher read `other` as a REGISTERED
+    hook event, found no such variant upstream, and reported a phantom
+    "⛔ Breaking drift — decoder will silently drop events" that auto-filed an
+    issue and failed the run. A watcher that cries wolf gets its real alarms
+    ignored, so every event reader shares this one parser.
+    """
+    got = parse_rust_const_str_array((REPO / rel_path).read_text(), const_name)
+    if got is None:
+        raise RuntimeError(f"could not locate {const_name} in {rel_path}")
+    return got
+
+
+def strip_rust_comments(body: str) -> str:
+    """Remove Rust comments, PRESERVING string literals and honouring nesting.
+
+    A scanner rather than a pair of `re.sub`s, because both regex approaches drop
+    a REAL registered event and so fail SILENTLY OPEN — the watcher stops checking
+    a name and nothing says so, which is worse than the phantom it replaced:
+
+    - blind `//[^\\n]*` eats to end of line from a `//` inside a STRING, taking
+      every later entry on that line with it;
+    - `/\\*.*?\\*/` stops at the first `*/`, so a nested block comment (legal Rust)
+      leaves its tail behind and re-admits words from inside it.
+
+    Neither can fire on today's `\\w+` hook names, so this is robustness for the
+    general parser the docstring below promises, not a live defect.
+    """
+    out: list[str] = []
+    i, n, depth = 0, len(body), 0
+    while i < n:
+        pair = body[i : i + 2]
+        if depth:
+            if pair == "/*":
+                depth += 1
+                i += 2
+            elif pair == "*/":
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if pair == "/*":
+            depth = 1
+            i += 2
+            continue
+        if pair == "//":
+            nl = body.find("\n", i)
+            i = n if nl < 0 else nl
+            continue
+        if body[i] == '"':
+            j = i + 1
+            while j < n:
+                if body[j] == "\\":
+                    j += 2
+                    continue
+                if body[j] == '"':
+                    j += 1
+                    break
+                j += 1
+            out.append(body[i:j])
+            i = j
+            continue
+        out.append(body[i])
+        i += 1
+    return "".join(out)
+
+
+def rust_block_after(src: str, anchor_re: str) -> str | None:
+    """The `{ … }` block following the first `anchor_re` match, `None` if absent.
+
+    Scraping a whole FILE for a decoder's arms is the same class as scraping a
+    whole const-array block including its comments: it admits text the decoder
+    does not actually depend on — a `#[cfg(test)] mod tests` constructing the same
+    tuple shape leaks a phantom, and a phantom makes the watcher alarm on a name
+    upstream never had to have. Run the source through `strip_rust_comments`
+    first so a brace inside a comment or string cannot move the bounds.
+    """
+    m = re.search(anchor_re, src)
     if not m:
-        raise RuntimeError("could not locate CODEX_EVENTS in install/codex.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+        return None
+    start = src.find("{", m.end())
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start : i + 1]
+    return None
+
+
+def parse_rust_const_str_array(src: str, const_name: str) -> set[str] | None:
+    """The pure half of `rust_const_str_array` — `None` when the const is absent.
+
+    Split out so the comment-blindness above is testable from a synthetic snippet:
+    the shape assertions in the selftest cannot catch it, since a phantom scraped
+    out of a comment is an ordinary-looking word that passes every shape regex.
+    """
+    m = re.search(rf"const {const_name}[^=]*=\s*&\[(.*?)\];", src, re.S)
+    if not m:
+        return None
+    return set(re.findall(r'"(\w+)"', strip_rust_comments(m.group(1))))
+
+
+def read_codex_events() -> set[str]:
+    return rust_const_str_array("crates/pixtuoid/src/install/codex.rs", "CODEX_EVENTS")
 
 
 def read_codex_rollout_types() -> tuple[set[str], set[str]]:
@@ -594,8 +704,20 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
     decoders) — so a positive "each depended type still exists upstream" check is
     the only backstop against an upstream rename going dark."""
     src = (REPO / "crates/pixtuoid-core/src/source/codex.rs").read_text()
-    event_msg = set(re.findall(r'\(\s*"event_msg"\s*,\s*"(\w+)"\s*\)', src))
-    response_item = set(re.findall(r'\(\s*"response_item"\s*,\s*"(\w+)"\s*\)', src))
+    # Bounded to the decoder's own match block, NOT the whole file: the file also
+    # carries `#[cfg(test)] mod tests`, and a future test constructing a tuple of
+    # this shape with a type the decoder does not depend on would leak a phantom
+    # into the depended set — the watcher would then alarm on a name upstream
+    # never had to have. Comments are stripped first so a brace inside one cannot
+    # move the block's bounds.
+    block = rust_block_after(strip_rust_comments(src), r"match \(outer, inner\)")
+    if block is None:
+        raise RuntimeError(
+            "could not locate the codex `match (outer, inner)` decode block in "
+            "source/codex.rs — the transcript decoder was refactored; update the parser."
+        )
+    event_msg = set(re.findall(r'\(\s*"event_msg"\s*,\s*"(\w+)"\s*\)', block))
+    response_item = set(re.findall(r'\(\s*"response_item"\s*,\s*"(\w+)"\s*\)', block))
     if not event_msg or not response_item:
         raise RuntimeError(
             "could not locate codex ('event_msg'|'response_item', …) decode arms "
@@ -606,11 +728,7 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
 
 
 def read_cc_events() -> set[str]:
-    src = (REPO / "crates/pixtuoid/src/install/claude.rs").read_text()
-    m = re.search(r"const EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
-    if not m:
-        raise RuntimeError("could not locate EVENTS in install/claude.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    return rust_const_str_array("crates/pixtuoid/src/install/claude.rs", "EVENTS")
 
 
 def read_dispatch_names() -> set[str]:
@@ -618,7 +736,10 @@ def read_dispatch_names() -> set[str]:
     m = re.search(r"known_name\s*=\s*([^;]+);", src)
     if not m:
         raise RuntimeError("could not locate the dispatch known_name check in decoder.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    # Same comment-blindness class as the array readers: the captured span is an
+    # EXPRESSION, so a trailing `// the legacy "Task" name was dropped` — exactly
+    # the history CLAUDE.md records for this line — would read as a known name.
+    return set(re.findall(r'"(\w+)"', strip_rust_comments(m.group(1))))
 
 
 def upstream_codex_hooks(text: str) -> set[str] | None:
@@ -718,11 +839,7 @@ def upstream_cc_hook_events(text: str) -> set[str] | None:
 
 
 def read_reasonix_events() -> set[str]:
-    src = (REPO / "crates/pixtuoid/src/install/reasonix.rs").read_text()
-    m = re.search(r"const REASONIX_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
-    if not m:
-        raise RuntimeError("could not locate REASONIX_EVENTS in install/reasonix.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    return rust_const_str_array("crates/pixtuoid/src/install/reasonix.rs", "REASONIX_EVENTS")
 
 
 def upstream_reasonix_hooks(text: str) -> set[str] | None:
@@ -732,11 +849,7 @@ def upstream_reasonix_hooks(text: str) -> set[str] | None:
 
 
 def read_codewhale_events() -> set[str]:
-    src = (REPO / "crates/pixtuoid/src/install/codewhale.rs").read_text()
-    m = re.search(r"const CODEWHALE_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
-    if not m:
-        raise RuntimeError("could not locate CODEWHALE_EVENTS in install/codewhale.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    return rust_const_str_array("crates/pixtuoid/src/install/codewhale.rs", "CODEWHALE_EVENTS")
 
 
 def read_opencode_events() -> set[str]:
@@ -786,11 +899,7 @@ def read_cursor_events() -> set[str]:
     truth (mirrors read_reasonix_events / read_codewhale_events). Reading the
     decoder's `match event` block instead would risk a future camelCase field
     lookup in an arm leaking a phantom event into the drift set."""
-    src = (REPO / "crates/pixtuoid/src/install/cursor.rs").read_text()
-    m = re.search(r"const CURSOR_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
-    if not m:
-        raise RuntimeError("could not locate CURSOR_EVENTS in install/cursor.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    return rust_const_str_array("crates/pixtuoid/src/install/cursor.rs", "CURSOR_EVENTS")
 
 
 def read_openclaw_events() -> set[str]:
@@ -799,11 +908,7 @@ def read_openclaw_events() -> set[str]:
     HOOKS array and the decoder arms are pinned to by
     `openclaw_events_plugin_decoder_and_const_agree`, so this is a leak-free
     source of truth (mirrors read_cursor_events / read_codewhale_events)."""
-    src = (REPO / "crates/pixtuoid/src/install/openclaw.rs").read_text()
-    m = re.search(r"const OPENCLAW_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
-    if not m:
-        raise RuntimeError("could not locate OPENCLAW_EVENTS in install/openclaw.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    return rust_const_str_array("crates/pixtuoid/src/install/openclaw.rs", "OPENCLAW_EVENTS")
 
 
 def read_hermes_events() -> set[str]:
@@ -811,11 +916,7 @@ def read_hermes_events() -> set[str]:
     `HERMES_EVENTS` const in install/hermes.rs — pinned to the decoder arms by
     `every_registered_hermes_event_decodes` (install/hermes.rs), so this is a
     leak-free source of truth (mirrors read_cursor_events / read_openclaw_events)."""
-    src = (REPO / "crates/pixtuoid/src/install/hermes.rs").read_text()
-    m = re.search(r"const HERMES_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
-    if not m:
-        raise RuntimeError("could not locate HERMES_EVENTS in install/hermes.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    return rust_const_str_array("crates/pixtuoid/src/install/hermes.rs", "HERMES_EVENTS")
 
 
 def read_grok_events() -> set[str]:
@@ -823,11 +924,7 @@ def read_grok_events() -> set[str]:
     const in install/grok.rs — pinned to the decoder arms by
     `every_registered_grok_event_decodes`, so this is a leak-free source of
     truth (mirrors read_cursor_events / read_hermes_events)."""
-    src = (REPO / "crates/pixtuoid/src/install/grok.rs").read_text()
-    m = re.search(r"const GROK_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
-    if not m:
-        raise RuntimeError("could not locate GROK_EVENTS in install/grok.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    return rust_const_str_array("crates/pixtuoid/src/install/grok.rs", "GROK_EVENTS")
 
 
 def read_kimi_events() -> set[str]:
@@ -836,11 +933,7 @@ def read_kimi_events() -> set[str]:
     `every_registered_kimi_event_decodes` test pins to the decode path (the shared
     CC-shaped arms + the source's custom Extend decoder), so this is a leak-free
     source of truth (mirrors read_cursor_events / read_hermes_events)."""
-    src = (REPO / "crates/pixtuoid/src/install/kimi.rs").read_text()
-    m = re.search(r"const KIMI_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
-    if not m:
-        raise RuntimeError("could not locate KIMI_EVENTS in install/kimi.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    return rust_const_str_array("crates/pixtuoid/src/install/kimi.rs", "KIMI_EVENTS")
 
 
 def upstream_grok_hooks(text: str) -> set[str] | None:
