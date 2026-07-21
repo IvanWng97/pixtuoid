@@ -32,6 +32,13 @@ jobs:
         with:
           # Full history for the tag-on-main ancestry check below.
           fetch-depth: 0
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD
+      # on Linux (#633) — alsa-sys's build script PANICS when pkg-config can't
+      # find them. ci.yml installs this in every Linux job; this workflow had
+      # none, so `just clippy` below would have failed on the FIRST tag after
+      # #633 — in the one gate that only ever runs at tag time.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
