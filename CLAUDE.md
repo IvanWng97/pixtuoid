@@ -21,6 +21,20 @@ above don't apply there):
 - [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md) — the Raycast TS extension.
 - [`site/CLAUDE.md`](site/CLAUDE.md) — the Astro landing page.
 
+There is a THIRD consumer with no guide in this tree, because it lives in
+someone else's repo: **homebrew-core**'s `pixtuoid` formula. Its `test do`
+block parses `connect claude-code --json` and asserts the exact row
+`{"id" => "claude-code", "outcome" => "connected"}`, plus the literal
+`OK: pack "skeleton"` line and that `.claude/settings.json` gains
+`pixtuoid-hook`. The asymmetry is the dangerous part: Raycast and the site
+fail in OUR CI where we see it; homebrew-core fails in THEIRS, on an
+`autobump: true` version bump we neither trigger nor get notified about, and
+our suite stays green because it asserts those same strings as its own
+goldens. The contract is marked at each source site (`validate.rs`,
+`sources_cli.rs`, `claude_code.rs`); the release-side consequences —
+default-feature Linux builds, new `depends_on`, the tag-is-a-publish rule —
+are in [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
+
 **Read the nested guide for the crate you're editing.** Many things that look
 like a bug are documented, load-bearing design — the "Known sharp edges"
 section in each nested file (indexed below) explains why.

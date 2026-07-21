@@ -1,3 +1,9 @@
+# DO NOT delete or rename this file without a coordinated homebrew-core PR:
+# their formula's `install` opens with `rm ".cargo/config.toml"` (to drop the
+# lld pin below, which their build containers have no linker for). Ruby's `rm`
+# raises Errno::ENOENT on a missing path, so removing this file here fails
+# their build on its FIRST line — in Homebrew's CI, not ours.
+#
 # Link with lld on x86_64 Linux — every ubuntu-latest CI job links natively
 # for this target (test binaries, smoke, deb) and the runner image ships lld.
 # Linux contributors need it too (`apt install lld`); see docs/CONTRIBUTING.md.

@@ -5,7 +5,12 @@ use pixtuoid_core::sprite::format::{load_pack, validate_pack_animations};
 
 use crate::strip_control_chars;
 
-/// The `OK:` line. `pack.name`/`pack.version` are untrusted TOML string fields —
+/// The `OK:` line. **homebrew-core contract**: their `test do` asserts this
+/// output matches `OK: pack "skeleton"` after `init-pack`, so the literal
+/// prefix + quoting is a public packaging surface — rewording it breaks
+/// Homebrew's CI on the next autobump, not ours. Coordinate a core PR.
+///
+/// `pack.name`/`pack.version` are untrusted TOML string fields —
 /// a crafted pack can encode ESC/OSC bytes (TOML `\u` escapes) that would inject
 /// a terminal escape when a user runs `validate-pack` to inspect a downloaded
 /// pack, so sanitize at the boundary (the sibling egresses — headless summary,

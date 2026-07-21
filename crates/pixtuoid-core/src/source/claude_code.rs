@@ -18,6 +18,11 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::{live_cc_session_ids, ClaudeCodeSource};
 
+/// homebrew-core contract: their formula's `test do` runs
+/// `pixtuoid connect claude-code --json` and asserts the parsed result equals
+/// `[{"id" => "claude-code", "outcome" => "connected"}]`. Renaming this id
+/// breaks Homebrew's CI on the next autobump — ours stays green, because our
+/// own tests assert this string as their OWN golden. Coordinate a core PR.
 pub const SOURCE_NAME: &str = "claude-code";
 
 /// The label the attachment decoder synthesizes for the `ultra_effort_exit`
