@@ -652,6 +652,33 @@ def strip_rust_comments(body: str) -> str:
     return "".join(out)
 
 
+def rust_block_after(src: str, anchor_re: str) -> str | None:
+    """The `{ … }` block following the first `anchor_re` match, `None` if absent.
+
+    Scraping a whole FILE for a decoder's arms is the same class as scraping a
+    whole const-array block including its comments: it admits text the decoder
+    does not actually depend on — a `#[cfg(test)] mod tests` constructing the same
+    tuple shape leaks a phantom, and a phantom makes the watcher alarm on a name
+    upstream never had to have. Run the source through `strip_rust_comments`
+    first so a brace inside a comment or string cannot move the bounds.
+    """
+    m = re.search(anchor_re, src)
+    if not m:
+        return None
+    start = src.find("{", m.end())
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start : i + 1]
+    return None
+
+
 def parse_rust_const_str_array(src: str, const_name: str) -> set[str] | None:
     """The pure half of `rust_const_str_array` — `None` when the const is absent.
 
@@ -677,8 +704,20 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
     decoders) — so a positive "each depended type still exists upstream" check is
     the only backstop against an upstream rename going dark."""
     src = (REPO / "crates/pixtuoid-core/src/source/codex.rs").read_text()
-    event_msg = set(re.findall(r'\(\s*"event_msg"\s*,\s*"(\w+)"\s*\)', src))
-    response_item = set(re.findall(r'\(\s*"response_item"\s*,\s*"(\w+)"\s*\)', src))
+    # Bounded to the decoder's own match block, NOT the whole file: the file also
+    # carries `#[cfg(test)] mod tests`, and a future test constructing a tuple of
+    # this shape with a type the decoder does not depend on would leak a phantom
+    # into the depended set — the watcher would then alarm on a name upstream
+    # never had to have. Comments are stripped first so a brace inside one cannot
+    # move the block's bounds.
+    block = rust_block_after(strip_rust_comments(src), r"match \(outer, inner\)")
+    if block is None:
+        raise RuntimeError(
+            "could not locate the codex `match (outer, inner)` decode block in "
+            "source/codex.rs — the transcript decoder was refactored; update the parser."
+        )
+    event_msg = set(re.findall(r'\(\s*"event_msg"\s*,\s*"(\w+)"\s*\)', block))
+    response_item = set(re.findall(r'\(\s*"response_item"\s*,\s*"(\w+)"\s*\)', block))
     if not event_msg or not response_item:
         raise RuntimeError(
             "could not locate codex ('event_msg'|'response_item', …) decode arms "
