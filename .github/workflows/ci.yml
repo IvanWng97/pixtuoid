@@ -294,7 +294,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   packaging-build:
-    name: packaging-build (homebrew-core parity)
+    name: packaging-build (${{ matrix.os }})
     # Mirrors how homebrew-core actually builds us, which NO other job does:
     # `cargo install --locked` from a clean tree, DEFAULT features on, on both
     # bottled platforms. Two failure classes only this job can catch:
@@ -309,9 +309,18 @@ jobs:
     #      red for a missing system lib, the core FORMULA needs a matching
     #      `depends_on`, landed in the same PR as the version bump.
     #
-    # The apt line below mirrors the formula's declared Linux deps 1:1 — keep
-    # them in lockstep. libasound2-dev ↔ `depends_on "alsa-lib"` (rodio/cpal,
-    # the default-on `audio` feature, #633).
+    # The apt line below does NOT mirror the core formula, and that gap is the
+    # point. As of homebrew-core 2026-07-21 the formula declares only
+    # `depends_on "rust" => :build` — it builds 0.15.0, which predates the
+    # default-on `audio` feature (#633). libasound2-dev is what the CURRENT
+    # tree needs (rodio → cpal → alsa-sys, whose build script panics when
+    # pkg-config can't find ALSA).
+    #
+    # So this job proves the CODE builds from source; it CANNOT red on the
+    # formula-side dep, because it installs the header itself. Adding
+    # `depends_on "alsa-lib"` under `on_linux` is a release checklist item for
+    # whichever version first ships `audio` — tracked in #731. Class #2 above
+    # therefore covers a genuinely NEW system lib, not this already-known one.
     strategy:
       fail-fast: false
       matrix:
@@ -333,7 +342,7 @@ jobs:
         run: |
           cargo install --locked --path crates/pixtuoid --root "${RUNNER_TEMP}/pkg"
           cargo install --locked --path crates/pixtuoid-hook --root "${RUNNER_TEMP}/pkg"
-      - name: Replay the formula's test block
+      - name: Replay the formula's install + test assertions
         run: |
           # pipefail is NOT in the default `run:` shell (bash -e): without it a
           # pipeline reports the LAST command's status, so a crashing binary
@@ -364,6 +373,10 @@ jobs:
           "$BIN" validate-pack "${HOME}/pack"   > "$out/validate"
           "$BIN" connect claude-code --json     > "$out/connect.json"
 
+          # The formula's FIRST assertion is `assert_match version.to_s` — a
+          # CONTENT check. `set -e` only proves --version exited 0, so without
+          # this grep the capture above is a dead oracle.
+          grep -qF "$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)" "$out/version"
           grep -q '^\.TH' "$out/man.roff"
           grep -q pixtuoid "$out/completions.bash"
           grep -q 'OK: pack "skeleton"' "$out/validate"

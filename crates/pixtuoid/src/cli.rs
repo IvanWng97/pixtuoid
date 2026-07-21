@@ -128,12 +128,19 @@ pub enum Cmd {
     /// `pixtuoid completions zsh > ~/.zfunc/_pixtuoid`. Package managers install
     /// these automatically; this command lets `cargo install` / `npm` users do it
     /// themselves for any shell.
+    ///
+    /// homebrew-core contract: their `install` block calls
+    /// `generate_completions_from_executable(bin/"pixtuoid", "completions")`, so
+    /// renaming this subcommand breaks their BUILD (not just a test) on the next
+    /// autobump. Same for `Man` below.
     Completions {
         /// Target shell.
         shell: clap_complete::Shell,
     },
     /// Print the roff man page to stdout (`pixtuoid man > pixtuoid.1`). A
     /// packaging interface — generated from the same clap definitions as `--help`.
+    /// homebrew-core's `install` captures this via `Utils.safe_popen_read` — see
+    /// the contract note on `Completions`.
     #[command(hide = true)]
     Man,
 }

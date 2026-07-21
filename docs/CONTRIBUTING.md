@@ -70,7 +70,8 @@ Recipes are grouped by intent — run `just --list` to see them:
 (so the path-dep requirement can't drift — the classic missed edit), drafts the
 `release_notes()` arm from the commit log since the last tag, runs the full
 gate, and lands it on a release branch. It **stops before the tag** — pushing
-the tag is what fires the *irreversible* crates.io publish, so a human owns that:
+the tag is what fires the *irreversible* publish (crates.io + npm, and a
+homebrew-core autobump), so a human owns that:
 
 ```bash
 just setup-tools                            # once per clone — installs cargo-edit (+ the rest)
@@ -84,8 +85,8 @@ git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crat
 
 The tag also publishes **outside** this repo: `pixtuoid` is in homebrew-core,
 whose formula builds from the tag TARBALL and is `autobump: true`, so
-BrewTestBot opens a version-bump PR on its own — the tarball is fetchable the
-instant the tag lands, ~an hour before `release.yml` finishes. A tag we can't
+BrewTestBot opens a version-bump PR on its own — and the tarball is fetchable
+the instant the tag lands, before `release.yml` has finished. A tag we can't
 un-publish is therefore also a homebrew-core build we can't un-trigger. Two
 consequences worth internalizing:
 
@@ -94,7 +95,11 @@ consequences worth internalizing:
   macOS *and* Linux — the one configuration our own release never builds
   (`release.yml` ships Linux artifacts `--no-default-features`). Anything that
   adds a system-library dependency needs a matching `depends_on` in the core
-  formula, landed in the same PR as the version bump.
+  formula, landed in the same PR as the version bump. **One is outstanding
+  right now**: the default-on `audio` feature (#633) landed after v0.15.0 and
+  pulls rodio/cpal, which need ALSA on Linux; the formula declares no runtime
+  deps yet, so the first bump that ships `audio` must add
+  `depends_on "alsa-lib"` — see [#731](https://github.com/IvanWng97/pixtuoid/issues/731).
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/validate.rs`,
   `crates/pixtuoid/src/sources_cli.rs` and
