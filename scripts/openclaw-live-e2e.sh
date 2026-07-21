@@ -39,6 +39,9 @@ done
 # shellcheck disable=SC2329  # invoked indirectly via `trap cleanup EXIT` below
 cleanup() {
     [ -n "$PIXPID" ] && kill "$PIXPID" 2>/dev/null
+    # The #318 step's background `sleep` (set later, so guard under `set -u`):
+    # a Ctrl-C before step [12] kills it would otherwise leak a 10-min sleep.
+    [ -n "${SPID:-}" ] && kill "$SPID" 2>/dev/null
     rm -f "$SOCK" "$OUT"
     rm -rf "$PROJ" "$CFGDIR"
 }
@@ -134,10 +137,16 @@ expect idle idle-healed
 # session_start here would adopt nothing (its PidSeen hits a Some) and killing
 # its pid would be a no-op — the exact false-premise bug that made [11] fail.
 #
-# The real #318 case is a RECONNECT after an abrupt down (openclaw.rs models the
-# same path): gateway_stop takes the mascot Down, enter_down clears current_pid,
-# and the reconnect is learned only from a plain _pid-carrying event — never a
-# fresh gateway_start. So drive that: down, then re-adopt via PidSeen.
+# The real #318 trigger is a MID-ATTACH — pixtuoid attaches to an
+# already-running gateway, never sees gateway_start, and adopts the pid off the
+# first plain event into a fresh current_pid=None entry. That literal shape
+# can't be reproduced in one process here, since [5]'s gateway_start already
+# created the entry with an armed pid. So reach the SAME None state the honest
+# way: gateway_stop takes the mascot Down and enter_down clears current_pid,
+# then the reconnect's plain _pid event re-adopts via PidSeen — the identical
+# adoption path (pinned by the pid_seen_re_adopts_after_an_abrupt_down unit
+# test). gateway_stop is a clean shutdown, used here only as the deterministic
+# route to current_pid=None; the mechanism under test is the None-only adoption.
 echo "[10] gateway_stop -> down (clears current_pid so the rung can re-arm)"
 send '{"type":"gateway_stop"}'
 expect down down-before-reattach
@@ -145,12 +154,16 @@ expect down down-before-reattach
 sleep 600 &
 SPID=$!
 echo "[11] session_start carrying _pid=$SPID (reconnect, no gateway_start) -> idle"
-# The explicit _pid is KEPT by the shim (an inbound value wins over getppid),
-# so this is the real live pid, adopted by PidSeen because current_pid is None.
+# The explicit _pid is KEPT by the shim (an inbound value wins over getppid), so
+# this is the real live pid. The `idle` here does NOT itself prove adoption — it
+# comes from the SessionStarted resurrect; the adoption is proved only by [12]
+# below (kill the adopted pid, get an instant down). Keep both steps.
 send "{\"type\":\"session_start\",\"sessionId\":\"mid1\",\"_pid\":$SPID}"
 expect idle idle-midattach
 
 echo "[12] kill $SPID -> down (instant abrupt-down off the RE-adopted pid, #318)"
+# THE assertion that gates #318: this reds unless PidSeen actually adopted $SPID
+# at [11] (verified by mutation — disabling the adoption fails exactly here).
 kill "$SPID" 2>/dev/null
 expect down down-abrupt
 
