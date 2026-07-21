@@ -60,6 +60,12 @@ echo "=== cx· agent state progression ==="
 grep 'agents=' "$out" || true
 # Headless always prints `agents=[]` (empty scene), so success = at least one
 # NON-empty agents line ever appeared. `agents=\[[^]]` = a char after `[` other than `]`.
+#
+# This EXITS non-zero: two review prompts cite this script as a verification
+# step, so a replay that produced no agent must fail the caller rather than
+# print a note and exit 0.
 if ! grep -qE 'agents=\[[^]]' "$out"; then
-    echo "(no cx· agent ever appeared — is '$bin' the codex-aware build, and is the fixture a codex rollout?)"
+    echo "FAIL: no cx· agent ever appeared — is '$bin' the codex-aware build, and is the fixture a codex rollout?" >&2
+    exit 1
 fi
+echo "PASS: the fixture replayed into at least one non-empty scene."

@@ -267,6 +267,16 @@ fuzz dir:
     cargo build --release --example decoder_fuzz -p pixtuoid-core
     find "$dir" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz
 
+# Hermetic OpenClaw daemon live-e2e: drives the REAL shim with crafted gateway
+# envelopes on an isolated socket and asserts the lobster's
+# idle/busy/degraded/down via the headless `daemons=` line. Zero gateway, zero
+# model calls. Same on-demand local tier as `fuzz` — it needs a release build
+# and an ExitWatch backend (macOS kqueue / Linux pidfd), so it is not a CI gate.
+[group('rust')]
+[doc('Hermetic OpenClaw daemon live-e2e (needs `just build --release`)')]
+openclaw-e2e:
+    scripts/openclaw-live-e2e.sh
+
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
 #   just build --release                      # release
@@ -523,6 +533,10 @@ gen-check: gen-readme-check gen-wasm-check
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
+    # The comparator's selftest gates the pixel predicate itself, and runs FIRST:
+    # gen-media.py --check delegates every image comparison to it, so an
+    # always-green comparator would report success for any render at all.
+    .venv/bin/python3 scripts/compare-screenshots.py --selftest
     .venv/bin/python3 scripts/gen-media.py --check
     .venv/bin/python3 scripts/gen-pix-icons.py --check
 
