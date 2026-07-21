@@ -188,11 +188,14 @@ struct WireCase {
     seed: SeedStart,
     /// The state classes this fixture's committed wire must drive the slot
     /// through. Derived from a measurement pass judged per-source against each
-    /// decoder's documented semantics (not guessed): the seven `&[Active]` rows
-    /// are FIXTURE-LIMITED (their fixture carries no permission/dispatch event),
-    /// the richer rows carry a real permission (`Waiting`) or Task dispatch
-    /// (`Delegating`). Registration alone was the only prior pin — this proves
-    /// the wire drives the reducer to the RIGHT lifecycle state, not merely a slot.
+    /// decoder's documented semantics (not guessed): the eight `&[Active]` rows
+    /// carry no permission/dispatch event, so they reach only Active — seven for
+    /// lack of such an event in the fixture, plus codewhale which is
+    /// architecturally no-Waiting (its `ApprovalRequired` fires no hook, core
+    /// CLAUDE.md). The four richer rows carry a real permission (`Waiting`) or
+    /// Task dispatch (`Delegating`). Registration alone was the only prior pin —
+    /// this proves the wire drives the reducer to the RIGHT lifecycle state, not
+    /// merely a slot.
     must_reach: &'static [Reach],
 }
 
