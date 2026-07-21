@@ -220,6 +220,8 @@ pub(crate) async fn reducer_task(
     // Disabled once the presence channel closes (all senders dropped) so its
     // `recv() -> None` branch can't busy-loop the select.
     let mut presence_open = true;
+    // Sources already announced as gated (see the connection gate below).
+    let mut gate_logged: std::collections::HashSet<String> = std::collections::HashSet::new();
     let initial_caps: [usize; MAX_FLOORS] =
         std::array::from_fn(|i| floor_caps[i].load(Ordering::Relaxed));
     let mut scene = SceneState::new(initial_caps);
@@ -239,7 +241,17 @@ pub(crate) async fn reducer_task(
                 let now = SystemTime::now();
                 // Connection gate: drop a disconnected source's events before
                 // they register/refresh a sprite. No scene change → no send.
-                if event_source(&scene, &ev).is_some_and(|src| !connected.is_connected(src)) {
+                //
+                // Logged ONCE PER SOURCE, because this `continue` sits above the
+                // only `debug!` below: a gated source otherwise emits zero lines
+                // at every log level, so "connected, but no sprite" and "not
+                // connected" are indistinguishable from the outside. That cost a
+                // full replay-harness misdiagnosis. Per-source, never per-event —
+                // a disconnected watcher streams events indefinitely.
+                if let Some(src) = event_source(&scene, &ev).filter(|s| !connected.is_connected(s)) {
+                    if gate_logged.insert(src.to_string()) {
+                        tracing::debug!(source = src, "dropping events: source not connected");
+                    }
                     continue;
                 }
                 tracing::debug!(?transport, ?ev, "event");

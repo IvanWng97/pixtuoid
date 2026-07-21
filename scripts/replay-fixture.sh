@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # replay-fixture.sh — replay a captured Codex rollout fixture into a HERMETIC
-# headless pixtuoid run (via --codex-sessions-root + a temp dir, so ~/.codex is
-# untouched) and print the cx· agent's state progression. Lets you eyeball a
-# source's lifecycle (e.g. permission -> resume) end-to-end without a live CLI.
+# headless pixtuoid run and print the cx· agent's state progression. Lets you
+# eyeball a source's lifecycle (e.g. permission -> resume) end-to-end without a
+# live CLI.
+#
+# "Hermetic" means all FOUR host couplings are isolated — sessions root, projects
+# root, config (XDG_CONFIG_HOME) and the hook socket. The original wording
+# claimed hermetic while only naming ~/.codex, and the two unnamed leaks are
+# exactly what silently broke this script; keep the list explicit.
 #
 # Usage:  scripts/replay-fixture.sh <rollout.jsonl> [delay_secs]
 #   e.g.  scripts/replay-fixture.sh \
@@ -25,6 +30,8 @@ command -v "$bin" >/dev/null 2>&1 || {
 
 root="$(mktemp -d)"
 proj="$(mktemp -d)"
+cfgdir="$(mktemp -d)"
+sock="$(mktemp -u)"
 out="$(mktemp)"
 hpid=""
 cleanup() {
@@ -32,17 +39,33 @@ cleanup() {
         kill "$hpid" 2>/dev/null || true
         wait "$hpid" 2>/dev/null || true # reap quietly (suppress "Terminated")
     fi
-    rm -rf "$root" "$proj" "$out"
+    rm -rf "$root" "$proj" "$cfgdir" "$out"
+    rm -f "$sock"
     return 0
 }
 trap cleanup EXIT
+
+# An ISOLATED config marking Codex connected. `resolve_connected` treats a
+# missing [sources] key as DISCONNECTED (config/mod.rs), and the driver drops
+# every event from a disconnected source BEFORE the reducer and before its only
+# `debug!` — so on a box that never connected Codex in the Sources panel this
+# replay produced zero agents and zero log lines, at any log level. Broken this
+# way since the connection gate landed (#284); openclaw-live-e2e.sh learned the
+# same lesson two days later, this script never got it.
+mkdir -p "$cfgdir/pixtuoid"
+printf '[sources]\ncodex = true\n' >"$cfgdir/pixtuoid/config.toml"
 
 mkdir -p "$root/replay"
 # The filename's trailing UUID is the Codex session key (codex_id_from_path);
 # any canonical UUID works for a replay.
 file="$root/replay/rollout-2026-01-01T00-00-00-0a0a0a0a-0b0b-0c0c-0d0d-0e0e0e0e0e0e.jsonl"
 
-"$bin" run --headless --codex-sessions-root "$root" --projects-root "$proj" \
+# The isolated socket matters for the ASSERTION, not just for hygiene: on the
+# default socket a live CC session's hook traffic lands in this run's scene and
+# satisfies the `agents=\[[^]]` success grep, so a totally broken Codex path
+# would report PASS.
+XDG_CONFIG_HOME="$cfgdir" PIXTUOID_SOCKET="$sock" \
+    "$bin" run --headless --codex-sessions-root "$root" --projects-root "$proj" \
     --log-level error >"$out" 2>&1 &
 hpid=$!
 sleep 2 # let the watcher bind/seed before the first append
