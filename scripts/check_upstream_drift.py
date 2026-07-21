@@ -597,6 +597,61 @@ def rust_const_str_array(rel_path: str, const_name: str) -> set[str]:
     return got
 
 
+def strip_rust_comments(body: str) -> str:
+    """Remove Rust comments, PRESERVING string literals and honouring nesting.
+
+    A scanner rather than a pair of `re.sub`s, because both regex approaches drop
+    a REAL registered event and so fail SILENTLY OPEN — the watcher stops checking
+    a name and nothing says so, which is worse than the phantom it replaced:
+
+    - blind `//[^\\n]*` eats to end of line from a `//` inside a STRING, taking
+      every later entry on that line with it;
+    - `/\\*.*?\\*/` stops at the first `*/`, so a nested block comment (legal Rust)
+      leaves its tail behind and re-admits words from inside it.
+
+    Neither can fire on today's `\\w+` hook names, so this is robustness for the
+    general parser the docstring below promises, not a live defect.
+    """
+    out: list[str] = []
+    i, n, depth = 0, len(body), 0
+    while i < n:
+        pair = body[i : i + 2]
+        if depth:
+            if pair == "/*":
+                depth += 1
+                i += 2
+            elif pair == "*/":
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if pair == "/*":
+            depth = 1
+            i += 2
+            continue
+        if pair == "//":
+            nl = body.find("\n", i)
+            i = n if nl < 0 else nl
+            continue
+        if body[i] == '"':
+            j = i + 1
+            while j < n:
+                if body[j] == "\\":
+                    j += 2
+                    continue
+                if body[j] == '"':
+                    j += 1
+                    break
+                j += 1
+            out.append(body[i:j])
+            i = j
+            continue
+        out.append(body[i])
+        i += 1
+    return "".join(out)
+
+
 def parse_rust_const_str_array(src: str, const_name: str) -> set[str] | None:
     """The pure half of `rust_const_str_array` — `None` when the const is absent.
 
@@ -607,9 +662,7 @@ def parse_rust_const_str_array(src: str, const_name: str) -> set[str] | None:
     m = re.search(rf"const {const_name}[^=]*=\s*&\[(.*?)\];", src, re.S)
     if not m:
         return None
-    body = re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)
-    body = re.sub(r"//[^\n]*", "", body)
-    return set(re.findall(r'"(\w+)"', body))
+    return set(re.findall(r'"(\w+)"', strip_rust_comments(m.group(1))))
 
 
 def read_codex_events() -> set[str]:
@@ -644,7 +697,10 @@ def read_dispatch_names() -> set[str]:
     m = re.search(r"known_name\s*=\s*([^;]+);", src)
     if not m:
         raise RuntimeError("could not locate the dispatch known_name check in decoder.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    # Same comment-blindness class as the array readers: the captured span is an
+    # EXPRESSION, so a trailing `// the legacy "Task" name was dropped` — exactly
+    # the history CLAUDE.md records for this line — would read as a known name.
+    return set(re.findall(r'"(\w+)"', strip_rust_comments(m.group(1))))
 
 
 def upstream_codex_hooks(text: str) -> set[str] | None:
@@ -838,11 +894,7 @@ def read_kimi_events() -> set[str]:
     `every_registered_kimi_event_decodes` test pins to the decode path (the shared
     CC-shaped arms + the source's custom Extend decoder), so this is a leak-free
     source of truth (mirrors read_cursor_events / read_hermes_events)."""
-    src = (REPO / "crates/pixtuoid/src/install/kimi.rs").read_text()
-    m = re.search(r"const KIMI_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
-    if not m:
-        raise RuntimeError("could not locate KIMI_EVENTS in install/kimi.rs")
-    return set(re.findall(r'"(\w+)"', m.group(1)))
+    return rust_const_str_array("crates/pixtuoid/src/install/kimi.rs", "KIMI_EVENTS")
 
 
 def upstream_grok_hooks(text: str) -> set[str] | None:

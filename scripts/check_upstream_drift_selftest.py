@@ -261,6 +261,56 @@ const DEMO_EVENTS: &[&str] = &[
     )
 
 
+def test_parser_never_drops_a_real_event() -> None:
+    """The failing-OPEN direction, which is the worse one.
+
+    A phantom is loud: the watcher alarms on a name upstream does not have. A
+    DROPPED registration is silent — that name simply stops being checked, and
+    nothing says so. Both regex formulations of this parser had that bug, so
+    each case below is a construct that made one of them swallow a real entry.
+    """
+    cases = [
+        # `//` inside a string literal: a line-comment strip runs to end of line
+        # and takes every later entry with it.
+        ('"SessionStart", "a//b", "SessionEnd"', {"SessionStart", "SessionEnd"}),
+        ('"Alpha", "http://x", "Charlie"', {"Alpha", "Charlie"}),
+        # Nested block comments are legal Rust; a non-greedy `/\\*.*?\\*/` closes
+        # at the FIRST `*/` and re-admits words from the comment's tail.
+        ('"Alpha", /* outer /* inner */ names "Phantom" */ "B"', {"Alpha", "B"}),
+        # A `/*` that only ever appears inside a line comment must not open a
+        # block that swallows the entries after it.
+        ('"Alpha",\n // uses /* as a marker\n "Beta", /* real */', {"Alpha", "Beta"}),
+        # Escaped quotes must not end the string early.
+        (r'"Alpha", "say \"Beta\"", "Gamma"', {"Alpha", "Gamma"}),
+        # A URL in a COMMENT is the benign twin of case 2 — still excluded.
+        ('"Alpha",\n // see https://x "Notification"\n "Beta"', {"Alpha", "Beta"}),
+    ]
+    for body, want in cases:
+        got = d.parse_rust_const_str_array(f"const E: &[&str] = &[{body}];", "E")
+        check(got == want, f"no real event dropped from `{body}`: {got!r} != {want!r}")
+
+
+def test_every_const_array_reader_uses_the_shared_parser() -> None:
+    """No reader may hand-roll the scrape the shared parser exists to own.
+
+    This is the mechanical form of the lesson, not a second copy of it: the
+    original migration was a HAND-LISTED sweep of nine readers and it missed one
+    (`read_kimi_events`), which is the N-1-of-N class this repo's review prompt
+    calls its most-recurrent escape. A checklist cannot enforce itself; this can.
+    """
+    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
+    offenders = [
+        ln.strip()
+        for ln in src.splitlines()
+        if 'findall(r\'"(\\w+)"\'' in ln and "strip_rust_comments" not in ln
+    ]
+    check(
+        not offenders,
+        "every `\"(\\\\w+)\"` scrape must route through strip_rust_comments; "
+        f"unrouted: {offenders!r}",
+    )
+
+
 def main() -> int:
     for t in (
         test_try_fetch_classifies_permanent_vs_transient,
@@ -268,6 +318,8 @@ def main() -> int:
         test_upstream_parsers_extract_from_a_snippet,
         test_cc_doc_marker_detection_fires_both_directions,
         test_const_array_parser_ignores_words_quoted_inside_comments,
+        test_parser_never_drops_a_real_event,
+        test_every_const_array_reader_uses_the_shared_parser,
     ):
         t()
     if FAILS:

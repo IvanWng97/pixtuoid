@@ -15,6 +15,7 @@ images has an all-zero alpha band, and Pillow >= 10's getbbox() defaults to
 alpha_only=True, which would make ANY two same-size images compare equal.
 """
 
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -139,6 +140,22 @@ def _selftest():
         flat = write("flat.png", "RGB", black, size=(10, 10))
         check("1% diff under a 0.5% threshold must FAIL", compare_images(flat, spot, diff_out, 0.5), 1)
         check("1% diff under a 2% threshold must PASS", compare_images(flat, spot, diff_out, 2.0), 0)
+        # ON the boundary, so `>` vs `>=` is observable. Both cases above sit off
+        # it, which let a flipped operator survive; a threshold is a policy and
+        # its inclusivity is the part worth pinning.
+        check("1% diff exactly AT a 1% threshold must PASS", compare_images(flat, spot, diff_out, 1.0), 0)
+
+        # The consumers do not import this module — gen-media.py and
+        # gen-pix-icons.py subprocess it. Exercise that path too, or argv
+        # handling and the exit-code mapping stay untested however many
+        # in-process checks pass.
+        argv = [sys.executable, str(Path(__file__).resolve())]
+        cli_ok = subprocess.run([*argv, str(rgb_a), str(rgb_a), str(diff_out)], capture_output=True)
+        check("CLI: identical images exit 0", cli_ok.returncode, 0)
+        cli_bad = subprocess.run([*argv, str(rgb_a), str(rgb_b), str(diff_out)], capture_output=True)
+        check("CLI: differing images exit 1", cli_bad.returncode, 1)
+        cli_usage = subprocess.run([*argv, str(rgb_a)], capture_output=True)
+        check("CLI: wrong arity exits 2", cli_usage.returncode, 2)
 
     failed = [(n, got, want) for n, got, want in checks if got != want]
     for name, got, want in failed:

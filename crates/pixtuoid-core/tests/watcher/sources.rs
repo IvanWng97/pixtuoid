@@ -461,12 +461,9 @@ async fn omp_ended_transcript_is_gated_at_first_sight_and_a_live_one_seeds() {
 // never observes an `ActivityState`, so nothing in the suite has ever checked
 // that a real Codex rollout drives the state machine anywhere.
 //
-// That coverage existed only in `scripts/replay-fixture.sh`, a MANUAL script
-// whose success branch was `if ! grep -q ...; then echo; fi` — the `if` takes
-// its status from the `echo`, so it exited 0 unconditionally. It was also
-// reading the developer's real config, where an unconnected `codex` made the
-// driver drop every event. It therefore reported success for five weeks while
-// producing no agent at all. A script nobody can fail is not coverage.
+// That coverage lived only in a MANUAL script that was structurally incapable
+// of failing, so it reported success while producing no agent at all. A check
+// nobody can fail is not coverage; this is why the assertion belongs in a test.
 #[tokio::test]
 async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
     use pixtuoid_core::state::ActivityState;
@@ -517,8 +514,12 @@ async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
                 }
             }
             // A quiet gap once the whole file has been folded: the fixture is
-            // finite, so this is the normal exit, not a timeout failure.
-            Ok(None) | Err(_) if !states.is_empty() => break,
+            // finite, so this is the normal exit, not a timeout failure. A
+            // CLOSED channel ends the loop unconditionally — guarding it on
+            // `states` would spin at full CPU until the deadline on the very
+            // path where nothing more can arrive.
+            Ok(None) => break,
+            Err(_) if !states.is_empty() => break,
             _ => {}
         }
     }
@@ -536,23 +537,44 @@ async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
         "label derives from the session_meta cwd basename"
     );
 
+    // ORDER, not mere presence. Two `any()` checks would also pass for a reducer
+    // that parked the agent on the permission prompt BEFORE the tool ran, or one
+    // that left it Waiting after the fixture's task_complete — neither of which
+    // is the permission flow this scenario is named for.
+    let idx = |want: &str| {
+        states.iter().position(|s| {
+            matches!(
+                (s, want),
+                (ActivityState::Idle, "idle")
+                    | (ActivityState::Active { .. }, "active")
+                    | (ActivityState::Waiting { .. }, "waiting")
+            )
+        })
+    };
+    let (first_active, first_waiting) = (idx("active"), idx("waiting"));
     assert!(
         matches!(states.first(), Some(ActivityState::Idle)),
         "registration lands Idle, got {states:?}"
     );
     assert!(
-        states
-            .iter()
-            .any(|s| matches!(s, ActivityState::Active { .. })),
+        first_active.is_some(),
         "the fixture's function_call must drive Active, got {states:?}"
     );
     // THE point of this scenario: an escalation-requiring exec_command parks the
     // agent on a permission prompt. This is the only state in the progression a
     // decoder-level test can't reach — it is a reducer decision.
     assert!(
-        states
-            .iter()
-            .any(|s| matches!(s, ActivityState::Waiting { .. })),
+        first_waiting.is_some(),
         "the escalated exec_command must drive Waiting(permission), got {states:?}"
+    );
+    assert!(
+        first_active < first_waiting,
+        "Active must precede Waiting — the tool runs, THEN the gate parks it: {states:?}"
+    );
+    // The terminal state: the fixture ends on task_complete, so the permission
+    // gate must have been resolved rather than left latched.
+    assert!(
+        !matches!(states.last(), Some(ActivityState::Waiting { .. })),
+        "the agent must not still be Waiting after task_complete, got {states:?}"
     );
 }

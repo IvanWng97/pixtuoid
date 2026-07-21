@@ -237,11 +237,22 @@ mutants *args:
     # Gate on the MUTANT COUNT, not on `.rs` changes. cargo-mutants has no
     # --error-on-zero and exits 0 having tested nothing when the diff yields no
     # mutants — a vacuous green reading as "teeth verified". A `.rs`-changes
-    # check is NOT sufficient, which this recipe's first real execution proved:
-    # a diff of test files plus `exclude_globs` entries (driver.rs) passed that
-    # check and still printed "No mutants to filter" and exit 0. `--list`
-    # enumerates without running, so the pre-check is cheap.
-    if ! cargo mutants --in-diff target/mutants.diff --list 2>/dev/null | grep -q .; then
+    # check is NOT sufficient: a diff of test files plus `exclude_globs` entries
+    # yields zero mutants and passes it. `--list` enumerates without running
+    # (sub-second), so the pre-check is cheap.
+    #
+    # A FAILING tool and an empty result are reported separately. Folding them
+    # sends the reader to inspect their diff when the real cause is a missing
+    # cargo-mutants or an unparseable .cargo/mutants.toml — misdirection is the
+    # failure class this gate exists to remove, so it must not commit it.
+    if ! listed=$(cargo mutants --in-diff target/mutants.diff --list 2>/dev/null); then
+        echo "error: \`cargo mutants --list\` failed — the mutant count is unknown." >&2
+        echo "  Usually a missing cargo-mutants (\`just setup-tools\`) or an" >&2
+        echo "  unparseable .cargo/mutants.toml. Rerunning with stderr shown:" >&2
+        cargo mutants --in-diff target/mutants.diff --list >/dev/null || true
+        exit 1
+    fi
+    if [ -z "$listed" ]; then
         echo "error: the diff vs $base yields ZERO mutants — nothing would be tested." >&2
         echo "  Either there are no .rs changes, or every changed .rs is test code" >&2
         echo "  or listed in .cargo/mutants.toml exclude_globs." >&2
@@ -516,9 +527,8 @@ gen-wasm-check:
     SIZE=$(wc -c < "$W" | tr -d ' ')
     test "$SIZE" -le "$CAP" || { echo "$W is $SIZE bytes (> $CAP cap) — investigate the bloat"; exit 1; }
     # Report the headroom, don't just pass silently. A ratchet you can only read
-    # at the moment it breaks gives no warning that it is about to: the prose
-    # above said "~700 KB today" while the artifact had grown to ~900 KB, and
-    # nothing surfaced the drift because every run was a silent green.
+    # at the moment it breaks gives no warning that it is about to — and a prose
+    # estimate of the size drifts unnoticed precisely because every run is green.
     echo "wasm $SIZE / $CAP bytes ($((SIZE * 100 / CAP))% of cap, $(((CAP - SIZE) / 1024)) KB headroom)"
     test -f "$M" || { echo "missing $M — run 'just gen-wasm' (the wasm/glue pair manifest)"; exit 1; }
     (cd site/public/wasm && shasum -a 256 --strict -c manifest.sha256 >/dev/null) \
@@ -541,14 +551,10 @@ gen-wasm-check:
 # + a release build of the snapshot example.
 [group('gen')]
 [doc('Fail if any committed README section or rendered image has drifted')]
-gen-check: gen-readme-check gen-wasm-check
+gen-check: compare-selftest gen-readme-check gen-wasm-check
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
-    # The comparator's selftest gates the pixel predicate itself, and runs FIRST:
-    # gen-media.py --check delegates every image comparison to it, so an
-    # always-green comparator would report success for any render at all.
-    .venv/bin/python3 scripts/compare-screenshots.py --selftest
     .venv/bin/python3 scripts/gen-media.py --check
     .venv/bin/python3 scripts/gen-pix-icons.py --check
 
@@ -752,6 +758,22 @@ setup-tools:
     # would otherwise be the only gate). Idempotent. CI re-runs `just preflight`
     # regardless, so a skipped local hook still meets the same checks at merge.
     git config core.hooksPath .githooks
+
+# The pixel comparator is the primitive under `gen-check` and the smoke job, and
+# it had no test of its own — an always-green comparator reports success for any
+# render at all. Its own recipe, matching the other two selftests, because it
+# needs only Pillow while `gen-check` needs the venv plus ffmpeg, node, a release
+# snapshot build and the wasm pair: a developer who cannot run that gate should
+# still be able to run this.
+[group('meta')]
+[doc('Self-test the pixel comparator that gen-check and smoke ride on')]
+compare-selftest:
+    #!/usr/bin/env sh
+    set -eu
+    # Prefer the venv (the same Pillow gen-media.py uses), but do not require it:
+    # any python3 with Pillow answers the question this recipe asks.
+    if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
+    "$py" scripts/compare-screenshots.py --selftest
 
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
 # is a silent monitor death (the script returns empty / raises, the weekly job

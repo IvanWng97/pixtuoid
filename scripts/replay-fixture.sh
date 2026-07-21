@@ -46,12 +46,11 @@ cleanup() {
 trap cleanup EXIT
 
 # An ISOLATED config marking Codex connected. `resolve_connected` treats a
-# missing [sources] key as DISCONNECTED (config/mod.rs), and the driver drops
-# every event from a disconnected source BEFORE the reducer and before its only
-# `debug!` — so on a box that never connected Codex in the Sources panel this
-# replay produced zero agents and zero log lines, at any log level. Broken this
-# way since the connection gate landed (#284); openclaw-live-e2e.sh learned the
-# same lesson two days later, this script never got it.
+# missing [sources] key as DISCONNECTED (config/mod.rs) and the driver drops a
+# disconnected source's events ahead of the reducer, so without this a box that
+# never connected Codex in the Sources panel replays into zero agents — and,
+# because the drop sits above the gate's own log line, zero explanation too.
+# openclaw-live-e2e.sh isolates its config for exactly this reason.
 mkdir -p "$cfgdir/pixtuoid"
 printf '[sources]\ncodex = true\n' >"$cfgdir/pixtuoid/config.toml"
 
@@ -81,14 +80,17 @@ sleep 2
 
 echo "=== cx· agent state progression ==="
 grep 'agents=' "$out" || true
-# Headless always prints `agents=[]` (empty scene), so success = at least one
-# NON-empty agents line ever appeared. `agents=\[[^]]` = a char after `[` other than `]`.
+# Success requires a STATE TRANSITION, not merely a registered sprite: junk
+# content still registers `agents=[cx@0:idle]`, so a bare "a non-empty scene
+# appeared" predicate reports PASS for a decoder that has stopped decoding
+# entirely. The bundled permission-flow fixture guarantees both active and
+# waiting, so requiring either keeps the check honest without over-fitting.
 #
-# This EXITS non-zero: two review prompts cite this script as a verification
-# step, so a replay that produced no agent must fail the caller rather than
-# print a note and exit 0.
-if ! grep -qE 'agents=\[[^]]' "$out"; then
-    echo "FAIL: no cx· agent ever appeared — is '$bin' the codex-aware build, and is the fixture a codex rollout?" >&2
+# This EXITS non-zero: the script is cited as a verification step, so a replay
+# that produced nothing must fail its caller rather than print a note and exit 0.
+if ! grep -qE 'agents=\[cx·[^]]*:(active|waiting)' "$out"; then
+    echo "FAIL: the fixture never drove a cx· agent into active/waiting — is '$bin'" >&2
+    echo "  the codex-aware build, and is the fixture a codex rollout?" >&2
     exit 1
 fi
-echo "PASS: the fixture replayed into at least one non-empty scene."
+echo "PASS: the fixture drove a cx· agent through a real state transition."
