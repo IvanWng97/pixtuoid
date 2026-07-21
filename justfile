@@ -234,12 +234,18 @@ mutants *args:
     base="${MUTANTS_BASE:-origin/main}"
     mkdir -p target
     git diff "$base...HEAD" > target/mutants.diff
-    # A diff with NO Rust changes (dispatched from `main` where HEAD==origin/main,
-    # or a docs/justfile/site-only branch) makes `--in-diff` test ZERO mutants and
-    # exit 0 — a vacuous green reading as "teeth verified" having checked nothing
-    # (cargo-mutants has no --error-on-zero flag). Gate on actual `.rs` changes.
-    if ! git diff --name-only "$base...HEAD" -- '*.rs' | grep -q .; then
-        echo "error: no Rust changes vs $base — no mutants to test. Run from a feature branch with .rs changes, or set MUTANTS_BASE." >&2
+    # Gate on the MUTANT COUNT, not on `.rs` changes. cargo-mutants has no
+    # --error-on-zero and exits 0 having tested nothing when the diff yields no
+    # mutants — a vacuous green reading as "teeth verified". A `.rs`-changes
+    # check is NOT sufficient, which this recipe's first real execution proved:
+    # a diff of test files plus `exclude_globs` entries (driver.rs) passed that
+    # check and still printed "No mutants to filter" and exit 0. `--list`
+    # enumerates without running, so the pre-check is cheap.
+    if ! cargo mutants --in-diff target/mutants.diff --list 2>/dev/null | grep -q .; then
+        echo "error: the diff vs $base yields ZERO mutants — nothing would be tested." >&2
+        echo "  Either there are no .rs changes, or every changed .rs is test code" >&2
+        echo "  or listed in .cargo/mutants.toml exclude_globs." >&2
+        echo "  Run from a branch touching mutable production Rust, or set MUTANTS_BASE." >&2
         exit 1
     fi
     cargo mutants --in-diff target/mutants.diff {{ args }}
