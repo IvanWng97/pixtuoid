@@ -2,14 +2,14 @@
   {
     "id": "brew",
     "label": "Homebrew",
-    "blurb": "macOS",
-    "cmds": ["brew install IvanWng97/pixtuoid/pixtuoid"],
+    "blurb": "Linux, macOS, or WSL",
+    "cmds": ["brew install pixtuoid"],
     "readme": true
   },
   {
     "id": "npm",
     "label": "npm",
-    "blurb": "any OS",
+    "blurb": "Any OS",
     "cmds": ["npm install -g pixtuoid"],
     "readme": true
   },

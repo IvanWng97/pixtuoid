@@ -696,9 +696,7 @@ test('reduced motion: an install copy writes the clipboard but hires nobody', as
   const copy = page.locator('.install__panel.is-active .install__copy');
   await copy.click();
   await expect(copy).toHaveText(/Copied|Select & copy/);
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    'brew install IvanWng97/pixtuoid/pixtuoid'
-  );
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('brew install pixtuoid');
   await page.waitForTimeout(500); // settle window: no late/async hire lands
   expect(await page.evaluate(() => (window as unknown as { __hired: string[] }).__hired)).toEqual(
     []

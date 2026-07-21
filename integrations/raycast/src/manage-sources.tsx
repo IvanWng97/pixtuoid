@@ -106,7 +106,7 @@ function ErrorView({ error, onRetry }: { error: Error; onRetry: () => void }) {
         title={notFound ? "Pixtuoid not found" : "Couldn't read sources"}
         description={
           notFound
-            ? "Set the binary path in preferences, or install pixtuoid (cargo install pixtuoid · npm i -g pixtuoid · brew install ivanwng97/pixtuoid/pixtuoid)."
+            ? "Set the binary path in preferences, or install pixtuoid (cargo install pixtuoid · npm i -g pixtuoid · brew install pixtuoid)."
             : error.message
         }
         actions={

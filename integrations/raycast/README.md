@@ -23,7 +23,7 @@ Install the `pixtuoid` binary with any of:
 ```sh
 cargo install pixtuoid pixtuoid-hook
 npm i -g pixtuoid
-brew install IvanWng97/pixtuoid/pixtuoid
+brew install pixtuoid
 ```
 
 The extension auto-detects it via your login shell's `PATH`, then the common
