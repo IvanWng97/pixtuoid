@@ -126,18 +126,31 @@ send '{"type":"agent_end","runId":"r3","success":true}'
 expect idle idle-healed
 
 # ---- #318 mid-attach pid adoption + instant abrupt-down ----
-# The daemon is up with current_pid=None (no gateway_start carried a _pid). A
-# NON-gateway_start event carrying a REAL live _pid must adopt it (PidSeen), so
-# killing that pid takes the daemon down via the PresenceExitWatch — the proof
-# the mid-attach pid binding works (a non-adopted pid's death would be a no-op,
-# leaving the daemon idle and failing step [11]).
+# `PidSeen` adoption is None-ONLY (apply_presence): it bootstraps current_pid
+# only when the daemon has none, so GatewayUp never gets clobbered. That means
+# the mid-attach scenario has to REACH current_pid=None first, and the shim
+# stamps _pid=getppid() onto every event that lacks one — so the gateway_start
+# at [5] already armed current_pid to the shim's parent. Sending a bare
+# session_start here would adopt nothing (its PidSeen hits a Some) and killing
+# its pid would be a no-op — the exact false-premise bug that made [11] fail.
+#
+# The real #318 case is a RECONNECT after an abrupt down (openclaw.rs models the
+# same path): gateway_stop takes the mascot Down, enter_down clears current_pid,
+# and the reconnect is learned only from a plain _pid-carrying event — never a
+# fresh gateway_start. So drive that: down, then re-adopt via PidSeen.
+echo "[10] gateway_stop -> down (clears current_pid so the rung can re-arm)"
+send '{"type":"gateway_stop"}'
+expect down down-before-reattach
+
 sleep 600 &
 SPID=$!
-echo "[10] session_start carrying _pid=$SPID -> idle (PidSeen adopts the live pid)"
+echo "[11] session_start carrying _pid=$SPID (reconnect, no gateway_start) -> idle"
+# The explicit _pid is KEPT by the shim (an inbound value wins over getppid),
+# so this is the real live pid, adopted by PidSeen because current_pid is None.
 send "{\"type\":\"session_start\",\"sessionId\":\"mid1\",\"_pid\":$SPID}"
 expect idle idle-midattach
 
-echo "[11] kill $SPID -> down (instant abrupt-down off the adopted pid, #318)"
+echo "[12] kill $SPID -> down (instant abrupt-down off the RE-adopted pid, #318)"
 kill "$SPID" 2>/dev/null
 expect down down-abrupt
 
