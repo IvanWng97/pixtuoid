@@ -290,6 +290,53 @@ def test_parser_never_drops_a_real_event() -> None:
         check(got == want, f"no real event dropped from `{body}`: {got!r} != {want!r}")
 
 
+def test_block_scrape_is_bounded_to_the_decoder() -> None:
+    """A scrape bounded to one block must not see code that follows it.
+
+    `read_codex_rollout_types` used to scan the WHOLE of source/codex.rs, so a
+    `#[cfg(test)] mod tests` constructing the same tuple shape would leak a type
+    the decoder does not depend on — and a phantom makes the watcher alarm on a
+    name upstream never had to have.
+
+    This exists because the sibling comment-safe parser shipped exactly such a
+    case one commit earlier and this bounding fix did not: the negative control
+    was RUN and then left out of the suite, which is the failure this whole
+    branch is about.
+    """
+    src = """
+fn decode(v: Value) -> Vec<Event> {
+    let out = match (outer, inner) {
+        ("event_msg", "task_started") => vec![start()],
+        ("response_item", "function_call") => { let f = |x| { x }; vec![f(call())] }
+        _ => vec![],
+    };
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    fn planted() { let _ = ("event_msg", "PHANTOM"); }
+}
+"""
+    block = d.rust_block_after(d.strip_rust_comments(src), r"match \(outer, inner\)")
+    check(block is not None, "the anchor's block is found")
+    got = set(re.findall(r'\(\s*"event_msg"\s*,\s*"(\w+)"\s*\)', block or ""))
+    # Nested braces from the closure/vec! must not close the block early, and the
+    # planted test tuple after it must not be visible.
+    check(got == {"task_started"}, f"bounded to the decoder's arms: {got!r}")
+    check(
+        "function_call" in (block or ""),
+        "the nested-brace arm is INSIDE the block (it did not close early)",
+    )
+
+    # A missing anchor is None, so the caller raises loudly rather than silently
+    # scraping nothing — a decoder refactor must break the watcher, not blind it.
+    check(
+        d.rust_block_after("fn unrelated() { }", r"match \(outer, inner\)") is None,
+        "a missing anchor returns None, never an empty block",
+    )
+
+
 def test_every_const_array_reader_uses_the_shared_parser() -> None:
     """No reader may hand-roll the scrape the shared parser exists to own.
 
@@ -319,6 +366,7 @@ def main() -> int:
         test_cc_doc_marker_detection_fires_both_directions,
         test_const_array_parser_ignores_words_quoted_inside_comments,
         test_parser_never_drops_a_real_event,
+        test_block_scrape_is_bounded_to_the_decoder,
         test_every_const_array_reader_uses_the_shared_parser,
     ):
         t()
