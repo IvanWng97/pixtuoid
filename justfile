@@ -495,7 +495,8 @@ gen-wasm: gen-wasm-tools wasm-build
 # Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
 # a lazy-load behind the poster, so a silent size regression (a dep pulling in
 # formatting machinery, an accidental debug build) fails loudly — 1 MiB raw ≈
-# ~350-400 KB gzipped; the artifact is ~700 KB today. Pair (#424): the
+# The artifact is ~900 KB (the recipe prints the exact figure and the headroom
+# left against the cap — read it there rather than trusting this line). Pair (#424): the
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
 # a one-sided merge resolution or partial regen ships a silent runtime throw,
 # so every committed file must match gen-wasm's sha256 manifest AND every file
@@ -514,6 +515,11 @@ gen-wasm-check:
     CAP=1048576
     SIZE=$(wc -c < "$W" | tr -d ' ')
     test "$SIZE" -le "$CAP" || { echo "$W is $SIZE bytes (> $CAP cap) — investigate the bloat"; exit 1; }
+    # Report the headroom, don't just pass silently. A ratchet you can only read
+    # at the moment it breaks gives no warning that it is about to: the prose
+    # above said "~700 KB today" while the artifact had grown to ~900 KB, and
+    # nothing surfaced the drift because every run was a silent green.
+    echo "wasm $SIZE / $CAP bytes ($((SIZE * 100 / CAP))% of cap, $(((CAP - SIZE) / 1024)) KB headroom)"
     test -f "$M" || { echo "missing $M — run 'just gen-wasm' (the wasm/glue pair manifest)"; exit 1; }
     (cd site/public/wasm && shasum -a 256 --strict -c manifest.sha256 >/dev/null) \
         || { echo "wasm/glue pair MISMATCH vs $M — a partial regen or one-sided merge; run 'just gen-wasm' and commit all of site/public/wasm/"; exit 1; }
