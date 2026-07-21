@@ -49,17 +49,8 @@ jobs:
       - uses: extractions/setup-just@v4
       - name: Validate tag commit is on main
         # A release tag pushed at an arbitrary (unreviewed) commit must not
-        # build + publish (#215). Pre-release tester tags (v*-winrc.N / -rc.N)
+        # build + publish (#215). Pre-release tester tags (v*-win.N / -rc.N)
         # are deliberately exempt — they exist to test commits BEFORE merge.
-        #
-        # The suffix MUST contain one of Homebrew's UNSTABLE_VERSION_KEYWORDS
-        # (alpha beta bpo dev experimental prerelease preview rc — see
-        # Library/Homebrew/livecheck/livecheck.rb). homebrew-core autobumps us
-        # off `git ls-remote --tags`, and anything the keyword filter misses
-        # parses as a NEWER version: the old `-win.N` name contained no keyword,
-        # so a tester tag on an UNREVIEWED commit could have been auto-bumped
-        # into homebrew-core and bottled on six platforms. `-rc` was safe only
-        # by accident of its spelling. Keep `rc` in any new channel name (#731).
         if: ${{ !contains(github.ref_name, '-') }}
         run: |
           git fetch origin main --quiet
@@ -69,7 +60,7 @@ jobs:
           fi
       - name: Validate tag matches Cargo.toml version
         run: |
-          # Pre-release suffixes (-winrc.1, -rc.1) validate against the base version —
+          # Pre-release suffixes (-win.1, -rc.1) validate against the base version —
           # the suffix is release-channel metadata, not a Cargo version.
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           TAG_VERSION="${TAG_VERSION%%-*}"
@@ -282,7 +273,7 @@ jobs:
     # GH release (needs: [build, deb]) never ships. Matches the `release` job's gate.
     needs: [check, build, deb]
     # Never publish a pre-release to crates.io — the publish is irreversible;
-    # tester pre-release tags (v*-winrc.N etc.) build artifacts only.
+    # tester pre-release tags (v*-win.N etc.) build artifacts only.
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -340,7 +331,7 @@ jobs:
     needs: [check, build, deb]
     # Never publish a pre-release to npm — like crates.io, an npm publish is
     # effectively irreversible (no unpublish after 72h). Pre-release tags
-    # (v*-winrc.N / -rc) build artifacts only. Consumes the SAME build artifacts
+    # (v*-win.N / -rc) build artifacts only. Consumes the SAME build artifacts
     # as the release job — npm is a third downstream consumer of the one build
     # matrix, not a parallel build.
     if: ${{ !contains(github.ref_name, '-') }}
