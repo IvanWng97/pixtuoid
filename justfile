@@ -534,8 +534,9 @@ gen-check: gen-readme-check gen-wasm-check
 # inter-crate pixtuoid→pixtuoid-core path-dep requirement, and Cargo.lock (via
 # `cargo set-version`) — then drafts the in-app `release_notes()` arm from the
 # commit log, runs `just preflight`, and commits on `release/vX.Y.Z`. It STOPS
-# before the tag: pushing the tag is what triggers the irreversible crates.io
-# publish, so that stays a human step. Needs cargo-edit (`just setup-tools`).
+# before the tag: pushing the tag is what triggers the irreversible publish
+# (crates.io + npm, and a homebrew-core autobump), so that stays a human step.
+# Needs cargo-edit (`just setup-tools`).
 # Honors SKIP_PREFLIGHT=1 for iteration.
 [group('release')]
 [doc('Cut a release: bump every version number + draft notes on a release branch (no tag/push)')]

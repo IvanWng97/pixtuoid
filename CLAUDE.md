@@ -24,9 +24,12 @@ above don't apply there):
 There is a THIRD consumer with no guide in this tree, because it lives in
 someone else's repo: **homebrew-core**'s `pixtuoid` formula. Its `test do`
 block parses `connect claude-code --json` and asserts the exact row
-`{"id" => "claude-code", "outcome" => "connected"}`, plus the literal
-`OK: pack "skeleton"` line and that `.claude/settings.json` gains
-`pixtuoid-hook`. The asymmetry is the dangerous part: Raycast and the site
+`{"id" => "claude-code", "outcome" => "connected"}`, plus that `--version`
+prints the version, the literal `OK: pack "skeleton"` line, and that
+`.claude/settings.json` gains `pixtuoid-hook`. Their **`install`** block adds
+two more, and those are worse — they break core's BUILD, not its test:
+`pixtuoid man` must emit roff and `pixtuoid completions <shell>` a script,
+both on clean stdout. The asymmetry is the dangerous part: Raycast and the site
 fail in OUR CI where we see it; homebrew-core fails in THEIRS, on an
 `autobump: true` version bump we neither trigger nor get notified about, and
 our suite stays green because it asserts those same strings as its own
@@ -176,7 +179,8 @@ fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
 
 **Release:** `just bump X.Y.Z` rewrites every version number, drafts
 `release_notes()`, runs preflight, and commits on a release branch — it
-stops before the tag; pushing the tag is the irreversible crates.io publish
+stops before the tag; pushing the tag is the irreversible publish (crates.io +
+npm, and it auto-triggers a homebrew-core bump)
 and stays a human step. See
 [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
