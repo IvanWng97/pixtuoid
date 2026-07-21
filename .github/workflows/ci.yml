@@ -326,8 +326,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-14]
     runs-on: ${{ matrix.os }}
-    # Two release-mode `cargo install`s from a cold cache; `cargo install` uses
-    # its own target dir, so rust-cache only partly covers it.
+    # Two release-mode `cargo install`s. `cargo install` defaults to a TEMP
+    # target dir it deletes on exit, so rust-cache would have nothing to save
+    # and every run would be a cold release build — the env below points it at
+    # the workspace target/ instead, which rust-cache does persist. First run
+    # on a new lockfile is still cold; the ceiling is sized for that.
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
