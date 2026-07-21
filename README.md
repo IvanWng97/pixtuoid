@@ -46,13 +46,13 @@ A little bit *Black Mirror*, a little bit *The Sims* — and the most glanceable
 Pick one — Homebrew on macOS, or npm on any OS:
 
 <!-- install:start · generated from site/src/install.json by `just gen-readme` — edit the JSON, not this block -->
-**Homebrew** (macOS):
+**Homebrew** (Linux, macOS, WSL):
 
 ```bash
-brew install IvanWng97/pixtuoid/pixtuoid
+brew install pixtuoid
 ```
 
-**npm** (any OS):
+**npm** (Any OS):
 
 ```bash
 npm install -g pixtuoid
