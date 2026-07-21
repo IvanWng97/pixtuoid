@@ -79,8 +79,29 @@ just bump 0.5.1                             # bump + draft notes + preflight →
 # (the office HUD bakes CARGO_PKG_VERSION, so a bump drifts every committed still)
 # and commit docs/images + site/public/demos — else CI's smoke gen-check reds the PR.
 # then PR → review → merge, then:
-git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crates.io + homebrew
+git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crates.io + npm
 ```
+
+The tag also publishes **outside** this repo: `pixtuoid` is in homebrew-core,
+whose formula builds from the tag TARBALL and is `autobump: true`, so
+BrewTestBot opens a version-bump PR on its own — the tarball is fetchable the
+instant the tag lands, ~an hour before `release.yml` finishes. A tag we can't
+un-publish is therefore also a homebrew-core build we can't un-trigger. Two
+consequences worth internalizing:
+
+- **A from-source build break lands in Homebrew's CI, not ours.** Their formula
+  builds the workspace with DEFAULT features (`cargo install --locked`) on
+  macOS *and* Linux — the one configuration our own release never builds
+  (`release.yml` ships Linux artifacts `--no-default-features`). Anything that
+  adds a system-library dependency needs a matching `depends_on` in the core
+  formula, landed in the same PR as the version bump.
+- **Their `test do` block is a public contract** — see the "homebrew-core
+  contract" comments at `crates/pixtuoid/src/validate.rs`,
+  `crates/pixtuoid/src/sources_cli.rs` and
+  `crates/pixtuoid-core/src/source/claude_code.rs`.
+
+Preempt the bot: submit the bump PR yourself right after tagging, so the
+version bump and any new `depends_on` ship together.
 
 Publishing to crates.io + npm uses **OIDC trusted publishing** — CI carries no
 standing registry tokens. The per-crate (crates.io) and per-package (npm)
