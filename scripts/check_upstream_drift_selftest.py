@@ -232,12 +232,42 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
     check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
 
 
+def test_const_array_parser_ignores_words_quoted_inside_comments() -> None:
+    """A quoted word in a comment must NOT be read as a registered event.
+
+    The shape assertions above cannot catch this: a phantom scraped out of a
+    comment is an ordinary-looking word that passes every shape regex. It shipped
+    for real — a WHY comment inside CODEX_EVENTS mentioning the SessionEnd
+    payload's `reason const "other"` made the watcher report a phantom breaking
+    drift, auto-file an issue, and fail the run.
+    """
+    src = '''
+const DEMO_EVENTS: &[&str] = &[
+    "SessionStart",
+    // upstream's payload carries a reason const "other"; the field is
+    // `hook_event_name:"SessionEnd"` — neither is a registered event here
+    /* a block comment naming "PreToolUse" is not a registration either */
+    "SessionEnd",
+];
+'''
+    got = d.parse_rust_const_str_array(src, "DEMO_EVENTS")
+    check(got == {"SessionStart", "SessionEnd"}, f"comments excluded: {got!r}")
+
+    # And an absent const is reported as such, not as an empty set — an empty
+    # set would read as "nothing registered" and silence every check downstream.
+    check(
+        d.parse_rust_const_str_array(src, "NOPE_EVENTS") is None,
+        "a missing const returns None, never an empty set",
+    )
+
+
 def main() -> int:
     for t in (
         test_try_fetch_classifies_permanent_vs_transient,
         test_source_parsers_find_nonempty_well_shaped_sets,
         test_upstream_parsers_extract_from_a_snippet,
         test_cc_doc_marker_detection_fires_both_directions,
+        test_const_array_parser_ignores_words_quoted_inside_comments,
     ):
         t()
     if FAILS:
