@@ -31,7 +31,14 @@ command -v "$bin" >/dev/null 2>&1 || {
 root="$(mktemp -d)"
 proj="$(mktemp -d)"
 cfgdir="$(mktemp -d)"
-sock="$(mktemp -u)"
+# The socket lives inside a PRIVATE 0700 dir, not as a bare name in the shared
+# temp dir: `mktemp -u` reserves a name without creating anything, leaving a
+# pre-plant/symlink race between name generation and pixtuoid's bind(). Nothing
+# downstream closes it — `ensure_owned_socket_dir` (hook/unix.rs) deliberately
+# does not police an explicit PIXTUOID_SOCKET path. This matches what the sibling
+# Rust harness (cli_json.rs::headless_replay) already does with tempfile::tempdir.
+sockdir="$(mktemp -d)"
+sock="$sockdir/hook.sock"
 out="$(mktemp)"
 hpid=""
 cleanup() {
@@ -39,8 +46,7 @@ cleanup() {
         kill "$hpid" 2>/dev/null || true
         wait "$hpid" 2>/dev/null || true # reap quietly (suppress "Terminated")
     fi
-    rm -rf "$root" "$proj" "$cfgdir" "$out"
-    rm -f "$sock"
+    rm -rf "$root" "$proj" "$cfgdir" "$sockdir" "$out"
     return 0
 }
 trap cleanup EXIT
