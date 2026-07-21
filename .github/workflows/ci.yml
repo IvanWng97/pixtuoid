@@ -336,9 +336,16 @@ jobs:
       - name: Replay the formula's test block
         run: |
           # pipefail is NOT in the default `run:` shell (bash -e): without it a
-          # `"$BIN" ... | grep -q` pipeline reports GREP's status, so a crashing
-          # binary reads as green. These assertions are the oracle — they have to
-          # be capable of failing.
+          # pipeline reports the LAST command's status, so a crashing binary
+          # reads as green. These assertions are the oracle — they have to be
+          # capable of failing.
+          #
+          # With pipefail on, never pipe the binary straight into `grep -q`:
+          # -q exits at the first match, and `pixtuoid man` matches on line 1
+          # (`.TH`), so the still-writing producer takes EPIPE and the pipeline
+          # fails. Linux's 64K pipe buffer absorbs the rest of the output and
+          # hides it; macOS's does not. Capture to a file, then grep the file —
+          # that also lets `set -e` check the binary's OWN exit status.
           set -euo pipefail
           # Resolve the binary BEFORE reassigning HOME, and export HOME here
           # rather than in `env:` (a step-level HOME override also reaches the
@@ -347,14 +354,21 @@ jobs:
           BIN="${RUNNER_TEMP}/pkg/bin/pixtuoid"
           export HOME="${RUNNER_TEMP}/fakehome"
           mkdir -p "${HOME}"
-          "$BIN" --version
-          "$BIN" man | grep -q '^\.TH'
-          "$BIN" completions bash | grep -q pixtuoid
+          out="${RUNNER_TEMP}/formula-test"
+          mkdir -p "$out"
+
+          "$BIN" --version                      > "$out/version"
+          "$BIN" man                            > "$out/man.roff"
+          "$BIN" completions bash               > "$out/completions.bash"
           "$BIN" init-pack "${HOME}/pack"
-          "$BIN" validate-pack "${HOME}/pack" | grep -q 'OK: pack "skeleton"'
-          "$BIN" connect claude-code --json \
-            | python3 -c 'import json,sys; assert json.load(sys.stdin) == [{"id":"claude-code","outcome":"connected"}], "connect --json envelope drifted from the homebrew-core contract"'
+          "$BIN" validate-pack "${HOME}/pack"   > "$out/validate"
+          "$BIN" connect claude-code --json     > "$out/connect.json"
+
+          grep -q '^\.TH' "$out/man.roff"
+          grep -q pixtuoid "$out/completions.bash"
+          grep -q 'OK: pack "skeleton"' "$out/validate"
           grep -q pixtuoid-hook "${HOME}/.claude/settings.json"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == [{"id":"claude-code","outcome":"connected"}], "connect --json envelope drifted from the homebrew-core contract"' "$out/connect.json"
 
   semver:
     name: semver-checks
