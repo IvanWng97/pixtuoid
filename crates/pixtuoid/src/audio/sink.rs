@@ -73,24 +73,19 @@ pub(crate) mod rodio_sink {
         /// `None` when no output device is available (headless boxes) —
         /// callers degrade to silence, never error the office.
         pub(crate) fn open() -> Option<Self> {
-            // Build with our OWN stream error_callback instead of the convenience
-            // `open_default_sink` (whose default callback `eprintln!`s). A
-            // MID-SESSION cpal error — device unplugged, sample-rate change — fires
-            // this on the audio thread; a raw eprintln there would corrupt the TUI's
-            // alternate screen (or vanish to hidden stderr) and never reach our log.
-            // Route it to `tracing::warn!` (the warn-floor file log), matching how
-            // the open-failure below and rodio's drop-log (`log_on_drop(false)`) are
-            // already kept out of the terminal. rodio 0.22 has no reconnect, so this
-            // is observability, not recovery — audio just goes silent, now logged.
-            let opened = with_stderr_silenced(|| {
-                rodio::DeviceSinkBuilder::from_default_device().and_then(|builder| {
-                    builder
-                        .with_error_callback(|err| {
-                            tracing::warn!("audio: output stream error (device lost?): {err}");
-                        })
-                        .open_stream()
-                })
-            });
+            // `open_default_sink` keeps rodio's full open FALLBACK: the default
+            // device+config first, then — on failure — every other non-"null"
+            // output device, each retried across its supported configs. A
+            // hand-rolled `from_default_device().open_stream()` would silently drop
+            // that `.or_else` and go silent on hardware the fallback would have
+            // recovered. rodio's `tracing` feature (Cargo.toml) routes a MID-SESSION
+            // stream error (device unplugged, sample-rate change) — fired on the
+            // audio thread — to `tracing::error!` instead of the default callback's
+            // `eprintln!`, which mid-altscreen would corrupt the TUI. rodio 0.22 has
+            // no reconnect, so this is observability, not recovery — audio just goes
+            // silent, now logged. `with_stderr_silenced` still wraps the call for
+            // ALSA's C-level fd-2 chatter (below rodio's Rust logging).
+            let opened = with_stderr_silenced(rodio::DeviceSinkBuilder::open_default_sink);
             match opened {
                 Ok(mut stream) => {
                     stream.log_on_drop(false);

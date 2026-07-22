@@ -2943,6 +2943,7 @@ dependencies = [
  "dasp_sample",
  "num-rational",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
