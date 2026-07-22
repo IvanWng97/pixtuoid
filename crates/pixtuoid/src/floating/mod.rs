@@ -147,8 +147,14 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         floor_caps,
     );
     app.set_audio_ui(audio_ui);
-    event_loop
+    let result = event_loop
         .run_app(&mut app)
-        .context("running the floating window event loop")?;
-    Ok(())
+        .context("running the floating window event loop");
+    // Stop the audio device thread SYNCHRONOUSLY before returning (process
+    // exit) — one place covering every exit (normal close AND the window-
+    // creation error paths). The detached device thread's RodioSink Drop would
+    // otherwise race process teardown and strand the OS output on macOS (the
+    // "music keeps playing after quit" bug). Runs on both Ok and Err.
+    app.shutdown_audio();
+    result
 }

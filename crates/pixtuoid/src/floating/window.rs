@@ -140,6 +140,16 @@ impl FloatingApp {
         }
     }
 
+    /// Stop the audio device thread synchronously — called ONCE after the event
+    /// loop returns (see `floating::run`), so it covers every exit (close,
+    /// window-creation failure) in one place. The detached device thread's
+    /// RodioSink Drop otherwise races process teardown and can strand the OS
+    /// output on macOS (the "music keeps playing after quit" bug). No-op for a
+    /// muted session that never spawned the device thread.
+    pub(crate) fn shutdown_audio(&self) {
+        self.audio_ctl.handle().shutdown();
+    }
+
     /// Render the latest scene to a DOWNSCALED office buffer, then nearest-neighbor
     /// upscale it into the window. The pixel-art office is tiny at 1:1 (8×12 sprites),
     /// so a native blit looks sparse + miniature; rendering at ~1/SCALE and blowing it

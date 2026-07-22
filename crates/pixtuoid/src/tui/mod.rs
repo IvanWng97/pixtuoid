@@ -1081,6 +1081,15 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     })
     .await;
 
+    // Stop the audio device thread SYNCHRONOUSLY before we return (and the
+    // process exits). The thread owns the RodioSink whose Drop closes the OS
+    // output device; detached, that Drop races process teardown and loses — on
+    // macOS CoreAudio a half-closed output strands playback (music keeps going
+    // after quit; `sudo killall coreaudiod` to recover). Covers every exit
+    // above (q / Ctrl-C / external terminate / error) since all fall through
+    // here. No-op for a muted session that never spawned a device thread.
+    audio_ctl.handle().shutdown();
+
     teardown_terminal(&mut renderer.terminal)?;
     result
 }
