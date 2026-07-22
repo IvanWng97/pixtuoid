@@ -18,6 +18,13 @@ right-size the process; don't 700-line-plan a 300-line change.
 
 Every section gets an answer; "n/a" counts only with a reason.
 
+0. **Design gate cleared** (arc-loop step 3) — before the sections below, the
+   plan states the approach passed the gate: the idiomatic way is confirmed
+   against real docs/source (not memory); the design survived an adversarial
+   pass; the deepening lens ran (deletion test — does this *deepen* a module or
+   add another shallow one = AI-slop?). Name any big-radius refactor the
+   deepening warrants — a slop-reducing refactor is in-scope here, not deferred
+   by default.
 1. **Data shapes** — for every NEW field, config key, map, or collection:
    name its identity/key-space. If it overlaps an existing structure's
    identity (two collections keyed by the same id; an attribute map

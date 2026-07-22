@@ -195,21 +195,35 @@ repo-committed and won't exist on a fresh checkout or in a non-Claude tool.
 2. **Grill the design** — decide the open questions ONE at a time, each with a
    recommended answer, before writing code. (A big arc introducing new
    seams/vocabulary grills against the domain docs first.)
-3. **Spec** — synthesize the grilled decisions into `docs/superpowers/specs/`
+3. **Design gate (before build; NOT the step-8 merge review)** — the grilled
+   approach clears three design-time lenses so slop dies in design, not review:
+   **best-practice search** (confirm the *idiomatic* way against real
+   docs/source online — never memory: the dep's own API/features, the standard
+   pattern); **adversarial design review** (red-team the design itself — simplest
+   shape? failure mode? — BEFORE code exists); **deepening lens** (the deletion
+   test — would deleting this concentrate complexity or just move it? — plus the
+   deep-vs-shallow check: does the change *deepen* a module or add another
+   shallow one = AI-slop?). Cut slop in small, verified steps; a big-radius
+   refactor is fine when the deepening earns it. (`codebase-design` /
+   `improve-codebase-architecture` drive the deepening lens; this repo keeps its
+   domain record + decisions-not-to-relitigate in nested `CLAUDE.md` + "Known
+   sharp edges", NOT a `CONTEXT.md`/`docs/adr/` — map onto those, don't scaffold
+   competing docs.)
+4. **Spec** — synthesize the grilled decisions into `docs/superpowers/specs/`
    (LOCAL, git-ignored — the working design record, not the tracker). Also
    plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md).
-4. **Mock gate (taste/visual work only)** — ratify the AFTER visual BEFORE any
+5. **Mock gate (taste/visual work only)** — ratify the AFTER visual BEFORE any
    code (the `beautify-decoration` skill's "The visual-iteration loop").
-5. **Build** — TDD (see Conventions): failing test → minimal impl → commit.
-6. **Self-review** — a standards+spec pass before pushing. Not the merge gate.
-7. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
+6. **Build** — TDD (see Conventions): failing test → minimal impl → commit.
+7. **Self-review** — a standards+spec pass before pushing. Not the merge gate.
+8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
    lenses on the diff) + green CI + the online review bot's `Findings: 0` at
    HEAD, checked atomically. (If the bot errors or posts no findings comment at
    HEAD — it can fail on a very large diff — the gate is unsatisfiable as
    written; the `two-lens-review` skill's step 6 owns the fallback.)
    See "Things NOT to do" and the running order under "Where to look". **A human
    merges.**
-8. **Wrap** — retro; record durable lessons.
+9. **Wrap** — retro; record durable lessons.
 
 **Skills.** Repo skills live in [`.claude/skills/`](.claude/skills/) (committed,
 so they travel with the repo): `two-lens-review` (the merge gate),
@@ -221,7 +235,9 @@ run the loop above as prose.
 
 **Bootstrap on a fresh machine / other tool.** `git clone` gives you the repo
 skills + all `just` gates immediately. The day-to-day *loop* skills
-(`grilling`, `to-spec`, `tdd`, `code-review`, `diagnosing-bugs`) are a
+(`grilling`, `to-spec`, `tdd`, `code-review`, `diagnosing-bugs`, plus
+`research`/`grill-with-docs` and `improve-codebase-architecture`/`codebase-design`
+for the step-3 design gate) are a
 PERSONAL, non-committed layer — install [mattpocock/skills](https://github.com/mattpocock/skills)
 if you want the Claude Code implementations; otherwise this section IS the loop.
 Do NOT run its `setup-matt-pocock-skills` here — it scaffolds a `CONTEXT.md` +
