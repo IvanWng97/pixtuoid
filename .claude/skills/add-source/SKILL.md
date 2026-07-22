@@ -35,13 +35,12 @@ the runtime wiring + `Source` impl, and ships a `hook.custom` decoder + an
 These are the ones with a failing test attached — do NOT stop before them:
 
 - **`site/src/sources.json` row** — a manifest bridge test fails until it exists;
-  then `just gen-readme` to sync the README. (CLAUDE.md step 5.)
+  then `just gen-readme` to sync the README.
 - **Per-source badge hue** — a `Theme::source` (`SourceColors`) field in EVERY
   theme file + a `dashboard_line` match arm; two guard tests fail otherwise.
-  (CLAUDE.md step 7.)
 - **`pub fn <cli>_home()`** if the CLI has a custom config root — one fn honoring
   its `*_HOME` precedence, called from BOTH the watcher's `default_paths()` AND the
-  installer's `default_config_path()` so they can't disagree. (CLAUDE.md step 6.)
+  installer's `default_config_path()` so they can't disagree.
 - **A captured fixture** under `tests/sources/fixtures/<name>/<scenario>/`
   exercising the **SessionStart hook** — the conformance test forces one, and its
   one-AgentId assertion guards against the reason-field ghost.
