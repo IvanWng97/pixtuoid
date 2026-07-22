@@ -176,6 +176,18 @@ pub fn claude_config_dir() -> Option<PathBuf> {
 /// rest are session-metadata/sidecar lines we knowingly ignore. Set to the LATEST
 /// format only (legacy `summary`/`progress` are intentionally absent — a replayed
 /// legacy line breadcrumbs at session-frequency, not a flood).
+///
+/// The set is swept from the CC-transcript files the watcher actually decodes
+/// (`<uuid>.jsonl` + `agent-<id>.jsonl`). It deliberately does NOT include the
+/// FOREIGN workflow-orchestrator `journal.jsonl` types (`started`/`result`),
+/// which live in the same tree but are excluded upstream by `skip_workflow_journal`
+/// (claude_code/native.rs) so they never reach this decoder — else they would
+/// flood (avg ~14 per file). Caveat: unlike codex/copilot/omp's structural axes
+/// this is an EMPIRICAL assumption about CC's wire, not a schema-bounded one and
+/// with no CI drift-watch — a genuinely-new HIGH-frequency top-level type would
+/// flood the warn-floor LOG (only; no TUI/stderr) until named here, which the
+/// breadcrumb itself surfaces (self-healing, strictly better than the prior
+/// zero-signal silent drop).
 const KNOWN_TYPES: &[&str] = &[
     "agent-name",
     "ai-title",

@@ -102,14 +102,14 @@ pub(crate) fn extract_copilot_cwd(v: &Value) -> Option<PathBuf> {
 }
 
 /// The COMPLETE set of copilot event `type` NAMESPACES — the family prefix
-/// before the first `.` — from the 114-member `SessionEvent` anyOf union in the
+/// before the first `.` — from the 100+-member `SessionEvent` anyOf union in the
 /// `@github/copilot` session-events JSON schema (verified live), NOT just the
 /// families we decode. The tail arm breadcrumbs a `type` whose namespace is
 /// OUTSIDE this set (a brand-new event FAMILY = a structural wire change); a
 /// KNOWN namespace with an event we don't decode (`assistant.message_delta`,
 /// `mcp.*`, `hook.progress`) stays SILENT — copilot streams those many times per
 /// turn and `drift::unknown_event` has NO dedup, so breadcrumbing the full
-/// 114-member `type` axis would flood the warn-floor (drift.rs's anti-flood
+/// 100+-member `type` axis would flood the warn-floor (drift.rs's anti-flood
 /// rule). Kept honest by `read_copilot_namespaces` in `check_upstream_drift.py`:
 /// a new upstream namespace not listed here alarms in CI before it can flood.
 const KNOWN_NAMESPACES: &[&str] = &[
@@ -143,7 +143,7 @@ const KNOWN_NAMESPACES: &[&str] = &[
 /// The copilot event NAMESPACE — the family prefix before the first `.`
 /// (`tool.execution_start` → `tool`), or the whole string when there is no dot
 /// (`abort`). The flood-safe breadcrumb keys on THIS (25 low-cardinality
-/// families), not the full `type` (114 high-cardinality events).
+/// families), not the full `type` (100+ high-cardinality events).
 fn copilot_namespace(kind: &str) -> &str {
     kind.split_once('.').map_or(kind, |(prefix, _)| prefix)
 }
