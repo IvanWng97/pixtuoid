@@ -5,6 +5,7 @@
 //! (issue #103).
 
 pub(crate) mod driver;
+pub(crate) mod gate;
 pub(crate) mod pipeline;
 
 pub use driver::run;
@@ -129,6 +130,26 @@ fn cap_boot_capacities(base: [usize; MAX_FLOORS], cap: Option<usize>) -> [usize;
     match cap {
         Some(c) => base.map(|x| x.min(c)),
         None => base,
+    }
+}
+
+/// The headless-vs-interactive boot capacity POLICY, lifted out of the
+/// coverage/mutants-excluded `run_async` so it is covered + mutation-tested.
+/// Headless honors `--max-desks` UNCLAMPED (there is no terminal layout to
+/// measure); interactive measures the real per-floor layout (`measure`, injected
+/// so the terminal query stays in the shell — and it is NOT called in headless,
+/// which never queries the terminal) then clamps to the cap. Clamping, not
+/// `[cap; N]`, keeps the `fetch_max` boot atomics from over-seeding agents onto
+/// non-existent desks.
+pub(crate) fn resolve_boot_caps(
+    desk_cap: Option<usize>,
+    headless: bool,
+    measure: impl FnOnce() -> [usize; MAX_FLOORS],
+) -> [usize; MAX_FLOORS] {
+    match (desk_cap, headless) {
+        (Some(cap), true) => [cap; MAX_FLOORS],
+        (None, true) => [FALLBACK_DESKS; MAX_FLOORS],
+        (cap, false) => cap_boot_capacities(measure(), cap),
     }
 }
 
@@ -332,6 +353,30 @@ mod tests {
             found,
             "expected at least one terminal size in the swept range where \
              per-floor seeds produce distinct capacities"
+        );
+    }
+
+    #[test]
+    fn resolve_boot_caps_headless_honors_cap_unclamped_interactive_clamps() {
+        // Headless honors --max-desks unclamped and NEVER measures the terminal.
+        assert_eq!(
+            resolve_boot_caps(Some(99), true, || panic!("headless must not measure")),
+            [99; MAX_FLOORS]
+        );
+        // Headless with no cap falls back.
+        assert_eq!(
+            resolve_boot_caps(None, true, || panic!("headless must not measure")),
+            [FALLBACK_DESKS; MAX_FLOORS]
+        );
+        // Interactive clamps the measured layout down to the cap.
+        assert_eq!(
+            resolve_boot_caps(Some(4), false, || [10; MAX_FLOORS]),
+            [4; MAX_FLOORS]
+        );
+        // Interactive with no cap keeps the measured layout.
+        assert_eq!(
+            resolve_boot_caps(None, false, || [10; MAX_FLOORS]),
+            [10; MAX_FLOORS]
         );
     }
 

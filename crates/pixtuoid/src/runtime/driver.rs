@@ -9,7 +9,10 @@
 //! coverage accounting in the parent module. One exception: `headless_loop`'s
 //! signal handling takes the ctrl_c future as an injected seam, so its
 //! registration-failure arm IS unit-tested here (the file stays
-//! coverage-excluded regardless).
+//! coverage-excluded regardless). The connection-gate DECISION (gate + apply +
+//! reconcile-sweep) lives in the sibling [`super::gate`] module — covered AND
+//! mutation-tested — so a drift in it reds a test; this shell only wires the
+//! tokio channels to those functions.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,14 +29,14 @@ use pixtuoid_core::source::grok::GrokSource;
 use pixtuoid_core::source::hook::HookRouter;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::omp::OmpSource;
-use pixtuoid_core::source::registry;
 use pixtuoid_core::source::DynSource;
 use pixtuoid_core::state::MAX_FLOORS;
-use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver};
+use pixtuoid_core::{Reducer, SceneState, TaggedReceiver};
 use tokio::sync::watch;
 
+use super::gate;
 use super::{
-    boot_capacities_for, cap_boot_capacities, summarize, ConnectedSources, RunConfig, SceneRx,
+    boot_capacities_for, resolve_boot_caps, summarize, ConnectedSources, RunConfig, SceneRx,
     FALLBACK_DESKS,
 };
 
@@ -75,16 +78,10 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // Resolve the bound socket (Unix) / pipe (Windows) the HookRouter binds; the
     // Sources panel shows the same path (explicit --socket override, else default).
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
-    let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {
-        // Headless: no terminal to measure. Honor the cap as-is, else the fallback.
-        (Some(cap), true) => [cap; MAX_FLOORS],
-        (None, true) => [FALLBACK_DESKS; MAX_FLOORS],
-        // Interactive: measure the real per-floor layout capacity FIRST, then clamp
-        // to the optional cap. Clamping (not `[cap; _]`) keeps the boot atomics from
-        // being seeded above the layout's real capacity — `fetch_max` only grows, so
-        // an over-seed strands agents on non-existent desks until the terminal grows.
-        (cap, false) => cap_boot_capacities(compute_boot_capacities(), cap),
-    };
+    // Headless-vs-interactive boot capacity policy — the covered + mutation-tested
+    // `resolve_boot_caps` in mod.rs; the terminal-size query stays here in the shell
+    // (passed as the injected `measure`, called only on the interactive arm).
+    let boot_caps = resolve_boot_caps(desk_cap, headless, compute_boot_capacities);
     // The shared spine (#714): presence channel + exit watch, the source set,
     // event/scene/health channels, floor-caps atomics, reducer + source task
     // spawns — ONE authority with `floating::run`. The tasks live on this
@@ -186,24 +183,10 @@ pub(crate) fn build_source_set(
     ]
 }
 
-/// The source id an event would register/refresh — so the Connection gate can
-/// drop a disconnected source's events BEFORE they reach the reducer. The source
-/// is NOT recoverable from an `AgentId` (it's a hash), so read it off the two
-/// variants that carry it (a hook `Identity` is emitted ahead of every activity
-/// event since #221, so a fresh hook session's first event self-identifies);
-/// otherwise fall back to the existing slot's source. `None` (an identity-less
-/// event for an unknown id) slips the gate once and is evicted on the next tick.
-fn event_source<'a>(scene: &'a SceneState, ev: &'a AgentEvent) -> Option<&'a str> {
-    match ev {
-        AgentEvent::SessionStart { source, .. } | AgentEvent::Identity { source, .. }
-            if !source.is_empty() =>
-        {
-            Some(source)
-        }
-        _ => scene.agents.get(&ev.agent_id()).map(|s| s.source.as_ref()),
-    }
-}
-
+/// The reducer event loop: gate + apply incoming `AgentEvent`s, merge daemon
+/// presence, and run the 1-Hz reconcile sweep — the codecov/mutants-excluded
+/// async shell over [`super::gate`] (#103), which owns the gate/reconcile
+/// decision so it stays covered and mutation-tested.
 pub(crate) async fn reducer_task(
     mut rx: TaggedReceiver,
     scene_tx: watch::Sender<Arc<SceneState>>,
@@ -240,30 +223,19 @@ pub(crate) async fn reducer_task(
         tokio::select! {
             event = rx.recv() => {
                 let Some((transport, ev)) = event else { break };
-                let now = SystemTime::now();
-                // Connection gate: drop a disconnected source's events before
-                // they register/refresh a sprite. No scene change → no send.
-                //
-                // Announced once per registered source, because this `continue`
-                // sits above the only `debug!` below: without it a gated source
-                // emits zero lines at every log level, making "connected but no
-                // sprite" indistinguishable from "not connected" — the two
-                // hypotheses a reader most needs to separate. Per-source, never
-                // per-event: a disconnected watcher streams indefinitely.
-                if let Some(src) = event_source(&scene, &ev).filter(|s| !connected.is_connected(s)) {
-                    if let Some(known) = registry::descriptor_for(src) {
-                        if gate_logged.insert(known.name) {
-                            tracing::debug!(
-                                source = known.name,
-                                "dropping events: source not connected"
-                            );
-                        }
-                    }
-                    continue;
-                }
-                tracing::debug!(?transport, ?ev, "event");
-                reducer.apply(&mut scene, ev, now, transport);
-                if scene_tx.send(Arc::new(scene.clone())).is_err() {
+                // Connection gate + apply, in the shared `gate` core (covered +
+                // mutation-tested; the async shell here is neither). A gated event
+                // mutates nothing, so publish only when it actually applied.
+                if gate::apply_gated_event(
+                    &mut reducer,
+                    &mut scene,
+                    ev,
+                    transport,
+                    &connected,
+                    SystemTime::now(),
+                    &mut gate_logged,
+                ) && scene_tx.send(Arc::new(scene.clone())).is_err()
+                {
                     tracing::warn!("scene channel closed — renderer dropped");
                     break;
                 }
@@ -274,27 +246,29 @@ pub(crate) async fn reducer_task(
             // AgentId-pure). Invariant #2. N daemons route by the tuple's source.
             update = presence_rx.recv(), if presence_open => {
                 match update {
-                    Some(PresenceMsg {
-                        source,
-                        delta: update,
-                    }) => {
-                        let now = SystemTime::now();
-                        // CONNECTION GATE (mirrors the AgentEvent arm above): a
-                        // daemon DISCONNECTED in the Sources panel has its presence
-                        // DROPPED — don't arm the exit watch, don't apply. Any
-                        // lingering entry is walked out by the sweep-tick reconcile.
-                        if connected.is_connected(&source) {
-                            // Arm the instant abrupt-down watch on the gateway pid —
-                            // from GatewayUp (gateway_start) OR PidSeen (#318: a
-                            // mid-attach / reconnect that never saw gateway_start, so
-                            // the pid rides a later event). `watch` is idempotent per
-                            // pid; `apply_presence` owns the None-only adoption.
-                            if let Some(ew) = presence_exit_watch.as_ref() {
-                                if let Some(pid) = update.armable_pid() {
-                                    ew.watch(&source, pid);
-                                }
+                    Some(PresenceMsg { source, delta }) => {
+                        // Connection gate + armable-pid selection + apply, in the
+                        // shared `gate` core (covered + mutation-tested) — the
+                        // presence twin of `apply_gated_event`. A disconnected
+                        // daemon's delta is dropped (walked out by the sweep-tick
+                        // reconcile); only `ew.watch` (IO) + the publish stay here.
+                        if let gate::PresenceGate::Applied { arm_pid } = gate::apply_gated_presence(
+                            &mut scene,
+                            &source,
+                            delta,
+                            &connected,
+                            SystemTime::now(),
+                        ) {
+                            // Arm the instant abrupt-down watch on the gateway pid
+                            // (GatewayUp/PidSeen #318). Arming AFTER apply_presence is
+                            // safe: the two touch DISJOINT state (the exit-watch pid
+                            // map vs scene.daemons), and a dead pid's synthesized
+                            // PidExited (ESRCH at registration) re-enters only on a
+                            // LATER select iteration — it can never observe a
+                            // half-applied arm within this synchronous arm.
+                            if let (Some(ew), Some(pid)) = (presence_exit_watch.as_ref(), arm_pid) {
+                                ew.watch(&source, pid);
                             }
-                            daemon::apply_presence(&mut scene, &source, update, now);
                             if scene_tx.send(Arc::new(scene.clone())).is_err() {
                                 tracing::warn!("scene channel closed — renderer dropped");
                                 break;
@@ -305,27 +279,10 @@ pub(crate) async fn reducer_task(
                 }
             }
             _ = sweep_interval.tick() => {
-                let now = SystemTime::now();
-                // Reconcile the scene toward the connected-set: walk out (idempotently)
-                // every sprite whose source is NOT connected. Stateless on purpose —
-                // no prev-set bookkeeping — and keyed on the COMPLEMENT of the set
-                // (not a registered-source list), so it ALSO evicts a blank-source
-                // slot synthesized for an identity-less event that slipped the
-                // per-event gate, closing that hole within one tick.
-                let cur = connected.snapshot();
-                reducer.reconcile_connected(&mut scene, &cur, now);
-                reducer.tick(&mut scene, now);
-                // Per-daemon presence reconcile + decay (registry-DRIVEN, N daemons):
-                // a panel-disconnected daemon walks its mascot out (Down → walk-out →
-                // DOWN_REMOVE removal — the presence side-channel is separate from the
-                // AgentEvent gate), and every daemon decays busy→idle / up→down on
-                // silence per its own TTL. A 2nd daemon needs no edit here.
-                for (source, ttl) in registry::daemon_sources() {
-                    if !connected.is_connected(source) {
-                        daemon::mark_presence_down(&mut scene, source, now);
-                    }
-                    daemon::sweep_presence_ttl(&mut scene, source, ttl, now);
-                }
+                // Walk out disconnected sources, advance exit-grace, decay daemon
+                // presence — the shared `gate` core (covered + mutation-tested; a
+                // 2nd daemon needs no edit, it is registry-DRIVEN).
+                gate::reconcile_sweep_tick(&mut reducer, &mut scene, &connected, SystemTime::now());
                 if scene_tx.send(Arc::new(scene.clone())).is_err() {
                     tracing::warn!("scene channel closed — renderer dropped");
                     break;
@@ -418,114 +375,6 @@ fn compute_boot_capacities() -> [usize; MAX_FLOORS] {
 mod tests {
     use super::*;
     use pixtuoid_core::source::manager::SourceDeath;
-    use pixtuoid_core::Transport;
-
-    // The connection gate on HOOK transport, end to end (#735). The reducer_task
-    // gate + the 1-Hz reconciler are two layers of ONE contract — a disconnected
-    // source renders no PERSISTENT sprite — and that contract had no hook-path
-    // test: `event_source_extracts_...` unit-tests the predicate, and #727's
-    // process pair covers only JSONL. This drives a REAL decoded hook payload
-    // through the exact gate loop reducer_task runs, both ways.
-    //
-    // The two layers matter separately because they cover different events in one
-    // payload. A hook `preToolUse` decodes to `[Identity{source}, ActivityStart]`
-    // (#221): the per-event gate drops the source-carrying `Identity`, but the
-    // bare `ActivityStart` that follows resolves to `None` in `event_source`
-    // (its id has no slot yet), slips the gate once, and `synthesize_hook_
-    // registration` mints a BLANK-source slot for it. The reconciler is the
-    // documented safety net that sweeps that blank slot (its `""` source is not
-    // in the connected set). The residual is bounded but NOT instant: the
-    // reconcile MARKS the slot exiting (`cascade_exit`), then it walks out over
-    // `EXIT_GRACE_WINDOW` (4.5s) before `sweep_exited` removes it — a few-second
-    // blank `#N`, not a one-tick disappearance. Bounded to at most ONE such slot
-    // per session id AT A TIME: a later event for the same id coalesces onto that
-    // one slot (AgentId identity) rather than adding another — so the transient
-    // never multiplies within a session, though a source that keeps firing
-    // re-mints one each GC cycle. Still not worth a third
-    // gating layer: an AgentId-keyed "gated ids" map with its own TTL/GC, to shave
-    // a self-correcting cosmetic that rides out alongside the source's real
-    // walk-out, is the defensive-arm smell the review taxonomy warns against — and
-    // it contradicts the documented "swept too. Stateless on purpose (no prev-set
-    // bookkeeping)" design. Returns (slots BEFORE the reconcile, live slots AFTER) so
-    // each layer gets independent teeth: a source-carrying event (SessionStart/
-    // Identity) is dropped by the GATE — 0 before reconcile — while a bare
-    // activity event only clears at the RECONCILE. A single "after" count would
-    // pass even with the gate removed (reconcile alone still sweeps), which is
-    // exactly the gap #735 flags.
-    fn drive_hook_gate(payload: &serde_json::Value, connected: &[&str]) -> (usize, usize) {
-        use pixtuoid_core::source::decoder::decode_hook_payload;
-        let cs = ConnectedSources::new(connected.iter().map(|s| s.to_string()).collect());
-        let mut scene = SceneState::uniform(8);
-        let mut reducer = Reducer::new();
-        let now = SystemTime::now();
-        // The exact reducer_task per-event gate.
-        for ev in decode_hook_payload(payload.clone()).expect("decode hook") {
-            if event_source(&scene, &ev)
-                .filter(|s| !cs.is_connected(s))
-                .is_some()
-            {
-                continue;
-            }
-            reducer.apply(&mut scene, ev, now, Transport::Hook);
-        }
-        let before = scene.agents.len();
-        // The 1-Hz reconcile sweep the loop runs on every tick.
-        reducer.reconcile_connected(&mut scene, &cs.snapshot(), now);
-        let live = scene
-            .agents
-            .values()
-            .filter(|s| s.exiting_at.is_none())
-            .count();
-        (before, live)
-    }
-
-    fn cursor_hook(event: &str) -> serde_json::Value {
-        // `_pixtuoid_source` is the only attribution the gate trusts — never the
-        // public `source` field (which CC overloads for the SessionStart reason).
-        serde_json::json!({
-            "hook_event_name": event, "session_id": "c7-sess", "cwd": "",
-            "conversation_id": "c7-sess", "workspace_roots": ["/x/proj"],
-            "tool_name": "Shell", "tool_input": {"command": "ls"},
-            "_pixtuoid_source": "cursor"
-        })
-    }
-
-    #[test]
-    fn the_gate_drops_a_disconnected_sources_carrying_hook_event_outright() {
-        // A `sessionStart` decodes to a single source-carrying `SessionStart`, so
-        // the per-event gate drops it BEFORE it ever registers — no transient at
-        // all. This is the layer #735 is about: remove the gate and this reds
-        // (the SessionStart registers, and only the reconcile would clean it).
-        let (before, live) = drive_hook_gate(&cursor_hook("sessionStart"), &["claude-code"]);
-        assert_eq!(
-            before, 0,
-            "the gate must drop a disconnected SessionStart pre-reconcile"
-        );
-        assert_eq!(live, 0, "and no sprite survives");
-    }
-
-    #[test]
-    fn a_disconnected_sources_hook_activity_leaves_no_persistent_sprite() {
-        // A bare activity event slips the gate once (its id has no slot, so
-        // `event_source` is None) and synthesizes a transient blank slot; the
-        // reconcile is the layer that sweeps it. Pins the CONTRACT (no persistent
-        // sprite), not the transient count, so a future fix that closes the
-        // one-slot window stays green.
-        let (_before, live) = drive_hook_gate(&cursor_hook("preToolUse"), &["claude-code"]);
-        assert_eq!(
-            live, 0,
-            "a disconnected source's hook activity must leave no live sprite after the reconcile"
-        );
-    }
-
-    #[test]
-    fn hook_events_for_a_connected_source_render() {
-        let (_before, live) = drive_hook_gate(&cursor_hook("preToolUse"), &["cursor"]);
-        assert_eq!(
-            live, 1,
-            "a connected source's hook activity must render exactly one live sprite"
-        );
-    }
 
     type HealthPair = (
         watch::Sender<Vec<SourceDeath>>,
@@ -576,63 +425,6 @@ mod tests {
              transcript-bearing source is registered but not built (it would never \
              spawn), or a built source isn't registered"
         );
-    }
-
-    // The Connection-gate seam: `event_source` decides which source an incoming
-    // event belongs to so reducer_task can drop a disconnected source's events.
-    // Carrying variants (SessionStart/Identity) self-identify; everything else
-    // resolves via the existing slot; an unknown id with no carried source slips
-    // the gate once (None) and is swept by the per-tick reconciler.
-    #[test]
-    fn event_source_extracts_source_for_the_connection_gate() {
-        use pixtuoid_core::AgentId;
-        let now = SystemTime::now();
-        let mut scene = SceneState::new([FALLBACK_DESKS; MAX_FLOORS]);
-        let mut reducer = Reducer::new();
-        let id = AgentId::from_transcript_path("/p/a.jsonl");
-
-        // SessionStart carries the source directly — even before the slot exists.
-        let ss = AgentEvent::SessionStart {
-            agent_id: id,
-            source: "claude-code".into(),
-            session_id: "s".into(),
-            cwd: PathBuf::from("/repo"),
-            parent_id: None,
-        };
-        assert_eq!(event_source(&scene, &ss), Some("claude-code"));
-
-        // Identity likewise self-identifies.
-        let idy = AgentEvent::Identity {
-            agent_id: id,
-            source: "codex".into(),
-            session_id: "s".into(),
-            cwd: None,
-            pid: None,
-        };
-        assert_eq!(event_source(&scene, &idy), Some("codex"));
-
-        // A non-carrying event for an UNKNOWN id slips the gate (None) — the
-        // reconciler is the safety net.
-        let act = AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: None,
-            detail: None,
-        };
-        assert_eq!(event_source(&scene, &act), None);
-
-        // Once registered, the same event resolves via the slot's source.
-        reducer.apply(&mut scene, ss, now, Transport::Jsonl);
-        assert_eq!(event_source(&scene, &act), Some("claude-code"));
-
-        // An EMPTY source on a carrying variant falls through to the slot.
-        let empty = AgentEvent::Identity {
-            agent_id: id,
-            source: String::new(),
-            session_id: "s".into(),
-            cwd: None,
-            pid: None,
-        };
-        assert_eq!(event_source(&scene, &empty), Some("claude-code"));
     }
 
     #[tokio::test(start_paused = true)]
