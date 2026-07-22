@@ -372,12 +372,11 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 /// axis. It stays SILENT on an unhandled `sessionUpdate` TAG under a KNOWN method
 /// (the HIGH-cardinality axis: the ACP chunk tags stream per token, xAI emits
 /// cosmetic churn — breadcrumbing each would flood, and `drift::unknown_event` has
-/// NO dedup). The finer ACP-tag tier (breadcrumb a NEW ACP `sessionUpdate`
-/// *capability* under `session/update`) is DEFERRED to #766: pinning its complete
-/// set without flooding on a per-token chunk needs the ACP `SessionUpdate` enum
-/// fetched from the external `agent-client-protocol` crate — a crates.io fetch
-/// modality `check_upstream_drift.py` doesn't yet have (the ACP half is already
-/// deliberately unfetched, pinned upstream by grok's own `wire_tags` guard).
+/// NO dedup). The finer ACP-tag tier (#766) now lives in the shared
+/// `source/acp.rs` (`KNOWN_ACP_TAGS` + `decode_session_update`), which the
+/// `session/update` arm of `decode_grok_line` delegates to — it breadcrumbs an
+/// unknown `sessionUpdate` tag while staying silent on the known per-token chunks;
+/// drift-watched against the live v1 ACP schema by `read_acp_tags`.
 const KNOWN_METHODS: &[&str] = &["session/update", "_x.ai/session/update"];
 
 /// Decode one `updates.jsonl` line. Envelope (storage/mod.rs
@@ -426,111 +425,107 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
         return Ok(vec![]);
     };
     let str_field = |key: &str| update.get(key).and_then(|s| s.as_str());
-    let tool_call_id = || str_field("toolCallId").map(String::from);
 
-    match (method, tag) {
-        ("session/update", "tool_call") => Ok(vec![AgentEvent::ActivityStart {
+    match method {
+        // The ACP-STANDARD notifications → the shared ACP decoder (source/acp.rs):
+        // the tag vocabulary + lifecycle (tool_call→ActivityStart, tool_call_update
+        // terminal→ActivityEnd) + the flood-safe unknown-tag breadcrumb (#766).
+        // grok's tool vocabulary + Task-detection stay bespoke, injected as the
+        // detail builder (invariant #3: per-source dispatch judgment).
+        "session/update" => Ok(crate::source::acp::decode_session_update(
             agent_id,
-            tool_use_id: tool_call_id(),
-            detail: Some(grok_transcript_tool_detail(
-                str_field("title").unwrap_or("?"),
-                update.get("rawInput"),
-            )),
-        }]),
-        ("session/update", "tool_call_update") => {
-            // `status` is one of pending/in_progress/completed/failed — only
-            // the two terminal ones end the activity; a status-less update
-            // (content/locations delta) is not a completion either.
-            match str_field("status") {
-                Some("completed") | Some("failed") => Ok(vec![AgentEvent::ActivityEnd {
-                    agent_id,
-                    tool_use_id: tool_call_id(),
-                }]),
-                _ => Ok(vec![]),
-            }
-        }
-        ("_x.ai/session/update", "subagent_spawned") => {
-            let Some(child_key) =
-                str_field("child_session_id").or_else(|| str_field("subagent_id"))
-            else {
-                crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
-                return Ok(vec![]);
-            };
-            let child = AgentId::from_parts(SOURCE_NAME, child_key);
-            let mut evs = vec![AgentEvent::SessionStart {
-                agent_id: child,
-                source: SOURCE_NAME.to_string(),
-                session_id: child_key.to_string(),
-                // The line carries no cwd; the child's own flat transcript
-                // first-sight (path-derived cwd) or its tool hooks back-fill.
-                cwd: PathBuf::new(),
-                parent_id: Some(agent_id),
-            }];
-            if let Some(label) = str_field("description")
-                .filter(|s| !s.is_empty())
-                .or_else(|| str_field("subagent_type"))
-                .filter(|s| !s.is_empty())
-            {
-                evs.push(AgentEvent::Rename {
+            SOURCE_NAME,
+            update,
+            grok_transcript_tool_detail,
+        )),
+        // xAI PRIVATE extension namespace (`_`-prefix = ACP's reserved
+        // implementation-specific marker) — NOT ACP vocabulary, stays fully bespoke.
+        "_x.ai/session/update" => match tag {
+            "subagent_spawned" => {
+                let Some(child_key) =
+                    str_field("child_session_id").or_else(|| str_field("subagent_id"))
+                else {
+                    crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
+                    return Ok(vec![]);
+                };
+                let child = AgentId::from_parts(SOURCE_NAME, child_key);
+                let mut evs = vec![AgentEvent::SessionStart {
                     agent_id: child,
-                    label: ellipsize(label, MAX_DECODED_FIELD_CHARS),
-                });
+                    source: SOURCE_NAME.to_string(),
+                    session_id: child_key.to_string(),
+                    // The line carries no cwd; the child's own flat transcript
+                    // first-sight (path-derived cwd) or its tool hooks back-fill.
+                    cwd: PathBuf::new(),
+                    parent_id: Some(agent_id),
+                }];
+                if let Some(label) = str_field("description")
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| str_field("subagent_type"))
+                    .filter(|s| !s.is_empty())
+                {
+                    evs.push(AgentEvent::Rename {
+                        agent_id: child,
+                        label: ellipsize(label, MAX_DECODED_FIELD_CHARS),
+                    });
+                }
+                Ok(evs)
             }
-            Ok(evs)
-        }
-        ("_x.ai/session/update", "subagent_finished") => {
-            let Some(child_key) =
-                str_field("child_session_id").or_else(|| str_field("subagent_id"))
-            else {
-                crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
-                return Ok(vec![]);
-            };
-            Ok(vec![AgentEvent::SessionEnd {
-                agent_id: AgentId::from_parts(SOURCE_NAME, child_key),
-                as_child: true,
-            }])
-        }
-        ("_x.ai/session/update", "model_changed") => {
-            let model = str_field("model_id")
-                .filter(|s| !s.is_empty())
-                .map(|m| ellipsize(m, MAX_DECODED_FIELD_CHARS));
-            let effort = str_field("reasoning_effort")
-                .filter(|s| !s.is_empty())
-                .map(|e| ellipsize(e, MAX_DECODED_FIELD_CHARS));
-            if model.is_none() && effort.is_none() {
-                return Ok(vec![]);
-            }
-            Ok(vec![AgentEvent::ModelInfo {
-                agent_id,
-                model,
-                effort,
-            }])
-        }
-        // Turn end — the transcript twin of the `stop` hook, settling a
-        // tool-less turn to idle for transcript-only setups. Drift-watched
-        // via the TurnCompleted arm of GROK_XAI_VARIANTS.
-        ("_x.ai/session/update", "turn_completed") => Ok(vec![AgentEvent::ActivityEnd {
-            agent_id,
-            tool_use_id: None,
-        }]),
-        ("_x.ai/session/update", "hook_execution") => {
-            if str_field("event_name") == Some("session_end") {
+            "subagent_finished" => {
+                let Some(child_key) =
+                    str_field("child_session_id").or_else(|| str_field("subagent_id"))
+                else {
+                    crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
+                    return Ok(vec![]);
+                };
                 Ok(vec![AgentEvent::SessionEnd {
-                    agent_id,
-                    as_child: false,
+                    agent_id: AgentId::from_parts(SOURCE_NAME, child_key),
+                    as_child: true,
                 }])
-            } else {
-                Ok(vec![])
             }
-        }
-        // A `method` OUTSIDE KNOWN_METHODS is a brand-new top-level wire namespace
-        // (a structural change) — breadcrumb it (defense #2, the live-stream signal
-        // for a new grok method family; the hook side breadcrumbs its own transport
-        // separately). An unhandled TAG under a KNOWN method falls through to the
-        // silent `_` below — the high-cardinality axis whose finer ACP breadcrumb
-        // tier is deferred (see KNOWN_METHODS). An empty-string method (an absent
-        // one already bailed) is a degenerate line — `!m.is_empty()` skips it.
-        (m, _) if !m.is_empty() && !KNOWN_METHODS.contains(&m) => {
+            "model_changed" => {
+                let model = str_field("model_id")
+                    .filter(|s| !s.is_empty())
+                    .map(|m| ellipsize(m, MAX_DECODED_FIELD_CHARS));
+                let effort = str_field("reasoning_effort")
+                    .filter(|s| !s.is_empty())
+                    .map(|e| ellipsize(e, MAX_DECODED_FIELD_CHARS));
+                if model.is_none() && effort.is_none() {
+                    return Ok(vec![]);
+                }
+                Ok(vec![AgentEvent::ModelInfo {
+                    agent_id,
+                    model,
+                    effort,
+                }])
+            }
+            // Turn end — the transcript twin of the `stop` hook, settling a
+            // tool-less turn to idle for transcript-only setups. Drift-watched
+            // via the TurnCompleted arm of GROK_XAI_VARIANTS.
+            "turn_completed" => Ok(vec![AgentEvent::ActivityEnd {
+                agent_id,
+                tool_use_id: None,
+            }]),
+            "hook_execution" => {
+                if str_field("event_name") == Some("session_end") {
+                    Ok(vec![AgentEvent::SessionEnd {
+                        agent_id,
+                        as_child: false,
+                    }])
+                } else {
+                    Ok(vec![])
+                }
+            }
+            // grok emits many cosmetic xAI updates (diff_review, compaction,
+            // rewind_marker, …); an unhandled extension tag is a silent skip — the
+            // high-cardinality axis (the low-card ACP tag tier lives in acp.rs).
+            _ => Ok(vec![]),
+        },
+        // Method tier (#767): a `method` OUTSIDE KNOWN_METHODS is a brand-new
+        // top-level wire namespace (structural) → breadcrumb (defense #2, the
+        // live-stream signal for a new grok method family; the hook side
+        // breadcrumbs its own transport separately). An empty-string method (an
+        // absent one already bailed) is a degenerate line — `!m.is_empty()` skips it.
+        m if !m.is_empty() && !KNOWN_METHODS.contains(&m) => {
             crate::source::drift::unknown_event(SOURCE_NAME, m);
             Ok(vec![])
         }
@@ -1418,14 +1413,15 @@ mod tests {
         }
     }
 
-    /// The method tail arm: a brand-new top-level `method` breadcrumbs (the
-    /// live-stream signal for a new grok wire namespace), while an unhandled
-    /// `sessionUpdate` TAG under a KNOWN method stays SILENT — the high-cardinality
-    /// axis (ACP chunk tags stream per token; the xAI method emits cosmetic churn),
-    /// whose finer ACP-capability breadcrumb is deferred to #766.
+    /// grok breadcrumbs at TWO tiers: an unknown top-level `method` (method tier,
+    /// #767) AND — delegating to the shared `acp::decode_session_update` — an
+    /// unknown ACP `sessionUpdate` tag under `session/update` (tag tier, #766).
+    /// The per-token ACP chunks and the xAI extension's cosmetic churn stay SILENT
+    /// (the high-cardinality axes). This pins the DELEGATION end-to-end (the tag
+    /// tier's own exhaustive coverage lives in `source::acp::tests`).
     #[test]
-    fn unknown_method_breadcrumbs_but_known_method_unhandled_tags_stay_silent() {
-        // novel method → breadcrumb the method itself.
+    fn unknown_method_and_acp_tag_breadcrumb_but_chunks_and_xai_stay_silent() {
+        // novel method → method-tier breadcrumb.
         let novel = json!({"timestamp": 1721131200u64, "method": "_x.ai/session/telemetry",
                            "params": {"sessionId": "s", "update": {"sessionUpdate": "beam"}}});
         let logs = crate::test_capture::capture_logs(|| {
@@ -1439,14 +1435,25 @@ mod tests {
             "a brand-new grok method must fire the drift breadcrumb, got:\n{logs}"
         );
 
-        // silent-real: unhandled tags under the TWO known methods must stay SILENT.
-        // The ACP per-token chunks are the flood case a mis-scoped guard would hit;
-        // a future ACP capability under `session/update` stays silent BY DESIGN (the
-        // tag-tier is deferred, #766); the xAI method's cosmetic churn stays silent.
+        // novel ACP tag under session/update → tag-tier breadcrumb, delegated to
+        // acp.rs, with the composed `session/update:{tag}` name.
+        let tag_logs = crate::test_capture::capture_logs(|| {
+            assert!(decode_line(acp_line(
+                json!({"sessionUpdate": "future_acp_capability_2027"})
+            ))
+            .is_empty());
+        });
+        assert!(
+            tag_logs.contains("unknown_event")
+                && tag_logs.contains("session/update:future_acp_capability_2027"),
+            "a brand-new ACP sessionUpdate tag must breadcrumb via the shared acp decode, got:\n{tag_logs}"
+        );
+
+        // silent-real: the per-token ACP chunks (the flood case) + the xAI
+        // extension's cosmetic churn must stay SILENT.
         for v in [
             acp_line(json!({"sessionUpdate": "agent_message_chunk"})),
             acp_line(json!({"sessionUpdate": "user_message_chunk"})),
-            acp_line(json!({"sessionUpdate": "future_acp_capability_2027"})),
             xai_line(json!({"sessionUpdate": "diff_review"})),
             xai_line(json!({"sessionUpdate": "rewind_marker_2027"})),
         ] {
@@ -1455,7 +1462,7 @@ mod tests {
             });
             assert!(
                 !quiet.contains("unknown_event"),
-                "an unhandled tag under a known method must NOT breadcrumb, got:\n{quiet}"
+                "a per-token chunk or xAI tag must NOT breadcrumb, got:\n{quiet}"
             );
         }
     }

@@ -500,6 +500,22 @@ GROK_XAI_FIELDS = {
 # rename_all — field idents ARE the wire names). A rename silently degrades the
 # whole liveness ladder (probe → instant exit → negative vouch) to mtime gating.
 GROK_ACTIVE_SESSION_FIELDS = {"session_id", "pid", "cwd", "opened_at"}
+# The ACP (Agent Client Protocol) v1 `SessionUpdate` tag vocabulary the SHARED
+# `source/acp.rs` flood-guards (grok is the sole ACP-transcript source today; #766).
+# The canonical schema lives in the `agentclientprotocol` org (the `zed-industries`
+# slug 301-redirects there). grok pins `features = ["unstable"]`, so its real
+# surface is the UNION of the v1 stable + v1 unstable tag sets — we fetch both and
+# union. v2 is a SEPARATE, partly non-overlapping line grok does NOT speak → NOT
+# fetched (its tags would be false "adopt terminal_update" noise). `main` tracks the
+# latest v1, matching KNOWN_ACP_TAGS' "latest v1, no version-fallback" anchor.
+ACP_V1_SCHEMA_URL = (
+    "https://raw.githubusercontent.com/agentclientprotocol/"
+    "agent-client-protocol/main/schema/v1/schema.json"
+)
+ACP_V1_SCHEMA_UNSTABLE_URL = (
+    "https://raw.githubusercontent.com/agentclientprotocol/"
+    "agent-client-protocol/main/schema/v1/schema.unstable.json"
+)
 
 # Oh My Pi (omp) is TRANSCRIPT-ONLY: the decoder tails the session JSONL, so the
 # depended names are the entry `type` discriminators (source/omp.rs `match kind`)
@@ -961,6 +977,16 @@ def read_grok_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/grok.rs", "GROK_EVENTS")
 
 
+def read_acp_tags() -> set[str]:
+    """The ACP v1 `sessionUpdate` tag vocabulary the shared `source/acp.rs`
+    flood-guards, read from its `KNOWN_ACP_TAGS` const. The ACP tag tier
+    breadcrumbs a tag OUTSIDE this set, and `drift::unknown_event` has NO dedup —
+    so an upstream v1 tag missing from it (esp. a per-token `*_message_chunk`)
+    would flood. The report diffs this against the live v1 schema so a new upstream
+    tag is a review ping BEFORE it floods."""
+    return rust_const_str_array("crates/pixtuoid-core/src/source/acp.rs", "KNOWN_ACP_TAGS")
+
+
 def read_kimi_events() -> set[str]:
     """The PascalCase hook events we register/decode, read from the `KIMI_EVENTS`
     const in install/kimi.rs — the SAME registered list the
@@ -978,6 +1004,41 @@ def upstream_grok_hooks(text: str) -> set[str] | None:
         return None
     found = set(re.findall(r"(?m)^\s*([A-Z]\w+),", m.group(1)))
     return found or None
+
+
+def upstream_acp_session_update_tags(text: str) -> set[str] | None:
+    """The ACP `SessionUpdate` discriminator tags from a v1 JSON schema — the
+    `sessionUpdate` `const` of each member of the `$defs.SessionUpdate` closed
+    `oneOf` union (members carry the const INLINE; a `$ref` member is resolved).
+    Returns None if the schema won't parse or the union is absent (→ the caller
+    alarms breaking, the ACP tag flood guard is blind)."""
+    try:
+        root = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    defs = root.get("$defs") or root.get("definitions") or {}
+    if not isinstance(defs, dict):
+        return None
+    su = defs.get("SessionUpdate")
+    members = su.get("oneOf") or su.get("anyOf") if isinstance(su, dict) else None
+    if not isinstance(members, list):
+        return None
+    tags: set[str] = set()
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        node = member
+        ref = member.get("$ref", "")
+        if ref:
+            node = defs.get(ref.rsplit("/", 1)[-1], {})
+        const = (
+            node.get("properties", {}).get("sessionUpdate", {}).get("const")
+            if isinstance(node, dict)
+            else None
+        )
+        if isinstance(const, str):
+            tags.add(const)
+    return tags or None
 
 
 def _copilot_type_const(sch: object) -> str | None:
@@ -1441,6 +1502,40 @@ def run_checks(
                         f"parsing and the WHOLE liveness ladder (probe / instant exit / "
                         f"negative vouch / focus) degrades to mtime gating."
                     )
+
+    # --- ACP v1 SessionUpdate tags — the shared source/acp.rs flood guard (#766) --
+    # A NEW upstream v1 tag NOT in KNOWN_ACP_TAGS makes `acp::decode_session_update`
+    # `drift::unknown_event` on EVERY line of it (no dedup) → warn-floor flood, so a
+    # new tag is a REVIEW ping to add it (decode it or knowingly ignore it). grok
+    # pins features=["unstable"], so its surface is the UNION of v1 stable + unstable;
+    # we fetch both. Review-class, never breaking — the reverse (a KNOWN_ACP_TAGS
+    # member gone upstream) is a benign stale entry.
+    known_acp = read_acp_tags()
+    up_acp: set[str] = set()
+    acp_parsed = False
+    for url, label in (
+        (ACP_V1_SCHEMA_URL, "ACP v1 schema"),
+        (ACP_V1_SCHEMA_UNSTABLE_URL, "ACP v1 unstable schema"),
+    ):
+        text = try_fetch(url, label, breaking, errors)
+        if text is not None:
+            tags = upstream_acp_session_update_tags(text)
+            if tags is None:
+                breaking.append(
+                    f"ACP `SessionUpdate` oneOf not found in {label} — upstream "
+                    "restructured the schema; update upstream_acp_session_update_tags / "
+                    "the ACP_V1_SCHEMA* URLs (the ACP tag flood guard is blind)."
+                )
+            else:
+                up_acp |= tags
+                acp_parsed = True
+    if acp_parsed:
+        for tag in sorted(up_acp - known_acp):
+            review.append(
+                f"new ACP v1 `sessionUpdate` tag `{tag}` upstream not in KNOWN_ACP_TAGS "
+                f"(source/acp.rs) — the ACP tag tier will breadcrumb EVERY line of it "
+                f"(drift flood); add it to KNOWN_ACP_TAGS (decode it, or knowingly ignore it)."
+            )
 
     # --- Copilot event types (only the FETCH is transient) -----------------
     if copilot_ours is not None:
