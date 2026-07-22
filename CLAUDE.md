@@ -134,7 +134,7 @@ flat, three of them deliberately publish-excluded) with `#[cfg(windows)]` parity
 the headless render harness (`tui_renderer/harness`) drives the real
 `TuiRenderer` through ratatui `TestBackend` — see the tui guide. Coverage:
 `just coverage`. Decoder never-panic fuzz vs a real session corpus:
-`just fuzz <jsonl-dir>` (on-demand, not in CI). Mutation testing (do the
+`just fuzz <source> <jsonl-dir>` (on-demand, not in CI). Mutation testing (do the
 assertions have teeth?): `just mutants` — diff-scoped (`cargo-mutants
 --in-diff` vs origin/main), config in `.cargo/mutants.toml`; in CI it is its own
 **on-demand** workflow (`mutants.yml`, `workflow_dispatch` from the Actions tab),

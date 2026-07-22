@@ -1136,4 +1136,84 @@ mod tests {
             );
         }
     }
+
+    use proptest::prelude::*;
+
+    /// A depth-capped arbitrary `serde_json::Value` — the proptest-book
+    /// `prop_recursive` shape (leaf | array | object) plus a "JSON re-encoded as
+    /// a string" arm, so a string can itself carry nested JSON — the kind of
+    /// payload codex's `function_call.arguments` reparse consumes (the exact
+    /// gated shape is rarely hit by random keys; the never-panic contract holds
+    /// for it regardless). The bounds
+    /// (4 deep / 64 nodes / 8 wide) keep generation terminating — the decoders do
+    /// flat `.get("a").get("b")` chains, never deep recursion, so a shallow tree
+    /// exercises every arm.
+    fn arb_json() -> impl Strategy<Value = serde_json::Value> {
+        use serde_json::Value;
+        let leaf = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::from),
+            any::<i64>().prop_map(Value::from),
+            any::<f64>()
+                .prop_filter("finite", |x| x.is_finite())
+                .prop_map(Value::from),
+            ".*".prop_map(Value::from),
+        ];
+        leaf.prop_recursive(4, 64, 8, |inner| {
+            prop_oneof![
+                proptest::collection::vec(inner.clone(), 0..8).prop_map(Value::Array),
+                proptest::collection::hash_map(".*", inner.clone(), 0..8)
+                    .prop_map(|m| Value::Object(m.into_iter().collect())),
+                inner.prop_map(|v| Value::String(v.to_string())),
+            ]
+        })
+    }
+
+    proptest! {
+        // #748(b): the decoders' never-panic contract (the JSONL watcher +
+        // hook listener LOG+CONTINUE on a malformed line — a panic would take the
+        // whole watcher down) was checked ONLY by the on-demand `just fuzz`
+        // corpus, never in CI. Make it a per-CI property over EVERY registered
+        // `LineDecoder`, iterated from REGISTRY so a newly-added source is covered
+        // with zero test edits. An `Err` is fine — the mere call under proptest's
+        // `catch_unwind` IS the property; a panic shrinks to a minimal Value.
+        #[test]
+        fn every_line_decoder_never_panics_on_arbitrary_json(v in arb_json()) {
+            for d in REGISTRY {
+                if let Some(decode) = d.line_decoder() {
+                    let _ = decode("/fixture/session.jsonl", d.name, v.clone());
+                }
+                // The paired first-sight cwd extractor also runs on untrusted
+                // transcript-head content in the walker — same never-panic contract.
+                if let Some(extract) = d.cwd_extractor() {
+                    let _ = extract(&v);
+                }
+            }
+        }
+
+        // The hook + presence surface carries the SAME never-panic contract as
+        // the JSONL line decoders; cover the whole `fn(Value) -> Result` decode
+        // surface with the same fuzzed Value, not just the transcript half.
+        #[test]
+        fn every_hook_and_presence_decoder_never_panics(v in arb_json()) {
+            for d in REGISTRY {
+                if let Some(hook) = d.hook() {
+                    match hook.custom {
+                        Some(HookCustom::Extend(f)) => {
+                            let _ = f(&v);
+                        }
+                        Some(HookCustom::ClaimsAll(f)) => {
+                            let _ = f(&v);
+                        }
+                        None => {}
+                    }
+                }
+                if let Some(presence) = d.presence_decoder() {
+                    let _ = presence(&v);
+                }
+            }
+            // The shared CC-shaped hook entry (takes the Value by value).
+            let _ = crate::source::decoder::decode_hook_payload(v.clone());
+        }
+    }
 }
