@@ -162,6 +162,41 @@ pub fn claude_config_dir() -> Option<PathBuf> {
     crate::platform::nonempty(std::env::var("CLAUDE_CONFIG_DIR").ok()).map(PathBuf::from)
 }
 
+/// The COMPLETE set of CC transcript top-level `type` discriminators, verified
+/// empirically against a live `~/.claude/projects` corpus. CC is a CLOSED binary
+/// — there is NO fetchable transcript-format schema, so unlike codex/copilot/omp/
+/// grok this axis gets NO CI drift-watch; the runtime breadcrumb below is the SOLE
+/// defense (the antigravity `defense-#2-only` class). The tail breadcrumbs a
+/// top-level `type` OUTSIDE this set — a brand-new line SHAPE, and the axis
+/// visibly churns (`worktree-state`/`relocated`/`frame-link` are recent CC
+/// additions), so this live-stream breadcrumb is the only way the repo learns CC
+/// added one. It stays SILENT on the HIGH-cardinality INNER `attachment.type`
+/// (`hook_success` streams ~per tool-call) — breadcrumbing that would flood, per
+/// drift.rs's anti-flood rule. `user`/`assistant`/`attachment` are decoded; the
+/// rest are session-metadata/sidecar lines we knowingly ignore. Set to the LATEST
+/// format only (legacy `summary`/`progress` are intentionally absent — a replayed
+/// legacy line breadcrumbs at session-frequency, not a flood).
+const KNOWN_TYPES: &[&str] = &[
+    "agent-name",
+    "ai-title",
+    "assistant",
+    "attachment",
+    "bridge-session",
+    "custom-title",
+    "file-history-delta",
+    "file-history-snapshot",
+    "frame-link",
+    "last-prompt",
+    "mode",
+    "permission-mode",
+    "pr-link",
+    "queue-operation",
+    "relocated",
+    "system",
+    "user",
+    "worktree-state",
+];
+
 /// Decode one CC JSONL transcript line into 0..N AgentEvents.
 pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     // Key on the session UUID (filename stem), NOT the raw path — matches the
@@ -174,6 +209,14 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
 
     let mut out = Vec::new();
     let ty = obj.get("type").and_then(|s| s.as_str()).unwrap_or("");
+
+    // An unrecognized top-level `type` is a structural wire change — breadcrumb it
+    // (defense #2). Guarded on the LOW-cardinality top-level `type` (session-freq),
+    // never the HIGH-cardinality inner `attachment.type`. A known type still runs
+    // its handling below; only the breadcrumb is new. Empty type = a typeless line.
+    if !ty.is_empty() && !KNOWN_TYPES.contains(&ty) {
+        crate::source::drift::unknown_event(source, ty);
+    }
 
     // `.filter(non-empty)`: an empty `attributionAgent` would emit `Rename {
     // label: "" }`, blanking a good hook-derived label with no recovery until the
@@ -812,6 +855,57 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "a bare string line must emit no events"
+        );
+    }
+
+    /// The top-level `type` breadcrumb: a brand-new pseudo-type fires the drift
+    /// signal (CC's ONLY drift instrument — no fetchable schema), while every
+    /// KNOWN current type stays SILENT, INCLUDING an `attachment` line carrying a
+    /// brand-new inner `attachment.type` (the high-cardinality axis that streams
+    /// per tool-call — guarding it would flood).
+    #[test]
+    fn unknown_top_level_type_breadcrumbs_but_known_and_inner_attachment_stay_silent() {
+        let path = "/x/.claude/projects/p/s.jsonl";
+        // novel top-level type → breadcrumb.
+        let logs = crate::test_capture::capture_logs(|| {
+            let out = decode_cc_line(
+                path,
+                "claude-code",
+                json!({"type": "quantum-line", "foo": 1}),
+            )
+            .unwrap();
+            assert!(
+                out.is_empty(),
+                "an unknown top-level type decodes to no events"
+            );
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("quantum-line"),
+            "a brand-new CC top-level type must fire the drift breadcrumb, got:\n{logs}"
+        );
+
+        // silent-real: every KNOWN current type — the session-metadata sidecar
+        // lines we ignore + the decoded shapes — stays silent (a KNOWN_TYPES
+        // omission would breadcrumb these at session-frequency). The last case is a
+        // real `attachment` line whose INNER attachment.type is brand-new: only the
+        // top-level `type` is guarded, so the per-tool-call inner axis never floods.
+        let quiet = crate::test_capture::capture_logs(|| {
+            for v in [
+                json!({"type": "mode", "mode": "acceptEdits"}),
+                json!({"type": "last-prompt", "prompt": "hi"}),
+                json!({"type": "worktree-state"}),
+                json!({"type": "frame-link", "url": "x"}),
+                json!({"type": "pr-link"}),
+                json!({"type": "bridge-session"}),
+                json!({"type": "system", "subtype": "brand_new_subtype_2027"}),
+                json!({"type": "attachment", "attachment": {"type": "brand_new_kind_2027"}}),
+            ] {
+                decode_cc_line(path, "claude-code", v).unwrap();
+            }
+        });
+        assert!(
+            !quiet.contains("unknown_event"),
+            "known top-level types + a novel inner attachment.type must NOT breadcrumb, got:\n{quiet}"
         );
     }
 
