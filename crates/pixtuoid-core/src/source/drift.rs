@@ -11,6 +11,22 @@
 //! from the real stream", `pixtuoid-core/CLAUDE.md`) finally made VISIBLE instead
 //! of stranded in a log nobody reads — the gap the Task→Agent rename exposed.
 //!
+//! **The flood-safe axis rule (`unknown_event` has NO dedup — it warns per
+//! line).** A transcript decoder's tail may breadcrumb an unrecognized shape
+//! ONLY on a LOW-cardinality STRUCTURAL axis — a brand-new line SHAPE the source
+//! emits a bounded number of (codex's `RolloutItem` OUTER, copilot's `type`
+//! NAMESPACE, omp's entry `type`). It MUST stay SILENT on the HIGH-cardinality
+//! EVENT axis — a new value under a shape we already ignore dozens of per turn
+//! (codex's `EventMsg`/`ResponseItem` inners, copilot's `assistant.*_delta`,
+//! omp's `customType`) — because one warn per line there floods the warn-floor.
+//! Each decoder pins its axis in a `KNOWN_*` const whose COMPLETE set is verified
+//! against live upstream and (where the schema is fetchable) drift-watched by
+//! `check_upstream_drift.py`, so a new upstream shape is a CI review ping BEFORE
+//! it can flood. This is a per-decoder DOMAIN judgment (the axis lands in a
+//! different position each source — a match arm, a namespace projection, a
+//! two-tier dispatch), not a shared abstraction: the guard is 3 lines, the axis
+//! choice is irreducible, so the principle is codified HERE and applied inline.
+//!
 //! `source` is a static registry source name (safe). The free-form values
 //! (`name`/`field`/`tool`/`detail`) are untrusted wire content — every consumer
 //! sanitizes (the headless path's `sanitize_line`, the footer's cell buffer).

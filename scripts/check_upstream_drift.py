@@ -892,6 +892,17 @@ def read_omp_entry_types() -> set[str]:
     return set(re.findall(r'(?m)^\s*"(\w+)"\s*(?:=>|if\b|$)', m.group(1)))
 
 
+def read_omp_known_types() -> set[str]:
+    """The COMPLETE session-entry `type` set the transcript tail flood-guards, read
+    from the `KNOWN_ENTRY_TYPES` const in `source/omp.rs` (the full `RawFileEntry`
+    union — NOT just the arms we decode, which is `read_omp_entry_types`). The tail
+    breadcrumbs a `type` OUTSIDE this set, and `drift::unknown_event` has NO dedup,
+    so an upstream entry type missing from it would flood the warn-floor on every
+    line of it. The report diffs this against the live `RawFileEntry` literals so a
+    new upstream type is a review ping BEFORE it floods."""
+    return rust_const_str_array("crates/pixtuoid-core/src/source/omp.rs", "KNOWN_ENTRY_TYPES")
+
+
 def read_copilot_events() -> set[str]:
     """The event `type` strings the decoder maps, read from the `match kind`
     block in source/copilot.rs (the source of truth — stays in sync with the
@@ -902,6 +913,17 @@ def read_copilot_events() -> set[str]:
     if not m:
         raise RuntimeError("could not locate the `match kind` block in source/copilot.rs")
     return set(re.findall(r'"((?:session|tool|subagent|permission)\.[a-z._]+)"', m.group(1)))
+
+
+def read_copilot_namespaces() -> set[str]:
+    """The event-`type` NAMESPACE families the transcript tail flood-guards, read
+    from the `KNOWN_NAMESPACES` const in `source/copilot.rs`. The tail breadcrumbs a
+    `type` whose namespace is OUTSIDE this set, and `drift::unknown_event` has NO
+    dedup — so an upstream `SessionEvent` namespace missing from it would flood the
+    warn-floor on every line of that family. The report diffs this against the live
+    `SessionEvent` union so a new upstream namespace is a review ping BEFORE it
+    floods."""
+    return rust_const_str_array("crates/pixtuoid-core/src/source/copilot.rs", "KNOWN_NAMESPACES")
 
 
 def read_cursor_events() -> set[str]:
@@ -958,6 +980,24 @@ def upstream_grok_hooks(text: str) -> set[str] | None:
     return found or None
 
 
+def _copilot_type_const(sch: object) -> str | None:
+    """The wire `type` string a copilot schema definition pins — `properties.type`
+    as a `const` (or a single-element `enum`). Shared by upstream_copilot_events
+    (walks ALL definitions) and upstream_copilot_namespaces (the SessionEvent
+    union only) so the two can't drift on how a type-tag is expressed."""
+    if not isinstance(sch, dict):
+        return None
+    t = sch.get("properties", {}).get("type")
+    if not isinstance(t, dict):
+        return None
+    c = t.get("const")
+    if c is None:
+        enum = t.get("enum")
+        if isinstance(enum, list) and len(enum) == 1:
+            c = enum[0]
+    return c if isinstance(c, str) else None
+
+
 def upstream_copilot_events(text: str) -> set[str] | None:
     """The per-event `type` consts from the @github/copilot session-events JSON
     schema. Each event is a `definitions.<Name>` object whose `properties.type`
@@ -966,21 +1006,48 @@ def upstream_copilot_events(text: str) -> set[str] | None:
         defs = json.loads(text).get("definitions", {})
     except (json.JSONDecodeError, AttributeError):
         return None
-    consts: set[str] = set()
-    for sch in defs.values():
-        if not isinstance(sch, dict):
-            continue
-        t = sch.get("properties", {}).get("type")
-        if not isinstance(t, dict):
-            continue
-        c = t.get("const")
-        if c is None:
-            enum = t.get("enum")
-            if isinstance(enum, list) and len(enum) == 1:
-                c = enum[0]
-        if isinstance(c, str):
-            consts.add(c)
+    consts = {c for sch in defs.values() if (c := _copilot_type_const(sch))}
     return consts or None
+
+
+def upstream_copilot_namespaces(text: str) -> set[str] | None:
+    """The NAMESPACE families (prefix before the first `.`) of the copilot
+    `SessionEvent` union — the `definitions.SessionEvent.anyOf` members' own `type`
+    consts, grouped to their family. Scoped to the anyOf union ON PURPOSE: a naive
+    walk of ALL `definitions` (upstream_copilot_events) also pulls in nested-content
+    type-tags (`audio`/`text`/`image`/`file`/…) that share the `type.const` shape
+    but are never a top-level envelope `type`, inflating the set with ~30 phantom
+    families. Returns None if the schema won't parse or the union is absent (→ the
+    caller alarms breaking, the namespace flood guard is blind)."""
+    try:
+        defs = json.loads(text).get("definitions", {})
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    anyof = defs.get("SessionEvent", {}).get("anyOf") if isinstance(defs, dict) else None
+    if not isinstance(anyof, list):
+        return None
+    namespaces: set[str] = set()
+    for member in anyof:
+        ref = member.get("$ref", "") if isinstance(member, dict) else ""
+        name = ref.rsplit("/", 1)[-1] if ref else ""
+        c = _copilot_type_const(defs.get(name))
+        if c:
+            namespaces.add(c.split(".", 1)[0])
+    return namespaces or None
+
+
+def upstream_omp_entry_types(text: str) -> set[str] | None:
+    """The COMPLETE omp session-entry `type` set — the `RawFileEntry` union in
+    session-entries.ts. Two forms: direct `type: "literal"` discriminators, and
+    `type: typeof CONST` refs whose value is a `CONST = "literal"` binding (the
+    `title` / `title_change` slots). Returns None if neither form is found (→ the
+    caller alarms breaking, the entry-type flood guard is blind)."""
+    literals = set(re.findall(r'type:\s*"(\w+)"', text))
+    for const_name in re.findall(r"type:\s*typeof\s+(\w+)", text):
+        m = re.search(rf'{re.escape(const_name)}\s*=\s*"(\w+)"', text)
+        if m:
+            literals.add(m.group(1))
+    return literals or None
 
 
 def upstream_copilot_field_names(text: str) -> set[str] | None:
@@ -1412,6 +1479,28 @@ def run_checks(
                             f"renamed; the decoder reads None (wrong-register / no-link / "
                             f"no tool label / permission never gates)."
                         )
+            # Event NAMESPACES → the family axis the transcript tail flood-guards.
+            # A NEW upstream namespace NOT in KNOWN_NAMESPACES makes the tail
+            # `drift::unknown_event` on EVERY line of that family (no dedup) →
+            # warn-floor flood, so a new namespace is a REVIEW ping to add it to
+            # KNOWN_NAMESPACES (decode it or knowingly ignore it). The reverse (a
+            # KNOWN_NAMESPACES member gone upstream) is a benign stale entry.
+            up_ns = upstream_copilot_namespaces(text)
+            if up_ns is None:
+                breaking.append(
+                    "Copilot `SessionEvent` anyOf union not found in the schema — "
+                    "upstream restructured it; update upstream_copilot_namespaces "
+                    "(the namespace flood guard is blind)."
+                )
+            else:
+                known_ns = read_copilot_namespaces()
+                for ns in sorted(up_ns - known_ns):
+                    review.append(
+                        f"new Copilot event NAMESPACE `{ns}` upstream (`SessionEvent`) "
+                        f"not in KNOWN_NAMESPACES (source/copilot.rs) — the transcript "
+                        f"tail will breadcrumb EVERY line of it (drift flood); add it "
+                        f"to KNOWN_NAMESPACES (decode it, or knowingly ignore it)."
+                    )
 
     # --- omp session-entry types + wire names (only the FETCH is transient) --
     if omp_ours is not None:
@@ -1436,6 +1525,27 @@ def run_checks(
                         f"omp field `{field}` (read by decode_omp_line) is GONE from "
                         f"session-entries.ts property keys — renamed; the decoder "
                         f"reads None (no cwd label / no session_exit end)."
+                    )
+            # Entry TYPES → the axis the transcript tail flood-guards. A NEW
+            # upstream entry type NOT in KNOWN_ENTRY_TYPES makes the tail
+            # `drift::unknown_event` on EVERY line of it (no dedup) → warn-floor
+            # flood, so a new type is a REVIEW ping to add it to KNOWN_ENTRY_TYPES
+            # (decode it or knowingly ignore it).
+            up_types = upstream_omp_entry_types(text)
+            if up_types is None:
+                breaking.append(
+                    "omp `RawFileEntry` `type` literals not found in "
+                    "session-entries.ts — upstream restructured it; update "
+                    "upstream_omp_entry_types (the entry-type flood guard is blind)."
+                )
+            else:
+                known_types = read_omp_known_types()
+                for t in sorted(up_types - known_types):
+                    review.append(
+                        f"new omp entry TYPE `{t}` upstream (session-entries.ts) not "
+                        f"in KNOWN_ENTRY_TYPES (source/omp.rs) — the transcript tail "
+                        f"will breadcrumb EVERY line of it (drift flood); add it to "
+                        f"KNOWN_ENTRY_TYPES (decode it, or knowingly ignore it)."
                     )
         diag = try_fetch(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", breaking, errors)
         if diag is not None and '"session_exit"' not in diag:
