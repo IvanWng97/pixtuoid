@@ -61,7 +61,7 @@
     "@types/react": "^19.0.10",
     "eslint": "^10.7.0",
     "json-schema-to-typescript": "^15.0.4",
-    "prettier": "^3.9.5",
+    "prettier": "^3.9.6",
     "typescript": "^6.0.3"
   },
   "overrides": {
