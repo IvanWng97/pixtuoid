@@ -60,14 +60,11 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         first_run,
         audio,
     } = cfg;
-    // Ambient audio (#633): spawn at boot only when a PERSISTED unmute says
-    // so — the muted default costs nothing (no device, no thread, no
-    // buffers); run_tui lazily spawns on the first `m` unmute instead.
-    let audio_handle = if !audio.muted && !headless {
-        crate::audio::spawn(audio.volume)
-    } else {
-        crate::audio::AudioHandle::disabled()
-    };
+    // Ambient audio (#633): `run_tui` builds the AudioController, which OWNS the
+    // device thread — boot-spawn iff `!audio.muted`, then Drop-teardown when the
+    // controller (a run_tui local) drops on ANY exit. Nothing to spawn or tear
+    // down here; the muted default costs nothing until the first `m`. (Headless
+    // has no painter/controller, so it never plays.)
     // Focus-jump pid point-query roots (cloned: build_source_set consumes the
     // originals). CC = projects root (sessions registry derived in-core);
     // Codex = the rollout tree the fd probe walks.
@@ -122,7 +119,6 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             log_path,
             first_run,
             focus_roots,
-            audio: audio_handle,
             audio_cfg: audio,
         })
         .await

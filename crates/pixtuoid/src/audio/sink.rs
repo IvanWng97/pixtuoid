@@ -73,7 +73,20 @@ pub(crate) mod rodio_sink {
         /// `None` when no output device is available (headless boxes) —
         /// callers degrade to silence, never error the office.
         pub(crate) fn open() -> Option<Self> {
-            match with_stderr_silenced(rodio::DeviceSinkBuilder::open_default_sink) {
+            // `open_default_sink` keeps rodio's full open FALLBACK: the default
+            // device+config first, then — on failure — every other non-"null"
+            // output device, each retried across its supported configs. A
+            // hand-rolled `from_default_device().open_stream()` would silently drop
+            // that `.or_else` and go silent on hardware the fallback would have
+            // recovered. rodio's `tracing` feature (Cargo.toml) routes a MID-SESSION
+            // stream error (device unplugged, sample-rate change) — fired on the
+            // audio thread — to `tracing::error!` instead of the default callback's
+            // `eprintln!`, which mid-altscreen would corrupt the TUI. rodio 0.22 has
+            // no reconnect, so this is observability, not recovery — audio just goes
+            // silent, now logged. `with_stderr_silenced` still wraps the call for
+            // ALSA's C-level fd-2 chatter (below rodio's Rust logging).
+            let opened = with_stderr_silenced(rodio::DeviceSinkBuilder::open_default_sink);
+            match opened {
                 Ok(mut stream) => {
                     stream.log_on_drop(false);
                     Some(Self {

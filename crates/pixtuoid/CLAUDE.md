@@ -266,7 +266,20 @@ src/
 │                       knob; `m` = the whole opt-in, persisted via save_audio_muted) + volume clamped [0,1];
 │                       the system LAZY-SPAWNS on the first unmute (muted = zero cost: no device/thread/
 │                       buffers) — run_tui swaps the fresh handle into the renderer; floating boot-spawns
-│                       iff !muted AND has the SAME m/+/- runtime keys. The mute/volume TRANSITION is
+│                       iff !muted AND has the SAME m/+/- runtime keys. TEARDOWN-ON-QUIT (the "music keeps
+│                       playing after quit / killall coreaudiod" bug): the device runs on a spawned thread
+│                       whose RodioSink Drop closes the OS output — detached, that Drop RACES process exit
+│                       and on macOS strands CoreAudio (cpal's stream is !Send so it CAN'T live on the main
+│                       thread lowfi-style — the device MUST stay off-thread, so the fix is to JOIN it, not
+│                       relocate it). RAII owns this: **`AudioController` boot-spawns the device thread in
+│                       `new()` and JOINs it in `impl Drop`** (via `AudioHandle::shutdown` — drop the sole
+│                       sender → run_loop returns → bounded join by SHUTDOWN_JOIN_TIMEOUT, which must exceed
+│                       a release synth build since run_loop is blind to the closed channel mid-build). Each
+│                       painter holds ONE controller (TUI a run_tui local; floating a FloatingApp field),
+│                       built AFTER that painter's fallible `?` boot steps — so no thread predates its
+│                       Drop-owner and the compiler runs the join on EVERY exit (q/Ctrl-C/terminate/error/`?`/
+│                       panic-unwind), no hand-wired shutdown call to forget. The join is bounded because
+│                       CoreAudio device-close can itself block. The mute/volume TRANSITION is
 │                       ONE authority — `audio::apply_audio_action(&mut AudioUi, action, paused, spawn)`
 │                       (audio/mod.rs, unit-tested); the PERSIST protocol around it (mute-save-now, volume
 │                       debounce→flash-expiry, exit-flush) is a SECOND authority BOTH painters OWN —

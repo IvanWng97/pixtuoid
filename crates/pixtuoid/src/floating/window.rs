@@ -56,8 +56,9 @@ pub(crate) struct FloatingApp {
     /// The whole mute/volume persist protocol (#633 close-out) — the SAME
     /// `AudioController` the TUI owns (was `audio`/`volume_flash`/`volume_dirty`
     /// duplicated here). The renderer holds its own handle clone, handed over
-    /// once by `set_audio_ui`; the shared-Arc handle stays live across a lazy
-    /// respawn, so there is no per-spawn re-sync. Flash is VOLUME-only now (was
+    /// once in `new` (`renderer.set_audio(audio_ctl.handle().clone())`); the
+    /// shared-Arc handle stays live across a lazy respawn, so there is no
+    /// per-spawn re-sync. Flash is VOLUME-only now (was
     /// every-gesture): a mute toggle shows no transient overlay until a footer
     /// lands to display it — the accepted TUI-parity tradeoff.
     audio_ctl: crate::audio::AudioController,
@@ -94,22 +95,24 @@ impl FloatingApp {
         pets: Vec<pixtuoid_scene::pet::Pet>,
         scene_rx: watch::Receiver<Arc<SceneState>>,
         floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
+        audio_muted: bool,
+        audio_volume: f32,
     ) -> Self {
-        let audio_ctl = crate::audio::AudioController::new(
-            crate::audio::AudioUi {
-                handle: crate::audio::AudioHandle::disabled(),
-                muted: true,
-                volume: 1.0,
-            },
-            config_path.clone(),
-        );
+        // The controller OWNS the device thread (boot-spawn here, Drop-teardown)
+        // — see AudioController. Built here, after floating::run's fallible boot
+        // steps (pack / runtime / event-loop `?`), so a boot failure means no
+        // thread ever existed, and every later exit drops `app` → the join runs.
+        let audio_ctl =
+            crate::audio::AudioController::new(audio_muted, audio_volume, config_path.clone());
+        let mut renderer = OfficeRenderer::new();
+        renderer.set_audio(audio_ctl.handle().clone());
         Self {
             cfg,
             theme,
             pack,
             config_path,
             pets,
-            renderer: OfficeRenderer::new(),
+            renderer,
             audio_ctl,
             scene_rx,
             floor_caps,
@@ -454,15 +457,5 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
-    }
-}
-
-impl FloatingApp {
-    /// Install the ambient-audio state (#633): the renderer takes a handle
-    /// clone (the per-frame feed), the app keeps the handle/muted/volume trio
-    /// the m/+/- keys drive.
-    pub(crate) fn set_audio_ui(&mut self, audio: crate::audio::AudioUi) {
-        self.audio_ctl = crate::audio::AudioController::new(audio, self.config_path.clone());
-        self.renderer.set_audio(self.audio_ctl.handle().clone());
     }
 }

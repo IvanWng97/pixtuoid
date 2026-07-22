@@ -40,19 +40,6 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         audio,
         ..
     } = cfg;
-    // Ambient audio (#633): boot-spawn iff the persisted state is unmuted —
-    // a muted boot stays at zero cost (no device/thread/buffers) until the
-    // first m/+ press lazy-spawns it (window.rs, TUI parity).
-    let audio_ui = crate::audio::AudioUi {
-        handle: if !audio.muted {
-            crate::audio::spawn(audio.volume)
-        } else {
-            crate::audio::AudioHandle::disabled()
-        },
-        muted: audio.muted,
-        volume: audio.volume,
-    };
-
     let app_config = config::load(&config_path, &mut Vec::new());
     let floating_cfg = config::resolve_floating(&app_config);
     let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(pack_dir)
@@ -137,6 +124,13 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         });
     }
 
+    // FloatingApp OWNS the audio device thread via its AudioController (boot-spawn
+    // iff unmuted, Drop-teardown). Constructed HERE, after every fallible `?` boot
+    // step (pack load, runtime + event-loop build), so a boot failure means no
+    // thread ever existed — and once `app` exists, its Drop joins the device
+    // thread on EVERY exit (run_app returning normally OR a window-creation
+    // failure), no manual shutdown call. This is what fixes the "music keeps
+    // playing after quit / killall coreaudiod" bug at the root, structurally.
     let mut app = FloatingApp::new(
         floating_cfg,
         theme,
@@ -145,10 +139,12 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         pets,
         scene_rx,
         floor_caps,
+        audio.muted,
+        audio.volume,
     );
-    app.set_audio_ui(audio_ui);
     event_loop
         .run_app(&mut app)
-        .context("running the floating window event loop")?;
-    Ok(())
+        .context("running the floating window event loop")
+    // `app` drops here → AudioController Drop → device thread joined before we
+    // return (and the process exits).
 }

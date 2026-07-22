@@ -520,12 +520,9 @@ pub(crate) struct TuiSession {
     /// drive the footer nudge (`main` owns the resolution; `None` = no surfacing).
     pub log_path: Option<std::path::PathBuf>,
     /// The ambient-audio gateway (#633) — disabled while `[audio] muted`
-    /// (the default): the system lazily spawns on the FIRST `m` unmute.
-    /// The TUI feeds per-frame `AudioFrame`s (renderer-side, floor-scoped);
-    /// `m` toggles + persists mute.
-    pub audio: crate::audio::AudioHandle,
-    /// The resolved `[audio]` settings — the lazy spawn needs `volume`, and
-    /// `muted` seeds the m-toggle state.
+    /// The resolved `[audio]` settings — `run_tui` builds the `AudioController`
+    /// from these (it OWNS the device thread: boot-spawn iff `!muted`, then
+    /// Drop-teardown). `muted` seeds the m-toggle; `volume` the boot + lazy spawn.
     pub audio_cfg: crate::config::AudioConfig,
     /// Focus-jump pid point-query roots: (CC projects root, Codex sessions
     /// root) — threaded from RunConfig so a sprite click can resolve a
@@ -550,7 +547,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         log_path,
         focus_roots,
         first_run,
-        audio,
         audio_cfg,
     } = session;
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
@@ -561,14 +557,14 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // The office boots exactly as the user left it. Debounce: `+`/`-` is a
     // repeatable key, so the volume write lands ONCE when the flash window expires
     // (and on quit), never per repeat event.
-    let mut audio_ctl = crate::audio::AudioController::new(
-        crate::audio::AudioUi {
-            handle: audio,
-            muted: audio_cfg.muted,
-            volume: audio_cfg.volume,
-        },
-        config_path.clone(),
-    );
+    // The controller OWNS the audio device thread (boot-spawn iff unmuted,
+    // Drop-teardown). Built HERE, after the pack-load `?` above, so a bad
+    // --pack-dir never leaves a spawned thread un-joined; and `audio_ctl` is a
+    // run_tui local, so EVERY exit below (q / Ctrl-C / terminate / error) drops
+    // it → the device thread is joined before the process exits (the "music
+    // keeps playing after quit" fix, structural — no manual shutdown call).
+    let mut audio_ctl =
+        crate::audio::AudioController::new(audio_cfg.muted, audio_cfg.volume, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
     // First-run onboarding "move-in" overlay (TOP of the modal precedence chain).
     // The roster is built only on first run; if no agent CLIs are detected there's
@@ -1082,6 +1078,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     .await;
 
     teardown_terminal(&mut renderer.terminal)?;
+    // `audio_ctl` (a local) drops as this fn returns → AudioController Drop joins
+    // the device thread, so its RodioSink Drop (the OS output close) completes
+    // before the process exits. Covers every path above — q / Ctrl-C / terminate
+    // / error / the `?` on teardown — because a local's Drop runs on all of them.
     result
 }
 

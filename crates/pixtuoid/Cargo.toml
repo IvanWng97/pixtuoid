@@ -65,8 +65,12 @@ clap_mangen = "0.3.0"
 # no decoder features, every sound is synthesized into raw sample buffers at
 # startup (src/audio/synth.rs). Optional behind the default-on `audio`
 # feature: `--no-default-features` builds a silent binary (and skips cpal's
-# Linux ALSA system-header requirement).
-rodio = { version = "0.22.2", default-features = false, features = ["playback"], optional = true }
+# Linux ALSA system-header requirement). `tracing` routes rodio's OWN diagnostics
+# (mid-session stream errors, the device-list-enumeration failure, the drop log)
+# to `tracing::error!/debug!` instead of its default `eprintln!` — a raw stderr
+# write mid-altscreen corrupts the TUI (lowfi's first-ever bug). See
+# `sink::rodio_sink::RodioSink::open`.
+rodio = { version = "0.22.2", default-features = false, features = ["playback", "tracing"], optional = true }
 
 [features]
 default = ["audio"]
