@@ -232,8 +232,9 @@ impl AudioController {
         }
     }
 
-    /// Flush any pending volume on shutdown (a nudge-then-quit).
-    pub(crate) fn flush_on_exit(&mut self) {
+    /// Flush any pending debounced volume on exit (a nudge-then-quit). Called
+    /// from `Drop` now — the ONE exit path — not per painter.
+    fn flush_on_exit(&mut self) {
         if self.volume_dirty {
             self.save_volume();
         }
@@ -260,17 +261,27 @@ impl AudioController {
     }
 }
 
-/// RAII teardown: stop the device thread when the controller drops. Each painter
+/// RAII teardown — the ONE exit verb for BOTH halves of the audio protocol:
+/// PERSIST a pending debounced volume, THEN stop the device thread. Each painter
 /// holds exactly ONE controller (TUI a `run_tui` local; floating a `FloatingApp`
 /// field), so this fires once on EVERY exit — the compiler guarantees it runs
-/// where a hand-wired `shutdown()` call could be forgotten on some `?`/panic
-/// path. `AudioHandle::shutdown` drops the sole sender (closing the device
-/// thread's channel) and JOINS the thread so its `RodioSink` Drop — the OS
-/// device close — completes before the process exits; idempotent + a no-op for a
-/// muted session that never spawned. See the `AudioHandle::shutdown` docs for
-/// why the join (not just the drop) is load-bearing on macOS CoreAudio.
+/// where a hand-wired call could be forgotten on some `?`/early-return path.
+/// (Release is `panic="abort"`, so a panic — a crash — is the one exit that
+/// skips Drop; losing a sub-second unsaved volume nudge there is acceptable.)
+///
+/// Ordering is persist-before-stop, and both run unconditionally: before #752
+/// the volume flush sat on the TUI `q` branch only, so Ctrl-C / terminate / error
+/// lost a nudge that landed inside the debounce window — moving it here fixes that
+/// (Drop already ran on every exit for the device stop). `flush_on_exit` is a
+/// no-op unless a nudge is pending; both halves are panic-free (save + join log,
+/// never unwrap), safe to run during unwind. `AudioHandle::shutdown` drops the
+/// sole sender (closing the device thread's channel) and JOINS the thread so its
+/// `RodioSink` Drop — the OS device close — completes before the process exits;
+/// idempotent + a no-op for a muted session that never spawned. See the
+/// `AudioHandle::shutdown` docs for why the join is load-bearing on macOS CoreAudio.
 impl Drop for AudioController {
     fn drop(&mut self) {
+        self.flush_on_exit();
         self.ui.handle.shutdown();
     }
 }
@@ -394,6 +405,43 @@ mod controller_tests {
                 .unwrap()
                 .contains("volume"),
             "a nudge-then-quit persists on exit"
+        );
+    }
+
+    #[test]
+    fn drop_persists_a_pending_nudge_even_without_the_q_path() {
+        // #752 Ctrl-C bug: the flush used to run only on the TUI `q` branch, so
+        // an external terminate (Ctrl-C / signal / error) lost a debounced volume
+        // nudge. Now `AudioController::drop` flushes on EVERY exit — modelled by
+        // dropping a dirtied controller WITHOUT the q path or an explicit flush.
+        let (mut c, _dir) = ctl(false, 0.50);
+        let path = c.config_path.clone();
+        c.apply(AudioAction::Volume(false), false, Instant::now(), |_, _| {});
+        assert!(
+            !std::fs::read_to_string(&path).unwrap().contains("volume"),
+            "not yet persisted — still inside the debounce window"
+        );
+        drop(c); // the ONLY exit signal: no `q`, no explicit flush_on_exit()
+        assert!(
+            std::fs::read_to_string(&path).unwrap().contains("volume"),
+            "AudioController::drop must persist a pending nudge (the #752 Ctrl-C fix)"
+        );
+    }
+
+    #[test]
+    fn a_clean_drop_does_not_rewrite_the_config() {
+        // Drop now does config I/O on EVERY exit — the ONLY guard against a
+        // needless rewrite (+ `.bak` churn) on every quit is `volume_dirty`. Pin
+        // it: an un-nudged controller's drop must leave the config byte-identical
+        // (a mutant flipping the guard to `if true` would else survive).
+        let (c, _dir) = ctl(false, 0.50);
+        let path = c.config_path.clone();
+        let before = std::fs::read_to_string(&path).unwrap();
+        drop(c); // no nudge → flush_on_exit is a no-op
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "an un-dirtied drop must not touch the user's config"
         );
     }
 }

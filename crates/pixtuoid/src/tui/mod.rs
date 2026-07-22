@@ -1047,8 +1047,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 if ui.theme_picker.is_some() {
                     renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
                 }
-                // a nudge-then-quit inside the debounce window still persists
-                audio_ctl.flush_on_exit();
+                // The debounced-volume flush + device stop both ride
+                // `AudioController::drop` (fires on ALL exits, not just `q`) —
+                // `audio_ctl` drops as this fn returns. See its Drop impl (#752).
                 break;
             }
             // The frame-pacing sleep doubles as the signal-listen window (the
