@@ -149,9 +149,26 @@ pub(crate) struct AudioController {
 }
 
 impl AudioController {
-    pub(crate) fn new(ui: AudioUi, config_path: std::path::PathBuf) -> Self {
+    /// Construct the controller AND own the device thread's whole lifecycle:
+    /// boot-spawn here (iff a persisted unmute wants sound), tear down in `Drop`.
+    /// Because the controller is built AFTER each painter's fallible boot steps
+    /// (TUI after the pack load; floating after pack/runtime/event-loop build),
+    /// no device thread ever exists before its Drop-owner — so `Drop` alone
+    /// covers EVERY exit path (q / Ctrl-C / terminate / error / a boot `?`),
+    /// with no manual shutdown wiring. `muted`/`volume` come pre-resolved from
+    /// config; a muted boot stays at zero cost (no device/thread/buffers) until
+    /// the first `m`/`+` lazy-respawns in place.
+    pub(crate) fn new(muted: bool, volume: f32, config_path: std::path::PathBuf) -> Self {
+        let handle = AudioHandle::disabled();
+        if !muted {
+            handle.respawn_in_place(volume);
+        }
         Self {
-            ui,
+            ui: AudioUi {
+                handle,
+                muted,
+                volume,
+            },
             config_path,
             volume_dirty: false,
             flash_at: None,
@@ -230,6 +247,21 @@ impl AudioController {
     }
 }
 
+/// RAII teardown: stop the device thread when the controller drops. Each painter
+/// holds exactly ONE controller (TUI a `run_tui` local; floating a `FloatingApp`
+/// field), so this fires once on EVERY exit — the compiler guarantees it runs
+/// where a hand-wired `shutdown()` call could be forgotten on some `?`/panic
+/// path. `AudioHandle::shutdown` drops the sole sender (closing the device
+/// thread's channel) and JOINS the thread so its `RodioSink` Drop — the OS
+/// device close — completes before the process exits; idempotent + a no-op for a
+/// muted session that never spawned. See the `AudioHandle::shutdown` docs for
+/// why the join (not just the drop) is load-bearing on macOS CoreAudio.
+impl Drop for AudioController {
+    fn drop(&mut self) {
+        self.ui.handle.shutdown();
+    }
+}
+
 #[cfg(test)]
 mod controller_tests {
     use super::*;
@@ -239,12 +271,21 @@ mod controller_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"normal\"\n").unwrap();
-        let ui = AudioUi {
-            handle: AudioHandle::disabled(),
-            muted,
-            volume,
+        // Device-free construction (NOT `AudioController::new`, which boot-spawns
+        // a real device when unmuted): these tests drive the mute/volume/persist
+        // logic with an INJECTED respawn closure via `apply`, so they must not
+        // open an output device. A disabled handle's Drop teardown is a no-op.
+        let c = AudioController {
+            ui: AudioUi {
+                handle: AudioHandle::disabled(),
+                muted,
+                volume,
+            },
+            config_path: path,
+            volume_dirty: false,
+            flash_at: None,
         };
-        (AudioController::new(ui, path), dir)
+        (c, dir)
     }
 
     #[test]
@@ -640,10 +681,11 @@ impl AudioHandle {
     }
 
     /// Stop the device thread synchronously — THE quit-path teardown, called
-    /// once from each painter's exit (run_tui, floating close). Drops the sole
-    /// sender so `run_loop` sees the channel close and returns, dropping its
-    /// `RodioSink` (which closes the OS output device), then JOINS the thread so
-    /// that Drop actually completes BEFORE the process exits.
+    /// from [`AudioController`]'s `Drop` (so it runs on every painter exit
+    /// without a hand-wired call). Drops the sole sender so `run_loop` sees the
+    /// channel close and returns, dropping its `RodioSink` (which closes the OS
+    /// output device), then JOINS the thread so that Drop actually completes
+    /// BEFORE the process exits.
     ///
     /// Without the join the device thread is detached and its Drop races
     /// process teardown — it usually loses, and on macOS CoreAudio a half-closed
@@ -653,11 +695,11 @@ impl AudioHandle {
     /// Bounded so a pathological rodio/cpal Drop can't hang the exit — a timeout
     /// is no worse than today's always-detached behaviour.
     ///
-    /// INVARIANT: call this only after the painter's input/render loop has
-    /// halted, so `shutdown` / `respawn_in_place` / `frame` never run
-    /// concurrently on the shared `tx`/`join` cells. Both painters satisfy it
-    /// (TUI after its loop; floating after `run_app` returns). Idempotent, so a
-    /// belt-and-suspenders second call (the driver-level backstop) is a no-op.
+    /// INVARIANT: this runs from `AudioController::drop`, i.e. only after the
+    /// painter's input/render loop has ended and the controller is being torn
+    /// down — so `shutdown` / `respawn_in_place` / `frame` never run
+    /// concurrently on the shared `tx`/`join` cells. Idempotent (`take()`-based)
+    /// regardless.
     pub(crate) fn shutdown(&self) {
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let handle = self.join.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -745,17 +787,6 @@ fn join_with_timeout(handle: std::thread::JoinHandle<()>, timeout: std::time::Du
         let _ = done_tx.send(());
     });
     let _ = done_rx.recv_timeout(timeout);
-}
-
-/// Boot the audio thread. `volume` arrives pre-clamped from config resolve.
-/// Returns a disabled handle when the `audio` feature is off or no output
-/// device exists — callers never need a cfg. Same path as the lazy re-spawn
-/// (a fresh disabled handle, then a swap in place), so boot and re-spawn can't
-/// drift.
-pub(crate) fn spawn(volume: f32) -> AudioHandle {
-    let handle = AudioHandle::disabled();
-    handle.respawn_in_place(volume);
-    handle
 }
 
 /// The production lazy-respawn injected into [`apply_audio_action`] /

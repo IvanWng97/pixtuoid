@@ -124,6 +124,13 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         });
     }
 
+    // FloatingApp OWNS the audio device thread via its AudioController (boot-spawn
+    // iff unmuted, Drop-teardown). Constructed HERE, after every fallible `?` boot
+    // step (pack load, runtime + event-loop build), so a boot failure means no
+    // thread ever existed — and once `app` exists, its Drop joins the device
+    // thread on EVERY exit (run_app returning normally OR a window-creation
+    // failure), no manual shutdown call. This is what fixes the "music keeps
+    // playing after quit / killall coreaudiod" bug at the root, structurally.
     let mut app = FloatingApp::new(
         floating_cfg,
         theme,
@@ -132,34 +139,12 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         pets,
         scene_rx,
         floor_caps,
+        audio.muted,
+        audio.volume,
     );
-    // Ambient audio (#633): boot-spawn iff the persisted state is unmuted —
-    // a muted boot stays at zero cost (no device/thread/buffers) until the
-    // first m/+ press lazy-spawns it (window.rs, TUI parity). Spawned HERE,
-    // after every fallible `?` boot step (pack load, runtime + event-loop
-    // build) — a device thread opened before one of those errored would be
-    // detached with no `shutdown_audio()` to join it (the teardown bug, on the
-    // boot-error path). From here on the only exit is `run_app` returning.
-    let audio_ui = crate::audio::AudioUi {
-        handle: if !audio.muted {
-            crate::audio::spawn(audio.volume)
-        } else {
-            crate::audio::AudioHandle::disabled()
-        },
-        muted: audio.muted,
-        volume: audio.volume,
-    };
-    app.set_audio_ui(audio_ui);
-    let result = event_loop
+    event_loop
         .run_app(&mut app)
-        .context("running the floating window event loop");
-    // Stop the audio device thread SYNCHRONOUSLY before returning (process
-    // exit). `run_app` is the ONLY exit reachable once audio is spawned (above),
-    // and it returns on macOS/Windows/Linux after `event_loop.exit()` — so this
-    // covers the normal close AND the in-`resumed` window-creation failures,
-    // on both Ok and Err. The detached device thread's RodioSink Drop would
-    // otherwise race process teardown and strand the OS output on macOS (the
-    // "music keeps playing after quit" bug).
-    app.shutdown_audio();
-    result
+        .context("running the floating window event loop")
+    // `app` drops here → AudioController Drop → device thread joined before we
+    // return (and the process exits).
 }

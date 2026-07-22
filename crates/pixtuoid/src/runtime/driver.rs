@@ -60,14 +60,11 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         first_run,
         audio,
     } = cfg;
-    // Ambient audio (#633): spawn at boot only when a PERSISTED unmute says
-    // so — the muted default costs nothing (no device, no thread, no
-    // buffers); run_tui lazily spawns on the first `m` unmute instead.
-    let audio_handle = if !audio.muted && !headless {
-        crate::audio::spawn(audio.volume)
-    } else {
-        crate::audio::AudioHandle::disabled()
-    };
+    // Ambient audio (#633): `run_tui` builds the AudioController, which OWNS the
+    // device thread — boot-spawn iff `!audio.muted`, then Drop-teardown when the
+    // controller (a run_tui local) drops on ANY exit. Nothing to spawn or tear
+    // down here; the muted default costs nothing until the first `m`. (Headless
+    // has no painter/controller, so it never plays.)
     // Focus-jump pid point-query roots (cloned: build_source_set consumes the
     // originals). CC = projects root (sessions registry derived in-core);
     // Codex = the rollout tree the fd probe walks.
@@ -108,16 +105,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     if headless {
         headless_loop(scene_rx, health_rx).await
     } else {
-        // Backstop the audio device thread against run_tui's pre-loop `?`
-        // early-returns (e.g. a bad `--pack-dir`): run_tui joins the thread on
-        // its OWN loop exits, but a fallible boot step before that loop returns
-        // Err without joining — detaching the device thread (the teardown bug on
-        // the boot-error path). A shared clone + a post-run_tui shutdown covers
-        // every run_tui exit; `shutdown` is idempotent, so the normal path's
-        // in-loop join makes this a no-op. Disabled handle (muted/headless boot)
-        // = no-op regardless.
-        let audio_cleanup = audio_handle.clone();
-        let result = crate::tui::run_tui(crate::tui::TuiSession {
+        crate::tui::run_tui(crate::tui::TuiSession {
             scene_rx,
             pack_dir,
             floor_caps,
@@ -131,12 +119,9 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             log_path,
             first_run,
             focus_roots,
-            audio: audio_handle,
             audio_cfg: audio,
         })
-        .await;
-        audio_cleanup.shutdown();
-        result
+        .await
     }
 }
 

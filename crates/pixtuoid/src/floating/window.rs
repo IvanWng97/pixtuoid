@@ -94,22 +94,24 @@ impl FloatingApp {
         pets: Vec<pixtuoid_scene::pet::Pet>,
         scene_rx: watch::Receiver<Arc<SceneState>>,
         floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
+        audio_muted: bool,
+        audio_volume: f32,
     ) -> Self {
-        let audio_ctl = crate::audio::AudioController::new(
-            crate::audio::AudioUi {
-                handle: crate::audio::AudioHandle::disabled(),
-                muted: true,
-                volume: 1.0,
-            },
-            config_path.clone(),
-        );
+        // The controller OWNS the device thread (boot-spawn here, Drop-teardown)
+        // — see AudioController. Built here, after floating::run's fallible boot
+        // steps (pack / runtime / event-loop `?`), so a boot failure means no
+        // thread ever existed, and every later exit drops `app` → the join runs.
+        let audio_ctl =
+            crate::audio::AudioController::new(audio_muted, audio_volume, config_path.clone());
+        let mut renderer = OfficeRenderer::new();
+        renderer.set_audio(audio_ctl.handle().clone());
         Self {
             cfg,
             theme,
             pack,
             config_path,
             pets,
-            renderer: OfficeRenderer::new(),
+            renderer,
             audio_ctl,
             scene_rx,
             floor_caps,
@@ -138,16 +140,6 @@ impl FloatingApp {
         ) {
             tracing::warn!("pixtuoid floating: could not persist window geometry: {e}");
         }
-    }
-
-    /// Stop the audio device thread synchronously — called ONCE after the event
-    /// loop returns (see `floating::run`), so it covers every exit (close,
-    /// window-creation failure) in one place. The detached device thread's
-    /// RodioSink Drop otherwise races process teardown and can strand the OS
-    /// output on macOS (the "music keeps playing after quit" bug). No-op for a
-    /// muted session that never spawned the device thread.
-    pub(crate) fn shutdown_audio(&self) {
-        self.audio_ctl.handle().shutdown();
     }
 
     /// Render the latest scene to a DOWNSCALED office buffer, then nearest-neighbor
@@ -464,15 +456,5 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
-    }
-}
-
-impl FloatingApp {
-    /// Install the ambient-audio state (#633): the renderer takes a handle
-    /// clone (the per-frame feed), the app keeps the handle/muted/volume trio
-    /// the m/+/- keys drive.
-    pub(crate) fn set_audio_ui(&mut self, audio: crate::audio::AudioUi) {
-        self.audio_ctl = crate::audio::AudioController::new(audio, self.config_path.clone());
-        self.renderer.set_audio(self.audio_ctl.handle().clone());
     }
 }
