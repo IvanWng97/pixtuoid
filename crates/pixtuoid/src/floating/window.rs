@@ -370,7 +370,9 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
     ) {
         match event {
             WindowEvent::CloseRequested => {
-                self.audio_ctl.flush_on_exit();
+                // Geometry MUST persist HERE — the window is gone once `run_app`
+                // returns. The audio persist + device stop instead ride
+                // `AudioController::drop` when `app` drops post-`run_app` (#752).
                 self.persist_geometry();
                 event_loop.exit();
             }
