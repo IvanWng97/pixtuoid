@@ -84,6 +84,7 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     # sharp edge in crates/pixtuoid-core/CLAUDE.md), so it floors at 1.
     cases = [
         (d.read_codex_events, r"^[A-Za-z]\w+$", 2),
+        (d.read_codex_rollout_outers, r"^[a-z][a-z_]*$", 4),
         (d.read_cc_events, r"^[A-Za-z]\w+$", 2),
         (d.read_dispatch_names, r"^[A-Za-z]\w+$", 1),
         (d.read_reasonix_events, r"^[A-Za-z]\w+$", 2),
