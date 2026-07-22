@@ -128,6 +128,14 @@ pub(crate) fn extract_codex_cwd(v: &Value) -> Option<PathBuf> {
     v.get("payload")?.get("cwd")?.as_str().map(PathBuf::from)
 }
 
+/// The rollout OUTER `type` discriminators codex emits that we RECOGNIZE —
+/// whether we decode them (`event_msg`/`response_item`/`turn_context`) or
+/// knowingly ignore them (`session_meta` carries only the head cwd, read by
+/// [`extract_codex_cwd`], and drives no event). The tail arm breadcrumbs an
+/// outer OUTSIDE this set (a brand-new line SHAPE); keep it in sync with the
+/// match arms below + `read_codex_rollout_types` in `check_upstream_drift.py`.
+const KNOWN_OUTERS: &[&str] = &["event_msg", "response_item", "turn_context", "session_meta"];
+
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
 pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
@@ -250,6 +258,18 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
             } else {
                 vec![]
             }
+        }
+        // A rollout line whose OUTER `type` we don't recognize is a structural
+        // wire change — breadcrumb it (defense #2, the live-stream signal that CI's
+        // fetch-based defense #4 can't see: `read_codex_rollout_types` only alarms
+        // a VANISHED depended type, never a brand-new one in a user's own stream).
+        // We do NOT breadcrumb a KNOWN outer with an unhandled INNER (a new
+        // EventMsg/ResponseItem variant we knowingly ignore — codex emits dozens
+        // per session; that would flood the warn-floor, exactly what drift.rs's
+        // anti-flood doc forbids). Empty outer = a typeless/degenerate line, skipped.
+        (other, _) if !other.is_empty() && !KNOWN_OUTERS.contains(&other) => {
+            crate::source::drift::unknown_event(source, other);
+            vec![]
         }
         _ => vec![],
     };
@@ -687,6 +707,50 @@ mod tests {
             }] => assert_eq!(display, "tool"),
             other => panic!("expected one Generic-detail ActivityStart, got {other:?}"),
         }
+    }
+
+    /// The rollout tail arm: a brand-new OUTER `type` breadcrumbs (the sole
+    /// live-stream drift signal for a new codex line SHAPE — CI defense #4 only
+    /// catches a VANISHED type), while a KNOWN outer with an unhandled INNER, and
+    /// `session_meta`, stay SILENT so the warn-floor doesn't flood on benign
+    /// EventMsg/ResponseItem churn.
+    #[test]
+    fn unknown_outer_breadcrumbs_but_known_outer_and_session_meta_stay_silent() {
+        let novel = serde_json::json!({ "type": "brand_new_outer_2027", "payload": {} });
+        let logs = crate::test_capture::capture_logs(|| {
+            let out = decode_codex_line("/x/rollout.jsonl", SOURCE_NAME, novel).unwrap();
+            assert!(
+                out.is_empty(),
+                "an unknown outer decodes to no events: {out:?}"
+            );
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("brand_new_outer_2027"),
+            "a brand-new codex outer must fire the drift breadcrumb, got:\n{logs}"
+        );
+
+        // Negative 1: a known outer with an INNER we knowingly ignore — silent.
+        let known_ignored = serde_json::json!({
+            "type": "event_msg",
+            "payload": { "type": "some_ignored_event_2027" },
+        });
+        let quiet = crate::test_capture::capture_logs(|| {
+            decode_codex_line("/x/rollout.jsonl", SOURCE_NAME, known_ignored).unwrap();
+        });
+        assert!(
+            !quiet.contains("unknown_event"),
+            "a known outer with an ignored inner must NOT breadcrumb, got:\n{quiet}"
+        );
+
+        // Negative 2: session_meta (a known outer read only for cwd) — silent.
+        let meta = serde_json::json!({ "type": "session_meta", "payload": { "cwd": "/x" } });
+        let quiet_meta = crate::test_capture::capture_logs(|| {
+            decode_codex_line("/x/rollout.jsonl", SOURCE_NAME, meta).unwrap();
+        });
+        assert!(
+            !quiet_meta.contains("unknown_event"),
+            "session_meta must not breadcrumb, got:\n{quiet_meta}"
+        );
     }
 
     // The `codex_session_ended` + liveness-probe tests live with the runtime

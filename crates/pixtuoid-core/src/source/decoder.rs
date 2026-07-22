@@ -186,7 +186,17 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     // Err per event (CC falls through to the shared arms' missing-
     // `hook_event_name` bail; cursor's claims-all errors on the same absent
     // field).
-    if source != crate::source::grok::SOURCE_NAME && obj.contains_key("hookEventName") {
+    // Scope the drop to the TWO documented cross-fire targets (grok's compat scan
+    // installs the shim into ~/.claude/settings.json + ~/.cursor/hooks.json). A
+    // FUTURE camelCase-`hookEventName` source is NOT silently swallowed here — it
+    // falls through to the shared arms and bails on the missing snake
+    // `hook_event_name`, so a mis-wire surfaces as an OBSERVED decode error, not a
+    // silent ghost (the earlier `!= grok` blanket guard hid every non-grok camelCase
+    // envelope).
+    if (source == crate::source::claude_code::SOURCE_NAME
+        || source == crate::source::cursor::SOURCE_NAME)
+        && obj.contains_key("hookEventName")
+    {
         tracing::trace!(source, "dropping grok cross-fired hook envelope");
         return Ok(vec![]);
     }
@@ -1599,6 +1609,15 @@ mod tests {
         let mut untagged = grok_envelope("x");
         untagged.as_object_mut().unwrap().remove("_pixtuoid_source");
         assert!(decode_hook_payload(untagged).expect("Ok").is_empty());
+
+        // Tightened scope: a FUTURE source (not cc/cursor/grok) that also sends a
+        // camelCase `hookEventName` is NOT silently swallowed — it falls through
+        // and bails on the missing snake `hook_event_name`, so a mis-wire is
+        // OBSERVED (a decode Err the pipeline logs), not a silent ghost.
+        assert!(
+            decode_hook_payload(grok_envelope("some-future-cli")).is_err(),
+            "a non-cc/cursor camelCase envelope must bail (observed), not drop silently"
+        );
     }
 
     #[test]
