@@ -128,13 +128,26 @@ pub(crate) fn extract_codex_cwd(v: &Value) -> Option<PathBuf> {
     v.get("payload")?.get("cwd")?.as_str().map(PathBuf::from)
 }
 
-/// The rollout OUTER `type` discriminators codex emits that we RECOGNIZE —
-/// whether we decode them (`event_msg`/`response_item`/`turn_context`) or
-/// knowingly ignore them (`session_meta` carries only the head cwd, read by
-/// [`extract_codex_cwd`], and drives no event). The tail arm breadcrumbs an
-/// outer OUTSIDE this set (a brand-new line SHAPE); keep it in sync with the
-/// match arms below + `read_codex_rollout_types` in `check_upstream_drift.py`.
-const KNOWN_OUTERS: &[&str] = &["event_msg", "response_item", "turn_context", "session_meta"];
+/// The COMPLETE set of codex rollout OUTER `type` discriminators — the
+/// `RolloutItem` enum variants (`codex-rs/protocol/src/protocol.rs`,
+/// `rename_all = "snake_case"`), verified against live upstream — NOT just the
+/// ones we decode. The tail arm breadcrumbs an outer OUTSIDE this set (a
+/// brand-new line SHAPE); an outer INSIDE it that we don't decode (`compacted`,
+/// `world_state`, `inter_agent_communication[_metadata]`, `session_meta`) stays
+/// SILENT, else the breadcrumb would flood on lines codex emits every session
+/// (a `compacted` on each `/compact`, `world_state` patches, …). Kept honest by
+/// `read_codex_rollout_outers` in `check_upstream_drift.py`: a new upstream
+/// `RolloutItem` variant not listed here alarms in CI before it can flood.
+const KNOWN_OUTERS: &[&str] = &[
+    "session_meta",
+    "response_item",
+    "inter_agent_communication",
+    "inter_agent_communication_metadata",
+    "compacted",
+    "turn_context",
+    "world_state",
+    "event_msg",
+];
 
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
@@ -751,6 +764,28 @@ mod tests {
             !quiet_meta.contains("unknown_event"),
             "session_meta must not breadcrumb, got:\n{quiet_meta}"
         );
+
+        // The REAL released/main RolloutItem outers we don't decode must ALSO stay
+        // silent — this is the case the fictional `brand_new_outer_2027` above can't
+        // catch: `compacted` fires on every `/compact`, `world_state` on state
+        // patches, so a KNOWN_OUTERS set that omitted them would flood the warn-floor.
+        for outer in [
+            "compacted",
+            "world_state",
+            "inter_agent_communication",
+            "inter_agent_communication_metadata",
+            "response_item", // known multi-arm outer, unhandled inner
+        ] {
+            let line =
+                serde_json::json!({ "type": outer, "payload": { "type": "x", "message": "y" } });
+            let quiet = crate::test_capture::capture_logs(|| {
+                decode_codex_line("/x/rollout.jsonl", SOURCE_NAME, line).unwrap();
+            });
+            assert!(
+                !quiet.contains("unknown_event"),
+                "known outer {outer:?} must NOT breadcrumb (it would flood), got:\n{quiet}"
+            );
+        }
     }
 
     // The `codex_session_ended` + liveness-probe tests live with the runtime

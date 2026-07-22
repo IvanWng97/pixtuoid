@@ -15,9 +15,11 @@ and compares against the live upstream:
   * Codex rollout types-> the `("event_msg"|"response_item", …)` decode arms in
                           crates/pixtuoid-core/src/source/codex.rs vs the `EventMsg`
                           enum (protocol.rs) + the `ResponseItem` enum (models.rs).
-                          The transcript decoder drops an unknown type SILENTLY
-                          (`_ => vec![]`, no breadcrumb), so this positive check —
-                          each depended type still exists upstream — is its ONLY backstop
+                          The transcript decoder now BREADCRUMBS an unknown OUTER
+                          type (`drift::unknown_event`, defense #2) but is silent on
+                          an unknown INNER under a known outer, so this positive check
+                          — each depended INNER type still exists upstream — is the
+                          backstop for the INNER direction
   * CC hook events     -> `EVENTS` in crates/pixtuoid/src/install/claude.rs
                           vs the hook-event summary table in code.claude.com
                           hooks.md (CC is a closed binary; the docs markdown is
@@ -727,6 +729,16 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
     return event_msg, response_item
 
 
+def read_codex_rollout_outers() -> set[str]:
+    """The rollout OUTER `type` discriminators the transcript decoder RECOGNIZES,
+    read from the `KNOWN_OUTERS` const in `source/codex.rs`. The tail breadcrumbs
+    any outer OUTSIDE this set, and `drift::unknown_event` has NO dedup — so an
+    upstream `RolloutItem` variant missing from this set would flood the
+    warn-floor on every line of it. The report diffs this against the live
+    `RolloutItem` enum so a new upstream outer is a review ping BEFORE it floods."""
+    return rust_const_str_array("crates/pixtuoid-core/src/source/codex.rs", "KNOWN_OUTERS")
+
+
 def read_cc_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/claude.rs", "EVENTS")
 
@@ -1110,6 +1122,28 @@ def run_checks(
                             f"renamed; the transcript decoder drops it SILENTLY "
                             f"(`_ => vec![]`, no drift breadcrumb)."
                         )
+        # Rollout OUTER types → the `RolloutItem` enum in the SAME protocol.rs.
+        # A NEW upstream outer NOT in KNOWN_OUTERS makes the transcript tail
+        # `drift::unknown_event` on EVERY line of it (no dedup) → warn-floor
+        # flood, so a new outer is a REVIEW ping to add it to KNOWN_OUTERS
+        # (decode it or knowingly ignore it). The reverse (a KNOWN_OUTERS member
+        # gone upstream) is a benign stale silent-set entry — no breaking alarm.
+        if text is not None and codex_rollout is not None:
+            up_outers = upstream_codex_enum_types(text, "RolloutItem")
+            if up_outers is None:
+                breaking.append(
+                    "Codex `RolloutItem` enum not found in protocol.rs — upstream "
+                    "moved it; update the parser (the rollout OUTER flood guard is blind)."
+                )
+            else:
+                known_outers = read_codex_rollout_outers()
+                for t in sorted(up_outers - known_outers):
+                    review.append(
+                        f"new Codex rollout OUTER `{t}` upstream (`RolloutItem`) not "
+                        f"in KNOWN_OUTERS (source/codex.rs) — the transcript tail will "
+                        f"breadcrumb EVERY line of it (drift flood); add it to "
+                        f"KNOWN_OUTERS (decode it, or knowingly ignore it)."
+                    )
         # `turn_context` FIELD survival (burn tier, #541): the transcript
         # decoder reads `model` + `effort` off every turn_context line
         # (source/codex.rs) — a rename silently kills the model badge/flame
