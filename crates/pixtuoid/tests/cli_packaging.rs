@@ -1,50 +1,91 @@
 //! Integration coverage for the `completions` / `man` packaging dispatch in
 //! `main.rs`. The clap_complete / clap_mangen GENERATION is unit-tested in
-//! `cli.rs`, but the DISPATCH — that the SHELL arg actually reaches clap_complete
-//! and that stdout stays the clean artifact channel (tracing → stderr) — had no
-//! test tooth (the codecov-excluded `main.rs` arms, #398).
+//! `cli.rs`; these spawn the REAL binary and assert the dispatch itself — that
+//! the SHELL arg reaches clap_complete and that stdout stays the clean artifact
+//! channel (tracing → stderr) — which the codecov-excluded `main.rs` arms (#398)
+//! have no unit-test tooth for. This is the homebrew-core contract our
+//! packaging-build CI job parses, promoted to a real number over EVERY supported
+//! shell (the #747 "generated-doc surface" hardening).
 
+use clap::ValueEnum;
+
+/// Spawn the built binary with a HERMETIC env: strip `$RUST_LOG` / `$PIXTUOID_LOG`
+/// so an inherited dev/CI verbosity can't raise the tracing floor and leak onto
+/// the channels these assertions check. Per the #172 RUST_LOG policy the binary
+/// HONORS a non-empty `$RUST_LOG`, so a test asserting a clean channel must clear
+/// it rather than assume it's unset.
 fn run(args: &[&str]) -> std::process::Output {
     std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
         .args(args)
+        .env_remove("RUST_LOG")
+        .env_remove("PIXTUOID_LOG")
         .output()
         .expect("run pixtuoid")
 }
 
+/// Every shell clap_complete supports must emit exactly one clean script: a
+/// non-empty artifact naming the binary on stdout, nothing on stderr, exit 0 —
+/// and the scripts must be pairwise-distinct (proof the SHELL arg is honored, not
+/// a hardcoded generator). Iterating `Shell::value_variants()` (not a hardcoded
+/// subset) means a shell clap_complete adds later is covered automatically, the
+/// way `registered_source_names()` auto-covers a new source.
 #[test]
-fn completions_emit_a_shell_script_naming_the_binary() {
-    let out = run(&["completions", "bash"]);
+fn completions_emit_a_clean_script_for_every_supported_shell() {
+    let shells = clap_complete::Shell::value_variants();
+    // Negative control: with 0 or 1 shell the per-shell loop AND the pairwise
+    // distinctness tooth below would pass vacuously (clap_complete ships 5).
+    assert!(
+        shells.len() >= 2,
+        "clap_complete exposes < 2 shells ({}) — the per-shell + distinctness coverage below is vacuous",
+        shells.len()
+    );
+
+    let mut scripts = std::collections::HashSet::new();
+    for shell in shells {
+        let name = shell
+            .to_possible_value()
+            .expect("every Shell variant has a value name")
+            .get_name()
+            .to_owned();
+        let out = run(&["completions", &name]);
+        assert!(
+            out.status.success(),
+            "completions {name} exited non-zero: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            out.stderr.is_empty(),
+            "completions {name} wrote to stderr — the artifact channel must stay clean: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("pixtuoid"),
+            "completions {name} script omits the binary name"
+        );
+        assert!(
+            scripts.insert(out.stdout),
+            "completions {name} produced a script identical to another shell's — the shell arg is ignored"
+        );
+    }
+}
+
+/// `man` emits a real roff man page on the clean stdout channel — the homebrew
+/// `Utils.safe_popen_read` capture greps `^.TH`.
+#[test]
+fn man_emits_clean_roff_to_stdout() {
+    let out = run(&["man"]);
     assert!(
         out.status.success(),
-        "completions bash exited non-zero: {}",
+        "man exited non-zero: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("pixtuoid"),
-        "completion script omits the binary name"
+        out.stderr.is_empty(),
+        "man wrote to stderr — the artifact channel must stay clean: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
-}
-
-#[test]
-fn completions_shell_arg_actually_reaches_clap_complete() {
-    // Proves the dispatch passes the SHELL through (not a hardcoded one): the bash
-    // and zsh completion scripts are structurally different.
-    let bash = run(&["completions", "bash"]).stdout;
-    let zsh = run(&["completions", "zsh"]).stdout;
-    assert_ne!(
-        bash, zsh,
-        "bash and zsh completions are identical — the shell arg is ignored"
-    );
-}
-
-#[test]
-fn man_emits_roff_to_stdout() {
-    let out = run(&["man"]);
-    assert!(out.status.success(), "man exited non-zero");
-    let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains(".TH"),
+        String::from_utf8_lossy(&out.stdout).contains(".TH"),
         "man output is not roff (.TH header missing)"
     );
 }
