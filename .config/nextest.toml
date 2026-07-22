@@ -49,7 +49,9 @@ threads-required = "num-cpus"
 # taxes every CI job's wall-clock) — instead raise only the hard KILL. Keep the
 # 60s SLOW marker so its growth stays VISIBLE every run; lift terminate to 5×60=300s
 # so coverage instrumentation (~2×) + CI contention can't false-red it while a real
-# ≥1.5× synthesis regression still trips it.
+# ≥1.5× synthesis regression still trips it. REVISIT if CI shows this past ~250s:
+# the headroom is gone — dedup further, split the smoke, or reduce the seed sweep
+# rather than lifting the cap again (the SLOW marker is only a soft signal).
 [[profile.default.overrides]]
 filter = 'test(generated_beds_are_finite_phase_locked_and_in_the_sound_world)'
 slow-timeout = { period = "60s", terminate-after = 5 }
