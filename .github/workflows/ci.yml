@@ -421,6 +421,19 @@ jobs:
       - uses: extractions/setup-just@v4
       - name: Generate coverage + JUnit XML (single test run)
         run: just coverage
+      # Negative control: `fail_ci_if_error: false` (below) plus all-informational
+      # Codecov statuses mean a BROKEN instrument that produces an empty/missing
+      # lcov would upload nothing and CI would stay green — the exact false-green
+      # class the oracle plan (#727) exists to kill. A broken GENERATION must red
+      # the job here; only the transient UPLOAD stays non-blocking.
+      - name: Assert coverage artifacts are non-empty (negative control)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in lcov.info target/nextest/ci/junit.xml; do
+            [ -s "$f" ] || { echo "::error::coverage produced no $f — a broken instrument must red the job, not silently upload nothing"; exit 1; }
+          done
+          echo "lcov.info=$(wc -c < lcov.info)B junit.xml=$(wc -c < target/nextest/ci/junit.xml)B"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -436,6 +449,113 @@ jobs:
           files: target/nextest/ci/junit.xml
           report-type: test_results
           flags: unit
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # Per-OS line coverage for the platform-gated surface the ubuntu `coverage` job
+  # compiles OUT and therefore CANNOT measure: the `cfg(windows)` parity twins, the
+  # named-pipe transport, `platform::home_first_dir`'s Windows arm,
+  # `write_config_atomic`'s rename-retry, the macOS path/`launchd` arms. These run
+  # the SAME `just coverage` recipe as ubuntu (one source of truth) and upload lcov
+  # under the SAME per-OS flag the required *-test jobs already use for their JUnit
+  # (Codecov keeps coverage and test_results separate per report-type, so the flag
+  # now means "everything measured on this platform").
+  #
+  # Deliberately SEPARATE from the required windows-test / macos-test jobs, and NOT
+  # required themselves: those stay fast, uninstrumented pass/fail gates, so the
+  # ~2x coverage-instrumentation cost — and any first-run instrumentation surprise
+  # on the never-before-instrumented platform-gated code — can never couple into a
+  # REQUIRED merge gate. Safe to instrument now that #736/#756 sized the audio-synth
+  # per-test caps for the coverage slowdown (measured on Apple Silicon: the belted
+  # `generated_beds_` ran 52s instrumented vs its 300s cap; the shim latency twins
+  # 0.13s vs their 200ms bound). Promote to required in a follow-up once real runs
+  # confirm they stay green — especially the Windows shim/pipe latency twins, which
+  # no instrumented run has ever exercised (they are compiled out on ubuntu).
+  coverage-windows:
+    name: coverage-windows
+    runs-on: windows-latest
+    # Generous vs windows-test's 30m: instrumented full suite on the slowest runner,
+    # and the FIRST run is cold — rust-cache keys the entry by RUSTFLAGS, so the
+    # `-C instrument-coverage` build has no prior cache until this job has run once.
+    # Per-test HANGS are already caught by nextest's slow-timeout, so this bound only
+    # has to cover total wall-clock + cold compile. Provisional — retighten to the
+    # observed p95 once CI reports it.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      # Shared v1-rust prefix like every other job: rust-cache already keys by job-id
+      # AND RUSTFLAGS, so this instrumented job gets its own cache entry without
+      # colliding with the uninstrumented windows-test (the sibling ubuntu `coverage`
+      # job is likewise instrumented on v1-rust).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
+      - uses: extractions/setup-just@v4
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage + JUnit XML (single instrumented test run)
+        run: just coverage
+      # Same false-green negative control as the ubuntu coverage job.
+      - name: Assert coverage artifacts are non-empty (negative control)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in lcov.info target/nextest/ci/junit.xml; do
+            [ -s "$f" ] || { echo "::error::coverage produced no $f — a broken instrument must red the job, not silently upload nothing"; exit 1; }
+          done
+          echo "lcov.info=$(wc -c < lcov.info)B junit.xml=$(wc -c < target/nextest/ci/junit.xml)B"
+      # lcov ONLY — the required windows-test job already uploads this platform's
+      # JUnit under flag `windows`; re-uploading it here would double the test rows.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          flags: windows
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage-macos:
+    name: coverage-macos
+    runs-on: macos-14
+    # Apple Silicon is fast (the belted audio measured 52s instrumented), so a
+    # tighter bound than windows suffices; still generous for the cold instrumented
+    # cache. Provisional — retighten to the observed p95.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
+      - uses: extractions/setup-just@v4
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage + JUnit XML (single instrumented test run)
+        run: just coverage
+      - name: Assert coverage artifacts are non-empty (negative control)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in lcov.info target/nextest/ci/junit.xml; do
+            [ -s "$f" ] || { echo "::error::coverage produced no $f — a broken instrument must red the job, not silently upload nothing"; exit 1; }
+          done
+          echo "lcov.info=$(wc -c < lcov.info)B junit.xml=$(wc -c < target/nextest/ci/junit.xml)B"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          flags: macos
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
