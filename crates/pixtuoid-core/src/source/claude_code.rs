@@ -185,9 +185,11 @@ pub fn claude_config_dir() -> Option<PathBuf> {
 /// flood (avg ~14 per file). Caveat: unlike codex/copilot/omp's structural axes
 /// this is an EMPIRICAL assumption about CC's wire, not a schema-bounded one and
 /// with no CI drift-watch — a genuinely-new HIGH-frequency top-level type would
-/// flood the warn-floor LOG (only; no TUI/stderr) until named here, which the
-/// breadcrumb itself surfaces (self-healing, strictly better than the prior
-/// zero-signal silent drop).
+/// breadcrumb until named here. The per-line VOLUME is log-confined (a sustained
+/// regime warns per line to the warn-floor), but the drift IS surfaced in the TUI
+/// as a SINGLE throttled `⚠ decode drift` footer nudge (+ the Sources-panel health
+/// verdict + `pixtuoid doctor`), so it is visible and self-healing — strictly
+/// better than the prior zero-signal silent drop.
 const KNOWN_TYPES: &[&str] = &[
     "agent-name",
     "ai-title",
