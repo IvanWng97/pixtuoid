@@ -266,7 +266,15 @@ src/
 │                       knob; `m` = the whole opt-in, persisted via save_audio_muted) + volume clamped [0,1];
 │                       the system LAZY-SPAWNS on the first unmute (muted = zero cost: no device/thread/
 │                       buffers) — run_tui swaps the fresh handle into the renderer; floating boot-spawns
-│                       iff !muted AND has the SAME m/+/- runtime keys. The mute/volume TRANSITION is
+│                       iff !muted AND has the SAME m/+/- runtime keys. TEARDOWN-ON-QUIT (the "music keeps
+│                       playing after quit / killall coreaudiod" bug): the device runs on a spawned thread
+│                       whose RodioSink Drop closes the OS output — detached, that Drop RACES process exit
+│                       and on macOS strands CoreAudio. So `AudioHandle::shutdown()` (drop the sole sender →
+│                       run_loop returns → JOIN, bounded by SHUTDOWN_JOIN_TIMEOUT which must exceed a release
+│                       synth build, else it falls back to detached) runs at EVERY exit: run_tui after its
+│                       loop + a driver.rs backstop for run_tui's pre-loop `?`; floating after run_app (with
+│                       the boot-spawn placed AFTER the fallible `?` steps). Idempotent; disabled/muted =
+│                       no-op. The mute/volume TRANSITION is
 │                       ONE authority — `audio::apply_audio_action(&mut AudioUi, action, paused, spawn)`
 │                       (audio/mod.rs, unit-tested); the PERSIST protocol around it (mute-save-now, volume
 │                       debounce→flash-expiry, exit-flush) is a SECOND authority BOTH painters OWN —

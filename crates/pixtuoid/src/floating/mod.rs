@@ -40,19 +40,6 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         audio,
         ..
     } = cfg;
-    // Ambient audio (#633): boot-spawn iff the persisted state is unmuted —
-    // a muted boot stays at zero cost (no device/thread/buffers) until the
-    // first m/+ press lazy-spawns it (window.rs, TUI parity).
-    let audio_ui = crate::audio::AudioUi {
-        handle: if !audio.muted {
-            crate::audio::spawn(audio.volume)
-        } else {
-            crate::audio::AudioHandle::disabled()
-        },
-        muted: audio.muted,
-        volume: audio.volume,
-    };
-
     let app_config = config::load(&config_path, &mut Vec::new());
     let floating_cfg = config::resolve_floating(&app_config);
     let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(pack_dir)
@@ -146,15 +133,33 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         scene_rx,
         floor_caps,
     );
+    // Ambient audio (#633): boot-spawn iff the persisted state is unmuted —
+    // a muted boot stays at zero cost (no device/thread/buffers) until the
+    // first m/+ press lazy-spawns it (window.rs, TUI parity). Spawned HERE,
+    // after every fallible `?` boot step (pack load, runtime + event-loop
+    // build) — a device thread opened before one of those errored would be
+    // detached with no `shutdown_audio()` to join it (the teardown bug, on the
+    // boot-error path). From here on the only exit is `run_app` returning.
+    let audio_ui = crate::audio::AudioUi {
+        handle: if !audio.muted {
+            crate::audio::spawn(audio.volume)
+        } else {
+            crate::audio::AudioHandle::disabled()
+        },
+        muted: audio.muted,
+        volume: audio.volume,
+    };
     app.set_audio_ui(audio_ui);
     let result = event_loop
         .run_app(&mut app)
         .context("running the floating window event loop");
     // Stop the audio device thread SYNCHRONOUSLY before returning (process
-    // exit) — one place covering every exit (normal close AND the window-
-    // creation error paths). The detached device thread's RodioSink Drop would
+    // exit). `run_app` is the ONLY exit reachable once audio is spawned (above),
+    // and it returns on macOS/Windows/Linux after `event_loop.exit()` — so this
+    // covers the normal close AND the in-`resumed` window-creation failures,
+    // on both Ok and Err. The detached device thread's RodioSink Drop would
     // otherwise race process teardown and strand the OS output on macOS (the
-    // "music keeps playing after quit" bug). Runs on both Ok and Err.
+    // "music keeps playing after quit" bug).
     app.shutdown_audio();
     result
 }

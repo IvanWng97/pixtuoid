@@ -108,7 +108,16 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     if headless {
         headless_loop(scene_rx, health_rx).await
     } else {
-        crate::tui::run_tui(crate::tui::TuiSession {
+        // Backstop the audio device thread against run_tui's pre-loop `?`
+        // early-returns (e.g. a bad `--pack-dir`): run_tui joins the thread on
+        // its OWN loop exits, but a fallible boot step before that loop returns
+        // Err without joining — detaching the device thread (the teardown bug on
+        // the boot-error path). A shared clone + a post-run_tui shutdown covers
+        // every run_tui exit; `shutdown` is idempotent, so the normal path's
+        // in-loop join makes this a no-op. Disabled handle (muted/headless boot)
+        // = no-op regardless.
+        let audio_cleanup = audio_handle.clone();
+        let result = crate::tui::run_tui(crate::tui::TuiSession {
             scene_rx,
             pack_dir,
             floor_caps,
@@ -125,7 +134,9 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             audio: audio_handle,
             audio_cfg: audio,
         })
-        .await
+        .await;
+        audio_cleanup.shutdown();
+        result
     }
 }
 

@@ -652,6 +652,12 @@ impl AudioHandle {
     /// quit for the same reason; this is that, adapted to the off-thread device.
     /// Bounded so a pathological rodio/cpal Drop can't hang the exit — a timeout
     /// is no worse than today's always-detached behaviour.
+    ///
+    /// INVARIANT: call this only after the painter's input/render loop has
+    /// halted, so `shutdown` / `respawn_in_place` / `frame` never run
+    /// concurrently on the shared `tx`/`join` cells. Both painters satisfy it
+    /// (TUI after its loop; floating after `run_app` returns). Idempotent, so a
+    /// belt-and-suspenders second call (the driver-level backstop) is a no-op.
     pub(crate) fn shutdown(&self) {
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let handle = self.join.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -704,16 +710,34 @@ pub(crate) fn drain_frames(rx: &mpsc::Receiver<AudioFrame>) -> Vec<AudioFrame> {
 const TICK_MS: u64 = 50;
 
 /// Upper bound on how long [`AudioHandle::shutdown`] waits for the device
-/// thread to finish its teardown. In practice `run_loop` returns within one
-/// `TICK_MS` (50ms) of the channel closing; this only guards against a
-/// pathological rodio/cpal device-close hang so a bad Drop can't wedge quit.
-const SHUTDOWN_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+/// thread to finish its teardown.
+///
+/// The COMMON case is fast: once the office is running, `run_loop` sits in a
+/// `recv_timeout` and returns within one `TICK_MS` (50ms) of the channel
+/// closing. But `run_loop` is BLIND to the closed channel while it is inside a
+/// synthesis build — the startup `AssetBank` build and each `TrackBeds::build`
+/// (~2s each in release, far more in debug; see the `run_loop` synth-window
+/// comment). Quitting during that window (unmute-then-immediately-quit, or a
+/// mood swap) forces the thread through the in-flight build before it can
+/// observe the disconnect, so the ceiling must comfortably exceed a release
+/// build — otherwise the join times out and the device thread falls back to
+/// DETACHED (the very bug this fixes). 8s covers the realistic
+/// startup+first-frame worst case (~4s release) with load headroom, and still
+/// bounds a genuinely hung cpal/CoreAudio device-close. A debug build's longer
+/// synth can still exceed it — accepted: debug is not shipped, and a slow-quit
+/// leak in a dev build is the mild failure, not a user one.
+const SHUTDOWN_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
-/// Join `handle`, but give up after `timeout` so a hung device-close can't
-/// block the exit. The join runs on a helper thread whose completion we wait on
-/// with a timeout; on timeout the helper is left detached (harmless — the
-/// process is exiting anyway, exactly the pre-fix behaviour for that one bad
-/// case). std has no timed `JoinHandle::join`, hence the channel dance.
+/// Join `handle`, but give up after `timeout` so a hung device-close (or a
+/// still-in-flight multi-second synth build, see [`SHUTDOWN_JOIN_TIMEOUT`])
+/// can't block the exit forever. The join runs on a helper thread whose
+/// completion we wait on with a timeout; on timeout the helper is left detached,
+/// still blocked on the real join. That is harmless for the `shutdown` caller
+/// (the process is exiting). For the `respawn_in_place` caller — where the
+/// session CONTINUES — a timeout instead leaves the retired device thread to
+/// finish on its own; no worse than the pre-fix always-detached behaviour, and
+/// that path is near-unreachable in normal flow anyway. std has no timed
+/// `JoinHandle::join`, hence the channel dance.
 fn join_with_timeout(handle: std::thread::JoinHandle<()>, timeout: std::time::Duration) {
     let (done_tx, done_rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -882,7 +906,16 @@ mod tests {
         // channel, then drop the sender — the loop must exit cleanly
         let (tx, rx) = mpsc::sync_channel(8);
         let recorder = Arc::new(std::sync::Mutex::new(sink::NullSink::default()));
-        struct Probe(Arc<std::sync::Mutex<sink::NullSink>>);
+        // `.1` flips when the device (the `Box<dyn AudioSink>` run_loop owns) is
+        // DROPPED — i.e. when run_loop returns on Disconnect. In production that
+        // Drop is the RodioSink closing the OS device; the recorder is a SEPARATE
+        // shared handle that outlives the thread, so it can't observe the drop —
+        // this flag can. Guards the exact teardown quit relies on against a future
+        // run_loop refactor that moved or `mem::forget`-ed the device out.
+        struct Probe(
+            Arc<std::sync::Mutex<sink::NullSink>>,
+            Arc<std::sync::atomic::AtomicBool>,
+        );
         impl AudioSink for Probe {
             fn start_loop(&mut self, stem: LoopStem, s: Arc<Vec<f32>>) {
                 self.0.lock().unwrap().start_loop(stem, s);
@@ -897,7 +930,13 @@ mod tests {
                 self.0.lock().unwrap().play_once(s, g);
             }
         }
-        let probe = Probe(Arc::clone(&recorder));
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.1.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let device_dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let probe = Probe(Arc::clone(&recorder), Arc::clone(&device_dropped));
         let muted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let muted_ctl = std::sync::Arc::clone(&muted);
         let vol = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits()));
@@ -934,6 +973,13 @@ mod tests {
         .unwrap();
         drop(tx);
         join.join().unwrap();
+
+        assert!(
+            device_dropped.load(std::sync::atomic::Ordering::SeqCst),
+            "run_loop must DROP its device when the channel closes — that Drop is \
+             the RodioSink closing the OS output; a refactor that leaked it would \
+             re-strand audio on quit (the bug shutdown()'s join exists to force)"
+        );
 
         let rec = recorder.lock().unwrap();
         for stem in LoopStem::ALL {
