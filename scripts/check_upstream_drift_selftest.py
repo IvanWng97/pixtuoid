@@ -232,12 +232,142 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
     check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
 
 
+def test_const_array_parser_ignores_words_quoted_inside_comments() -> None:
+    """A quoted word in a comment must NOT be read as a registered event.
+
+    The shape assertions above cannot catch this: a phantom scraped out of a
+    comment is an ordinary-looking word that passes every shape regex. It shipped
+    for real — a WHY comment inside CODEX_EVENTS mentioning the SessionEnd
+    payload's `reason const "other"` made the watcher report a phantom breaking
+    drift, auto-file an issue, and fail the run.
+    """
+    src = '''
+const DEMO_EVENTS: &[&str] = &[
+    "SessionStart",
+    // upstream's payload carries a reason const "other"; the field is
+    // `hook_event_name:"SessionEnd"` — neither is a registered event here
+    /* a block comment naming "PreToolUse" is not a registration either */
+    "SessionEnd",
+];
+'''
+    got = d.parse_rust_const_str_array(src, "DEMO_EVENTS")
+    check(got == {"SessionStart", "SessionEnd"}, f"comments excluded: {got!r}")
+
+    # And an absent const is reported as such, not as an empty set — an empty
+    # set would read as "nothing registered" and silence every check downstream.
+    check(
+        d.parse_rust_const_str_array(src, "NOPE_EVENTS") is None,
+        "a missing const returns None, never an empty set",
+    )
+
+
+def test_parser_never_drops_a_real_event() -> None:
+    """The failing-OPEN direction, which is the worse one.
+
+    A phantom is loud: the watcher alarms on a name upstream does not have. A
+    DROPPED registration is silent — that name simply stops being checked, and
+    nothing says so. Both regex formulations of this parser had that bug, so
+    each case below is a construct that made one of them swallow a real entry.
+    """
+    cases = [
+        # `//` inside a string literal: a line-comment strip runs to end of line
+        # and takes every later entry with it.
+        ('"SessionStart", "a//b", "SessionEnd"', {"SessionStart", "SessionEnd"}),
+        ('"Alpha", "http://x", "Charlie"', {"Alpha", "Charlie"}),
+        # Nested block comments are legal Rust; a non-greedy `/\\*.*?\\*/` closes
+        # at the FIRST `*/` and re-admits words from the comment's tail.
+        ('"Alpha", /* outer /* inner */ names "Phantom" */ "B"', {"Alpha", "B"}),
+        # A `/*` that only ever appears inside a line comment must not open a
+        # block that swallows the entries after it.
+        ('"Alpha",\n // uses /* as a marker\n "Beta", /* real */', {"Alpha", "Beta"}),
+        # Escaped quotes must not end the string early.
+        (r'"Alpha", "say \"Beta\"", "Gamma"', {"Alpha", "Gamma"}),
+        # A URL in a COMMENT is the benign twin of case 2 — still excluded.
+        ('"Alpha",\n // see https://x "Notification"\n "Beta"', {"Alpha", "Beta"}),
+    ]
+    for body, want in cases:
+        got = d.parse_rust_const_str_array(f"const E: &[&str] = &[{body}];", "E")
+        check(got == want, f"no real event dropped from `{body}`: {got!r} != {want!r}")
+
+
+def test_block_scrape_is_bounded_to_the_decoder() -> None:
+    """A scrape bounded to one block must not see code that follows it.
+
+    `read_codex_rollout_types` used to scan the WHOLE of source/codex.rs, so a
+    `#[cfg(test)] mod tests` constructing the same tuple shape would leak a type
+    the decoder does not depend on — and a phantom makes the watcher alarm on a
+    name upstream never had to have.
+
+    This exists because the sibling comment-safe parser shipped exactly such a
+    case one commit earlier and this bounding fix did not: the negative control
+    was RUN and then left out of the suite, which is the failure this whole
+    branch is about.
+    """
+    src = """
+fn decode(v: Value) -> Vec<Event> {
+    let out = match (outer, inner) {
+        ("event_msg", "task_started") => vec![start()],
+        ("response_item", "function_call") => { let f = |x| { x }; vec![f(call())] }
+        _ => vec![],
+    };
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    fn planted() { let _ = ("event_msg", "PHANTOM"); }
+}
+"""
+    block = d.rust_block_after(d.strip_rust_comments(src), r"match \(outer, inner\)")
+    check(block is not None, "the anchor's block is found")
+    got = set(re.findall(r'\(\s*"event_msg"\s*,\s*"(\w+)"\s*\)', block or ""))
+    # Nested braces from the closure/vec! must not close the block early, and the
+    # planted test tuple after it must not be visible.
+    check(got == {"task_started"}, f"bounded to the decoder's arms: {got!r}")
+    check(
+        "function_call" in (block or ""),
+        "the nested-brace arm is INSIDE the block (it did not close early)",
+    )
+
+    # A missing anchor is None, so the caller raises loudly rather than silently
+    # scraping nothing — a decoder refactor must break the watcher, not blind it.
+    check(
+        d.rust_block_after("fn unrelated() { }", r"match \(outer, inner\)") is None,
+        "a missing anchor returns None, never an empty block",
+    )
+
+
+def test_every_const_array_reader_uses_the_shared_parser() -> None:
+    """No reader may hand-roll the scrape the shared parser exists to own.
+
+    This is the mechanical form of the lesson, not a second copy of it: the
+    original migration was a HAND-LISTED sweep of nine readers and it missed one
+    (`read_kimi_events`), which is the N-1-of-N class this repo's review prompt
+    calls its most-recurrent escape. A checklist cannot enforce itself; this can.
+    """
+    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
+    offenders = [
+        ln.strip()
+        for ln in src.splitlines()
+        if 'findall(r\'"(\\w+)"\'' in ln and "strip_rust_comments" not in ln
+    ]
+    check(
+        not offenders,
+        "every `\"(\\\\w+)\"` scrape must route through strip_rust_comments; "
+        f"unrouted: {offenders!r}",
+    )
+
+
 def main() -> int:
     for t in (
         test_try_fetch_classifies_permanent_vs_transient,
         test_source_parsers_find_nonempty_well_shaped_sets,
         test_upstream_parsers_extract_from_a_snippet,
         test_cc_doc_marker_detection_fires_both_directions,
+        test_const_array_parser_ignores_words_quoted_inside_comments,
+        test_parser_never_drops_a_real_event,
+        test_block_scrape_is_bounded_to_the_decoder,
+        test_every_const_array_reader_uses_the_shared_parser,
     ):
         t()
     if FAILS:

@@ -2,8 +2,8 @@
   {
     "id": "brew",
     "label": "Homebrew",
-    "blurb": "macOS",
-    "cmds": ["brew install IvanWng97/pixtuoid/pixtuoid"],
+    "blurb": "Linux, macOS, or WSL2",
+    "cmds": ["brew install pixtuoid"],
     "readme": true
   },
   {

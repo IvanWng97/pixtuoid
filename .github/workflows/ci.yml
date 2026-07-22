@@ -293,6 +293,96 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  packaging-build:
+    name: packaging-build (${{ matrix.os }})
+    # Mirrors how homebrew-core actually builds us, which NO other job does:
+    # `cargo install --locked` from a clean tree, DEFAULT features on, on both
+    # bottled platforms. Two failure classes only this job can catch:
+    #
+    #   1. A stale Cargo.lock. Every other job runs plain cargo, which silently
+    #      UPDATES the lock when it drifts from a Cargo.toml edit; `--locked`
+    #      makes that same state a hard error — red in Homebrew's CI, on an
+    #      autobump we don't control (see docs/CONTRIBUTING.md#releasing).
+    #   2. A NEW system-library dependency. release.yml builds Linux artifacts
+    #      `--no-default-features`, so the default-feature Linux build ships
+    #      nowhere else — it is exactly what core compiles. When this job goes
+    #      red for a missing system lib, the core FORMULA needs a matching
+    #      `depends_on`, landed in the same PR as the version bump.
+    #
+    # The apt line below does NOT mirror the core formula, and that gap is the
+    # point. As of homebrew-core 2026-07-21 the formula declares only
+    # `depends_on "rust" => :build` — it builds 0.15.0, which predates the
+    # default-on `audio` feature (#633). libasound2-dev is what the CURRENT
+    # tree needs (rodio → cpal → alsa-sys, whose build script panics when
+    # pkg-config can't find ALSA).
+    #
+    # So this job proves the CODE builds from source; it CANNOT red on the
+    # formula-side dep, because it installs the header itself. Adding
+    # `depends_on "alsa-lib"` under `on_linux` is a release checklist item for
+    # whichever version first ships `audio` — tracked in #731. Class #2 above
+    # therefore covers a genuinely NEW system lib, not this already-known one.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    # Two release-mode `cargo install`s from a cold cache; `cargo install` uses
+    # its own target dir, so rust-cache only partly covers it.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
+      - name: Install ALSA headers (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: cargo install --locked (both binaries, default features)
+        run: |
+          cargo install --locked --path crates/pixtuoid --root "${RUNNER_TEMP}/pkg"
+          cargo install --locked --path crates/pixtuoid-hook --root "${RUNNER_TEMP}/pkg"
+      - name: Replay the formula's install + test assertions
+        run: |
+          # pipefail is NOT in the default `run:` shell (bash -e): without it a
+          # pipeline reports the LAST command's status, so a crashing binary
+          # reads as green. These assertions are the oracle — they have to be
+          # capable of failing.
+          #
+          # With pipefail on, never pipe the binary straight into `grep -q`:
+          # -q exits at the first match, and `pixtuoid man` matches on line 1
+          # (`.TH`), so the still-writing producer takes EPIPE and the pipeline
+          # fails. Linux's 64K pipe buffer absorbs the rest of the output and
+          # hides it; macOS's does not. Capture to a file, then grep the file —
+          # that also lets `set -e` check the binary's OWN exit status.
+          set -euo pipefail
+          # Resolve the binary BEFORE reassigning HOME, and export HOME here
+          # rather than in `env:` (a step-level HOME override also reaches the
+          # runner's own tooling). `connect` WRITES agent config — the formula
+          # runs it in a sandboxed testpath, so this must never see a real HOME.
+          BIN="${RUNNER_TEMP}/pkg/bin/pixtuoid"
+          export HOME="${RUNNER_TEMP}/fakehome"
+          mkdir -p "${HOME}"
+          out="${RUNNER_TEMP}/formula-test"
+          mkdir -p "$out"
+
+          "$BIN" --version                      > "$out/version"
+          "$BIN" man                            > "$out/man.roff"
+          "$BIN" completions bash               > "$out/completions.bash"
+          "$BIN" init-pack "${HOME}/pack"
+          "$BIN" validate-pack "${HOME}/pack"   > "$out/validate"
+          "$BIN" connect claude-code --json     > "$out/connect.json"
+
+          # The formula's FIRST assertion is `assert_match version.to_s` — a
+          # CONTENT check. `set -e` only proves --version exited 0, so without
+          # this grep the capture above is a dead oracle.
+          grep -qF "$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)" "$out/version"
+          grep -q '^\.TH' "$out/man.roff"
+          grep -q pixtuoid "$out/completions.bash"
+          grep -q 'OK: pack "skeleton"' "$out/validate"
+          grep -q pixtuoid-hook "${HOME}/.claude/settings.json"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == [{"id":"claude-code","outcome":"connected"}], "connect --json envelope drifted from the homebrew-core contract"' "$out/connect.json"
+
   semver:
     name: semver-checks
     runs-on: ubuntu-latest

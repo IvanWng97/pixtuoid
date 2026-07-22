@@ -15,7 +15,9 @@ images has an all-zero alpha band, and Pillow >= 10's getbbox() defaults to
 alpha_only=True, which would make ANY two same-size images compare equal.
 """
 
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from PIL import Image, ImageChops, UnidentifiedImageError
@@ -85,9 +87,93 @@ def compare_images(ref_path, cand_path, diff_path, threshold_percent=0.0):
     return 0
 
 
+def _selftest():
+    """Assert the comparator can actually FAIL. Returns an exit code.
+
+    Two required gates (`gen-check`, smoke) ride on this predicate, so a
+    silently-always-green comparator would report success for any render. The
+    RGBA case below is the specific always-green mode the module docstring
+    warns about: drop the `.convert("RGB")` and ImageChops.difference leaves an
+    all-zero alpha band that Pillow >= 10's alpha_only=True getbbox() reads as
+    "no difference" — every case here still passes EXCEPT that one.
+    """
+    checks = []
+
+    def check(name, got, want):
+        checks.append((name, got, want))
+
+    black = (0, 0, 0)
+    white = (255, 255, 255)
+
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        diff_out = td / "diff.png"
+
+        def write(name, mode, color, size=(8, 8)):
+            p = td / name
+            Image.new(mode, size, color).save(p)
+            return p
+
+        # THE anti-rot check: opaque RGBA, differing only in colour. Without the
+        # RGB conversion this returns 0 and the whole gate is decorative.
+        rgba_a = write("rgba_a.png", "RGBA", black + (255,))
+        rgba_b = write("rgba_b.png", "RGBA", white + (255,))
+        check("differing RGBA images must FAIL", compare_images(rgba_a, rgba_b, diff_out), 1)
+
+        rgb_a = write("rgb_a.png", "RGB", black)
+        rgb_b = write("rgb_b.png", "RGB", white)
+        check("differing RGB images must FAIL", compare_images(rgb_a, rgb_b, diff_out), 1)
+
+        check("identical images must PASS", compare_images(rgb_a, rgb_a, diff_out), 0)
+
+        bigger = write("bigger.png", "RGB", black, size=(16, 16))
+        check("size mismatch must ERROR", compare_images(rgb_a, bigger, diff_out), 2)
+
+        check("missing file must ERROR", compare_images(td / "nope.png", rgb_a, diff_out), 2)
+
+        # A threshold must gate on the measured percentage, not swallow the diff:
+        # one differing pixel in 100 is 1%, so 0.5% fails and 2% passes.
+        spotted = Image.new("RGB", (10, 10), black)
+        spotted.putpixel((0, 0), white)
+        spot = td / "spot.png"
+        spotted.save(spot)
+        flat = write("flat.png", "RGB", black, size=(10, 10))
+        check("1% diff under a 0.5% threshold must FAIL", compare_images(flat, spot, diff_out, 0.5), 1)
+        check("1% diff under a 2% threshold must PASS", compare_images(flat, spot, diff_out, 2.0), 0)
+        # ON the boundary, so `>` vs `>=` is observable. Both cases above sit off
+        # it, which let a flipped operator survive; a threshold is a policy and
+        # its inclusivity is the part worth pinning.
+        check("1% diff exactly AT a 1% threshold must PASS", compare_images(flat, spot, diff_out, 1.0), 0)
+
+        # The consumers do not import this module — gen-media.py and
+        # gen-pix-icons.py subprocess it. Exercise that path too, or argv
+        # handling and the exit-code mapping stay untested however many
+        # in-process checks pass.
+        argv = [sys.executable, str(Path(__file__).resolve())]
+        cli_ok = subprocess.run([*argv, str(rgb_a), str(rgb_a), str(diff_out)], capture_output=True)
+        check("CLI: identical images exit 0", cli_ok.returncode, 0)
+        cli_bad = subprocess.run([*argv, str(rgb_a), str(rgb_b), str(diff_out)], capture_output=True)
+        check("CLI: differing images exit 1", cli_bad.returncode, 1)
+        cli_usage = subprocess.run([*argv, str(rgb_a)], capture_output=True)
+        check("CLI: wrong arity exits 2", cli_usage.returncode, 2)
+
+    failed = [(n, got, want) for n, got, want in checks if got != want]
+    for name, got, want in failed:
+        print(f"SELFTEST FAIL: {name} — got exit {got}, want {want}", file=sys.stderr)
+    if failed:
+        print(f"compare-screenshots selftest: {len(failed)}/{len(checks)} checks FAILED", file=sys.stderr)
+        return 1
+    print(f"compare-screenshots selftest: all {len(checks)} checks passed", file=sys.stderr)
+    return 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv[1:]:
+        sys.exit(_selftest())
+
     if len(sys.argv) not in (4, 5):
         print("Usage: compare-screenshots.py <reference> <candidate> <diff_out> [threshold_percent]")
+        print("       compare-screenshots.py --selftest")
         sys.exit(2)
 
     threshold = float(sys.argv[4]) if len(sys.argv) == 5 else 0.0

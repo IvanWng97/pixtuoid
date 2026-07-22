@@ -36,6 +36,9 @@ tests/
 │   ├── liveness.rs           proof-of-life emission, negative vouch, instant exit (pid death), probe-failure no-ops
 │   ├── unclaim.rs            child-end un-claim: turn-N+1 re-register + in-flight multi-turn revival
 │   ├── sources.rs            Source::run glue (codex / antigravity / claude-code / copilot / omp bind+spawn)
+│   │                         + the ONE fixture→Reducer fold: a committed rollout driven through the real
+│   │                         reducer, asserting the ActivityState progression (conformance snapshots stop
+│   │                         at decoded events and never construct a Reducer, so no other test observes one)
 │   └── attach.rs             the mid-attach scenario suite (attach shows exactly the live set)
 ├── transport/main.rs         #[cfg(unix)] mod socket;  #[cfg(windows)] mod pipe;
 ├── render/main.rs            mod {blit, format}  +  render/fixtures/ (sprites)

@@ -32,6 +32,13 @@ jobs:
         with:
           # Full history for the tag-on-main ancestry check below.
           fetch-depth: 0
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD
+      # on Linux (#633) — alsa-sys's build script PANICS when pkg-config can't
+      # find them. ci.yml installs this in every Linux job; this workflow had
+      # none, so `just clippy` below would have failed on the FIRST tag after
+      # #633 — in the one gate that only ever runs at tag time.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -315,106 +322,6 @@ jobs:
             publish_one "$crate"
           done
 
-  homebrew:
-    name: update homebrew tap
-    needs: release
-    # Never let a pre-release (v*-rc/-beta/-alpha) clobber the stable formula.
-    if: ${{ !contains(github.ref_name, '-') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Update formula
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          TAG="${GITHUB_REF_NAME}"
-
-          # Homebrew ships the 4 DESKTOP targets only (no windows) — a deliberate
-          # SUBSET of the build matrix, not a full mirror. Add an arm here when a
-          # new macOS/Linux target joins the matrix (windows stays npm/release-only).
-          SHA_MACOS_ARM=$(sha256sum "artifacts/pixtuoid-${TAG}-aarch64-apple-darwin.tar.gz" | cut -d' ' -f1)
-          SHA_MACOS_INTEL=$(sha256sum "artifacts/pixtuoid-${TAG}-x86_64-apple-darwin.tar.gz" | cut -d' ' -f1)
-          SHA_LINUX_ARM=$(sha256sum "artifacts/pixtuoid-${TAG}-aarch64-unknown-linux-gnu.tar.gz" | cut -d' ' -f1)
-          SHA_LINUX_INTEL=$(sha256sum "artifacts/pixtuoid-${TAG}-x86_64-unknown-linux-musl.tar.gz" | cut -d' ' -f1)
-
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/IvanWng97/homebrew-pixtuoid.git" tap
-          mkdir -p tap/Formula
-
-          cat > tap/Formula/pixtuoid.rb <<RUBY
-          class Pixtuoid < Formula
-            desc "Terminal pixel-art office for AI coding agents"
-            homepage "https://github.com/IvanWng97/pixtuoid"
-            version "${VERSION}"
-            license "MIT"
-
-            on_macos do
-              on_arm do
-                url "https://github.com/IvanWng97/pixtuoid/releases/download/${TAG}/pixtuoid-${TAG}-aarch64-apple-darwin.tar.gz"
-                sha256 "${SHA_MACOS_ARM}"
-              end
-              on_intel do
-                url "https://github.com/IvanWng97/pixtuoid/releases/download/${TAG}/pixtuoid-${TAG}-x86_64-apple-darwin.tar.gz"
-                sha256 "${SHA_MACOS_INTEL}"
-              end
-            end
-
-            on_linux do
-              on_arm do
-                url "https://github.com/IvanWng97/pixtuoid/releases/download/${TAG}/pixtuoid-${TAG}-aarch64-unknown-linux-gnu.tar.gz"
-                sha256 "${SHA_LINUX_ARM}"
-              end
-              on_intel do
-                url "https://github.com/IvanWng97/pixtuoid/releases/download/${TAG}/pixtuoid-${TAG}-x86_64-unknown-linux-musl.tar.gz"
-                sha256 "${SHA_LINUX_INTEL}"
-              end
-            end
-
-            def install
-              bin.install "pixtuoid"
-              bin.install "pixtuoid-hook"
-            end
-
-            def caveats
-              <<~EOS
-                To start visualizing your AI coding sessions:
-                  pixtuoid
-
-                Then press \`s\` to open the Sources panel and connect your
-                CLI (Claude Code, Codex, ...). Disconnect there before
-                uninstalling to remove its hooks.
-              EOS
-            end
-
-            test do
-              assert_match "pixtuoid", shell_output("#{bin}/pixtuoid --version")
-            end
-          end
-          RUBY
-          sed -i 's/^          //' tap/Formula/pixtuoid.rb
-
-          cd tap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/pixtuoid.rb
-          # Idempotent: a re-run of the same tag regenerates a byte-identical
-          # formula (same version + same artifact SHAs), so `git commit` would
-          # exit 1 ("nothing to commit") and fail the job. Skip the commit/push
-          # when the formula is unchanged — mirrors the crates.io/npm jobs'
-          # safe-re-run discipline.
-          if git diff --staged --quiet; then
-            echo "::notice::homebrew formula unchanged for ${VERSION} — nothing to commit"
-          else
-            git commit -m "pixtuoid ${VERSION}"
-            git push
-          fi
-
   npm:
     name: publish to npm
     # Same full-matrix gate as the crates.io `publish` job: npm consumes only the
@@ -425,8 +332,8 @@ jobs:
     # Never publish a pre-release to npm — like crates.io, an npm publish is
     # effectively irreversible (no unpublish after 72h). Pre-release tags
     # (v*-win.N / -rc) build artifacts only. Consumes the SAME build artifacts
-    # as the release/homebrew jobs — npm is a fourth downstream consumer of the
-    # one build matrix, not a parallel build.
+    # as the release job — npm is a third downstream consumer of the one build
+    # matrix, not a parallel build.
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20

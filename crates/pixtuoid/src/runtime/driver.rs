@@ -220,6 +220,14 @@ pub(crate) async fn reducer_task(
     // Disabled once the presence channel closes (all senders dropped) so its
     // `recv() -> None` branch can't busy-loop the select.
     let mut presence_open = true;
+    // Registered sources already announced as gated (see the connection gate).
+    // Bounded by the registry, NOT by the wire: `_pixtuoid_source` arrives
+    // verbatim from socket JSON with no registry check and no length cap, and an
+    // unknown name is a supported, tested decode path — so keying this on the
+    // raw string would let a long-lived `run` accumulate one entry per distinct
+    // name seen. An unregistered source is a DRIFT story, not a connection-gate
+    // one, and `source/drift.rs` already owns it.
+    let mut gate_logged: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
     let initial_caps: [usize; MAX_FLOORS] =
         std::array::from_fn(|i| floor_caps[i].load(Ordering::Relaxed));
     let mut scene = SceneState::new(initial_caps);
@@ -239,7 +247,22 @@ pub(crate) async fn reducer_task(
                 let now = SystemTime::now();
                 // Connection gate: drop a disconnected source's events before
                 // they register/refresh a sprite. No scene change → no send.
-                if event_source(&scene, &ev).is_some_and(|src| !connected.is_connected(src)) {
+                //
+                // Announced once per registered source, because this `continue`
+                // sits above the only `debug!` below: without it a gated source
+                // emits zero lines at every log level, making "connected but no
+                // sprite" indistinguishable from "not connected" — the two
+                // hypotheses a reader most needs to separate. Per-source, never
+                // per-event: a disconnected watcher streams indefinitely.
+                if let Some(src) = event_source(&scene, &ev).filter(|s| !connected.is_connected(s)) {
+                    if let Some(known) = registry::descriptor_for(src) {
+                        if gate_logged.insert(known.name) {
+                            tracing::debug!(
+                                source = known.name,
+                                "dropping events: source not connected"
+                            );
+                        }
+                    }
                     continue;
                 }
                 tracing::debug!(?transport, ?ev, "event");
@@ -400,6 +423,113 @@ mod tests {
     use super::*;
     use pixtuoid_core::source::manager::SourceDeath;
     use pixtuoid_core::Transport;
+
+    // The connection gate on HOOK transport, end to end (#735). The reducer_task
+    // gate + the 1-Hz reconciler are two layers of ONE contract — a disconnected
+    // source renders no PERSISTENT sprite — and that contract had no hook-path
+    // test: `event_source_extracts_...` unit-tests the predicate, and #727's
+    // process pair covers only JSONL. This drives a REAL decoded hook payload
+    // through the exact gate loop reducer_task runs, both ways.
+    //
+    // The two layers matter separately because they cover different events in one
+    // payload. A hook `preToolUse` decodes to `[Identity{source}, ActivityStart]`
+    // (#221): the per-event gate drops the source-carrying `Identity`, but the
+    // bare `ActivityStart` that follows resolves to `None` in `event_source`
+    // (its id has no slot yet), slips the gate once, and `synthesize_hook_
+    // registration` mints a BLANK-source slot for it. The reconciler is the
+    // documented safety net that sweeps that blank slot (its `""` source is not
+    // in the connected set). The residual is bounded but NOT instant: the
+    // reconcile MARKS the slot exiting (`cascade_exit`), then it walks out over
+    // `EXIT_GRACE_WINDOW` (4.5s) before `sweep_exited` removes it — a few-second
+    // blank `#N`, not a one-tick disappearance. Bounded to at most ONE such slot
+    // per session id AT A TIME: a later event for the same id coalesces onto that
+    // one slot (AgentId identity) rather than adding another — so the transient
+    // never multiplies within a session, though a source that keeps firing
+    // re-mints one each GC cycle. Still not worth a third
+    // gating layer: an AgentId-keyed "gated ids" map with its own TTL/GC, to shave
+    // a self-correcting cosmetic that rides out alongside the source's real
+    // walk-out, is the defensive-arm smell the review taxonomy warns against — and
+    // it contradicts the documented "swept too. Stateless on purpose (no prev-set
+    // bookkeeping)" design. Returns (slots BEFORE the reconcile, live slots AFTER) so
+    // each layer gets independent teeth: a source-carrying event (SessionStart/
+    // Identity) is dropped by the GATE — 0 before reconcile — while a bare
+    // activity event only clears at the RECONCILE. A single "after" count would
+    // pass even with the gate removed (reconcile alone still sweeps), which is
+    // exactly the gap #735 flags.
+    fn drive_hook_gate(payload: &serde_json::Value, connected: &[&str]) -> (usize, usize) {
+        use pixtuoid_core::source::decoder::decode_hook_payload;
+        let cs = ConnectedSources::new(connected.iter().map(|s| s.to_string()).collect());
+        let mut scene = SceneState::uniform(8);
+        let mut reducer = Reducer::new();
+        let now = SystemTime::now();
+        // The exact reducer_task per-event gate.
+        for ev in decode_hook_payload(payload.clone()).expect("decode hook") {
+            if event_source(&scene, &ev)
+                .filter(|s| !cs.is_connected(s))
+                .is_some()
+            {
+                continue;
+            }
+            reducer.apply(&mut scene, ev, now, Transport::Hook);
+        }
+        let before = scene.agents.len();
+        // The 1-Hz reconcile sweep the loop runs on every tick.
+        reducer.reconcile_connected(&mut scene, &cs.snapshot(), now);
+        let live = scene
+            .agents
+            .values()
+            .filter(|s| s.exiting_at.is_none())
+            .count();
+        (before, live)
+    }
+
+    fn cursor_hook(event: &str) -> serde_json::Value {
+        // `_pixtuoid_source` is the only attribution the gate trusts — never the
+        // public `source` field (which CC overloads for the SessionStart reason).
+        serde_json::json!({
+            "hook_event_name": event, "session_id": "c7-sess", "cwd": "",
+            "conversation_id": "c7-sess", "workspace_roots": ["/x/proj"],
+            "tool_name": "Shell", "tool_input": {"command": "ls"},
+            "_pixtuoid_source": "cursor"
+        })
+    }
+
+    #[test]
+    fn the_gate_drops_a_disconnected_sources_carrying_hook_event_outright() {
+        // A `sessionStart` decodes to a single source-carrying `SessionStart`, so
+        // the per-event gate drops it BEFORE it ever registers — no transient at
+        // all. This is the layer #735 is about: remove the gate and this reds
+        // (the SessionStart registers, and only the reconcile would clean it).
+        let (before, live) = drive_hook_gate(&cursor_hook("sessionStart"), &["claude-code"]);
+        assert_eq!(
+            before, 0,
+            "the gate must drop a disconnected SessionStart pre-reconcile"
+        );
+        assert_eq!(live, 0, "and no sprite survives");
+    }
+
+    #[test]
+    fn a_disconnected_sources_hook_activity_leaves_no_persistent_sprite() {
+        // A bare activity event slips the gate once (its id has no slot, so
+        // `event_source` is None) and synthesizes a transient blank slot; the
+        // reconcile is the layer that sweeps it. Pins the CONTRACT (no persistent
+        // sprite), not the transient count, so a future fix that closes the
+        // one-slot window stays green.
+        let (_before, live) = drive_hook_gate(&cursor_hook("preToolUse"), &["claude-code"]);
+        assert_eq!(
+            live, 0,
+            "a disconnected source's hook activity must leave no live sprite after the reconcile"
+        );
+    }
+
+    #[test]
+    fn hook_events_for_a_connected_source_render() {
+        let (_before, live) = drive_hook_gate(&cursor_hook("preToolUse"), &["cursor"]);
+        assert_eq!(
+            live, 1,
+            "a connected source's hook activity must render exactly one live sprite"
+        );
+    }
 
     type HealthPair = (
         watch::Sender<Vec<SourceDeath>>,

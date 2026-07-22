@@ -26,3 +26,15 @@ path = "junit.xml"
 [[profile.default.overrides]]
 filter = 'test(_exits_zero_without_blocking) | test(_within_watchdog_bound)'
 threads-required = "num-cpus"
+
+# The connection-gate pair spawns a real `run --headless` and polls a wall-clock
+# BUDGET for it to reach a state (a sprite rendered, or the gate's drop line).
+# Same load-sensitivity class as the shim bounds above, one level up: the budget
+# is generous and both arms normally break out inside a second, but under a
+# saturated machine the child is starved and the budget expires — observed, both
+# arms red at 20s while a quiet run finishes in 0.98s. Exclusivity is nearly free
+# here precisely BECAUSE they exit on a positive signal rather than waiting out a
+# fixed timeout; raising the budget instead would only lengthen the failure path.
+[[profile.default.overrides]]
+filter = 'test(connected_codex_rollout_becomes_a_sprite) | test(disconnected_codex_rollout_is_dropped_by_the_gate)'
+threads-required = "num-cpus"
