@@ -73,7 +73,25 @@ pub(crate) mod rodio_sink {
         /// `None` when no output device is available (headless boxes) —
         /// callers degrade to silence, never error the office.
         pub(crate) fn open() -> Option<Self> {
-            match with_stderr_silenced(rodio::DeviceSinkBuilder::open_default_sink) {
+            // Build with our OWN stream error_callback instead of the convenience
+            // `open_default_sink` (whose default callback `eprintln!`s). A
+            // MID-SESSION cpal error — device unplugged, sample-rate change — fires
+            // this on the audio thread; a raw eprintln there would corrupt the TUI's
+            // alternate screen (or vanish to hidden stderr) and never reach our log.
+            // Route it to `tracing::warn!` (the warn-floor file log), matching how
+            // the open-failure below and rodio's drop-log (`log_on_drop(false)`) are
+            // already kept out of the terminal. rodio 0.22 has no reconnect, so this
+            // is observability, not recovery — audio just goes silent, now logged.
+            let opened = with_stderr_silenced(|| {
+                rodio::DeviceSinkBuilder::from_default_device().and_then(|builder| {
+                    builder
+                        .with_error_callback(|err| {
+                            tracing::warn!("audio: output stream error (device lost?): {err}");
+                        })
+                        .open_stream()
+                })
+            });
+            match opened {
                 Ok(mut stream) => {
                     stream.log_on_drop(false);
                     Some(Self {
