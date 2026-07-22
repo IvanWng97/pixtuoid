@@ -1141,8 +1141,10 @@ mod tests {
 
     /// A depth-capped arbitrary `serde_json::Value` — the proptest-book
     /// `prop_recursive` shape (leaf | array | object) plus a "JSON re-encoded as
-    /// a string" arm, so decoders that re-parse a nested string field as JSON
-    /// (e.g. codex `function_call.arguments`) are actually reached. The bounds
+    /// a string" arm, so a string can itself carry nested JSON — the kind of
+    /// payload codex's `function_call.arguments` reparse consumes (the exact
+    /// gated shape is rarely hit by random keys; the never-panic contract holds
+    /// for it regardless). The bounds
     /// (4 deep / 64 nodes / 8 wide) keep generation terminating — the decoders do
     /// flat `.get("a").get("b")` chains, never deep recursion, so a shallow tree
     /// exercises every arm.
@@ -1180,6 +1182,11 @@ mod tests {
             for d in REGISTRY {
                 if let Some(decode) = d.line_decoder() {
                     let _ = decode("/fixture/session.jsonl", d.name, v.clone());
+                }
+                // The paired first-sight cwd extractor also runs on untrusted
+                // transcript-head content in the walker — same never-panic contract.
+                if let Some(extract) = d.cwd_extractor() {
+                    let _ = extract(&v);
                 }
             }
         }
