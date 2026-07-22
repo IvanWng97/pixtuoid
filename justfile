@@ -261,19 +261,23 @@ mutants *args:
     fi
     cargo mutants --in-diff target/mutants.diff {{ args }}
 
-# Never-panic fuzz the per-source decoders over a JSONL corpus DIR (on-demand;
-# not in preflight/CI — points at local or public real sessions, not committed
-# data). Auto-routes each line to the CC / Codex / Copilot / Antigravity / hook
-# decoder by its shape; exits non-zero on any panic. Examples:
-#   just fuzz ~/.claude/projects       # your CC sessions (newest formats)
-#   just fuzz ~/.codex/sessions        # your Codex rollouts
-#   just fuzz ~/.copilot/session-state # your Copilot CLI sessions
-#   git clone https://github.com/daaain/claude-code-log /tmp/cc && just fuzz /tmp/cc/test_data/real_projects
+# Never-panic fuzz ONE source's transcript decoder over a JSONL corpus DIR
+# (on-demand; not in preflight/CI — points at local or public real sessions, not
+# committed data). SOURCE is a registered source name (see `registered_source_names`):
+# every line is routed through THAT source's registry line_decoder — no shape
+# guessing, so a newer source can't be silently misrouted to decode_cc_line.
+# Exits non-zero on any panic. Examples:
+#   just fuzz claude-code ~/.claude/projects   # your CC sessions (newest formats)
+#   just fuzz codex ~/.codex/sessions          # your Codex rollouts
+#   just fuzz grok ~/.grok/sessions            # grok ACP transcripts
+#   just fuzz omp ~/.omp/agent/sessions        # omp sessions
+#   git clone https://github.com/daaain/claude-code-log /tmp/cc && just fuzz claude-code /tmp/cc/test_data/real_projects
 [group('rust')]
-[doc('Never-panic fuzz the decoders over a JSONL corpus dir: just fuzz ~/.claude/projects')]
-fuzz dir:
+[doc('Never-panic fuzz a source decoder over a JSONL corpus dir: just fuzz claude-code ~/.claude/projects')]
+fuzz source dir:
     #!/usr/bin/env bash
     set -euo pipefail
+    source="{{ source }}"
     dir="{{ dir }}"
     # Guard the corpus BEFORE fuzzing: under the default no-pipefail shell a
     # typo'd dir made `find` fail while the pipeline status stayed the
@@ -282,7 +286,7 @@ fuzz dir:
     [ -d "$dir" ] || { echo "error: corpus dir '$dir' does not exist" >&2; exit 1; }
     [ -n "$(find "$dir" -name '*.jsonl' -print -quit)" ] || { echo "error: no .jsonl files under '$dir' — nothing to fuzz" >&2; exit 1; }
     cargo build --release --example decoder_fuzz -p pixtuoid-core
-    find "$dir" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz
+    find "$dir" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz "$source"
 
 # Hermetic OpenClaw daemon live-e2e: drives the REAL shim with crafted gateway
 # envelopes on an isolated socket and asserts the lobster's
