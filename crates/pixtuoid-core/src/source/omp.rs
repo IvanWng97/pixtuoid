@@ -176,6 +176,36 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
     (chain.len() > 1).then(|| chain[..chain.len() - 1].join("/"))
 }
 
+/// The COMPLETE set of omp session-entry `type` discriminators — the
+/// `RawFileEntry` union in oh-my-pi's `session/session-entries.ts` (verified
+/// live), NOT just the ones we decode. The tail breadcrumbs a `type` OUTSIDE
+/// this set (a brand-new entry SHAPE = a structural wire change); a KNOWN type
+/// we don't decode (`model_change`, `title`, `compaction`, a `custom` line whose
+/// customType isn't the exit marker, …) stays SILENT — omp writes those
+/// routinely and `drift::unknown_event` has NO dedup, so breadcrumbing them would
+/// flood the warn-floor (drift.rs's anti-flood rule). The nested `customType`
+/// axis is deliberately NOT guarded (unbounded, extension-authored — the true
+/// flood axis). Kept honest by `read_omp_known_types` in
+/// `check_upstream_drift.py`: a new upstream entry type not listed here alarms in
+/// CI before it can flood.
+const KNOWN_ENTRY_TYPES: &[&str] = &[
+    "branch_summary",
+    "compaction",
+    "custom",
+    "custom_message",
+    "label",
+    "message",
+    "mode_change",
+    "model_change",
+    "service_tier_change",
+    "session",
+    "session_init",
+    "thinking_level_change",
+    "title",
+    "title_change",
+    "ttsr_injection",
+];
+
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream reference loader is itself lenient (`parseJsonlLenient`), so a
@@ -327,11 +357,22 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 as_child: omp_parent_key_from_path(path).is_some(),
             }]
         }
+        // An entry whose `type` is OUTSIDE KNOWN_ENTRY_TYPES is a structural wire
+        // change — breadcrumb it (defense #2, the live-stream signal for a
+        // brand-new omp entry SHAPE that CI's fetch-based defense can't see in a
+        // user's own stream). A KNOWN type we don't decode falls through to the
+        // silent `_` below (a `custom` line with a non-exit customType lands here
+        // too: `custom` is KNOWN, so it stays silent — the customType axis is the
+        // unbounded one we never guard). Empty type = a typeless line, skipped.
+        other if !other.is_empty() && !KNOWN_ENTRY_TYPES.contains(&other) => {
+            crate::source::drift::unknown_event(source, other);
+            vec![]
+        }
         // title / title_change / model_change / compaction / session_init /
-        // custom_message / thinking_level_change / … — not sprite-visible.
-        // (model_change stays undecoded even though the burn tier reads model:
-        // its value is the provider-prefixed combined form, and every assistant
-        // message re-stamps the bare `model` anyway — one turn's lag at most.)
+        // custom_message / thinking_level_change / … — KNOWN types that are not
+        // sprite-visible. (model_change stays undecoded even though the burn tier
+        // reads model: its value is the provider-prefixed combined form, and every
+        // assistant message re-stamps the bare `model` anyway — one turn's lag.)
         _ => vec![],
     };
     Ok(out)
@@ -865,6 +906,46 @@ mod tests {
         assert!(decode_omp_line(ROOT, SOURCE_NAME, json!(["array"]))
             .unwrap()
             .is_empty());
+    }
+
+    /// The entry-type tail arm: a brand-new `type` breadcrumbs (the live-stream
+    /// signal for a new omp entry SHAPE), while a KNOWN type we don't decode —
+    /// including a `custom` line whose customType isn't the exit marker — stays
+    /// SILENT so the routine title/model_change/compaction churn can't flood.
+    #[test]
+    fn unknown_entry_type_breadcrumbs_but_known_types_stay_silent() {
+        let novel = r#"{"type":"quantum_entry","id":"x","parentId":null,"timestamp":"t"}"#;
+        let logs = crate::test_capture::capture_logs(|| {
+            assert!(
+                decode(novel).is_empty(),
+                "an unknown entry type decodes to no events"
+            );
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("quantum_entry"),
+            "a brand-new omp entry type must fire the drift breadcrumb, got:\n{logs}"
+        );
+
+        // silent-real: KNOWN types we don't decode fire routinely, so a
+        // KNOWN_ENTRY_TYPES omission would flood. All stay SILENT — the case
+        // `quantum_entry` can't catch. `custom`/non-exit customType is load-bearing:
+        // the customType axis is the unbounded one we keep silent on (only the entry
+        // `type` is guarded, never customType).
+        for line in [
+            r#"{"type":"title","v":1,"title":"t","source":"auto","updatedAt":"t","pad":"   "}"#,
+            r#"{"type":"model_change","id":"x","parentId":null,"timestamp":"t","model":"m"}"#,
+            r#"{"type":"compaction","id":"x","parentId":null,"timestamp":"t","summary":"…"}"#,
+            r#"{"type":"custom","id":"x","parentId":null,"timestamp":"t","customType":"memory_write","data":{}}"#,
+            r#"{"type":"thinking_level_change","id":"x","parentId":null,"timestamp":"t"}"#,
+        ] {
+            let quiet = crate::test_capture::capture_logs(|| {
+                assert!(decode(line).is_empty());
+            });
+            assert!(
+                !quiet.contains("unknown_event"),
+                "known omp entry type must NOT breadcrumb (it would flood), got:\n{quiet}"
+            );
+        }
     }
 
     #[test]

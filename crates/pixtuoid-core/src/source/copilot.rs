@@ -101,6 +101,53 @@ pub(crate) fn extract_copilot_cwd(v: &Value) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// The COMPLETE set of copilot event `type` NAMESPACES — the family prefix
+/// before the first `.` — from the 100+-member `SessionEvent` anyOf union in the
+/// `@github/copilot` session-events JSON schema (verified live), NOT just the
+/// families we decode. The tail arm breadcrumbs a `type` whose namespace is
+/// OUTSIDE this set (a brand-new event FAMILY = a structural wire change); a
+/// KNOWN namespace with an event we don't decode (`assistant.message_delta`,
+/// `mcp.*`, `hook.progress`) stays SILENT — copilot streams those many times per
+/// turn and `drift::unknown_event` has NO dedup, so breadcrumbing the full
+/// 100+-member `type` axis would flood the warn-floor (drift.rs's anti-flood
+/// rule). Kept honest by `read_copilot_namespaces` in `check_upstream_drift.py`:
+/// a new upstream namespace not listed here alarms in CI before it can flood.
+const KNOWN_NAMESPACES: &[&str] = &[
+    "abort",
+    "assistant",
+    "auto_mode_switch",
+    "capabilities",
+    "command",
+    "commands",
+    "elicitation",
+    "exit_plan_mode",
+    "external_tool",
+    "hook",
+    "mcp",
+    "mcp_app",
+    "model",
+    "pending_messages",
+    "permission",
+    "sampling",
+    "session",
+    "session_limits_exhausted",
+    "skill",
+    "subagent",
+    "system",
+    "tool",
+    "tool_search",
+    "user",
+    "user_input",
+];
+
+/// The copilot event NAMESPACE — the family prefix before the first `.`
+/// (`tool.execution_start` → `tool`), or the whole string when there is no dot
+/// (`abort`). The flood-safe breadcrumb keys on THIS (25 low-cardinality
+/// families), not the full `type` (100+ high-cardinality events).
+fn copilot_namespace(kind: &str) -> &str {
+    kind.split_once('.').map_or(kind, |(prefix, _)| prefix)
+}
+
 /// Decode one `events.jsonl` line into zero or more `AgentEvent`s. Unknown,
 /// ephemeral, or malformed shapes return `vec![]` (the watcher logs + continues;
 /// this never panics — real files carry embedded-newline / U+2028 corruption,
@@ -318,8 +365,21 @@ pub fn decode_copilot_line(
             }
             evs
         }
+        // A line whose `type` NAMESPACE (the family before the first `.`) is
+        // OUTSIDE KNOWN_NAMESPACES is a structural wire change — breadcrumb the
+        // full `type` (defense #2, the live-stream signal CI's fetch-based defense
+        // can't see for a brand-new family in a user's own stream). We do NOT
+        // breadcrumb a KNOWN namespace with an event we don't decode: copilot
+        // streams `assistant.*_delta` / `mcp.*` / `hook.progress` many times per
+        // turn and `drift::unknown_event` has no dedup, so that would flood the
+        // warn-floor (drift.rs's anti-flood rule). Empty type = a typeless line.
+        other if !other.is_empty() && !KNOWN_NAMESPACES.contains(&copilot_namespace(other)) => {
+            crate::source::drift::unknown_event(source, other);
+            vec![]
+        }
         // Everything else (ephemeral streaming, assistant.*, hook.*, user.message,
-        // session.* metadata) is not a sprite-visible lifecycle change → ignore.
+        // session.* metadata) is a KNOWN-namespace event that is not a
+        // sprite-visible lifecycle change → ignore, silently.
         _ => vec![],
     };
     Ok(out)
@@ -829,6 +889,52 @@ mod tests {
         assert!(decode_copilot_line(PATH, SOURCE_NAME, json!(["array"]))
             .unwrap()
             .is_empty());
+    }
+
+    /// The namespace tail arm: a `type` in an UNKNOWN family breadcrumbs (the
+    /// live-stream signal for a brand-new copilot event FAMILY — CI's fetch-based
+    /// defense only catches a VANISHED type), while a KNOWN namespace with an
+    /// event we don't decode stays SILENT so the per-token `assistant.*` / `mcp.*`
+    /// stream can't flood the warn-floor.
+    #[test]
+    fn unknown_namespace_breadcrumbs_but_known_namespace_events_stay_silent() {
+        // novel: a family outside the 25 known namespaces → breadcrumb the full `type`.
+        let novel =
+            r#"{"type":"telepathy.transmit","data":{},"id":"i","timestamp":"t","parentId":null}"#;
+        let logs = crate::test_capture::capture_logs(|| {
+            assert!(
+                decode(novel).is_empty(),
+                "an unknown namespace decodes to no events"
+            );
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("telepathy.transmit"),
+            "a brand-new copilot namespace must fire the drift breadcrumb, got:\n{logs}"
+        );
+
+        // silent-real: the actual high-frequency KNOWN-namespace events the decoder
+        // ignores fire per turn/token, so a KNOWN_NAMESPACES omission would flood.
+        // All must stay SILENT — the case `telepathy.transmit` can't catch. `abort`
+        // is the dot-less namespace (the whole `type` string IS the family).
+        for kind in [
+            "assistant.message_delta",
+            "mcp.tools.list_changed",
+            "hook.progress",
+            "session.idle",
+            "user.message",
+            "abort",
+        ] {
+            let line = format!(
+                r#"{{"type":"{kind}","data":{{}},"id":"i","timestamp":"t","parentId":null}}"#
+            );
+            let quiet = crate::test_capture::capture_logs(|| {
+                assert!(decode(&line).is_empty());
+            });
+            assert!(
+                !quiet.contains("unknown_event"),
+                "known-namespace event {kind:?} must NOT breadcrumb (it would flood), got:\n{quiet}"
+            );
+        }
     }
 
     // ── drift fallbacks + missing-id early returns (the un-happy-path arms) ──

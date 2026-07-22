@@ -92,7 +92,9 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
         (d.read_openclaw_events, r"^[a-z][a-z_]*$", 2),
         (d.read_opencode_events, r"^[a-z][a-z0-9._]*$", 2),
         (d.read_copilot_events, r"^[a-z][a-z0-9._]*$", 2),
+        (d.read_copilot_namespaces, r"^[a-z][a-z_]*$", 20),
         (d.read_omp_entry_types, r"^[a-z]+$", 3),
+        (d.read_omp_known_types, r"^[a-z][a-z_]*$", 10),
         (d.read_cursor_events, r"^[a-zA-Z]\w+$", 2),
         (d.read_hermes_events, r"^[a-z][a-z_]*$", 2),
         (d.read_kimi_events, r"^[A-Za-z]\w+$", 2),
@@ -132,6 +134,32 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
 
     # A malformed schema → None (signals "restructured", handled as breaking upstream).
     check(d.upstream_copilot_events("not json") is None, "copilot bad json -> None")
+
+    # Copilot NAMESPACES — scoped to the SessionEvent.anyOf union. A nested-content
+    # def that shares the `type.const` shape (`Blob`→"blob") must NOT leak a phantom
+    # family: the result is EXACTLY {session, tool}, proving the anyOf scoping.
+    ns_schema = (
+        '{"definitions":{'
+        '"SessionEvent":{"anyOf":[{"$ref":"#/definitions/SessStart"},{"$ref":"#/definitions/ToolStart"}]},'
+        '"SessStart":{"properties":{"type":{"const":"session.start"}}},'
+        '"ToolStart":{"properties":{"type":{"const":"tool.execution_start"}}},'
+        '"Blob":{"properties":{"type":{"const":"blob"}}}}}'
+    )
+    up = d.upstream_copilot_namespaces(ns_schema)
+    check(up == {"session", "tool"}, f"copilot namespaces scoped to SessionEvent union (no Blob leak): {up}")
+    check(d.upstream_copilot_namespaces("not json") is None, "copilot namespaces bad json -> None")
+    check(d.upstream_copilot_namespaces('{"definitions":{}}') is None, "copilot namespaces no union -> None")
+
+    # omp entry types — direct `type: "x"` literals PLUS `type: typeof CONST`
+    # refs resolved via a `CONST = "x"` binding (the title / title_change slots).
+    omp_ts = (
+        'const SESSION_TITLE_SLOT_ENTRY_TYPE = "title";\n'
+        'interface Msg { type: "message"; }\n'
+        'interface Slot { type: typeof SESSION_TITLE_SLOT_ENTRY_TYPE; }\n'
+    )
+    up = d.upstream_omp_entry_types(omp_ts)
+    check(up == {"message", "title"}, f"omp entry types (literal + typeof-resolved): {up}")
+    check(d.upstream_omp_entry_types("no types here") is None, "omp entry types none -> None")
 
     # Copilot FIELD-NAME union — every `properties` key at ANY depth (envelope
     # `agentId` AND the nested `data.properties` `toolCallId`).
