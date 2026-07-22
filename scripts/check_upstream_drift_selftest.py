@@ -95,6 +95,7 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
         (d.read_copilot_namespaces, r"^[a-z][a-z_]*$", 20),
         (d.read_omp_entry_types, r"^[a-z]+$", 3),
         (d.read_omp_known_types, r"^[a-z][a-z_]*$", 10),
+        (d.read_acp_tags, r"^[a-z][a-z_]*$", 10),
         (d.read_cursor_events, r"^[a-zA-Z]\w+$", 2),
         (d.read_hermes_events, r"^[a-z][a-z_]*$", 2),
         (d.read_kimi_events, r"^[A-Za-z]\w+$", 2),
@@ -160,6 +161,23 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     up = d.upstream_omp_entry_types(omp_ts)
     check(up == {"message", "title"}, f"omp entry types (literal + typeof-resolved): {up}")
     check(d.upstream_omp_entry_types("no types here") is None, "omp entry types none -> None")
+
+    # ACP v1 SessionUpdate tags — each `$defs.SessionUpdate.oneOf` member's inline
+    # `sessionUpdate.const`, with a `$ref` member resolved.
+    acp_schema = (
+        '{"$defs":{"SessionUpdate":{"oneOf":['
+        '{"properties":{"sessionUpdate":{"const":"tool_call"}}},'
+        '{"properties":{"sessionUpdate":{"const":"user_message_chunk"}}},'
+        '{"$ref":"#/$defs/PlanUpd"}]},'
+        '"PlanUpd":{"properties":{"sessionUpdate":{"const":"plan_update"}}}}}'
+    )
+    up = d.upstream_acp_session_update_tags(acp_schema)
+    check(
+        up == {"tool_call", "user_message_chunk", "plan_update"},
+        f"acp tags (inline const + $ref resolved): {up}",
+    )
+    check(d.upstream_acp_session_update_tags("not json") is None, "acp bad json -> None")
+    check(d.upstream_acp_session_update_tags('{"$defs":{}}') is None, "acp no SessionUpdate -> None")
 
     # Copilot FIELD-NAME union — every `properties` key at ANY depth (envelope
     # `agentId` AND the nested `data.properties` `toolCallId`).

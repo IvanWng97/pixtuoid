@@ -345,6 +345,9 @@ pub fn grok_pid_for_session(grok_root: &std::path::Path, session_id: &str) -> Op
         .copied()
 }
 
+/// Shared ACP (Agent Client Protocol) wire-vocabulary decode — reused by any
+/// source whose transcript speaks ACP (grok today). Internal: `pub(crate)`.
+pub(crate) mod acp;
 pub mod antigravity;
 // The async runtime + watcher + liveness-probe layer: gated out of a wasm
 // (`--no-default-features`) build. These modules own all the tokio/notify/libc
