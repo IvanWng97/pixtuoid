@@ -277,8 +277,8 @@ src/
 │                       a release synth build since run_loop is blind to the closed channel mid-build). Each
 │                       painter holds ONE controller (TUI a run_tui local; floating a FloatingApp field),
 │                       built AFTER that painter's fallible `?` boot steps — so no thread predates its
-│                       Drop-owner and the compiler runs the teardown on EVERY exit (q/Ctrl-C/terminate/error/`?`/
-│                       panic-unwind), no hand-wired call to forget. Drop FLUSHES a pending debounced volume
+│                       Drop-owner and the compiler runs the teardown on EVERY exit (q/Ctrl-C/terminate/error/`?`;
+│                       a release `panic=abort` is the one exit it skips), no hand-wired call to forget. Drop FLUSHES a pending debounced volume
 │                       BEFORE the join, so a nudge-then-Ctrl-C persists too (#752, was `q`-branch-only). The join is bounded because
 │                       CoreAudio device-close can itself block. The mute/volume TRANSITION is
 │                       ONE authority — `audio::apply_audio_action(&mut AudioUi, action, paused, spawn)`

@@ -265,7 +265,9 @@ impl AudioController {
 /// PERSIST a pending debounced volume, THEN stop the device thread. Each painter
 /// holds exactly ONE controller (TUI a `run_tui` local; floating a `FloatingApp`
 /// field), so this fires once on EVERY exit — the compiler guarantees it runs
-/// where a hand-wired call could be forgotten on some `?`/panic path.
+/// where a hand-wired call could be forgotten on some `?`/early-return path.
+/// (Release is `panic="abort"`, so a panic — a crash — is the one exit that
+/// skips Drop; losing a sub-second unsaved volume nudge there is acceptable.)
 ///
 /// Ordering is persist-before-stop, and both run unconditionally: before #752
 /// the volume flush sat on the TUI `q` branch only, so Ctrl-C / terminate / error
@@ -423,6 +425,23 @@ mod controller_tests {
         assert!(
             std::fs::read_to_string(&path).unwrap().contains("volume"),
             "AudioController::drop must persist a pending nudge (the #752 Ctrl-C fix)"
+        );
+    }
+
+    #[test]
+    fn a_clean_drop_does_not_rewrite_the_config() {
+        // Drop now does config I/O on EVERY exit — the ONLY guard against a
+        // needless rewrite (+ `.bak` churn) on every quit is `volume_dirty`. Pin
+        // it: an un-nudged controller's drop must leave the config byte-identical
+        // (a mutant flipping the guard to `if true` would else survive).
+        let (c, _dir) = ctl(false, 0.50);
+        let path = c.config_path.clone();
+        let before = std::fs::read_to_string(&path).unwrap();
+        drop(c); // no nudge → flush_on_exit is a no-op
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "an un-dirtied drop must not touch the user's config"
         );
     }
 }
