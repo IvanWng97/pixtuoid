@@ -364,6 +364,22 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 // Transcript decoding (updates.jsonl)
 // ---------------------------------------------------------------------------
 
+/// The COMPLETE set of grok transcript `method` namespaces — the ACP standard
+/// `session/update` and the xAI extension `_x.ai/session/update` (both handled
+/// in `decode_grok_line`; stable wire namespaces, verified against grok-build's
+/// `updates.jsonl` envelope). The tail breadcrumbs a `method` OUTSIDE this set —
+/// a brand-new top-level wire namespace = a structural change, the LOW-cardinality
+/// axis. It stays SILENT on an unhandled `sessionUpdate` TAG under a KNOWN method
+/// (the HIGH-cardinality axis: the ACP chunk tags stream per token, xAI emits
+/// cosmetic churn — breadcrumbing each would flood, and `drift::unknown_event` has
+/// NO dedup). The finer ACP-tag tier (breadcrumb a NEW ACP `sessionUpdate`
+/// *capability* under `session/update`) is DEFERRED to #766: pinning its complete
+/// set without flooding on a per-token chunk needs the ACP `SessionUpdate` enum
+/// fetched from the external `agent-client-protocol` crate — a crates.io fetch
+/// modality `check_upstream_drift.py` doesn't yet have (the ACP half is already
+/// deliberately unfetched, pinned upstream by grok's own `wire_tags` guard).
+const KNOWN_METHODS: &[&str] = &["session/update", "_x.ai/session/update"];
+
 /// Decode one `updates.jsonl` line. Envelope (storage/mod.rs
 /// `SessionUpdateEnvelope`): `{"timestamp":<unix-secs>,"method":…,"params":
 /// {"sessionId":…,"update":{"sessionUpdate":"<tag>",…},"_meta":…}}`.
@@ -506,6 +522,17 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
             } else {
                 Ok(vec![])
             }
+        }
+        // A `method` OUTSIDE KNOWN_METHODS is a brand-new top-level wire namespace
+        // (a structural change) — breadcrumb it (defense #2, the live-stream signal
+        // for a new grok method family; the hook side breadcrumbs its own transport
+        // separately). An unhandled TAG under a KNOWN method falls through to the
+        // silent `_` below — the high-cardinality axis whose finer ACP breadcrumb
+        // tier is deferred (see KNOWN_METHODS). An empty-string method (an absent
+        // one already bailed) is a degenerate line — `!m.is_empty()` skips it.
+        (m, _) if !m.is_empty() && !KNOWN_METHODS.contains(&m) => {
+            crate::source::drift::unknown_event(SOURCE_NAME, m);
+            Ok(vec![])
         }
         _ => Ok(vec![]),
     }
@@ -1388,6 +1415,48 @@ mod tests {
             assert!(decode_grok_line(TRANSCRIPT, SOURCE_NAME, v)
                 .unwrap()
                 .is_empty());
+        }
+    }
+
+    /// The method tail arm: a brand-new top-level `method` breadcrumbs (the
+    /// live-stream signal for a new grok wire namespace), while an unhandled
+    /// `sessionUpdate` TAG under a KNOWN method stays SILENT — the high-cardinality
+    /// axis (ACP chunk tags stream per token; the xAI method emits cosmetic churn),
+    /// whose finer ACP-capability breadcrumb is deferred to #766.
+    #[test]
+    fn unknown_method_breadcrumbs_but_known_method_unhandled_tags_stay_silent() {
+        // novel method → breadcrumb the method itself.
+        let novel = json!({"timestamp": 1721131200u64, "method": "_x.ai/session/telemetry",
+                           "params": {"sessionId": "s", "update": {"sessionUpdate": "beam"}}});
+        let logs = crate::test_capture::capture_logs(|| {
+            assert!(
+                decode_line(novel).is_empty(),
+                "an unknown method decodes to no events"
+            );
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("_x.ai/session/telemetry"),
+            "a brand-new grok method must fire the drift breadcrumb, got:\n{logs}"
+        );
+
+        // silent-real: unhandled tags under the TWO known methods must stay SILENT.
+        // The ACP per-token chunks are the flood case a mis-scoped guard would hit;
+        // a future ACP capability under `session/update` stays silent BY DESIGN (the
+        // tag-tier is deferred, #766); the xAI method's cosmetic churn stays silent.
+        for v in [
+            acp_line(json!({"sessionUpdate": "agent_message_chunk"})),
+            acp_line(json!({"sessionUpdate": "user_message_chunk"})),
+            acp_line(json!({"sessionUpdate": "future_acp_capability_2027"})),
+            xai_line(json!({"sessionUpdate": "diff_review"})),
+            xai_line(json!({"sessionUpdate": "rewind_marker_2027"})),
+        ] {
+            let quiet = crate::test_capture::capture_logs(|| {
+                assert!(decode_line(v).is_empty());
+            });
+            assert!(
+                !quiet.contains("unknown_event"),
+                "an unhandled tag under a known method must NOT breadcrumb, got:\n{quiet}"
+            );
         }
     }
 
