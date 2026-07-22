@@ -1271,6 +1271,14 @@ mod tests {
             ),
         ];
         for (name, buf, ref_centroid, tol, bands) in cases {
+            // finite/peak on the day-takes lives HERE now: they are the heaviest
+            // buffers in the suite, and `every_buffer_is_finite_and_peak_bounded`
+            // used to RE-synthesize all 8 just to re-check this — assert it on the
+            // copies already built in `cases` instead of a second synthesis (#736).
+            assert!(
+                buf.iter().all(|v| v.is_finite() && v.abs() <= 1.0),
+                "{name}: NaN/over-peak"
+            );
             let c = centroid_hz(&buf);
             assert!(
                 (c - ref_centroid).abs() <= ref_centroid * 0.20,
@@ -1283,17 +1291,18 @@ mod tests {
                     "{name} band {lo}-{hi}: {s:.3} vs ratified {ref_share}"
                 );
             }
-        }
-        // the full-kit signatures night deliberately lacks: the snare's
-        // 400-3200 noise body and the open hat's long top-end ring both
-        // put audible energy in 3.5-6.5k
-        for take in [&score::DAY2, &score::DAY3] {
-            let drums = day_take_drums(take, &mut NoiseStream::new(4));
-            let hats = band_energy_share(&drums, 3500.0, 6500.0);
-            assert!(
-                hats > 0.0015,
-                "day-take hats/snare must be audible in 3.5-6.5k: {hats:.5}"
-            );
+            // the full-kit signatures night deliberately lacks: the snare's
+            // 400-3200 noise body and the open hat's long top-end ring both put
+            // audible energy in 3.5-6.5k. Reuse the drums buffer already built in
+            // `cases` — this was a second synthesis pass per take (#736). Same
+            // `NoiseStream::new(4)` seed, so it is the identical buffer.
+            if name.ends_with("drums") {
+                let hats = band_energy_share(&buf, 3500.0, 6500.0);
+                assert!(
+                    hats > 0.0015,
+                    "{name} hats/snare must be audible in 3.5-6.5k: {hats:.5}"
+                );
+            }
         }
     }
 
@@ -1467,14 +1476,12 @@ mod tests {
             ("night_keys", night_keys()),
             ("night_drums", night_drums(&mut rng)),
             ("night_texture", night_texture(&mut rng)),
-            ("day2_pad", day_take_pad(&score::DAY2)),
-            ("day2_sparkle", day_take_sparkle(&score::DAY2)),
-            ("day2_keys", day_take_keys(&score::DAY2)),
-            ("day2_drums", day_take_drums(&score::DAY2, &mut rng)),
-            ("day3_pad", day_take_pad(&score::DAY3)),
-            ("day3_sparkle", day_take_sparkle(&score::DAY3)),
-            ("day3_keys", day_take_keys(&score::DAY3)),
-            ("day3_drums", day_take_drums(&score::DAY3, &mut rng)),
+            // The 8 day2/day3 take-stems are the heaviest buffers in the suite and
+            // are ALREADY synthesized (+ finite/peak-checked) in
+            // `day_take_stems_match_the_ratified_fingerprints`; re-building them
+            // here was a duplicate synthesis pass (#736). pad/sparkle/keys are
+            // deterministic → identical there; drums' finite/peak is seed-agnostic
+            // and also covered by `generated_beds_…`'s per-seed beds.
         ] {
             assert!(!buf.is_empty(), "{name} empty");
             assert!(
