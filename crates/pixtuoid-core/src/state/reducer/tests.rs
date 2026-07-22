@@ -533,3 +533,185 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
         "gc must prune an ended entry past CHILD_END_LEDGER_TTL"
     );
 }
+
+/// #748(c): the existing correlation tests assert a prune *ran*; none assert the
+/// maps stay BOUNDED across a long stream. Drive a synthetic ~1 event/s stream
+/// through the REAL reducer (`apply` + the interleaved `tick` — the only reaper
+/// of the two non-TTL maps `active_tasks`/`gated_before_waiting`, including their
+/// slot-less orphan retain) and assert every one of Correlation's 7 maps stays
+/// under a fixed bound. A per-event leak (a missed prune site — the class that
+/// hides in `active_tasks`/`gated_before_waiting`, which `gc` never touches)
+/// grows a map ~linearly and blows the bound; a healthy stream stays an order of
+/// magnitude under.
+#[test]
+fn correlation_maps_stay_bounded_across_a_long_stream() {
+    use crate::source::{AgentEvent, ToolDetail, Transport};
+    use crate::state::SceneState;
+    use crate::AgentId;
+    use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
+
+    // Well ABOVE every map's steady-state working set (the widest window is
+    // PROOF_OF_LIFE_TTL = 150s at ~1 event/s ⇒ ~150), and FAR below ITERS — so a
+    // per-event leak blows it while a healthy stream stays ~an order under.
+    const MAX_CORR_ENTRIES: usize = 512;
+    const ITERS: u64 = 3_000;
+    const MAP_NAMES: [&str; 7] = [
+        "recent_hook_tool_uses",
+        "recent_hook_session_ends",
+        "active_tasks",
+        "recent_task_drains",
+        "child_ledger",
+        "recent_proof_of_life",
+        "gated_before_waiting",
+    ];
+
+    let mut r = super::Reducer::new();
+    // Cap comfortably exceeds the un-swept working set: a slot lives from its
+    // SessionStart until `sweep_exited` removes it ~EXIT_GRACE_WINDOW (4.5s) after
+    // its end — a handful of concurrent slots at ~1s/iter.
+    let mut scene = SceneState::uniform(32);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    // Peak length per map — a bound test where a map was never populated passes
+    // vacuously, so assert peak > 0 for all 7 at the end (negative-control).
+    let mut peak = [0usize; 7];
+
+    for i in 0..ITERS {
+        let now = t0 + Duration::from_secs(i);
+        let a = AgentId::from_parts("claude-code", &format!("s{i}"));
+
+        // 1. register the root slot.
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: a,
+                source: "claude-code".into(),
+                session_id: format!("s{i}"),
+                cwd: PathBuf::from("/repo"),
+                parent_id: None,
+            },
+            now,
+            Transport::Hook,
+        );
+        // 2. a subagent Task START → active_tasks + recent_hook_tool_uses.
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityStart {
+                agent_id: a,
+                tool_use_id: Some("task1".into()),
+                detail: Some(ToolDetail::Task),
+            },
+            now,
+            Transport::Hook,
+        );
+        // 3. its END → recent_task_drains (+ drains active_tasks to empty).
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityEnd {
+                agent_id: a,
+                tool_use_id: Some("task1".into()),
+            },
+            now,
+            Transport::Hook,
+        );
+        // 4. a gated tool START → Active{tool_use_id}.
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityStart {
+                agent_id: a,
+                tool_use_id: Some("gate1".into()),
+                detail: Some(ToolDetail::Generic {
+                    display: "Bash".into(),
+                }),
+            },
+            now,
+            Transport::Hook,
+        );
+        // 5. Waiting while Active-with-tuid → gated_before_waiting.
+        r.apply(
+            &mut scene,
+            AgentEvent::Waiting {
+                agent_id: a,
+                reason: "perm".into(),
+            },
+            now,
+            Transport::Hook,
+        );
+        // 6. ProofOfLife (slot exists, not exiting) → recent_proof_of_life.
+        r.apply(
+            &mut scene,
+            AgentEvent::ProofOfLife { agent_id: a },
+            now,
+            Transport::Hook,
+        );
+        // 7. end as_child → child_ledger[a].ended_at + marks `a` exiting.
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionEnd {
+                agent_id: a,
+                as_child: true,
+            },
+            now,
+            Transport::Hook,
+        );
+        // 8. a hook SessionEnd for an UNREGISTERED id → recent_hook_session_ends
+        //    tombstone (needs Hook + no slot; fresh id each iter, 5s TTL).
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionEnd {
+                agent_id: AgentId::from_parts("claude-code", &format!("u{i}")),
+                as_child: false,
+            },
+            now,
+            Transport::Hook,
+        );
+        // 9. an ORPHAN Task (no SessionStart → no slot) → an active_tasks entry
+        //    reaped ONLY by tick's slot-removal retain. If that retain regressed,
+        //    orphans would accumulate ~1/iter and blow the bound — the exact
+        //    active_tasks leak class the audit flagged.
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityStart {
+                agent_id: AgentId::from_parts("claude-code", &format!("o{i}")),
+                tool_use_id: Some("orphan".into()),
+                detail: Some(ToolDetail::Task),
+            },
+            now,
+            Transport::Hook,
+        );
+
+        // Interleave a tick — the ONLY reaper of the non-TTL orphan retains, and
+        // it re-runs gc/sweep, exactly as the runtime driver does on its ~1s cadence.
+        r.tick(&mut scene, now);
+
+        let lens = [
+            r.corr.recent_hook_tool_uses.len(),
+            r.corr.recent_hook_session_ends.len(),
+            r.corr.active_tasks.len(),
+            r.corr.recent_task_drains.len(),
+            r.corr.child_ledger.len(),
+            r.corr.recent_proof_of_life.len(),
+            r.corr.gated_before_waiting.len(),
+        ];
+        for (p, &l) in peak.iter_mut().zip(lens.iter()) {
+            *p = (*p).max(l);
+        }
+        // In-loop bound check — a SLOW leak trips mid-stream, not only at the tail.
+        for (l, name) in lens.iter().zip(MAP_NAMES) {
+            assert!(
+                *l <= MAX_CORR_ENTRIES,
+                "Correlation map `{name}` grew to {l} at iter {i} (> {MAX_CORR_ENTRIES}) — a prune site is missing"
+            );
+        }
+    }
+
+    // Negative-control: every map must have been exercised, else its bound check
+    // above passed vacuously.
+    for (p, name) in peak.iter().zip(MAP_NAMES) {
+        assert!(
+            *p > 0,
+            "Correlation map `{name}` was never populated — its bound check was vacuous"
+        );
+    }
+}
