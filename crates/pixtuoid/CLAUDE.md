@@ -165,9 +165,10 @@ src/
 │                       takes its ctrl_c future as an injected seam, so its signal arms — incl.
 │                       the registration-failure disarm — are unit-tested. The CONNECTION-GATE DECISION
 │                       lives in the sibling `runtime::gate` module (`event_source` + `apply_gated_event` +
-│                       `reconcile_sweep_tick` — covered AND mutation-tested, so a gate/reconcile drift reds a
-│                       test, NOT hidden in this coverage-excluded shell; the tests drive the REAL fns, not a
-│                       hand-copied mirror — #741/#751), DRIVEN by reducer_task: every incoming event is dropped
+│                       `apply_gated_presence` [the daemon-presence twin] + `reconcile_sweep_tick` — covered AND
+│                       mutation-tested, so a gate/reconcile drift reds a test, NOT hidden in this coverage-excluded
+│                       shell; the tests drive the REAL fns, not a hand-copied mirror — #741/#751), DRIVEN by
+│                       reducer_task (the presence arm keeps only `ew.watch` + publish): every incoming event is dropped
 │                       if its source (resolved by the pure `event_source` off SessionStart/Identity, else the
 │                       slot) is not in the connected-set; every sweep tick RECONCILES the scene toward the set via
 │                       (idempotent) `Reducer::reconcile_connected(&cur)` — which evicts every slot whose

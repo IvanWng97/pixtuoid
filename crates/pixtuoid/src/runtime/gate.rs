@@ -1,5 +1,5 @@
 //! The connection-gate functional core — the pure, testable heart of
-//! `reducer_task`'s event/sweep loop, lifted OUT of the coverage- and
+//! `reducer_task`'s event/presence/sweep loop, lifted OUT of the coverage- and
 //! mutants-excluded `driver.rs` async shell (issue #103) so the gate decision
 //! itself is measured and mutation-checked: a drift in the predicate now reds a
 //! test instead of slipping through unguarded (the reason #741/#751 flagged the
@@ -88,6 +88,39 @@ pub(crate) fn reconcile_sweep_tick(
         }
         daemon::sweep_presence_ttl(scene, source, ttl, now);
     }
+}
+
+/// The outcome of gating a daemon-presence delta: `Dropped` (the daemon's source
+/// is not connected — nothing applied, nothing to arm) or `Applied`, carrying the
+/// gateway pid the shell should arm the abrupt-down exit watch on (`None` when the
+/// delta arms nothing, e.g. `SessionStarted`). The enum makes "dropped but has a
+/// pid to arm" unrepresentable.
+pub(crate) enum PresenceGate {
+    Dropped,
+    Applied { arm_pid: Option<i32> },
+}
+
+/// Apply one daemon-presence delta through the connection gate — the presence
+/// twin of [`apply_gated_event`]. Returns [`PresenceGate::Dropped`] when the
+/// daemon's source is not connected (a panel-disconnected daemon is instead
+/// walked out by [`reconcile_sweep_tick`]); otherwise selects the armable pid
+/// (`GatewayUp`/`PidSeen` #318) and applies the delta to `scene.daemons` via the
+/// pure `daemon::apply_presence`. The `ExitWatch` registration and the scene
+/// publish stay in the shell.
+pub(crate) fn apply_gated_presence(
+    scene: &mut SceneState,
+    source: &str,
+    delta: daemon::DaemonPresenceUpdate,
+    connected: &ConnectedSources,
+    now: SystemTime,
+) -> PresenceGate {
+    if !connected.is_connected(source) {
+        return PresenceGate::Dropped;
+    }
+    // Selected BEFORE the move into apply_presence; the shell arms after.
+    let arm_pid = delta.armable_pid();
+    daemon::apply_presence(scene, source, delta, now);
+    PresenceGate::Applied { arm_pid }
 }
 
 #[cfg(test)]
@@ -262,5 +295,57 @@ mod tests {
             pid: None,
         };
         assert_eq!(event_source(&scene, &empty), Some("claude-code"));
+    }
+
+    #[test]
+    fn presence_gate_drops_a_disconnected_daemon_and_applies_a_connected_one() {
+        use pixtuoid_core::source::daemon::DaemonPresenceUpdate;
+        use pixtuoid_core::state::DaemonState;
+
+        let cs = ConnectedSources::new(["openclaw".to_string()].into_iter().collect());
+        let mut scene = SceneState::uniform(8);
+        let now = SystemTime::now();
+
+        // A disconnected daemon's GatewayUp is Dropped: nothing applied, nothing
+        // lands in scene.daemons (mutate the gate to `if false` and this reds — the
+        // presence twin of the AgentEvent gate's teeth).
+        let dropped = apply_gated_presence(
+            &mut scene,
+            "not-connected",
+            DaemonPresenceUpdate::GatewayUp { pid: Some(4321) },
+            &cs,
+            now,
+        );
+        assert!(
+            matches!(dropped, PresenceGate::Dropped),
+            "a disconnected daemon's presence must be dropped"
+        );
+        assert!(scene.daemons().get("not-connected").is_none());
+
+        // A connected daemon Applies (returns the armable pid) AND the delta lands
+        // in scene.daemons as Up->Idle — the daemons assertion gives the
+        // `daemon::apply_presence` call itself teeth (deleting it reds this), the
+        // whole point of moving the seam into a covered module.
+        let applied = apply_gated_presence(
+            &mut scene,
+            "openclaw",
+            DaemonPresenceUpdate::GatewayUp { pid: Some(4321) },
+            &cs,
+            now,
+        );
+        assert!(
+            matches!(
+                applied,
+                PresenceGate::Applied {
+                    arm_pid: Some(4321)
+                }
+            ),
+            "a connected daemon's presence must apply and arm its GatewayUp pid"
+        );
+        assert_eq!(
+            scene.daemons().get("openclaw").map(|p| p.display_state()),
+            Some(DaemonState::Idle),
+            "apply_presence must land the GatewayUp in scene.daemons"
+        );
     }
 }

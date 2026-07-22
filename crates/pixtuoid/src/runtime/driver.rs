@@ -36,7 +36,7 @@ use tokio::sync::watch;
 
 use super::gate;
 use super::{
-    boot_capacities_for, cap_boot_capacities, summarize, ConnectedSources, RunConfig, SceneRx,
+    boot_capacities_for, resolve_boot_caps, summarize, ConnectedSources, RunConfig, SceneRx,
     FALLBACK_DESKS,
 };
 
@@ -81,16 +81,10 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // Resolve the bound socket (Unix) / pipe (Windows) the HookRouter binds; the
     // Sources panel shows the same path (explicit --socket override, else default).
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
-    let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {
-        // Headless: no terminal to measure. Honor the cap as-is, else the fallback.
-        (Some(cap), true) => [cap; MAX_FLOORS],
-        (None, true) => [FALLBACK_DESKS; MAX_FLOORS],
-        // Interactive: measure the real per-floor layout capacity FIRST, then clamp
-        // to the optional cap. Clamping (not `[cap; _]`) keeps the boot atomics from
-        // being seeded above the layout's real capacity — `fetch_max` only grows, so
-        // an over-seed strands agents on non-existent desks until the terminal grows.
-        (cap, false) => cap_boot_capacities(compute_boot_capacities(), cap),
-    };
+    // Headless-vs-interactive boot capacity policy — the covered + mutation-tested
+    // `resolve_boot_caps` in mod.rs; the terminal-size query stays here in the shell
+    // (passed as the injected `measure`, called only on the interactive arm).
+    let boot_caps = resolve_boot_caps(desk_cap, headless, compute_boot_capacities);
     // The shared spine (#714): presence channel + exit watch, the source set,
     // event/scene/health channels, floor-caps atomics, reducer + source task
     // spawns — ONE authority with `floating::run`. The tasks live on this
@@ -256,27 +250,29 @@ pub(crate) async fn reducer_task(
             // AgentId-pure). Invariant #2. N daemons route by the tuple's source.
             update = presence_rx.recv(), if presence_open => {
                 match update {
-                    Some(PresenceMsg {
-                        source,
-                        delta: update,
-                    }) => {
-                        let now = SystemTime::now();
-                        // CONNECTION GATE (mirrors the AgentEvent arm above): a
-                        // daemon DISCONNECTED in the Sources panel has its presence
-                        // DROPPED — don't arm the exit watch, don't apply. Any
-                        // lingering entry is walked out by the sweep-tick reconcile.
-                        if connected.is_connected(&source) {
-                            // Arm the instant abrupt-down watch on the gateway pid —
-                            // from GatewayUp (gateway_start) OR PidSeen (#318: a
-                            // mid-attach / reconnect that never saw gateway_start, so
-                            // the pid rides a later event). `watch` is idempotent per
-                            // pid; `apply_presence` owns the None-only adoption.
-                            if let Some(ew) = presence_exit_watch.as_ref() {
-                                if let Some(pid) = update.armable_pid() {
-                                    ew.watch(&source, pid);
-                                }
+                    Some(PresenceMsg { source, delta }) => {
+                        // Connection gate + armable-pid selection + apply, in the
+                        // shared `gate` core (covered + mutation-tested) — the
+                        // presence twin of `apply_gated_event`. A disconnected
+                        // daemon's delta is dropped (walked out by the sweep-tick
+                        // reconcile); only `ew.watch` (IO) + the publish stay here.
+                        if let gate::PresenceGate::Applied { arm_pid } = gate::apply_gated_presence(
+                            &mut scene,
+                            &source,
+                            delta,
+                            &connected,
+                            SystemTime::now(),
+                        ) {
+                            // Arm the instant abrupt-down watch on the gateway pid
+                            // (GatewayUp/PidSeen #318). Arming AFTER apply_presence is
+                            // safe: the two touch DISJOINT state (the exit-watch pid
+                            // map vs scene.daemons), and a dead pid's synthesized
+                            // PidExited (ESRCH at registration) re-enters only on a
+                            // LATER select iteration — it can never observe a
+                            // half-applied arm within this synchronous arm.
+                            if let (Some(ew), Some(pid)) = (presence_exit_watch.as_ref(), arm_pid) {
+                                ew.watch(&source, pid);
                             }
-                            daemon::apply_presence(&mut scene, &source, update, now);
                             if scene_tx.send(Arc::new(scene.clone())).is_err() {
                                 tracing::warn!("scene channel closed — renderer dropped");
                                 break;
