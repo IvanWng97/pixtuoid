@@ -6,7 +6,7 @@
 //! overlay (terminal lifecycle lives with the event loop in `tui/mod.rs`).
 //!
 //! `render_to_rgb_buffer` is the public entry point, and is itself TWO
-//! phases behind one seam: [`sim_step`] (the `sim` module) advances the
+//! phases behind one seam: `sim_step` (the `sim` module) advances the
 //! world — motion, poses, lighting, chitchat — with no pixel access and
 //! returns an immutable [`SimFrame`]; the paint pass (`paint_frame`)
 //! consumes `&SimFrame` and mutates only the buffer + the paint-local
@@ -217,7 +217,7 @@ pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
 
 /// How hard it is raining, as a scalar (0.0 clear … 1.0 storm) — the audio
 /// model's weather feed (`crate::audio::stem_levels`). A deliberate SCALAR
-/// query so the module-private [`background::Weather`] enum never widens:
+/// query so the module-private `background::Weather` enum never widens:
 /// consumers get "how much rain", not the weather vocabulary. Snow/fog/etc.
 /// are 0.0 — precipitation you can HEAR, not precipitation per se. Honors
 /// the same per-thread [`force_weather`] override as every render.

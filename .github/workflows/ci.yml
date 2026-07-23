@@ -421,6 +421,27 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just api-surface-check
 
+  # Doc-rendering gate: `cargo doc` with every rustdoc warning as an error
+  # (broken/private intra-doc links are denied in `[workspace.lints.rustdoc]`)
+  # + run the doctests `cargo nextest` skips. Neither is visible to the build /
+  # clippy / test jobs. Stable toolchain (these are not nightly lints).
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD
+      # on Linux — `cargo doc` + the doctests compile the binary crate.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
+      - uses: extractions/setup-just@v4
+      - run: just doc-check
+
   # ADVISORY (never blocks): flag NEW runs of 3+ consecutive `//` comments in a
   # fn body on a PR's changed lines (the ~5k pre-existing legitimate WHY
   # comments are grandfathered — see `just comment-lint`). Findings surface as

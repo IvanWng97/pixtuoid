@@ -28,7 +28,7 @@ pub(crate) fn user_home() -> String {
     )
 }
 
-/// `Option` variant of [`user_home`]: the SAME USERPROFILE-vs-HOME rule, but
+/// `Option` variant of `user_home`: the SAME USERPROFILE-vs-HOME rule, but
 /// with no host-level fallback — `None` when nothing is set so a caller can
 /// supply its own (the installer's config/install call sites call this directly
 /// and keep their own per-call fallbacks). This is the one place that knows the
@@ -58,7 +58,7 @@ pub(crate) fn codex_home() -> PathBuf {
 /// of codex's existing-dir gate), else `<home>/.grok` on EVERY OS (no XDG, no
 /// APPDATA). Upstream resolves home via the re-stabilized
 /// `std::env::home_dir()` (USERPROFILE on Windows, `$HOME` never consulted
-/// there) — [`user_home`]'s USERPROFILE-first order is the faithful mirror.
+/// there) — `user_home`'s USERPROFILE-first order is the faithful mirror.
 /// Used for the sessions root, the installer's `hooks/pixtuoid.json` path, AND
 /// the `active_sessions.json` liveness probe, so the three can never disagree.
 pub(crate) fn grok_home() -> PathBuf {
@@ -99,7 +99,7 @@ fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
 /// `HOME`-FIRST home resolution, then `USERPROFILE` on Windows — the precedence
 /// used by the agent CLIs that hand-roll their own home dir as `$HOME ?? <OS
 /// home>` instead of deferring to a stdlib that ignores `$HOME` on Windows. This
-/// is the OPPOSITE of pixtuoid's generic [`user_home`] (`USERPROFILE`-first on
+/// is the OPPOSITE of pixtuoid's generic `user_home` (`USERPROFILE`-first on
 /// Windows, so the JSONL watcher never joins onto Git Bash's POSIX-form `HOME`).
 ///
 /// The divergence is load-bearing: a Windows user who exports `HOME` (Git Bash /
@@ -110,14 +110,14 @@ fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
 /// shell. `None` when nothing resolves (the installer maps it to "pass --config").
 ///
 /// Source-verified HOME-first CLIs (the only consumers; both hook/daemon, no
-/// watcher counterpart unlike [`codex_home`]):
+/// watcher counterpart unlike `codex_home`):
 /// - **CodeWhale** — `config::effective_home_dir` = `$HOME ?? dirs::home_dir()`.
 /// - **OpenClaw** — `infra/home-dir.ts::resolveRawOsHomeDir` = `$HOME ??
 ///   $USERPROFILE ?? os.homedir()` (the installer layers `OPENCLAW_HOME` on top).
 ///
 /// Every OTHER CLI uses its language stdlib (Rust `dirs::home_dir`, Go
 /// `os.UserHomeDir`, Node `os.homedir`) — all `USERPROFILE`-first/only on Windows
-/// — so they correctly use the generic [`user_home`], NOT this.
+/// — so they correctly use the generic `user_home`, NOT this.
 pub fn home_first_dir() -> Option<PathBuf> {
     resolve_home_first(
         cfg!(windows),
@@ -149,7 +149,7 @@ fn resolve_home_first(
 /// - else → `$XDG_CONFIG_HOME` if set, else `<home>/.config`.
 ///
 /// Empty env values count as unset. `home` is the already-resolved user home
-/// (see [`user_home`]) used for the relative fallbacks.
+/// (see `user_home`) used for the relative fallbacks.
 pub fn resolve_user_config_dir(
     os: &str,
     appdata: Option<String>,
@@ -188,7 +188,7 @@ fn resolve_home(
 
 /// The single USERPROFILE-vs-HOME precedence, in its purest form: USERPROFILE
 /// then HOME on Windows, HOME only on Unix, with empty strings treated as
-/// unset and `None` when nothing resolves. Both [`resolve_home`] (String, with
+/// unset and `None` when nothing resolves. Both `resolve_home` (String, with
 /// a host fallback) and [`user_home_opt`] (the `Option` shape the installer
 /// calls) derive from this — pure, so the Windows arm is unit-testable on any host.
 pub fn resolve_user_home_opt(

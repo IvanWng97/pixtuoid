@@ -11,7 +11,7 @@
 //! Presence rides a SIBLING channel (invariant #2: NOT the one `AgentEvent`
 //! channel), carrying `PresenceMsg { source, delta }` so N
 //! daemons land in DISTINCT `SceneState::daemons` entries. The reducer task
-//! merges them via [`apply_presence`], NEVER through `Reducer::apply` (which is
+//! merges them via [`apply_presence`](crate::source::daemon::apply_presence), NEVER through `Reducer::apply` (which is
 //! `AgentId`-pure). See `docs/superpowers/specs/2026-06-15-source-kind-daemon-
 //! agent-decouple-design.md`.
 

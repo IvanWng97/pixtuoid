@@ -449,10 +449,10 @@ pub fn resolve_theme(
     Ok(config_theme.unwrap_or(&NORMAL))
 }
 
-/// Resolve config into the office's [`Pet`]s. `[[pets]]` absent → all kinds
+/// Resolve config into the office's `Pet`s. `[[pets]]` absent → all kinds
 /// with default names. `pets = []` → no pets. An unknown `kind` is warn-skipped
 /// (non-fatal; the rest of the config and the remaining stanzas survive). A
-/// `name` is trimmed; empty/absent → [`PetKind::default_name`]. Resolving HERE
+/// `name` is trimmed; empty/absent → `PetKind::default_name`. Resolving HERE
 /// (once, at startup) means the render path reads `pet.name` directly — no
 /// per-frame lookup, no parallel kind→name map to keep in sync.
 pub fn resolve_pets(

@@ -3,7 +3,7 @@ use pixtuoid_core::sprite::Rgb;
 use super::*;
 
 /// Catppuccin Mocha — warm pastels on dark chocolate.
-/// Based on https://github.com/catppuccin/catppuccin
+/// Based on <https://github.com/catppuccin/catppuccin>
 /// Base: #1e1e2e, Surface0: #313244, Overlay0: #6c7086
 /// Rosewater: #f5e0dc, Flamingo: #f2cdcd, Pink: #f5c2e7
 /// Mauve: #cba6f7, Red: #f38ba8, Maroon: #eba0ac

@@ -177,7 +177,9 @@ semver surface), api-surface (`just api-surface-check` — a committed `cargo
 public-api` golden per published crate at `api/<crate>.txt`; the reviewable-diff
 twin of the semver gate: semver says "major/minor?", the golden says *what*
 changed — regenerate with `just api-surface` + commit when the public surface
-shifts), coverage/smoke, gen-check, gen-readme-check, npm-check,
+shifts), docs (`just doc-check` — `cargo doc` with `-D warnings` over the
+`[workspace.lints.rustdoc]` broken/private-intra-doc-link deny + the doctests
+`cargo nextest` skips), coverage/smoke, gen-check, gen-readme-check, npm-check,
 check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
 fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
 

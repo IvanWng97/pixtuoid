@@ -34,6 +34,17 @@ categories   = ["command-line-utilities", "visualization"]
 [workspace.lints.rust]
 unreachable_pub = "warn"
 
+# Doc-rendering hygiene. Unlike `missing_docs` (a public-API contract, scoped to
+# the published crates), a broken or private-target intra-doc link is a DEAD LINK
+# in the rendered docs for ANY crate — a plain correctness bug — so this gate is
+# workspace-wide. Rustdoc lints only fire during a doc build (`cargo doc` /
+# `cargo test --doc`), so they're invisible to `cargo build`/`clippy`; the CI
+# `docs` job (`just doc-check`) runs `cargo doc` to execute them. `deny` here +
+# `-D warnings` in that recipe together keep the rendered docs pristine.
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+
 [profile.release]
 lto           = true
 codegen-units = 1
