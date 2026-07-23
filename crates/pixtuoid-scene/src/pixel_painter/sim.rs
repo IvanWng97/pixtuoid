@@ -3,7 +3,7 @@
 //! `render_to_rgb_buffer` used to fuse sim-step and paint in one pass:
 //! `PixelCtx` carried six `&mut` sim stores, so there was no way to advance
 //! motion/lifecycle/venue state without painting, and no way to observe the
-//! outcomes except through a full render. The split: [`sim_step`] mutates the
+//! outcomes except through a full render. The split: `sim_step` mutates the
 //! [`SimStores`] and returns an immutable [`SimFrame`] snapshot; the paint
 //! pass (still inside `render_to_rgb_buffer`) consumes `&SimFrame` and only
 //! ever writes the pixel buffer + the paint-local `FrameCache` (a render
@@ -40,7 +40,7 @@ use super::anchors::{
 };
 use super::seat::{seat_sprite_in_pack, settle_seat_view, SeatView};
 
-/// The mutable world state one [`sim_step`] advances — every `&mut` store the
+/// The mutable world state one `sim_step` advances — every `&mut` store the
 /// fused pass used to hide inside `PixelCtx`. `render_to_rgb_buffer` builds
 /// one from its `PixelCtx`; a headless consumer builds one from its own
 /// `FloorCtx` + chitchat map.
@@ -94,7 +94,7 @@ pub struct CharacterPlacement {
     pub walking_dust_frame: Option<usize>,
 }
 
-/// The immutable outcome of one [`sim_step`]: the world advanced, observed.
+/// The immutable outcome of one `sim_step`: the world advanced, observed.
 /// Paint consumes it by `&` — rendering the same frame twice is byte-identical
 /// and cannot move the sim (the purity the split exists for). Owned data (no
 /// borrows into the stores) so the stores are free again the moment

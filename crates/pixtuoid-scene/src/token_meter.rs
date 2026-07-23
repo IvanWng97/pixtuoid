@@ -8,7 +8,7 @@
 //! cache writes + output; cache READS are excluded at decode): cumulative
 //! per session, monotone, honest — no ceilings, no model→window tables.
 //!
-//! Tier ladder: ×[`TIER_FACTOR`] geometric from [`TIER_BASE_TOKENS`]
+//! Tier ladder: ×`TIER_FACTOR` geometric from `TIER_BASE_TOKENS`
 //! (250K / 2M / 16M). Calibrated 2026-07 against BOTH populations: 108 local
 //! sessions split 24/41/22/12 across the four tiers, and community data
 //! (ccusage reports, anthropics/claude-code#24147, the docs' /usage example)
@@ -20,7 +20,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::AgentSlot;
 
-/// T1's threshold; T2/T3 derive by [`TIER_FACTOR`]. See the module doc for
+/// T1's threshold; T2/T3 derive by `TIER_FACTOR`. See the module doc for
 /// the two-population calibration behind the value. The site copy
 /// (`site/src/features.json` "Token meter" desc → the README table) repeats
 /// the derived 250K / 2M / 16M — update it on recalibration.
@@ -42,7 +42,7 @@ pub(crate) const SHEET_FALL_MS: u64 = 550;
 /// Fall start height above the stack top, in buffer px.
 pub(crate) const SHEET_FALL_PX: u16 = 6;
 
-/// Cumulative fresh tokens → tier 0..=[`MAX_TIER`]. Pure and monotone.
+/// Cumulative fresh tokens → tier 0..=`MAX_TIER`. Pure and monotone.
 pub fn token_tier(tokens_used: u64) -> u8 {
     let mut tier = 0u8;
     let mut threshold = TIER_BASE_TOKENS;

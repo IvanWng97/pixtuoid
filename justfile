@@ -269,6 +269,22 @@ _api-nightly:
     echo "installing {{API_NIGHTLY}} (api-surface needs nightly rustdoc JSON)…" >&2
     rustup toolchain install {{API_NIGHTLY}} --profile minimal
 
+# Doc-rendering gate. Two things `cargo build`/`clippy`/`nextest` can't see:
+# (1) build the rendered docs with EVERY rustdoc warning as an error — the
+# broken/private intra-doc-link classes are already `deny` in
+# `[workspace.lints.rustdoc]`, and `-D warnings` also catches bare URLs, invalid
+# HTML, redundant links, and any future rustdoc lint, so `cargo doc` output stays
+# pristine (dead links render as broken anchors on docs.rs); (2) RUN the doctests
+# — `cargo nextest` does NOT execute doctests, so the crate-root examples would
+# otherwise go ungated. CI-only in practice (a doc build + a doctest run).
+[group('rust')]
+[doc('Doc gate: cargo doc with -D warnings + run the doctests nextest skips (CI-only)')]
+doc-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+    cargo test --doc --workspace
+
 # Coverage + JUnit XML in one run — the exact command ci.yml's coverage job uses.
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
@@ -332,6 +348,19 @@ mutants *args:
         exit 1
     fi
     cargo mutants --in-diff target/mutants.diff {{ args }}
+
+# Comment-slop advisory: flag NEW runs of 3+ consecutive `//` comments inside a
+# function body (the repo's "fn-body comments ≤2 lines" convention —
+# pr-review.prompt.md's comment-value factor). DIFF-SCOPED like `mutants`
+# (`scripts/comment-lint.py` over the ast-grep rule `.ast-grep/rules/`), so the
+# ~5k pre-existing legitimate WHY comments are grandfathered and only new code
+# is checked. ADVISORY by default (prints + exit 0); `--gate` makes it exit 1,
+# `--worktree` lints uncommitted edits, `--github` emits inline PR annotations.
+# Needs ast-grep (setup-tools) + python3. Forwards args (e.g. a different base).
+[group('rust')]
+[doc('Advisory: flag NEW 3+-consecutive-comment runs in a fn body (diff-scoped)')]
+comment-lint *args:
+    python3 scripts/comment-lint.py {{ args }}
 
 # Never-panic fuzz ONE source's transcript decoder over a JSONL corpus DIR
 # (on-demand; not in preflight/CI — points at local or public real sessions, not
@@ -815,7 +844,9 @@ setup-tools:
     # in a workflow `run:` block passes `just lint` green locally). brew on macOS;
     # elsewhere point at the install docs rather than silently leaving `just lint`
     # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
-    for t in shfmt actionlint shellcheck; do
+    # ast-grep backs the `comment-lint` advisory (structural Rust lint rules in
+    # .ast-grep/rules/); shfmt/actionlint/shellcheck back `just lint`.
+    for t in shfmt actionlint shellcheck ast-grep; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true

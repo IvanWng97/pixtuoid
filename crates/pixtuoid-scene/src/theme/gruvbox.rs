@@ -3,7 +3,7 @@ use pixtuoid_core::sprite::Rgb;
 use super::*;
 
 /// Gruvbox Dark — retro warm amber on dark brown.
-/// Based on https://github.com/morhetz/gruvbox
+/// Based on <https://github.com/morhetz/gruvbox>
 /// bg: #282828, bg1: #3c3836, bg2: #504945, bg3: #665c54
 /// fg: #ebdbb2, fg2: #d5c4a1, fg3: #bdae93, fg4: #a89984
 /// Red: #fb4934, Green: #b8bb26, Yellow: #fabd2f

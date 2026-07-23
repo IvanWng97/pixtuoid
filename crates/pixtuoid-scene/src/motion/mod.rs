@@ -101,7 +101,7 @@ pub struct WalkLeg {
 /// named lounge waypoint — with an optional seat to settle onto — or an aimless
 /// amble). `dest` stays outside the enum because it is always present; only the
 /// waypoint/seat metadata is variant-specific. Produced by
-/// [`crate::pose::resolve_wander_target`] (the ONE stateless resolver both the
+/// `crate::pose::resolve_wander_target` (the ONE stateless resolver both the
 /// motion authority and `idle_pose` share).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WanderTarget {
@@ -536,7 +536,7 @@ fn advance_phase_clock(ms: &mut MotionState, walk_total: u64, now: SystemTime) {
 }
 
 /// Pick the wander destination for a given agent and cycle — a thin delegate to
-/// the ONE stateless resolver [`crate::pose::resolve_wander_target`], which
+/// the ONE stateless resolver `crate::pose::resolve_wander_target`, which
 /// `pose::pure::idle_pose` also calls, so the routed motion path and the
 /// stateless overlay can never drift to different destinations for the same
 /// `(agent, cycle)` and equal claims. `origin` is the agent's home desk (the

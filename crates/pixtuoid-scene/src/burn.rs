@@ -1,9 +1,9 @@
 //! Burn tier — how expensive an agent's LLM brain is, as a VISUAL fact.
 //!
 //! The model is the GATE, effort is the SPLIT (user-pinned): only
-//! the [`TOP_MODELS`] ever color at all — at ordinary/unknown effort they get
+//! the `TOP_MODELS` ever color at all — at ordinary/unknown effort they get
 //! ember-red hair ([`BurnTier::Premium`]); with a FRESH max-class effort
-//! ([`MAX_EFFORTS`], within [`EFFORT_TTL_SECS`]) the hair catches fire
+//! (`MAX_EFFORTS`, within `EFFORT_TTL_SECS`) the hair catches fire
 //! ([`BurnTier::Top`], the flame crown). Everything else — including
 //! opus/gpt-5.5-class flagships — stays [`BurnTier::Normal`].
 //!
@@ -66,7 +66,7 @@ pub(crate) fn burn_tier(model: Option<&str>, effort_fresh: Option<&str>) -> Burn
     }
 }
 
-/// The slot's effort observation, IF still fresh (within [`EFFORT_TTL_SECS`])
+/// The slot's effort observation, IF still fresh (within `EFFORT_TTL_SECS`)
 /// — the ONE freshness rule shared by the tier judgment and the dossier's
 /// `· effort` suffix, so the tooltip can't show an effort the flame already
 /// decayed past.
@@ -87,9 +87,9 @@ pub fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
     })
 }
 
-/// The slot-level judgment the paint pass calls: applies the [`EFFORT_TTL_SECS`]
+/// The slot-level judgment the paint pass calls: applies the `EFFORT_TTL_SECS`
 /// freshness filter to the slot's last effort observation, then delegates to
-/// [`burn_tier`].
+/// `burn_tier`.
 pub fn slot_burn_tier(slot: &AgentSlot, now: SystemTime) -> BurnTier {
     burn_tier(slot.model.as_deref(), fresh_effort(slot, now))
 }
