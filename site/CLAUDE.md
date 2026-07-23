@@ -41,7 +41,8 @@ edit** — the `glob` pattern, the page's `sourcePath`, the nav label, the two
 path filters, and the doc itself (the `KNOWLEDGE-BASE → KNOWLEDGE-ENGINEERING`
 rename is the worked example: the *route slug* `/knowledge-base` was kept to
 avoid link rot while the file + display name changed). `ARCHITECTURE.md`'s
-Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
+Mermaid diagram becomes an inline SVG via `rehype-mermaid` whenever the content
+layer renders it — during `astro check` AS WELL AS `astro build` — which is
 **why CI installs Chromium**; break the Mermaid *syntax* and `astro build` fails —
 but a Chromium/Playwright *version* mismatch fails DIFFERENTLY: `rehype-mermaid`
 collapses the whole `<Content />` to an empty `<article>` WITHOUT erroring the
@@ -54,8 +55,12 @@ deploy's cache — and once a broken deploy caches an empty `/architecture`, eve
 later deploy serves it back as a **+7ms cache HIT** and never re-renders the
 `mermaid` block (no Chromium launch, no error, still empty). `pages.yml` sets
 `cache: false` so each deploy does a fresh real render; poison can't persist
-(#682). `site.yml` renders fine because it has no cross-run Astro cache. Both
-paths are caught by `config/assert-docs-rendered.mjs` (`check:docs`) — run in
+(#682). `site.yml` renders fine because it has no cross-run Astro cache. A
+THIRD, orthogonal cause is INSTALL ORDER: the render also fires during `astro
+check`, so Chromium must be installed BEFORE `npm run check` — `pages.yml` once
+had the install LAST in the `&&` chain, so check rendered browserless and the
+deploy went red (the 2026-07 outage; #776 reorders it before check, mirroring
+`site.yml`). All three are caught by `config/assert-docs-rendered.mjs` (`check:docs`) — run in
 `verify`/site-check AND the deploy's `build-cmd`, asserting every doc page's
 `<article>` has a body + `/architecture` kept its `<svg>` — so a collapsed render
 reddens, never deploys.
