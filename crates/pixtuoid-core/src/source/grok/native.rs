@@ -91,6 +91,9 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     }
 }
 
+/// Non-Unix stub — grok's `active_sessions.json` liveness probe is Unix-only
+/// (the pid-liveness + kernel-start recycle check it needs), so on Windows it
+/// always returns `None` and grok liveness degrades to pure mtime gating.
 #[cfg(not(unix))]
 pub fn live_grok_session_ids(_grok_root: &Path) -> Option<ProbeSnapshot> {
     None

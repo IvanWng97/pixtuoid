@@ -1,5 +1,5 @@
 //! Zone-based scene layout for the top-down office — primitive geometry
-//! only, no terminal deps. Computed once per (buf_w, buf_h, num_agents)
+//! only, no terminal deps. Computed once per (buf_w, buf_h, max_desks)
 //! triple; serializable / wire-shippable (no out-of-process consumer today).
 //!
 //! Splits a buf-pixel rectangle into quadrants (meeting / pantry /
@@ -176,7 +176,7 @@ pub struct Lounge {
 
 /// The computed office geometry for one floor — quadrant bounds, per-agent
 /// desks, waypoints, decor, walls, and the walkability mask. Built once per
-/// `(buf_w, buf_h, num_agents)` via [`Self::compute`].
+/// `(buf_w, buf_h, max_desks)` via [`Self::compute`].
 #[derive(Debug, Clone)]
 pub struct SceneLayout {
     /// Buffer width in pixels this layout was computed for.

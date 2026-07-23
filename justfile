@@ -15,6 +15,21 @@
 # single-sourced cross-platform (CI never writes inline commands).
 set windows-shell := ["bash", "-cu"]
 
+# ── variables ─────────────────────────────────────────────────────
+# just evaluates these globally regardless of position; kept at the top (the
+# idiom) so the file's config lives in one place.
+
+# The published semver surface: the ONLY two crates whose public API is a
+# contract (the binary lib target is not). Single-sourced here so the three
+# gates over it — semver / api-surface / api-surface-check — can't drift; a
+# newly-published crate is added in ONE place.
+PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
+
+# The nightly the api-surface goldens are pinned to (rustdoc JSON is
+# nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
+# cargo-public-api 0.52.0 to match. Bump both together or the golden churns.
+API_NIGHTLY := "nightly-2026-07-22"
+
 # List available recipes.
 default:
     @just --list
@@ -195,27 +210,30 @@ msrv:
 [group('rust')]
 [doc('SemVer-check pixtuoid-core + pixtuoid-scene against their crates.io baselines (CI-only)')]
 semver:
-    cargo semver-checks --package pixtuoid-core --package pixtuoid-scene
+    cargo semver-checks $(printf -- '--package %s ' {{PUBLISHED_CRATES}})
 
-# Public-API surface snapshot for the two PUBLISHED libraries (pixtuoid-core +
-# pixtuoid-scene). COMPLEMENTS `just semver`: the semver gate answers
-# "major/minor bump?", this shows *what* changed as a reviewable golden diff.
-# Goldens live in `api/<crate>.txt` — `cargo public-api -s` output (`-s` omits
-# blanket-impl noise like `Into`/`Receiver`; auto-derived `Clone`/`Serialize`/…
-# STAY, since adding/removing a derive IS a public-API change). rustdoc JSON is
-# nightly-only, so both recipes PIN {{API_NIGHTLY}} (self-installed on first use)
-# — the golden is reproducible local↔CI. CI + setup-tools pin cargo-public-api
-# 0.52.0 to match; regenerate with those exact two versions or the golden churns.
-# CI-only in practice (like semver) — run `just api-surface` + commit the golden
-# whenever either crate's public surface changes.
-API_NIGHTLY := "nightly-2026-07-22"
-
+# Public-API surface snapshot for the PUBLISHED libraries. COMPLEMENTS
+# `just semver`: the semver gate answers "major/minor bump?", this shows *what*
+# changed as a reviewable golden diff. Goldens live in `api/<crate>.txt` —
+# `cargo public-api -s` output (`-s` omits blanket-impl noise like
+# `Into`/`Receiver`; auto-derived `Clone`/`Serialize`/… STAY, since
+# adding/removing a derive IS a public-API change). cargo-public-api takes one
+# crate per call, so a golden file is regenerated per crate. rustdoc JSON is
+# nightly-only, so both recipes PIN {{API_NIGHTLY}}. CI-only in practice (like
+# semver) — run `just api-surface` + commit the golden whenever either crate's
+# public surface changes.
 [group('rust')]
 [doc('Regenerate the api/<crate>.txt public-API goldens (cargo-public-api + pinned nightly)')]
 api-surface: _api-nightly
     #!/usr/bin/env bash
     set -euo pipefail
-    for crate in pixtuoid-core pixtuoid-scene; do
+    # cargo-public-api only honors RUSTUP_TOOLCHAIN when the invoked `cargo` is
+    # the rustup PROXY. A Homebrew/system cargo ahead of it on PATH ignores the
+    # env, so cargo-public-api falls back to rust-toolchain.toml's STABLE pin and
+    # dies on `-Z` (nightly-only). Prepend the rustup bin so the proxy wins (a
+    # no-op on CI, where it's already first).
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    for crate in {{PUBLISHED_CRATES}}; do
         RUSTUP_TOOLCHAIN={{API_NIGHTLY}} cargo public-api -p "$crate" -s > "api/$crate.txt"
     done
 
@@ -224,10 +242,12 @@ api-surface: _api-nightly
 api-surface-check: _api-nightly
     #!/usr/bin/env bash
     set -euo pipefail
+    # See `api-surface`: force the rustup proxy cargo so RUSTUP_TOOLCHAIN is honored.
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
     fail=0
-    for crate in pixtuoid-core pixtuoid-scene; do
+    for crate in {{PUBLISHED_CRATES}}; do
         RUSTUP_TOOLCHAIN={{API_NIGHTLY}} cargo public-api -p "$crate" -s > "$tmp/$crate.txt"
         if ! diff -u "api/$crate.txt" "$tmp/$crate.txt"; then
             echo "error: public API of $crate drifted from api/$crate.txt — run 'just api-surface' and commit the update" >&2
