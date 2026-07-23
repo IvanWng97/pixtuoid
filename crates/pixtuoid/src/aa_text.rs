@@ -70,7 +70,7 @@ pub fn line_height(px: f32) -> i32 {
 }
 
 /// Rasterize `s` in the AA face at pixel size `px`, top-left at `(x, top_y)`,
-/// calling `put(px_x, px_y, coverage)` for every lit pixel (`coverage` ∈ [0,1] is
+/// calling `put(px_x, px_y, coverage)` for every lit pixel (`coverage` ∈ `[0,1]` is
 /// the AA grayscale strength). Backend-agnostic — the caller composites into its
 /// own surface. Returns the total advance width (so a caller placing a cursor /
 /// second run doesn't recompute via [`text_width`]).

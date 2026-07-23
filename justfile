@@ -269,6 +269,22 @@ _api-nightly:
     echo "installing {{API_NIGHTLY}} (api-surface needs nightly rustdoc JSON)…" >&2
     rustup toolchain install {{API_NIGHTLY}} --profile minimal
 
+# Doc-rendering gate. Two things `cargo build`/`clippy`/`nextest` can't see:
+# (1) build the rendered docs with EVERY rustdoc warning as an error — the
+# broken/private intra-doc-link classes are already `deny` in
+# `[workspace.lints.rustdoc]`, and `-D warnings` also catches bare URLs, invalid
+# HTML, redundant links, and any future rustdoc lint, so `cargo doc` output stays
+# pristine (dead links render as broken anchors on docs.rs); (2) RUN the doctests
+# — `cargo nextest` does NOT execute doctests, so the crate-root examples would
+# otherwise go ungated. CI-only in practice (a doc build + a doctest run).
+[group('rust')]
+[doc('Doc gate: cargo doc with -D warnings + run the doctests nextest skips (CI-only)')]
+doc-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+    cargo test --doc --workspace
+
 # Coverage + JUnit XML in one run — the exact command ci.yml's coverage job uses.
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.

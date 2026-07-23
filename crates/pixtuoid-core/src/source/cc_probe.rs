@@ -1,4 +1,4 @@
-//! The CC sessions/<pid>.json registry probe — the `~/.claude/sessions`
+//! The CC `sessions/<pid>.json` registry probe — the `~/.claude/sessions`
 //! machinery behind `claude_code::live_cc_session_ids` (re-exported there;
 //! this module is the implementation home).
 
@@ -25,8 +25,8 @@ use crate::source::jsonl::ProbeSnapshot;
 ///
 /// PID-reuse guard (#220): kill(0) only proves SOME process owns the pid. When
 /// the entry carries `startedAt` (ms epoch, stamped by CC at startup) AND the
-/// kernel can report the process start time ([`pid_start_time_secs`] — macOS
-/// only today), the two must agree within [`PID_START_TOLERANCE_SECS`] or the
+/// kernel can report the process start time (`pid_start_time_secs` — macOS
+/// only today), the two must agree within `PID_START_TOLERANCE_SECS` or the
 /// pid was recycled by an unrelated process and the entry is skipped. Either
 /// side missing falls back to pid-alive-only (the previous behavior — the
 /// check is additive). This matters more now that the probe is ONGOING

@@ -39,7 +39,7 @@ const CHILD_END_UNCLAIM_TTL: Duration = Duration::from_secs(300);
 /// PRODUCER: the tee inside `HookRouter::run` (the `HookRouter` owns the ONE
 /// shared socket ALL sources' hook payloads ride), so every `SubagentStop`
 /// (CC and Codex alike) passes that single seam. CONSUMERS: each WIRED source's
-/// `JsonlWatcher` (via [`JsonlWatcher::with_child_end_unclaims`] — CC and
+/// `JsonlWatcher` (via `JsonlWatcher::with_child_end_unclaims` — CC and
 /// Codex today; Antigravity stays unwired, nothing stamps its ends
 /// `as_child`) drains only
 /// the ids matching its OWN claimed paths; foreign ids stay pending for the
