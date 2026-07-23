@@ -127,7 +127,7 @@ impl PetKind {
 
 /// A pet configured for the office: its [`PetKind`] plus the display name shown
 /// in the hover tooltip. The name is resolved ONCE (custom from the `[[pets]]`
-/// stanza, else `PetKind::default_name`) so the render path never does a name
+/// stanza, else [`PetKind::default_name`]) so the render path never does a name
 /// lookup or fallback — it reads `pet.name` directly. Keying the office's pets
 /// as a `&[Pet]` (not a parallel `Vec<PetKind>` + name map) makes "every enabled
 /// pet has a name" true by construction.
