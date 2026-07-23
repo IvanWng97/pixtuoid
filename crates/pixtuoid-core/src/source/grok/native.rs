@@ -329,6 +329,7 @@ fn grok_probe_root_resolved(sessions_root: &Path, home: &Path) -> Option<PathBuf
 
 /// Source that watches the grok session transcript tree.
 pub struct GrokSource {
+    /// The watched grok session-transcript root; per-session `updates.jsonl` lives under it.
     pub sessions_root: PathBuf,
     /// The #246 child-end un-claim side-channel — grok is consumer-only like
     /// Codex: its `subagent_stop`/`subagent_end` hooks decode to Hook-transport
@@ -341,6 +342,7 @@ pub struct GrokSource {
 }
 
 impl GrokSource {
+    /// Construct pointed at the default grok `sessions` root.
     pub fn default_paths() -> Self {
         Self {
             sessions_root: grok_home().join("sessions"),

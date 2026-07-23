@@ -88,6 +88,8 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
     report
 }
 
+/// Load the character sprite pack: the compiled-in default pack, with an
+/// optional `--pack-dir` custom pack merged over it.
 pub fn load_sprite_pack(pack_dir: Option<PathBuf>) -> Result<Pack> {
     let base = load_embedded_pack()?;
 

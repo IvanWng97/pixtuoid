@@ -10,7 +10,9 @@ use crate::layout::{furniture_def, pct, Bounds, Furniture, Point, OBSTACLE_PAD_P
 /// `compute::room_furniture`), so the fixed-size array encodes that invariant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MeetingTrio {
+    /// The two sofa centres: `[0]` north, `[1]` south (pixel-space).
     pub sofas: [Point; 2],
+    /// The table centre, midway between the two sofas (pixel-space).
     pub table: Point,
 }
 
@@ -25,7 +27,10 @@ pub struct MeetingTrio {
 /// keeping bounds and trio in ONE element makes that class unrepresentable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MeetingRoom {
+    /// The room's interior rectangle (buffer pixels).
     pub bounds: Bounds,
+    /// The sofa/table trio, or `None` when the room is too small to fit it
+    /// (bare floor — the room still exists to hold its `room_id`).
     pub trio: Option<MeetingTrio>,
 }
 

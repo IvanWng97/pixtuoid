@@ -2,33 +2,47 @@ use std::collections::HashMap;
 
 use crate::grid::Grid;
 
+/// Compositing a `Frame` onto an `RgbBuffer` (`blit_frame`), skipping
+/// transparent pixels.
 pub mod blit;
+/// Sprite-pack file format: `pack.toml` + `.sprite` parsing, the recolor-key
+/// palette guard, and pack loading.
 pub mod format;
 
+/// An opaque 24-bit color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rgb {
+    /// Red channel, 0–255.
     pub r: u8,
+    /// Green channel, 0–255.
     pub g: u8,
+    /// Blue channel, 0–255.
     pub b: u8,
 }
 
 /// A single pixel: `Some(rgb)` or `None` (transparent).
 pub type Pixel = Option<Rgb>;
 
+/// A map from single-character frame codes to pixels (opaque `Rgb` or
+/// transparent).
 #[derive(Debug, Clone, Default)]
 pub struct Palette {
     map: HashMap<char, Pixel>,
 }
 
 impl Palette {
+    /// A palette with no keys.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Map `key` to `pixel` (opaque `Some(rgb)` or transparent `None`).
     pub fn insert(&mut self, key: char, pixel: Pixel) {
         self.map.insert(key, pixel);
     }
 
+    /// Look up `key`: `None` if the key is undefined, else `Some(pixel)` (the
+    /// pixel itself may be transparent).
     pub fn get(&self, key: char) -> Option<Pixel> {
         self.map.get(&key).copied()
     }
@@ -106,9 +120,12 @@ impl Frame {
     }
 }
 
+/// An animation: an ordered list of frames plus the per-frame hold time.
 #[derive(Debug, Clone)]
 pub struct Sprite {
+    /// The frames, played in order.
     pub frames: Vec<Frame>,
+    /// How long each frame holds before advancing, in milliseconds.
     pub frame_ms: u32,
 }
 
@@ -131,6 +148,7 @@ impl std::ops::DerefMut for RgbBuffer {
 }
 
 impl RgbBuffer {
+    /// A `width × height` buffer with every pixel set to `fill`.
     pub fn filled(width: u16, height: u16, fill: Rgb) -> Self {
         RgbBuffer(Grid::filled(width, height, fill))
     }
@@ -163,12 +181,17 @@ impl RgbBuffer {
         self.raw_index(x, y)
     }
 
+    /// Read the `Rgb` at `(x, y)`. Debug-asserts the point is in bounds;
+    /// unchecked in release (the hot blit path clips first).
     pub fn get(&self, x: u16, y: u16) -> Rgb {
         // Unchecked index in release (every caller clips first); this is a
         // public primitive the v2 PNG/web renderers are meant to reuse.
         self.0.as_slice()[self.checked_index(x, y)]
     }
 
+    /// Write `rgb` at `(x, y)`. Debug-asserts the point is in bounds; unchecked
+    /// in release. Use [`put_checked`](Self::put_checked) when `(x, y)` may fall
+    /// outside the buffer.
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
         let i = self.checked_index(x, y);
         self.0.as_mut_slice()[i] = rgb;

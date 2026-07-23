@@ -68,6 +68,7 @@ use serde_json::Value;
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
+/// The CodeWhale CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "codewhale";
 
 /// CodeWhale tools that dispatch a sub-agent (`crates/tui/src/tools/subagent`

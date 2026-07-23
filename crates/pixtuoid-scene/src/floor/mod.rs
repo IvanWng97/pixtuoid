@@ -55,14 +55,19 @@ pub fn floor_capacity(buf_w: u16, buf_h: u16, floor_seed: u64) -> usize {
         .unwrap_or(0)
 }
 
+/// Per-floor identity + look: index, altitude, and derived layout seed.
 #[derive(Debug, Clone, Copy)]
 pub struct FloorMeta {
+    /// Zero-based floor index.
     pub floor_idx: usize,
+    /// Height fraction: 0.0 (ground) → 1.0 (top floor); drives skyline depth in the windows.
     pub altitude: f32,
+    /// This floor's layout seed (`floor_seed(floor_idx)`).
     pub floor_seed: u64,
 }
 
 impl FloorMeta {
+    /// Metadata for floor `floor_idx` of `total_floors` — altitude spreads 0.0 (ground) → 1.0 (top).
     pub fn for_floor(floor_idx: usize, total_floors: usize) -> Self {
         let altitude = if total_floors <= 1 {
             0.0
@@ -80,6 +85,7 @@ impl FloorMeta {
         }
     }
 
+    /// The lone floor of a single-floor office (index 0, altitude 0.0).
     pub fn ground() -> Self {
         Self::for_floor(0, 1)
     }
@@ -89,10 +95,15 @@ impl FloorMeta {
 /// occupancy overlay, pose history, recolored-frame cache, lighting
 /// fade state, and motion map so floors are fully independent.
 pub struct FloorCtx {
+    /// This floor's A\* pathfinder.
     pub router: AStarRouter,
+    /// Per-tick walkable-cell occupancy (routing steers around occupied cells).
     pub overlay: OccupancyOverlay,
+    /// Per-agent pose history for the routed pose derivation.
     pub history: PoseHistory,
+    /// Per-agent recolored-sprite cache.
     pub cache: FrameCache,
+    /// This floor's indoor-lighting fade state.
     pub light: LightingState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
     /// Evicted alongside `history` and `cache` in [`FloorCtx::evict_missing`]
@@ -123,6 +134,7 @@ impl Default for FloorCtx {
 }
 
 impl FloorCtx {
+    /// Fresh per-floor state — empty router, overlay, history, cache, and lighting.
     pub fn new() -> Self {
         Self {
             router: AStarRouter::new(),
@@ -242,6 +254,7 @@ impl CoffeeState {
     /// both read it, so the paint and the bookkeeping can't drift.
     pub const STEAM_WINDOW_SECS: u64 = 120;
 
+    /// Empty coffee state — no cups held.
     pub fn new() -> Self {
         Self::default()
     }
@@ -347,14 +360,23 @@ pub fn frame_epilogue(
 /// `split_at_mut`, so they can't fold into one bundle. `buf_w`/`buf_h` fold into
 /// [`Size`].
 pub struct FrameInputs<'a> {
+    /// The scene to render (the full live scene, or a projected single-floor one).
     pub scene: &'a SceneState,
+    /// The character sprite pack.
     pub pack: &'a Pack,
+    /// The active color theme.
     pub theme: &'static Theme,
+    /// This frame's wall-clock time.
     pub now: SystemTime,
+    /// Target pixel-buffer size.
     pub size: Size,
+    /// This floor's index, altitude, and layout seed.
     pub floor_meta: FloorMeta,
+    /// The pet's live interaction state, if a pet is present.
     pub active_pet: Option<&'a PetState>,
+    /// This floor's configured pet, if any.
     pub floor_pet: Option<&'a Pet>,
+    /// Composite the walkable / approach / route debug layer (the `w` toggle).
     pub debug_walkable: bool,
 }
 
@@ -364,10 +386,19 @@ pub struct FrameInputs<'a> {
 /// pass, the appliance audio-cue feed a windowed painter can't otherwise
 /// reach (#633; the TUI reads the same set off its `DrawCtx` out-param).
 pub struct FloorFrame {
+    /// The frame's computed layout (callers cache it for overlays / hit-testing).
     pub layout: Arc<crate::layout::Layout>,
+    /// The occupied-waypoint indices this frame — the appliance audio-cue feed.
     pub occupied_waypoints: std::collections::HashSet<usize>,
 }
 
+/// THE shared headless frame seam: scene → `RgbBuffer`, one floor, one frame —
+/// prologue (buffer sizing, layout, router zone) → the pixel pass → the coffee +
+/// door-anim [`frame_epilogue`], single-sourced so the epilogue can't drift across
+/// painters (#423). Returns the [`FloorFrame`] (layout + occupancy), or `None` when
+/// the size can't lay out (buffer left cleared, no panic). Per-agent eviction stays
+/// caller-side — [`FloorSession`] owns it for the single-floor painters; a
+/// projected-scene consumer (the TUI floor slide) must never evict in here.
 pub fn render_floor(
     fctx: &mut FloorCtx,
     buf: &mut RgbBuffer,
@@ -419,11 +450,14 @@ pub fn render_floor(
 /// into. A multi-floor painter composes `Vec<PerFloor>` (the TUI); the
 /// single-floor painters hold one inside a [`FloorSession`].
 pub struct PerFloor {
+    /// This floor's sim/paint stores.
     pub ctx: FloorCtx,
+    /// The reused pixel buffer this floor renders into.
     pub buf: RgbBuffer,
 }
 
 impl PerFloor {
+    /// Fresh floor stores + an empty (zero-sized) pixel buffer.
     pub fn new() -> Self {
         Self {
             ctx: FloorCtx::new(),
@@ -482,6 +516,7 @@ pub struct AudioObserver {
 }
 
 impl AudioObserver {
+    /// A fresh observer, primed for no floor yet.
     pub fn new() -> Self {
         Self::default()
     }
@@ -544,7 +579,9 @@ impl AudioObserver {
 /// cue edges stay warm (the observer reprimes on a switch).
 #[derive(Default)]
 pub struct PerOffice {
+    /// Every agent's desk cup + fetch time — survives floor navigation.
     pub coffee: CoffeeState,
+    /// Active speech bubbles keyed by venue (the `VenueKey` carries `floor_idx`).
     pub chitchat: HashMap<VenueKey, ActiveChitchat>,
     /// The office-wide audio observer (the sound twin of `coffee`): one cue
     /// tracker + reprime latch, shared across floors, so every painter composes
@@ -553,6 +590,7 @@ pub struct PerOffice {
 }
 
 impl PerOffice {
+    /// Empty office state.
     pub fn new() -> Self {
         Self::default()
     }
@@ -575,7 +613,9 @@ impl PerOffice {
 /// TUI) composes `Vec<`[`PerFloor`]`>` + one [`PerOffice`] and drives
 /// [`render_floor`] / `draw_scene` itself.
 pub struct FloorSession {
+    /// This session's single floor — its sim/paint stores + pixel buffer.
     pub floor: PerFloor,
+    /// The office-wide cross-frame state (coffee, chitchat, audio) shared across floors.
     pub office: PerOffice,
     /// The layout the last `render` laid out — [`FloorSession::overlay`] builds
     /// labels against IT (not a caller-supplied one), so a painter can't pass a
@@ -589,6 +629,7 @@ pub struct FloorSession {
 }
 
 impl FloorSession {
+    /// An empty session — fresh floor + office state, nothing laid out yet.
     pub fn new() -> Self {
         Self {
             floor: PerFloor::new(),
@@ -800,14 +841,18 @@ impl Default for LightingState {
 }
 
 impl LightingState {
+    /// Floor of the smoothed lit level — an empty floor dims to here, never to black.
     pub const MIN_LEVEL: f32 = 0.10;
+    /// How long an emptied floor holds full light before it starts fading (ms).
     pub const EMPTY_DEBOUNCE_MS: u64 = 5_000;
+    /// Time constant of the exponential lit-level ease (ms).
     pub const FADE_TAU_MS: u64 = 800;
     /// Multiplier applied to the time-of-day floor-darken overlay when
     /// the floor is fully empty. Tunes "how dark" empty looks; the only
     /// knob to reach for if empty floors read as too dark / too bright.
     pub const EMPTY_FLOOR_DIM_BOOST: f32 = 2.4;
 
+    /// A fully-lit floor (level 1.0), no fade in progress.
     pub fn new() -> Self {
         Self {
             level: 1.0,
@@ -859,15 +904,20 @@ impl LightingState {
 
 /// Animated floor-switch transition.
 pub struct FloorTransition {
+    /// The floor being slid away FROM.
     pub from_floor: usize,
+    /// The floor being slid TO.
     pub to_floor: usize,
+    /// When the slide began.
     pub started_at: SystemTime,
+    /// Slide duration (ms).
     pub duration_ms: u64,
 }
 
 const TRANSITION_DURATION_MS: u64 = 900;
 
 impl FloorTransition {
+    /// Start a slide from floor `from` to floor `to` at `now`.
     pub fn new(from: usize, to: usize, now: SystemTime) -> Self {
         Self {
             from_floor: from,
@@ -887,6 +937,7 @@ impl FloorTransition {
         )
     }
 
+    /// Whether the slide has finished (or a backward clock step past its duration ends it).
     pub fn is_done(&self, now: SystemTime) -> bool {
         // Backward-clock escape: `t` saturates to 0 while `now < started_at`
         // (eased_progress), so a wall-clock step to before the transition
@@ -927,7 +978,9 @@ pub fn num_floors(scene: &SceneState) -> usize {
 /// back into `AgentSlot.desk_index`, keeps that field's GLOBAL type honest
 /// until [`project_floor_scene`] re-hosts the slot.
 pub struct ProjectedSlot {
+    /// The projected agent — its `desk_index` still the ORIGINAL global allocation.
     pub slot: AgentSlot,
+    /// The agent's desk remapped into this floor's local `[0..capacity)` space.
     pub desk: FloorLocalDeskIndex,
 }
 

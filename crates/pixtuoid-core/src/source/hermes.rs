@@ -61,6 +61,7 @@ use serde_json::Value;
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
+/// The Hermes CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "hermes";
 
 /// The Hermes home dir, mirroring Hermes's OWN resolution (verified via

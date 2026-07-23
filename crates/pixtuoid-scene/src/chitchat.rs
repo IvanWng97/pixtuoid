@@ -89,22 +89,38 @@ pub const CHITCHAT_LINES: &[&str] = &[
 /// every other social waypoint is its own `Waypoint` venue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VenueKey {
-    Room { floor_idx: usize, room_id: usize },
-    Waypoint { floor_idx: usize, wp_idx: usize },
+    /// A whole meeting room's group conversation (all its slots share one venue).
+    Room {
+        /// Index of the floor the room is on.
+        floor_idx: usize,
+        /// The room's id (index into `layout.meeting_rooms`).
+        room_id: usize,
+    },
+    /// A single social waypoint's conversation (pantry, couch, vending, printer).
+    Waypoint {
+        /// Index of the floor the waypoint is on.
+        floor_idx: usize,
+        /// Index of the waypoint in `layout.waypoints`.
+        wp_idx: usize,
+    },
 }
 
 /// A live conversation among the agents currently at a venue.
 pub struct ActiveChitchat {
+    /// The venue this conversation belongs to.
     pub venue: VenueKey,
     /// Current attendees, sorted ascending by raw id for a stable speaker
     /// rotation. Refreshed each frame so agents joining/leaving the venue are
     /// folded into / out of the rotation.
     pub participants: Vec<AgentId>,
+    /// When the conversation began — the turn/expiry clock.
     pub started_at: SystemTime,
     seed: u64,
 }
 
 impl ActiveChitchat {
+    /// Starts a conversation at `venue` among `participants`, seeded from the
+    /// sorted attendee set plus the start time.
     pub fn new(venue: VenueKey, participants: Vec<AgentId>, now: SystemTime) -> Self {
         // Direct call to the model-layer `anim::elapsed_ms` (NOT the render-layer
         // `pixel_painter::epoch_ms` forwarder — chitchat is a model module and
@@ -138,6 +154,7 @@ impl ActiveChitchat {
         self.participants = participants;
     }
 
+    /// Whether the exchange has run its full `CHITCHAT_TOTAL_MS`.
     pub fn is_expired(&self, now: SystemTime) -> bool {
         self.elapsed_ms(now) >= CHITCHAT_TOTAL_MS
     }
@@ -223,13 +240,14 @@ pub fn venue_wp_idx(
 }
 
 /// Whether agents at this waypoint kind can start a chitchat — any venue but
-/// [`ChitchatVenue::None`].
+/// `ChitchatVenue::None`.
 pub fn supports_chitchat(kind: WaypointKind) -> bool {
     chitchat_venue(kind) != ChitchatVenue::None
 }
 
 /// A single speech bubble ready for the widget layer to render.
 pub struct ChitchatBubble {
+    /// The quip to render.
     pub text: &'static str,
     /// Pixel coords of the speaking agent's anchor.
     pub anchor: Point,
@@ -241,9 +259,13 @@ pub struct ChitchatBubble {
 /// and consumer can't transpose the two `usize`-ish fields.
 #[derive(Debug, Clone, Copy)]
 pub struct Visitor {
+    /// The visitor's waypoint slot index.
     pub wp_idx: usize,
+    /// The visiting agent.
     pub agent_id: AgentId,
+    /// The agent's pixel anchor (bubble placement).
     pub anchor: Point,
+    /// `Some(room_id)` for meeting slots, `None` for single-point waypoints.
     pub room_id: Option<usize>,
 }
 

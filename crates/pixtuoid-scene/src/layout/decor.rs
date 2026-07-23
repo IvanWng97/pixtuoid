@@ -43,10 +43,15 @@ pub enum WaypointKind {
 /// wander destination).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DwellWindow {
+    /// Baseline dwell time at the spot, in milliseconds.
     pub base_ms: u64,
+    /// Extra randomized dwell added on top of `base_ms`, in milliseconds
+    /// (`0` marks the [`Self::DECOR`] non-destination sentinel).
     pub range_ms: u64,
 }
 impl DwellWindow {
+    /// The decor sentinel — scenery, not a wander destination
+    /// (`base_ms == range_ms == 0`).
     pub const DECOR: DwellWindow = DwellWindow {
         base_ms: 0,
         range_ms: 0,
@@ -70,9 +75,13 @@ pub(crate) const PLANT_FOOTPRINT: Size = Size { w: 6, h: 3 };
 /// the canonical absolute sides (north = −y).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ApproachSides {
+    /// Approachable from the north (−y) in the canonical frame?
     pub n: bool,
+    /// Approachable from the south (+y, the canonical front)?
     pub s: bool,
+    /// Approachable from the east (+x)?
     pub e: bool,
+    /// Approachable from the west (−x)?
     pub w: bool,
 }
 
@@ -313,32 +322,55 @@ impl WaypointKind {
 /// [`desk_furniture_def`] accessor.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Furniture {
+    /// The lounge / cubicle-top viewing couch (3 seats).
     Couch,
+    /// The pantry counter (kitchen + coffee).
     Pantry,
+    /// An aisle phone booth.
     PhoneBooth,
+    /// An aisle standing desk (alternate workstation).
     StandingDesk,
+    /// A corridor vending machine.
     VendingMachine,
+    /// A corridor printer.
     Printer,
+    /// A meeting-room sofa SEAT (its body is [`Furniture::MeetingSofaBody`]).
     MeetingSofa,
+    /// A meeting-room standing spot beside the table.
     MeetingChair,
+    /// A potted ficus (6px pot, overhanging canopy).
     PlantFicus,
+    /// A tall potted plant (shares the ficus pot footprint).
     PlantTall,
+    /// A small flowering plant (2×2 pot).
     PlantFlower,
+    /// A low succulent (3×2 pot).
     PlantSucculent,
+    /// A rolling whiteboard (aisle filler or wall decor).
     Whiteboard,
+    /// A wall-mounted TV.
     Tv,
+    /// A bookshelf.
     Bookshelf,
+    /// A cork bulletin board.
     BulletinBoard,
+    /// An exit sign.
     ExitSign,
+    /// A meeting-room presentation screen.
     MeetingScreen,
     // Singleton / per-room furniture (not keyed by a role enum — placed
     // directly in the layout). The meeting sofa/table BODIES are distinct from
     // the `MeetingSofa`/`MeetingChair` SEAT rows above (3 seats sit on 1 body):
     // the seat rows carry `None` footprint, these carry the obstacle the mask
     // stamps once per room.
+    /// The meeting-sofa BODY — the obstacle the mask stamps once per room
+    /// (its seats are the [`Furniture::MeetingSofa`] rows).
     MeetingSofaBody,
+    /// The meeting-room table body.
     MeetingTable,
+    /// The lounge floor lamp.
     FloorLamp,
+    /// The lounge side table (wood surface + magazine).
     LoungeSideTable,
     /// Kitchen-island BODY (the big center counter) — the obstacle the mask
     /// stamps once; the `IslandStand` rows are the stand slots around it
@@ -980,9 +1012,13 @@ pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
 /// face the table at the room centre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Facing {
+    /// Facing north (−y, toward the far wall) — a back view.
     North,
+    /// Facing south (+y, toward the viewer) — a front view.
     South,
+    /// Facing east (+x, right).
     East,
+    /// Facing west (−x, left).
     West,
 }
 
@@ -991,9 +1027,13 @@ pub enum Facing {
 /// cubicle row to reach the back wall.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WallDecor {
+    /// A bookshelf against the back wall.
     Bookshelf,
+    /// A wall-mounted whiteboard.
     Whiteboard,
+    /// A cork bulletin board.
     BulletinBoard,
+    /// An exit sign.
     ExitSign,
     /// Wall-mounted meeting-room display — paints above the meeting
     /// room interior so participants can pretend they're presenting.
@@ -1033,9 +1073,13 @@ impl WallDecor {
 /// these around the lounge so it doesn't feel like one ficus repeated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlantKind {
+    /// A leafy ficus in a 6px pot.
     Ficus,
+    /// A tall plant (shares the ficus pot footprint).
     Tall,
+    /// A small flowering plant (2×2 pot).
     Flower,
+    /// A low succulent (3×2 pot).
     Succulent,
 }
 
@@ -1068,10 +1112,15 @@ impl PlantKind {
 /// but stable across renders. Each variant maps to a distinct sprite.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PodDecor {
+    /// A tall plant filling the aisle.
     PlantTall,
+    /// A rolling whiteboard in the aisle.
     Whiteboard,
+    /// A wheeled TV cart.
     Tv,
+    /// A phone booth.
     PhoneBooth,
+    /// A standing desk.
     StandingDesk,
 }
 

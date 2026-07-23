@@ -62,6 +62,7 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::{live_grok_session_ids, GrokSource};
 
+/// The Grok Build source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "grok";
 
 /// Decode one grok hook payload (already identified by

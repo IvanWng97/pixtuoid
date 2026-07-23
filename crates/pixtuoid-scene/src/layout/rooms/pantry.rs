@@ -14,7 +14,7 @@ use crate::layout::{
 pub(crate) const COMPACT_COUNTER: Size = Size { w: 20, h: 8 };
 
 /// The pantry room: its bounds plus what it owns — the counter's chosen
-/// footprint (large detailed kitchen vs [`COMPACT_COUNTER`], a width-only
+/// footprint (large detailed kitchen vs `COMPACT_COUNTER`, a width-only
 /// decision) and the kitchen-island body centre (`None` when the room can't
 /// host it clear of walls + the counter — refuse-don't-force). The island's
 /// 4 `WaypointKind::Island` stand slots and the counter/snack-shelf
@@ -22,10 +22,11 @@ pub(crate) const COMPACT_COUNTER: Size = Size { w: 20, h: 8 };
 /// topic, different identity).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PantryRoom {
+    /// The pantry room's interior rectangle (buffer pixels).
     pub bounds: Bounds,
     /// Footprint (width, height) of the pantry counter sprite. (32, 10)
     /// when the pantry is wide enough for the detailed kitchen run;
-    /// [`COMPACT_COUNTER`] for narrow terminals where the wide sprite
+    /// `COMPACT_COUNTER` for narrow terminals where the wide sprite
     /// wouldn't fit. The renderer reads this to pick which sprite to paint
     /// (`pantry` vs `pantry_small`).
     pub counter_size: Size,

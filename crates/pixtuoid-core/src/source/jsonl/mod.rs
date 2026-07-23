@@ -56,6 +56,9 @@ fn default_prefixed_label(_path: &Path, source: &str, cwd: &Path) -> String {
     crate::source::decoder::derive_prefixed_label(source, cwd)
 }
 
+/// Predicate on a transcript's raw bytes: `true` when they carry a session-end
+/// marker. The first-sight gate consults it so an already-ended transcript is
+/// never seeded as a live sprite.
 pub type SessionEndChecker = fn(&[u8]) -> bool;
 
 /// Derives the opaque session-id string used to build the generic
@@ -164,6 +167,10 @@ impl ScanState {
     }
 }
 
+/// Tails a source's transcript directory, decoding each `.jsonl` append into
+/// `AgentEvent`s. Built with [`JsonlWatcher::new`] plus the `with_*` builders
+/// (id/label/cwd derivers, path filter, liveness probe); [`JsonlWatcher::run`]
+/// drives the watch loop.
 pub struct JsonlWatcher {
     root: PathBuf,
     initial_window: Duration,
@@ -199,6 +206,9 @@ pub fn force_polling_backend_for_tests(interval: Duration) {
 static TEST_POLL_OVERRIDE: OnceLock<Duration> = OnceLock::new();
 
 impl JsonlWatcher {
+    /// A watcher over `root` for `source`, decoding each transcript line with
+    /// `decode_line` and gating ended sessions with `check_session_ended`.
+    /// Deriver/filter/probe defaults are set by the `with_*` builders.
     pub fn new(
         root: PathBuf,
         source: String,
@@ -222,6 +232,8 @@ impl JsonlWatcher {
         }
     }
 
+    /// Override the recency window a first-sight transcript must fall within to
+    /// seed at EOF (default `DEFAULT_INITIAL_WINDOW`).
     pub fn with_initial_window(mut self, window: Duration) -> Self {
         self.initial_window = window;
         self
@@ -248,6 +260,9 @@ impl JsonlWatcher {
         self
     }
 
+    /// Override how the opaque session-id string is derived from a transcript
+    /// path (default [`IdDeriver`], the normalized path). CC and Codex use it to
+    /// key on the session UUID in the filename stem instead.
     pub fn with_id_deriver(mut self, id_derive: IdDeriver) -> Self {
         self.id_derive = id_derive;
         self
@@ -278,6 +293,9 @@ impl JsonlWatcher {
         self
     }
 
+    /// Attach a liveness probe (default: none) so the watcher gates first-sight
+    /// seeding on a live-session check and drives ongoing liveness (proof-of-life,
+    /// exit detection) rather than transcript content.
     pub fn with_liveness_probe(mut self, probe: LivenessProbe) -> Self {
         self.liveness_probe = Some(probe);
         self
@@ -327,6 +345,9 @@ impl JsonlWatcher {
         }
     }
 
+    /// Consume the watcher and drive the watch loop — initial seed, a 250ms
+    /// rescan, the 60s poll backstop, and notify events — feeding each decoded
+    /// event to `tx`. Runs until the channel closes or a fatal error.
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
         let cursors: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
         let seen_sessions: Arc<Mutex<HashMap<PathBuf, bool>>> =

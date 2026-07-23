@@ -397,6 +397,30 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just semver
 
+  # Public-API surface golden (cargo-public-api) for the two published libs —
+  # COMPLEMENTS semver: the gate above says "major/minor?", this shows WHAT
+  # changed as a reviewable diff of api/<crate>.txt. rustdoc JSON is nightly-only,
+  # so `just api-surface-check` self-installs the pinned nightly (justfile
+  # API_NIGHTLY — kept there so the toolchain version lives in ONE place); this
+  # job only pins cargo-public-api to match the committed goldens. CI-only, like
+  # semver. cargo-public-api isn't in taiki-e/install-action, so binstall it.
+  api-surface:
+    name: api-surface
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - name: Install cargo-public-api (pinned to match the committed goldens)
+        run: cargo binstall -y cargo-public-api@0.52.0
+      - uses: extractions/setup-just@v4
+      - run: just api-surface-check
+
   coverage:
     name: coverage
     runs-on: ubuntu-latest

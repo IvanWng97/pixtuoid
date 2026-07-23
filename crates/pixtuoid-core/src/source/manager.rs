@@ -12,13 +12,14 @@ use crate::source::{DynSource, TaggedSender};
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SourceDeath {
-    /// [`Source::name`] of the source that died (e.g. "claude-code").
+    /// The dead source's registry name (e.g. "claude-code").
     pub source: String,
     /// Display rendering of the fatal error.
     pub error: String,
 }
 
 impl SourceDeath {
+    /// Build a `SourceDeath` from the dead source's name and its display error.
     pub fn new(source: impl Into<String>, error: impl Into<String>) -> Self {
         Self {
             source: source.into(),
@@ -37,6 +38,7 @@ pub struct SourceManager {
 }
 
 impl SourceManager {
+    /// An empty `SourceManager` — register sources with `with_source`, then `spawn`.
     pub fn new() -> Self {
         Self::default()
     }

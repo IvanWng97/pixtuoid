@@ -36,6 +36,7 @@ pub(crate) const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 /// tasks. Every other bind error stays fatal → `SourceDeath`.
 #[derive(Debug)]
 pub struct SocketBusy {
+    /// The socket/pipe path a live owner already holds.
     pub path: PathBuf,
 }
 
@@ -52,6 +53,10 @@ impl std::fmt::Display for SocketBusy {
 
 impl std::error::Error for SocketBusy {}
 
+/// Listener for the shared hook socket (Unix domain socket / Windows named
+/// pipe) every CLI's hook shim connects to. Frames + decodes each payload onto
+/// the tagged `AgentEvent` channel; optionally attaches a pid-exit watch and the
+/// daemon presence side-channel.
 pub struct HookSocketListener {
     inner: imp::Listener,
     path: PathBuf,
@@ -73,6 +78,8 @@ pub struct HookSocketListener {
 pub(crate) type PresenceSender = crate::source::daemon::PresenceSender;
 
 impl HookSocketListener {
+    /// Bind the listener at `path`, returning [`SocketBusy`] if a live owner
+    /// already holds it (the recoverable-bind case).
     pub async fn bind(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let inner = imp::Listener::bind(&path).await?;
@@ -84,6 +91,7 @@ impl HookSocketListener {
         })
     }
 
+    /// The bound socket/pipe path.
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -104,6 +112,9 @@ impl HookSocketListener {
         self
     }
 
+    /// Accept connections forever, decoding each hook payload onto `tx` (and, if
+    /// wired, the pid-watch / presence side-channel). Returns [`SocketBusy`]'s
+    /// quiet `Ok(())` degradation path via the caller when the plane is ceded.
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
         self.inner.run(tx, self.pid_watch, self.presence_tx).await
     }

@@ -55,6 +55,8 @@ pub struct ChildEndUnclaims {
 }
 
 impl ChildEndUnclaims {
+    /// An empty side-channel with the default prune TTL
+    /// (`CHILD_END_UNCLAIM_TTL`).
     pub fn new() -> Self {
         Self::with_ttl(CHILD_END_UNCLAIM_TTL)
     }

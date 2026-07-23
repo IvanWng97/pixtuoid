@@ -13,8 +13,10 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::AntigravitySource;
 
+/// The Antigravity CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "antigravity";
 
+/// Decode one Antigravity CLI transcript line into `AgentEvent`s (the step_index / tool_calls JSONL schema).
 pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, transcript_path);
     let Some(obj) = v.as_object() else {

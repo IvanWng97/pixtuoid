@@ -48,6 +48,7 @@ use serde_json::{Map, Value};
 use crate::source::AgentEvent;
 use crate::AgentId;
 
+/// The Kimi CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "kimi";
 
 /// Decode the two Kimi hook events the shared CC-shaped arms don't handle, and

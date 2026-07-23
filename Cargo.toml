@@ -25,6 +25,12 @@ categories   = ["command-line-utilities", "visualization"]
 # `pub(crate)` — so a layer-internal item can't silently leak as crate API. It's
 # warn here; CI's `cargo clippy -- -D warnings` (just clippy) makes it a hard
 # gate. Semver-neutral: cargo-semver-checks never sees an unreachable item.
+#
+# `missing_docs` is NOT here on purpose: it is a PUBLIC-API gate, and the public
+# API is exactly the two PUBLISHED crates (the binary lib target is not a semver
+# surface). So it's enabled per-crate via `#![warn(missing_docs)]` in
+# pixtuoid-core/pixtuoid-scene `lib.rs` — scoped identically to the semver-checks
+# + api-surface gates, not fanned out over the binary crates' non-API internals.
 [workspace.lints.rust]
 unreachable_pub = "warn"
 

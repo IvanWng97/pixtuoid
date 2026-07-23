@@ -46,10 +46,12 @@ pub(super) fn epoch_ms(now: SystemTime) -> u64 {
 /// and agent ids that were seen carrying coffee this frame (so the
 /// caller can persist them into its `CoffeeState`).
 pub struct PixelPassResult {
+    /// The office pet's resolved frame this tick (for hit-testing), if present.
     pub pet_pos: Option<PetFrame>,
     /// The gateway mascot's resolved frame this tick (for hover identity).
     /// `None` when no gateway is present.
     pub mascot_pos: Option<MascotFrame>,
+    /// Active speech bubbles this frame, for the caller's widget pass.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agent ids observed in `Walking { carrying_coffee: true }` this
     /// frame. The caller inserts them into the persistent
@@ -66,11 +68,13 @@ pub struct PixelPassResult {
 /// this is recaptured each render like `PetFrame`.
 #[derive(Clone, Copy)]
 pub struct MascotFrame {
+    /// The mascot's top-left screen position this tick.
     pub pos: Point,
     /// The painted sprite's pixel size (from the pack's real frame) — so the
     /// binary's `hit_test_mascot` click box derives from what's drawn, not a
     /// hardcoded constant.
     pub w: u16,
+    /// The painted sprite's pixel height (paired with `w`).
     pub h: u16,
     /// Human-readable gateway name (e.g. "OpenClaw").
     pub name: &'static str,
@@ -81,6 +85,7 @@ pub struct MascotFrame {
     /// Gateway up but its model backend is failing every run (#317) — the tooltip
     /// reads "model error" and the lobster renders sickly red.
     pub degraded: bool,
+    /// Number of sessions the gateway currently holds (tooltip detail).
     pub active_sessions: u32,
 }
 
@@ -122,6 +127,8 @@ pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 /// from the painted art / steam anchor when the sprite is re-tuned. Pinned to the
 /// steam anchor by `steam_anchor_sits_within_the_coffee_machine_columns`.
 pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
+/// Coffee-machine column range for the 20-wide `pantry_small` sprite (see
+/// [`PANTRY_COFFEE_COLS_LARGE`]).
 pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
 
 /// The neon wall-sign panel geometry, in PIXELS: origin `(X, Y)` and OUTER size
@@ -139,6 +146,7 @@ pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
 /// cross-crate consumer (`pub(crate)`, don't widen the semver surface).
 pub(crate) const NEON_PANEL_X: u16 = 1;
 pub(crate) const NEON_PANEL_Y: u16 = 1;
+/// The neon panel's OUTER width in pixels (frame included) — see the panel-geometry doc above.
 pub const NEON_PANEL_W: u16 = 30;
 pub(crate) const NEON_PANEL_H: u16 = 8;
 /// The frame thickness `paint_neon_panel` lights on every side (it reads THIS, so
@@ -277,13 +285,21 @@ pub struct PixelCtx<'a> {
     /// field: it is a sibling of the `FloorCtx` on a `PerFloor`, borrowed
     /// disjointly by a multi-floor painter's `split_at_mut`.
     pub store: &'a mut crate::floor::FloorCtx,
+    /// The RGB pixel buffer this pass paints into.
     pub buf: &'a mut RgbBuffer,
+    /// The live scene state to render.
     pub scene: &'a SceneState,
+    /// The computed office geometry for this frame.
     pub layout: &'a Layout,
+    /// The character/furniture sprite pack.
     pub pack: &'a Pack,
+    /// The current time (the engine never reads the clock itself — it's a parameter).
     pub now: SystemTime,
+    /// The active color theme.
     pub theme: &'a crate::theme::Theme,
+    /// Which floor of the office this pass renders.
     pub floor: crate::floor::FloorMeta,
+    /// The pet-interaction (heart-anim) state, if a pet is being petted.
     pub active_pet: Option<&'a crate::pet::PetState>,
     /// The pet on this floor (kind drives the sprite; name is unused here — the
     /// pixel pass doesn't render the name, the tooltip does).
@@ -291,6 +307,7 @@ pub struct PixelCtx<'a> {
     /// Carrier → fetch-time view of [`crate::floor::CoffeeState`] (one map:
     /// key present = has a desk cup, value = steam-window anchor).
     pub coffee: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
+    /// Per-venue active speech-bubble state, advanced across frames.
     pub chitchat_state: &'a mut HashMap<crate::chitchat::VenueKey, ActiveChitchat>,
     /// When set, composite the walkable / approach / route debug layer over the
     /// finished scene (the live `w` toggle). Off by default; transient.
@@ -319,6 +336,10 @@ struct PaintCtx<'a> {
     debug_walkable: bool,
 }
 
+/// Render `ctx`'s scene into its buffer — the SHARED world render, TWO phases:
+/// `sim_step` advances the world (no pixels) into a [`SimFrame`], then the paint
+/// pass consumes it, mutating only the buffer + recolor cache. Returns the frame's
+/// [`PixelPassResult`] (pet/mascot frames, chitchat bubbles, coffee carriers, occupancy).
 pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // Phase 1 — SIM: advance the world (motion/poses/lighting/chitchat),
     // producing no pixels. See `sim::sim_step`.

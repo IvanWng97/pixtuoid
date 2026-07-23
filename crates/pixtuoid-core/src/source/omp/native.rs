@@ -37,10 +37,12 @@ fn omp_session_ended(tail: &[u8]) -> bool {
 /// transcripts sit under per-cwd encoded dirs, subagent transcripts nest one
 /// level deeper per delegation).
 pub struct OmpSource {
+    /// The watched omp `sessions` root (per-cwd root transcripts plus nested subagent transcripts).
     pub sessions_root: PathBuf,
 }
 
 impl OmpSource {
+    /// Construct pointed at the default omp `sessions` root.
     pub fn default_paths() -> Self {
         Self {
             sessions_root: omp_agent_dir().join("sessions"),

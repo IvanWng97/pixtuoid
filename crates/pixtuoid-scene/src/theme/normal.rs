@@ -2,6 +2,7 @@ use pixtuoid_core::sprite::Rgb;
 
 use super::*;
 
+/// The default `normal` theme — the only light-mode palette.
 pub static NORMAL: Theme = Theme {
     name: "normal",
     kind: ThemeKind::Light,

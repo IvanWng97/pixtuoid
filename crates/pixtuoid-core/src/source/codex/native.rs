@@ -90,6 +90,7 @@ fn codex_probe_root_resolved(sessions_root: &Path, home: &Path) -> Option<PathBu
 
 /// Source that watches the Codex session transcript directory.
 pub struct CodexSource {
+    /// The watched Codex `sessions` rollout root (`~/.codex/sessions`).
     pub sessions_root: PathBuf,
     /// The #246 child-end un-claim side-channel — Codex is consumer-only:
     /// its `SubagentStop` hooks ride the shared socket the `HookRouter`
@@ -102,6 +103,7 @@ pub struct CodexSource {
 }
 
 impl CodexSource {
+    /// Construct pointed at the default Codex `sessions` rollout root.
     pub fn default_paths() -> Self {
         Self {
             sessions_root: codex_home().join("sessions"),

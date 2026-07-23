@@ -48,6 +48,7 @@ use serde_json::Value;
 // `crate::source::daemon` layer. This module keeps ONLY OpenClaw's wire decode.
 use crate::source::daemon::DaemonPresenceUpdate;
 
+/// The OpenClaw daemon source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "openclaw";
 
 /// The busy pairing key: prefer a non-empty `runId`; if `runId` is ABSENT (not

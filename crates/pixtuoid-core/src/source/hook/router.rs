@@ -76,6 +76,8 @@ pub struct HookRouter {
 }
 
 impl HookRouter {
+    /// Construct a router bound to `socket_path`, with the child-end-unclaim tee
+    /// and presence side-channel disabled (attach them via the builder methods).
     pub fn new(socket_path: PathBuf) -> Self {
         Self {
             socket_path,

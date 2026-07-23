@@ -51,12 +51,16 @@ pub const STALE_RESUME_GAP_RANGE_MS: u64 = 6_000;
 /// are physics-timed only in the routed motion path — and #62's frozen leg paths make
 /// approximate overlay timing safe (a new leg's shape is snapshotted once).
 pub const WANDER_WALK_EST_MS: u64 = 3_500;
+/// Companion estimate: the at-waypoint dwell beat (paired with `WANDER_WALK_EST_MS`).
 pub const WANDER_DWELL_EST_MS: u64 = 18_000;
 
 /// Frame-cycle period for animated poses.
 pub const TYPING_FRAME_MS: u64 = 140;
+/// Per-frame duration of the walking animation.
 pub const WALKING_FRAME_MS: u64 = 220;
+/// Frame count of the typing animation loop.
 pub const TYPING_FRAMES: usize = 2;
+/// Frame count of the walking animation loop.
 pub const WALKING_FRAMES: usize = 2;
 
 /// The walking sprite's frame index at `elapsed_ms` into the walk — the one
@@ -140,6 +144,7 @@ pub struct Personality {
 const TRIP_CHANCE_SPAN_PCT: u64 = 36;
 const AIMLESS_PREF_SPAN_PCT: u64 = 51;
 
+/// Derives an agent's wander `Personality` from its id hash.
 pub fn personality_for(agent_id: AgentId) -> Personality {
     let h = agent_id.raw();
     Personality {
@@ -176,34 +181,48 @@ pub fn waypoint_index_for_cycle(agent_id: AgentId, cycle_n: u64, num_waypoints: 
     ((agent_id.raw() ^ cycle_n) as usize) % num_waypoints
 }
 
+/// The pose an agent renders this frame — the output of pose derivation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pose {
+    /// Seated at the desk, idle.
     SeatedIdle,
     /// Seated at desk, awake but not typing. Used when the agent
     /// recently finished a tool call and the LLM is likely thinking.
     SeatedThinking,
+    /// Seated at the desk, typing.
     SeatedTyping {
+        /// Typing animation frame index (`0..TYPING_FRAMES`).
         frame: usize,
     },
+    /// Standing at the desk.
     StandingAtDesk,
     /// At a lounge waypoint. Concrete render depends on the kind:
     ///   Couch    → sit on couch sprite
     ///   Coffee   → standing + holding-coffee sprite
     ///   Others   → plain standing
     AtWaypoint {
+        /// Index of the target waypoint.
         wp: usize,
+        /// Kind of the target waypoint (selects the concrete sprite).
         kind: WaypointKind,
     },
+    /// Walking along the current leg between two points.
     Walking {
+        /// Leg start point (buffer pixels).
         from: Point,
+        /// Leg end point (buffer pixels).
         to: Point,
+        /// Progress along the leg, 0..=1000 (thousandths).
         t_x1000: u16,
+        /// Walking animation frame index (`0..WALKING_FRAMES`).
         frame: usize,
+        /// Whether the agent renders holding a coffee on this leg.
         carrying_coffee: bool,
     },
     /// Standing at a random cubicle_aisle point (not at any waypoint). The dest field
     /// is the buf-pixel target the agent walked to. Used by aimless wander.
     AimlessAt {
+        /// Buffer-pixel point the agent ambled to.
         dest: Point,
     },
 }

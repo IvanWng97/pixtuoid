@@ -9,13 +9,18 @@ pub const PET_DURATION_MS: u64 = 2000;
 /// (render-side only) — petting is a local visual effect, not a data
 /// model concern. Same pattern as `mouse_pos`.
 pub struct PetState {
+    /// When the pet was last clicked — anchors the `PET_DURATION_MS` freeze.
     pub petted_at: SystemTime,
+    /// Buffer-pixel position of the petted animal (hearts anchor).
     pub pet_pos: Point,
+    /// Which pet was petted.
     pub kind: PetKind,
+    /// Index of the floor the petted animal is on.
     pub floor_idx: usize,
 }
 
 impl PetState {
+    /// Whether the freeze/hearts effect is still playing at `now` (within `PET_DURATION_MS`).
     pub fn is_active(&self, now: SystemTime) -> bool {
         now.duration_since(self.petted_at)
             .map(|d| d.as_millis() as u64)
@@ -23,6 +28,7 @@ impl PetState {
             < PET_DURATION_MS
     }
 
+    /// Milliseconds since the pet was clicked, saturating to 0 on a backward clock.
     pub fn elapsed_ms(&self, now: SystemTime) -> u64 {
         // Delegate to the crate's saturate-to-0 helper (byte-identical). `is_active`
         // above keeps its own form: its backward-clock fallback is `PET_DURATION_MS+1`
@@ -35,20 +41,28 @@ impl PetState {
 /// produced by the pixel pass and consumed by the renderer/tooltip/hit-test.
 #[derive(Clone, Copy)]
 pub struct PetFrame {
+    /// Buffer-pixel position of the pet this tick.
     pub pos: Point,
+    /// Resolved sprite/animation name (walk/sit/sleep).
     pub anim: &'static str,
+    /// Which pet this frame renders.
     pub kind: PetKind,
 }
 
+/// The kind of office pet — selects sprites, hitbox, and idle-sleep behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PetKind {
+    /// The office cat.
     Cat,
+    /// The office dog.
     Dog,
 }
 
 impl PetKind {
+    /// Every pet kind.
     pub const ALL: &'static [PetKind] = &[PetKind::Cat, PetKind::Dog];
 
+    /// Parses a `[[pets]]` `kind` string ("cat"/"dog") into a `PetKind`; `None` if unknown.
     pub fn from_config_name(s: &str) -> Option<Self> {
         match s {
             "cat" => Some(PetKind::Cat),
@@ -57,6 +71,7 @@ impl PetKind {
         }
     }
 
+    /// Sprite name for the walking pose.
     pub fn walk_anim(self) -> &'static str {
         match self {
             PetKind::Cat => "cat_walk",
@@ -64,6 +79,7 @@ impl PetKind {
         }
     }
 
+    /// Sprite name for the sitting/resting pose.
     pub fn sit_anim(self) -> &'static str {
         match self {
             PetKind::Cat => "cat_sit",
@@ -71,6 +87,7 @@ impl PetKind {
         }
     }
 
+    /// Sprite name for the sleeping pose.
     pub fn sleep_anim(self) -> &'static str {
         match self {
             PetKind::Cat => "cat_sleep",
@@ -88,6 +105,7 @@ impl PetKind {
         }
     }
 
+    /// Whether this kind curls up to sleep near idle agents (cat yes, dog no).
     pub fn sleeps_near_idle(self) -> bool {
         match self {
             PetKind::Cat => true,
@@ -95,6 +113,7 @@ impl PetKind {
         }
     }
 
+    /// Click hit-test box for the given anim name (walk widest, sleep shortest).
     pub fn hitbox(self, anim_name: &str) -> Size {
         if anim_name == self.walk_anim() {
             Size { w: 8, h: 6 }
@@ -114,7 +133,9 @@ impl PetKind {
 /// pet has a name" true by construction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pet {
+    /// Which animal.
     pub kind: PetKind,
+    /// Display name shown in the hover tooltip.
     pub name: String,
 }
 
@@ -128,6 +149,8 @@ impl Pet {
     }
 }
 
+/// Picks the one pet for a floor from the office's pets (`floor_seed`-indexed);
+/// `None` when none are configured.
 pub fn select_pet_for_floor(floor_seed: u64, pets: &[Pet]) -> Option<&Pet> {
     if pets.is_empty() {
         return None;

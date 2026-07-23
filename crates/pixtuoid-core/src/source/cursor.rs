@@ -66,6 +66,7 @@ use serde_json::Value;
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
+/// The Cursor CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "cursor";
 
 /// Decode one Cursor hook payload (already identified by

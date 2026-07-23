@@ -67,6 +67,7 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::OmpSource;
 
+/// The Oh My Pi (omp) source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "omp";
 
 /// omp's agent config dir: `$PI_CODING_AGENT_DIR` if set non-empty (omp's own

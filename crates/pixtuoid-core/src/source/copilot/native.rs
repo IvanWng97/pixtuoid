@@ -35,10 +35,12 @@ fn copilot_session_ended(tail: &[u8]) -> bool {
 
 /// Source that watches the Copilot session-state directory.
 pub struct CopilotSource {
+    /// The watched Copilot `session-state` root; each session's `events.jsonl` lives under it.
     pub sessions_root: PathBuf,
 }
 
 impl CopilotSource {
+    /// Construct pointed at the default Copilot `session-state` root.
     pub fn default_paths() -> Self {
         Self {
             sessions_root: copilot_home().join("session-state"),

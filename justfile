@@ -197,6 +197,58 @@ msrv:
 semver:
     cargo semver-checks --package pixtuoid-core --package pixtuoid-scene
 
+# Public-API surface snapshot for the two PUBLISHED libraries (pixtuoid-core +
+# pixtuoid-scene). COMPLEMENTS `just semver`: the semver gate answers
+# "major/minor bump?", this shows *what* changed as a reviewable golden diff.
+# Goldens live in `api/<crate>.txt` — `cargo public-api -s` output (`-s` omits
+# blanket-impl noise like `Into`/`Receiver`; auto-derived `Clone`/`Serialize`/…
+# STAY, since adding/removing a derive IS a public-API change). rustdoc JSON is
+# nightly-only, so both recipes PIN {{API_NIGHTLY}} (self-installed on first use)
+# — the golden is reproducible local↔CI. CI + setup-tools pin cargo-public-api
+# 0.52.0 to match; regenerate with those exact two versions or the golden churns.
+# CI-only in practice (like semver) — run `just api-surface` + commit the golden
+# whenever either crate's public surface changes.
+API_NIGHTLY := "nightly-2026-07-22"
+
+[group('rust')]
+[doc('Regenerate the api/<crate>.txt public-API goldens (cargo-public-api + pinned nightly)')]
+api-surface: _api-nightly
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for crate in pixtuoid-core pixtuoid-scene; do
+        RUSTUP_TOOLCHAIN={{API_NIGHTLY}} cargo public-api -p "$crate" -s > "api/$crate.txt"
+    done
+
+[group('rust')]
+[doc("Fail if a published crate's public API drifted from the api/ goldens (CI-only)")]
+api-surface-check: _api-nightly
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    fail=0
+    for crate in pixtuoid-core pixtuoid-scene; do
+        RUSTUP_TOOLCHAIN={{API_NIGHTLY}} cargo public-api -p "$crate" -s > "$tmp/$crate.txt"
+        if ! diff -u "api/$crate.txt" "$tmp/$crate.txt"; then
+            echo "error: public API of $crate drifted from api/$crate.txt — run 'just api-surface' and commit the update" >&2
+            fail=1
+        fi
+    done
+    exit "$fail"
+
+# Self-provision the api-surface pinned nightly (rustdoc JSON is nightly-only) if
+# it isn't already installed — the same idempotent posture as setup-tools. The
+# minimal profile carries rustdoc (bundled with rustc), all cargo-public-api
+# needs to build the crate's rustdoc JSON.
+[private]
+_api-nightly:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v rustup >/dev/null || { echo "rustup not found — install {{API_NIGHTLY}} manually for api-surface" >&2; exit 1; }
+    rustup toolchain list | grep -q '{{API_NIGHTLY}}' && exit 0
+    echo "installing {{API_NIGHTLY}} (api-surface needs nightly rustdoc JSON)…" >&2
+    rustup toolchain install {{API_NIGHTLY}} --profile minimal
+
 # Coverage + JUnit XML in one run — the exact command ci.yml's coverage job uses.
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
@@ -717,7 +769,9 @@ verify: preflight site-check gen-check
 setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
-    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit cargo-insta lychee)
+    # cargo-public-api is PINNED (the `just api-surface` goldens are reproducible
+    # only against an exact tool + nightly pair — see the api-surface recipe).
+    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit cargo-insta lychee cargo-public-api@0.52.0)
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"
     else
