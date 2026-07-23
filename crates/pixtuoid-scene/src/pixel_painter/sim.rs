@@ -58,6 +58,7 @@ pub(crate) struct SimStores<'a> {
 /// colors are presentation and must not leak into the sim layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharacterGlow {
+    /// No glow.
     None,
     /// `SeatedThinking` — paint uses the theme's default tool-glow color.
     Thinking,
@@ -70,17 +71,26 @@ pub enum CharacterGlow {
 /// `agent_idx` indexes [`SimFrame::agents`].
 #[derive(Debug, Clone, Copy)]
 pub struct CharacterPlacement {
+    /// Index into [`SimFrame::agents`] for this character.
     pub agent_idx: usize,
     /// Y-sort key (breath-independent — see the arm comments in
     /// `resolve_characters`).
     pub anchor_y: u16,
+    /// The sprite animation to blit (e.g. `"seated"`, `"walk"`).
     pub anim_name: &'static str,
+    /// The frame within `anim_name` to draw this tick.
     pub frame_idx: usize,
+    /// Top-left screen position to blit the sprite at.
     pub anchor: Point,
+    /// Whether to mirror the sprite horizontally (facing west).
     pub flip_x: bool,
+    /// The glow decision for this character (paint maps it to a color).
     pub glow: CharacterGlow,
+    /// `Some(seed)` drives the sleeping "z" particles; `None` when awake.
     pub sleep_z_seed: Option<u64>,
+    /// Whether to draw the waiting/permission bubble over this character.
     pub waiting_bubble: bool,
+    /// `Some(frame)` draws the walking dust puff; `None` when standing still.
     pub walking_dust_frame: Option<usize>,
 }
 

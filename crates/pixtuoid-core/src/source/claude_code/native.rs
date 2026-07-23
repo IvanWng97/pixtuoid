@@ -25,6 +25,7 @@ use crate::source::{Source, TaggedSender};
 /// ride that one socket), so this is now ONLY the `~/.claude/projects` JSONL
 /// watcher: no socket bind, no presence/pid plumbing, no dual-task `select!`.
 pub struct ClaudeCodeSource {
+    /// The watched `~/.claude/projects` transcript root.
     pub projects_root: PathBuf,
     /// The #246 child-end un-claim side-channel — CONSUMER only now (its watcher
     /// releases CC child-transcript claims on the rare blocked-stop continuation;
@@ -39,6 +40,7 @@ impl ClaudeCodeSource {
     // binds the socket — the `HookRouter` does — but this is the shim↔daemon
     // parity bridge anchor, pinned by tests/socket_path_parity.rs). The driver
     // resolves it here and hands it to `HookRouter::new`.
+    /// Resolve the hook rendezvous path — a Unix socket (or Windows named pipe) the shim connects to and the daemon binds.
     pub fn default_socket_path() -> PathBuf {
         if let Ok(p) = std::env::var("PIXTUOID_SOCKET") {
             // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy): an
@@ -77,6 +79,7 @@ impl ClaudeCodeSource {
         }
     }
 
+    /// Construct pointed at the default `~/.claude/projects` root.
     pub fn default_paths() -> Self {
         let projects_root = claude_config_dir()
             .unwrap_or_else(|| PathBuf::from(crate::platform::user_home()).join(".claude"))

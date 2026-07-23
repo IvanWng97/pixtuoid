@@ -82,22 +82,27 @@ pub struct OccupancyOverlay {
 }
 
 impl OccupancyOverlay {
+    /// An empty overlay — no rects blocked.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Drop every blocked rect, ready to rebuild for the next frame.
     pub fn clear(&mut self) {
         self.rects.clear();
     }
 
+    /// Block the rect at `(x, y)` of size `w × h`.
     pub fn add(&mut self, x: u16, y: u16, w: u16, h: u16) {
         self.rects.push((x, y, w, h));
     }
 
+    /// The number of blocked rects.
     pub fn len(&self) -> usize {
         self.rects.len()
     }
 
+    /// True when no rect is blocked.
     pub fn is_empty(&self) -> bool {
         self.rects.is_empty()
     }

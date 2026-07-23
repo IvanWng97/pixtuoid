@@ -190,19 +190,25 @@ struct AnimationToml {
     frame_ms: u32,
 }
 
+/// A loaded sprite pack: a named, versioned palette plus its animations.
 #[derive(Debug, Clone)]
 pub struct Pack {
+    /// Pack name from the `[pack]` table in `pack.toml`.
     pub name: String,
+    /// Pack version string from the `[pack]` table in `pack.toml`.
     pub version: String,
+    /// The shared color palette its frames reference by single-char code.
     pub palette: Palette,
     animations: HashMap<String, Sprite>,
 }
 
 impl Pack {
+    /// The animation registered under `key`, if the pack defines one.
     pub fn animation(&self, key: &str) -> Option<&Sprite> {
         self.animations.get(key)
     }
 
+    /// The names of every animation in this pack.
     pub fn animation_names(&self) -> Vec<String> {
         self.animations.keys().cloned().collect()
     }
@@ -258,6 +264,8 @@ fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>)
     })
 }
 
+/// Load a `Pack` from `dir/pack.toml` and its on-disk frame files, guarding
+/// each frame path against directory traversal outside `dir`.
 pub fn load_pack(dir: &Path) -> Result<Pack> {
     let toml_path = dir.join("pack.toml");
     let toml_src = std::fs::read_to_string(&toml_path)
@@ -371,6 +379,8 @@ fn build_palette(map: &HashMap<String, String>) -> Result<Palette> {
 // Animation registry — canonical list of animation names the renderer uses.
 // ---------------------------------------------------------------------------
 
+/// Character animation names every pack MUST provide; `validate_pack_animations`
+/// reports any that are missing as an error.
 pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
     "seated",
     "typing",
@@ -385,8 +395,13 @@ pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
 
 // side_seated is optional-by-design: the chair render degrades to the front
 // `seated` pose when a pack lacks it (seat_sprite_in_pack), never invisible.
+/// Character animation names a pack MAY omit; the renderer degrades gracefully
+/// when absent (e.g. `side_seated` falls back to the front `seated` pose).
 pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &["walking_coffee", "side_seated"];
 
+/// Environment/furniture animation names a pack MAY provide; `Pack::merge_from`
+/// inherits any of these that are missing from the base pack (character
+/// animations are never inherited).
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
     "filing_cabinet",
@@ -429,20 +444,31 @@ const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
     ("lobster_walk", 2),
 ];
 
+/// Per-category tally of a pack's animation discrepancies, produced by
+/// `validate_pack_animations`.
 #[derive(Debug, Default)]
 pub struct ValidationReport {
+    /// Required character-animation names absent from the pack — an error.
     pub missing_required: Vec<String>,
+    /// Optional animation names absent from the pack — reported, not an error.
     pub missing_optional: Vec<String>,
+    /// `(name, have, need)` for each animation with fewer frames than its
+    /// multi-frame minimum (e.g. `typing` needs 2).
     pub insufficient_frames: Vec<(String, usize, usize)>,
+    /// Animation names present in the pack but in none of the known registries.
     pub unknown: Vec<String>,
 }
 
 impl ValidationReport {
+    /// True when the pack is unusable — a required animation is missing or one
+    /// has too few frames. Missing OPTIONAL animations do not count.
     pub fn has_errors(&self) -> bool {
         !self.missing_required.is_empty() || !self.insufficient_frames.is_empty()
     }
 }
 
+/// Check a pack's animations against the required/optional/multi-frame
+/// registries, collecting every discrepancy into a [`ValidationReport`].
 pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     let mut report = ValidationReport::default();
     let known_names = || {

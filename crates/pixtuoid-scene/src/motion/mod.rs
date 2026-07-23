@@ -36,8 +36,11 @@ use crate::pose::{
 /// agents that step into its path mid-leg (rare, cosmetic, legs are seconds).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalkPathSnapshot {
+    /// Leg start point.
     pub from: Point,
+    /// Leg end point.
     pub to: Point,
+    /// The frozen A* polyline from `from` to `to`.
     pub path: Vec<Point>,
 }
 
@@ -86,8 +89,11 @@ pub struct WanderFrame {
 /// of what was a `(SystemTime, WalkProfile, Point)` tuple.
 #[derive(Debug, Clone)]
 pub struct WalkLeg {
+    /// Wall-clock instant the leg armed.
     pub started_at: SystemTime,
+    /// Frozen physics profile for the leg.
     pub profile: WalkProfile,
+    /// Frozen leg origin, recorded at arm-time so the leg doesn't drift.
     pub from: Point,
 }
 
@@ -101,6 +107,7 @@ pub struct WalkLeg {
 pub struct WanderTarget {
     /// Destination pixel of the current trip (the walkable approach/amble cell).
     pub dest: Point,
+    /// Whether `dest` is a named waypoint (with optional seat) or an aimless amble.
     pub kind: WanderKind,
 }
 
@@ -113,8 +120,11 @@ pub enum WanderKind {
     /// way back) so arrival/departure don't pop; `seat = None` for obstacles
     /// (the agent stands AT `dest`).
     Named {
+        /// Index into `layout.waypoints`.
         wp_idx: usize,
+        /// Kind of the target waypoint.
         kind: WaypointKind,
+        /// Seat foot cell to settle onto; `None` for a stand-at obstacle.
         seat: Option<Point>,
     },
     /// An aimless amble to a random walkable point (no named waypoint, no seat).
@@ -193,6 +203,7 @@ pub struct WanderState {
 /// lazily on the first relevant walk-start frame.
 #[derive(Debug, Clone)]
 pub struct MotionState {
+    /// The agent this motion state belongs to.
     pub agent_id: AgentId,
 
     // --- entry / exit / snap-back one-shot walks ---

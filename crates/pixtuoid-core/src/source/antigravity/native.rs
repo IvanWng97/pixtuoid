@@ -17,6 +17,7 @@ use crate::source::{Source, TaggedSender};
 /// Uses JsonlWatcher with a custom decoder for the Antigravity JSONL
 /// format (step_index/PLANNER_RESPONSE/tool_calls schema).
 pub struct AntigravitySource {
+    /// The watched Antigravity brain-dir root; conversation-log JSONL lives under it.
     pub brain_root: PathBuf,
 }
 

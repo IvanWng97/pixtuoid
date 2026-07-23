@@ -5,6 +5,21 @@
 //! chitchat, and the embedded sprite pack. It has **no** terminal or window
 //! dependency — `tui` (ratatui half-block) and `floating` (winit/softbuffer)
 //! are thin painters layered on top, and neither depends on the other.
+//!
+//! ```
+//! use pixtuoid_scene::layout::SceneLayout;
+//! use pixtuoid_scene::theme::theme_by_name;
+//!
+//! // Themes are bundled and resolved by name (normal, cyberpunk, dracula, …).
+//! let theme = theme_by_name("dracula").expect("bundled theme");
+//! assert_eq!(theme.name, "dracula");
+//!
+//! // Lay out an office for a 192×64 pixel viewport — pure geometry, no window.
+//! // `None` fills the buffer with as many desk pods as physically fit.
+//! let office = SceneLayout::compute_with_seed(192, 64, None, 0)
+//!     .expect("viewport is large enough for an office");
+//! assert!(!office.home_desks.is_empty());
+//! ```
 
 // Terminal- and window-free (invariant #1, crate-boundary enforced). The dep
 // boundary can't see a raw `println!` (std, no dep); this restriction lint does
@@ -16,6 +31,11 @@
 // Grid/RgbBuffer seams). Lives here, not in Cargo.toml: `[lints] workspace =
 // true` cannot be combined with a per-crate `[lints.rust]` table.
 #![forbid(unsafe_code)]
+// Public-API doc gate. Scoped to this PUBLISHED crate (not `[workspace.lints]`)
+// because the binary crates' `pub` items aren't a semver surface — the same
+// two-crate scope as the semver-checks + api-surface gates. `-D warnings`
+// (`just clippy`) promotes it to a hard gate; `#[doc(hidden)] pub` is exempt.
+#![warn(missing_docs)]
 
 // Easing curves for the binary's floor-slide/popup animations — in-workspace
 // painter plumbing, not a stable engine API.
@@ -51,10 +71,12 @@ pub mod motion;
 #[doc(hidden)]
 pub mod overlay;
 pub mod pathfind;
+/// Office pets — the `Pet`/`PetKind` model and per-floor selection.
 pub mod pet;
 pub mod physics;
 pub mod pixel_painter;
 pub mod pose;
+/// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
 

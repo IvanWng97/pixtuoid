@@ -36,7 +36,9 @@ pub const EVENT_CHANNEL_CAPACITY: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Transport {
+    /// Arrived over the hook socket/named pipe — live; wins hook-vs-JSONL dedup.
     Hook,
+    /// Read from a transcript JSONL file (may be a historical replay).
     Jsonl,
 }
 
@@ -56,16 +58,21 @@ pub enum ToolDetail {
     Task,
     /// Any other tool. `display` is the user-facing label
     /// (e.g. `"Bash: ls"`, `"Edit foo.rs"`) used for the AgentSlot detail.
-    Generic { display: String },
+    Generic {
+        /// The user-facing tool label (e.g. `"Bash: ls"`).
+        display: String,
+    },
 }
 
 impl ToolDetail {
+    /// The user-facing label for this tool detail.
     pub fn display(&self) -> &str {
         match self {
             ToolDetail::Task => "Delegating",
             ToolDetail::Generic { display } => display,
         }
     }
+    /// Whether this is the `Task` delegation category.
     pub fn is_task(&self) -> bool {
         matches!(self, ToolDetail::Task)
     }
@@ -100,33 +107,53 @@ impl From<&str> for ToolDetail {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum AgentEvent {
+    /// A session began — registers a new agent slot at the next free desk.
     SessionStart {
+        /// The new session's agent id.
         agent_id: AgentId,
+        /// The originating CLI (registry source name, e.g. `"claude-code"`).
         source: String,
+        /// The CLI's own session identifier.
         session_id: String,
+        /// The session's working directory (drives the desk label + team outfit).
         cwd: PathBuf,
+        /// The parent agent when this is a subagent, else `None`.
         parent_id: Option<AgentId>,
     },
+    /// A tool call started — the slot goes Active.
     ActivityStart {
+        /// The acting agent.
         agent_id: AgentId,
+        /// The tool call's id, used to pair with its `ActivityEnd` (hook-wins dedup).
         tool_use_id: Option<String>,
+        /// Structured tool detail (e.g. a subagent-dispatch `Task`), when known.
         detail: Option<ToolDetail>,
     },
+    /// A tool call finished — arms the debounced return to Idle.
     ActivityEnd {
+        /// The acting agent.
         agent_id: AgentId,
+        /// The completing tool call's id (pairs with its `ActivityStart`).
         tool_use_id: Option<String>,
     },
+    /// The agent is blocked on a permission/input prompt — the slot goes Waiting.
     Waiting {
+        /// The waiting agent.
         agent_id: AgentId,
+        /// Why it is waiting (the prompt/notification reason).
         reason: String,
     },
     /// Late-discovered display name (e.g. CC subagent `attributionAgent`).
     /// Reducer overrides the slot label; noop if the slot doesn't exist.
     Rename {
+        /// The agent to relabel.
         agent_id: AgentId,
+        /// The new display label.
         label: String,
     },
+    /// A session ended — marks the slot exiting (GC'd after the grace window).
     SessionEnd {
+        /// The ending agent.
         agent_id: AgentId,
         /// True ONLY when this end's SUBJECT is a CHILD agent ending *as a
         /// child* — stamped by the subagent-END decoders: the CC/Codex
@@ -163,6 +190,7 @@ pub enum AgentEvent {
     /// stay driven by real events). When the live signal disappears the
     /// emissions stop and normal staleness sweeps resume after the TTL.
     ProofOfLife {
+        /// The vouched-live agent whose sweep-exemption to refresh.
         agent_id: AgentId,
     },
     /// Identity context a hook decoder attaches IMMEDIATELY AHEAD of a
@@ -177,8 +205,11 @@ pub enum AgentEvent {
     /// it never touches labels, activity state, or `last_event_at` (the
     /// paired activity event right behind it carries those).
     Identity {
+        /// The agent this identity context describes.
         agent_id: AgentId,
+        /// The originating CLI (registry source name).
         source: String,
+        /// The CLI's own session identifier.
         session_id: String,
         /// `None` when the payload carries no usable cwd (e.g. CC PostToolUse,
         /// Codex PermissionRequest) — the registration is then label-ordinal
@@ -206,6 +237,7 @@ pub enum AgentEvent {
     /// model line never registers a session) and dedups per field; decoders
     /// may emit per sighting.
     ModelInfo {
+        /// The agent this observation is attributed to.
         agent_id: AgentId,
         /// `Some` = a model observation (e.g. `"claude-fable-5"`).
         model: Option<String>,
@@ -226,6 +258,7 @@ pub enum AgentEvent {
     /// sheet-fall window) lives in `pixtuoid-scene::token_meter` — the
     /// RAW-store/interpret-at-paint posture `ModelInfo` documents.
     Usage {
+        /// The agent whose token spend this reading records.
         agent_id: AgentId,
         /// Fresh tokens this reading: new input + cache writes + output.
         fresh_tokens: u64,
@@ -255,6 +288,7 @@ pub struct PidIdentity {
 }
 
 impl PidIdentity {
+    /// Bundle a pid with its start marker (`None` where the OS can't provide one).
     pub fn new(pid: i32, started: Option<u64>) -> Self {
         Self { pid, started }
     }
@@ -282,6 +316,7 @@ impl AgentEvent {
         }
     }
 
+    /// The agent id this event concerns (every variant carries one).
     pub fn agent_id(&self) -> AgentId {
         match self {
             AgentEvent::SessionStart { agent_id, .. } => *agent_id,
@@ -348,6 +383,7 @@ pub fn grok_pid_for_session(grok_root: &std::path::Path, session_id: &str) -> Op
 /// Shared ACP (Agent Client Protocol) wire-vocabulary decode — reused by any
 /// source whose transcript speaks ACP (grok today). Internal: `pub(crate)`.
 pub(crate) mod acp;
+/// Antigravity (Google IDE CLI) transcript source: decoder + `Source` adapter.
 pub mod antigravity;
 // The async runtime + watcher + liveness-probe layer: gated out of a wasm
 // (`--no-default-features`) build. These modules own all the tokio/notify/libc
@@ -358,6 +394,7 @@ pub mod antigravity;
 // public paths don't move.
 #[cfg(feature = "native")]
 pub(crate) mod cc_probe;
+/// Claude Code transcript source: line/hook decoders + the `Source` adapter.
 pub mod claude_code;
 pub mod codewhale;
 pub mod codex;
@@ -376,11 +413,15 @@ pub(crate) mod fd_probe;
 pub mod grok;
 pub mod hermes;
 #[cfg(feature = "native")]
+/// The shared hook socket listener + router every CLI's hook shim connects to.
 pub mod hook;
 #[cfg(feature = "native")]
+/// The JSONL transcript watcher: tails per-session `.jsonl` files with the
+/// first-sight gate + liveness probe ladder.
 pub mod jsonl;
 pub mod kimi;
 #[cfg(feature = "native")]
+/// `SourceManager` — spawns sources and surfaces a fatal source exit as `SourceDeath`.
 pub mod manager;
 // The async transport seam (tagged channel + `Source`/`DynSource`); the
 // re-export keeps the pre-split `source::{Source, TaggedSender, …}` paths.

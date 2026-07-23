@@ -49,6 +49,7 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::CopilotSource;
 
+/// The GitHub Copilot CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "copilot";
 
 /// `$COPILOT_HOME` if set, else `~/.copilot`. An empty OR whitespace-only

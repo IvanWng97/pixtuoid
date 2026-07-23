@@ -2,6 +2,7 @@ use pixtuoid_core::sprite::Rgb;
 
 use super::*;
 
+/// The `tokyo-night` dark theme.
 pub static TOKYO_NIGHT: Theme = Theme {
     name: "tokyo-night",
     kind: ThemeKind::Dark,

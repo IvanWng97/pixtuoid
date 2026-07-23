@@ -173,6 +173,9 @@ impl WalkKinematics {
     }
 }
 
+/// Freeze a [`WalkProfile`] for one walk leg: trapezoidal/triangular kinematics
+/// over `path_len_octile`, with cruise speed picked by `intent` and per-agent
+/// speed/pause personality seeded from `agent_id`.
 pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId) -> WalkProfile {
     let v_base = match intent {
         WalkIntent::SnapBack => V_CRUISE_SNAPBACK,

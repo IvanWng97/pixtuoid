@@ -9,9 +9,11 @@ use crate::id::AgentId;
 
 mod correlation;
 mod fsm;
+/// The event coordinator: [`reducer::Reducer`] folds `AgentEvent`s into `SceneState`.
 pub mod reducer;
 mod scope;
 
+/// Maximum number of office floors a `SceneState` tracks.
 pub const MAX_FLOORS: usize = 10;
 
 // serde adapters for the `Arc<str>` / `Arc<Path>` slot fields (#279). serde has
@@ -132,7 +134,9 @@ pub enum ToolKind {
     Task,
     /// Edit / Write / MultiEdit.
     Edit,
+    /// Read.
     Read,
+    /// Bash.
     Bash,
     /// Grep / Glob.
     Search,
@@ -178,15 +182,22 @@ impl ToolKind {
 /// this turns ~5N allocations/frame into 0.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActivityState {
+    /// No tool running (debounced — see the `Active` sharp edge).
     Idle,
+    /// A tool call is in flight (or within the Active→Idle grace window).
     Active {
+        /// The in-flight tool call's id (pairs Start↔End).
         #[serde(with = "opt_arc_str_serde")]
         tool_use_id: Option<Arc<str>>,
+        /// The tool's display detail, when known.
         #[serde(with = "opt_arc_str_serde")]
         detail: Option<Arc<str>>,
+        /// The bucketed tool kind (drives the per-tool glow/tally).
         kind: ToolKind,
     },
+    /// Blocked on a permission/input prompt.
     Waiting {
+        /// Why the agent is waiting (the prompt reason).
         #[serde(with = "arc_str_serde")]
         reason: Arc<str>,
     },
@@ -215,9 +226,13 @@ pub enum ActivityState {
 /// never clobbered by a back-fill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LabelProvenance {
+    /// Monotonic `{prefix}#N` ordinal minted with no cwd — no information, upgradable.
     OrdinalGhost,
+    /// Bare registry prefix from an empty-cwd deriver fallback — upgradable.
     PrefixFallback,
+    /// Derived from the cwd basename (`cc·repo`-style) — real information, never clobbered.
     CwdDerived,
+    /// Externally supplied display name (subagent name, a rename) — never clobbered.
     Renamed,
 }
 
@@ -231,6 +246,7 @@ pub struct SlotLabel {
 }
 
 impl SlotLabel {
+    /// Construct a label carrying an explicit provenance.
     pub fn new(text: impl Into<Arc<str>>, provenance: LabelProvenance) -> Self {
         Self {
             text: text.into(),
@@ -238,18 +254,22 @@ impl SlotLabel {
         }
     }
 
+    /// A monotonic `{prefix}#N` ordinal label minted with no cwd (upgradable).
     pub fn ordinal_ghost(text: impl Into<Arc<str>>) -> Self {
         Self::new(text, LabelProvenance::OrdinalGhost)
     }
 
+    /// A bare source-prefix label from an empty-cwd deriver fallback (upgradable).
     pub fn prefix_fallback(text: impl Into<Arc<str>>) -> Self {
         Self::new(text, LabelProvenance::PrefixFallback)
     }
 
+    /// A label derived from the cwd basename — real information, never clobbered.
     pub fn cwd_derived(text: impl Into<Arc<str>>) -> Self {
         Self::new(text, LabelProvenance::CwdDerived)
     }
 
+    /// A label from an externally supplied display name — never clobbered.
     pub fn renamed(text: impl Into<Arc<str>>) -> Self {
         Self::new(text, LabelProvenance::Renamed)
     }
@@ -259,6 +279,7 @@ impl SlotLabel {
         Arc::clone(&self.text)
     }
 
+    /// How this label was minted (see `LabelProvenance`).
     pub fn provenance(&self) -> LabelProvenance {
         self.provenance
     }
@@ -311,16 +332,30 @@ impl From<String> for SlotLabel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// One live agent's full state: identity, working directory, current activity,
+/// desk/floor assignment, and the per-session meters (tool count, tokens,
+/// effort). The Arc-backed strings/paths keep the per-frame `SceneState` clone
+/// cheap.
 pub struct AgentSlot {
+    /// This agent's stable identity — the `SceneState::agents` map key.
     pub agent_id: AgentId,
+    /// Registry name of the source that produced this agent (e.g. `cc`, `codex`).
     #[serde(with = "arc_str_serde")]
     pub source: Arc<str>,
+    /// Source-native session identifier this slot is keyed under.
     #[serde(with = "arc_str_serde")]
     pub session_id: Arc<str>,
+    /// The agent's working directory; its basename drives the derived label
+    /// (`unknown_cwd` marks a placeholder).
     #[serde(with = "arc_path_serde")]
     pub cwd: Arc<Path>,
+    /// Display name + how it was derived (see `SlotLabel`).
     pub label: SlotLabel,
+    /// Current activity — Idle, Active (running a tool), or Waiting.
     pub state: ActivityState,
+    /// Wall-clock time the current `state` was entered (reset on every state
+    /// change). `SystemTime` is process-local — the tree serializes for debug
+    /// dumps, not as a wire contract.
     pub state_started_at: SystemTime,
     /// Wall-clock time of the most recent event (any type) from this
     /// agent. The stale-agent sweep uses this as the primary liveness
@@ -352,9 +387,13 @@ pub struct AgentSlot {
     /// lifetime so capacity growth never silently migrates agents between
     /// floors.
     pub floor_idx: usize,
+    /// Monotonic count of tool calls this agent has made this session.
     pub tool_call_count: u32,
+    /// Cumulative milliseconds spent in the `Active` state.
     pub active_ms: u64,
+    /// Set when the source reported no working directory, so `cwd` is a placeholder.
     pub unknown_cwd: bool,
+    /// The dispatching parent, for a subagent slot (`None` for a top-level session).
     pub parent_id: Option<AgentId>,
     /// The agent process's pid + recycle marker — the focus-jump channel for
     /// hook-only sources (filled from the shim/plugin `_pid` riding each
@@ -411,12 +450,15 @@ fn u64_is_zero(v: &u64) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct EffortObservation {
+    /// The RAW effort string as observed on the wire (uninterpreted).
     #[serde(with = "arc_str_serde")]
     pub value: Arc<str>,
+    /// When `value` was last observed — the burn-tier freshness clock.
     pub seen_at: SystemTime,
 }
 
 impl EffortObservation {
+    /// Bundle a raw effort string with the time it was observed.
     pub fn new(value: Arc<str>, seen_at: SystemTime) -> Self {
         Self { value, seen_at }
     }
@@ -433,10 +475,12 @@ impl EffortObservation {
 pub struct UsageObservation {
     /// Fresh tokens in this one reading (new input + cache writes + output).
     pub delta: u64,
+    /// When this reading was applied — the falling-sheet window anchor.
     pub seen_at: SystemTime,
 }
 
 impl UsageObservation {
+    /// Bundle a fresh-token `delta` with the time it was applied.
     pub fn new(delta: u64, seen_at: SystemTime) -> Self {
         Self { delta, seen_at }
     }
@@ -451,7 +495,9 @@ impl UsageObservation {
 /// floor); `Down` = the daemon was seen and then died (the lobster walks out).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DaemonState {
+    /// Alive with no run in flight — the mascot ambles.
     Idle,
+    /// ≥1 run in flight (projected from `DaemonPresence::in_flight_run_keys`).
     Busy,
     /// Gateway is UP but its model backend is failing every run (#317) — the
     /// Apr-2026 Anthropic-ban failure mode: `gateway_start`/`session_start`/
@@ -460,6 +506,7 @@ pub enum DaemonState {
     /// a failed run; self-heals on the next successful run (or a new run start /
     /// gateway restart). The mascot renders distressed (sickly red, sluggish).
     Degraded,
+    /// Seen and then died — the mascot walks out (distinct from *absent*).
     Down,
 }
 
@@ -476,7 +523,11 @@ pub enum DaemonLiveness {
     /// The gateway is alive. `degraded` (#317): alive-but-broken (auth revoked /
     /// provider down), rendered distressed; healed by the next clean run / new
     /// attempt / restart.
-    Up { degraded: bool },
+    Up {
+        /// Alive-but-broken (#317): every model run is failing (auth revoked /
+        /// provider down), so the mascot renders distressed.
+        degraded: bool,
+    },
     /// The gateway was seen and then died (the mascot walks out). Distinct from
     /// *absent* (no map entry = never configured / plugin not loaded).
     Down,
@@ -550,8 +601,12 @@ impl DaemonPresence {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// The whole-office snapshot the reducer maintains and the render layer reads:
+/// live agent slots, per-floor desk capacities, and the daemon mascots.
 pub struct SceneState {
+    /// Live agent slots, keyed by `AgentId`.
     pub agents: BTreeMap<AgentId, AgentSlot>,
+    /// Desk capacity per floor, indexed by floor (`0..MAX_FLOORS`).
     pub floor_capacities: [usize; MAX_FLOORS],
     /// Daemon-style sources (the OpenClaw gateway is instance #1) rendered as
     /// wandering mascots, keyed on the registry source name. Empty for an
@@ -583,6 +638,7 @@ impl Default for SceneState {
 }
 
 impl SceneState {
+    /// An empty scene with the given per-floor desk capacities.
     pub fn new(floor_capacities: [usize; MAX_FLOORS]) -> Self {
         Self {
             agents: BTreeMap::new(),
@@ -591,10 +647,12 @@ impl SceneState {
         }
     }
 
+    /// A scene with the same desk capacity on every floor.
     pub fn uniform(cap: usize) -> Self {
         Self::new([cap; MAX_FLOORS])
     }
 
+    /// Total desk count across all floors (sum of `floor_capacities`).
     pub fn total_capacity(&self) -> usize {
         self.floor_capacities.iter().sum()
     }

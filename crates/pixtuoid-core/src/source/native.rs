@@ -10,6 +10,7 @@ use super::{AgentEvent, Transport};
 
 /// Events sent on a tagged channel so the reducer knows which transport produced them.
 pub type TaggedSender = mpsc::Sender<(Transport, AgentEvent)>;
+/// Receiving half of the `Transport`-tagged event channel (see `TaggedSender`).
 pub type TaggedReceiver = mpsc::Receiver<(Transport, AgentEvent)>;
 
 /// A `Source` produces `AgentEvent`s from one agent CLI flavor (Claude Code,
@@ -42,7 +43,10 @@ pub type TaggedReceiver = mpsc::Receiver<(Transport, AgentEvent)>;
 ///
 /// [`AgentId::from_parts`]: crate::AgentId::from_parts
 pub trait Source: Send + 'static {
+    /// Stable, lowercase identifier for this source (e.g. `"claude-code"`).
     fn name(&self) -> &str;
+    /// Consume the source and pump its `AgentEvent`s onto `tx` until the stream
+    /// ends or a fatal error; never panic (log + continue on malformed input).
     fn run(
         self: Box<Self>,
         tx: TaggedSender,
@@ -59,7 +63,9 @@ pub trait Source: Send + 'static {
 /// `with_source(Box::new(my_source))` work directly; implement [`Source`]
 /// only.
 pub trait DynSource: Send + 'static {
+    /// This source's stable identifier — mirrors `Source::name`.
     fn name(&self) -> &str;
+    /// Boxed-future form of `Source::run` — the dyn-safe erasure point `SourceManager` awaits.
     fn run(
         self: Box<Self>,
         tx: TaggedSender,

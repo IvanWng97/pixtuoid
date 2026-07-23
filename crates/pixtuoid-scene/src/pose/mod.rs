@@ -44,9 +44,13 @@ use crate::pathfind::Router;
 /// separate args (frame inputs, not engine state). `overlay` is shared (&) —
 /// none of these fns mutate it; router/history/motion are &mut.
 pub struct RouteCtx<'a> {
+    /// The A* router for this frame.
     pub router: &'a mut dyn Router,
+    /// Live occupancy overlay (shared, read-only here).
     pub overlay: &'a OccupancyOverlay,
+    /// Per-agent rendered-position cache.
     pub history: &'a mut PoseHistory,
+    /// Per-agent walk-timing state, keyed by `AgentId`.
     pub motion: &'a mut HashMap<AgentId, MotionState>,
 }
 
@@ -60,6 +64,7 @@ pub struct PoseHistory {
 }
 
 impl PoseHistory {
+    /// A new, empty history.
     pub fn new() -> Self {
         Self::default()
     }

@@ -91,14 +91,17 @@ pub struct AStarRouter {
 }
 
 impl AStarRouter {
+    /// Construct an empty router — no cached paths, no preferred zone.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Number of cached `(from, to)` routes currently held.
     pub fn len(&self) -> usize {
         self.paths.len()
     }
 
+    /// Whether the path cache holds no routes.
     pub fn is_empty(&self) -> bool {
         self.paths.is_empty()
     }

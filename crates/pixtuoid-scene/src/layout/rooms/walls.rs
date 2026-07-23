@@ -252,7 +252,10 @@ pub(crate) fn wall_segment_rect(
 /// doorway (the span is in y), else horizontal (span in x).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Doorway {
+    /// One endpoint of the opening (pixel-space).
     pub start: Point,
+    /// The other endpoint (pixel-space; the span axis is implicit — see the
+    /// type doc).
     pub end: Point,
 }
 

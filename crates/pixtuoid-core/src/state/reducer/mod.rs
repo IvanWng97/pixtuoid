@@ -237,6 +237,9 @@ struct TaskTracking {
     handled_by_task_start: bool,
 }
 
+/// The event coordinator: folds `AgentEvent`s into `SceneState`, owning the
+/// cross-slot correlation maps, the Active→Idle debounce, and the stale/exit
+/// sweeps.
 #[derive(Debug, Default)]
 pub struct Reducer {
     /// The seven cross-slot correlation maps + their TTL pruning — see
@@ -257,6 +260,7 @@ pub struct Reducer {
 }
 
 impl Reducer {
+    /// A reducer with empty correlation state.
     pub fn new() -> Self {
         Self::default()
     }
@@ -319,6 +323,9 @@ impl Reducer {
         }
     }
 
+    /// Fold one `AgentEvent` into the scene at `now`, tagged with the
+    /// `Transport` it arrived on (load-bearing for hook-wins dedup). Runs the
+    /// GC + exit/idle sweeps first, then dispatches on the event.
     pub fn apply(
         &mut self,
         scene: &mut SceneState,

@@ -26,6 +26,7 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::{live_codex_rollout_ids, CodexSource};
 
+/// The Codex CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "codex";
 
 /// Trailing canonical UUID (`8-4-4-4-12`) of a `rollout-<ts>-<UUID>.jsonl`

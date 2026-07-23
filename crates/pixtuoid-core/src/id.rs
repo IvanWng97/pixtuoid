@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// An opaque, source-namespaced session identifier — a 64-bit FNV-1a hash of
+/// `(source, opaque_id)` (see [`AgentId::from_parts`]), so two sources never
+/// collide on the same opaque id.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct AgentId(u64);
 
@@ -117,6 +120,8 @@ impl AgentId {
         AgentId(hash)
     }
 
+    /// The underlying 64-bit hash — the personality slicers key per-agent
+    /// variation off it by taking a bit window (see [`splitmix64`]).
     pub fn raw(self) -> u64 {
         self.0
     }

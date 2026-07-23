@@ -39,7 +39,10 @@ pub use native::{spawn_presence_exit_watch, PresenceExitWatch, PresenceSender};
 pub enum DaemonPresenceUpdate {
     /// `gateway_start` — the daemon is up; `pid` (its `process.pid`) is armed
     /// for `ExitWatch`. UP-winning + idempotent; resets the session count.
-    GatewayUp { pid: Option<i32> },
+    GatewayUp {
+        /// The gateway's `process.pid`, armed for the abrupt-down exit watch (`None` if unknown).
+        pid: Option<i32>,
+    },
     /// `gateway_stop` — clean shutdown.
     GatewayDown,
     /// `session_start` — a multiplexed session began (bumps the bubble count).
@@ -47,21 +50,36 @@ pub enum DaemonPresenceUpdate {
     /// `session_end` — a session ended.
     SessionEnded,
     /// `before_agent_run` — a turn entered flight, keyed for self-healing busy.
-    RunStarted { run_key: String },
+    RunStarted {
+        /// Correlates this turn with its later `RunEnded`/`RunFailed`.
+        run_key: String,
+    },
     /// `agent_end` with `success: true` — a turn completed OK.
-    RunEnded { run_key: String },
+    RunEnded {
+        /// The completed turn's correlation key (matches its `RunStarted`).
+        run_key: String,
+    },
     /// `agent_end` with `success: false` (#317) — a turn FAILED (the model
     /// backend is broken: auth revoked, provider down). Drives `Degraded`.
-    RunFailed { run_key: String },
+    RunFailed {
+        /// The failed turn's correlation key (matches its `RunStarted`).
+        run_key: String,
+    },
     /// A live gateway pid OBSERVED on any event carrying `_pid` (#318) — adopted
     /// into `current_pid` ONLY when it was `None`, so a MID-ATTACH or a
     /// reconnect-while-alive can still arm the abrupt-down exit watch even though
     /// it never saw the `gateway_start` that carries the pid via `GatewayUp`.
     /// Does NOT change `DaemonState` (it's a pure pid adoption). `GatewayUp` still
     /// owns restart-rebinds (overwrites), so `PidSeen` never clobbers a known pid.
-    PidSeen { pid: i32 },
+    PidSeen {
+        /// The live gateway pid observed on the event.
+        pid: i32,
+    },
     /// The armed gateway pid died (from the `ExitWatch` drain, not a decoder).
-    PidExited { pid: i32 },
+    PidExited {
+        /// The gateway pid that exited.
+        pid: i32,
+    },
 }
 
 /// A presence delta tagged with WHICH daemon it belongs to — the routing key for
@@ -71,7 +89,9 @@ pub enum DaemonPresenceUpdate {
 /// read positionally at the seam.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresenceMsg {
+    /// The daemon source name this delta routes to (`daemons[source]`).
     pub source: String,
+    /// The presence delta to apply to that daemon.
     pub delta: DaemonPresenceUpdate,
 }
 

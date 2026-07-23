@@ -2,6 +2,7 @@ use pixtuoid_core::sprite::Rgb;
 
 use super::*;
 
+/// The `cyberpunk` dark theme.
 pub static CYBERPUNK: Theme = Theme {
     name: "cyberpunk",
     kind: ThemeKind::Dark,
