@@ -443,7 +443,7 @@ deb target:
 [doc('Install the site npm deps + the e2e browser (run once per clone)')]
 site-setup:
     npm --prefix site ci
-    npx --prefix site playwright install chromium
+    npx --prefix site playwright install chromium chromium-headless-shell
 
 [group('site')]
 [doc('Site dev server with HMR → http://localhost:4321/ (foreground; agents: site-dev-bg)')]

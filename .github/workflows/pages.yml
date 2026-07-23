@@ -45,11 +45,18 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
       # withastro/action runs `astro build` + uploads the Pages artifact; gate the
       # deploy on lint + types too (a build-clean but typecheck-failing commit
-      # mustn't ship), and install Chromium here (same runner → global cache) so
-      # the action's build can render /architecture's ```mermaid block to an SVG.
-      - name: Validate (lint + types) + Chromium for the diagram
+      # mustn't ship). Install Chromium BEFORE `npm run check`: `astro check`
+      # renders /architecture's ```mermaid block via rehype-mermaid (headless
+      # Playwright), so the browser must already be present — with the install
+      # LAST in the && chain (after check), that render ran browserless and the
+      # deploy went red at `check:docs` (assert-docs-rendered.mjs) (the 2026-07
+      # outage). site.yml uses this same install-before-check order — the reason
+      # its PR-gate render stays green. `install chromium` already pulls
+      # `chromium-headless-shell`; name it too so a cache holding
+      # chromium-but-not-the-shell can't skip it.
+      - name: Chromium for the diagram, then validate (lint + types)
         working-directory: site
-        run: npm ci && npm run lint && npm run check && npx playwright install --with-deps chromium
+        run: npm ci && npx playwright install --with-deps chromium chromium-headless-shell && npm run lint && npm run check
       - uses: withastro/action@v6
         # the ticker's build-time merged-PR fetch: unauthenticated quota on shared
         # runner IPs is routinely exhausted -> silent canned-reel fallback; the
