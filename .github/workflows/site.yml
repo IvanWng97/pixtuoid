@@ -47,8 +47,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
       # the /architecture page renders its ```mermaid block to an inline SVG at
-      # build via rehype-mermaid (Playwright) — needs a headless Chromium.
-      - run: npx playwright install --with-deps chromium
+      # build via rehype-mermaid (headless Playwright) — needs a headless Chromium,
+      # installed BEFORE `npm run check`/`build` below (both render it; check-then-
+      # install is what broke pages.yml). `install chromium` already pulls
+      # `chromium-headless-shell`; name it too so a cache holding chromium-but-not-
+      # the-shell can't skip it.
+      - run: npx playwright install --with-deps chromium chromium-headless-shell
       - run: npm run format:check
       - run: npm run lint
       - run: npm run check
