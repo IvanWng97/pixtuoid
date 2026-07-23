@@ -442,6 +442,26 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just doc-check
 
+  # ADVISORY (never blocks): flag NEW runs of 3+ consecutive `//` comments in a
+  # fn body on a PR's changed lines (the ~5k pre-existing legitimate WHY
+  # comments are grandfathered — see `just comment-lint`). Findings surface as
+  # inline `::warning::` annotations on the diff; the script exits 0 so the job
+  # is green regardless. Just ast-grep + python — no cargo build.
+  comment-lint:
+    name: comment-lint (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need origin/main to diff the PR range
+      - name: Install ast-grep
+        run: npm install -g @ast-grep/cli@0.44.1
+      - uses: extractions/setup-just@v4
+      - run: |
+          git fetch --quiet origin main
+          just comment-lint origin/main --github
+
   coverage:
     name: coverage
     runs-on: ubuntu-latest

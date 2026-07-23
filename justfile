@@ -349,6 +349,19 @@ mutants *args:
     fi
     cargo mutants --in-diff target/mutants.diff {{ args }}
 
+# Comment-slop advisory: flag NEW runs of 3+ consecutive `//` comments inside a
+# function body (the repo's "fn-body comments ≤2 lines" convention —
+# pr-review.prompt.md's comment-value factor). DIFF-SCOPED like `mutants`
+# (`scripts/comment-lint.py` over the ast-grep rule `.ast-grep/rules/`), so the
+# ~5k pre-existing legitimate WHY comments are grandfathered and only new code
+# is checked. ADVISORY by default (prints + exit 0); `--gate` makes it exit 1,
+# `--worktree` lints uncommitted edits, `--github` emits inline PR annotations.
+# Needs ast-grep (setup-tools) + python3. Forwards args (e.g. a different base).
+[group('rust')]
+[doc('Advisory: flag NEW 3+-consecutive-comment runs in a fn body (diff-scoped)')]
+comment-lint *args:
+    python3 scripts/comment-lint.py {{ args }}
+
 # Never-panic fuzz ONE source's transcript decoder over a JSONL corpus DIR
 # (on-demand; not in preflight/CI — points at local or public real sessions, not
 # committed data). SOURCE is a registered source name (see `registered_source_names`):
@@ -831,7 +844,9 @@ setup-tools:
     # in a workflow `run:` block passes `just lint` green locally). brew on macOS;
     # elsewhere point at the install docs rather than silently leaving `just lint`
     # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
-    for t in shfmt actionlint shellcheck; do
+    # ast-grep backs the `comment-lint` advisory (structural Rust lint rules in
+    # .ast-grep/rules/); shfmt/actionlint/shellcheck back `just lint`.
+    for t in shfmt actionlint shellcheck ast-grep; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true

@@ -369,6 +369,23 @@ history:
   #455 rendered re-audit found them, and its RE-RUN rendered lens caught the
   CTA :hover 4.17:1 AA failure that two static lenses AND a rest-state
   render missed: state-sweep, don't spot-check.
+- **Diff adds or reshapes a substantial block of comments / doc comments**
+  (a new multi-line `//` WHY, a large `///` docstring, a comment-heavy refactor,
+  a mass doc pass) → add a comment lens that reads each NEW/changed comment
+  AGAINST the code it describes (not the diff in isolation), on the four
+  Family-C axes: **accuracy** (does it match what the code actually does?),
+  **value** (a non-obvious WHY, never narration of the WHAT — the comment-value
+  factor), **comment-rot** (now FALSE about the code), and the **vestigial**
+  class (a comment describing code the SAME diff deleted — "code gone, comment
+  remains"). This is a SEMANTIC judgment the mechanical gate can't make: the
+  diff-scoped `just comment-lint` advisory finds structural CANDIDATES (runs of
+  3+ consecutive `//` in a fn body, on the diff's new lines only — the ~5k
+  pre-existing legitimate WHY are grandfathered), but the keep / trim-to-≤2 /
+  relocate-to-the-declaration-or-a-CLAUDE.md-sharp-edge call is this lens's.
+  Anti-slop caveat: this repo's dense WHY-comment density is DELIBERATE — flag
+  only genuine slop (restated WHAT, stale, vestigial), never a legitimate WHY
+  that happens to run long. (Claude Code: the `comment-analyzer` agent is the
+  ready implementation.)
 - **Interactive TUI flow changed** (onboarding, panel actions, popup gating,
   keybind dispatch) → add a UX / user-journey lens that WALKS each user path
   end-to-end — first run, every failure branch, the no-CLI user, repeat

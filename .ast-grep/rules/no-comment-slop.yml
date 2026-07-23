@@ -1,0 +1,30 @@
+# Flags a run of 3+ CONSECUTIVE plain `//` comments inside a function body —
+# the repo's "fn-body comments <=2 lines" convention (pr-review.prompt.md's
+# comment-value factor). A longer WHY belongs on the DECLARATION it explains
+# (a const/fn/module doc carries a ~25-word rationale) or a CLAUDE.md sharp
+# edge; a present-tense code-state assertion belongs in a test.
+#
+# Deliberately narrow to avoid false positives on the repo's dense, LEGITIMATE
+# rationale culture: `///`/`//!` DOC comments are excluded (the regex), only
+# runs INSIDE a `function_item` count (module/declaration docs are fine), and
+# the comments must be immediately consecutive (`stopBy: neighbor`). ADVISORY
+# only — run diff-scoped on new code (`just comment-lint`), never a merge gate;
+# the ~5k pre-existing hits are grandfathered legitimate WHY.
+id: no-comment-slop
+language: Rust
+severity: warning
+message: "3+ consecutive line comments in a function body — trim to a WHY (≤2 lines), or move the rationale to the declaration doc / a CLAUDE.md sharp edge."
+rule:
+  kind: line_comment
+  regex: '^//($|[^/!])'
+  inside:
+    kind: function_item
+    stopBy: end
+  follows:
+    kind: line_comment
+    regex: '^//($|[^/!])'
+    stopBy: neighbor
+    follows:
+      kind: line_comment
+      regex: '^//($|[^/!])'
+      stopBy: neighbor
