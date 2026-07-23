@@ -15,6 +15,7 @@ Usage: comment-lint.py [BASE_REF] [--gate] [--worktree]
 """
 import json
 import re
+import shutil
 import subprocess
 import sys
 
@@ -57,6 +58,13 @@ def main() -> int:
         print("comment-lint: no added/changed Rust lines vs", base)
         return 0
 
+    # Fail SOFT if ast-grep isn't installed — this is an advisory (it's excluded
+    # from setup-tools' verify loop on purpose), so a dev without it gets a hint,
+    # never a raw traceback that reads like the tool is broken.
+    if shutil.which("ast-grep") is None:
+        print("comment-lint: ast-grep not found — run `just setup-tools` (advisory skipped)")
+        return 0
+
     scan = subprocess.run(
         ["ast-grep", "scan", "--json"], capture_output=True, text=True, check=True
     ).stdout
@@ -65,27 +73,29 @@ def main() -> int:
     new_hits = []
     for h in hits:
         f = h["file"]
-        # ast-grep JSON `start.line` is 0-indexed; the diff is 1-indexed.
+        # ast-grep JSON `start.line` is 0-indexed; the diff is 1-indexed. The hit
+        # anchors on the LAST comment of a run, so prepending a line onto an
+        # existing 2-run isn't caught (the anchor is unchanged) — a rare,
+        # accepted diff-scoping residual; a fresh 3+-run in new code IS caught.
         ln = h["range"]["start"]["line"] + 1
         if ln in added.get(f, ()):  # noqa: SIM118 — set membership
-            new_hits.append((f, ln, h["text"].strip().splitlines()[0]))
+            new_hits.append((f, ln, h["text"].strip().splitlines()[0], h["message"]))
 
     if not new_hits:
         print("comment-lint: no new 3+-comment runs in the diff vs", base, "✓")
         return 0
 
     github = "--github" in sys.argv[1:]
-    advice = (
-        "3+ consecutive line comments in a fn body — trim to a WHY (≤2 lines) or "
-        "move the rationale to the declaration doc / a CLAUDE.md sharp edge"
-    )
-    print(f"comment-lint: {len(new_hits)} new 3+-consecutive-comment run(s) in a fn body")
+    # A run of N>3 comments yields N-2 overlapping ast-grep windows, so this
+    # counts flagged LINES, not distinct runs — each still points at its fn.
+    print(f"comment-lint: {len(new_hits)} new comment-slop finding(s) in a fn body")
     print("  (advisory — pr-review.prompt.md comment-value factor)")
-    for f, ln, txt in sorted(new_hits):
+    for f, ln, txt, msg in sorted(new_hits):
         print(f"  {f}:{ln}: {txt}")
         if github:
-            # GitHub Actions annotation — surfaces inline on the PR diff.
-            print(f"::warning file={f},line={ln}::{advice}")
+            # GitHub Actions annotation (inline on the PR diff); the rule's own
+            # `message` is the single source of the guidance text.
+            print(f"::warning file={f},line={ln}::{msg}")
     return 1 if gate else 0
 
 
