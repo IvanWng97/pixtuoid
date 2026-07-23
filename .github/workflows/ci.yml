@@ -475,13 +475,14 @@ jobs:
   coverage-windows:
     name: coverage-windows
     runs-on: windows-latest
-    # Generous vs windows-test's 30m: instrumented full suite on the slowest runner,
-    # and the FIRST run is cold — rust-cache keys the entry by RUSTFLAGS, so the
-    # `-C instrument-coverage` build has no prior cache until this job has run once.
-    # Per-test HANGS are already caught by nextest's slow-timeout, so this bound only
-    # has to cover total wall-clock + cold compile. Provisional — retighten to the
-    # observed p95 once CI reports it.
-    timeout-minutes: 60
+    # Instrumented full suite on the slowest runner. Per-test HANGS are already
+    # caught by nextest's slow-timeout, so this bound only has to cover total
+    # wall-clock + a cold instrumented compile (rust-cache keys the entry by
+    # RUSTFLAGS, so a cache miss rebuilds `-C instrument-coverage` from scratch).
+    # Retightened 60→20 after ~18 runs (incl. the first cold ones) measured a COLD
+    # worst-case of 10.3m (warm p95 ~8.7m) — 20m is ~2× the observed cold max, so it
+    # can't flake this now-required job while a 2×+ wall-clock regression trips (#757).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -525,9 +526,9 @@ jobs:
     name: coverage-macos
     runs-on: macos-14
     # Apple Silicon is fast (the belted audio measured 52s instrumented), so a
-    # tighter bound than windows suffices; still generous for the cold instrumented
-    # cache. Provisional — retighten to the observed p95.
-    timeout-minutes: 45
+    # tighter bound than windows suffices. Retightened 45→15 after ~18 runs measured
+    # a COLD worst-case of 7.8m — ~2× headroom, same flake-safe sizing as windows (#757).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
