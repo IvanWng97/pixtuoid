@@ -47,9 +47,14 @@ jobs:
       # deploy on lint + types too (a build-clean but typecheck-failing commit
       # mustn't ship), and install Chromium here (same runner → global cache) so
       # the action's build can render /architecture's ```mermaid block to an SVG.
+      # `chromium-headless-shell` is REQUIRED, not implied by `chromium`: recent
+      # Playwright split the headless shell into its own download, and
+      # rehype-mermaid launches it (headless) to rasterize the diagram — without
+      # it the render collapses to an empty page and `assert-docs-rendered.mjs`
+      # (rightly) fails the build (the 2026-07 deploy outage).
       - name: Validate (lint + types) + Chromium for the diagram
         working-directory: site
-        run: npm ci && npm run lint && npm run check && npx playwright install --with-deps chromium
+        run: npm ci && npm run lint && npm run check && npx playwright install --with-deps chromium chromium-headless-shell
       - uses: withastro/action@v6
         # the ticker's build-time merged-PR fetch: unauthenticated quota on shared
         # runner IPs is routinely exhausted -> silent canned-reel fallback; the
