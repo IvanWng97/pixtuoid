@@ -1,7 +1,9 @@
 name: gemini review
 
 on:
-  pull_request:
+  # The secret-bearing automatic path must load this workflow from the trusted
+  # default branch. The job never checks out or executes the pull-request head.
+  pull_request_target:
     types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
     types: [created]
@@ -15,7 +17,7 @@ jobs:
     # repo-write actors. The API guard below independently enforces both
     # repository and base-branch boundaries before the secret-bearing step.
     if: >
-      (github.event_name == 'pull_request' &&
+      (github.event_name == 'pull_request_target' &&
         github.actor != 'dependabot[bot]' &&
         github.event.pull_request.draft == false &&
         github.event.pull_request.head.repo.full_name == github.repository &&
