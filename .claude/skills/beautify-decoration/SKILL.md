@@ -78,7 +78,7 @@ crop = crop.resize((crop.width*2, crop.height*2), Image.NEAREST)
 crop.save('/tmp/crop.png')
 ```
 
-Then `Read` the cropped PNG — you (Claude) can see PNG content via the Read tool.
+Then inspect the cropped PNG with the agent's image-viewing tool.
 
 PIL is available system-wide (installed via `pip3 install --user --break-system-packages Pillow`). If a fresh environment misses it, install once.
 

@@ -232,12 +232,14 @@ repo-committed and won't exist on a fresh checkout or in a non-Claude tool.
 9. **Wrap** — retro; record durable lessons.
 
 **Skills.** Repo skills live in [`.claude/skills/`](.claude/skills/) (committed,
-so they travel with the repo): `two-lens-review` (the merge gate),
+so they travel with the repo). On symlink-capable checkouts,
+[`.agents/skills/`](.agents/skills/) aliases the same directories for Codex.
+The skills are `two-lens-review` (the merge gate),
 `beautify-decoration` (the visual mock loop), `add-source` / `add-theme`
 (scaffold + test-teeth for a new CLI / palette), `procedural-lofi` (synthesize
 a new ambient sound — the reference-fingerprint → freeze pipeline). Claude Code
-auto-surfaces them by description; other tools read this file (`AGENTS.md`) and
-run the loop above as prose.
+auto-surfaces them by description; Codex does the same through the aliases.
+Other tools read this file (`AGENTS.md`) and run the loop above as prose.
 
 **Bootstrap on a fresh machine / other tool.** `git clone` gives you the repo
 skills + all `just` gates immediately. The day-to-day *loop* skills
