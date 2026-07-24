@@ -133,12 +133,46 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just gen-readme-check
 
+  # cargo-public-api complements semver: one classifies compatibility, while
+  # this golden shows the exact public surface change. rustdoc JSON is nightly
+  # only, so the just recipe owns that pin; this job pins the comparison tool.
+  api-surface:
+    name: api-surface
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - name: Install cargo-public-api (pinned to match the committed goldens)
+        run: cargo binstall -y cargo-public-api@0.52.0
+      - uses: extractions/setup-just@v4
+      - run: just api-surface-check
+
+  # rustdoc warnings and doctests are invisible to clippy and nextest, so this
+  # is a distinct rendering/contract check on the stable toolchain.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # cargo doc and doctests compile the default-on audio feature on Linux.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+      - run: just doc-check
+
   required:
     name: required-lint-jobs
     # This explicit manifest prevents a nested job deletion or rename from
     # silently shrinking the single protected ci-gate.
     if: ${{ always() }}
-    needs: [fmt, clippy, deny, machete, hygiene, msrv, notes-curated, npm-gen, readme]
+    needs: [fmt, clippy, deny, machete, hygiene, msrv, notes-curated, npm-gen, readme, api-surface, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

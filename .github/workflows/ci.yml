@@ -31,9 +31,7 @@ jobs:
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-  # These jobs were not required by branch protection before the split. Keep
-  # them visible and green-before-merge reviewable without silently promoting
-  # them into the stable protected gate.
+  # Advisory checks stay visible without entering the stable protected gate.
   supplemental:
     name: Supplemental Checks
     uses: ./.github/workflows/ci-supplemental.yml
