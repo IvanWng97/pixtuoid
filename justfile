@@ -116,7 +116,9 @@ ci-observability:
 [group('rust')]
 [doc('Offline link + anchor check (lychee) over the repo markdown — no network, .gitignore-aware')]
 links:
-    lychee --offline --include-fragments .
+    # Source CSS uses Vite package specifiers; its module graph belongs to the
+    # site build, while this gate owns documentation links and anchors.
+    lychee --offline --include-fragments --extensions md .
 
 # Clippy across the workspace, warnings denied.
 [group('rust')]
