@@ -16,7 +16,7 @@
 
 import { spawn } from "node:child_process";
 
-const HOOK_PATH = {{HOOK_PATH_JSON}};
+const HOOK_PATH = "{{HOOK_PATH_JSON}}";
 
 // The ONLY fields forwarded. `messages` / `prompt` / `sessionFile` / `systemPrompt`
 // are deliberately ABSENT — the daemon fixture needs the run pairing key + ids,

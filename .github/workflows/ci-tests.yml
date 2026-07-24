@@ -26,15 +26,13 @@ jobs:
         env:
           NEXTEST_PROFILE: ci
       - name: Upload test results to Codecov
-        if: always()
-        uses: codecov/codecov-action@v7
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/upload-codecov
         with:
-          files: target/nextest/ci/junit.xml
-          report-type: test_results
-          flags: windows
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          file: target/nextest/ci/junit.xml
+          flag: windows
+          report_type: test_results
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   macos-test:
     name: macos-test
@@ -51,15 +49,13 @@ jobs:
         env:
           NEXTEST_PROFILE: ci
       - name: Upload test results to Codecov
-        if: always()
-        uses: codecov/codecov-action@v7
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/upload-codecov
         with:
-          files: target/nextest/ci/junit.xml
-          report-type: test_results
-          flags: macos
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          file: target/nextest/ci/junit.xml
+          flag: macos
+          report_type: test_results
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   coverage:
     name: coverage
@@ -79,34 +75,21 @@ jobs:
         uses: taiki-e/install-action@cargo-nextest
       - name: Generate coverage + JUnit XML (single test run)
         run: just coverage
-      # Codecov upload failures are informational. Generation is not: an empty
-      # instrument would otherwise produce a false-green required job.
-      - name: Assert coverage artifacts are non-empty (negative control)
-        shell: bash
-        run: |
-          set -euo pipefail
-          for f in lcov.info target/nextest/ci/junit.xml; do
-            [ -s "$f" ] || { echo "::error::coverage produced no $f — a broken instrument must red the job, not silently upload nothing"; exit 1; }
-          done
-          echo "lcov.info=$(wc -c < lcov.info)B junit.xml=$(wc -c < target/nextest/ci/junit.xml)B"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: ./.github/actions/upload-codecov
         with:
-          files: lcov.info
-          flags: unit
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          file: lcov.info
+          flag: unit
+          report_type: coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
       - name: Upload test results to Codecov
-        if: always()
-        uses: codecov/codecov-action@v7
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/upload-codecov
         with:
-          files: target/nextest/ci/junit.xml
-          report-type: test_results
-          flags: unit
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          file: target/nextest/ci/junit.xml
+          flag: unit
+          report_type: test_results
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   # Platform coverage compiles code the Linux job cannot see: Windows pipes and
   # atomic-write retries, plus macOS paths and launchd. These are now required,
@@ -128,24 +111,14 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate coverage + JUnit XML (single instrumented test run)
         run: just coverage
-      # Same false-green guard as the Linux coverage job.
-      - name: Assert coverage artifacts are non-empty (negative control)
-        shell: bash
-        run: |
-          set -euo pipefail
-          for f in lcov.info target/nextest/ci/junit.xml; do
-            [ -s "$f" ] || { echo "::error::coverage produced no $f — a broken instrument must red the job, not silently upload nothing"; exit 1; }
-          done
-          echo "lcov.info=$(wc -c < lcov.info)B junit.xml=$(wc -c < target/nextest/ci/junit.xml)B"
       # lcov only: windows-test already uploads this platform's JUnit report.
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: ./.github/actions/upload-codecov
         with:
-          files: lcov.info
-          flags: windows
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          file: lcov.info
+          flag: windows
+          report_type: coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   coverage-macos:
     name: coverage-macos
@@ -163,24 +136,14 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate coverage + JUnit XML (single instrumented test run)
         run: just coverage
-      # Same false-green guard as the Linux coverage job.
-      - name: Assert coverage artifacts are non-empty (negative control)
-        shell: bash
-        run: |
-          set -euo pipefail
-          for f in lcov.info target/nextest/ci/junit.xml; do
-            [ -s "$f" ] || { echo "::error::coverage produced no $f — a broken instrument must red the job, not silently upload nothing"; exit 1; }
-          done
-          echo "lcov.info=$(wc -c < lcov.info)B junit.xml=$(wc -c < target/nextest/ci/junit.xml)B"
       # lcov only: macos-test already uploads this platform's JUnit report.
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: ./.github/actions/upload-codecov
         with:
-          files: lcov.info
-          flags: macos
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          file: lcov.info
+          flag: macos
+          report_type: coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   snapshots:
     name: snapshot hygiene

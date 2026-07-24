@@ -165,7 +165,7 @@ component — `rust-toolchain.toml` pins only `rustfmt`+`clippy`, so without it 
 editor / AI-agent LSP silently degrades to grep).
 
 ```
-just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+actionlint+links) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+actionlint+ci-observability+links) → clippy → hack → test
 just fmt          # auto-format
 git config core.hooksPath .githooks   # activate hooks once per clone
 ```
@@ -182,6 +182,8 @@ shifts), docs (`just doc-check` — `cargo doc` with `-D warnings` over the
 `cargo nextest` skips), coverage/smoke, gen-check, gen-readme-check, npm-check,
 check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
 fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
+Cross-file report/upload semantics that actionlint cannot express are pinned by
+`just ci-observability` and run inside both `just lint` and the CI hygiene job.
 
 **Release:** `just bump X.Y.Z` rewrites every version number, drafts
 `release_notes()`, runs preflight, and commits on a release branch — it

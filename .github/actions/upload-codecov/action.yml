@@ -1,0 +1,61 @@
+name: Upload report to Codecov
+description: Validate a generated report and make advisory upload failures visible
+
+inputs:
+  file:
+    description: Repository-relative report path
+    required: true
+  flag:
+    description: Codecov flag for this report
+    required: true
+  report_type:
+    description: Codecov report type (coverage or test_results)
+    required: true
+  token:
+    description: Repository Codecov token
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Require a non-empty generated report
+      shell: bash
+      env:
+        REPORT_FILE: ${{ inputs.file }}
+      run: |
+        set -euo pipefail
+        if [[ ! -s "$REPORT_FILE" ]]; then
+          echo "::error title=Missing generated report::$REPORT_FILE is missing or empty"
+          exit 1
+        fi
+        echo "$REPORT_FILE=$(wc -c < "$REPORT_FILE")B"
+
+    - name: Upload report
+      id: upload
+      continue-on-error: true
+      uses: codecov/codecov-action@v7
+      with:
+        files: ${{ inputs.file }}
+        flags: ${{ inputs.flag }}
+        report_type: ${{ inputs.report_type }}
+        disable_search: true
+        fail_ci_if_error: true
+        token: ${{ inputs.token }}
+
+    - name: Surface advisory upload failure
+      if: ${{ steps.upload.outcome == 'failure' }}
+      shell: bash
+      env:
+        REPORT_FILE: ${{ inputs.file }}
+        REPORT_FLAG: ${{ inputs.flag }}
+        REPORT_TYPE: ${{ inputs.report_type }}
+      run: |
+        message="Codecov $REPORT_TYPE upload failed for $REPORT_FILE (flag: $REPORT_FLAG); the generated report was valid, so this external-service failure is advisory."
+        echo "::warning title=Codecov upload failed::$message"
+        {
+          echo "### Codecov upload warning"
+          echo
+          echo "$message"
+          echo
+          echo "Inspect the **Upload report** step above for the uploader error."
+        } >> "$GITHUB_STEP_SUMMARY"

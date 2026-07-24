@@ -38,7 +38,7 @@ const PLUGIN_ID: &str = "pixtuoid";
 #[cfg(test)]
 const SENTINEL: &str = "@pixtuoid-openclaw-plugin";
 /// Placeholder for the baked shim path in the bundled entry module.
-const HOOK_PLACEHOLDER: &str = "{{HOOK_PATH_JSON}}";
+const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
 
 /// The OpenClaw gateway hook events pixtuoid depends on — the SINGLE source of

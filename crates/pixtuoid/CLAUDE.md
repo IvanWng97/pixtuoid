@@ -350,7 +350,9 @@ src/
 │                         format-local like merge_install/uninstall),
 │                       verify.rs (the READ-ONLY #309 install-schema verifier: SchemaParse/SchemaVerifyResult/ShimRef +
 │                         shared read helpers shell_shim_ref (4 shell targets) / flat_json_verify (reasonix+cursor) /
-│                         assemble; install::verify_target(t, config) = the I/O wrapper that reads the config +
+│                         assemble; the two baked code templates keep their placeholder quoted so both files
+│                         remain valid source before rendering (default-setup CodeQL parses them);
+│                         install::verify_target(t, config) = the I/O wrapper that reads the config +
 │                         calls verify_schema + stats the shim + (for `extra_artifacts` targets like OpenClaw)
 │                         stats each wholly-owned plugin file for existence — a missing one is a HARD break, the
 │                         silent-dead class the config check is blind to (#332; paths are hook-path-independent so a
@@ -376,7 +378,8 @@ src/
 │                         opencode = a TS PLUGIN (the FIRST install target that writes CODE, not a config block):
 │                         opencode auto-discovers `<config>/plugins/*.ts` (plural, canonical), so we DROP `<opencode-config>/plugins/pixtuoid.ts`
 │                         (no opencode.jsonc edit). The plugin (bundled `opencode_plugin.ts`, shim abs-path baked in
-│                         JSON-escaped) pipes lifecycle/tool/permission EventV2 to the shim on stdin; merge_install
+│                         JSON-escaped) pipes lifecycle/tool/permission
+│                         EventV2 to the shim on stdin; merge_install
 │                         renders the whole file (it's wholly ours), uninstall writes a sentinel-free no-op stub
 │                         (write-only orchestrator can't delete), detect on the `@pixtuoid-opencode-plugin` sentinel),
 │                       hook_cmd/ (mod.rs / unix.rs / windows.rs — the shared per-platform hook-command builders,

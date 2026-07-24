@@ -90,10 +90,11 @@ jobs:
       # carry the failing scores, not the element-level violations) — `path` is
       # workspace-root-relative, so it's prefixed with site/ despite the job cwd.
       - name: Upload Lighthouse reports
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: lighthouse-reports
           path: site/.lighthouseci/
           retention-days: 7
-          if-no-files-found: ignore
+          include-hidden-files: true
+          if-no-files-found: error

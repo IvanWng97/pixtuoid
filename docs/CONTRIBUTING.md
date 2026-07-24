@@ -19,7 +19,7 @@ git hooks call the same recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + actionlint + links) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + actionlint + ci-observability + links) → clippy → hack → test
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 ```

@@ -79,6 +79,7 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just shfmt-check
       - run: just actionlint
+      - run: just ci-observability
       - run: just links
 
   msrv:

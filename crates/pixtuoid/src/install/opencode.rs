@@ -43,9 +43,9 @@ use crate::install::target::MergeOutcome;
 const SENTINEL: &str = "@pixtuoid-opencode-plugin";
 
 /// The placeholder the bundled template carries for the baked shim path.
-const HOOK_PLACEHOLDER: &str = "{{HOOK_PATH_JSON}}";
+const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
-/// The bundled plugin source (with the `{{HOOK_PATH_JSON}}` placeholder).
+/// The bundled plugin source (with the quoted `{{HOOK_PATH_JSON}}` placeholder).
 const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
 /// Written on uninstall: a valid empty ES module (opencode loads it to zero

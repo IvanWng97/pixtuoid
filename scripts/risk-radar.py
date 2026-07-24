@@ -159,6 +159,8 @@ SEAMS: tuple[Seam, ...] = (
         or p
         in (
             "scripts/compare-screenshots.py",
+            "scripts/check_ci_observability.py",
+            "scripts/check_ci_observability_selftest.py",
             "scripts/gen-media.py",
             "scripts/gen-readme.mjs",
         ),
@@ -261,6 +263,8 @@ def _selftest() -> int:
     assert keys(["scripts/compare-screenshots.py"]) == ["ci-gates"]
     assert keys(["scripts/gen-media.py"]) == ["ci-gates"]
     assert keys(["scripts/gen-readme.mjs"]) == ["ci-gates"]
+    assert keys(["scripts/check_ci_observability.py"]) == ["ci-gates"]
+    assert keys(["scripts/check_ci_observability_selftest.py"]) == ["ci-gates"]
     # A non-gate script stays silent (scripts/ is NOT a blanket match).
     assert keys(["scripts/crop-snapshot.py"]) == []
 

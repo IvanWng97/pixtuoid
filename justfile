@@ -71,6 +71,15 @@ shfmt-fix:
 actionlint:
     actionlint
 
+# Cross-file CI contracts that actionlint cannot express: advisory upload
+# failures stay visible, generated reports fail closed, hidden Lighthouse
+# artifacts are included, and code templates remain parseable before rendering.
+[group('rust')]
+[doc('Check CI report/upload observability contracts and their negative controls')]
+ci-observability:
+    python3 scripts/check_ci_observability_selftest.py
+    python3 scripts/check_ci_observability.py
+
 # Offline link + anchor check (lychee) over the repo's OWN markdown: every
 # relative cross-link between the nested CLAUDE.md/AGENTS.md guides + docs/ must
 # resolve, and `#anchor` fragments must exist. Directory-walk mode respects
@@ -124,7 +133,7 @@ arch:
     done
     echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window-free"
 
-# Fast, independent lint checks in parallel (fmt + machete + deny + arch + shfmt + actionlint + links).
+# Fast, independent lint checks in parallel (fmt + machete + deny + arch + shfmt + actionlint + CI observability + links).
 [group('rust')]
 lint:
     #!/usr/bin/env bash
@@ -149,6 +158,7 @@ lint:
     run arch    just arch                & pids+=($!)
     run shfmt   just shfmt-check         & pids+=($!)
     run actions just actionlint          & pids+=($!)
+    run ci-obs  just ci-observability     & pids+=($!)
     run links   just links               & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
@@ -910,4 +920,3 @@ risk-radar base="origin/main":
 [doc('Self-test the risk-radar matcher (seam map predicates)')]
 risk-radar-test:
     python3 scripts/risk-radar.py --selftest
-
