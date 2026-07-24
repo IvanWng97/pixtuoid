@@ -155,16 +155,13 @@ SEAMS: tuple[Seam, ...] = (
         match=lambda p: p.startswith(".github/workflows/")
         or p.startswith(".github/actions/")
         or p == "justfile"
-        or p in ("requirements-ci.txt", "requirements-dev.txt")
+        or p.startswith("policy/ci-observability/")
         or p.startswith(".githooks/")
         or p
         in (
             "scripts/compare-screenshots.py",
-            "scripts/check_ci_observability.py",
-            "scripts/check_ci_observability_selftest.py",
             "scripts/gen-media.py",
             "scripts/gen-readme.mjs",
-            "scripts/validate_ci_report.py",
         ),
         audit=(
             "Confirm you did NOT weaken a gate: no removed required check, no `--no-verify`/hook-skip flag, no relaxed `-D warnings`.",
@@ -261,15 +258,11 @@ def _selftest() -> int:
     assert keys(["integrations/raycast/contract/outcome-row.schema.json"]) == ["json-contract"]
     # ci-gates fires on the hooks dir too:
     assert keys([".githooks/pre-push"]) == ["ci-gates"]
-    # ...AND the gate LOGIC that lives under scripts/ (the pixel/README drift gates):
+    # ...AND the gate policy plus gate LOGIC under scripts/:
+    assert keys(["policy/ci-observability/main.rego"]) == ["ci-gates"]
     assert keys(["scripts/compare-screenshots.py"]) == ["ci-gates"]
     assert keys(["scripts/gen-media.py"]) == ["ci-gates"]
     assert keys(["scripts/gen-readme.mjs"]) == ["ci-gates"]
-    assert keys(["scripts/check_ci_observability.py"]) == ["ci-gates"]
-    assert keys(["scripts/check_ci_observability_selftest.py"]) == ["ci-gates"]
-    assert keys(["scripts/validate_ci_report.py"]) == ["ci-gates"]
-    assert keys(["requirements-ci.txt"]) == ["ci-gates"]
-    assert keys(["requirements-dev.txt"]) == ["ci-gates"]
     # A non-gate script stays silent (scripts/ is NOT a blanket match).
     assert keys(["scripts/crop-snapshot.py"]) == []
 

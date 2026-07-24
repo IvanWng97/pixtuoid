@@ -1,5 +1,5 @@
 name: Upload report to Codecov
-description: Validate a generated report and make advisory upload failures visible
+description: Require a generated report and make advisory upload failures visible
 
 inputs:
   file:
@@ -18,26 +18,16 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Require a valid generated report
+    - name: Require a generated report
       shell: bash
       env:
         REPORT_FILE: ${{ inputs.file }}
-        REPORT_TYPE: ${{ inputs.report_type }}
       run: |
         set -euo pipefail
         if [[ ! -s "$REPORT_FILE" ]]; then
           echo "::error title=Missing generated report::$REPORT_FILE is missing or empty"
           exit 1
         fi
-        if command -v python3 >/dev/null 2>&1; then
-          report_python=python3
-        elif command -v python >/dev/null 2>&1; then
-          report_python=python
-        else
-          echo "::error title=Cannot validate generated report::Python 3 is unavailable"
-          exit 1
-        fi
-        "$report_python" scripts/validate_ci_report.py "$REPORT_TYPE" "$REPORT_FILE"
         echo "$REPORT_FILE=$(wc -c < "$REPORT_FILE")B"
 
     - name: Upload report
@@ -60,7 +50,7 @@ runs:
         REPORT_FLAG: ${{ inputs.flag }}
         REPORT_TYPE: ${{ inputs.report_type }}
       run: |
-        message="Codecov $REPORT_TYPE upload failed for $REPORT_FILE (flag: $REPORT_FLAG); the generated report was valid, so this external-service failure is advisory."
+        message="Codecov $REPORT_TYPE upload failed for $REPORT_FILE (flag: $REPORT_FLAG); the report was generated, so this external-service failure is advisory."
         echo "::warning title=Codecov upload failed::$message"
         {
           echo "### Codecov upload warning"

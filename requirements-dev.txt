@@ -1,4 +1,4 @@
-# Dev-only Python deps for CI policy checks and visual verification tooling.
+# Dev-only Python deps for visual verification tooling.
 #
 # Setup (once per clone):
 #   python3 -m venv .venv
@@ -6,5 +6,4 @@
 #
 # Run scripts via the venv:
 #   .venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png
--r requirements-ci.txt
 Pillow>=10.0

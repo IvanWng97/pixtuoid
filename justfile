@@ -25,9 +25,6 @@ set windows-shell := ["bash", "-cu"]
 # newly-published crate is added in ONE place.
 PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 
-# Python venvs use different executable layouts on POSIX and Windows.
-VENV_PYTHON := if os_family() == "windows" { ".venv/Scripts/python.exe" } else { ".venv/bin/python3" }
-
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
 # nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
 # cargo-public-api 0.52.0 to match. Bump both together or the golden churns.
@@ -74,23 +71,22 @@ shfmt-fix:
 actionlint:
     actionlint
 
-# Cross-file CI contracts that actionlint cannot express: advisory upload
-# failures stay visible, generated reports fail closed, hidden Lighthouse
-# artifacts are included, CodeQL retains complete Rust semantic inputs, and
-# code templates remain parseable before rendering.
+# Cross-file CI contracts that actionlint cannot express. yq owns YAML 1.2
+# parsing; Conftest/OPA owns policy evaluation and policy unit tests.
 [group('rust')]
-[doc('Check CI report/upload observability contracts and their negative controls')]
+[doc('Check repository CI contracts with Conftest/OPA policy-as-code')]
 ci-observability:
     #!/usr/bin/env bash
     set -euo pipefail
-    py=python3
-    [[ -x "{{ VENV_PYTHON }}" ]] && py="{{ VENV_PYTHON }}"
-    "$py" -c 'import yaml' 2>/dev/null || {
-        echo "error: PyYAML is missing — run \`just setup-tools\`" >&2
-        exit 1
-    }
-    "$py" scripts/check_ci_observability_selftest.py
-    "$py" scripts/check_ci_observability.py
+    files=()
+    while IFS= read -r file; do files+=("$file"); done < <(rg --files .github/workflows .github/actions -g '*.yml' -g '*.yaml' | sort)
+    ((${#files[@]})) || { echo "error: no GitHub Actions YAML files found" >&2; exit 1; }
+    combined="$(mktemp)"; trap 'rm -f "$combined"' EXIT
+    yq eval-all -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${files[@]}" >"$combined"
+    conftest fmt --check policy/ci-observability
+    conftest verify --policy policy/ci-observability
+    conftest test --parser json --policy policy/ci-observability "$combined"
+    iconv -f US-ASCII -t US-ASCII codecov.yml >/dev/null
 
 # Offline link + anchor check (lychee) over the repo's OWN markdown: every
 # relative cross-link between the nested CLAUDE.md/AGENTS.md guides + docs/ must
@@ -153,7 +149,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt actionlint cargo-machete cargo-deny lychee; do
+    for t in shfmt actionlint conftest yq iconv cargo-machete cargo-deny lychee; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -867,8 +863,9 @@ setup-tools:
     # elsewhere point at the install docs rather than silently leaving `just lint`
     # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
     # ast-grep backs the `comment-lint` advisory (structural Rust lint rules in
-    # .ast-grep/rules/); shfmt/actionlint/shellcheck back `just lint`.
-    for t in shfmt actionlint shellcheck ast-grep; do
+    # .ast-grep/rules/); shfmt/actionlint/shellcheck back workflow linting,
+    # while yq + Conftest/OPA evaluate repository-specific workflow policy.
+    for t in shfmt actionlint shellcheck ast-grep yq conftest; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -879,22 +876,13 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck; do
+    for t in shfmt actionlint shellcheck yq conftest iconv; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
         echo "error: ${missing[*]} still missing after setup — install via your package manager (e.g. brew install ${missing[*]}); \`just lint\` needs it." >&2
         exit 1
     fi
-    # The CI contract checker needs a real YAML parser so anchors, aliases,
-    # quoted keys, block scalars, and flow mappings cannot evade its policies.
-    python3 -m venv .venv
-    venv_python="{{ VENV_PYTHON }}"
-    if [[ ! -x "$venv_python" ]]; then
-        echo "error: Python created no executable in .venv" >&2
-        exit 1
-    fi
-    "$venv_python" -m pip install --disable-pip-version-check -r requirements-ci.txt
     # Activate the local pre-push gate (dormant by default in a fresh clone, so CI
     # would otherwise be the only gate). Idempotent. CI re-runs `just preflight`
     # regardless, so a skipped local hook still meets the same checks at merge.
