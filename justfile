@@ -87,7 +87,7 @@ ci-observability:
     #!/usr/bin/env bash
     set -euo pipefail
     files=()
-    while IFS= read -r file; do files+=("$file"); done < <(rg --files .github/workflows .github/actions -g '*.yml' -g '*.yaml' | sort)
+    while IFS= read -r file; do files+=("$file"); done < <(find .github/workflows .github/actions -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort)
     ((${#files[@]})) || { echo "error: no GitHub Actions YAML files found" >&2; exit 1; }
     [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
     files+=(site/package.json)
