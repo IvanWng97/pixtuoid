@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from dataclasses import dataclass
@@ -37,7 +38,7 @@ class YamlItem:
 
     def direct_values(self, key: str) -> list[str]:
         return [
-            entry.value
+            normalize_yaml_scalar(entry.value)
             for entry in self.entries
             if entry.parent is None and entry.key == key
         ]
@@ -53,7 +54,7 @@ class YamlItem:
             if entry.parent is None and entry.key == parent_key
         }
         return [
-            entry.value
+            normalize_yaml_scalar(entry.value)
             for entry in self.entries
             if entry.parent in parent_indexes and entry.key == key
         ]
@@ -103,6 +104,20 @@ def active_lines(text: str, comment_prefixes: tuple[str, ...] = ("#",)) -> list[
 def active_code_lines(text: str) -> list[str]:
     without_block_comments = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     return active_lines(without_block_comments, ("//", "#"))
+
+
+def normalize_yaml_scalar(value: str) -> str:
+    if len(value) < 2:
+        return value
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1].replace("''", "'")
+    if value.startswith('"') and value.endswith('"'):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return value
+        return decoded if isinstance(decoded, str) else value
+    return value
 
 
 def structural_yaml_lines(text: str) -> list[YamlLine]:
@@ -215,7 +230,7 @@ def yaml_values_at(text: str, path: tuple[str, ...]) -> list[str]:
             keys.append(entries[cursor].key)
             cursor = entries[cursor].parent
         if tuple(reversed(keys)) == path:
-            values.append(entry.value)
+            values.append(normalize_yaml_scalar(entry.value))
     return values
 
 

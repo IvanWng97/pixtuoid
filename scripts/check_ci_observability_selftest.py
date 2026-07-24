@@ -184,19 +184,25 @@ class CiObservabilityContractTests(unittest.TestCase):
         self.assertIn("ASCII", result.stderr)
 
     def test_rejects_direct_codecov_use_and_wrong_input_name(self) -> None:
-        files = good_files()
-        files[".github/workflows/rogue.yml"] = textwrap.dedent(
-            """\
-            - uses: codecov/codecov-action@v7
-              with:
-                report-type: test_results
-            """
-        )
-        result = run_checker(files)
+        for action in (
+            "codecov/codecov-action@v7",
+            "'codecov/codecov-action@v7'",
+            '"codecov/codecov-action@v7"',
+        ):
+            with self.subTest(action=action):
+                files = good_files()
+                files[".github/workflows/rogue.yml"] = textwrap.dedent(
+                    f"""\
+                    - uses: {action}
+                      with:
+                        report-type: test_results
+                    """
+                )
+                result = run_checker(files)
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("centralized", result.stderr)
-        self.assertIn("report-type", result.stderr)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("centralized", result.stderr)
+                self.assertIn("report-type", result.stderr)
 
     def test_rejects_wrapper_contract_regressions(self) -> None:
         mutations = (
