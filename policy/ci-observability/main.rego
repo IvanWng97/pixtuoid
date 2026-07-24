@@ -27,6 +27,7 @@ rust_diagnostics_metric := "rust/summary/number-of-files-extracted-with-errors"
 rust_clean_metric := "rust/summary/number-of-successfully-extracted-files"
 gemini_workflow_path := ".github/workflows/gemini-review.yml"
 gemini_review_step_name := "Run read-only Gemini design review"
+gemini_failure_step_name := "Record review failure"
 lighthouse_workflow_path := ".github/workflows/site.yml"
 pages_workflow_path := ".github/workflows/pages.yml"
 site_package_path := "site/package.json"
@@ -225,6 +226,11 @@ gemini_review_steps := [step |
 	object.get(step, "name", "") == gemini_review_step_name
 ]
 
+gemini_failure_steps := [step |
+	some step in gemini_steps
+	object.get(step, "name", "") == gemini_failure_step_name
+]
+
 has_weekly_codeql_schedule if {
 	some schedule in codeql.on.schedule
 	schedule.cron == "29 11 * * 3"
@@ -239,6 +245,18 @@ deny contains msg if {
 	count(gemini_review_steps) == 1
 	object.get(gemini_review_steps[0], "continue-on-error", false) != false
 	msg := sprintf("%s must fail when Gemini produces no review", [gemini_workflow_path])
+}
+
+deny contains msg if {
+	count(gemini_failure_steps) != 1
+	msg := sprintf("%s must contain exactly one Gemini failure notice", [gemini_workflow_path])
+}
+
+deny contains msg if {
+	count(gemini_failure_steps) == 1
+	condition := object.get(gemini_failure_steps[0], "if", "")
+	not contains(condition, "failure()")
+	msg := sprintf("%s Gemini failure notice must run after a failed review step", [gemini_workflow_path])
 }
 
 deny contains msg if {

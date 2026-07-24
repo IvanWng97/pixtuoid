@@ -134,6 +134,18 @@ test_gemini_review_cannot_be_masked_as_success if {
 	sprintf("%s must fail when Gemini produces no review", [gemini_workflow_path]) in violations
 }
 
+test_gemini_failure_notice_uses_a_status_check_function if {
+	fixture := {"documents": [{
+		"path": gemini_workflow_path,
+		"contents": {"jobs": {"design-review": {"steps": [{
+			"name": gemini_failure_step_name,
+			"if": "steps.gemini.outcome == 'failure'",
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Gemini failure notice must run after a failed review step", [gemini_workflow_path]) in violations
+}
+
 test_report_presence_check_is_required if {
 	fixture := {"documents": [{
 		"path": codecov_authority_path,

@@ -138,6 +138,7 @@ jobs:
 
       - name: Record review failure
         if: >
+          failure() &&
           steps.pr.outputs.reviewable == 'true' &&
           steps.gemini.outcome == 'failure'
         run: >
