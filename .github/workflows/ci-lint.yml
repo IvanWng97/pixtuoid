@@ -77,6 +77,10 @@ jobs:
         with:
           tool: lychee@0.24.2
       - uses: extractions/setup-just@v4
+      - name: Install CI policy parser
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python3 -m pip install --disable-pip-version-check -r requirements-ci.txt
       - run: just shfmt-check
       - run: just actionlint
       - run: just ci-observability

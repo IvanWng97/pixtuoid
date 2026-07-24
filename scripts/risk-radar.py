@@ -155,6 +155,7 @@ SEAMS: tuple[Seam, ...] = (
         match=lambda p: p.startswith(".github/workflows/")
         or p.startswith(".github/actions/")
         or p == "justfile"
+        or p in ("requirements-ci.txt", "requirements-dev.txt")
         or p.startswith(".githooks/")
         or p
         in (
@@ -267,6 +268,8 @@ def _selftest() -> int:
     assert keys(["scripts/check_ci_observability.py"]) == ["ci-gates"]
     assert keys(["scripts/check_ci_observability_selftest.py"]) == ["ci-gates"]
     assert keys(["scripts/validate_ci_report.py"]) == ["ci-gates"]
+    assert keys(["requirements-ci.txt"]) == ["ci-gates"]
+    assert keys(["requirements-dev.txt"]) == ["ci-gates"]
     # A non-gate script stays silent (scripts/ is NOT a blanket match).
     assert keys(["scripts/crop-snapshot.py"]) == []
 

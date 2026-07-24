@@ -210,7 +210,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('requirements-dev.txt') }}
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements-*.txt') }}
           restore-keys: pip-${{ runner.os }}-
       - name: Set up Python virtual environment
         run: |

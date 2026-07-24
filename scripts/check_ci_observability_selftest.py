@@ -224,6 +224,63 @@ class CiObservabilityContractTests(unittest.TestCase):
                 self.assertIn("centralized", result.stderr)
                 self.assertIn("report-type", result.stderr)
 
+    def test_resolves_indirect_and_flow_action_references(self) -> None:
+        cases = (
+            textwrap.dedent(
+                """\
+                action: &codecov codecov/codecov-action@v7
+                steps:
+                  - uses: *codecov
+                """
+            ),
+            textwrap.dedent(
+                """\
+                - uses: &codecov codecov/codecov-action@v7
+                """
+            ),
+            textwrap.dedent(
+                """\
+                - uses: !!str codecov/codecov-action@v7
+                """
+            ),
+            '- uses: "codecov/\\\n    codecov-action@v7"\n',
+            "- { uses: codecov/codecov-action@v7 }\n",
+            '- { "uses": codecov/codecov-action@v7 }\n',
+        )
+        for workflow in cases:
+            with self.subTest(workflow=workflow):
+                files = good_files()
+                files[".github/workflows/rogue.yml"] = workflow
+                result = run_checker(files)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("centralized", result.stderr)
+
+    def test_rejects_codecov_use_behind_a_quoted_mapping_key(self) -> None:
+        for key in ("'uses'", '"uses"'):
+            with self.subTest(key=key):
+                files = good_files()
+                files[".github/workflows/rogue.yml"] = (
+                    f"- {key}: codecov/codecov-action@v7\n"
+                )
+                result = run_checker(files)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("centralized", result.stderr)
+
+    def test_rejects_ambiguous_duplicate_mapping_keys(self) -> None:
+        files = good_files()
+        action_path = ".github/actions/upload-codecov/action.yml"
+        files[action_path] = files[action_path].replace(
+            "        fail_ci_if_error: true",
+            "        fail_ci_if_error: true\n"
+            "        fail_ci_if_error: false",
+        )
+        result = run_checker(files)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("duplicate mapping key", result.stderr)
+
     def test_rejects_wrapper_contract_regressions(self) -> None:
         mutations = (
             ("files: ${{ inputs.file }}", "files: guessed.xml"),
@@ -382,7 +439,7 @@ class CiObservabilityContractTests(unittest.TestCase):
         files = good_files()
         files[".github/workflows/site.yml"] = files[
             ".github/workflows/site.yml"
-        ].replace("include-hidden-files: true\n", "").replace(
+        ].replace("    include-hidden-files: true\n", "").replace(
             "if-no-files-found: error", "if-no-files-found: ignore"
         )
         files[".github/workflows/site.yml"] += textwrap.dedent(

@@ -25,6 +25,9 @@ set windows-shell := ["bash", "-cu"]
 # newly-published crate is added in ONE place.
 PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 
+# Python venvs use different executable layouts on POSIX and Windows.
+VENV_PYTHON := if os_family() == "windows" { ".venv/Scripts/python.exe" } else { ".venv/bin/python3" }
+
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
 # nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
 # cargo-public-api 0.52.0 to match. Bump both together or the golden churns.
@@ -78,8 +81,16 @@ actionlint:
 [group('rust')]
 [doc('Check CI report/upload observability contracts and their negative controls')]
 ci-observability:
-    python3 scripts/check_ci_observability_selftest.py
-    python3 scripts/check_ci_observability.py
+    #!/usr/bin/env bash
+    set -euo pipefail
+    py=python3
+    [[ -x "{{ VENV_PYTHON }}" ]] && py="{{ VENV_PYTHON }}"
+    "$py" -c 'import yaml' 2>/dev/null || {
+        echo "error: PyYAML is missing — run \`just setup-tools\`" >&2
+        exit 1
+    }
+    "$py" scripts/check_ci_observability_selftest.py
+    "$py" scripts/check_ci_observability.py
 
 # Offline link + anchor check (lychee) over the repo's OWN markdown: every
 # relative cross-link between the nested CLAUDE.md/AGENTS.md guides + docs/ must
@@ -875,6 +886,15 @@ setup-tools:
         echo "error: ${missing[*]} still missing after setup — install via your package manager (e.g. brew install ${missing[*]}); \`just lint\` needs it." >&2
         exit 1
     fi
+    # The CI contract checker needs a real YAML parser so anchors, aliases,
+    # quoted keys, block scalars, and flow mappings cannot evade its policies.
+    python3 -m venv .venv
+    venv_python="{{ VENV_PYTHON }}"
+    if [[ ! -x "$venv_python" ]]; then
+        echo "error: Python created no executable in .venv" >&2
+        exit 1
+    fi
+    "$venv_python" -m pip install --disable-pip-version-check -r requirements-ci.txt
     # Activate the local pre-push gate (dormant by default in a fresh clone, so CI
     # would otherwise be the only gate). Idempotent. CI re-runs `just preflight`
     # regardless, so a skipped local hook still meets the same checks at merge.

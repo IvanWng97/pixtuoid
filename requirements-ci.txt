@@ -1,0 +1,2 @@
+# Parser used by the repository-specific CI policy checks.
+PyYAML==6.0.3

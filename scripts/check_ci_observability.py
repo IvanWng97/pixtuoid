@@ -4,76 +4,82 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
-@dataclass(frozen=True)
-class YamlLine:
-    index: int
-    indent: int
-    content: str
-
-
-@dataclass(frozen=True)
-class YamlEntry:
-    line: YamlLine
-    indent: int
-    key: str
-    value: str
-    parent: int | None
+import yaml
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode
+from yaml.resolver import BaseResolver
 
 
 @dataclass(frozen=True)
 class YamlItem:
-    source_lines: tuple[str, ...]
-    entries: tuple[YamlEntry, ...]
-
-    @property
-    def start_index(self) -> int:
-        return min(entry.line.index for entry in self.entries)
+    mapping: dict[str, object]
+    start_index: int
 
     def direct_values(self, key: str) -> list[str]:
-        return [
-            resolve_yaml_scalar(entry, self.source_lines)
-            for entry in self.entries
-            if entry.parent is None and entry.key == key
-        ]
+        value = self.mapping.get(key)
+        return [value] if isinstance(value, str) else []
 
     def direct_value(self, key: str) -> str | None:
         values = self.direct_values(key)
         return values[0] if len(values) == 1 else None
 
     def child_values(self, parent_key: str, key: str) -> list[str]:
-        parent_indexes = {
-            index
-            for index, entry in enumerate(self.entries)
-            if entry.parent is None and entry.key == parent_key
-        }
-        return [
-            resolve_yaml_scalar(entry, self.source_lines)
-            for entry in self.entries
-            if entry.parent in parent_indexes and entry.key == key
-        ]
+        parent = self.mapping.get(parent_key)
+        if not isinstance(parent, dict):
+            return []
+        value = parent.get(key)
+        return [value] if isinstance(value, str) else []
 
     def child_value(self, parent_key: str, key: str) -> str | None:
         values = self.child_values(parent_key, key)
         return values[0] if len(values) == 1 else None
 
     def scalar(self, key: str) -> str:
-        candidates = [
-            entry
-            for entry in self.entries
-            if entry.parent is None
-            and entry.key == key
-            and is_block_scalar(entry.value)
-        ]
-        if len(candidates) != 1:
-            return ""
-        return resolve_yaml_scalar(candidates[0], self.source_lines)
+        value = self.mapping.get(key)
+        return value if isinstance(value, str) else ""
+
+
+class UniqueKeyBaseLoader(yaml.BaseLoader):
+    """String-only loader that also rejects ambiguous duplicate mapping keys.
+
+    BaseLoader keeps GitHub's `on` key and scalar settings as strings and
+    cannot construct Python objects from repository-controlled YAML tags.
+    """
+
+
+def construct_unique_mapping(
+    loader: UniqueKeyBaseLoader, node: MappingNode, deep: bool = False
+) -> dict[str, object]:
+    mapping: dict[str, object] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if not isinstance(key, str):
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "mapping keys must be strings",
+                key_node.start_mark,
+            )
+        if key in mapping:
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"duplicate mapping key {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+UniqueKeyBaseLoader.add_constructor(
+    BaseResolver.DEFAULT_MAPPING_TAG,
+    construct_unique_mapping,
+)
 
 
 def read_text(root: Path, relative: str) -> tuple[str, list[str]]:
@@ -98,230 +104,54 @@ def active_code_lines(text: str) -> list[str]:
     return active_lines(without_block_comments, ("//", "#"))
 
 
-def strip_yaml_inline_comment(value: str) -> str:
-    quote: str | None = None
-    index = 0
-    while index < len(value):
-        character = value[index]
-        if quote == "'":
-            if character == "'" and index + 1 < len(value):
-                if value[index + 1] == "'":
-                    index += 2
-                    continue
-            if character == "'":
-                quote = None
-        elif quote == '"':
-            if character == "\\":
-                index += 2
-                continue
-            if character == '"':
-                quote = None
-        elif character in ("'", '"'):
-            quote = character
-        elif character == "#" and (
-            index == 0 or value[index - 1].isspace()
-        ):
-            return value[:index].rstrip()
-        index += 1
-    return value
+def load_yaml(
+    text: str, relative: str
+) -> tuple[object | None, list[str]]:
+    try:
+        return yaml.load(text, Loader=UniqueKeyBaseLoader), []
+    except yaml.YAMLError as error:
+        problem = getattr(error, "problem", None) or str(error)
+        return None, [f"{relative} must be valid, unambiguous YAML: {problem}"]
 
 
-def normalize_yaml_scalar(value: str) -> str:
-    value = strip_yaml_inline_comment(value)
-    if len(value) < 2:
-        return value
-    if value.startswith("'") and value.endswith("'"):
-        return value[1:-1].replace("''", "'")
-    if value.startswith('"') and value.endswith('"'):
-        try:
-            decoded = json.loads(value)
-        except json.JSONDecodeError:
-            return value
-        return decoded if isinstance(decoded, str) else value
-    return value
-
-
-def is_block_scalar(value: str) -> bool:
-    value = strip_yaml_inline_comment(value)
-    return re.fullmatch(r"[|>](?:[0-9][+-]?|[+-][0-9]?)?", value) is not None
-
-
-def block_scalar_lines(
-    entry: YamlEntry, source_lines: tuple[str, ...]
-) -> list[str]:
-    raw_lines: list[str] = []
-    for line in source_lines[entry.line.index + 1 :]:
-        stripped = line.lstrip(" ")
-        if stripped and len(line) - len(stripped) <= entry.indent:
-            break
-        raw_lines.append(line)
-
-    content_indents = [
-        len(line) - len(line.lstrip(" "))
-        for line in raw_lines
-        if line.strip()
-    ]
-    if not content_indents:
-        return []
-    content_indent = min(content_indents)
-    return [
-        line[content_indent:] if line.strip() else ""
-        for line in raw_lines
-    ]
-
-
-def fold_yaml_lines(lines: list[str]) -> str:
-    if not lines:
-        return ""
-    folded: list[str] = []
-    for index, line in enumerate(lines):
-        folded.append(line)
-        if index + 1 < len(lines):
-            next_line = lines[index + 1]
-            folded.append("\n" if not line or not next_line else " ")
-    return "".join(folded)
-
-
-def resolve_yaml_scalar(
-    entry: YamlEntry, source_lines: tuple[str, ...]
-) -> str:
-    marker = strip_yaml_inline_comment(entry.value)
-    if not is_block_scalar(marker):
-        return normalize_yaml_scalar(entry.value)
-
-    lines = block_scalar_lines(entry, source_lines)
-    value = (
-        "\n".join(lines)
-        if marker.startswith("|")
-        else fold_yaml_lines(lines)
-    )
-    if "-" in marker:
-        return value.rstrip("\n")
-    if "+" in marker:
-        return value + "\n"
-    return value.rstrip("\n") + "\n"
-
-
-def structural_yaml_lines(text: str) -> list[YamlLine]:
-    structural: list[YamlLine] = []
-    block_scalar_indent: int | None = None
-    for index, line in enumerate(text.splitlines()):
-        stripped = line.lstrip(" ")
-        indent = len(line) - len(stripped)
-        if block_scalar_indent is not None:
-            if not stripped or indent > block_scalar_indent:
-                continue
-            block_scalar_indent = None
-        if not stripped or stripped.startswith("#"):
-            continue
-        yaml_line = YamlLine(index=index, indent=indent, content=stripped)
-        structural.append(yaml_line)
-        if re.search(r":\s*[|>][0-9+-]*\s*(?:#.*)?$", stripped):
-            block_scalar_indent = (
-                indent + 2 if stripped.startswith("- ") else indent
-            )
-    return structural
-
-
-def parse_mapping(content: str) -> tuple[str, str] | None:
-    match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*", content)
-    if match is None:
-        return None
-    return match.group(1), match.group(2)
-
-
-def yaml_items(text: str) -> list[YamlItem]:
-    source_lines = tuple(text.splitlines())
-    structural = structural_yaml_lines(text)
+def yaml_items(document: object) -> list[YamlItem]:
     items: list[YamlItem] = []
-    for position, first_line in enumerate(structural):
-        if not first_line.content.startswith("- "):
-            continue
+    active_containers: set[int] = set()
 
-        body: list[tuple[YamlLine, int, str]] = [
-            (
-                first_line,
-                first_line.indent + 2,
-                first_line.content.removeprefix("- ").strip(),
-            )
-        ]
-        for line in structural[position + 1 :]:
-            if line.indent <= first_line.indent:
-                break
-            if not line.content.startswith("- "):
-                body.append((line, line.indent, line.content))
+    def visit(value: object) -> None:
+        if not isinstance(value, (dict, list)):
+            return
+        identity = id(value)
+        if identity in active_containers:
+            return
+        active_containers.add(identity)
+        if isinstance(value, dict):
+            items.append(YamlItem(mapping=value, start_index=len(items)))
+            for child in value.values():
+                visit(child)
+        else:
+            for child in value:
+                visit(child)
+        active_containers.remove(identity)
 
-        entries: list[YamlEntry] = []
-        ancestors: list[int] = []
-        for line, indent, content in body:
-            mapping = parse_mapping(content)
-            if mapping is None:
-                continue
-            while ancestors and entries[ancestors[-1]].indent >= indent:
-                ancestors.pop()
-            parent = ancestors[-1] if ancestors else None
-            key, value = mapping
-            entries.append(
-                YamlEntry(
-                    line=line,
-                    indent=indent,
-                    key=key,
-                    value=value,
-                    parent=parent,
-                )
-            )
-            ancestors.append(len(entries) - 1)
-        items.append(YamlItem(source_lines=source_lines, entries=tuple(entries)))
+    visit(document)
     return items
 
 
-def yaml_mapping_entries(text: str) -> list[YamlEntry]:
-    entries: list[YamlEntry] = []
-    ancestors: list[int] = []
-    for line in structural_yaml_lines(text):
-        content = line.content
-        indent = line.indent
-        if content.startswith("- "):
-            content = content.removeprefix("- ").strip()
-            indent += 2
-        mapping = parse_mapping(content)
-        if mapping is None:
-            continue
-        while ancestors and entries[ancestors[-1]].indent >= indent:
-            ancestors.pop()
-        parent = ancestors[-1] if ancestors else None
-        key, value = mapping
-        entries.append(
-            YamlEntry(
-                line=line,
-                indent=indent,
-                key=key,
-                value=value,
-                parent=parent,
-            )
-        )
-        ancestors.append(len(entries) - 1)
-    return entries
+def yaml_values_at(document: object, path: tuple[str, ...]) -> list[object]:
+    value = document
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            return []
+        value = value[key]
+    return [value]
 
 
-def yaml_values_at(text: str, path: tuple[str, ...]) -> list[str]:
-    entries = yaml_mapping_entries(text)
-    source_lines = tuple(text.splitlines())
-    values: list[str] = []
-    for index, entry in enumerate(entries):
-        keys: list[str] = []
-        cursor: int | None = index
-        while cursor is not None:
-            keys.append(entries[cursor].key)
-            cursor = entries[cursor].parent
-        if tuple(reversed(keys)) == path:
-            values.append(resolve_yaml_scalar(entry, source_lines))
-    return values
-
-
-def items_using(text: str, action: str) -> list[YamlItem]:
+def items_using(document: object, action: str) -> list[YamlItem]:
     return [
-        item for item in yaml_items(text) if item.direct_value("uses") == action
+        item
+        for item in yaml_items(document)
+        if item.direct_value("uses") == action
     ]
 
 
@@ -348,7 +178,16 @@ def check_codecov_upload_contract(root: Path) -> list[str]:
     if errors:
         return errors
 
-    action_items = yaml_items(action)
+    action_document, action_yaml_errors = load_yaml(action, action_path)
+    workflow_document, workflow_yaml_errors = load_yaml(
+        workflow, workflow_path
+    )
+    errors.extend(action_yaml_errors)
+    errors.extend(workflow_yaml_errors)
+    if errors:
+        return errors
+
+    action_items = yaml_items(action_document)
     validation_items = [
         item
         for item in action_items
@@ -365,7 +204,9 @@ def check_codecov_upload_contract(root: Path) -> list[str]:
     else:
         validation_step = validation_items[0]
 
-    upload_items = items_using(action, "codecov/codecov-action@v7")
+    upload_items = items_using(
+        action_document, "codecov/codecov-action@v7"
+    )
     if len(upload_items) != 1:
         errors.append(
             f"{action_path} must contain exactly one direct "
@@ -454,11 +295,15 @@ def check_codecov_upload_contract(root: Path) -> list[str]:
     )
     authority_path = root / action_path
     for path in [*workflow_files, *action_files]:
-        if path == authority_path:
-            continue
         candidate = path.read_text(encoding="utf-8")
         relative = path.relative_to(root).as_posix()
-        for item in yaml_items(candidate):
+        candidate_document, candidate_errors = load_yaml(candidate, relative)
+        errors.extend(candidate_errors)
+        if candidate_errors:
+            continue
+        if path == authority_path:
+            continue
+        for item in yaml_items(candidate_document):
             uses = item.direct_value("uses")
             if uses is not None and uses.startswith("codecov/codecov-action@"):
                 errors.append(
@@ -478,7 +323,7 @@ def check_codecov_upload_contract(root: Path) -> list[str]:
                 )
 
     local_uploads = items_using(
-        workflow, "./.github/actions/upload-codecov"
+        workflow_document, "./.github/actions/upload-codecov"
     )
     if len(local_uploads) != 6:
         errors.append(
@@ -503,11 +348,17 @@ def check_lighthouse_artifact_contract(root: Path) -> list[str]:
     workflow, errors = read_text(root, workflow_path)
     if errors:
         return errors
+    workflow_document, yaml_errors = load_yaml(workflow, workflow_path)
+    errors.extend(yaml_errors)
+    if errors:
+        return errors
 
     target = "site/.lighthouseci/"
     upload_items = [
         item
-        for item in items_using(workflow, "actions/upload-artifact@v7")
+        for item in items_using(
+            workflow_document, "actions/upload-artifact@v7"
+        )
         if item.child_value("with", "path") == target
     ]
     if len(upload_items) != 1:
@@ -548,6 +399,10 @@ def check_codeql_contract(root: Path) -> list[str]:
     workflow, errors = read_text(root, workflow_path)
     if errors:
         return errors
+    workflow_document, yaml_errors = load_yaml(workflow, workflow_path)
+    errors.extend(yaml_errors)
+    if errors:
+        return errors
 
     expected_languages = (
         "actions",
@@ -556,18 +411,16 @@ def check_codeql_contract(root: Path) -> list[str]:
         "rust",
     )
     language_values = yaml_values_at(
-        workflow,
+        workflow_document,
         ("jobs", "analyze", "strategy", "matrix", "language"),
     )
     actual_languages: tuple[str, ...] = ()
     if len(language_values) == 1:
         value = language_values[0]
-        if value.startswith("[") and value.endswith("]"):
-            actual_languages = tuple(
-                language.strip().strip("'\"")
-                for language in value[1:-1].split(",")
-                if language.strip()
-            )
+        if isinstance(value, list) and all(
+            isinstance(language, str) for language in value
+        ):
+            actual_languages = tuple(value)
     if actual_languages != expected_languages:
         errors.append(
             f"{workflow_path} must explicitly analyze "
@@ -575,7 +428,7 @@ def check_codeql_contract(root: Path) -> list[str]:
         )
 
     expected_paths = (
-        (("on", "push", "branches"), "[main]", "push to main"),
+        (("on", "push", "branches"), ["main"], "push to main"),
         (("on", "pull_request"), "", "pull requests"),
         (("on", "workflow_dispatch"), "", "manual dispatch"),
         (
@@ -599,15 +452,27 @@ def check_codeql_contract(root: Path) -> list[str]:
         ),
     )
     for path, expected, label in expected_paths:
-        if yaml_values_at(workflow, path) != [expected]:
+        if yaml_values_at(workflow_document, path) != [expected]:
             errors.append(f"{workflow_path} must configure active `{label}`")
-    if not yaml_values_at(workflow, ("on", "schedule", "cron")):
+    schedule = yaml_values_at(workflow_document, ("on", "schedule"))
+    if (
+        len(schedule) != 1
+        or not isinstance(schedule[0], list)
+        or not any(
+            isinstance(item, dict) and isinstance(item.get("cron"), str)
+            for item in schedule[0]
+        )
+    ):
         errors.append(f"{workflow_path} must retain a weekly `schedule`")
 
-    items = yaml_items(workflow)
-    checkout_steps = items_using(workflow, "actions/checkout@v7")
-    init_steps = items_using(workflow, "github/codeql-action/init@v4")
-    analyze_steps = items_using(workflow, "github/codeql-action/analyze@v4")
+    items = yaml_items(workflow_document)
+    checkout_steps = items_using(workflow_document, "actions/checkout@v7")
+    init_steps = items_using(
+        workflow_document, "github/codeql-action/init@v4"
+    )
+    analyze_steps = items_using(
+        workflow_document, "github/codeql-action/analyze@v4"
+    )
     rust_steps = [
         item
         for item in items
