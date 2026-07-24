@@ -1,0 +1,40 @@
+name: 'Setup Cargo & Just'
+description: 'Sets up Rust toolchain, rust-cache, and just'
+
+inputs:
+  toolchain:
+    description: 'Rust toolchain channel or version to install'
+    required: false
+    default: 'stable'
+  components:
+    description: 'Comma-separated list of toolchain components'
+    required: false
+    default: ''
+  targets:
+    description: 'Comma-separated list of target triples'
+    required: false
+    default: ''
+  enable-cache:
+    description: 'Whether to enable Swatinem/rust-cache'
+    required: false
+    default: 'true'
+  cache-prefix:
+    description: 'Prefix key for rust-cache'
+    required: false
+    default: 'v1-rust'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+
+    - if: ${{ inputs.enable-cache == 'true' }}
+      uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: ${{ inputs.cache-prefix }}
+
+    - uses: extractions/setup-just@v4

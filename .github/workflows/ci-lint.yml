@@ -1,0 +1,133 @@
+name: ci-lint
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: rustfmt
+          enable-cache: 'false'
+      - run: just fmt-check
+      - run: just arch
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: clippy
+      - run: just clippy
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2.1.1
+        with:
+          command: check bans licenses sources
+
+  machete:
+    name: unused deps
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@cargo-machete
+      - uses: extractions/setup-just@v4
+      - run: just machete
+
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install shfmt + actionlint
+        run: |
+          go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: lychee@0.24.2
+      - uses: extractions/setup-just@v4
+      - run: just shfmt-check
+      - run: just actionlint
+      - run: just links
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: extractions/setup-just@v4
+      - run: just msrv
+
+  notes-curated:
+    name: release notes curated
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: extractions/setup-just@v4
+      - run: just notes-curated
+
+  npm-gen:
+    name: npm package generator
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: extractions/setup-just@v4
+      - run: just npm-check
+
+  readme:
+    name: readme drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: extractions/setup-just@v4
+      - run: just gen-readme-check
+
+  comment-lint:
+    name: comment-lint (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install ast-grep
+        run: npm install -g @ast-grep/cli@0.44.1
+      - uses: extractions/setup-just@v4
+      - run: |
+          git fetch --quiet origin main
+          just comment-lint origin/main --github

@@ -1,0 +1,235 @@
+name: ci-tests
+
+on:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  windows-test:
+    name: windows-test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - run: just test
+        env:
+          NEXTEST_PROFILE: ci
+      - name: Upload test results to Codecov
+        if: always()
+        uses: codecov/codecov-action@v7
+        with:
+          files: target/nextest/ci/junit.xml
+          report-type: test_results
+          flags: windows
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  macos-test:
+    name: macos-test
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - run: just test
+        env:
+          NEXTEST_PROFILE: ci
+      - name: Upload test results to Codecov
+        if: always()
+        uses: codecov/codecov-action@v7
+        with:
+          files: target/nextest/ci/junit.xml
+          report-type: test_results
+          flags: macos
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Generate coverage + JUnit XML (single test run)
+        run: just coverage
+      - name: Assert coverage artifacts are non-empty (negative control)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in lcov.info target/nextest/ci/junit.xml; do
+            [ -s "$f" ] || { echo "::error::coverage produced no $f — a broken instrument must red the job, not silently upload nothing"; exit 1; }
+          done
+          echo "lcov.info=$(wc -c < lcov.info)B junit.xml=$(wc -c < target/nextest/ci/junit.xml)B"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          flags: unit
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload test results to Codecov
+        if: always()
+        uses: codecov/codecov-action@v7
+        with:
+          files: target/nextest/ci/junit.xml
+          report-type: test_results
+          flags: unit
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage-windows:
+    name: coverage-windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage + JUnit XML (single instrumented test run)
+        run: just coverage
+      - name: Assert coverage artifacts are non-empty (negative control)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in lcov.info target/nextest/ci/junit.xml; do
+            [ -s "$f" ] || { echo "::error::coverage produced no $f — a broken instrument must red the job, not silently upload nothing"; exit 1; }
+          done
+          echo "lcov.info=$(wc -c < lcov.info)B junit.xml=$(wc -c < target/nextest/ci/junit.xml)B"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          flags: windows
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage-macos:
+    name: coverage-macos
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage + JUnit XML (single instrumented test run)
+        run: just coverage
+      - name: Assert coverage artifacts are non-empty (negative control)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in lcov.info target/nextest/ci/junit.xml; do
+            [ -s "$f" ] || { echo "::error::coverage produced no $f — a broken instrument must red the job, not silently upload nothing"; exit 1; }
+          done
+          echo "lcov.info=$(wc -c < lcov.info)B junit.xml=$(wc -c < target/nextest/ci/junit.xml)B"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          flags: macos
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  snapshots:
+    name: snapshot hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-insta
+      - run: just snapshots
+
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+      - name: Build release binaries + examples
+        run: just build --release --bins --examples
+      - name: pixtuoid --help exits 0
+        run: ./target/release/pixtuoid --help
+      - name: pixtuoid-hook exits 0 with no socket
+        run: |
+          out=$(echo '{}' | ./target/release/pixtuoid-hook 2>&1)
+          test -z "$out"
+          echo "hook shim exited 0 silently (expected no-op with no socket)"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install ffmpeg
+        run: |
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          for attempt in 1 2 3; do
+            if sudo apt-get update "${apt_opts[@]}" \
+              && sudo apt-get install -y "${apt_opts[@]}" ffmpeg; then
+              ffmpeg -version
+              exit 0
+            fi
+            echo "ffmpeg install attempt $attempt failed; retrying in $((attempt * 15))s..." >&2
+            sleep "$((attempt * 15))"
+          done
+          echo "ffmpeg install failed after 3 attempts" >&2
+          exit 1
+      - name: Cache pip downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: pip-${{ runner.os }}-
+      - name: Set up Python virtual environment
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+      - name: Artifact-drift gate (README sections + all rendered stills)
+        run: just gen-check
+      - name: Upload gen-check diff overlays
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gen-check-diffs
+          path: target/gen-check-diff/
+          retention-days: 7
+          if-no-files-found: ignore

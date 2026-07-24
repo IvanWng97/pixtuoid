@@ -1,0 +1,123 @@
+name: ci-builds
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  wasm-check:
+    name: wasm-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          targets: wasm32-unknown-unknown
+      - run: just wasm-build
+      - run: just gen-wasm-check
+
+  hack:
+    name: feature combinations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+      - uses: taiki-e/install-action@cargo-hack
+      - run: just hack
+
+  windows-check:
+    name: windows-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: just check-windows
+
+  packaging-build:
+    name: packaging-build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+      - name: Install ALSA headers (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: cargo install --locked (both binaries, default features)
+        run: |
+          cargo install --locked --path crates/pixtuoid --root "${RUNNER_TEMP}/pkg"
+          cargo install --locked --path crates/pixtuoid-hook --root "${RUNNER_TEMP}/pkg"
+      - name: Replay the formula's install + test assertions
+        run: |
+          set -euo pipefail
+          BIN="${RUNNER_TEMP}/pkg/bin/pixtuoid"
+          export HOME="${RUNNER_TEMP}/fakehome"
+          mkdir -p "${HOME}"
+          out="${RUNNER_TEMP}/formula-test"
+          mkdir -p "$out"
+
+          "$BIN" --version                      > "$out/version"
+          "$BIN" man                            > "$out/man.roff"
+          "$BIN" completions bash               > "$out/completions.bash"
+          "$BIN" init-pack "${HOME}/pack"
+          "$BIN" validate-pack "${HOME}/pack"   > "$out/validate"
+          "$BIN" connect claude-code --json     > "$out/connect.json"
+
+          grep -qF "$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)" "$out/version"
+          grep -q '^\.TH' "$out/man.roff"
+          grep -q pixtuoid "$out/completions.bash"
+          grep -q 'OK: pack "skeleton"' "$out/validate"
+          grep -q pixtuoid-hook "${HOME}/.claude/settings.json"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == [{"id":"claude-code","outcome":"connected"}], "connect --json envelope drifted from the homebrew-core contract"' "$out/connect.json"
+
+  semver:
+    name: semver-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+      - uses: taiki-e/install-action@cargo-semver-checks
+      - run: just semver
+
+  api-surface:
+    name: api-surface
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - name: Install cargo-public-api (pinned to match the committed goldens)
+        run: cargo binstall -y cargo-public-api@0.52.0
+      - uses: extractions/setup-just@v4
+      - run: just api-surface-check
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+      - run: just doc-check
