@@ -34,9 +34,10 @@ jobs:
           fetch-depth: 0
       # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD
       # on Linux (#633) — alsa-sys's build script PANICS when pkg-config can't
-      # find them. ci.yml installs this in every Linux job; this workflow had
-      # none, so `just clippy` below would have failed on the FIRST tag after
-      # #633 — in the one gate that only ever runs at tag time.
+      # find them. The CI workflows install this in every Linux job that builds
+      # default features; this workflow had none, so `just clippy` below would
+      # have failed on the FIRST tag after #633 — in the one gate that only ever
+      # runs at tag time.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
@@ -69,7 +70,7 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}"
             exit 1
           fi
-      # Single-sourced through the justfile (same recipes as ci.yml + the hooks).
+      # Single-sourced through the justfile (same recipes as PR CI + the hooks).
       # Intentionally lighter than `just preflight` (which also runs lint + hack):
       # the tag comes from main, which already passed the full CI matrix — here we
       # re-verify fmt/clippy/tests against the exact tagged commit (`just test`
@@ -97,7 +98,7 @@ jobs:
             os: ubuntu-latest
             cross: true
           # aarch64 cross-links on the same x64 runner (Tier 1; VC ARM64 components preinstalled).
-          # windows-latest now the VS2026 migration has settled; unlike ci.yml's windows-test
+          # windows-latest now the VS2026 migration has settled; unlike ci-tests.yml's windows-test
           # this build is validated only at TAG time (release.yml doesn't run on PRs), so watch
           # the first tagged run after this and re-pin to a dated label if it regresses.
           - target: x86_64-pc-windows-msvc

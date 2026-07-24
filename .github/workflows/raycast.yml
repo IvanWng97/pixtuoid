@@ -36,7 +36,7 @@ jobs:
       # The --json contract types are GENERATED from the committed JSON Schemas, so
       # a producer change (a regenerated schema) that wasn't propagated to the TS
       # types fails here — drift can't slip through. (Each schema's own freshness vs
-      # its Rust struct is gated by the `*_schema_matches_the_committed_contract` tests in ci.yml.)
+      # its Rust struct is gated by the `*_schema_matches_the_committed_contract` tests in ci-tests.yml.)
       - name: contract types match the committed schemas
         run: npm run gen:contract && git diff --exit-code src/contract.ts src/contract-outcome.ts
       - run: npx tsc --noEmit

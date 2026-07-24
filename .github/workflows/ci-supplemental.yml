@@ -1,0 +1,23 @@
+name: ci-supplemental
+
+on:
+  workflow_call:
+
+jobs:
+  # Advisory by contract: findings are annotations and never enter ci-gate.
+  # Keeping the whole job supplemental also prevents checkout/npm/network
+  # failures from becoming a new protected requirement.
+  comment-lint:
+    name: comment-lint (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # origin/main is required to identify new PR lines
+      - name: Install ast-grep
+        run: npm install -g @ast-grep/cli@0.44.1
+      - uses: extractions/setup-just@v4
+      - run: |
+          git fetch --quiet origin main
+          just comment-lint origin/main --github
