@@ -141,7 +141,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
       issues: write
       pull-requests: write
     steps:
@@ -150,6 +149,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.design-review.outputs.head_sha }}
           PR_NUMBER: ${{ needs.design-review.outputs.number }}
+          REPOSITORY: ${{ github.repository }}
           REVIEW: ${{ needs.design-review.outputs.review }}
         run: |
           {
@@ -161,4 +161,8 @@ jobs:
             echo
             echo "<!-- gemini-design-review:$HEAD_SHA -->"
           } >"$RUNNER_TEMP/gemini-review.md"
-          gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/gemini-review.md"
+          # This least-privilege publisher deliberately has no checkout, so gh
+          # cannot infer the repository from local Git metadata.
+          gh pr comment "$PR_NUMBER" \
+            --repo "$REPOSITORY" \
+            --body-file "$RUNNER_TEMP/gemini-review.md"
