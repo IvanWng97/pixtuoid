@@ -33,17 +33,28 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # CodeQL's Rust no-build extractor uses rust-analyzer. Discovering the
-      # runner's active sysroot proved fail-open (the scan stayed green while
-      # 223/280 files had extraction errors), so pass every verified semantic
-      # input explicitly before CodeQL initializes.
+      # CodeQL's Rust no-build extractor embeds rust-analyzer, which can lag the
+      # runner's rolling stable toolchain. Use the workspace's declared MSRV as
+      # the compatible semantic floor and pass every verified input explicitly.
       - name: Prepare Rust semantic analysis
         if: ${{ matrix.language == 'rust' }}
         shell: bash
         run: |
           set -euo pipefail
-          rustup component add rust-src rust-analyzer --toolchain stable
-          rust_sysroot="$(rustup run stable rustc --print sysroot)"
+          workspace_msrv="$(
+            cargo metadata --no-deps --format-version 1 |
+              jq -er '
+                [.packages[].rust_version]
+                | select(length > 0 and all(.[]; . != null))
+                | unique
+                | select(length == 1)
+                | .[0]
+              '
+          )"
+          rustup toolchain install "$workspace_msrv" \
+            --profile minimal \
+            --component rust-src,rust-analyzer
+          rust_sysroot="$(rustup run "$workspace_msrv" rustc --print sysroot)"
           rust_source="$rust_sysroot/lib/rustlib/src/rust/library"
           proc_macro_server="$rust_sysroot/libexec/rust-analyzer-proc-macro-srv"
           test -s "$rust_source/std/src/lib.rs"
@@ -64,6 +75,46 @@ jobs:
           build-mode: none
 
       - name: Analyze
+        id: analyze
         uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
+
+      # The action can remain green when extractor diagnostics affect most
+      # files. Read CodeQL's own SARIF metrics and enforce GitHub's documented
+      # database-health boundary: diagnostics must not affect the majority.
+      - name: Verify Rust extraction health
+        if: ${{ matrix.language == 'rust' }}
+        shell: bash
+        env:
+          SARIF_DIR: ${{ steps.analyze.outputs.sarif-output }}
+        run: |
+          set -euo pipefail
+          read -r with_diagnostics without_diagnostics < <(
+            jq --slurp --exit-status --raw-output '
+              def metric($id):
+                [
+                  .[] | .runs[]? as $run
+                  | $run.properties.metricResults[]? as $metric
+                  | ($metric.rule.toolComponent.index // -1) as $component_index
+                  | ($metric.rule.index // -1) as $rule_index
+                  | select($component_index >= 0 and $rule_index >= 0)
+                  | $run.tool.extensions[$component_index].rules[$rule_index]
+                  | select(.id == $id)
+                  | $metric.value
+                ]
+                | if length == 1 then .[0]
+                  else error("expected exactly one CodeQL metric for \($id)")
+                  end;
+              [
+                metric("rust/summary/number-of-files-extracted-with-errors"),
+                metric("rust/summary/number-of-successfully-extracted-files")
+              ]
+              | @tsv
+            ' "$SARIF_DIR"/*.sarif
+          )
+          echo "Rust extraction: $without_diagnostics clean files; $with_diagnostics files with diagnostics"
+          if (( without_diagnostics <= 0 || with_diagnostics >= without_diagnostics )); then
+            echo "::error title=Unhealthy Rust CodeQL database::$with_diagnostics files have extraction diagnostics; only $without_diagnostics are clean."
+            exit 1
+          fi

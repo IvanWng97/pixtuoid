@@ -19,6 +19,14 @@ report_presence_step_name := "Require a generated report"
 upload_warning_step_name := "Surface advisory upload failure"
 codeql_workflow_path := ".github/workflows/codeql.yml"
 rust_setup_step_name := "Prepare Rust semantic analysis"
+rust_health_step_name := "Verify Rust extraction health"
+rust_matrix_condition := "${{ matrix.language == 'rust' }}"
+codeql_analyze_step_id := "analyze"
+codeql_sarif_output := "${{ steps.analyze.outputs.sarif-output }}"
+rust_diagnostics_metric := "rust/summary/number-of-files-extracted-with-errors"
+rust_clean_metric := "rust/summary/number-of-successfully-extracted-files"
+gemini_workflow_path := ".github/workflows/gemini-review.yml"
+gemini_review_step_name := "Run read-only Gemini design review"
 lighthouse_workflow_path := ".github/workflows/site.yml"
 pages_workflow_path := ".github/workflows/pages.yml"
 site_package_path := "site/package.json"
@@ -194,15 +202,43 @@ codeql_steps_using(action) := [entry |
 rust_setup_steps := [entry |
 	some index, step in codeql_steps
 	object.get(step, "name", "") == rust_setup_step_name
-	object.get(step, "if", "") == "${{ matrix.language == 'rust' }}"
+	object.get(step, "if", "") == rust_matrix_condition
 	run := object.get(step, "run", "")
 	is_string(run)
 	entry := {"index": index, "value": step, "run": run}
 ]
 
+rust_health_steps := [entry |
+	some index, step in codeql_steps
+	object.get(step, "name", "") == rust_health_step_name
+	object.get(step, "if", "") == rust_matrix_condition
+	run := object.get(step, "run", "")
+	is_string(run)
+	entry := {"index": index, "value": step, "run": run}
+]
+
+gemini := documents[gemini_workflow_path]
+gemini_job := gemini.jobs["design-review"]
+gemini_steps := object.get(gemini_job, "steps", [])
+gemini_review_steps := [step |
+	some step in gemini_steps
+	object.get(step, "name", "") == gemini_review_step_name
+]
+
 has_weekly_codeql_schedule if {
 	some schedule in codeql.on.schedule
 	schedule.cron == "29 11 * * 3"
+}
+
+deny contains msg if {
+	count(gemini_review_steps) != 1
+	msg := sprintf("%s must contain exactly one Gemini review step", [gemini_workflow_path])
+}
+
+deny contains msg if {
+	count(gemini_review_steps) == 1
+	object.get(gemini_review_steps[0], "continue-on-error", false) != false
+	msg := sprintf("%s must fail when Gemini produces no review", [gemini_workflow_path])
 }
 
 deny contains msg if {
@@ -523,8 +559,22 @@ deny contains msg if {
 deny contains msg if {
 	count(rust_setup_steps) == 1
 	run := rust_setup_steps[0].run
-	not contains(run, "rustup component add rust-src rust-analyzer --toolchain stable")
-	msg := sprintf("%s must install rust-src and rust-analyzer before CodeQL init", [codeql_workflow_path])
+	not contains(run, "cargo metadata --no-deps --format-version 1")
+	msg := sprintf("%s must derive one workspace MSRV with cargo metadata", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "rustup toolchain install \"$workspace_msrv\"")
+	msg := sprintf("%s must install the declared MSRV before CodeQL init", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "rustup run \"$workspace_msrv\" rustc --print sysroot")
+	msg := sprintf("%s must derive CodeQL's sysroot from the declared MSRV", [codeql_workflow_path])
 }
 
 deny contains msg if {
@@ -594,6 +644,43 @@ deny contains msg if {
 }
 
 deny contains msg if {
+	analyze_steps := codeql_steps_using("github/codeql-action/analyze@v4")
+	count(analyze_steps) == 1
+	object.get(analyze_steps[0].value, "id", "") != codeql_analyze_step_id
+	msg := sprintf("%s CodeQL analyze step must have id: %s", [codeql_workflow_path, codeql_analyze_step_id])
+}
+
+deny contains msg if {
+	count(rust_health_steps) != 1
+	msg := sprintf("%s must contain one Rust extraction-health gate", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_health_steps) == 1
+	object.get(rust_health_steps[0].value, "continue-on-error", false) != false
+	msg := sprintf("%s Rust extraction-health gate must fail the job", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_health_steps) == 1
+	env := object.get(rust_health_steps[0].value, "env", {})
+	object.get(env, "SARIF_DIR", "") != codeql_sarif_output
+	msg := sprintf("%s Rust extraction-health gate must read CodeQL's SARIF output", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_health_steps) == 1
+	not contains(rust_health_steps[0].run, rust_diagnostics_metric)
+	msg := sprintf("%s Rust extraction-health gate must read the diagnostics metric", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_health_steps) == 1
+	not contains(rust_health_steps[0].run, rust_clean_metric)
+	msg := sprintf("%s Rust extraction-health gate must read the clean-files metric", [codeql_workflow_path])
+}
+
+deny contains msg if {
 	checkout_steps := codeql_steps_using("actions/checkout@v7")
 	init_steps := codeql_steps_using("github/codeql-action/init@v4")
 	count(checkout_steps) == 1
@@ -608,4 +695,12 @@ deny contains msg if {
 	count(init_steps) == 1
 	rust_setup_steps[0].index >= init_steps[0].index
 	msg := sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	analyze_steps := codeql_steps_using("github/codeql-action/analyze@v4")
+	count(analyze_steps) == 1
+	count(rust_health_steps) == 1
+	analyze_steps[0].index >= rust_health_steps[0].index
+	msg := sprintf("%s must verify Rust extraction health after CodeQL analyze", [codeql_workflow_path])
 }

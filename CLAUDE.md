@@ -191,10 +191,13 @@ the yq + Conftest/OPA policy and real composite-action behavior tests under
 `just lint` and the CI hygiene job.
 That gate also pins the advanced CodeQL workflow: all four repository
 languages stay explicit, Rust stays on its only supported `none` build mode,
-and `rust-src` plus all Cargo targets are available before extraction. This is
-why CodeQL lives in [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)
-instead of GitHub default setup — default setup cannot prepare Rust's semantic
-inputs.
+and the no-build extractor receives `rust-src` plus the proc-macro server from
+the workspace's declared MSRV (not the runner's rolling stable toolchain).
+After analysis, CodeQL's own SARIF metrics fail the Rust job if extraction
+diagnostics affect at least as many files as were extracted cleanly. This is why
+CodeQL lives in [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)
+instead of GitHub default setup — default setup cannot prepare these semantic
+inputs or enforce database health.
 
 **Release:** `just bump X.Y.Z` rewrites every version number, drafts
 `release_notes()`, runs preflight, and commits on a release branch — it
@@ -245,7 +248,9 @@ repo-committed and won't exist on a fresh checkout or in a non-Claude tool.
    the default branch, and trusted collaborators can retrigger it with
    `@gemini-cli /review`. A successful Gemini result may supply that
    differentiated lens, but never replaces the canonical online review verdict
-   or the human merge.
+   or the human merge. "Advisory" describes its merge-gate role, not its check
+   conclusion: an API, quota, or empty-review failure stays red instead of
+   masquerading as a successful review.
    See "Things NOT to do" and the running order under "Where to look". **A human
    merges.**
 9. **Wrap** — retro; record durable lessons.

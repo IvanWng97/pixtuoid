@@ -86,6 +86,54 @@ test_codeql_step_selection_preserves_order if {
 	analyze[0].index == 2
 }
 
+test_codeql_rust_setup_cannot_use_rolling_stable if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"name": rust_setup_step_name,
+			"if": rust_matrix_condition,
+			"run": "rustup component add rust-src rust-analyzer --toolchain stable",
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must derive one workspace MSRV with cargo metadata", [codeql_workflow_path]) in violations
+}
+
+test_codeql_extraction_health_cannot_be_masked_as_success if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"name": rust_health_step_name,
+			"if": rust_matrix_condition,
+			"continue-on-error": true,
+			"run": "health",
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Rust extraction-health gate must fail the job", [codeql_workflow_path]) in violations
+}
+
+test_codeql_analyze_must_expose_sarif_output if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{"uses": "github/codeql-action/analyze@v4"}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s CodeQL analyze step must have id: analyze", [codeql_workflow_path]) in violations
+}
+
+test_gemini_review_cannot_be_masked_as_success if {
+	fixture := {"documents": [{
+		"path": gemini_workflow_path,
+		"contents": {"jobs": {"design-review": {"steps": [{
+			"name": gemini_review_step_name,
+			"continue-on-error": true,
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must fail when Gemini produces no review", [gemini_workflow_path]) in violations
+}
+
 test_report_presence_check_is_required if {
 	fixture := {"documents": [{
 		"path": codecov_authority_path,
@@ -249,12 +297,14 @@ test_missing_codeql_semantic_inputs_are_rejected if {
 		"path": codeql_workflow_path,
 		"contents": {"jobs": {"analyze": {"steps": [{
 			"name": rust_setup_step_name,
-			"if": "${{ matrix.language == 'rust' }}",
+			"if": rust_matrix_condition,
 			"run": "rustup component add rust-src --toolchain stable\ntest -s \"$rust_source/std/src/lib.rs\"\n",
 		}]}}},
 	}]}
 	violations := deny with input as fixture
-	sprintf("%s must install rust-src and rust-analyzer before CodeQL init", [codeql_workflow_path]) in violations
+	sprintf("%s must derive one workspace MSRV with cargo metadata", [codeql_workflow_path]) in violations
+	sprintf("%s must install the declared MSRV before CodeQL init", [codeql_workflow_path]) in violations
+	sprintf("%s must derive CodeQL's sysroot from the declared MSRV", [codeql_workflow_path]) in violations
 	sprintf("%s must verify the sysroot proc-macro server before CodeQL init", [codeql_workflow_path]) in violations
 	sprintf("%s must pass the verified sysroot to the Rust extractor", [codeql_workflow_path]) in violations
 	sprintf("%s must pass the verified rust-src path to the Rust extractor", [codeql_workflow_path]) in violations
