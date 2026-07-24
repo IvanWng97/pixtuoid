@@ -50,18 +50,14 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - run: just check-windows
 
-  packaging-build:
-    name: packaging-build (${{ matrix.os }})
+  packaging-linux:
+    name: packaging-build (ubuntu-latest)
     # This is the only clean `cargo install --locked`, default-features build on
     # both Homebrew bottle platforms. It catches stale lockfiles and new system
     # dependencies before an external autobump does. The known ALSA formula gap
     # remains tracked in #731; installing its headers here proves the source
     # build while release handling owns the formula dependency.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-14]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     # Two cold release installs use cargo-install target dirs, so the shared
     # cache can only partially reduce this job.
     timeout-minutes: 45
@@ -69,44 +65,15 @@ jobs:
       - uses: actions/checkout@v7
       # Packaging does not invoke just, so keep its setup narrower than the
       # shared Rust+just action while retaining the same cache namespace.
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: v1-rust
-      - name: Install ALSA headers (Linux only)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - name: cargo install --locked (both binaries, default features)
-        run: |
-          cargo install --locked --path crates/pixtuoid --root "${RUNNER_TEMP}/pkg"
-          cargo install --locked --path crates/pixtuoid-hook --root "${RUNNER_TEMP}/pkg"
-      - name: Replay the formula's install + test assertions
-        run: |
-          # Capture before grep: pipefail must expose a crashing producer, while
-          # grep -q on a live producer can induce EPIPE (notably on macOS).
-          set -euo pipefail
-          # Resolve the binary before isolating HOME. `connect` writes config,
-          # and must never touch the runner user's real home directory.
-          BIN="${RUNNER_TEMP}/pkg/bin/pixtuoid"
-          export HOME="${RUNNER_TEMP}/fakehome"
-          mkdir -p "${HOME}"
-          out="${RUNNER_TEMP}/formula-test"
-          mkdir -p "$out"
+      - uses: ./.github/actions/packaging-build
 
-          "$BIN" --version                      > "$out/version"
-          "$BIN" man                            > "$out/man.roff"
-          "$BIN" completions bash               > "$out/completions.bash"
-          "$BIN" init-pack "${HOME}/pack"
-          "$BIN" validate-pack "${HOME}/pack"   > "$out/validate"
-          "$BIN" connect claude-code --json     > "$out/connect.json"
-
-          # Exit zero alone is not the formula's version-content assertion.
-          grep -qF "$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)" "$out/version"
-          grep -q '^\.TH' "$out/man.roff"
-          grep -q pixtuoid "$out/completions.bash"
-          grep -q 'OK: pack "skeleton"' "$out/validate"
-          grep -q pixtuoid-hook "${HOME}/.claude/settings.json"
-          python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == [{"id":"claude-code","outcome":"connected"}], "connect --json envelope drifted from the homebrew-core contract"' "$out/connect.json"
+  packaging-macos:
+    name: packaging-build (macos-14)
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/packaging-build
 
   semver:
     name: semver-checks
@@ -123,7 +90,7 @@ jobs:
     # Keep the protected gate's membership explicit; GitHub otherwise reports
     # a reusable workflow successful even after an unreferenced job is removed.
     if: ${{ always() }}
-    needs: [wasm-check, hack, windows-check, packaging-build, semver]
+    needs: [wasm-check, hack, windows-check, packaging-linux, packaging-macos, semver]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
