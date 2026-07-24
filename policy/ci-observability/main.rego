@@ -530,7 +530,7 @@ deny contains msg if {
 deny contains msg if {
 	count(rust_setup_steps) == 1
 	run := rust_setup_steps[0].run
-	not contains(run, "test -s \"$rust_source\"")
+	not contains(run, "test -s \"$rust_source/std/src/lib.rs\"")
 	msg := sprintf("%s must verify rust-src before CodeQL init", [codeql_workflow_path])
 }
 
@@ -539,6 +539,27 @@ deny contains msg if {
 	run := rust_setup_steps[0].run
 	not contains(run, "test -x \"$proc_macro_server\"")
 	msg := sprintf("%s must verify the sysroot proc-macro server before CodeQL init", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "CODEQL_EXTRACTOR_RUST_OPTION_SYSROOT=$rust_sysroot")
+	msg := sprintf("%s must pass the verified sysroot to the Rust extractor", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "CODEQL_EXTRACTOR_RUST_OPTION_SYSROOT_SRC=$rust_source")
+	msg := sprintf("%s must pass the verified rust-src path to the Rust extractor", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "CODEQL_EXTRACTOR_RUST_OPTION_PROC_MACRO_SERVER=$proc_macro_server")
+	msg := sprintf("%s must pass the verified proc-macro server to the Rust extractor", [codeql_workflow_path])
 }
 
 deny contains msg if {

@@ -98,8 +98,15 @@ rustup_calls="$(<"$rustup_log")"
 [[ "$rustup_calls" == *"component add rust-src rust-analyzer --toolchain stable"* ]] ||
     fail "Rust semantic-input setup did not install rust-src and rust-analyzer"
 github_env_content="$(<"$github_env")"
-[[ "$github_env_content" == "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=true" ]] ||
-    fail "Rust semantic-input setup did not enable all Cargo targets"
+expected_github_env="$(
+    printf '%s\n' \
+        "CODEQL_EXTRACTOR_RUST_OPTION_SYSROOT=$fake_sysroot" \
+        "CODEQL_EXTRACTOR_RUST_OPTION_SYSROOT_SRC=$fake_sysroot/lib/rustlib/src/rust/library" \
+        "CODEQL_EXTRACTOR_RUST_OPTION_PROC_MACRO_SERVER=$fake_sysroot/libexec/rust-analyzer-proc-macro-srv" \
+        "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=true"
+)"
+[[ "$github_env_content" == "$expected_github_env" ]] ||
+    fail "Rust semantic-input setup did not pass its verified sysroot, source, proc-macro server, and Cargo targets to CodeQL"
 
 if PATH="$fake_bin:$PATH" \
     RUSTUP_LOG="$rustup_log" \

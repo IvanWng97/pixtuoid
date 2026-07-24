@@ -244,18 +244,21 @@ test_codeql_language_set_is_exact if {
 	sprintf("%s must analyze actions, JavaScript/TypeScript, Python, and Rust", [codeql_workflow_path]) in violations
 }
 
-test_missing_codeql_proc_macro_server_is_rejected if {
+test_missing_codeql_semantic_inputs_are_rejected if {
 	fixture := {"documents": [{
 		"path": codeql_workflow_path,
 		"contents": {"jobs": {"analyze": {"steps": [{
 			"name": rust_setup_step_name,
 			"if": "${{ matrix.language == 'rust' }}",
-			"run": "rustup component add rust-src --toolchain stable\ntest -s \"$rust_source\"\n",
+			"run": "rustup component add rust-src --toolchain stable\ntest -s \"$rust_source/std/src/lib.rs\"\n",
 		}]}}},
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s must install rust-src and rust-analyzer before CodeQL init", [codeql_workflow_path]) in violations
 	sprintf("%s must verify the sysroot proc-macro server before CodeQL init", [codeql_workflow_path]) in violations
+	sprintf("%s must pass the verified sysroot to the Rust extractor", [codeql_workflow_path]) in violations
+	sprintf("%s must pass the verified rust-src path to the Rust extractor", [codeql_workflow_path]) in violations
+	sprintf("%s must pass the verified proc-macro server to the Rust extractor", [codeql_workflow_path]) in violations
 }
 
 test_codecov_flags_forwarding_is_pinned if {
