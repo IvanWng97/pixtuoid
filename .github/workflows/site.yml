@@ -7,7 +7,7 @@ on:
   # this workflow — auto-fixable + caught on every PR (everything lands via PR).
   # site/ also renders ../Cargo.toml + ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING,KNOWLEDGE-ENGINEERING,PARALLEL-DELIVERY}.md
   # (the mermaid block renders to an inline SVG at build). README drift from
-  # site/src/*.json is gated by ci.yml's `readme` job — so README.md is NOT here.
+  # site/src/*.json is gated by ci-lint.yml's `readme` job — so README.md is NOT here.
   pull_request:
     paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
 

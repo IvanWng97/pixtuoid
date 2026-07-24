@@ -27,7 +27,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: v1-rust # see ci.yml's clippy-job note
+          prefix-key: v1-rust # match setup-cargo-just's default cache namespace
       - uses: taiki-e/install-action@cargo-mutants
       - uses: taiki-e/install-action@cargo-nextest
       - uses: extractions/setup-just@v4

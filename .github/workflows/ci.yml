@@ -28,4 +28,22 @@ jobs:
   tests:
     name: Test Suite & Coverage
     uses: ./.github/workflows/ci-tests.yml
-    secrets: inherit
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  gate:
+    name: ci-gate
+    if: ${{ always() }}
+    needs: [lint, builds, tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every CI group to pass
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          BUILDS_RESULT: ${{ needs.builds.result }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+        run: |
+          if [[ "$LINT_RESULT" != success || "$BUILDS_RESULT" != success || "$TESTS_RESULT" != success ]]; then
+            echo "::error::CI group failed: lint=$LINT_RESULT builds=$BUILDS_RESULT tests=$TESTS_RESULT"
+            exit 1
+          fi
