@@ -188,12 +188,32 @@ class CiObservabilityContractTests(unittest.TestCase):
             "codecov/codecov-action@v7",
             "'codecov/codecov-action@v7'",
             '"codecov/codecov-action@v7"',
+            "'codecov/codecov-action@v7' # upload",
+            '"codecov/codecov-action@v7" # upload',
         ):
             with self.subTest(action=action):
                 files = good_files()
                 files[".github/workflows/rogue.yml"] = textwrap.dedent(
                     f"""\
                     - uses: {action}
+                      with:
+                        report-type: test_results
+                    """
+                )
+                result = run_checker(files)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("centralized", result.stderr)
+                self.assertIn("report-type", result.stderr)
+
+    def test_rejects_block_scalar_codecov_use(self) -> None:
+        for marker in (">-", "|-"):
+            with self.subTest(marker=marker):
+                files = good_files()
+                files[".github/workflows/rogue.yml"] = textwrap.dedent(
+                    f"""\
+                    - uses: {marker}
+                        codecov/codecov-action@v7
                       with:
                         report-type: test_results
                     """

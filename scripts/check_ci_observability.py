@@ -38,7 +38,7 @@ class YamlItem:
 
     def direct_values(self, key: str) -> list[str]:
         return [
-            normalize_yaml_scalar(entry.value)
+            resolve_yaml_scalar(entry, self.source_lines)
             for entry in self.entries
             if entry.parent is None and entry.key == key
         ]
@@ -54,7 +54,7 @@ class YamlItem:
             if entry.parent is None and entry.key == parent_key
         }
         return [
-            normalize_yaml_scalar(entry.value)
+            resolve_yaml_scalar(entry, self.source_lines)
             for entry in self.entries
             if entry.parent in parent_indexes and entry.key == key
         ]
@@ -69,19 +69,11 @@ class YamlItem:
             for entry in self.entries
             if entry.parent is None
             and entry.key == key
-            and re.fullmatch(r"[|>][0-9+-]*", entry.value)
+            and is_block_scalar(entry.value)
         ]
         if len(candidates) != 1:
             return ""
-
-        entry = candidates[0]
-        content: list[str] = []
-        for line in self.source_lines[entry.line.index + 1 :]:
-            stripped = line.lstrip(" ")
-            if stripped and len(line) - len(stripped) <= entry.indent:
-                break
-            content.append(line)
-        return "\n".join(content)
+        return resolve_yaml_scalar(candidates[0], self.source_lines)
 
 
 def read_text(root: Path, relative: str) -> tuple[str, list[str]]:
@@ -106,7 +98,36 @@ def active_code_lines(text: str) -> list[str]:
     return active_lines(without_block_comments, ("//", "#"))
 
 
+def strip_yaml_inline_comment(value: str) -> str:
+    quote: str | None = None
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if quote == "'":
+            if character == "'" and index + 1 < len(value):
+                if value[index + 1] == "'":
+                    index += 2
+                    continue
+            if character == "'":
+                quote = None
+        elif quote == '"':
+            if character == "\\":
+                index += 2
+                continue
+            if character == '"':
+                quote = None
+        elif character in ("'", '"'):
+            quote = character
+        elif character == "#" and (
+            index == 0 or value[index - 1].isspace()
+        ):
+            return value[:index].rstrip()
+        index += 1
+    return value
+
+
 def normalize_yaml_scalar(value: str) -> str:
+    value = strip_yaml_inline_comment(value)
     if len(value) < 2:
         return value
     if value.startswith("'") and value.endswith("'"):
@@ -118,6 +139,67 @@ def normalize_yaml_scalar(value: str) -> str:
             return value
         return decoded if isinstance(decoded, str) else value
     return value
+
+
+def is_block_scalar(value: str) -> bool:
+    value = strip_yaml_inline_comment(value)
+    return re.fullmatch(r"[|>](?:[0-9][+-]?|[+-][0-9]?)?", value) is not None
+
+
+def block_scalar_lines(
+    entry: YamlEntry, source_lines: tuple[str, ...]
+) -> list[str]:
+    raw_lines: list[str] = []
+    for line in source_lines[entry.line.index + 1 :]:
+        stripped = line.lstrip(" ")
+        if stripped and len(line) - len(stripped) <= entry.indent:
+            break
+        raw_lines.append(line)
+
+    content_indents = [
+        len(line) - len(line.lstrip(" "))
+        for line in raw_lines
+        if line.strip()
+    ]
+    if not content_indents:
+        return []
+    content_indent = min(content_indents)
+    return [
+        line[content_indent:] if line.strip() else ""
+        for line in raw_lines
+    ]
+
+
+def fold_yaml_lines(lines: list[str]) -> str:
+    if not lines:
+        return ""
+    folded: list[str] = []
+    for index, line in enumerate(lines):
+        folded.append(line)
+        if index + 1 < len(lines):
+            next_line = lines[index + 1]
+            folded.append("\n" if not line or not next_line else " ")
+    return "".join(folded)
+
+
+def resolve_yaml_scalar(
+    entry: YamlEntry, source_lines: tuple[str, ...]
+) -> str:
+    marker = strip_yaml_inline_comment(entry.value)
+    if not is_block_scalar(marker):
+        return normalize_yaml_scalar(entry.value)
+
+    lines = block_scalar_lines(entry, source_lines)
+    value = (
+        "\n".join(lines)
+        if marker.startswith("|")
+        else fold_yaml_lines(lines)
+    )
+    if "-" in marker:
+        return value.rstrip("\n")
+    if "+" in marker:
+        return value + "\n"
+    return value.rstrip("\n") + "\n"
 
 
 def structural_yaml_lines(text: str) -> list[YamlLine]:
@@ -135,7 +217,9 @@ def structural_yaml_lines(text: str) -> list[YamlLine]:
         yaml_line = YamlLine(index=index, indent=indent, content=stripped)
         structural.append(yaml_line)
         if re.search(r":\s*[|>][0-9+-]*\s*(?:#.*)?$", stripped):
-            block_scalar_indent = indent
+            block_scalar_indent = (
+                indent + 2 if stripped.startswith("- ") else indent
+            )
     return structural
 
 
@@ -222,6 +306,7 @@ def yaml_mapping_entries(text: str) -> list[YamlEntry]:
 
 def yaml_values_at(text: str, path: tuple[str, ...]) -> list[str]:
     entries = yaml_mapping_entries(text)
+    source_lines = tuple(text.splitlines())
     values: list[str] = []
     for index, entry in enumerate(entries):
         keys: list[str] = []
@@ -230,7 +315,7 @@ def yaml_values_at(text: str, path: tuple[str, ...]) -> list[str]:
             keys.append(entries[cursor].key)
             cursor = entries[cursor].parent
         if tuple(reversed(keys)) == path:
-            values.append(normalize_yaml_scalar(entry.value))
+            values.append(resolve_yaml_scalar(entry, source_lines))
     return values
 
 
