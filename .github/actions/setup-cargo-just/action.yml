@@ -2,10 +2,6 @@ name: 'Setup Cargo & Just'
 description: 'Sets up Rust toolchain, rust-cache, and just'
 
 inputs:
-  toolchain:
-    description: 'Rust toolchain channel or version to install'
-    required: false
-    default: 'stable'
   components:
     description: 'Comma-separated list of toolchain components'
     required: false
@@ -18,23 +14,21 @@ inputs:
     description: 'Whether to enable Swatinem/rust-cache'
     required: false
     default: 'true'
-  cache-prefix:
-    description: 'Prefix key for rust-cache'
-    required: false
-    default: 'v1-rust'
 
 runs:
   using: 'composite'
   steps:
     - uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
+    # v1 invalidates caches created before the workspace's dev-profile
+    # fingerprints changed. Keep this fixed so every Rust job shares one cache
+    # namespace and a future invalidation is a deliberate repository-wide edit.
     - if: ${{ inputs.enable-cache == 'true' }}
       uses: Swatinem/rust-cache@v2
       with:
-        prefix-key: ${{ inputs.cache-prefix }}
+        prefix-key: v1-rust
 
     - uses: extractions/setup-just@v4

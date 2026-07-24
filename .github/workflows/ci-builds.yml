@@ -8,6 +8,9 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # `just hack` checks the host graph only. This job catches target-gated deps
+  # and native calls that escape the core `native` boundary. It intentionally
+  # does not byte-compare wasm output because latest-stable builds can drift.
   wasm-check:
     name: wasm-check
     runs-on: ubuntu-latest
@@ -17,7 +20,10 @@ jobs:
       - uses: ./.github/actions/setup-cargo-just
         with:
           targets: wasm32-unknown-unknown
+      # gen-wasm uses this same build recipe, preventing local/CI command drift.
       - run: just wasm-build
+      # The committed artifact size cap is deterministic even when rebuild bytes
+      # are not, so it remains safe to gate in CI.
       - run: just gen-wasm-check
 
   hack:
@@ -26,6 +32,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # The default-on audio feature must compile through ALSA on Linux.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: ./.github/actions/setup-cargo-just
@@ -45,15 +52,27 @@ jobs:
 
   packaging-build:
     name: packaging-build (${{ matrix.os }})
+    # This is the only clean `cargo install --locked`, default-features build on
+    # both Homebrew bottle platforms. It catches stale lockfiles and new system
+    # dependencies before an external autobump does. The known ALSA formula gap
+    # remains tracked in #731; installing its headers here proves the source
+    # build while release handling owns the formula dependency.
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-14]
     runs-on: ${{ matrix.os }}
+    # Two cold release installs use cargo-install target dirs, so the shared
+    # cache can only partially reduce this job.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-cargo-just
+      # Packaging does not invoke just, so keep its setup narrower than the
+      # shared Rust+just action while retaining the same cache namespace.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust
       - name: Install ALSA headers (Linux only)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -63,7 +82,11 @@ jobs:
           cargo install --locked --path crates/pixtuoid-hook --root "${RUNNER_TEMP}/pkg"
       - name: Replay the formula's install + test assertions
         run: |
+          # Capture before grep: pipefail must expose a crashing producer, while
+          # grep -q on a live producer can induce EPIPE (notably on macOS).
           set -euo pipefail
+          # Resolve the binary before isolating HOME. `connect` writes config,
+          # and must never touch the runner user's real home directory.
           BIN="${RUNNER_TEMP}/pkg/bin/pixtuoid"
           export HOME="${RUNNER_TEMP}/fakehome"
           mkdir -p "${HOME}"
@@ -77,6 +100,7 @@ jobs:
           "$BIN" validate-pack "${HOME}/pack"   > "$out/validate"
           "$BIN" connect claude-code --json     > "$out/connect.json"
 
+          # Exit zero alone is not the formula's version-content assertion.
           grep -qF "$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)" "$out/version"
           grep -q '^\.TH' "$out/man.roff"
           grep -q pixtuoid "$out/completions.bash"
@@ -94,30 +118,21 @@ jobs:
       - uses: taiki-e/install-action@cargo-semver-checks
       - run: just semver
 
-  api-surface:
-    name: api-surface
+  required:
+    name: required-build-jobs
+    # Keep the protected gate's membership explicit; GitHub otherwise reports
+    # a reusable workflow successful even after an unreferenced job is removed.
+    if: ${{ always() }}
+    needs: [wasm-check, hack, windows-check, packaging-build, semver]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: v1-rust
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-binstall
-      - name: Install cargo-public-api (pinned to match the committed goldens)
-        run: cargo binstall -y cargo-public-api@0.52.0
-      - uses: extractions/setup-just@v4
-      - run: just api-surface-check
-
-  docs:
-    name: docs
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - uses: ./.github/actions/setup-cargo-just
-      - run: just doc-check
+      - name: Require every build job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failures="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
+          if [[ -n "$failures" ]]; then
+            echo "::error::Required build job failed: ${failures//$'\n'/, }"
+            exit 1
+          fi

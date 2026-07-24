@@ -27,6 +27,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      # The default-on audio feature compiles through ALSA on Linux; no test
+      # opens a device because runtime audio is behind the AudioSink seam.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: ./.github/actions/setup-cargo-just
@@ -40,8 +42,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # Pin the patch release: floating v2 briefly changed argument handling.
       - uses: EmbarkStudios/cargo-deny-action@v2.1.1
         with:
+          # Advisories run daily in audit.yml. Keep this list synchronized with
+          # the justfile `deny` recipe.
           command: check bans licenses sources
 
   machete:
@@ -50,6 +55,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # cargo-machete parses manifests and does not need a Rust toolchain.
       - uses: taiki-e/install-action@cargo-machete
       - uses: extractions/setup-just@v4
       - run: just machete
@@ -60,6 +66,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # One lightweight job owns the non-Rust hygiene tools. Go is preinstalled
+      # on the runner; lychee is installed as a pinned prebuilt binary.
       - name: Install shfmt + actionlint
         run: |
           go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
@@ -79,8 +87,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # The default-on audio feature must compile through ALSA on Linux.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # The MSRV recipe reads rust-version and installs that exact toolchain.
+      # rust-cache would key the runner's stable compiler, so a cold build is
+      # the honest compatibility gate.
       - uses: extractions/setup-just@v4
       - run: just msrv
 
@@ -90,6 +102,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # A grep-only guard against publishing placeholder release notes.
       - uses: extractions/setup-just@v4
       - run: just notes-curated
 
@@ -99,6 +112,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # Exercise the pure-Node generator before release.yml uses it to publish.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -111,23 +125,29 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # Pure node:builtins, with no npm install. This runs on every PR rather
+      # than in the path-filtered site workflow so it can be required safely.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: extractions/setup-just@v4
       - run: just gen-readme-check
 
-  comment-lint:
-    name: comment-lint (advisory)
+  required:
+    name: required-lint-jobs
+    # This explicit manifest prevents a nested job deletion or rename from
+    # silently shrinking the single protected ci-gate.
+    if: ${{ always() }}
+    needs: [fmt, clippy, deny, machete, hygiene, msrv, notes-curated, npm-gen, readme]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Install ast-grep
-        run: npm install -g @ast-grep/cli@0.44.1
-      - uses: extractions/setup-just@v4
-      - run: |
-          git fetch --quiet origin main
-          just comment-lint origin/main --github
+      - name: Require every lint job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failures="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
+          if [[ -n "$failures" ]]; then
+            echo "::error::Required lint job failed: ${failures//$'\n'/, }"
+            exit 1
+          fi

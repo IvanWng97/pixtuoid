@@ -1,0 +1,61 @@
+name: ci-supplemental
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # cargo-public-api complements semver: one classifies compatibility, while
+  # this golden shows the exact public surface change. rustdoc JSON is nightly
+  # only, so the just recipe owns that pin; this job pins the comparison tool.
+  api-surface:
+    name: api-surface
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - name: Install cargo-public-api (pinned to match the committed goldens)
+        run: cargo binstall -y cargo-public-api@0.52.0
+      - uses: extractions/setup-just@v4
+      - run: just api-surface-check
+
+  # rustdoc warnings and doctests are invisible to clippy and nextest, so this
+  # is a distinct rendering/contract check on the stable toolchain.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # cargo doc and doctests compile the default-on audio feature on Linux.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+      - run: just doc-check
+
+  # Advisory by contract: findings are annotations and never enter ci-gate.
+  # Keeping the whole job supplemental also prevents checkout/npm/network
+  # failures from becoming a new protected requirement.
+  comment-lint:
+    name: comment-lint (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # origin/main is required to identify new PR lines
+      - name: Install ast-grep
+        run: npm install -g @ast-grep/cli@0.44.1
+      - uses: extractions/setup-just@v4
+      - run: |
+          git fetch --quiet origin main
+          just comment-lint origin/main --github
