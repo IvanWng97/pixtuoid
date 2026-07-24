@@ -140,7 +140,6 @@ jobs:
         if: >
           steps.pr.outputs.reviewable == 'true' &&
           steps.gemini.outcome == 'success'
-        id: validate
         env:
           REVIEW: ${{ steps.gemini.outputs.summary }}
         run: |
@@ -153,9 +152,7 @@ jobs:
       - name: Record review failure
         if: >
           failure() &&
-          steps.pr.outputs.reviewable == 'true' &&
-          (steps.gemini.outcome == 'failure' ||
-            steps.validate.outcome == 'failure')
+          steps.pr.outputs.reviewable == 'true'
         run: >
           echo "::warning::Gemini produced no usable review; this advisory check
           remains failed."

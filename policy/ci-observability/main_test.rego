@@ -147,12 +147,25 @@ test_gemini_nonempty_review_gate_cannot_be_masked_as_success if {
 	fixture := {"documents": [{
 		"path": gemini_workflow_path,
 		"contents": {"jobs": {"design-review": {"steps": [{
-			"name": "Require a non-empty Gemini review",
+			"name": gemini_validation_step_name,
 			"continue-on-error": true,
 		}]}}},
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s non-empty Gemini review gate must fail the job", [gemini_workflow_path]) in violations
+}
+
+test_gemini_nonempty_review_gate_reads_the_action_summary if {
+	fixture := {"documents": [{
+		"path": gemini_workflow_path,
+		"contents": {"jobs": {"design-review": {"steps": [{
+			"name": gemini_validation_step_name,
+			"if": sprintf("%s && %s", [gemini_reviewable_condition, gemini_success_condition]),
+			"env": {"REVIEW": "${{ steps.unrelated.outputs.summary }}"},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s non-empty Gemini review gate must validate the action summary", [gemini_workflow_path]) in violations
 }
 
 test_gemini_failure_notice_uses_a_status_check_function if {
@@ -167,16 +180,29 @@ test_gemini_failure_notice_uses_a_status_check_function if {
 	sprintf("%s Gemini failure notice must run after a failed review step", [gemini_workflow_path]) in violations
 }
 
-test_gemini_failure_notice_covers_empty_review if {
+test_gemini_failure_notice_stays_scoped_to_reviewable_failures if {
 	fixture := {"documents": [{
 		"path": gemini_workflow_path,
 		"contents": {"jobs": {"design-review": {"steps": [{
 			"name": gemini_failure_step_name,
-			"if": "failure() && steps.gemini.outcome == 'failure'",
+			"if": "failure()",
 		}]}}},
 	}]}
 	violations := deny with input as fixture
-	sprintf("%s Gemini failure notice must cover action and output-validation failures", [gemini_workflow_path]) in violations
+	sprintf("%s Gemini failure notice must remain scoped to reviewable failures", [gemini_workflow_path]) in violations
+}
+
+test_gemini_review_validation_and_notice_order_is_required if {
+	fixture := {"documents": [{
+		"path": gemini_workflow_path,
+		"contents": {"jobs": {"design-review": {"steps": [
+			{"name": gemini_validation_step_name},
+			{"name": gemini_review_step_name},
+			{"name": gemini_failure_step_name},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must review, validate, then report failures in that order", [gemini_workflow_path]) in violations
 }
 
 test_report_presence_check_is_required if {

@@ -29,6 +29,9 @@ gemini_workflow_path := ".github/workflows/gemini-review.yml"
 gemini_review_step_name := "Run read-only Gemini design review"
 gemini_validation_step_name := "Require a non-empty Gemini review"
 gemini_failure_step_name := "Record review failure"
+gemini_review_output := "${{ steps.gemini.outputs.summary }}"
+gemini_reviewable_condition := "steps.pr.outputs.reviewable == 'true'"
+gemini_success_condition := "steps.gemini.outcome == 'success'"
 lighthouse_workflow_path := ".github/workflows/site.yml"
 pages_workflow_path := ".github/workflows/pages.yml"
 site_package_path := "site/package.json"
@@ -222,24 +225,38 @@ rust_health_steps := [entry |
 gemini := documents[gemini_workflow_path]
 gemini_job := gemini.jobs["design-review"]
 gemini_steps := object.get(gemini_job, "steps", [])
-gemini_review_steps := [step |
-	some step in gemini_steps
+gemini_review_steps := [entry |
+	some index, step in gemini_steps
 	object.get(step, "name", "") == gemini_review_step_name
+	entry := {"index": index, "value": step}
 ]
 
-gemini_validation_steps := [step |
-	some step in gemini_steps
+gemini_validation_steps := [entry |
+	some index, step in gemini_steps
 	object.get(step, "name", "") == gemini_validation_step_name
+	entry := {"index": index, "value": step}
 ]
 
-gemini_failure_steps := [step |
-	some step in gemini_steps
+gemini_failure_steps := [entry |
+	some index, step in gemini_steps
 	object.get(step, "name", "") == gemini_failure_step_name
+	entry := {"index": index, "value": step}
 ]
 
-gemini_failure_notice_covers_failures(condition) if {
-	contains(condition, "steps.gemini.outcome == 'failure'")
-	contains(condition, "steps.validate.outcome == 'failure'")
+gemini_validation_is_wired(step) if {
+	condition := object.get(step, "if", "")
+	contains(condition, gemini_reviewable_condition)
+	contains(condition, gemini_success_condition)
+	env := object.get(step, "env", {})
+	object.get(env, "REVIEW", "") == gemini_review_output
+}
+
+gemini_steps_are_ordered if {
+	count(gemini_review_steps) == 1
+	count(gemini_validation_steps) == 1
+	count(gemini_failure_steps) == 1
+	gemini_review_steps[0].index < gemini_validation_steps[0].index
+	gemini_validation_steps[0].index < gemini_failure_steps[0].index
 }
 
 has_weekly_codeql_schedule if {
@@ -254,7 +271,7 @@ deny contains msg if {
 
 deny contains msg if {
 	count(gemini_review_steps) == 1
-	object.get(gemini_review_steps[0], "continue-on-error", false) != false
+	object.get(gemini_review_steps[0].value, "continue-on-error", false) != false
 	msg := sprintf("%s must fail when Gemini produces no review", [gemini_workflow_path])
 }
 
@@ -265,8 +282,14 @@ deny contains msg if {
 
 deny contains msg if {
 	count(gemini_validation_steps) == 1
-	object.get(gemini_validation_steps[0], "continue-on-error", false) != false
+	object.get(gemini_validation_steps[0].value, "continue-on-error", false) != false
 	msg := sprintf("%s non-empty Gemini review gate must fail the job", [gemini_workflow_path])
+}
+
+deny contains msg if {
+	count(gemini_validation_steps) == 1
+	not gemini_validation_is_wired(gemini_validation_steps[0].value)
+	msg := sprintf("%s non-empty Gemini review gate must validate the action summary", [gemini_workflow_path])
 }
 
 deny contains msg if {
@@ -276,16 +299,24 @@ deny contains msg if {
 
 deny contains msg if {
 	count(gemini_failure_steps) == 1
-	condition := object.get(gemini_failure_steps[0], "if", "")
+	condition := object.get(gemini_failure_steps[0].value, "if", "")
 	not contains(condition, "failure()")
 	msg := sprintf("%s Gemini failure notice must run after a failed review step", [gemini_workflow_path])
 }
 
 deny contains msg if {
 	count(gemini_failure_steps) == 1
-	condition := object.get(gemini_failure_steps[0], "if", "")
-	not gemini_failure_notice_covers_failures(condition)
-	msg := sprintf("%s Gemini failure notice must cover action and output-validation failures", [gemini_workflow_path])
+	condition := object.get(gemini_failure_steps[0].value, "if", "")
+	not contains(condition, gemini_reviewable_condition)
+	msg := sprintf("%s Gemini failure notice must remain scoped to reviewable failures", [gemini_workflow_path])
+}
+
+deny contains msg if {
+	count(gemini_review_steps) == 1
+	count(gemini_validation_steps) == 1
+	count(gemini_failure_steps) == 1
+	not gemini_steps_are_ordered
+	msg := sprintf("%s must review, validate, then report failures in that order", [gemini_workflow_path])
 }
 
 deny contains msg if {

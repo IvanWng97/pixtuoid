@@ -100,7 +100,7 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      check_upstream_drift.py (weekly wire-format watch),
 policy/              repository policy-as-code: `ci-observability/` combines
                      Conftest/OPA structural contracts with yq-extracted
-                     composite-action behavior tests
+                     action/workflow behavior tests
 site/                Astro landing page → GitHub Pages; self-contained Node project,
                      own CI; `just site-{setup,dev,dev-bg,dev-stop,check,fmt,e2e}` → see site/README.md
 integrations/raycast/  Raycast extension (TypeScript, self-contained Node project; NOT Rust):
@@ -186,7 +186,7 @@ shifts), docs (`just doc-check` — `cargo doc` with `-D warnings` over the
 check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
 fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
 Cross-file report/upload semantics that actionlint cannot express are pinned by
-the yq + Conftest/OPA policy and real composite-action behavior tests under
+the yq + Conftest/OPA policy and real action/workflow behavior tests under
 `policy/ci-observability/`; `just ci-observability` runs them inside both
 `just lint` and the CI hygiene job.
 That gate also pins the advanced CodeQL workflow: all four repository

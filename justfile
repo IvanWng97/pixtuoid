@@ -80,7 +80,7 @@ actionlint:
     actionlint
 
 # Cross-file CI contracts that actionlint cannot express. yq owns YAML 1.2
-# parsing; Conftest/OPA owns policy evaluation and policy unit tests.
+# parsing, jq owns SARIF fixtures, and Conftest/OPA owns policy evaluation.
 [group('rust')]
 [doc('Check repository CI contracts with Conftest/OPA policy-as-code')]
 ci-observability:
@@ -168,7 +168,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt shellcheck actionlint conftest yq iconv cargo-machete cargo-deny lychee; do
+    for t in shfmt shellcheck actionlint conftest yq jq iconv cargo-machete cargo-deny lychee; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -884,8 +884,8 @@ setup-tools:
     # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
     # ast-grep backs the `comment-lint` advisory (structural Rust lint rules in
     # .ast-grep/rules/); shfmt/actionlint/shellcheck back workflow linting,
-    # while yq + Conftest/OPA evaluate repository-specific workflow policy.
-    for t in shfmt actionlint shellcheck ast-grep yq conftest; do
+    # while yq + jq + Conftest/OPA evaluate repository-specific workflow policy.
+    for t in shfmt actionlint shellcheck ast-grep yq jq conftest; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -896,7 +896,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck yq conftest iconv; do
+    for t in shfmt actionlint shellcheck yq jq conftest iconv; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
