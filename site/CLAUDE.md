@@ -415,6 +415,16 @@ digit-key scrollspy, the docs-nav variant, reduced-motion) plus a console-error
 watchdog, where tsc/knip/build are blind. CI is `site.yml` / `pages.yml` (NOT
 the Rust `ci.yml`).
 
+Lighthouse runs every route three times and gates volatile lab metrics by their
+median; the one first-visit reveal timing stays pessimistic because all three
+visits must clear it. `src/styles/fonts.css` uses Fontsource's own WOFF2 assets
+with `font-display: optional`, while `Base.astro` preloads the regular faces.
+Do not replace those declarations with Fontsource's default `swap` CSS: an
+Ubuntu cold visit lacks the metric-matched Georgia fallback and reflows long doc
+pages above the CLS budget. `font-layout.spec.ts` delays every font response and
+forces a deliberately mismatched fallback so that platform-specific failure is
+reproducible in the production-browser suite.
+
 `site-check` starts with `npm audit --audit-level=low`; the PR and Pages
 workflows run the same audit after `npm ci`. The npm generation is part of the
 toolchain: `packageManager` pins CI to npm 12.0.1, `engines.npm` +

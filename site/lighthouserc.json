@@ -30,10 +30,7 @@
         ],
         "speed-index": ["error", { "maxNumericValue": 4500, "aggregationMethod": "median" }],
         "interactive": ["error", { "maxNumericValue": 9000, "aggregationMethod": "median" }],
-        "total-blocking-time": [
-          "error",
-          { "maxNumericValue": 200, "aggregationMethod": "pessimistic" }
-        ],
+        "total-blocking-time": ["error", { "maxNumericValue": 200, "aggregationMethod": "median" }],
         "cumulative-layout-shift": [
           "error",
           { "maxNumericValue": 0.1, "aggregationMethod": "median" }

@@ -44,6 +44,7 @@ npm run check       # astro check (types + templates)
 npm run knip       # unused files / exports / dependencies
 npm run build      # astro build → dist/
 npm run e2e        # Playwright smoke suite (tests/e2e/) vs the PRODUCTION build
+npm run lighthouse # three-run accessibility, SEO, and performance budgets
 ```
 
 From the repo root the same gate is `just site-check` (and `just site-fmt`);
