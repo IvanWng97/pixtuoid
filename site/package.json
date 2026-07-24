@@ -51,7 +51,8 @@
     "prismjs": "1.30.0",
     "rehype-mermaid": "^3.0.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.65.0"
+    "typescript-eslint": "^8.65.0",
+    "web-vitals": "6.0.0"
   },
   "overrides": {
     "chrome-launcher@^0.13.4": "0.15.2",

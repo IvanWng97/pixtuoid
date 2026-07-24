@@ -423,7 +423,9 @@ Do not replace those declarations with Fontsource's default `swap` CSS: an
 Ubuntu cold visit lacks the metric-matched Georgia fallback and reflows long doc
 pages above the CLS budget. `font-layout.spec.ts` delays every font response and
 forces a deliberately mismatched fallback so that platform-specific failure is
-reproducible in the production-browser suite.
+reproducible in the production-browser suite; Google's pinned `web-vitals`
+package owns the canonical CLS calculation, while the test owns only this
+repository's delayed-font scenario and budget.
 
 `site-check` starts with `npm audit --audit-level=low`; the PR and Pages
 workflows run the same audit after `npm ci`. The npm generation is part of the
