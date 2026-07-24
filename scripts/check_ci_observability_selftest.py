@@ -81,6 +81,50 @@ def good_files() -> dict[str, str]:
                 if-no-files-found: error
             """
         ),
+        ".github/workflows/codeql.yml": textwrap.dedent(
+            """\
+            name: CodeQL
+            on:
+              push:
+                branches: [main]
+              pull_request:
+              schedule:
+                - cron: '29 11 * * 3'
+              workflow_dispatch:
+            permissions:
+              actions: read
+              contents: read
+              packages: read
+              security-events: write
+            jobs:
+              analyze:
+                runs-on: ubuntu-latest
+                timeout-minutes: 30
+                strategy:
+                  fail-fast: false
+                  matrix:
+                    language: [actions, javascript-typescript, python, rust]
+                steps:
+                  - uses: actions/checkout@v7
+                  - name: Prepare Rust semantic analysis
+                    if: ${{ matrix.language == 'rust' }}
+                    shell: bash
+                    run: |
+                      rustup component add rust-src --toolchain stable
+                      rust_source="$(rustup run stable rustc --print sysroot)/lib/rustlib/src/rust/library/std/src/lib.rs"
+                      test -s "$rust_source"
+                      echo "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=true" >> "$GITHUB_ENV"
+                  - name: Initialize CodeQL
+                    uses: github/codeql-action/init@v4
+                    with:
+                      languages: ${{ matrix.language }}
+                      build-mode: none
+                  - name: Analyze
+                    uses: github/codeql-action/analyze@v4
+                    with:
+                      category: /language:${{ matrix.language }}
+            """
+        ),
         "crates/pixtuoid/src/install/opencode_plugin.ts": (
             'const HOOK_PATH: string = "{{HOOK_PATH_JSON}}"\n'
         ),
@@ -212,6 +256,102 @@ class CiObservabilityContractTests(unittest.TestCase):
         self.assertIn("include-hidden-files: true", result.stderr)
         self.assertIn("valid source before rendering", result.stderr)
 
+    def test_rejects_codecov_contract_decoys_inside_a_run_scalar(self) -> None:
+        files = good_files()
+        action_path = ".github/actions/upload-codecov/action.yml"
+        files[action_path] = files[action_path].replace(
+            textwrap.indent(
+                textwrap.dedent(
+                    """\
+                    - id: upload
+                      continue-on-error: true
+                      uses: codecov/codecov-action@v7
+                      with:
+                        files: ${{ inputs.file }}
+                        flags: ${{ inputs.flag }}
+                        report_type: ${{ inputs.report_type }}
+                        disable_search: true
+                        fail_ci_if_error: true
+                    """
+                ),
+                "    ",
+            ),
+            textwrap.indent(
+                textwrap.dedent(
+                    """\
+                    - if: false
+                      shell: bash
+                      run: |
+                        uses: codecov/codecov-action@v7
+                        continue-on-error: true
+                        files: ${{ inputs.file }}
+                        report_type: ${{ inputs.report_type }}
+                        disable_search: true
+                        fail_ci_if_error: true
+                    - id: upload
+                      continue-on-error: false
+                      uses: codecov/codecov-action@v7
+                      with:
+                        files: guessed.xml
+                        flags: ${{ inputs.flag }}
+                        report_type: coverage
+                        disable_search: false
+                        fail_ci_if_error: false
+                    """
+                ),
+                "    ",
+            ),
+        )
+        result = run_checker(files)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("continue-on-error: true", result.stderr)
+        self.assertIn("files: ${{ inputs.file }}", result.stderr)
+
+    def test_rejects_lighthouse_contract_decoys_inside_an_env_scalar(self) -> None:
+        files = good_files()
+        site_path = ".github/workflows/site.yml"
+        files[site_path] = textwrap.dedent(
+            """\
+            - uses: actions/upload-artifact@v7
+              if: always()
+              env:
+                NOTE: |
+                  if: ${{ !cancelled() }}
+                  include-hidden-files: true
+                  if-no-files-found: error
+              with:
+                path: site/.lighthouseci/
+                include-hidden-files: false
+                if-no-files-found: ignore
+            """
+        )
+        result = run_checker(files)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("if: ${{ !cancelled() }}", result.stderr)
+        self.assertIn("include-hidden-files: true", result.stderr)
+        self.assertIn("if-no-files-found: error", result.stderr)
+
+    def test_rejects_codecov_routing_through_an_unapproved_composite(self) -> None:
+        files = good_files()
+        files[".github/actions/rogue/action.yml"] = textwrap.dedent(
+            """\
+            name: rogue-uploader
+            runs:
+              using: composite
+              steps:
+                - uses: codecov/codecov-action@v7
+                  with:
+                    files: report.xml
+            """
+        )
+        result = run_checker(files)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(".github/actions/rogue/action.yml", result.stderr)
+        self.assertIn("centralized", result.stderr)
+
     def test_rejects_a_hidden_lighthouse_artifact_that_can_disappear(self) -> None:
         files = good_files()
         files[".github/workflows/site.yml"] = files[
@@ -243,6 +383,82 @@ class CiObservabilityContractTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("if: ${{ !cancelled() }}", result.stderr)
+
+    def test_rejects_codeql_when_a_language_is_not_explicit(self) -> None:
+        files = good_files()
+        files[".github/workflows/codeql.yml"] = files[
+            ".github/workflows/codeql.yml"
+        ].replace(
+            "[actions, javascript-typescript, python, rust]",
+            "[javascript-typescript, python, rust]",
+        )
+        result = run_checker(files)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("actions", result.stderr)
+
+    def test_rejects_unsupported_or_ambiguous_rust_codeql_builds(self) -> None:
+        for mutation in (
+            ("build-mode: none", "build-mode: manual"),
+            (
+                "languages: ${{ matrix.language }}",
+                "languages: rust",
+            ),
+        ):
+            with self.subTest(mutation=mutation):
+                files = good_files()
+                path = ".github/workflows/codeql.yml"
+                files[path] = files[path].replace(*mutation)
+                result = run_checker(files)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(mutation[0], result.stderr)
+
+    def test_rejects_codeql_without_complete_rust_semantic_inputs(self) -> None:
+        mutations = (
+            (
+                "rustup component add rust-src --toolchain stable",
+                "rustup component add rustfmt --toolchain stable",
+            ),
+            ('test -s "$rust_source"', 'echo "$rust_source"'),
+            (
+                "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=true",
+                "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=false",
+            ),
+            (
+                "if: ${{ matrix.language == 'rust' }}",
+                "if: ${{ matrix.language == 'python' }}",
+            ),
+        )
+        for required, replacement in mutations:
+            with self.subTest(required=required):
+                files = good_files()
+                path = ".github/workflows/codeql.yml"
+                files[path] = files[path].replace(required, replacement)
+                result = run_checker(files)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(required, result.stderr)
+
+    def test_rejects_codeql_when_rust_setup_runs_after_initialization(self) -> None:
+        files = good_files()
+        path = ".github/workflows/codeql.yml"
+        workflow = files[path]
+        rust_start = workflow.index("      - name: Prepare Rust semantic analysis")
+        init_start = workflow.index("      - name: Initialize CodeQL")
+        analyze_start = workflow.index("      - name: Analyze")
+        rust_step = workflow[rust_start:init_start]
+        init_step = workflow[init_start:analyze_start]
+        files[path] = (
+            workflow[:rust_start]
+            + init_step
+            + rust_step
+            + workflow[analyze_start:]
+        )
+        result = run_checker(files)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("before", result.stderr)
 
     def test_rejects_code_templates_that_are_invalid_before_rendering(self) -> None:
         files = good_files()

@@ -1,0 +1,60 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly backstop at an off-peak minute; PRs and main pushes remain primary.
+    - cron: '29 11 * * 3'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep this explicit: implicit detection can omit languages in a
+        # multi-language repository.
+        language: [actions, javascript-typescript, python, rust]
+    steps:
+      - uses: actions/checkout@v7
+
+      # CodeQL's Rust no-build extractor delegates build scripts and macros to
+      # rust-analyzer. ubuntu-latest installs Rust with the minimal profile, so
+      # provide the standard-library source before CodeQL initializes.
+      - name: Prepare Rust semantic analysis
+        if: ${{ matrix.language == 'rust' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rust-src --toolchain stable
+          rust_source="$(rustup run stable rustc --print sysroot)/lib/rustlib/src/rust/library/std/src/lib.rs"
+          test -s "$rust_source"
+          echo "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=true" >> "$GITHUB_ENV"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # Rust supports only the no-build extractor. The interpreted
+          # languages in this matrix use the same supported mode.
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

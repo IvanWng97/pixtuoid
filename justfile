@@ -73,7 +73,8 @@ actionlint:
 
 # Cross-file CI contracts that actionlint cannot express: advisory upload
 # failures stay visible, generated reports fail closed, hidden Lighthouse
-# artifacts are included, and code templates remain parseable before rendering.
+# artifacts are included, CodeQL retains complete Rust semantic inputs, and
+# code templates remain parseable before rendering.
 [group('rust')]
 [doc('Check CI report/upload observability contracts and their negative controls')]
 ci-observability:

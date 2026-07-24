@@ -184,6 +184,12 @@ check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
 fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
 Cross-file report/upload semantics that actionlint cannot express are pinned by
 `just ci-observability` and run inside both `just lint` and the CI hygiene job.
+That gate also pins the advanced CodeQL workflow: all four repository
+languages stay explicit, Rust stays on its only supported `none` build mode,
+and `rust-src` plus all Cargo targets are available before extraction. This is
+why CodeQL lives in [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)
+instead of GitHub default setup — default setup cannot prepare Rust's semantic
+inputs.
 
 **Release:** `just bump X.Y.Z` rewrites every version number, drafts
 `release_notes()`, runs preflight, and commits on a release branch — it
