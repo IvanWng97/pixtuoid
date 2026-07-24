@@ -1,0 +1,105 @@
+name: ci-builds
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # `just hack` checks the host graph only. This job catches target-gated deps
+  # and native calls that escape the core `native` boundary. It intentionally
+  # does not byte-compare wasm output because latest-stable builds can drift.
+  wasm-check:
+    name: wasm-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          targets: wasm32-unknown-unknown
+      # gen-wasm uses this same build recipe, preventing local/CI command drift.
+      - run: just wasm-build
+      # The committed artifact size cap is deterministic even when rebuild bytes
+      # are not, so it remains safe to gate in CI.
+      - run: just gen-wasm-check
+
+  hack:
+    name: feature combinations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # The default-on audio feature must compile through ALSA on Linux.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+      - uses: taiki-e/install-action@cargo-hack
+      - run: just hack
+
+  windows-check:
+    name: windows-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: just check-windows
+
+  packaging-linux:
+    name: packaging-build (ubuntu-latest)
+    # This is the only clean `cargo install --locked`, default-features build on
+    # both Homebrew bottle platforms. It catches stale lockfiles and new system
+    # dependencies before an external autobump does. The known ALSA formula gap
+    # remains tracked in #731; installing its headers here proves the source
+    # build while release handling owns the formula dependency.
+    runs-on: ubuntu-latest
+    # Two cold release installs use cargo-install target dirs, so the shared
+    # cache can only partially reduce this job.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      # Packaging does not invoke just, so keep its setup narrower than the
+      # shared Rust+just action while retaining the same cache namespace.
+      - uses: ./.github/actions/packaging-build
+
+  packaging-macos:
+    name: packaging-build (macos-14)
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/packaging-build
+
+  semver:
+    name: semver-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+      - uses: taiki-e/install-action@cargo-semver-checks
+      - run: just semver
+
+  required:
+    name: required-build-jobs
+    # Keep the protected gate's membership explicit; GitHub otherwise reports
+    # a reusable workflow successful even after an unreferenced job is removed.
+    if: ${{ always() }}
+    needs: [wasm-check, hack, windows-check, packaging-linux, packaging-macos, semver]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every build job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failures="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
+          if [[ -n "$failures" ]]; then
+            echo "::error::Required build job failed: ${failures//$'\n'/, }"
+            exit 1
+          fi

@@ -1,0 +1,187 @@
+name: ci-lint
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: rustfmt
+          enable-cache: 'false'
+      - run: just fmt-check
+      - run: just arch
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # The default-on audio feature compiles through ALSA on Linux; no test
+      # opens a device because runtime audio is behind the AudioSink seam.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: clippy
+      - run: just clippy
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # Pin the patch release: floating v2 briefly changed argument handling.
+      - uses: EmbarkStudios/cargo-deny-action@v2.1.1
+        with:
+          # Advisories run daily in audit.yml. Keep this list synchronized with
+          # the justfile `deny` recipe.
+          command: check bans licenses sources
+
+  machete:
+    name: unused deps
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # cargo-machete parses manifests and does not need a Rust toolchain.
+      - uses: taiki-e/install-action@cargo-machete
+      - uses: extractions/setup-just@v4
+      - run: just machete
+
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # One lightweight job owns the non-Rust hygiene tools. Go is preinstalled
+      # on the runner; lychee is installed as a pinned prebuilt binary.
+      - name: Install shfmt + actionlint
+        run: |
+          go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: lychee@0.24.2
+      - uses: extractions/setup-just@v4
+      - run: just shfmt-check
+      - run: just actionlint
+      - run: just links
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # The default-on audio feature must compile through ALSA on Linux.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # The MSRV recipe reads rust-version and installs that exact toolchain.
+      # rust-cache would key the runner's stable compiler, so a cold build is
+      # the honest compatibility gate.
+      - uses: extractions/setup-just@v4
+      - run: just msrv
+
+  notes-curated:
+    name: release notes curated
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # A grep-only guard against publishing placeholder release notes.
+      - uses: extractions/setup-just@v4
+      - run: just notes-curated
+
+  npm-gen:
+    name: npm package generator
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # Exercise the pure-Node generator before release.yml uses it to publish.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: extractions/setup-just@v4
+      - run: just npm-check
+
+  readme:
+    name: readme drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # Pure node:builtins, with no npm install. This runs on every PR rather
+      # than in the path-filtered site workflow so it can be required safely.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: extractions/setup-just@v4
+      - run: just gen-readme-check
+
+  # cargo-public-api complements semver: one classifies compatibility, while
+  # this golden shows the exact public surface change. rustdoc JSON is nightly
+  # only, so the just recipe owns that pin; this job pins the comparison tool.
+  api-surface:
+    name: api-surface
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - name: Install cargo-public-api (pinned to match the committed goldens)
+        run: cargo binstall -y cargo-public-api@0.52.0
+      - uses: extractions/setup-just@v4
+      - run: just api-surface-check
+
+  # rustdoc warnings and doctests are invisible to clippy and nextest, so this
+  # is a distinct rendering/contract check on the stable toolchain.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # cargo doc and doctests compile the default-on audio feature on Linux.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-cargo-just
+      - run: just doc-check
+
+  required:
+    name: required-lint-jobs
+    # This explicit manifest prevents a nested job deletion or rename from
+    # silently shrinking the single protected ci-gate.
+    if: ${{ always() }}
+    needs: [fmt, clippy, deny, machete, hygiene, msrv, notes-curated, npm-gen, readme, api-surface, docs]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every lint job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failures="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
+          if [[ -n "$failures" ]]; then
+            echo "::error::Required lint job failed: ${failures//$'\n'/, }"
+            exit 1
+          fi

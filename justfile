@@ -1,6 +1,6 @@
 # Project task runner — the single source of truth for build / lint / format /
 # test. Every call-site goes through these recipes — the .githooks/ hooks,
-# .github/workflows/{ci,release}.yml, and the docs — so there is exactly ONE
+# .github/workflows/ci*.yml, .github/workflows/release.yml, and the docs — so there is exactly ONE
 # place that defines what each command actually runs (no drift between local,
 # CI, and release).
 #
@@ -95,7 +95,7 @@ machete:
 # License + supply-chain gate (bans/licenses/sources). Advisories are NOT here:
 # they're owned by the daily audit.yml (`check advisories`) so an overnight
 # RustSec advisory can't block a push of unchanged code. Keep this list in sync
-# with the ci.yml `deny` job's `command:`.
+# with the ci-lint.yml `deny` job's `command:`.
 [group('rust')]
 deny:
     cargo deny check bans licenses sources
@@ -285,11 +285,11 @@ doc-check:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
     cargo test --doc --workspace
 
-# Coverage + JUnit XML in one run — the exact command ci.yml's coverage job uses.
+# Coverage + JUnit XML in one run — the exact command ci-tests.yml's coverage job uses.
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
 [group('rust')]
-[doc('Coverage + JUnit XML — the exact command ci.yml runs (needs llvm-cov + nextest)')]
+[doc('Coverage + JUnit XML — the exact command ci-tests.yml runs (needs llvm-cov + nextest)')]
 coverage:
     cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci
 
@@ -402,7 +402,7 @@ openclaw-e2e:
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
 #   just build --release                      # release
-#   just build --release --bins --examples    # what ci.yml's smoke job builds
+#   just build --release --bins --examples    # what ci-tests.yml's smoke job builds
 [group('rust')]
 [doc('Compile the workspace; forwards args (e.g. --release --bins --examples)')]
 build *args:
@@ -532,7 +532,7 @@ gen-contract:
     npm --prefix integrations/raycast run gen:contract
 
 # Fail if the committed README drifted from site/src/{features,sources,install}.json.
-# Pure node:builtins — no npm ci. ci.yml runs this on every PR (the `readme` job),
+# Pure node:builtins — no npm ci. ci-lint.yml runs this on every PR (the `readme` job),
 # and gen-check composes it.
 [group('gen')]
 [doc('Fail if the committed README drifted from site data (features/sources/install.json)')]
@@ -554,7 +554,7 @@ gen-media *args:
 gen-icons:
     .venv/bin/python3 scripts/gen-pix-icons.py
 
-# The ONE wasm compile step — gen-wasm (below) and ci.yml's wasm-check job both
+# The ONE wasm compile step — gen-wasm (below) and ci-builds.yml's wasm-check job both
 # call this, so the package/target/profile CI checks can't drift from what
 # gen-wasm ships. Toolchain gotcha (load-bearing, cost 2 debug cycles): the
 # PATH cargo/rustc may be Homebrew's, which has NO wasm32 std — and even
@@ -576,7 +576,7 @@ wasm-build:
 # dependency, failing fast if wasm-bindgen/wasm-opt are missing instead of after a
 # minutes-long release compile. wasm-bindgen-cli must match the crate's pinned
 # wasm-bindgen (see crates/pixtuoid-web/Cargo.toml); wasm-opt (binaryen) shrinks
-# the blob ~10-20%. (ci.yml's wasm-check calls `wasm-build` directly — it only
+# the blob ~10-20%. (ci-builds.yml's wasm-check calls `wasm-build` directly — it only
 # compiles, so it needs neither of these.)
 [private]
 gen-wasm-tools:
@@ -649,7 +649,7 @@ gen-wasm-check:
 # Drift gate: fail if any committed README section OR rendered still is stale.
 # Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only
 # (ffmpeg/gifsicle bytes aren't stable cross-version, but the renders feeding
-# them ARE pixel-deterministic). Run by ci.yml's smoke job; runnable locally
+# them ARE pixel-deterministic). Run by ci-tests.yml's smoke job; runnable locally
 # before pushing a visual change. A red check after an INTENTIONAL office change
 # means: run `just gen` and commit the regenerated docs/images/ +
 # site/public/demos/ in the same change. Requires the .venv + ffmpeg + gifsicle
@@ -774,7 +774,7 @@ bump version:
 
 # Unit-test the npm package generator (Node, no cargo). The ONLY validation of
 # npm/generate.mjs — release.yml runs this as a hard gate right before `npm
-# publish`, and ci.yml runs it on every PR so a generator regression is caught
+# publish`, and ci-lint.yml runs it on every PR so a generator regression is caught
 # at review time, not at the irreversible tag-push. NOT in preflight: a Rust
 # pre-push shouldn't require a Node toolchain. Needs Node ≥ 22.
 [group('release')]

@@ -1,0 +1,50 @@
+name: Packaging build
+description: Exercise the Homebrew source-build and install contracts
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: v1-rust
+        # Explicit job IDs keep both platforms fail-closed in ci-gate; retain
+        # the former matrix job's cache namespace while rust-cache isolates OS.
+        shared-key: packaging-build
+    - name: Install ALSA headers (Linux only)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+    - name: cargo install --locked (both binaries, default features)
+      shell: bash
+      run: |
+        cargo install --locked --path crates/pixtuoid --root "${RUNNER_TEMP}/pkg"
+        cargo install --locked --path crates/pixtuoid-hook --root "${RUNNER_TEMP}/pkg"
+    - name: Replay the formula's install + test assertions
+      shell: bash
+      run: |
+        # Capture before grep: pipefail must expose a crashing producer, while
+        # grep -q on a live producer can induce EPIPE (notably on macOS).
+        set -euo pipefail
+        # Resolve the binary before isolating HOME. `connect` writes config,
+        # and must never touch the runner user's real home directory.
+        BIN="${RUNNER_TEMP}/pkg/bin/pixtuoid"
+        export HOME="${RUNNER_TEMP}/fakehome"
+        mkdir -p "${HOME}"
+        out="${RUNNER_TEMP}/formula-test"
+        mkdir -p "$out"
+
+        "$BIN" --version                      > "$out/version"
+        "$BIN" man                            > "$out/man.roff"
+        "$BIN" completions bash               > "$out/completions.bash"
+        "$BIN" init-pack "${HOME}/pack"
+        "$BIN" validate-pack "${HOME}/pack"   > "$out/validate"
+        "$BIN" connect claude-code --json     > "$out/connect.json"
+
+        # Exit zero alone is not the formula's version-content assertion.
+        grep -qF "$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)" "$out/version"
+        grep -q '^\.TH' "$out/man.roff"
+        grep -q pixtuoid "$out/completions.bash"
+        grep -q 'OK: pack "skeleton"' "$out/validate"
+        grep -q pixtuoid-hook "${HOME}/.claude/settings.json"
+        python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == [{"id":"claude-code","outcome":"connected"}], "connect --json envelope drifted from the homebrew-core contract"' "$out/connect.json"

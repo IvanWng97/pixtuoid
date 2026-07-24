@@ -134,8 +134,8 @@ SEAMS: tuple[Seam, ...] = (
     # (registered_source_names() over REGISTRY) + AgentEvent + the Source trait,
     # the contract-bearing items — over-firing is the safe side
     # for a wire contract (a 5s "shape unchanged" dismissal beats a missed
-    # gen-contract). Same rationale for justfile under ci-gates: the justfile
-    # IS the single source of truth for every gate, so any edit can weaken one.
+    # gen-contract). Same rationale for justfile and composite actions under
+    # ci-gates: both are shared implementations, so any edit can weaken a gate.
     Seam(
         key="json-contract",
         title="🔌 `--json` / Source contract surface",
@@ -153,6 +153,7 @@ SEAMS: tuple[Seam, ...] = (
         key="ci-gates",
         title="⚙️ CI / gate machinery (you're editing the safety net)",
         match=lambda p: p.startswith(".github/workflows/")
+        or p.startswith(".github/actions/")
         or p == "justfile"
         or p.startswith(".githooks/")
         or p
@@ -213,6 +214,7 @@ def _selftest() -> int:
     assert keys(["crates/pixtuoid/src/install/io.rs"]) == ["install"]
     assert keys(["site/src/sources.json"]) == ["json-contract"]
     assert keys([".github/workflows/ci.yml"]) == ["ci-gates"]
+    assert keys([".github/actions/setup-cargo-just/action.yml"]) == ["ci-gates"]
     assert keys(["justfile"]) == ["ci-gates"]
 
     # reducer-liveness matches whole dirs (state/ + source/jsonl/) + the

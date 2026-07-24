@@ -62,8 +62,9 @@ gates can't see. CI runs it in `site.yml` after the build step.
 > `astro build`; all six are in the `site.yml` / `pages.yml` path filters so a
 > change re-runs CI + redeploys. The root `README.md`'s Features table and install
 > commands are sourced from `src/features.json` / `src/install.json` (see below);
-> drift is gated by the `readme` job in `.github/workflows/ci.yml` (`just gen-readme-check`)
-> on every PR, not by `site.yml`.
+> drift is gated by the `readme` job in `.github/workflows/ci-lint.yml`, called
+> by `.github/workflows/ci.yml`, on every PR (`just gen-readme-check`), not by
+> `site.yml`.
 
 > **Generated README sections.** `src/features.json` (feature inventory — also
 > drives the Showcase roster), `src/sources.json` (supported tools — also drives the
