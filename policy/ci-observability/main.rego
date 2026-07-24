@@ -27,6 +27,7 @@ rust_diagnostics_metric := "rust/summary/number-of-files-extracted-with-errors"
 rust_clean_metric := "rust/summary/number-of-successfully-extracted-files"
 gemini_workflow_path := ".github/workflows/gemini-review.yml"
 gemini_review_step_name := "Run read-only Gemini design review"
+gemini_validation_step_name := "Require a non-empty Gemini review"
 gemini_failure_step_name := "Record review failure"
 lighthouse_workflow_path := ".github/workflows/site.yml"
 pages_workflow_path := ".github/workflows/pages.yml"
@@ -226,10 +227,20 @@ gemini_review_steps := [step |
 	object.get(step, "name", "") == gemini_review_step_name
 ]
 
+gemini_validation_steps := [step |
+	some step in gemini_steps
+	object.get(step, "name", "") == gemini_validation_step_name
+]
+
 gemini_failure_steps := [step |
 	some step in gemini_steps
 	object.get(step, "name", "") == gemini_failure_step_name
 ]
+
+gemini_failure_notice_covers_failures(condition) if {
+	contains(condition, "steps.gemini.outcome == 'failure'")
+	contains(condition, "steps.validate.outcome == 'failure'")
+}
 
 has_weekly_codeql_schedule if {
 	some schedule in codeql.on.schedule
@@ -248,6 +259,17 @@ deny contains msg if {
 }
 
 deny contains msg if {
+	count(gemini_validation_steps) != 1
+	msg := sprintf("%s must contain exactly one non-empty Gemini review gate", [gemini_workflow_path])
+}
+
+deny contains msg if {
+	count(gemini_validation_steps) == 1
+	object.get(gemini_validation_steps[0], "continue-on-error", false) != false
+	msg := sprintf("%s non-empty Gemini review gate must fail the job", [gemini_workflow_path])
+}
+
+deny contains msg if {
 	count(gemini_failure_steps) != 1
 	msg := sprintf("%s must contain exactly one Gemini failure notice", [gemini_workflow_path])
 }
@@ -257,6 +279,13 @@ deny contains msg if {
 	condition := object.get(gemini_failure_steps[0], "if", "")
 	not contains(condition, "failure()")
 	msg := sprintf("%s Gemini failure notice must run after a failed review step", [gemini_workflow_path])
+}
+
+deny contains msg if {
+	count(gemini_failure_steps) == 1
+	condition := object.get(gemini_failure_steps[0], "if", "")
+	not gemini_failure_notice_covers_failures(condition)
+	msg := sprintf("%s Gemini failure notice must cover action and output-validation failures", [gemini_workflow_path])
 }
 
 deny contains msg if {

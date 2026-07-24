@@ -81,8 +81,8 @@ jobs:
           category: /language:${{ matrix.language }}
 
       # The action can remain green when extractor diagnostics affect most
-      # files. Read CodeQL's own SARIF metrics and enforce GitHub's documented
-      # database-health boundary: diagnostics must not affect the majority.
+      # files. Read CodeQL's own SARIF metrics and enforce this repository's
+      # conservative health threshold: diagnostics must not affect the majority.
       - name: Verify Rust extraction health
         if: ${{ matrix.language == 'rust' }}
         shell: bash

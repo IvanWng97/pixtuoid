@@ -3,6 +3,7 @@ set -euo pipefail
 
 CODECOV_ACTION_FILE="${CODECOV_ACTION_FILE:-.github/actions/upload-codecov/action.yml}"
 CODEQL_WORKFLOW_FILE="${CODEQL_WORKFLOW_FILE:-.github/workflows/codeql.yml}"
+GEMINI_WORKFLOW_FILE="${GEMINI_WORKFLOW_FILE:-.github/workflows/gemini-review.yml}"
 
 fail() {
     echo "ci-observability behavior test: $*" >&2
@@ -205,3 +206,15 @@ printf '{"runs":[]}\n' >"$missing_metric_sarif_dir/rust.sarif"
 if SARIF_DIR="$missing_metric_sarif_dir" bash -c "$health_script" >/dev/null 2>&1; then
     fail "Rust extraction-health gate accepted missing CodeQL metrics"
 fi
+
+gemini_review_script="$(workflow_step_script "$GEMINI_WORKFLOW_FILE" "Require a non-empty Gemini review")"
+if REVIEW="" bash -c "$gemini_review_script" >/dev/null 2>&1; then
+    fail "Gemini review gate accepted an empty review"
+fi
+
+if REVIEW=$' \t\n' bash -c "$gemini_review_script" >/dev/null 2>&1; then
+    fail "Gemini review gate accepted a whitespace-only review"
+fi
+
+REVIEW="Findings: 0" bash -c "$gemini_review_script" >/dev/null ||
+    fail "Gemini review gate rejected a non-empty review"
