@@ -25,6 +25,9 @@ set windows-shell := ["bash", "-cu"]
 # newly-published crate is added in ONE place.
 PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 
+# Shell sources share one authority so formatting and lint coverage cannot drift.
+SHELL_SOURCES := "scripts/*.sh .githooks/* policy/ci-observability/*.sh"
+
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
 # nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
 # cargo-public-api 0.52.0 to match. Bump both together or the golden churns.
@@ -48,18 +51,23 @@ fmt:
 
 # Shell-format check (shfmt) — the `.sh` analog of `fmt-check`, gated via `lint`.
 # Pairs with the shellcheck house rule: shellcheck lints, shfmt formats. Covers
-# scripts/ + the git hooks. `-i 4` (4-space) matches the prevailing style; no
-# `-ci` so case bodies stay un-indented as written.
+# scripts/, git hooks, and CI policy behavior tests. `-i 4` (4-space) matches
+# the prevailing style; no `-ci` so case bodies stay un-indented as written.
 [group('rust')]
-[doc('Shell-format check (shfmt) over scripts/ + .githooks/ — the .sh analog of fmt-check')]
+[doc('Shell-format check over repository shell sources')]
 shfmt-check:
-    shfmt -i 4 -d scripts/*.sh .githooks/*
+    shfmt -i 4 -d {{ SHELL_SOURCES }}
 
 # Apply shell formatting in place (the `.sh` analog of `fmt`).
 [group('rust')]
-[doc('Apply shfmt formatting in place over scripts/ + .githooks/')]
+[doc('Apply shfmt formatting in place over repository shell sources')]
 shfmt-fix:
-    shfmt -i 4 -w scripts/*.sh .githooks/*
+    shfmt -i 4 -w {{ SHELL_SOURCES }}
+
+[group('rust')]
+[doc('Run shellcheck over repository shell sources')]
+shellcheck:
+    shellcheck {{ SHELL_SOURCES }}
 
 # Lint the GitHub Actions workflows (actionlint): YAML schema, expression types,
 # action input/output names, runner labels, AND shellcheck over every `run:`
@@ -86,6 +94,7 @@ ci-observability:
     conftest fmt --check policy/ci-observability
     conftest verify --policy policy/ci-observability
     conftest test --parser json --policy policy/ci-observability "$combined"
+    bash policy/ci-observability/action_behavior_test.sh
     iconv -f US-ASCII -t US-ASCII codecov.yml >/dev/null
 
 # Offline link + anchor check (lychee) over the repo's OWN markdown: every
@@ -141,7 +150,7 @@ arch:
     done
     echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window-free"
 
-# Fast, independent lint checks in parallel (fmt + machete + deny + arch + shfmt + actionlint + CI observability + links).
+# Fast, independent lint checks in parallel.
 [group('rust')]
 lint:
     #!/usr/bin/env bash
@@ -149,7 +158,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt actionlint conftest yq iconv cargo-machete cargo-deny lychee; do
+    for t in shfmt shellcheck actionlint conftest yq iconv cargo-machete cargo-deny lychee; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -165,6 +174,7 @@ lint:
     run deny    just deny                & pids+=($!)
     run arch    just arch                & pids+=($!)
     run shfmt   just shfmt-check         & pids+=($!)
+    run shell   just shellcheck           & pids+=($!)
     run actions just actionlint          & pids+=($!)
     run ci-obs  just ci-observability     & pids+=($!)
     run links   just links               & pids+=($!)

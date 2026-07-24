@@ -7,52 +7,36 @@ codecov_action_name := "codecov/codecov-action"
 codecov_authority_path := ".github/actions/upload-codecov/action.yml"
 codecov_wrapper := "./.github/actions/upload-codecov"
 codecov_workflow_path := ".github/workflows/ci-tests.yml"
+codecov_input_file := "${{ inputs.file }}"
+codecov_input_flag := "${{ inputs.flag }}"
+codecov_input_report_type := "${{ inputs.report_type }}"
+codecov_input_token := "${{ inputs.token }}"
+codecov_token_secret := "${{ secrets.CODECOV_TOKEN }}"
+junit_report_path := "target/nextest/ci/junit.xml"
+lcov_report_path := "lcov.info"
+post_test_condition := "${{ !cancelled() }}"
+report_presence_step_name := "Require a generated report"
+upload_warning_step_name := "Surface advisory upload failure"
 codeql_workflow_path := ".github/workflows/codeql.yml"
+rust_setup_step_name := "Prepare Rust semantic analysis"
 lighthouse_workflow_path := ".github/workflows/site.yml"
 
+expected_codecov_route(file, flag, report_type, condition) := {
+	"path": codecov_workflow_path,
+	"file": file,
+	"flag": flag,
+	"report_type": report_type,
+	"if": condition,
+	"token": codecov_token_secret,
+}
+
 expected_codecov_routes := {
-	{
-		"file": "target/nextest/ci/junit.xml",
-		"flag": "windows",
-		"report_type": "test_results",
-		"if": "${{ !cancelled() }}",
-		"token": "${{ secrets.CODECOV_TOKEN }}",
-	},
-	{
-		"file": "target/nextest/ci/junit.xml",
-		"flag": "macos",
-		"report_type": "test_results",
-		"if": "${{ !cancelled() }}",
-		"token": "${{ secrets.CODECOV_TOKEN }}",
-	},
-	{
-		"file": "lcov.info",
-		"flag": "unit",
-		"report_type": "coverage",
-		"if": "",
-		"token": "${{ secrets.CODECOV_TOKEN }}",
-	},
-	{
-		"file": "target/nextest/ci/junit.xml",
-		"flag": "unit",
-		"report_type": "test_results",
-		"if": "${{ !cancelled() }}",
-		"token": "${{ secrets.CODECOV_TOKEN }}",
-	},
-	{
-		"file": "lcov.info",
-		"flag": "windows",
-		"report_type": "coverage",
-		"if": "",
-		"token": "${{ secrets.CODECOV_TOKEN }}",
-	},
-	{
-		"file": "lcov.info",
-		"flag": "macos",
-		"report_type": "coverage",
-		"if": "",
-		"token": "${{ secrets.CODECOV_TOKEN }}",
-	},
+	expected_codecov_route(junit_report_path, "windows", "test_results", post_test_condition),
+	expected_codecov_route(junit_report_path, "macos", "test_results", post_test_condition),
+	expected_codecov_route(lcov_report_path, "unit", "coverage", ""),
+	expected_codecov_route(junit_report_path, "unit", "test_results", post_test_condition),
+	expected_codecov_route(lcov_report_path, "windows", "coverage", ""),
+	expected_codecov_route(lcov_report_path, "macos", "coverage", ""),
 }
 
 documents := {document.path: document.contents |
@@ -112,20 +96,23 @@ authority_objects := [entry |
 
 validation_steps := [entry |
 	some entry in authority_objects
+	object.get(entry.value, "name", "") == report_presence_step_name
 	run := object.get(entry.value, "run", "")
 	is_string(run)
 	contains(run, "-s \"$REPORT_FILE\"")
+	env := object.get(entry.value, "env", {})
+	object.get(env, "REPORT_FILE", "") == codecov_input_file
 	object.get(entry.value, "if", null) == null
 ]
 
 warning_steps := [entry |
 	some entry in authority_objects
+	object.get(entry.value, "name", "") == upload_warning_step_name
 	object.get(entry.value, "if", "") == "${{ steps.upload.outcome == 'failure' }}"
 ]
 
-ci_uploads := [entry |
+codecov_uploads := [entry |
 	some entry in uses_entries
-	entry.path == codecov_workflow_path
 	entry.uses == codecov_wrapper
 ]
 
@@ -133,6 +120,7 @@ codecov_route(entry) := route if {
 	params := object.get(entry.value, "with", {})
 	is_object(params)
 	route := {
+		"path": entry.path,
 		"file": object.get(params, "file", ""),
 		"flag": object.get(params, "flag", ""),
 		"report_type": object.get(params, "report_type", ""),
@@ -142,7 +130,7 @@ codecov_route(entry) := route if {
 }
 
 actual_codecov_routes := {codecov_route(entry) |
-	some entry in ci_uploads
+	some entry in codecov_uploads
 }
 
 codeql := documents[codeql_workflow_path]
@@ -157,6 +145,7 @@ codeql_steps_using(action) := [entry |
 
 rust_setup_steps := [entry |
 	some index, step in codeql_steps
+	object.get(step, "name", "") == rust_setup_step_name
 	object.get(step, "if", "") == "${{ matrix.language == 'rust' }}"
 	run := object.get(step, "run", "")
 	is_string(run)
@@ -202,14 +191,21 @@ deny contains msg if {
 deny contains msg if {
 	count(authority_uploads) == 1
 	params := object.get(authority_uploads[0].value, "with", {})
-	object.get(params, "files", "") != "${{ inputs.file }}"
+	object.get(params, "files", "") != codecov_input_file
 	msg := sprintf("%s Codecov step must pass only inputs.file", [codecov_authority_path])
 }
 
 deny contains msg if {
 	count(authority_uploads) == 1
 	params := object.get(authority_uploads[0].value, "with", {})
-	object.get(params, "report_type", "") != "${{ inputs.report_type }}"
+	object.get(params, "flags", "") != codecov_input_flag
+	msg := sprintf("%s Codecov step must pass inputs.flag", [codecov_authority_path])
+}
+
+deny contains msg if {
+	count(authority_uploads) == 1
+	params := object.get(authority_uploads[0].value, "with", {})
+	object.get(params, "report_type", "") != codecov_input_report_type
 	msg := sprintf("%s Codecov step must pass inputs.report_type", [codecov_authority_path])
 }
 
@@ -225,6 +221,13 @@ deny contains msg if {
 	params := object.get(authority_uploads[0].value, "with", {})
 	object.get(params, "fail_ci_if_error", false) != true
 	msg := sprintf("%s Codecov step must keep fail_ci_if_error: true", [codecov_authority_path])
+}
+
+deny contains msg if {
+	count(authority_uploads) == 1
+	params := object.get(authority_uploads[0].value, "with", {})
+	object.get(params, "token", "") != codecov_input_token
+	msg := sprintf("%s Codecov step must pass inputs.token", [codecov_authority_path])
 }
 
 deny contains msg if {
@@ -252,6 +255,27 @@ deny contains msg if {
 }
 
 deny contains msg if {
+	count(warning_steps) == 1
+	env := object.get(warning_steps[0].value, "env", {})
+	object.get(env, "REPORT_FILE", "") != codecov_input_file
+	msg := sprintf("%s failure step must identify inputs.file", [codecov_authority_path])
+}
+
+deny contains msg if {
+	count(warning_steps) == 1
+	env := object.get(warning_steps[0].value, "env", {})
+	object.get(env, "REPORT_FLAG", "") != codecov_input_flag
+	msg := sprintf("%s failure step must identify inputs.flag", [codecov_authority_path])
+}
+
+deny contains msg if {
+	count(warning_steps) == 1
+	env := object.get(warning_steps[0].value, "env", {})
+	object.get(env, "REPORT_TYPE", "") != codecov_input_report_type
+	msg := sprintf("%s failure step must identify inputs.report_type", [codecov_authority_path])
+}
+
+deny contains msg if {
 	some entry in uses_entries
 	entry.uses == codecov_wrapper
 	params := object.get(entry.value, "with", {})
@@ -260,13 +284,13 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	count(ci_uploads) != count(expected_codecov_routes)
-	msg := sprintf("%s must contain the six declared Codecov routes", [codecov_workflow_path])
+	count(codecov_uploads) != count(expected_codecov_routes)
+	msg := "the repository must contain exactly the six declared Codecov routes"
 }
 
 deny contains msg if {
 	actual_codecov_routes != expected_codecov_routes
-	msg := sprintf("%s Codecov routes must match the declared files, flags, types, conditions, and token", [codecov_workflow_path])
+	msg := "Codecov routes must match the declared paths, files, flags, types, conditions, and token"
 }
 
 deny contains msg if {

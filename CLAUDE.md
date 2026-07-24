@@ -98,6 +98,9 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      the lobster AND its backend `cc·<workspace>` coding sprite coexist live; real
                      account/gateway footprint, NOT a CI test),
                      check_upstream_drift.py (weekly wire-format watch),
+policy/              repository policy-as-code: `ci-observability/` combines
+                     Conftest/OPA structural contracts with yq-extracted
+                     composite-action behavior tests
 site/                Astro landing page → GitHub Pages; self-contained Node project,
                      own CI; `just site-{setup,dev,dev-bg,dev-stop,check,fmt,e2e}` → see site/README.md
 integrations/raycast/  Raycast extension (TypeScript, self-contained Node project; NOT Rust):
@@ -165,7 +168,7 @@ component — `rust-toolchain.toml` pins only `rustfmt`+`clippy`, so without it 
 editor / AI-agent LSP silently degrades to grep).
 
 ```
-just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+actionlint+ci-observability+links) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+shellcheck+actionlint+ci-observability+links) → clippy → hack → test
 just fmt          # auto-format
 git config core.hooksPath .githooks   # activate hooks once per clone
 ```
@@ -183,7 +186,9 @@ shifts), docs (`just doc-check` — `cargo doc` with `-D warnings` over the
 check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
 fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
 Cross-file report/upload semantics that actionlint cannot express are pinned by
-`just ci-observability` and run inside both `just lint` and the CI hygiene job.
+the yq + Conftest/OPA policy and real composite-action behavior tests under
+`policy/ci-observability/`; `just ci-observability` runs them inside both
+`just lint` and the CI hygiene job.
 That gate also pins the advanced CodeQL workflow: all four repository
 languages stay explicit, Rust stays on its only supported `none` build mode,
 and `rust-src` plus all Cargo targets are available before extraction. This is

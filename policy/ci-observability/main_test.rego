@@ -50,16 +50,20 @@ test_declared_codecov_route_matrix_is_complete if {
 }
 
 test_codecov_route_reads_the_structured_step if {
-	entry := {"value": {
-		"if": "${{ !cancelled() }}",
-		"with": {
-			"file": "target/nextest/ci/junit.xml",
-			"flag": "windows",
-			"report_type": "test_results",
-			"token": "${{ secrets.CODECOV_TOKEN }}",
+	entry := {
+		"path": codecov_workflow_path,
+		"value": {
+			"if": "${{ !cancelled() }}",
+			"with": {
+				"file": "target/nextest/ci/junit.xml",
+				"flag": "windows",
+				"report_type": "test_results",
+				"token": "${{ secrets.CODECOV_TOKEN }}",
+			},
 		},
-	}}
+	}
 	codecov_route(entry) == {
+		"path": codecov_workflow_path,
 		"file": "target/nextest/ci/junit.xml",
 		"flag": "windows",
 		"report_type": "test_results",
@@ -134,4 +138,61 @@ test_codeql_language_set_is_exact if {
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s must analyze actions, JavaScript/TypeScript, Python, and Rust", [codeql_workflow_path]) in violations
+}
+
+test_codecov_flags_forwarding_is_pinned if {
+	fixture := {"documents": [{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{
+			"uses": codecov_action,
+			"with": {"flags": "broken"},
+		}]}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Codecov step must pass inputs.flag", [codecov_authority_path]) in violations
+}
+
+test_codecov_token_forwarding_is_pinned if {
+	fixture := {"documents": [{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{
+			"uses": codecov_action,
+			"with": {"token": "broken"},
+		}]}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Codecov step must pass inputs.token", [codecov_authority_path]) in violations
+}
+
+test_report_presence_check_reads_inputs_file if {
+	fixture := {"documents": [{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{
+			"name": report_presence_step_name,
+			"env": {"REPORT_FILE": "README.md"},
+			"run": "test -s \"$REPORT_FILE\"",
+		}]}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must contain one unconditional non-empty report check", [codecov_authority_path]) in violations
+}
+
+test_wrapper_collection_covers_every_workflow if {
+	path := ".github/workflows/extra.yml"
+	fixture := {"documents": [{
+		"path": path,
+		"contents": {"jobs": {"test": {"steps": [{
+			"uses": codecov_wrapper,
+			"with": {
+				"file": lcov_report_path,
+				"flag": "extra",
+				"report_type": "coverage",
+				"token": codecov_token_secret,
+			},
+		}]}}},
+	}]}
+	uploads := codecov_uploads with input as fixture
+	count(uploads) == 1
+	uploads[0].path == path
+	"the repository must contain exactly the six declared Codecov routes" in deny with input as fixture
 }

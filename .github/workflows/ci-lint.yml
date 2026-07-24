@@ -80,6 +80,7 @@ jobs:
           tool: lychee@0.24.2
       - uses: extractions/setup-just@v4
       - run: just shfmt-check
+      - run: just shellcheck
       - run: just actionlint
       - run: just ci-observability
       - run: just links
