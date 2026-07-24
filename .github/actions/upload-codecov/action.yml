@@ -39,6 +39,7 @@ runs:
         flags: ${{ inputs.flag }}
         report_type: ${{ inputs.report_type }}
         disable_search: true
+        plugins: noop
         fail_ci_if_error: true
         token: ${{ inputs.token }}
 

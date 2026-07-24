@@ -1,5 +1,9 @@
 ---
 import { asset, DIM_RESTING } from '../consts';
+
+const wasmJsUrl = asset('wasm/pixtuoid_web.js');
+const audioWorkerUrl = asset('audio-worker.js');
+const officeDriverUrl = asset('office-driver.js');
 ---
 
 {
@@ -386,13 +390,16 @@ import { asset, DIM_RESTING } from '../consts';
 
 <script
   is:inline
-  define:vars={{
-    wasmJsUrl: asset('wasm/pixtuoid_web.js'),
-    audioWorkerUrl: asset('audio-worker.js'),
-    officeDriverUrl: asset('office-driver.js'),
-  }}
+  data-wasm-js-url={wasmJsUrl}
+  data-audio-worker-url={audioWorkerUrl}
+  data-office-driver-url={officeDriverUrl}
 >
   (function () {
+    const script = document.currentScript;
+    if (!(script instanceof HTMLScriptElement)) return;
+    const { wasmJsUrl, audioWorkerUrl, officeDriverUrl } = script.dataset;
+    if (!wasmJsUrl || !audioWorkerUrl || !officeDriverUrl) return;
+
     const wrap = document.querySelector('.backdrop');
     const canvas = document.getElementById('office-live');
     if (!wrap || !canvas) return;

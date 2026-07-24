@@ -20,6 +20,14 @@ upload_warning_step_name := "Surface advisory upload failure"
 codeql_workflow_path := ".github/workflows/codeql.yml"
 rust_setup_step_name := "Prepare Rust semantic analysis"
 lighthouse_workflow_path := ".github/workflows/site.yml"
+pages_workflow_path := ".github/workflows/pages.yml"
+site_package_path := "site/package.json"
+expected_dependency_audit := "npm audit --audit-level=low"
+pinned_npm_version := "12.0.1"
+expected_package_manager := sprintf("npm@%s", [pinned_npm_version])
+expected_npm_engine := ">=12.0.0 <13"
+expected_npm_setup := sprintf("npm install --global npm@%s", [pinned_npm_version])
+github_workspace := "${{ github.workspace }}"
 
 expected_codecov_route(file, flag, report_type, condition) := {
 	"path": codecov_workflow_path,
@@ -109,6 +117,46 @@ warning_steps := [entry |
 	some entry in authority_objects
 	object.get(entry.value, "name", "") == upload_warning_step_name
 	object.get(entry.value, "if", "") == "${{ steps.upload.outcome == 'failure' }}"
+]
+
+effective_working_directory(job, step) := directory if {
+	directory := object.get(step, "working-directory", null)
+	directory != null
+}
+
+effective_working_directory(job, step) := directory if {
+	object.get(step, "working-directory", null) == null
+	defaults := object.get(job, "defaults", {})
+	run_defaults := object.get(defaults, "run", {})
+	directory := object.get(run_defaults, "working-directory", "")
+}
+
+dependency_audit_steps(path, job_name) := [step |
+	workflow := documents[path]
+	jobs := object.get(workflow, "jobs", {})
+	job := object.get(jobs, job_name, {})
+	object.get(job, "if", null) == null
+	object.get(job, "continue-on-error", false) == false
+	steps := object.get(job, "steps", [])
+	some step in steps
+	object.get(step, "run", "") == "npm run audit"
+	object.get(step, "if", null) == null
+	object.get(step, "continue-on-error", false) == false
+	effective_working_directory(job, step) == "site"
+]
+
+pinned_npm_setup_steps(path, job_name) := [step |
+	workflow := documents[path]
+	jobs := object.get(workflow, "jobs", {})
+	job := object.get(jobs, job_name, {})
+	object.get(job, "if", null) == null
+	object.get(job, "continue-on-error", false) == false
+	steps := object.get(job, "steps", [])
+	some step in steps
+	object.get(step, "run", "") == expected_npm_setup
+	object.get(step, "working-directory", "") == github_workspace
+	object.get(step, "if", null) == null
+	object.get(step, "continue-on-error", false) == false
 ]
 
 codecov_uploads := [entry |
@@ -214,6 +262,13 @@ deny contains msg if {
 	params := object.get(authority_uploads[0].value, "with", {})
 	object.get(params, "disable_search", false) != true
 	msg := sprintf("%s Codecov step must keep disable_search: true", [codecov_authority_path])
+}
+
+deny contains msg if {
+	count(authority_uploads) == 1
+	params := object.get(authority_uploads[0].value, "with", {})
+	object.get(params, "plugins", "") != "noop"
+	msg := sprintf("%s Codecov step must disable plugin autodiscovery", [codecov_authority_path])
 }
 
 deny contains msg if {
@@ -336,6 +391,46 @@ deny contains msg if {
 }
 
 deny contains msg if {
+	count(dependency_audit_steps(lighthouse_workflow_path, "check")) != 1
+	msg := sprintf("%s must run the site dependency audit exactly once", [lighthouse_workflow_path])
+}
+
+deny contains msg if {
+	count(dependency_audit_steps(pages_workflow_path, "build")) != 1
+	msg := sprintf("%s must run the site dependency audit exactly once", [pages_workflow_path])
+}
+
+deny contains msg if {
+	manifest := documents[site_package_path]
+	scripts := object.get(manifest, "scripts", {})
+	object.get(scripts, "audit", "") != expected_dependency_audit
+	msg := sprintf("%s must keep scripts.audit at %q", [site_package_path, expected_dependency_audit])
+}
+
+deny contains msg if {
+	count(pinned_npm_setup_steps(lighthouse_workflow_path, "check")) != 1
+	msg := sprintf("%s must install %s exactly once", [lighthouse_workflow_path, expected_package_manager])
+}
+
+deny contains msg if {
+	count(pinned_npm_setup_steps(pages_workflow_path, "build")) != 1
+	msg := sprintf("%s must install %s exactly once", [pages_workflow_path, expected_package_manager])
+}
+
+deny contains msg if {
+	manifest := documents[site_package_path]
+	object.get(manifest, "packageManager", "") != expected_package_manager
+	msg := sprintf("%s must pin packageManager to %s", [site_package_path, expected_package_manager])
+}
+
+deny contains msg if {
+	manifest := documents[site_package_path]
+	engines := object.get(manifest, "engines", {})
+	object.get(engines, "npm", "") != expected_npm_engine
+	msg := sprintf("%s must require npm %s", [site_package_path, expected_npm_engine])
+}
+
+deny contains msg if {
 	codeql.on.push.branches != ["main"]
 	msg := sprintf("%s must run on pushes to main", [codeql_workflow_path])
 }
@@ -428,8 +523,8 @@ deny contains msg if {
 deny contains msg if {
 	count(rust_setup_steps) == 1
 	run := rust_setup_steps[0].run
-	not contains(run, "rustup component add rust-src --toolchain stable")
-	msg := sprintf("%s must install rust-src before CodeQL init", [codeql_workflow_path])
+	not contains(run, "rustup component add rust-src rust-analyzer --toolchain stable")
+	msg := sprintf("%s must install rust-src and rust-analyzer before CodeQL init", [codeql_workflow_path])
 }
 
 deny contains msg if {
@@ -437,6 +532,13 @@ deny contains msg if {
 	run := rust_setup_steps[0].run
 	not contains(run, "test -s \"$rust_source\"")
 	msg := sprintf("%s must verify rust-src before CodeQL init", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "test -x \"$proc_macro_server\"")
+	msg := sprintf("%s must verify the sysroot proc-macro server before CodeQL init", [codeql_workflow_path])
 }
 
 deny contains msg if {

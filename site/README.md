@@ -35,8 +35,9 @@ fails loud on a squatted port by design.
 ## Quality gates
 
 ```sh
-npm run verify     # format:check → lint → check → knip → test:unit → build → check:docs
+npm run verify     # audit → format:check → lint → check → knip → test:unit → build → check:docs
 # individually:
+npm run audit      # fail on any known dependency vulnerability
 npm run format     # prettier --write .
 npm run lint       # eslint .
 npm run check       # astro check (types + templates)
@@ -49,6 +50,13 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`);
 `just site-e2e` builds then runs the Playwright suite — the runtime-contract
 tier (window seams, scrollspy keys, dimmer, reduced-motion) that the static
 gates can't see. CI runs it in `site.yml` after the build step.
+
+The site requires npm 12 (`packageManager` pins CI to 12.0.1 and
+`engine-strict=true` rejects older local clients), because Node 26's bundled npm
+does not include the complete install-script policy toolchain. Dependency install
+scripts are fail-closed via `.npmrc`; `allowScripts` contains the reviewed
+version-pinned approval and an explicit `fsevents` denial. Use npm's
+`install-scripts` command to review changes.
 
 > **Cross-boundary build inputs.** The site reads six files from _outside_ `site/`
 > at build time: the workspace `Cargo.toml` (displayed version, via `vite.define` in

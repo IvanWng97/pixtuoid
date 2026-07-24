@@ -33,17 +33,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # CodeQL's Rust no-build extractor delegates build scripts and macros to
-      # rust-analyzer. ubuntu-latest installs Rust with the minimal profile, so
-      # provide the standard-library source before CodeQL initializes.
+      # CodeQL's Rust no-build extractor uses rust-analyzer and selects the
+      # proc-macro server from the active sysroot. The runner's minimal Rust
+      # profile provides neither semantic input, so install and verify both
+      # before CodeQL initializes.
       - name: Prepare Rust semantic analysis
         if: ${{ matrix.language == 'rust' }}
         shell: bash
         run: |
           set -euo pipefail
-          rustup component add rust-src --toolchain stable
-          rust_source="$(rustup run stable rustc --print sysroot)/lib/rustlib/src/rust/library/std/src/lib.rs"
+          rustup component add rust-src rust-analyzer --toolchain stable
+          rust_sysroot="$(rustup run stable rustc --print sysroot)"
+          rust_source="$rust_sysroot/lib/rustlib/src/rust/library/std/src/lib.rs"
+          proc_macro_server="$rust_sysroot/libexec/rust-analyzer-proc-macro-srv"
           test -s "$rust_source"
+          test -x "$proc_macro_server"
           echo "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=true" >> "$GITHUB_ENV"
 
       - name: Initialize CodeQL

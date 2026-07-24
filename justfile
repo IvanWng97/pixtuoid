@@ -89,10 +89,20 @@ ci-observability:
     files=()
     while IFS= read -r file; do files+=("$file"); done < <(rg --files .github/workflows .github/actions -g '*.yml' -g '*.yaml' | sort)
     ((${#files[@]})) || { echo "error: no GitHub Actions YAML files found" >&2; exit 1; }
-    combined="$(mktemp)"; trap 'rm -f "$combined"' EXIT
+    [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
+    files+=(site/package.json)
+    combined="$(mktemp)"
+    policy_test_results="$(mktemp)"
+    trap 'rm -f "$combined" "$policy_test_results"' EXIT
     yq eval-all -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${files[@]}" >"$combined"
     conftest fmt --check policy/ci-observability
-    conftest verify --policy policy/ci-observability
+    if ! conftest verify --policy policy/ci-observability --output json >"$policy_test_results"; then
+        yq -P '.' "$policy_test_results" >&2
+        exit 1
+    fi
+    policy_test_count="$(yq -e 'length' "$policy_test_results")"
+    ((policy_test_count > 0)) || { echo "error: Conftest discovered no Rego unit tests" >&2; exit 1; }
+    echo "$policy_test_count Rego unit tests passed"
     conftest test --parser json --policy policy/ci-observability "$combined"
     bash policy/ci-observability/action_behavior_test.sh
     iconv -f US-ASCII -t US-ASCII codecov.yml >/dev/null
@@ -509,7 +519,7 @@ site-dev-stop:
     cd site && node node_modules/astro/bin/astro.mjs dev stop
 
 [group('site')]
-[doc('Site static tier: format-check → lint → astro check → knip → unit tests → build (site CI runs e2e + lighthouse after these)')]
+[doc('Site static tier: audit → format-check → lint → astro check → knip → unit tests → build (site CI runs e2e + lighthouse after these)')]
 site-check:
     npm --prefix site run verify
 

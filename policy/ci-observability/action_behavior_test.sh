@@ -71,8 +71,10 @@ summary_content="$(<"$summary_file")"
 semantic_script="$(workflow_step_script "$CODEQL_WORKFLOW_FILE" "Prepare Rust semantic analysis")"
 fake_bin="$test_dir/bin"
 fake_sysroot="$test_dir/sysroot"
-mkdir -p "$fake_bin" "$fake_sysroot/lib/rustlib/src/rust/library/std/src"
+mkdir -p "$fake_bin" "$fake_sysroot/lib/rustlib/src/rust/library/std/src" "$fake_sysroot/libexec"
 printf 'pub mod std;\n' >"$fake_sysroot/lib/rustlib/src/rust/library/std/src/lib.rs"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_sysroot/libexec/rust-analyzer-proc-macro-srv"
+chmod +x "$fake_sysroot/libexec/rust-analyzer-proc-macro-srv"
 # shellcheck disable=SC2016 # The generated stub expands these variables when it runs.
 printf '%s\n' \
     '#!/usr/bin/env bash' \
@@ -93,8 +95,8 @@ PATH="$fake_bin:$PATH" \
     fail "Rust semantic-input setup failed with a complete standard-library source"
 
 rustup_calls="$(<"$rustup_log")"
-[[ "$rustup_calls" == *"component add rust-src --toolchain stable"* ]] ||
-    fail "Rust semantic-input setup did not install rust-src"
+[[ "$rustup_calls" == *"component add rust-src rust-analyzer --toolchain stable"* ]] ||
+    fail "Rust semantic-input setup did not install rust-src and rust-analyzer"
 github_env_content="$(<"$github_env")"
 [[ "$github_env_content" == "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=true" ]] ||
     fail "Rust semantic-input setup did not enable all Cargo targets"
@@ -105,4 +107,13 @@ if PATH="$fake_bin:$PATH" \
     GITHUB_ENV="$github_env" \
     bash -c "$semantic_script" >/dev/null 2>&1; then
     fail "Rust semantic-input setup accepted a missing standard-library source"
+fi
+
+chmod -x "$fake_sysroot/libexec/rust-analyzer-proc-macro-srv"
+if PATH="$fake_bin:$PATH" \
+    RUSTUP_LOG="$rustup_log" \
+    FAKE_SYSROOT="$fake_sysroot" \
+    GITHUB_ENV="$github_env" \
+    bash -c "$semantic_script" >/dev/null 2>&1; then
+    fail "Rust semantic-input setup accepted a missing proc-macro server"
 fi

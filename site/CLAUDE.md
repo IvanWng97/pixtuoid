@@ -163,6 +163,9 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   artifact built from the `pixtuoid-web` crate by `just gen-wasm` (wasm +
   wasm-bindgen JS glue, size- and pair-gated — a sha256 manifest pins the
   wasm/glue ABI pair — by `gen-wasm-check` in the Rust CI).
+  It is excluded from `tsconfig.json` because its JavaScript is generator-owned;
+  the rest of `public/` remains type-checked so the hand-authored runtime modules
+  (`office-driver.js`, `audio-worker.js`) stay inside the site gate.
   `components/OfficeBackdrop.astro` dynamically `import()`s it at runtime
   (cover-first on the boot path — the canvas covers the baked poster with its
   OWN `var(--bg)` tone, then FLOOR-ROLLS the live office up out of that tone once
@@ -375,10 +378,12 @@ would make browsers *ignore* `'unsafe-inline'`. Consequences to not "fix":
   `new Worker`, `office-driver.js` via `import()`) rides `script-src 'self'` as
   an EXTERNAL resource — it is not hashed and needs no CSP step; only its
   runtime-loading `is:inline` caller is (auto-)rehashed when its content changes.
-- **`style-src` keeps `'unsafe-inline'` and must stay hash-free**: Shiki
-  spans, the build-time mermaid SVG, and the few `style={}` attributes are
+- **`style-src` keeps `'unsafe-inline'` and must stay hash-free**: the
+  build-time mermaid SVG and the few `style={}` attributes are
   inline style ATTRIBUTES, which hashes cannot express (one present hash
-  disables `unsafe-inline` for the whole directive).
+  disables `unsafe-inline` for the whole directive). Markdown code uses
+  class-based Prism highlighting; do not switch it back to Shiki's inline
+  style attributes, which also makes Astro's CSP build warn.
 - **`astro dev` serves NO CSP** (upstream: the feature is build/preview-only).
   CSP regressions surface in `just site-e2e`'s console watchdog against the
   production build, not in dev.
@@ -409,3 +414,18 @@ page's RUNTIME contracts (`__pixLights`/`pix:onair`/`data-lit` seams, the
 digit-key scrollspy, the docs-nav variant, reduced-motion) plus a console-error
 watchdog, where tsc/knip/build are blind. CI is `site.yml` / `pages.yml` (NOT
 the Rust `ci.yml`).
+
+`site-check` starts with `npm audit --audit-level=low`; the PR and Pages
+workflows run the same audit after `npm ci`. The npm generation is part of the
+toolchain: `packageManager` pins CI to npm 12.0.1, `engines.npm` +
+`engine-strict=true` reject older local clients, and both workflows upgrade the
+older npm bundled with Node 26 before install. npm install scripts are
+fail-closed (`strict-allow-scripts=true`). `allowScripts` grants only the
+exact-version esbuild approval; `fsevents` is explicitly denied because npm's
+registry metadata flags an install script even though the installed manifest
+needs none. Use `npm install-scripts ls` after dependency changes: an
+unreviewed script must fail installation instead of becoming a warning.
+The version-qualified `chrome-launcher@^0.13.4` override upgrades only LHCI's
+old CommonJS launcher line to 0.15.2 (removing its deprecated
+`rimraf → glob → inflight` chain); do not widen it to 1.x, which is ESM-only
+while LHCI 0.15.1 still calls `require('chrome-launcher')`.

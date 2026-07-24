@@ -3,8 +3,10 @@
   "type": "module",
   "version": "0.0.0",
   "private": true,
+  "packageManager": "npm@12.0.1",
   "engines": {
-    "node": ">=26.0.0"
+    "node": ">=26.0.0",
+    "npm": ">=12.0.0 <13"
   },
   "scripts": {
     "dev": "astro dev",
@@ -18,7 +20,8 @@
     "knip": "knip",
     "test:unit": "node --test \"config/**/*.test.mjs\"",
     "check:docs": "node config/assert-docs-rendered.mjs dist",
-    "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build && npm run check:docs",
+    "audit": "npm audit --audit-level=low",
+    "verify": "npm run audit && npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build && npm run check:docs",
     "lighthouse": "lhci autorun",
     "e2e": "playwright test"
   },
@@ -45,16 +48,22 @@
     "playwright": "^1.61.1",
     "prettier": "^3.9.6",
     "prettier-plugin-astro": "^0.14.1",
+    "prismjs": "1.30.0",
     "rehype-mermaid": "^3.0.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.65.0"
   },
   "overrides": {
+    "chrome-launcher@^0.13.4": "0.15.2",
     "esbuild": "0.28.1",
     "tmp": "^0.2.7",
     "uuid": "^11.1.1",
     "yaml-language-server": {
       "yaml": "2.8.3"
     }
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents": false
   }
 }

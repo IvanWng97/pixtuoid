@@ -127,6 +127,110 @@ test_hidden_lighthouse_artifact_is_required if {
 	sprintf("%s Lighthouse upload must include hidden files", [lighthouse_workflow_path]) in violations
 }
 
+test_site_dependency_audit_is_required if {
+	fixture := {"documents": [{
+		"path": lighthouse_workflow_path,
+		"contents": {"jobs": {"check": {"steps": [{"run": "npm ci"}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must run the site dependency audit exactly once", [lighthouse_workflow_path]) in violations
+}
+
+test_pages_dependency_audit_is_required if {
+	path := ".github/workflows/pages.yml"
+	fixture := {"documents": [{
+		"path": path,
+		"contents": {"jobs": {"build": {"steps": [{"run": "npm ci"}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must run the site dependency audit exactly once", [path]) in violations
+}
+
+test_echoed_dependency_audit_is_rejected if {
+	fixture := {"documents": [{
+		"path": lighthouse_workflow_path,
+		"contents": {"jobs": {"check": {"steps": [{"run": "echo npm run audit"}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must run the site dependency audit exactly once", [lighthouse_workflow_path]) in violations
+}
+
+test_conditioned_dependency_audit_is_rejected if {
+	fixture := {"documents": [{
+		"path": lighthouse_workflow_path,
+		"contents": {"jobs": {"check": {
+			"defaults": {"run": {"working-directory": "site"}},
+			"steps": [{"run": "npm run audit", "if": "${{ false }}"}],
+		}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must run the site dependency audit exactly once", [lighthouse_workflow_path]) in violations
+}
+
+test_continue_on_error_dependency_audit_is_rejected if {
+	fixture := {"documents": [{
+		"path": lighthouse_workflow_path,
+		"contents": {"jobs": {"check": {
+			"defaults": {"run": {"working-directory": "site"}},
+			"steps": [{"run": "npm run audit", "continue-on-error": true}],
+		}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must run the site dependency audit exactly once", [lighthouse_workflow_path]) in violations
+}
+
+test_dependency_audit_in_the_wrong_job_is_rejected if {
+	fixture := {"documents": [{
+		"path": lighthouse_workflow_path,
+		"contents": {"jobs": {"other": {
+			"defaults": {"run": {"working-directory": "site"}},
+			"steps": [{"run": "npm run audit"}],
+		}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must run the site dependency audit exactly once", [lighthouse_workflow_path]) in violations
+}
+
+test_dependency_audit_script_is_pinned if {
+	fixture := {"documents": [{
+		"path": site_package_path,
+		"contents": {"scripts": {"audit": "echo clean"}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must keep scripts.audit at %q", [site_package_path, expected_dependency_audit]) in violations
+}
+
+test_site_workflow_installs_the_pinned_npm if {
+	fixture := {"documents": [{
+		"path": lighthouse_workflow_path,
+		"contents": {"jobs": {"check": {"steps": [{"run": "npm install --global npm@latest"}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must install %s exactly once", [lighthouse_workflow_path, expected_package_manager]) in violations
+}
+
+test_pages_workflow_installs_the_pinned_npm if {
+	fixture := {"documents": [{
+		"path": pages_workflow_path,
+		"contents": {"jobs": {"build": {"steps": [{"run": "npm install --global npm@latest"}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must install %s exactly once", [pages_workflow_path, expected_package_manager]) in violations
+}
+
+test_site_manifest_pins_the_npm_generation if {
+	fixture := {"documents": [{
+		"path": site_package_path,
+		"contents": {
+			"packageManager": "npm@11.17.0",
+			"engines": {"npm": ">=11"},
+		},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must pin packageManager to %s", [site_package_path, expected_package_manager]) in violations
+	sprintf("%s must require npm %s", [site_package_path, expected_npm_engine]) in violations
+}
+
 test_codeql_language_set_is_exact if {
 	fixture := {"documents": [{
 		"path": codeql_workflow_path,
@@ -140,6 +244,20 @@ test_codeql_language_set_is_exact if {
 	sprintf("%s must analyze actions, JavaScript/TypeScript, Python, and Rust", [codeql_workflow_path]) in violations
 }
 
+test_missing_codeql_proc_macro_server_is_rejected if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"name": rust_setup_step_name,
+			"if": "${{ matrix.language == 'rust' }}",
+			"run": "rustup component add rust-src --toolchain stable\ntest -s \"$rust_source\"\n",
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must install rust-src and rust-analyzer before CodeQL init", [codeql_workflow_path]) in violations
+	sprintf("%s must verify the sysroot proc-macro server before CodeQL init", [codeql_workflow_path]) in violations
+}
+
 test_codecov_flags_forwarding_is_pinned if {
 	fixture := {"documents": [{
 		"path": codecov_authority_path,
@@ -150,6 +268,18 @@ test_codecov_flags_forwarding_is_pinned if {
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s Codecov step must pass inputs.flag", [codecov_authority_path]) in violations
+}
+
+test_codecov_plugin_autodiscovery_is_rejected if {
+	fixture := {"documents": [{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{
+			"uses": codecov_action,
+			"with": {"plugins": "gcov"},
+		}]}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Codecov step must disable plugin autodiscovery", [codecov_authority_path]) in violations
 }
 
 test_codecov_token_forwarding_is_pinned if {

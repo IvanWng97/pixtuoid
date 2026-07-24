@@ -38,6 +38,11 @@ jobs:
           node-version: 26
           cache: npm
           cache-dependency-path: site/package-lock.json
+      # Node 26's bundled npm predates the complete allowScripts toolchain.
+      # Match packageManager before npm ci so install-script policy is enforced.
+      - name: Install pinned npm
+        working-directory: ${{ github.workspace }}
+        run: npm install --global npm@12.0.1
       - name: Cache Playwright Chromium
         uses: actions/cache@v6
         with:
@@ -54,9 +59,21 @@ jobs:
       # its PR-gate render stays green. `install chromium` already pulls
       # `chromium-headless-shell`; name it too so a cache holding
       # chromium-but-not-the-shell can't skip it.
-      - name: Chromium for the diagram, then validate (lint + types)
+      - name: Install site dependencies
         working-directory: site
-        run: npm ci && npx playwright install --with-deps chromium chromium-headless-shell && npm run lint && npm run check
+        run: npm ci
+      - name: Audit site dependencies
+        working-directory: site
+        run: npm run audit
+      - name: Install Chromium for the diagram
+        working-directory: site
+        run: npx playwright install --with-deps chromium chromium-headless-shell
+      - name: Lint site
+        working-directory: site
+        run: npm run lint
+      - name: Type-check site
+        working-directory: site
+        run: npm run check
       - uses: withastro/action@v6
         # the ticker's build-time merged-PR fetch: unauthenticated quota on shared
         # runner IPs is routinely exhausted -> silent canned-reel fallback; the

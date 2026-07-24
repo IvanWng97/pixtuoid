@@ -235,11 +235,12 @@ export default defineConfig({
   // → "pixtuoidv0.11.1", boot lines, docs prose). Pin the Astro 6 behavior.
   compressHTML: true,
   markdown: {
-    // keep ```mermaid as a RAW code node — Shiki would otherwise highlight it
-    // into a <pre> before rehype-mermaid can turn it into an inline SVG.
-    // (syntaxHighlight stays a top-level markdown option in Astro 7 — the
-    // vite-plugin passes it into whichever processor is active.)
-    syntaxHighlight: { type: 'shiki', excludeLangs: ['mermaid'] },
+    // keep ```mermaid as a RAW code node — the syntax highlighter would
+    // otherwise turn it into a <pre> before rehype-mermaid can turn it into
+    // an inline SVG.
+    // Prism emits classes instead of Shiki's inline style attributes, so it is
+    // compatible with Astro's CSP integration without a build-time warning.
+    syntaxHighlight: { type: 'prism', excludeLangs: ['mermaid'] },
     // Astro 7: Sätteri is the default Markdown processor and the legacy
     // `markdown.rehypePlugins` key is deprecated (hard error without
     // @astrojs/markdown-remark installed). Opt back into the remark/rehype
