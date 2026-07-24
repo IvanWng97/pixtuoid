@@ -205,6 +205,27 @@ mod tests {
     }
 
     #[test]
+    fn rendered_hook_binding_round_trips_escaped_paths() {
+        for path in [
+            r"C:\Program Files\Pixtuoid\pixtuoid-hook.exe",
+            r#"/tmp/"quoted"/pixtuoid-hook"#,
+        ] {
+            let rendered = render_plugin(path).unwrap();
+            let binding = rendered
+                .lines()
+                .find(|line| line.starts_with("const HOOK_PATH: string = "))
+                .unwrap();
+            let encoded = binding.strip_prefix("const HOOK_PATH: string = ").unwrap();
+            let expected_json = serde_json::to_string(path).unwrap();
+            assert_eq!(
+                binding,
+                format!("const HOOK_PATH: string = {expected_json}")
+            );
+            assert_eq!(serde_json::from_str::<String>(encoded).unwrap(), path);
+        }
+    }
+
+    #[test]
     fn install_is_idempotent_for_the_same_path() {
         let a = merge_install("", "/opt/bin/pixtuoid-hook").unwrap();
         let b = merge_install(&a.content, "/opt/bin/pixtuoid-hook").unwrap();

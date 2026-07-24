@@ -575,6 +575,28 @@ mod tests {
     }
 
     #[test]
+    fn rendered_hook_binding_round_trips_escaped_paths() {
+        for path in [
+            r"C:\Program Files\Pixtuoid\pixtuoid-hook.exe",
+            r#"/tmp/"quoted"/pixtuoid-hook"#,
+        ] {
+            let rendered = render_plugin(path).unwrap();
+            let binding = rendered
+                .lines()
+                .find(|line| line.starts_with("const HOOK_PATH = "))
+                .unwrap();
+            let encoded = binding
+                .strip_prefix("const HOOK_PATH = ")
+                .unwrap()
+                .strip_suffix(';')
+                .unwrap();
+            let expected_json = serde_json::to_string(path).unwrap();
+            assert_eq!(binding, format!("const HOOK_PATH = {expected_json};"));
+            assert_eq!(serde_json::from_str::<String>(encoded).unwrap(), path);
+        }
+    }
+
+    #[test]
     fn merge_install_adds_load_path_enabled_and_the_grant() {
         let _env = crate::TEST_ENV_LOCK
             .lock()
