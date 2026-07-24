@@ -27,4 +27,4 @@ jobs:
       - name: Delete closed PR caches
         run: |
           gh cache delete --all --ref "$PR_REF" --succeed-on-no-caches
-          echo "Deleted caches scoped to \`$PR_REF\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "Cache cleanup completed for \`$PR_REF\` (no caches is a successful no-op)." >> "$GITHUB_STEP_SUMMARY"
