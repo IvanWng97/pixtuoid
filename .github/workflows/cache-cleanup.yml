@@ -1,0 +1,30 @@
+name: cache cleanup
+
+# PR caches are scoped away from main and can evict useful main caches when the
+# repository reaches its 10 GB limit. Run in the base context so fork PRs can
+# clean up too, but never checkout or execute pull-request content here.
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  actions: write
+
+concurrency:
+  group: cache-cleanup-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  closed-pr:
+    name: closed PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR_REF: refs/pull/${{ github.event.pull_request.number }}/merge
+    steps:
+      - name: Delete closed PR caches
+        run: |
+          gh cache delete --all --ref "$PR_REF" --succeed-on-no-caches
+          echo "Cache cleanup completed for \`$PR_REF\` (no caches is a successful no-op)." >> "$GITHUB_STEP_SUMMARY"
