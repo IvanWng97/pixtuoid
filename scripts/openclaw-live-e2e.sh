@@ -36,7 +36,6 @@ for bin in "$PIX" "$HOOK"; do
     }
 done
 
-# shellcheck disable=SC2329  # invoked indirectly via `trap cleanup EXIT` below
 cleanup() {
     [ -n "$PIXPID" ] && kill "$PIXPID" 2>/dev/null
     # The #318 step's background `sleep` (set later, so guard under `set -u`):
@@ -174,4 +173,6 @@ if [ "$FAILED" = 0 ]; then
 else
     echo "openclaw-live-e2e: FAIL" >&2
 fi
+trap - EXIT
+cleanup
 exit "$FAILED"

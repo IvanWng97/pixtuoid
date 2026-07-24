@@ -78,6 +78,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: lychee@0.24.2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: shellcheck@0.11.0
+          fallback: none
       - uses: extractions/setup-just@v4
       - run: just shfmt-check
       - run: just shellcheck
