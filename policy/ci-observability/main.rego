@@ -22,13 +22,13 @@ actionlint_config_path := ".github/actionlint.yaml"
 actionlint_claude_wif_ignore := "input \"anthropic_(federation_rule_id|organization_id|service_account_id)\" is not defined in action \"anthropics/claude-code-action@v1\""
 actionlint_release_queue_ignore := "unexpected key \"queue\" for \"concurrency\" section"
 zizmor_config_path := ".github/zizmor.yml"
-checkout_action_name := "actions/checkout"
 cache_cleanup_workflow_path := ".github/workflows/cache-cleanup.yml"
 claude_action := "anthropics/claude-code-action@v1"
 claude_review_workflow_path := ".github/workflows/claude-review.yml"
 claude_security_workflow_path := ".github/workflows/claude-security-review.yml"
 claude_reusable_workflow_path := ".github/workflows/claude-readonly-review.yml"
 claude_reusable_reference := "./.github/workflows/claude-readonly-review.yml"
+pr_resolution_step_name := "Resolve pull request"
 claude_model_step_name := "Run read-only Claude review"
 claude_publish_step_name := "Publish validated Claude review"
 trusted_default_ref := "${{ github.event.repository.default_branch }}"
@@ -80,6 +80,7 @@ expected_actionlint_paths := {
 }
 
 expected_zizmor_rules := {"unpinned-uses": {"config": {"policies": {"*": "ref-pin"}}}}
+expected_claude_oauth_fallback := "${{ vars.ANTHROPIC_FEDERATION_RULE_ID == '' && vars.ANTHROPIC_ORGANIZATION_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}"
 
 codecov_oidc_job_names := {
 	"windows-test",
@@ -114,17 +115,6 @@ uses_entries := [entry |
 entries_using(action) := [entry |
 	some entry in uses_entries
 	entry.uses == action
-]
-
-checkout_action_reference(value) if {
-	parts := split(value, "@")
-	count(parts) == 2
-	lower(parts[0]) == checkout_action_name
-}
-
-checkout_entries := [entry |
-	some entry in uses_entries
-	checkout_action_reference(entry.uses)
 ]
 
 codecov_action_reference(value) if {
@@ -332,7 +322,7 @@ claude_model_auth_is_scoped(step) if {
 	object.get(params, "github_token", "") == "${{ github.token }}"
 	object.get(params, "anthropic_federation_rule_id", "") == "${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}"
 	object.get(params, "anthropic_organization_id", "") == "${{ vars.ANTHROPIC_ORGANIZATION_ID }}"
-	contains(object.get(params, "claude_code_oauth_token", ""), "vars.ANTHROPIC_FEDERATION_RULE_ID == ''")
+	object.get(params, "claude_code_oauth_token", "") == expected_claude_oauth_fallback
 }
 
 claude_publisher_revalidates_head(step) if {
@@ -370,6 +360,12 @@ gemini_review_steps := [entry |
 gemini_validation_steps := [entry |
 	some index, step in gemini_steps
 	object.get(step, "name", "") == gemini_validation_step_name
+	entry := {"index": index, "value": step}
+]
+
+gemini_named_steps(name) := [entry |
+	some index, step in gemini_steps
+	object.get(step, "name", "") == name
 	entry := {"index": index, "value": step}
 ]
 
@@ -475,6 +471,13 @@ deny contains msg if {
 	}
 	object.get(claude_analyze_job, "permissions", {}) != expected
 	msg := sprintf("%s analyze job must remain read-only except for OIDC", [claude_reusable_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	steps := claude_analyze_named_steps(pr_resolution_step_name)
+	count(steps) != 1
+	msg := sprintf("%s must resolve one open internal default-branch pull request", [claude_reusable_workflow_path])
 }
 
 deny contains msg if {
@@ -618,6 +621,13 @@ deny contains msg if {
 
 deny contains msg if {
 	_ := documents[gemini_workflow_path]
+	steps := gemini_named_steps(pr_resolution_step_name)
+	count(steps) != 1
+	msg := sprintf("%s must resolve one open internal default-branch pull request", [gemini_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[gemini_workflow_path]
 	object.get(gemini_job, "permissions", {}) != {
 		"contents": "read",
 		"pull-requests": "read",
@@ -695,13 +705,6 @@ deny contains msg if {
 	_ := documents[cache_cleanup_workflow_path]
 	not cache_cleanup_is_inert
 	msg := sprintf("%s pull_request_target job must remain cache-only and checkout-free", [cache_cleanup_workflow_path])
-}
-
-deny contains msg if {
-	some entry in checkout_entries
-	params := object.get(entry.value, "with", {})
-	object.get(params, "persist-credentials", true) != false
-	msg := sprintf("%s checkout must set persist-credentials: false", [entry.path])
 }
 
 deny contains msg if {
@@ -1012,7 +1015,7 @@ deny contains msg if {
 deny contains msg if {
 	config := documents[zizmor_config_path]
 	object.get(config, "rules", {}) != expected_zizmor_rules
-	msg := sprintf("%s must require every action to use at least a ref or tag", [zizmor_config_path])
+	msg := sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path])
 }
 
 deny contains msg if {

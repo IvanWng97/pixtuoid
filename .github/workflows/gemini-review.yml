@@ -54,8 +54,9 @@ jobs:
           gh api "$api_path" >"$RUNNER_TEMP/pull-request.json"
           head_repo="$(jq -r '.head.repo.full_name // ""' "$RUNNER_TEMP/pull-request.json")"
           base_ref="$(jq -r '.base.ref // ""' "$RUNNER_TEMP/pull-request.json")"
+          state="$(jq -r '.state // ""' "$RUNNER_TEMP/pull-request.json")"
 
-          if [[ "$head_repo" != "$REPOSITORY" || "$base_ref" != "$DEFAULT_BRANCH" ]]; then
+          if [[ "$head_repo" != "$REPOSITORY" || "$base_ref" != "$DEFAULT_BRANCH" || "$state" != open ]]; then
             echo "reviewable=false" >>"$GITHUB_OUTPUT"
             exit 0
           fi
@@ -177,6 +178,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           REVIEW: ${{ needs.design-review.outputs.review }}
         run: |
+          set -euo pipefail
           current_head_sha="$(
             gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha'
           )"

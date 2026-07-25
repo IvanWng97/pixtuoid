@@ -33,6 +33,7 @@ workflow_step_script() {
 
 test_dir="$(mktemp -d)"
 trap 'rm -rf "$test_dir"' EXIT
+export RUNNER_TEMP="$test_dir"
 
 presence_script="$(step_script "$CODECOV_ACTION_FILE" "Require a generated report")"
 missing_report="$test_dir/missing"
@@ -74,6 +75,59 @@ semantic_script="$(workflow_step_script "$CODEQL_WORKFLOW_FILE" "Prepare Rust se
 fake_bin="$test_dir/bin"
 fake_sysroot="$test_dir/sysroot"
 mkdir -p "$fake_bin" "$fake_sysroot/lib/rustlib/src/rust/library/std/src" "$fake_sysroot/libexec"
+
+# shellcheck disable=SC2016 # The generated gh stub reads the fixture when it runs.
+printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    '[[ "$1" == api ]]' \
+    'printf "%s\n" "$FAKE_PR_JSON"' \
+    >"$fake_bin/gh"
+chmod +x "$fake_bin/gh"
+
+assert_reviewability() {
+    local script="$1"
+    local fixture="$2"
+    local expected="$3"
+    local label="$4"
+    local output_file="$test_dir/pr-resolution-output"
+    : >"$output_file"
+
+    PATH="$fake_bin:$PATH" \
+        DEFAULT_BRANCH="main" \
+        FAKE_PR_JSON="$fixture" \
+        GH_TOKEN="test-token" \
+        GITHUB_OUTPUT="$output_file" \
+        PR_NUMBER="42" \
+        REPOSITORY="owner/repo" \
+        bash -c "$script" ||
+        fail "$label resolver exited non-zero"
+
+    local output
+    output="$(<"$output_file")"
+    if [[ "$expected" == true ]]; then
+        [[ "$output" == *"reviewable=true"* ]] ||
+            fail "$label resolver rejected an open internal default-branch PR"
+        [[ "$output" == *"number=42"* && "$output" == *"head_sha=abc123"* ]] ||
+            fail "$label resolver omitted the immutable PR identity"
+    elif [[ "$output" != "reviewable=false" ]]; then
+        fail "$label resolver accepted a PR outside its trust boundary"
+    fi
+}
+
+valid_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
+fork_pr='{"head":{"repo":{"full_name":"fork/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
+wrong_base_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"release"},"state":"open"}'
+closed_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"closed"}'
+for workflow_file in "$CLAUDE_REVIEW_WORKFLOW_FILE" "$GEMINI_WORKFLOW_FILE"; do
+    resolver_script="$(workflow_step_script "$workflow_file" "Resolve pull request")"
+    label="$(basename "$workflow_file")"
+    assert_reviewability "$resolver_script" "$valid_pr" true "$label"
+    assert_reviewability "$resolver_script" "$fork_pr" false "$label fork"
+    assert_reviewability "$resolver_script" "$wrong_base_pr" false "$label base"
+    assert_reviewability "$resolver_script" "$closed_pr" false "$label state"
+done
+
 printf 'pub mod std;\n' >"$fake_sysroot/lib/rustlib/src/rust/library/std/src/lib.rs"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_sysroot/libexec/rust-analyzer-proc-macro-srv"
 chmod +x "$fake_sysroot/libexec/rust-analyzer-proc-macro-srv"
@@ -233,8 +287,8 @@ REVIEW="Findings: 0" bash -c "$gemini_review_script" >/dev/null ||
     fail "Gemini review gate rejected a non-empty review"
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
+gemini_publisher_script="$(workflow_step_script "$GEMINI_WORKFLOW_FILE" "Publish Gemini review")"
 published_comment="$test_dir/published-comment"
-export RUNNER_TEMP="$test_dir"
 # shellcheck disable=SC2016 # The generated gh stub expands these variables when it runs.
 printf '%s\n' \
     '#!/usr/bin/env bash' \
@@ -258,6 +312,17 @@ printf '%s\n' \
     'esac' \
     >"$fake_bin/gh"
 chmod +x "$fake_bin/gh"
+
+if PATH="$fake_bin:$PATH" \
+    FAKE_PR_HEAD="new-head" \
+    PUBLISHED_COMMENT="$published_comment" \
+    HEAD_SHA="old-head" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW="No findings." \
+    bash -c "$gemini_publisher_script" >/dev/null 2>&1; then
+    fail "Gemini publisher accepted a stale review"
+fi
 
 valid_review='{"summary":"No correctness findings.","findings":[]}'
 PATH="$fake_bin:$PATH" \
@@ -311,6 +376,19 @@ if PATH="$fake_bin:$PATH" \
     fail "Claude publisher accepted a stale review"
 fi
 
+if PATH="$fake_bin:$PATH" \
+    FAKE_PR_HEAD="abc123" \
+    PUBLISHED_COMMENT="$published_comment" \
+    EXPECTED_HEAD_SHA="abc123" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW_JSON='{"summary":' \
+    REVIEW_MARKER="claude-auto-review" \
+    REVIEW_TITLE="Claude Review" \
+    bash -c "$publisher_script" >/dev/null 2>&1; then
+    fail "Claude publisher accepted malformed JSON"
+fi
+
 oversized_findings="$(
     jq -n '{
         summary: "too many",
@@ -335,6 +413,23 @@ if PATH="$fake_bin:$PATH" \
     REVIEW_TITLE="Claude Review" \
     bash -c "$publisher_script" >/dev/null 2>&1; then
     fail "Claude publisher accepted more than five findings"
+fi
+
+oversized_summary="$(
+    jq -n --arg summary "$(printf 's%.0s' {1..8001})" \
+        '{summary: $summary, findings: []}'
+)"
+if PATH="$fake_bin:$PATH" \
+    FAKE_PR_HEAD="abc123" \
+    PUBLISHED_COMMENT="$published_comment" \
+    EXPECTED_HEAD_SHA="abc123" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW_JSON="$oversized_summary" \
+    REVIEW_MARKER="claude-auto-review" \
+    REVIEW_TITLE="Claude Review" \
+    bash -c "$publisher_script" >/dev/null 2>&1; then
+    fail "Claude publisher accepted an oversized summary"
 fi
 
 unsafe_path_review='{"summary":"finding","findings":[{"severity":"HIGH","path":"../outside","line":1,"body":"bad"}]}'

@@ -3,5 +3,7 @@
 rules:
   unpinned-uses:
     config:
+      # Symbolic refs are accepted by repository policy; zizmor still rejects
+      # missing refs and audits their freshness and version consistency.
       policies:
         "*": ref-pin

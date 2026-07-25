@@ -190,7 +190,7 @@ the yq + Conftest/OPA policy and real action/workflow behavior tests under
 `policy/ci-observability/`; `just ci-observability` runs them inside both
 `just lint` and the CI hygiene job.
 `just zizmor` adds the upstream workflow/action/Dependabot security analyzer:
-the repository deliberately requires a versioned ref or SHA (not SHA-only),
+the repository deliberately requires a symbolic ref or SHA (not SHA-only),
 every checkout drops persisted credentials, and accepted analyzer findings use
 exact inline suppressions with their reason instead of disabled audit classes.
 Dependabot applies a seven-day update cooldown across every configured

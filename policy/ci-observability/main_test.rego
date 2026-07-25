@@ -572,17 +572,7 @@ test_zizmor_pin_policy_cannot_be_tightened_or_disabled_silently if {
 		"contents": {"rules": {"unpinned-uses": {"disable": true}}},
 	}]}
 	violations := deny with input as fixture
-	sprintf("%s must require every action to use at least a ref or tag", [zizmor_config_path]) in violations
-}
-
-test_every_checkout_drops_persisted_credentials if {
-	path := ".github/workflows/unsafe-checkout.yml"
-	fixture := {"documents": [{
-		"path": path,
-		"contents": {"jobs": {"test": {"steps": [{"uses": "actions/checkout@v99"}]}}},
-	}]}
-	violations := deny with input as fixture
-	sprintf("%s checkout must set persist-credentials: false", [path]) in violations
+	sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path]) in violations
 }
 
 test_cache_cleanup_cannot_execute_pull_request_code if {
@@ -612,6 +602,42 @@ test_claude_review_trigger_must_load_from_the_trusted_base if {
 	violations := deny with input as fixture
 	sprintf("%s must use pull_request_target instead of pull_request", [claude_review_workflow_path]) in violations
 	sprintf("%s must delegate to the canonical read-only Claude reviewer", [claude_review_workflow_path]) in violations
+}
+
+test_claude_resolver_is_required if {
+	fixture := {"documents": [{
+		"path": claude_reusable_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": []}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must resolve one open internal default-branch pull request", [claude_reusable_workflow_path]) in violations
+}
+
+test_gemini_resolver_is_required if {
+	fixture := {"documents": [{
+		"path": gemini_workflow_path,
+		"contents": {"jobs": {"design-review": {"steps": []}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must resolve one open internal default-branch pull request", [gemini_workflow_path]) in violations
+}
+
+test_claude_oauth_fallback_requires_all_wif_authority_fields_to_be_absent if {
+	fixture := {"documents": [{
+		"path": claude_reusable_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"name": claude_model_step_name,
+			"uses": claude_action,
+			"with": {
+				"github_token": "${{ github.token }}",
+				"anthropic_federation_rule_id": "${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}",
+				"anthropic_organization_id": "${{ vars.ANTHROPIC_ORGANIZATION_ID }}",
+				"claude_code_oauth_token": "${{ vars.ANTHROPIC_FEDERATION_RULE_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}",
+			},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Claude step must use WIF-first authentication with the scoped job token", [claude_reusable_workflow_path]) in violations
 }
 
 test_claude_model_and_publisher_permissions_are_separated if {

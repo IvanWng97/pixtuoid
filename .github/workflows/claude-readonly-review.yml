@@ -114,7 +114,9 @@ jobs:
           anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
           anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
           anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
-          claude_code_oauth_token: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          # A partial WIF authority is a configuration error, not a reason to
+          # silently fall back to the long-lived compatibility credential.
+          claude_code_oauth_token: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID == '' && vars.ANTHROPIC_ORGANIZATION_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           track_progress: false
           classify_inline_comments: false
           include_fix_links: false
