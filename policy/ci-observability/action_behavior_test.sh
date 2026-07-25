@@ -276,14 +276,28 @@ healthy_summary_content="$(<"$healthy_summary")"
     fail "Rust extraction-health summary omitted the diagnostics count"
 
 write_sarif_metrics "$unhealthy_sarif_dir/rust.sarif" 223 57
-if SARIF_DIR="$unhealthy_sarif_dir" bash -c "$health_script" >/dev/null 2>&1; then
+unhealthy_summary="$test_dir/unhealthy-summary"
+if unhealthy_output="$(
+    GITHUB_STEP_SUMMARY="$unhealthy_summary" \
+        SARIF_DIR="$unhealthy_sarif_dir" \
+        bash -c "$health_script" 2>&1
+)"; then
     fail "Rust extraction-health gate accepted a database with diagnostics in most files"
 fi
+[[ "$unhealthy_output" == *"::error title=Unhealthy Rust CodeQL database::"* ]] ||
+    fail "Rust extraction-health gate failed before evaluating its unhealthy threshold"
 
 printf '{"runs":[]}\n' >"$missing_metric_sarif_dir/rust.sarif"
-if SARIF_DIR="$missing_metric_sarif_dir" bash -c "$health_script" >/dev/null 2>&1; then
+missing_metric_summary="$test_dir/missing-metric-summary"
+if missing_metric_output="$(
+    GITHUB_STEP_SUMMARY="$missing_metric_summary" \
+        SARIF_DIR="$missing_metric_sarif_dir" \
+        bash -c "$health_script" 2>&1
+)"; then
     fail "Rust extraction-health gate accepted missing CodeQL metrics"
 fi
+[[ "$missing_metric_output" == *"expected exactly one CodeQL metric"* ]] ||
+    fail "Rust extraction-health gate failed before validating its required metrics"
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
 published_comment="$test_dir/published-comment"

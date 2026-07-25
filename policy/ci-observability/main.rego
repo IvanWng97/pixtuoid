@@ -226,11 +226,13 @@ codeql := documents[codeql_workflow_path]
 codeql_job := codeql.jobs.analyze
 codeql_steps := object.get(codeql_job, "steps", [])
 
-codeql_steps_using(action) := [entry |
-	some index, step in codeql_steps
-	object.get(step, "uses", "") == action
+indexed_steps_matching(steps, field, expected) := [entry |
+	some index, step in steps
+	object.get(step, field, "") == expected
 	entry := {"index": index, "value": step}
 ]
+
+codeql_steps_using(action) := indexed_steps_matching(codeql_steps, "uses", action)
 
 rust_setup_steps := [entry |
 	some index, step in codeql_steps
@@ -262,23 +264,11 @@ claude_publish_job := object.get(claude_reusable_jobs, "publish", {})
 claude_analyze_steps := object.get(claude_analyze_job, "steps", [])
 claude_publish_steps := object.get(claude_publish_job, "steps", [])
 
-claude_analyze_steps_using(action) := [entry |
-	some index, step in claude_analyze_steps
-	object.get(step, "uses", "") == action
-	entry := {"index": index, "value": step}
-]
+claude_analyze_steps_using(action) := indexed_steps_matching(claude_analyze_steps, "uses", action)
 
-claude_analyze_named_steps(name) := [entry |
-	some index, step in claude_analyze_steps
-	object.get(step, "name", "") == name
-	entry := {"index": index, "value": step}
-]
+claude_analyze_named_steps(name) := indexed_steps_matching(claude_analyze_steps, "name", name)
 
-claude_publish_named_steps(name) := [entry |
-	some index, step in claude_publish_steps
-	object.get(step, "name", "") == name
-	entry := {"index": index, "value": step}
-]
+claude_publish_named_steps(name) := indexed_steps_matching(claude_publish_steps, "name", name)
 
 claude_caller_jobs(path) := [job |
 	workflow := documents[path]

@@ -84,6 +84,16 @@ test_codeql_step_selection_preserves_order if {
 	analyze[0].index == 2
 }
 
+test_indexed_step_selection_supports_named_steps if {
+	steps := [
+		{"name": "first"},
+		{"name": "target"},
+		{"name": "target"},
+	]
+	matches := indexed_steps_matching(steps, "name", "target")
+	[count(matches), matches[0].index, matches[1].index] == [2, 1, 2]
+}
+
 test_codeql_rust_setup_cannot_use_rolling_stable if {
 	fixture := {"documents": [{
 		"path": codeql_workflow_path,
