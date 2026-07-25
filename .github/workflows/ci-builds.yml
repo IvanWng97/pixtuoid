@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
         with:
           targets: wasm32-unknown-unknown
@@ -32,6 +34,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # The default-on audio feature must compile through ALSA on Linux.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -45,6 +49,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
         with:
           targets: x86_64-pc-windows-msvc
@@ -63,6 +69,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # Packaging does not invoke just, so keep its setup narrower than the
       # shared Rust+just action while retaining the same cache namespace.
       - uses: ./.github/actions/packaging-build
@@ -73,6 +81,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/packaging-build
 
   semver:
@@ -81,6 +91,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
       - uses: taiki-e/install-action@cargo-semver-checks
       - run: just semver

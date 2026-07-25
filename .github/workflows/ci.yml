@@ -27,9 +27,10 @@ jobs:
 
   tests:
     name: Test Suite & Coverage
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/ci-tests.yml
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # Advisory checks stay visible without entering the stable protected gate.
   supplemental:

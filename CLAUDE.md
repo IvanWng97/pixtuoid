@@ -189,21 +189,37 @@ Cross-file report/upload semantics that actionlint cannot express are pinned by
 the yq + Conftest/OPA policy and real action/workflow behavior tests under
 `policy/ci-observability/`; `just ci-observability` runs them inside both
 `just lint` and the CI hygiene job.
+`just zizmor` adds the upstream workflow/action/Dependabot security analyzer:
+the repository deliberately requires a versioned ref or SHA (not SHA-only),
+every checkout drops persisted credentials, and accepted analyzer findings use
+exact inline suppressions with their reason instead of disabled audit classes.
+Dependabot applies a seven-day update cooldown across every configured
+ecosystem.
+The two automatic Claude reviewers are thin trigger policies over
+`claude-readonly-review.yml`: the model job checks out only the trusted default
+branch, receives the exact PR diff as inert data, has read-only GitHub/tools,
+and emits schema-bound JSON; a separate no-checkout publisher revalidates the PR
+head before writing the review comment. Anthropic WIF is preferred when its
+repository variables are configured, with the existing OAuth secret as a
+compatibility fallback. Codecov uploads likewise use job-scoped GitHub OIDC
+(fork PRs remain Codecov's tokenless path), never a repository upload token.
 That gate also pins the advanced CodeQL workflow: all four repository
 languages stay explicit, Rust stays on its only supported `none` build mode,
 and the no-build extractor receives `rust-src` plus the proc-macro server from
 the workspace's declared MSRV (not the runner's rolling stable toolchain).
 After analysis, CodeQL's own SARIF metrics fail the Rust job if extraction
-diagnostics affect at least as many files as were extracted cleanly. This is why
-CodeQL lives in [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)
-instead of GitHub default setup — default setup cannot prepare these semantic
-inputs or enforce database health.
+diagnostics affect at least as many files as were extracted cleanly, and the
+quantified counts are written to the job summary. This is why CodeQL lives in
+[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) instead of GitHub
+default setup — default setup cannot prepare these semantic inputs or enforce
+database health.
 
 **Release:** `just bump X.Y.Z` rewrites every version number, drafts
 `release_notes()`, runs preflight, and commits on a release branch — it
 stops before the tag; pushing the tag is the irreversible publish (crates.io +
 npm, and it auto-triggers a homebrew-core bump)
-and stays a human step. See
+and stays a human step. All tags enter one lossless, non-cancelling release
+queue so different versions cannot interleave publication. See
 [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 ## Development workflow (the arc loop)

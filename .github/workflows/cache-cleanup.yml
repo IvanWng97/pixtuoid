@@ -4,7 +4,7 @@ name: cache cleanup
 # repository reaches its 10 GB limit. Run in the base context so fork PRs can
 # clean up too, but never checkout or execute pull-request content here.
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] no checkout or PR-code execution; policy pins the cache-only job
     types: [closed]
 
 permissions:

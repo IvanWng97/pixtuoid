@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
         with:
           components: rustfmt
@@ -27,6 +29,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # The default-on audio feature compiles through ALSA on Linux; no test
       # opens a device because runtime audio is behind the AudioSink seam.
       - name: Install ALSA headers
@@ -42,6 +46,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # Pin the patch release: floating v2 briefly changed argument handling.
       - uses: EmbarkStudios/cargo-deny-action@v2.1.1
         with:
@@ -55,6 +61,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # cargo-machete parses manifests and does not need a Rust toolchain.
       - uses: taiki-e/install-action@cargo-machete
       - uses: extractions/setup-just@v4
@@ -66,6 +74,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # One lightweight job owns the non-Rust hygiene tools. Go is preinstalled
       # on the runner; lychee is installed as a pinned prebuilt binary.
       - name: Install workflow lint + policy tools
@@ -77,7 +87,8 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - uses: taiki-e/install-action@v2
         with:
-          tool: lychee@0.24.2
+          tool: lychee@0.24.2,zizmor@1.28.0
+          fallback: none
       - uses: taiki-e/install-action@v2
         with:
           tool: shellcheck@0.11.0
@@ -86,6 +97,9 @@ jobs:
       - run: just shfmt-check
       - run: just shellcheck
       - run: just actionlint
+      - run: just zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: just ci-observability
       - run: just links
 
@@ -95,6 +109,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # The default-on audio feature must compile through ALSA on Linux.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -110,6 +126,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # A grep-only guard against publishing placeholder release notes.
       - uses: extractions/setup-just@v4
       - run: just notes-curated
@@ -120,6 +138,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # Exercise the pure-Node generator before release.yml uses it to publish.
       - uses: actions/setup-node@v7
         with:
@@ -133,6 +153,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # Pure node:builtins, with no npm install. This runs on every PR rather
       # than in the path-filtered site workflow so it can be required safely.
       - uses: actions/setup-node@v7
@@ -150,6 +172,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v1-rust
@@ -169,6 +193,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # cargo doc and doctests compile the default-on audio feature on Linux.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev

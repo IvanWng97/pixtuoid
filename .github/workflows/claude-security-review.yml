@@ -1,77 +1,42 @@
 name: claude security review
 
 on:
-  pull_request:
-    # Runs on EVERY non-fork PR (no `paths:` filter). A hardcoded path
-    # allowlist silently rots as the security surface moves — a new crate, a
-    # new install target, embedded_pack's `--pack-dir` ingestion, platform
-    # path resolution all sit outside the old four globs. The gate is now the
-    # MODEL reading the diff: it early-exits on a diff with no trust boundary
-    # (see the prompt), bounded by `--max-budget-usd`, so coverage can't drift.
-    # `synchronize` re-reviews every push; `/security-review` is the manual re-trigger.
-    types: [opened, reopened, synchronize]
+  # Like the general review, automatic security analysis is loaded from the
+  # trusted default branch and receives the exact PR diff only as inert data.
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted-base caller; Conftest pins the read-only analyzer/publisher split
+    types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
     types: [created]
 
-permissions:
-  contents: read
-  pull-requests: write
-  id-token: write
-  actions: read
+permissions: {}
 
 jobs:
   security-review:
     if: >
-      (github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/security-review') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+      (github.event_name == 'pull_request_target' &&
+        github.actor != 'dependabot[bot]' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.base.ref == github.event.repository.default_branch) ||
+      (github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        startsWith(github.event.comment.body, '/security-review') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/claude-readonly-review.yml
+    with:
+      pr_number: ${{ github.event.issue.number || github.event.pull_request.number }}
+      prompt_path: .github/prompts/security_review_rules.md
+      review_marker: claude-security-review
+      review_title: Claude Security Review
+      max_turns: 40
+      max_budget_usd: 8
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     concurrency:
-      # issue_comment events carry github.event.issue.number, not pull_request.number.
       group: claude-security-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          track_progress: true
-          show_full_output: true
-          prompt: |
-            You are a security reviewer for a Rust CLI tool that integrates with Claude Code
-            via Unix sockets and modifies user config files.
-
-            Read CLAUDE.md first for architecture invariants and known sharp edges.
-
-            FIRST, look at the diff (`gh pr diff`). If it touches NO trust boundary —
-            nothing under the hook shim, socket/pipe transport, settings.json / config
-            writes, install targets, path/home resolution, untrusted-input decoding
-            (transcripts, hook payloads, JSONL lines), pack/asset ingestion, or
-            process/permission handling — post a one-line "no security-relevant changes
-            in this diff" summary via `gh pr comment` and exit without further review.
-            This workflow runs on every PR, so a clean exit on an irrelevant diff is the
-            expected, cheap path.
-
-            Otherwise, review this PR for security issues. Focus on:
-            1. Hook shim safety: must always exit 0, must never block CC, 200ms timeout non-negotiable
-            2. settings.json writes: must go through write_config_atomic (advisory lock + atomic rename + symlink resolution)
-            3. Unix socket handling: no path traversal, no symlink attacks
-            4. Input validation on hook payloads and JSONL lines — malformed input must be logged and skipped, never panic
-            5. No raw secrets in command strings or log output
-            6. No unwrap() in non-test code paths
-            7. File path handling: no directory traversal via crafted project names or transcript paths
-
-            Severity levels:
-            - CRITICAL: exploitable vulnerability (path traversal, code injection, data exfiltration)
-            - HIGH: safety invariant violation (hook blocks CC, unwrap in prod, settings.json direct write)
-            - MEDIUM: defense-in-depth gap (missing validation on a boundary that's currently safe)
-
-            Do NOT flag: style, naming, documentation, performance, or theoretical issues without a concrete attack vector.
-
-            For each finding, cite the exact file:line and explain the attack scenario.
-            Post inline comments via mcp__github_inline_comment__create_inline_comment.
-            Always post one summary comment via `gh pr comment`, even if no findings.
-          claude_args: '--max-turns 40 --max-budget-usd 8 --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"'

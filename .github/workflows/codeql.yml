@@ -32,6 +32,8 @@ jobs:
         language: [actions, javascript-typescript, python, rust]
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # CodeQL's Rust no-build extractor embeds rust-analyzer, which can lag the
       # runner's rolling stable toolchain. Use the workspace's declared MSRV as
@@ -114,6 +116,16 @@ jobs:
             ' "$SARIF_DIR"/*.sarif
           )
           echo "Rust extraction: $without_diagnostics clean files; $with_diagnostics files with diagnostics"
+          {
+            echo "### Rust CodeQL extraction health"
+            echo
+            echo "| Metric | Files |"
+            echo "| --- | ---: |"
+            echo "| Clean files | $without_diagnostics |"
+            echo "| Files with diagnostics | $with_diagnostics |"
+            echo
+            echo "The job fails when no file extracts cleanly or diagnostics affect at least as many files as extract cleanly."
+          } >> "$GITHUB_STEP_SUMMARY"
           if (( without_diagnostics <= 0 || with_diagnostics >= without_diagnostics )); then
             echo "::error title=Unhealthy Rust CodeQL database::$with_diagnostics files have extraction diagnostics; only $without_diagnostics are clean."
             exit 1

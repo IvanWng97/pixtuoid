@@ -138,7 +138,7 @@ configured before the tag is pushed, or that target's publish step fails. See
 
 ## Pull requests
 
-- Every PR is reviewed by **2+ agents** (explorer / reviewer / architect) before merge — no exceptions. The teeth here are the `claude-review` + `claude-security-review` CI workflows plus your own local pass; the read-only `gemini-review` workflow adds an advisory design/blast-radius lens and can be retriggered by a trusted collaborator with `@gemini-cli /review`. The lens-labelled write-up is a practice, not a parsed gate.
+- Every PR is reviewed by **2+ agents** (explorer / reviewer / architect) before merge — no exceptions. The teeth here are the `claude-review` + `claude-security-review` CI workflows plus your own local pass: both Claude model jobs run read-only against a trusted default-branch checkout and inert exact-head diff, then a separate least-privilege job publishes their validated result. The read-only `gemini-review` workflow adds an advisory design/blast-radius lens and can be retriggered by a trusted collaborator with `@gemini-cli /review`. The lens-labelled write-up is a practice, not a parsed gate.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check before merge.
 - Track every consciously-deferred finding as a GitHub issue (`gh issue create`) before moving on.
 

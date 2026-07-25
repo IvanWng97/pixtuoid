@@ -4,6 +4,7 @@ set -euo pipefail
 CODECOV_ACTION_FILE="${CODECOV_ACTION_FILE:-.github/actions/upload-codecov/action.yml}"
 CODEQL_WORKFLOW_FILE="${CODEQL_WORKFLOW_FILE:-.github/workflows/codeql.yml}"
 GEMINI_WORKFLOW_FILE="${GEMINI_WORKFLOW_FILE:-.github/workflows/gemini-review.yml}"
+CLAUDE_REVIEW_WORKFLOW_FILE="${CLAUDE_REVIEW_WORKFLOW_FILE:-.github/workflows/claude-readonly-review.yml}"
 
 fail() {
     echo "ci-observability behavior test: $*" >&2
@@ -194,8 +195,20 @@ write_sarif_metrics() {
 }
 
 write_sarif_metrics "$healthy_sarif_dir/rust.sarif" 3 97
-SARIF_DIR="$healthy_sarif_dir" bash -c "$health_script" >/dev/null ||
+healthy_summary="$test_dir/healthy-summary"
+GITHUB_STEP_SUMMARY="$healthy_summary" \
+    SARIF_DIR="$healthy_sarif_dir" \
+    bash -c "$health_script" >/dev/null ||
     fail "Rust extraction-health gate rejected a predominantly clean database"
+[[ -s "$healthy_summary" ]] ||
+    fail "Rust extraction-health gate wrote no job summary"
+healthy_summary_content="$(<"$healthy_summary")"
+[[ "$healthy_summary_content" == *"Rust CodeQL extraction health"* ]] ||
+    fail "Rust extraction-health summary omitted its heading"
+[[ "$healthy_summary_content" == *"| Clean files | 97 |"* ]] ||
+    fail "Rust extraction-health summary omitted the clean-file count"
+[[ "$healthy_summary_content" == *"| Files with diagnostics | 3 |"* ]] ||
+    fail "Rust extraction-health summary omitted the diagnostics count"
 
 write_sarif_metrics "$unhealthy_sarif_dir/rust.sarif" 223 57
 if SARIF_DIR="$unhealthy_sarif_dir" bash -c "$health_script" >/dev/null 2>&1; then
@@ -218,3 +231,122 @@ fi
 
 REVIEW="Findings: 0" bash -c "$gemini_review_script" >/dev/null ||
     fail "Gemini review gate rejected a non-empty review"
+
+publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
+published_comment="$test_dir/published-comment"
+export RUNNER_TEMP="$test_dir"
+# shellcheck disable=SC2016 # The generated gh stub expands these variables when it runs.
+printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'case "$1" in' \
+    'api)' \
+    '    printf "%s\n" "$FAKE_PR_HEAD"' \
+    '    ;;' \
+    'pr)' \
+    '    [[ "$2" == "comment" ]]' \
+    '    while (($#)); do' \
+    '        if [[ "$1" == "--body-file" ]]; then' \
+    '            command cp "$2" "$PUBLISHED_COMMENT"' \
+    '            exit 0' \
+    '        fi' \
+    '        shift' \
+    '    done' \
+    '    exit 1' \
+    '    ;;' \
+    '*) exit 1 ;;' \
+    'esac' \
+    >"$fake_bin/gh"
+chmod +x "$fake_bin/gh"
+
+valid_review='{"summary":"No correctness findings.","findings":[]}'
+PATH="$fake_bin:$PATH" \
+    FAKE_PR_HEAD="abc123" \
+    PUBLISHED_COMMENT="$published_comment" \
+    EXPECTED_HEAD_SHA="abc123" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW_JSON="$valid_review" \
+    REVIEW_MARKER="claude-auto-review" \
+    REVIEW_TITLE="Claude Review" \
+    bash -c "$publisher_script" ||
+    fail "Claude publisher rejected a valid zero-finding review"
+[[ -s "$published_comment" ]] ||
+    fail "Claude publisher posted no review body"
+published_content="$(<"$published_comment")"
+[[ "$published_content" == *"<!-- claude-auto-review:abc123 -->"* ]] ||
+    fail "Claude publisher omitted the exact-head marker"
+[[ "$published_content" == *"**Findings: 0**"* ]] ||
+    fail "Claude publisher omitted the zero-finding count"
+
+multi_review='{"summary":"Two verified findings.","findings":[{"severity":"HIGH","path":"src/lib.rs","line":7,"body":"Primary invariant violation."},{"severity":"MEDIUM","path":"tests/review.rs","line":11,"body":"Missing refusal-path coverage."}]}'
+PATH="$fake_bin:$PATH" \
+    FAKE_PR_HEAD="abc123" \
+    PUBLISHED_COMMENT="$published_comment" \
+    EXPECTED_HEAD_SHA="abc123" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW_JSON="$multi_review" \
+    REVIEW_MARKER="claude-auto-review" \
+    REVIEW_TITLE="Claude Review" \
+    bash -c "$publisher_script" ||
+    fail "Claude publisher rejected a valid multi-finding review"
+published_content="$(<"$published_comment")"
+[[ "$published_content" == *"**Findings: 2** (1 high, 1 medium)"* ]] ||
+    fail "Claude publisher miscounted finding severities"
+expected_location="\`src/lib.rs:7\`"
+[[ "$published_content" == *"$expected_location"* ]] ||
+    fail "Claude publisher omitted a finding location"
+
+if PATH="$fake_bin:$PATH" \
+    FAKE_PR_HEAD="new-head" \
+    PUBLISHED_COMMENT="$published_comment" \
+    EXPECTED_HEAD_SHA="old-head" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW_JSON="$valid_review" \
+    REVIEW_MARKER="claude-auto-review" \
+    REVIEW_TITLE="Claude Review" \
+    bash -c "$publisher_script" >/dev/null 2>&1; then
+    fail "Claude publisher accepted a stale review"
+fi
+
+oversized_findings="$(
+    jq -n '{
+        summary: "too many",
+        findings: [
+            range(0; 6) | {
+                severity: "MEDIUM",
+                path: "src/lib.rs",
+                line: 1,
+                body: "finding"
+            }
+        ]
+    }'
+)"
+if PATH="$fake_bin:$PATH" \
+    FAKE_PR_HEAD="abc123" \
+    PUBLISHED_COMMENT="$published_comment" \
+    EXPECTED_HEAD_SHA="abc123" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW_JSON="$oversized_findings" \
+    REVIEW_MARKER="claude-auto-review" \
+    REVIEW_TITLE="Claude Review" \
+    bash -c "$publisher_script" >/dev/null 2>&1; then
+    fail "Claude publisher accepted more than five findings"
+fi
+
+unsafe_path_review='{"summary":"finding","findings":[{"severity":"HIGH","path":"../outside","line":1,"body":"bad"}]}'
+if PATH="$fake_bin:$PATH" \
+    FAKE_PR_HEAD="abc123" \
+    PUBLISHED_COMMENT="$published_comment" \
+    EXPECTED_HEAD_SHA="abc123" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW_JSON="$unsafe_path_review" \
+    REVIEW_MARKER="claude-auto-review" \
+    REVIEW_TITLE="Claude Review" \
+    bash -c "$publisher_script" >/dev/null 2>&1; then
+    fail "Claude publisher accepted an unsafe finding path"
+fi

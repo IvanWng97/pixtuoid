@@ -2,9 +2,6 @@ name: ci-tests
 
 on:
   workflow_call:
-    secrets:
-      CODECOV_TOKEN:
-        required: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,8 +14,13 @@ jobs:
     # including platform-specific path, pipe, and shim behavior.
     runs-on: windows-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
@@ -32,7 +34,6 @@ jobs:
           file: target/nextest/ci/junit.xml
           flag: windows
           report_type: test_results
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   macos-test:
     name: macos-test
@@ -40,8 +41,13 @@ jobs:
     # config paths. macos-14 exercises the Apple Silicon build.
     runs-on: macos-14
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
@@ -55,14 +61,18 @@ jobs:
           file: target/nextest/ci/junit.xml
           flag: macos
           report_type: test_results
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   coverage:
     name: coverage
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # The default-on audio feature must compile through ALSA on Linux.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -81,7 +91,6 @@ jobs:
           file: lcov.info
           flag: unit
           report_type: coverage
-          token: ${{ secrets.CODECOV_TOKEN }}
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: ./.github/actions/upload-codecov
@@ -89,7 +98,6 @@ jobs:
           file: target/nextest/ci/junit.xml
           flag: unit
           report_type: test_results
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   # Platform coverage compiles code the Linux job cannot see: Windows pipes and
   # atomic-write retries, plus macOS paths and launchd. These are now required,
@@ -99,8 +107,13 @@ jobs:
     runs-on: windows-latest
     # Retightened after repeated cold runs; nextest owns per-test hang limits.
     timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
         with:
           components: llvm-tools-preview
@@ -118,15 +131,19 @@ jobs:
           file: lcov.info
           flag: windows
           report_type: coverage
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   coverage-macos:
     name: coverage-macos
     runs-on: macos-14
     # Apple Silicon cold runs leave roughly 2x headroom under this bound.
     timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
         with:
           components: llvm-tools-preview
@@ -143,7 +160,6 @@ jobs:
           file: lcov.info
           flag: macos
           report_type: coverage
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   snapshots:
     name: snapshot hygiene
@@ -151,6 +167,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # Snapshot tests compile the default-on audio feature on Linux.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -169,6 +187,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # The release build compiles the default-on audio feature on Linux.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev

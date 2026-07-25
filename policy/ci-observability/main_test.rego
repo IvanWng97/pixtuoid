@@ -58,7 +58,6 @@ test_codecov_route_reads_the_structured_step if {
 				"file": "target/nextest/ci/junit.xml",
 				"flag": "windows",
 				"report_type": "test_results",
-				"token": "${{ secrets.CODECOV_TOKEN }}",
 			},
 		},
 	}
@@ -68,7 +67,6 @@ test_codecov_route_reads_the_structured_step if {
 		"flag": "windows",
 		"report_type": "test_results",
 		"if": "${{ !cancelled() }}",
-		"token": "${{ secrets.CODECOV_TOKEN }}",
 	}
 }
 
@@ -203,6 +201,69 @@ test_gemini_review_validation_and_notice_order_is_required if {
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s must review, validate, then report failures in that order", [gemini_workflow_path]) in violations
+}
+
+test_gemini_model_must_use_a_trusted_checkout_and_read_only_tools if {
+	fixture := {"documents": [{
+		"path": gemini_workflow_path,
+		"contents": {
+			"permissions": {},
+			"jobs": {"design-review": {
+				"permissions": {
+					"contents": "write",
+					"pull-requests": "write",
+				},
+				"steps": [
+					{
+						"uses": "actions/checkout@v7",
+						"with": {
+							"ref": "${{ github.event.pull_request.head.sha }}",
+							"persist-credentials": true,
+						},
+					},
+					{
+						"name": gemini_review_step_name,
+						"with": {
+							"upload_artifacts": true,
+							"settings": "{\"tools\":{\"core\":[\"run_shell_command\"]}}",
+						},
+					},
+				],
+			}},
+		},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s model job must remain read-only", [gemini_workflow_path]) in violations
+	sprintf("%s must check out exactly one trusted default branch", [gemini_workflow_path]) in violations
+	sprintf("%s Gemini step must expose only read tools and disable artifacts", [gemini_workflow_path]) in violations
+}
+
+test_gemini_publisher_must_revalidate_head_without_actions if {
+	fixture := {"documents": [{
+		"path": gemini_workflow_path,
+		"contents": {
+			"permissions": {},
+			"jobs": {
+				"design-review": {"steps": []},
+				"publish": {
+					"permissions": {
+						"contents": "write",
+						"pull-requests": "write",
+					},
+					"steps": [
+						{"uses": "actions/checkout@v7"},
+						{
+							"name": "Publish Gemini review",
+							"run": "gh pr comment \"$PR_NUMBER\"",
+						},
+					],
+				},
+			},
+		},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s publisher must have comment-only permissions and no actions", [gemini_workflow_path]) in violations
+	sprintf("%s publisher must recheck the exact PR head", [gemini_workflow_path]) in violations
 }
 
 test_report_presence_check_is_required if {
@@ -415,7 +476,7 @@ test_codecov_token_forwarding_is_pinned if {
 		}]}},
 	}]}
 	violations := deny with input as fixture
-	sprintf("%s Codecov step must pass inputs.token", [codecov_authority_path]) in violations
+	sprintf("%s must not declare or forward a Codecov upload token", [codecov_authority_path]) in violations
 }
 
 test_report_presence_check_reads_inputs_file if {
@@ -441,7 +502,6 @@ test_wrapper_collection_covers_every_workflow if {
 				"file": lcov_report_path,
 				"flag": "extra",
 				"report_type": "coverage",
-				"token": codecov_token_secret,
 			},
 		}]}}},
 	}]}
@@ -449,4 +509,178 @@ test_wrapper_collection_covers_every_workflow if {
 	count(uploads) == 1
 	uploads[0].path == path
 	"the repository must contain exactly the six declared Codecov routes" in deny with input as fixture
+}
+
+test_codecov_oidc_replaces_the_repository_token if {
+	fixture := {"documents": [{
+		"path": codecov_authority_path,
+		"contents": {
+			"inputs": {"token": {"required": false}},
+			"runs": {"steps": [{
+				"uses": codecov_action,
+				"with": {
+					"files": codecov_input_file,
+					"flags": codecov_input_flag,
+					"report_type": codecov_input_report_type,
+					"token": "${{ inputs.token }}",
+				},
+			}]},
+		},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Codecov step must authenticate with GitHub OIDC", [codecov_authority_path]) in violations
+	sprintf("%s must not declare or forward a Codecov upload token", [codecov_authority_path]) in violations
+}
+
+test_codecov_oidc_permission_is_job_scoped if {
+	fixture := {"documents": [{
+		"path": codecov_workflow_path,
+		"contents": {"jobs": {
+			"coverage": {"permissions": {"contents": "read"}},
+			"snapshots": {"permissions": {"id-token": "write"}},
+		}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s job coverage must receive the Codecov OIDC permission", [codecov_workflow_path]) in violations
+	sprintf("%s job snapshots must not receive the Codecov OIDC permission", [codecov_workflow_path]) in violations
+}
+
+test_release_concurrency_must_serialize_different_tags if {
+	fixture := {"documents": [{
+		"path": release_workflow_path,
+		"contents": {"concurrency": {
+			"group": "release-${{ github.ref }}",
+			"cancel-in-progress": false,
+		}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must serialize every release tag through one concurrency group", [release_workflow_path]) in violations
+}
+
+test_actionlint_compatibility_ignores_cannot_be_broadened if {
+	fixture := {"documents": [{
+		"path": actionlint_config_path,
+		"contents": {"paths": {".github/workflows/**": {"ignore": [".*"]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must keep only the two path-specific upstream compatibility ignores", [actionlint_config_path]) in violations
+}
+
+test_zizmor_pin_policy_cannot_be_tightened_or_disabled_silently if {
+	fixture := {"documents": [{
+		"path": zizmor_config_path,
+		"contents": {"rules": {"unpinned-uses": {"disable": true}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must require every action to use at least a ref or tag", [zizmor_config_path]) in violations
+}
+
+test_every_checkout_drops_persisted_credentials if {
+	path := ".github/workflows/unsafe-checkout.yml"
+	fixture := {"documents": [{
+		"path": path,
+		"contents": {"jobs": {"test": {"steps": [{"uses": "actions/checkout@v99"}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s checkout must set persist-credentials: false", [path]) in violations
+}
+
+test_cache_cleanup_cannot_execute_pull_request_code if {
+	fixture := {"documents": [{
+		"path": cache_cleanup_workflow_path,
+		"contents": {
+			"on": {"pull_request_target": {"types": ["closed"]}},
+			"permissions": {"actions": "write"},
+			"jobs": {"closed-pr": {
+				"env": {"PR_REF": "refs/pull/${{ github.event.pull_request.number }}/merge"},
+				"steps": [{"uses": "actions/checkout@v7"}],
+			}},
+		},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s pull_request_target job must remain cache-only and checkout-free", [cache_cleanup_workflow_path]) in violations
+}
+
+test_claude_review_trigger_must_load_from_the_trusted_base if {
+	fixture := {"documents": [{
+		"path": claude_review_workflow_path,
+		"contents": {
+			"on": {"pull_request": {"types": ["opened"]}},
+			"jobs": {"review": {"steps": [{"uses": claude_action}]}},
+		},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must use pull_request_target instead of pull_request", [claude_review_workflow_path]) in violations
+	sprintf("%s must delegate to the canonical read-only Claude reviewer", [claude_review_workflow_path]) in violations
+}
+
+test_claude_model_and_publisher_permissions_are_separated if {
+	fixture := {"documents": [{
+		"path": claude_reusable_workflow_path,
+		"contents": {"jobs": {
+			"analyze": {
+				"permissions": {
+					"contents": "write",
+					"pull-requests": "write",
+					"id-token": "write",
+				},
+				"steps": [
+					{
+						"uses": "actions/checkout@v7",
+						"with": {
+							"ref": "${{ github.event.pull_request.head.sha }}",
+							"persist-credentials": true,
+						},
+					},
+					{
+						"name": claude_model_step_name,
+						"uses": claude_action,
+						"with": {
+							"track_progress": true,
+							"show_full_output": true,
+							"claude_args": "--allowedTools Bash,mcp__github_inline_comment__create_inline_comment",
+						},
+					},
+				],
+			},
+			"publish": {
+				"permissions": {
+					"contents": "write",
+					"pull-requests": "write",
+				},
+				"steps": [{"uses": "actions/checkout@v7"}],
+			},
+		}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s analyze job must remain read-only except for OIDC", [claude_reusable_workflow_path]) in violations
+	sprintf("%s must check out only the trusted default branch without persisted credentials", [claude_reusable_workflow_path]) in violations
+	sprintf("%s Claude step must disable progress comments and full output", [claude_reusable_workflow_path]) in violations
+	sprintf("%s Claude step must expose only read tools and structured output", [claude_reusable_workflow_path]) in violations
+	sprintf("%s publish job must have comment-only permissions and no checkout", [claude_reusable_workflow_path]) in violations
+}
+
+test_claude_publisher_must_revalidate_the_exact_head if {
+	fixture := {"documents": [{
+		"path": claude_reusable_workflow_path,
+		"contents": {"jobs": {"publish": {"steps": [{
+			"name": claude_publish_step_name,
+			"run": "gh pr comment \"$PR_NUMBER\"",
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s publisher must validate structured output and recheck the exact PR head", [claude_reusable_workflow_path]) in violations
+}
+
+test_codeql_health_metrics_must_be_visible_in_the_job_summary if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"name": rust_health_step_name,
+			"if": rust_matrix_condition,
+			"run": sprintf("read %s %s", [rust_diagnostics_metric, rust_clean_metric]),
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Rust extraction-health gate must write a quantified job summary", [codeql_workflow_path]) in violations
 }

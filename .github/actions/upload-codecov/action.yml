@@ -11,9 +11,6 @@ inputs:
   report_type:
     description: Codecov report type (coverage or test_results)
     required: true
-  token:
-    description: Repository Codecov token
-    required: false
 
 runs:
   using: composite
@@ -41,7 +38,7 @@ runs:
         disable_search: true
         plugins: noop
         fail_ci_if_error: true
-        token: ${{ inputs.token }}
+        use_oidc: true
 
     - name: Surface advisory upload failure
       if: ${{ steps.upload.outcome == 'failure' }}

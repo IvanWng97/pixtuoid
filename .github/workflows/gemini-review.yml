@@ -3,7 +3,7 @@ name: gemini review
 on:
   # The secret-bearing automatic path must load this workflow from the trusted
   # default branch. The job never checks out or executes the pull-request head.
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted-base checkout and isolated publisher are policy-pinned
     types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
     types: [created]
@@ -177,6 +177,14 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           REVIEW: ${{ needs.design-review.outputs.review }}
         run: |
+          current_head_sha="$(
+            gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha'
+          )"
+          if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then
+            echo "::error title=Stale Gemini review::Expected $HEAD_SHA, current PR head is $current_head_sha."
+            exit 1
+          fi
+
           {
             echo "## Gemini design / blast-radius review"
             echo
