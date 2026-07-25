@@ -259,14 +259,6 @@ repo-committed and won't exist on a fresh checkout or in a non-Claude tool.
    HEAD, checked atomically. (If the bot errors or posts no findings comment at
    HEAD — it can fail on a very large diff — the gate is unsatisfiable as
    written; the `two-lens-review` skill's step 6 owns the fallback.)
-   The read-only `gemini review` workflow is an additional advisory
-   design/blast-radius lens: it runs on each internal non-draft PR targeting
-   the default branch, and trusted collaborators can retrigger it with
-   `@gemini-cli /review`. A successful Gemini result may supply that
-   differentiated lens, but never replaces the canonical online review verdict
-   or the human merge. "Advisory" describes its merge-gate role, not its check
-   conclusion: an API, quota, or empty-review failure stays red instead of
-   masquerading as a successful review.
    See "Things NOT to do" and the running order under "Where to look". **A human
    merges.**
 9. **Wrap** — retro; record durable lessons.

@@ -3,8 +3,8 @@ set -euo pipefail
 
 CODECOV_ACTION_FILE="${CODECOV_ACTION_FILE:-.github/actions/upload-codecov/action.yml}"
 CODEQL_WORKFLOW_FILE="${CODEQL_WORKFLOW_FILE:-.github/workflows/codeql.yml}"
-GEMINI_WORKFLOW_FILE="${GEMINI_WORKFLOW_FILE:-.github/workflows/gemini-review.yml}"
 CLAUDE_REVIEW_WORKFLOW_FILE="${CLAUDE_REVIEW_WORKFLOW_FILE:-.github/workflows/claude-readonly-review.yml}"
+CI_LINT_WORKFLOW_FILE="${CI_LINT_WORKFLOW_FILE:-.github/workflows/ci-lint.yml}"
 
 fail() {
     echo "ci-observability behavior test: $*" >&2
@@ -119,14 +119,25 @@ valid_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"re
 fork_pr='{"head":{"repo":{"full_name":"fork/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
 wrong_base_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"release"},"state":"open"}'
 closed_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"closed"}'
-for workflow_file in "$CLAUDE_REVIEW_WORKFLOW_FILE" "$GEMINI_WORKFLOW_FILE"; do
-    resolver_script="$(workflow_step_script "$workflow_file" "Resolve pull request")"
-    label="$(basename "$workflow_file")"
-    assert_reviewability "$resolver_script" "$valid_pr" true "$label"
-    assert_reviewability "$resolver_script" "$fork_pr" false "$label fork"
-    assert_reviewability "$resolver_script" "$wrong_base_pr" false "$label base"
-    assert_reviewability "$resolver_script" "$closed_pr" false "$label state"
-done
+resolver_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Resolve pull request")"
+label="$(basename "$CLAUDE_REVIEW_WORKFLOW_FILE")"
+assert_reviewability "$resolver_script" "$valid_pr" true "$label"
+assert_reviewability "$resolver_script" "$fork_pr" false "$label fork"
+assert_reviewability "$resolver_script" "$wrong_base_pr" false "$label base"
+assert_reviewability "$resolver_script" "$closed_pr" false "$label state"
+
+lychee_fallback="$(
+    yq -e -r '
+        [.jobs.hygiene.steps[]
+            | select(.uses == "taiki-e/install-action@v2")
+            | select(.with.tool | contains("lychee@"))
+            | .with.fallback]
+        | select(length == 1)
+        | .[0]
+    ' "$CI_LINT_WORKFLOW_FILE"
+)"
+[[ "$lychee_fallback" == "cargo-binstall" ]] ||
+    fail "pinned lychee install must allow the documented cargo-binstall fallback"
 
 printf 'pub mod std;\n' >"$fake_sysroot/lib/rustlib/src/rust/library/std/src/lib.rs"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_sysroot/libexec/rust-analyzer-proc-macro-srv"
@@ -274,20 +285,7 @@ if SARIF_DIR="$missing_metric_sarif_dir" bash -c "$health_script" >/dev/null 2>&
     fail "Rust extraction-health gate accepted missing CodeQL metrics"
 fi
 
-gemini_review_script="$(workflow_step_script "$GEMINI_WORKFLOW_FILE" "Require a non-empty Gemini review")"
-if REVIEW="" bash -c "$gemini_review_script" >/dev/null 2>&1; then
-    fail "Gemini review gate accepted an empty review"
-fi
-
-if REVIEW=$' \t\n' bash -c "$gemini_review_script" >/dev/null 2>&1; then
-    fail "Gemini review gate accepted a whitespace-only review"
-fi
-
-REVIEW="Findings: 0" bash -c "$gemini_review_script" >/dev/null ||
-    fail "Gemini review gate rejected a non-empty review"
-
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
-gemini_publisher_script="$(workflow_step_script "$GEMINI_WORKFLOW_FILE" "Publish Gemini review")"
 published_comment="$test_dir/published-comment"
 # shellcheck disable=SC2016 # The generated gh stub expands these variables when it runs.
 printf '%s\n' \
@@ -312,17 +310,6 @@ printf '%s\n' \
     'esac' \
     >"$fake_bin/gh"
 chmod +x "$fake_bin/gh"
-
-if PATH="$fake_bin:$PATH" \
-    FAKE_PR_HEAD="new-head" \
-    PUBLISHED_COMMENT="$published_comment" \
-    HEAD_SHA="old-head" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW="No findings." \
-    bash -c "$gemini_publisher_script" >/dev/null 2>&1; then
-    fail "Gemini publisher accepted a stale review"
-fi
 
 valid_review='{"summary":"No correctness findings.","findings":[]}'
 PATH="$fake_bin:$PATH" \
