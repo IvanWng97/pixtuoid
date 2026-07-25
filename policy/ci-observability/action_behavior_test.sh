@@ -224,7 +224,12 @@ health_script="$(workflow_step_script "$CODEQL_WORKFLOW_FILE" "Verify Rust extra
 healthy_sarif_dir="$test_dir/healthy-sarif"
 unhealthy_sarif_dir="$test_dir/unhealthy-sarif"
 missing_metric_sarif_dir="$test_dir/missing-metric-sarif"
-mkdir -p "$healthy_sarif_dir" "$unhealthy_sarif_dir" "$missing_metric_sarif_dir"
+duplicate_metric_sarif_dir="$test_dir/duplicate-metric-sarif"
+mkdir -p \
+    "$healthy_sarif_dir" \
+    "$unhealthy_sarif_dir" \
+    "$missing_metric_sarif_dir" \
+    "$duplicate_metric_sarif_dir"
 
 write_sarif_metrics() {
     local output_file="$1"
@@ -259,6 +264,22 @@ write_sarif_metrics() {
         }' >"$output_file"
 }
 
+assert_metric_cardinality_rejected() {
+    local sarif_dir="$1"
+    local label="$2"
+    local summary_file="$test_dir/$label-summary"
+    local output
+    if output="$(
+        GITHUB_STEP_SUMMARY="$summary_file" \
+            SARIF_DIR="$sarif_dir" \
+            bash -c "$health_script" 2>&1
+    )"; then
+        fail "Rust extraction-health gate accepted $label CodeQL metrics"
+    fi
+    [[ "$output" == *"expected exactly one CodeQL metric"* ]] ||
+        fail "Rust extraction-health gate failed before rejecting $label CodeQL metrics"
+}
+
 write_sarif_metrics "$healthy_sarif_dir/rust.sarif" 3 97
 healthy_summary="$test_dir/healthy-summary"
 GITHUB_STEP_SUMMARY="$healthy_summary" \
@@ -288,16 +309,15 @@ fi
     fail "Rust extraction-health gate failed before evaluating its unhealthy threshold"
 
 printf '{"runs":[]}\n' >"$missing_metric_sarif_dir/rust.sarif"
-missing_metric_summary="$test_dir/missing-metric-summary"
-if missing_metric_output="$(
-    GITHUB_STEP_SUMMARY="$missing_metric_summary" \
-        SARIF_DIR="$missing_metric_sarif_dir" \
-        bash -c "$health_script" 2>&1
-)"; then
-    fail "Rust extraction-health gate accepted missing CodeQL metrics"
-fi
-[[ "$missing_metric_output" == *"expected exactly one CodeQL metric"* ]] ||
-    fail "Rust extraction-health gate failed before validating its required metrics"
+assert_metric_cardinality_rejected "$missing_metric_sarif_dir" "missing"
+
+base_sarif="$test_dir/base.sarif"
+write_sarif_metrics "$base_sarif" 3 97
+jq '
+    .runs[0].properties.metricResults +=
+        [.runs[0].properties.metricResults[0]]
+' "$base_sarif" >"$duplicate_metric_sarif_dir/rust.sarif"
+assert_metric_cardinality_rejected "$duplicate_metric_sarif_dir" "duplicate"
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
 published_comment="$test_dir/published-comment"

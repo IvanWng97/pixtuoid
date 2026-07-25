@@ -468,6 +468,115 @@ test_claude_review_trigger_must_load_from_the_trusted_base if {
 	sprintf("%s must delegate to the canonical read-only Claude reviewer", [claude_review_workflow_path]) in violations
 }
 
+test_claude_caller_trust_guards_cannot_be_weakened if {
+	review_condition := expected_claude_caller_condition(claude_review_workflow_path)
+	security_condition := expected_claude_caller_condition(claude_security_workflow_path)
+	elevated_association := replace(
+		review_condition,
+		claude_trusted_association_condition,
+		"true",
+	)
+	mutations := {
+		{
+			"path": claude_review_workflow_path,
+			"condition": "${{ true }}",
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": replace(
+				review_condition,
+				"github.actor != 'dependabot[bot]'",
+				"true",
+			),
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": replace(
+				review_condition,
+				"'dependabot[bot]'",
+				"'dependabot[bot] '",
+			),
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": replace(
+				review_condition,
+				"github.event.pull_request.draft == false",
+				"true",
+			),
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": replace(
+				review_condition,
+				"github.event.pull_request.head.repo.full_name == github.repository",
+				"true",
+			),
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": replace(
+				review_condition,
+				"github.event.pull_request.base.ref == github.event.repository.default_branch",
+				"true",
+			),
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": replace(review_condition, "'/claude-review'", "'/review'"),
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": replace(
+				review_condition,
+				"'/claude-review'",
+				"'/claude-review '",
+			),
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": replace(
+				review_condition,
+				"github.event.issue.pull_request",
+				"true",
+			),
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": elevated_association,
+		},
+		{
+			"path": claude_review_workflow_path,
+			"condition": replace(
+				review_condition,
+				`"COLLABORATOR"`,
+				`"COLLABORATOR "`,
+			),
+		},
+		{
+			"path": claude_security_workflow_path,
+			"condition": replace(security_condition, "'/security-review'", "'/review'"),
+		},
+	}
+	every mutation in mutations {
+		fixture := {"documents": [{
+			"path": mutation.path,
+			"contents": {
+				"on": {
+					"pull_request_target": {"types": ["opened"]},
+					"issue_comment": {"types": ["created"]},
+				},
+				"jobs": {"review": {
+					"if": mutation.condition,
+					"uses": claude_reusable_reference,
+				}},
+			},
+		}]}
+		violations := deny with input as fixture
+		sprintf("%s must preserve the trusted automatic and manual review guards", [mutation.path]) in violations
+	}
+}
+
 test_claude_resolver_is_required if {
 	fixture := {"documents": [{
 		"path": claude_reusable_workflow_path,

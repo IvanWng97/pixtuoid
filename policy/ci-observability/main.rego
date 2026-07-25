@@ -28,6 +28,13 @@ claude_review_workflow_path := ".github/workflows/claude-review.yml"
 claude_security_workflow_path := ".github/workflows/claude-security-review.yml"
 claude_reusable_workflow_path := ".github/workflows/claude-readonly-review.yml"
 claude_reusable_reference := "./.github/workflows/claude-readonly-review.yml"
+claude_manual_commands := {
+	claude_review_workflow_path: "/claude-review",
+	claude_security_workflow_path: "/security-review",
+}
+
+claude_automatic_condition := `(github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch)`
+claude_trusted_association_condition := `contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)`
 pr_resolution_step_name := "Resolve pull request"
 claude_model_step_name := "Run read-only Claude review"
 claude_publish_step_name := "Publish validated Claude review"
@@ -277,6 +284,26 @@ claude_caller_jobs(path) := [job |
 	object.get(job, "uses", "") == claude_reusable_reference
 ]
 
+claude_manual_condition(command) := sprintf(
+	`(github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '%s') && %s)`,
+	[command, claude_trusted_association_condition],
+)
+
+expected_claude_caller_condition(path) := sprintf(
+	"%s || %s",
+	[claude_automatic_condition, claude_manual_condition(claude_manual_commands[path])],
+)
+
+normalized_claude_condition(condition) := trim_space(regex.replace(condition, `\r?\n[ \t]*`, " "))
+
+claude_caller_condition_is_trusted(path) if {
+	callers := claude_caller_jobs(path)
+	count(callers) == 1
+	condition := object.get(callers[0], "if", "")
+	is_string(condition)
+	normalized_claude_condition(condition) == normalized_claude_condition(expected_claude_caller_condition(path))
+}
+
 claude_checkout_is_trusted(step) if {
 	params := object.get(step, "with", {})
 	object.get(params, "ref", "") == trusted_default_ref
@@ -371,6 +398,14 @@ deny contains msg if {
 	_ := documents[path]
 	count(claude_caller_jobs(path)) != 1
 	msg := sprintf("%s must delegate to the canonical read-only Claude reviewer", [path])
+}
+
+deny contains msg if {
+	some path in claude_trigger_workflow_paths
+	_ := documents[path]
+	count(claude_caller_jobs(path)) == 1
+	not claude_caller_condition_is_trusted(path)
+	msg := sprintf("%s must preserve the trusted automatic and manual review guards", [path])
 }
 
 deny contains msg if {
