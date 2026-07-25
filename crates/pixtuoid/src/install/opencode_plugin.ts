@@ -10,7 +10,7 @@
 // HOOK_PATH is baked in at install time (a JSON-encoded absolute path). Safe to
 // delete — disconnecting opencode in pixtuoid's Sources panel replaces this
 // with a removed-marker stub.
-const HOOK_PATH: string = {{HOOK_PATH_JSON}}
+const HOOK_PATH: string = "{{HOOK_PATH_JSON}}"
 
 // Only forward what pixtuoid maps. `message.part.updated` fires per token, so we
 // gate it to tool parts — AND only on a tool-state TRANSITION (see below),

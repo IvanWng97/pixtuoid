@@ -60,7 +60,6 @@ if lsof -nP -iTCP:18789 -sTCP:LISTEN >/dev/null 2>&1; then
     exit 2
 fi
 
-# shellcheck disable=SC2329  # invoked indirectly via `trap cleanup EXIT` below
 cleanup() {
     [ -n "$GWPID" ] && kill "$GWPID" 2>/dev/null
     pkill -f 'openclaw gateway run' 2>/dev/null
@@ -182,4 +181,6 @@ if [ "$FAILED" = 0 ]; then
 else
     echo "openclaw-cc-backend-e2e: FAIL" >&2
 fi
+trap - EXIT
+cleanup
 exit "$FAILED"

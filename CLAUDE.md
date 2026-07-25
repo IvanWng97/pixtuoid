@@ -98,6 +98,9 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      the lobster AND its backend `cc·<workspace>` coding sprite coexist live; real
                      account/gateway footprint, NOT a CI test),
                      check_upstream_drift.py (weekly wire-format watch),
+policy/              repository policy-as-code: `ci-observability/` combines
+                     Conftest/OPA structural contracts with yq-extracted
+                     action/workflow behavior tests
 site/                Astro landing page → GitHub Pages; self-contained Node project,
                      own CI; `just site-{setup,dev,dev-bg,dev-stop,check,fmt,e2e}` → see site/README.md
 integrations/raycast/  Raycast extension (TypeScript, self-contained Node project; NOT Rust):
@@ -165,7 +168,7 @@ component — `rust-toolchain.toml` pins only `rustfmt`+`clippy`, so without it 
 editor / AI-agent LSP silently degrades to grep).
 
 ```
-just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+actionlint+links) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+shellcheck+actionlint+ci-observability+links) → clippy → hack → test
 just fmt          # auto-format
 git config core.hooksPath .githooks   # activate hooks once per clone
 ```
@@ -182,6 +185,19 @@ shifts), docs (`just doc-check` — `cargo doc` with `-D warnings` over the
 `cargo nextest` skips), coverage/smoke, gen-check, gen-readme-check, npm-check,
 check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
 fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
+Cross-file report/upload semantics that actionlint cannot express are pinned by
+the yq + Conftest/OPA policy and real action/workflow behavior tests under
+`policy/ci-observability/`; `just ci-observability` runs them inside both
+`just lint` and the CI hygiene job.
+That gate also pins the advanced CodeQL workflow: all four repository
+languages stay explicit, Rust stays on its only supported `none` build mode,
+and the no-build extractor receives `rust-src` plus the proc-macro server from
+the workspace's declared MSRV (not the runner's rolling stable toolchain).
+After analysis, CodeQL's own SARIF metrics fail the Rust job if extraction
+diagnostics affect at least as many files as were extracted cleanly. This is why
+CodeQL lives in [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)
+instead of GitHub default setup — default setup cannot prepare these semantic
+inputs or enforce database health.
 
 **Release:** `just bump X.Y.Z` rewrites every version number, drafts
 `release_notes()`, runs preflight, and commits on a release branch — it
@@ -232,7 +248,9 @@ repo-committed and won't exist on a fresh checkout or in a non-Claude tool.
    the default branch, and trusted collaborators can retrigger it with
    `@gemini-cli /review`. A successful Gemini result may supply that
    differentiated lens, but never replaces the canonical online review verdict
-   or the human merge.
+   or the human merge. "Advisory" describes its merge-gate role, not its check
+   conclusion: an API, quota, or empty-review failure stays red instead of
+   masquerading as a successful review.
    See "Things NOT to do" and the running order under "Where to look". **A human
    merges.**
 9. **Wrap** — retro; record durable lessons.

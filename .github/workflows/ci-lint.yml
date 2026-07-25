@@ -68,17 +68,25 @@ jobs:
       - uses: actions/checkout@v7
       # One lightweight job owns the non-Rust hygiene tools. Go is preinstalled
       # on the runner; lychee is installed as a pinned prebuilt binary.
-      - name: Install shfmt + actionlint
+      - name: Install workflow lint + policy tools
         run: |
           go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          go install github.com/mikefarah/yq/v4@v4.53.3
+          CGO_ENABLED=0 go install github.com/open-policy-agent/conftest@v0.68.2
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - uses: taiki-e/install-action@v2
         with:
           tool: lychee@0.24.2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: shellcheck@0.11.0
+          fallback: none
       - uses: extractions/setup-just@v4
       - run: just shfmt-check
+      - run: just shellcheck
       - run: just actionlint
+      - run: just ci-observability
       - run: just links
 
   msrv:

@@ -10,6 +10,8 @@ declare const __GH_STARS__: string | null;
 // optional: each consumer guards, and reduced-motion / pre-boot states leave
 // some unset.
 interface Window {
+  /** Legacy WebKit constructor used by Safari releases before AudioContext. */
+  webkitAudioContext?: typeof AudioContext;
   /** THE site clock boundary (7/19) — defined in Base.astro's head boot. */
   __pixNight?: () => boolean;
   /** Per-frame dimmer opacity — written by OfficeBackdrop's controller. */

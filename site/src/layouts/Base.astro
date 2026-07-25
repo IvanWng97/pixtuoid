@@ -8,16 +8,14 @@ import '@fontsource/jersey-10/400.css';
 // woff2 through Vite (?url) so the <link> carries the same hashed asset URL the
 // @fontsource CSS resolves to — rebuild-proof, no hardcoded hash.
 import jerseyLatinWoff2 from '@fontsource/jersey-10/files/jersey-10-latin-400-normal.woff2?url';
-import '@fontsource/monaspace-neon/400.css';
-import '@fontsource/monaspace-neon/500.css';
-import '@fontsource/monaspace-neon/600.css';
-import '@fontsource/monaspace-neon/700.css';
-import '@fontsource/lora/400.css';
+import monaspaceLatinWoff2 from '@fontsource/monaspace-neon/files/monaspace-neon-latin-400-normal.woff2?url';
+import loraLatinWoff2 from '@fontsource/lora/files/lora-latin-400-normal.woff2?url';
 // 600 (SemiBold), not 500: the run-in step titles / docs links / tools CLI-name
 // column declare `font-weight: 600` on Lora — with only 400/500 loaded the 600
 // silently painted as Medium (500 was the accidental fallback, referenced by
 // nothing else). Loading the real 600 gives those a genuine weight step.
-import '@fontsource/lora/600.css';
+import '../styles/fonts.css';
+import 'prismjs/themes/prism-tomorrow.css';
 import '../styles/global.css';
 import { asset, THEMES, THEME_BG, THEME_STORAGE_KEY, VALID_THEMES, SITE_ORIGIN } from '../consts';
 import sources from '../sources.json';
@@ -83,12 +81,14 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     }
     <meta name="theme-color" content={THEME_BG.day} />
     {
-      /* The above-fold display face (hero headline, statements, boot intro's
-        version line): preload the latin subset so the pixel type doesn't
-        swap in late. `crossorigin` is required even same-origin — font
-        requests are CORS-mode, and a mismatch double-downloads. */
+      /* The three above-fold faces: preload their regular latin subsets so
+        they can win first paint without a late swap. `crossorigin` is required
+        even same-origin — font requests are CORS-mode, and a mismatch
+        double-downloads. */
     }
     <link rel="preload" as="font" type="font/woff2" href={jerseyLatinWoff2} crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href={monaspaceLatinWoff2} crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href={loraLatinWoff2} crossorigin />
     {preloadImage && <link rel="preload" as="image" href={preloadImage} fetchpriority="high" />}
 
     <!-- Open Graph / Twitter -->
@@ -466,6 +466,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           // Flag mirrors the one-shot event so a late-attaching listener (the
           // office backdrop, if its script ran after this) still sees the reveal.
           window.__pixRevealed = true;
+          performance.mark('pixtuoid-revealed');
           document.dispatchEvent(new Event('pix:revealed'));
         }
         if (root.dataset.booting !== '1' || !boot) {

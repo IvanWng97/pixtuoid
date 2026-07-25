@@ -155,6 +155,7 @@ SEAMS: tuple[Seam, ...] = (
         match=lambda p: p.startswith(".github/workflows/")
         or p.startswith(".github/actions/")
         or p == "justfile"
+        or p.startswith("policy/ci-observability/")
         or p.startswith(".githooks/")
         or p
         in (
@@ -257,7 +258,8 @@ def _selftest() -> int:
     assert keys(["integrations/raycast/contract/outcome-row.schema.json"]) == ["json-contract"]
     # ci-gates fires on the hooks dir too:
     assert keys([".githooks/pre-push"]) == ["ci-gates"]
-    # ...AND the gate LOGIC that lives under scripts/ (the pixel/README drift gates):
+    # ...AND the gate policy plus gate LOGIC under scripts/:
+    assert keys(["policy/ci-observability/main.rego"]) == ["ci-gates"]
     assert keys(["scripts/compare-screenshots.py"]) == ["ci-gates"]
     assert keys(["scripts/gen-media.py"]) == ["ci-gates"]
     assert keys(["scripts/gen-readme.mjs"]) == ["ci-gates"]

@@ -1102,6 +1102,9 @@ test('first visit: boot intro auto-runs, reveals the page, seeds the gate', asyn
   // Splash log displays 4 lines (~1.7s) then holds for engine (~4s MAX_ENGINE_WAITS) + settle fade (460ms) ≈ 6.3s.
   await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 10_000 });
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pix-booted'))).toBe('1');
+  expect(
+    await page.evaluate(() => performance.getEntriesByName('pixtuoid-revealed', 'mark').length)
+  ).toBe(1);
   expect(await page.evaluate(() => document.getElementById('main')!.hasAttribute('inert'))).toBe(
     false
   );

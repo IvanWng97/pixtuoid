@@ -1,0 +1,49 @@
+/* Load only the Latin faces used by site copy; other glyphs fall through to
+   system fonts instead of triggering late-loading swap-only subset files. */
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-display: optional;
+  font-weight: 400;
+  src: url('@fontsource/lora/files/lora-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-display: optional;
+  font-weight: 600;
+  src: url('@fontsource/lora/files/lora-latin-600-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Monaspace Neon';
+  font-style: normal;
+  font-display: optional;
+  font-weight: 400;
+  src: url('@fontsource/monaspace-neon/files/monaspace-neon-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Monaspace Neon';
+  font-style: normal;
+  font-display: optional;
+  font-weight: 500;
+  src: url('@fontsource/monaspace-neon/files/monaspace-neon-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Monaspace Neon';
+  font-style: normal;
+  font-display: optional;
+  font-weight: 600;
+  src: url('@fontsource/monaspace-neon/files/monaspace-neon-latin-600-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Monaspace Neon';
+  font-style: normal;
+  font-display: optional;
+  font-weight: 700;
+  src: url('@fontsource/monaspace-neon/files/monaspace-neon-latin-700-normal.woff2') format('woff2');
+}

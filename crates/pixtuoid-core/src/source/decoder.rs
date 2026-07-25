@@ -104,6 +104,7 @@ pub(crate) fn label_prefix_for(source: &str) -> &str {
 /// back to the bare prefix when `cwd` has no basename. CC keeps its own deriver
 /// for the subagent + project-dir fallbacks, but reads its prefix from the same
 /// [`label_prefix_for`] authority.
+#[cfg(any(feature = "native", test))]
 pub(crate) fn derive_prefixed_label(source: &str, cwd: &Path) -> String {
     let prefix = label_prefix_for(source);
     cwd_basename_label(prefix, cwd).unwrap_or_else(|| prefix.to_string())

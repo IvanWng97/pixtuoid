@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   check:
-    name: format · lint · types · build
+    name: audit · format · lint · types · build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -38,7 +38,13 @@ jobs:
           node-version: 26
           cache: npm
           cache-dependency-path: site/package-lock.json
+      # Node 26's bundled npm predates the complete allowScripts toolchain.
+      # Match packageManager before npm ci so install-script policy is enforced.
+      - name: Install pinned npm
+        working-directory: ${{ github.workspace }}
+        run: npm install --global npm@12.0.1
       - run: npm ci
+      - run: npm run audit
       # cache the ~92MB Chromium across runs (keyed on the lockfile) so the install
       # below is a no-op on a hit
       - name: Cache Playwright Chromium
@@ -80,20 +86,21 @@ jobs:
       # fallback — plus a console-error watchdog (it caught the CSP-blocked
       # inlined fonts on day one). Chromium is already installed above.
       - run: npm run e2e
-      # Lighthouse CI: gate a11y / SEO / best-practices (perf advisory) against
-      # the built pages — serves dist via `astro preview` (root `/` base on the
-      # custom domain) and audits each. Replaces the dropped eslint-plugin-jsx-a11y with a
-      # rendered-DOM a11y check (axe-powered) plus SEO/perf budgets. Uses the
-      # runner's pre-installed Chrome (chrome-launcher finds it).
+      # Lighthouse CI: hard-gate a11y / SEO / best-practices plus median
+      # performance budgets over three runs against the built pages. It serves
+      # dist via `astro preview` (root `/` base on the custom domain). Replaces
+      # the dropped eslint-plugin-jsx-a11y with a rendered-DOM a11y check
+      # (axe-powered). Uses the runner's pre-installed Chrome.
       - run: npm run lighthouse
       # Keep the full HTML reports even when the gate fails (the run logs only
       # carry the failing scores, not the element-level violations) — `path` is
       # workspace-root-relative, so it's prefixed with site/ despite the job cwd.
       - name: Upload Lighthouse reports
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: lighthouse-reports
           path: site/.lighthouseci/
           retention-days: 7
-          if-no-files-found: ignore
+          include-hidden-files: true
+          if-no-files-found: error

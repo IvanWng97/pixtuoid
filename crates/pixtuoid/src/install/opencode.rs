@@ -43,9 +43,9 @@ use crate::install::target::MergeOutcome;
 const SENTINEL: &str = "@pixtuoid-opencode-plugin";
 
 /// The placeholder the bundled template carries for the baked shim path.
-const HOOK_PLACEHOLDER: &str = "{{HOOK_PATH_JSON}}";
+const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
-/// The bundled plugin source (with the `{{HOOK_PATH_JSON}}` placeholder).
+/// The bundled plugin source (with the quoted `{{HOOK_PATH_JSON}}` placeholder).
 const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
 /// Written on uninstall: a valid empty ES module (opencode loads it to zero
@@ -202,6 +202,27 @@ mod tests {
             out.content.contains("--source"),
             "spawns the shim with --source opencode"
         );
+    }
+
+    #[test]
+    fn rendered_hook_binding_round_trips_escaped_paths() {
+        for path in [
+            r"C:\Program Files\Pixtuoid\pixtuoid-hook.exe",
+            r#"/tmp/"quoted"/pixtuoid-hook"#,
+        ] {
+            let rendered = render_plugin(path).unwrap();
+            let binding = rendered
+                .lines()
+                .find(|line| line.starts_with("const HOOK_PATH: string = "))
+                .unwrap();
+            let encoded = binding.strip_prefix("const HOOK_PATH: string = ").unwrap();
+            let expected_json = serde_json::to_string(path).unwrap();
+            assert_eq!(
+                binding,
+                format!("const HOOK_PATH: string = {expected_json}")
+            );
+            assert_eq!(serde_json::from_str::<String>(encoded).unwrap(), path);
+        }
     }
 
     #[test]

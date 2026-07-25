@@ -25,6 +25,9 @@ set windows-shell := ["bash", "-cu"]
 # newly-published crate is added in ONE place.
 PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 
+# Shell sources share one authority so formatting and lint coverage cannot drift.
+SHELL_SOURCES := "scripts/*.sh .githooks/* policy/ci-observability/*.sh"
+
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
 # nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
 # cargo-public-api 0.52.0 to match. Bump both together or the golden churns.
@@ -48,18 +51,23 @@ fmt:
 
 # Shell-format check (shfmt) — the `.sh` analog of `fmt-check`, gated via `lint`.
 # Pairs with the shellcheck house rule: shellcheck lints, shfmt formats. Covers
-# scripts/ + the git hooks. `-i 4` (4-space) matches the prevailing style; no
-# `-ci` so case bodies stay un-indented as written.
+# scripts/, git hooks, and CI policy behavior tests. `-i 4` (4-space) matches
+# the prevailing style; no `-ci` so case bodies stay un-indented as written.
 [group('rust')]
-[doc('Shell-format check (shfmt) over scripts/ + .githooks/ — the .sh analog of fmt-check')]
+[doc('Shell-format check over repository shell sources')]
 shfmt-check:
-    shfmt -i 4 -d scripts/*.sh .githooks/*
+    shfmt -i 4 -d {{ SHELL_SOURCES }}
 
 # Apply shell formatting in place (the `.sh` analog of `fmt`).
 [group('rust')]
-[doc('Apply shfmt formatting in place over scripts/ + .githooks/')]
+[doc('Apply shfmt formatting in place over repository shell sources')]
 shfmt-fix:
-    shfmt -i 4 -w scripts/*.sh .githooks/*
+    shfmt -i 4 -w {{ SHELL_SOURCES }}
+
+[group('rust')]
+[doc('Run shellcheck over repository shell sources')]
+shellcheck:
+    shellcheck {{ SHELL_SOURCES }}
 
 # Lint the GitHub Actions workflows (actionlint): YAML schema, expression types,
 # action input/output names, runner labels, AND shellcheck over every `run:`
@@ -71,6 +79,34 @@ shfmt-fix:
 actionlint:
     actionlint
 
+# Cross-file CI contracts that actionlint cannot express. yq owns YAML 1.2
+# parsing, jq owns SARIF fixtures, and Conftest/OPA owns policy evaluation.
+[group('rust')]
+[doc('Check repository CI contracts with Conftest/OPA policy-as-code')]
+ci-observability:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files=()
+    while IFS= read -r file; do files+=("$file"); done < <(find .github/workflows .github/actions -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort)
+    ((${#files[@]})) || { echo "error: no GitHub Actions YAML files found" >&2; exit 1; }
+    [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
+    files+=(site/package.json)
+    combined="$(mktemp)"
+    policy_test_results="$(mktemp)"
+    trap 'rm -f "$combined" "$policy_test_results"' EXIT
+    yq eval-all -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${files[@]}" >"$combined"
+    conftest fmt --check policy/ci-observability
+    if ! conftest verify --policy policy/ci-observability --output json >"$policy_test_results"; then
+        yq -P '.' "$policy_test_results" >&2
+        exit 1
+    fi
+    policy_test_count="$(yq -e 'length' "$policy_test_results")"
+    ((policy_test_count > 0)) || { echo "error: Conftest discovered no Rego unit tests" >&2; exit 1; }
+    echo "$policy_test_count Rego unit tests passed"
+    conftest test --parser json --policy policy/ci-observability "$combined"
+    bash policy/ci-observability/action_behavior_test.sh
+    iconv -f US-ASCII -t US-ASCII codecov.yml >/dev/null
+
 # Offline link + anchor check (lychee) over the repo's OWN markdown: every
 # relative cross-link between the nested CLAUDE.md/AGENTS.md guides + docs/ must
 # resolve, and `#anchor` fragments must exist. Directory-walk mode respects
@@ -80,7 +116,9 @@ actionlint:
 [group('rust')]
 [doc('Offline link + anchor check (lychee) over the repo markdown — no network, .gitignore-aware')]
 links:
-    lychee --offline --include-fragments .
+    # Source CSS uses Vite package specifiers; its module graph belongs to the
+    # site build, while this gate owns documentation links and anchors.
+    lychee --offline --include-fragments --extensions md .
 
 # Clippy across the workspace, warnings denied.
 [group('rust')]
@@ -124,7 +162,7 @@ arch:
     done
     echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window-free"
 
-# Fast, independent lint checks in parallel (fmt + machete + deny + arch + shfmt + actionlint + links).
+# Fast, independent lint checks in parallel.
 [group('rust')]
 lint:
     #!/usr/bin/env bash
@@ -132,7 +170,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt actionlint cargo-machete cargo-deny lychee; do
+    for t in shfmt shellcheck actionlint conftest yq jq iconv cargo-machete cargo-deny lychee; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -148,7 +186,9 @@ lint:
     run deny    just deny                & pids+=($!)
     run arch    just arch                & pids+=($!)
     run shfmt   just shfmt-check         & pids+=($!)
+    run shell   just shellcheck           & pids+=($!)
     run actions just actionlint          & pids+=($!)
+    run ci-obs  just ci-observability     & pids+=($!)
     run links   just links               & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
@@ -481,7 +521,7 @@ site-dev-stop:
     cd site && node node_modules/astro/bin/astro.mjs dev stop
 
 [group('site')]
-[doc('Site static tier: format-check → lint → astro check → knip → unit tests → build (site CI runs e2e + lighthouse after these)')]
+[doc('Site static tier: audit → format-check → lint → astro check → knip → unit tests → build (site CI runs e2e + lighthouse after these)')]
 site-check:
     npm --prefix site run verify
 
@@ -845,8 +885,9 @@ setup-tools:
     # elsewhere point at the install docs rather than silently leaving `just lint`
     # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
     # ast-grep backs the `comment-lint` advisory (structural Rust lint rules in
-    # .ast-grep/rules/); shfmt/actionlint/shellcheck back `just lint`.
-    for t in shfmt actionlint shellcheck ast-grep; do
+    # .ast-grep/rules/); shfmt/actionlint/shellcheck back workflow linting,
+    # while yq + jq + Conftest/OPA evaluate repository-specific workflow policy.
+    for t in shfmt actionlint shellcheck ast-grep yq jq conftest; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -857,7 +898,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck; do
+    for t in shfmt actionlint shellcheck yq jq conftest iconv; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -910,4 +951,3 @@ risk-radar base="origin/main":
 [doc('Self-test the risk-radar matcher (seam map predicates)')]
 risk-radar-test:
     python3 scripts/risk-radar.py --selftest
-
