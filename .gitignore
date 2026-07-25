@@ -5,7 +5,6 @@ Cargo.lock.bak
 *.swp
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
-.gemini/
 /*.png
 .venv
 .superpowers/

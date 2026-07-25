@@ -16,6 +16,8 @@ updates:
       - dependency-name: "objc2-app-kit"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: github-actions
     directory: /
@@ -25,6 +27,8 @@ updates:
       actions:
         patterns: ["*"]
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
 
   # The two Node projects previously had security ALERTS but no update PRs —
   # npm advisories surfaced with nothing offering the fix.
@@ -45,6 +49,8 @@ updates:
       # Stay on 6.x until the astro-check + eslint toolchain supports TS7.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: npm
     directory: /integrations/raycast
@@ -65,3 +71,5 @@ updates:
       # on 6.x until the eslint toolchain supports TS7.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+    cooldown:
+      default-days: 7

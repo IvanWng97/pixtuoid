@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: extractions/setup-just@v4
 
       # The matcher's selftest is the gate on the seam map itself — if someone

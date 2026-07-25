@@ -43,6 +43,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: extractions/setup-just@v4
 
       # Always runs (incl. PRs): a parser/classifier regression = silent monitor

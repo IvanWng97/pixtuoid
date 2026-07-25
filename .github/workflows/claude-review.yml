@@ -1,50 +1,42 @@
 name: claude review
 
 on:
-  pull_request:
-    # `synchronize` is deliberate: every push re-reviews (billed) — the owner
-    # wants continuous review across a PR's commits. `/claude-review` (below)
-    # remains as a manual re-trigger. The per-PR concurrency group cancels a
-    # superseded in-flight review, so rapid pushes don't stack cost.
+  # The automatic secret-bearing path is loaded only from the trusted default
+  # branch. The reusable workflow never checks out or executes the PR head.
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted-base caller; Conftest pins the read-only analyzer/publisher split
     types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
     types: [created]
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
-  id-token: write
-  actions: read
+permissions: {}
 
 jobs:
   review:
     if: >
-      (github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/claude-review') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+      (github.event_name == 'pull_request_target' &&
+        github.actor != 'dependabot[bot]' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.base.ref == github.event.repository.default_branch) ||
+      (github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        startsWith(github.event.comment.body, '/claude-review') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/claude-readonly-review.yml
+    with:
+      pr_number: ${{ github.event.issue.number || github.event.pull_request.number }}
+      prompt_path: .github/prompts/pr_review_rules.md
+      review_marker: claude-auto-review
+      review_title: Claude Review
+      max_turns: 60
+      max_budget_usd: 10
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     concurrency:
       group: claude-review-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Load review prompt
-        id: prompt
-        run: |
-          {
-            echo 'content<<PROMPT_EOF'
-            cat .github/prompts/pr_review_rules.md
-            echo 'PROMPT_EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: ${{ steps.prompt.outputs.content }}
-          track_progress: true
-          show_full_output: true
-          claude_args: '--max-turns 60 --max-budget-usd 10 --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"'

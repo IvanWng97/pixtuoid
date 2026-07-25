@@ -6,17 +6,39 @@ codecov_action := "codecov/codecov-action@v7"
 codecov_action_name := "codecov/codecov-action"
 codecov_authority_path := ".github/actions/upload-codecov/action.yml"
 codecov_wrapper := "./.github/actions/upload-codecov"
+ci_workflow_path := ".github/workflows/ci.yml"
 codecov_workflow_path := ".github/workflows/ci-tests.yml"
 codecov_input_file := "${{ inputs.file }}"
 codecov_input_flag := "${{ inputs.flag }}"
 codecov_input_report_type := "${{ inputs.report_type }}"
-codecov_input_token := "${{ inputs.token }}"
-codecov_token_secret := "${{ secrets.CODECOV_TOKEN }}"
 junit_report_path := "target/nextest/ci/junit.xml"
 lcov_report_path := "lcov.info"
 post_test_condition := "${{ !cancelled() }}"
 report_presence_step_name := "Require a generated report"
 upload_warning_step_name := "Surface advisory upload failure"
+release_workflow_path := ".github/workflows/release.yml"
+release_concurrency_group := "pixtuoid-release"
+actionlint_config_path := ".github/actionlint.yaml"
+actionlint_claude_wif_ignore := "input \"anthropic_(federation_rule_id|organization_id|service_account_id)\" is not defined in action \"anthropics/claude-code-action@v1\""
+actionlint_release_queue_ignore := "unexpected key \"queue\" for \"concurrency\" section"
+zizmor_config_path := ".github/zizmor.yml"
+cache_cleanup_workflow_path := ".github/workflows/cache-cleanup.yml"
+claude_action := "anthropics/claude-code-action@v1"
+claude_review_workflow_path := ".github/workflows/claude-review.yml"
+claude_security_workflow_path := ".github/workflows/claude-security-review.yml"
+claude_reusable_workflow_path := ".github/workflows/claude-readonly-review.yml"
+claude_reusable_reference := "./.github/workflows/claude-readonly-review.yml"
+claude_manual_commands := {
+	claude_review_workflow_path: "/claude-review",
+	claude_security_workflow_path: "/security-review",
+}
+
+claude_automatic_condition := `(github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch)`
+claude_trusted_association_condition := `contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)`
+pr_resolution_step_name := "Resolve pull request"
+claude_model_step_name := "Run read-only Claude review"
+claude_publish_step_name := "Publish validated Claude review"
+trusted_default_ref := "${{ github.event.repository.default_branch }}"
 codeql_workflow_path := ".github/workflows/codeql.yml"
 rust_setup_step_name := "Prepare Rust semantic analysis"
 rust_health_step_name := "Verify Rust extraction health"
@@ -25,13 +47,6 @@ codeql_analyze_step_id := "analyze"
 codeql_sarif_output := "${{ steps.analyze.outputs.sarif-output }}"
 rust_diagnostics_metric := "rust/summary/number-of-files-extracted-with-errors"
 rust_clean_metric := "rust/summary/number-of-successfully-extracted-files"
-gemini_workflow_path := ".github/workflows/gemini-review.yml"
-gemini_review_step_name := "Run read-only Gemini design review"
-gemini_validation_step_name := "Require a non-empty Gemini review"
-gemini_failure_step_name := "Record review failure"
-gemini_review_output := "${{ steps.gemini.outputs.summary }}"
-gemini_reviewable_condition := "steps.pr.outputs.reviewable == 'true'"
-gemini_success_condition := "steps.gemini.outcome == 'success'"
 lighthouse_workflow_path := ".github/workflows/site.yml"
 pages_workflow_path := ".github/workflows/pages.yml"
 site_package_path := "site/package.json"
@@ -48,7 +63,6 @@ expected_codecov_route(file, flag, report_type, condition) := {
 	"flag": flag,
 	"report_type": report_type,
 	"if": condition,
-	"token": codecov_token_secret,
 }
 
 expected_codecov_routes := {
@@ -58,6 +72,22 @@ expected_codecov_routes := {
 	expected_codecov_route(junit_report_path, "unit", "test_results", post_test_condition),
 	expected_codecov_route(lcov_report_path, "windows", "coverage", ""),
 	expected_codecov_route(lcov_report_path, "macos", "coverage", ""),
+}
+
+expected_actionlint_paths := {
+	claude_reusable_workflow_path: {"ignore": [actionlint_claude_wif_ignore]},
+	release_workflow_path: {"ignore": [actionlint_release_queue_ignore]},
+}
+
+expected_zizmor_rules := {"unpinned-uses": {"config": {"policies": {"*": "ref-pin"}}}}
+expected_claude_oauth_fallback := "${{ vars.ANTHROPIC_FEDERATION_RULE_ID == '' && vars.ANTHROPIC_ORGANIZATION_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}"
+
+codecov_oidc_job_names := {
+	"windows-test",
+	"macos-test",
+	"coverage",
+	"coverage-windows",
+	"coverage-macos",
 }
 
 documents := {document.path: document.contents |
@@ -186,7 +216,6 @@ codecov_route(entry) := route if {
 		"flag": object.get(params, "flag", ""),
 		"report_type": object.get(params, "report_type", ""),
 		"if": object.get(entry.value, "if", ""),
-		"token": object.get(params, "token", ""),
 	}
 }
 
@@ -194,15 +223,23 @@ actual_codecov_routes := {codecov_route(entry) |
 	some entry in codecov_uploads
 }
 
+ci_workflow := object.get(documents, ci_workflow_path, {})
+ci_jobs := object.get(ci_workflow, "jobs", {})
+ci_tests_call_job := object.get(ci_jobs, "tests", {})
+codecov_workflow := object.get(documents, codecov_workflow_path, {})
+codecov_jobs := object.get(codecov_workflow, "jobs", {})
+
 codeql := documents[codeql_workflow_path]
 codeql_job := codeql.jobs.analyze
 codeql_steps := object.get(codeql_job, "steps", [])
 
-codeql_steps_using(action) := [entry |
-	some index, step in codeql_steps
-	object.get(step, "uses", "") == action
+indexed_steps_matching(steps, field, expected) := [entry |
+	some index, step in steps
+	object.get(step, field, "") == expected
 	entry := {"index": index, "value": step}
 ]
+
+codeql_steps_using(action) := indexed_steps_matching(codeql_steps, "uses", action)
 
 rust_setup_steps := [entry |
 	some index, step in codeql_steps
@@ -222,41 +259,117 @@ rust_health_steps := [entry |
 	entry := {"index": index, "value": step, "run": run}
 ]
 
-gemini := documents[gemini_workflow_path]
-gemini_job := gemini.jobs["design-review"]
-gemini_steps := object.get(gemini_job, "steps", [])
-gemini_review_steps := [entry |
-	some index, step in gemini_steps
-	object.get(step, "name", "") == gemini_review_step_name
-	entry := {"index": index, "value": step}
-]
-
-gemini_validation_steps := [entry |
-	some index, step in gemini_steps
-	object.get(step, "name", "") == gemini_validation_step_name
-	entry := {"index": index, "value": step}
-]
-
-gemini_failure_steps := [entry |
-	some index, step in gemini_steps
-	object.get(step, "name", "") == gemini_failure_step_name
-	entry := {"index": index, "value": step}
-]
-
-gemini_validation_is_wired(step) if {
-	condition := object.get(step, "if", "")
-	contains(condition, gemini_reviewable_condition)
-	contains(condition, gemini_success_condition)
-	env := object.get(step, "env", {})
-	object.get(env, "REVIEW", "") == gemini_review_output
+claude_trigger_workflow_paths := {
+	claude_review_workflow_path,
+	claude_security_workflow_path,
 }
 
-gemini_steps_are_ordered if {
-	count(gemini_review_steps) == 1
-	count(gemini_validation_steps) == 1
-	count(gemini_failure_steps) == 1
-	gemini_review_steps[0].index < gemini_validation_steps[0].index
-	gemini_validation_steps[0].index < gemini_failure_steps[0].index
+claude_reusable := object.get(documents, claude_reusable_workflow_path, {})
+claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
+claude_analyze_job := object.get(claude_reusable_jobs, "analyze", {})
+claude_publish_job := object.get(claude_reusable_jobs, "publish", {})
+claude_analyze_steps := object.get(claude_analyze_job, "steps", [])
+claude_publish_steps := object.get(claude_publish_job, "steps", [])
+
+claude_analyze_steps_using(action) := indexed_steps_matching(claude_analyze_steps, "uses", action)
+
+claude_analyze_named_steps(name) := indexed_steps_matching(claude_analyze_steps, "name", name)
+
+claude_publish_named_steps(name) := indexed_steps_matching(claude_publish_steps, "name", name)
+
+claude_caller_jobs(path) := [job |
+	workflow := documents[path]
+	jobs := object.get(workflow, "jobs", {})
+	some _, job in jobs
+	object.get(job, "uses", "") == claude_reusable_reference
+]
+
+claude_manual_condition(command) := sprintf(
+	`(github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '%s') && %s)`,
+	[command, claude_trusted_association_condition],
+)
+
+expected_claude_caller_condition(path) := sprintf(
+	"%s || %s",
+	[claude_automatic_condition, claude_manual_condition(claude_manual_commands[path])],
+)
+
+normalized_claude_condition(condition) := trim_space(regex.replace(condition, `\r?\n[ \t]*`, " "))
+
+claude_caller_condition_is_trusted(path) if {
+	callers := claude_caller_jobs(path)
+	count(callers) == 1
+	condition := object.get(callers[0], "if", "")
+	is_string(condition)
+	normalized_claude_condition(condition) == normalized_claude_condition(expected_claude_caller_condition(path))
+}
+
+claude_checkout_is_trusted(step) if {
+	params := object.get(step, "with", {})
+	object.get(params, "ref", "") == trusted_default_ref
+	object.get(params, "fetch-depth", 0) == 1
+	object.get(params, "persist-credentials", true) == false
+}
+
+claude_model_is_nonpublishing(step) if {
+	params := object.get(step, "with", {})
+	object.get(params, "track_progress", true) == false
+	object.get(params, "show_full_output", true) == false
+	object.get(params, "classify_inline_comments", true) == false
+}
+
+claude_model_is_read_only(step) if {
+	params := object.get(step, "with", {})
+	args := object.get(params, "claude_args", "")
+	contains(args, "--allowedTools \"Read,Glob,Grep\"")
+	contains(args, "--json-schema")
+	not contains(args, "Bash")
+	not contains(args, "mcp__github")
+}
+
+claude_model_auth_is_scoped(step) if {
+	params := object.get(step, "with", {})
+	object.get(params, "github_token", "") == "${{ github.token }}"
+	object.get(params, "anthropic_federation_rule_id", "") == "${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}"
+	object.get(params, "anthropic_organization_id", "") == "${{ vars.ANTHROPIC_ORGANIZATION_ID }}"
+	object.get(params, "claude_code_oauth_token", "") == expected_claude_oauth_fallback
+}
+
+claude_publisher_revalidates_head(step) if {
+	run := object.get(step, "run", "")
+	contains(run, "jq --exit-status")
+	contains(run, ".head.sha")
+	contains(run, "EXPECTED_HEAD_SHA")
+	contains(run, "gh pr comment")
+}
+
+release_concurrency_is_lossless(concurrency) if {
+	object.get(concurrency, "group", "") == release_concurrency_group
+	object.get(concurrency, "queue", "") == "max"
+	object.get(concurrency, "cancel-in-progress", true) == false
+}
+
+rust_health_summary_is_quantified(run) if {
+	contains(run, "GITHUB_STEP_SUMMARY")
+	contains(run, "Rust CodeQL extraction health")
+	contains(run, "Files with diagnostics")
+	contains(run, "Clean files")
+}
+
+cache_cleanup_is_inert if {
+	workflow := documents[cache_cleanup_workflow_path]
+	workflow.permissions == {"actions": "write"}
+	workflow.on == {"pull_request_target": {"types": ["closed"]}}
+	jobs := object.get(workflow, "jobs", {})
+	count(jobs) == 1
+	job := jobs["closed-pr"]
+	count(object.get(job, "steps", [])) == 1
+	step := job.steps[0]
+	object.get(step, "uses", "") == ""
+	env := object.get(job, "env", {})
+	object.get(env, "PR_REF", "") == "refs/pull/${{ github.event.pull_request.number }}/merge"
+	run := object.get(step, "run", "")
+	contains(run, "gh cache delete --all --ref \"$PR_REF\" --succeed-on-no-caches")
 }
 
 has_weekly_codeql_schedule if {
@@ -265,58 +378,136 @@ has_weekly_codeql_schedule if {
 }
 
 deny contains msg if {
-	count(gemini_review_steps) != 1
-	msg := sprintf("%s must contain exactly one Gemini review step", [gemini_workflow_path])
+	some path in claude_trigger_workflow_paths
+	workflow := documents[path]
+	triggers := object.get(workflow, "on", {})
+	object.get(triggers, "pull_request", "missing") != "missing"
+	msg := sprintf("%s must use pull_request_target instead of pull_request", [path])
 }
 
 deny contains msg if {
-	count(gemini_review_steps) == 1
-	object.get(gemini_review_steps[0].value, "continue-on-error", false) != false
-	msg := sprintf("%s must fail when Gemini produces no review", [gemini_workflow_path])
+	some path in claude_trigger_workflow_paths
+	workflow := documents[path]
+	triggers := object.get(workflow, "on", {})
+	object.get(triggers, "pull_request_target", "missing") == "missing"
+	msg := sprintf("%s must use pull_request_target instead of pull_request", [path])
 }
 
 deny contains msg if {
-	count(gemini_validation_steps) != 1
-	msg := sprintf("%s must contain exactly one non-empty Gemini review gate", [gemini_workflow_path])
+	some path in claude_trigger_workflow_paths
+	_ := documents[path]
+	count(claude_caller_jobs(path)) != 1
+	msg := sprintf("%s must delegate to the canonical read-only Claude reviewer", [path])
 }
 
 deny contains msg if {
-	count(gemini_validation_steps) == 1
-	object.get(gemini_validation_steps[0].value, "continue-on-error", false) != false
-	msg := sprintf("%s non-empty Gemini review gate must fail the job", [gemini_workflow_path])
+	some path in claude_trigger_workflow_paths
+	_ := documents[path]
+	count(claude_caller_jobs(path)) == 1
+	not claude_caller_condition_is_trusted(path)
+	msg := sprintf("%s must preserve the trusted automatic and manual review guards", [path])
 }
 
 deny contains msg if {
-	count(gemini_validation_steps) == 1
-	not gemini_validation_is_wired(gemini_validation_steps[0].value)
-	msg := sprintf("%s non-empty Gemini review gate must validate the action summary", [gemini_workflow_path])
+	_ := documents[claude_reusable_workflow_path]
+	expected := {
+		"contents": "read",
+		"id-token": "write",
+		"pull-requests": "read",
+	}
+	object.get(claude_analyze_job, "permissions", {}) != expected
+	msg := sprintf("%s analyze job must remain read-only except for OIDC", [claude_reusable_workflow_path])
 }
 
 deny contains msg if {
-	count(gemini_failure_steps) != 1
-	msg := sprintf("%s must contain exactly one Gemini failure notice", [gemini_workflow_path])
+	_ := documents[claude_reusable_workflow_path]
+	steps := claude_analyze_named_steps(pr_resolution_step_name)
+	count(steps) != 1
+	msg := sprintf("%s must resolve one open internal default-branch pull request", [claude_reusable_workflow_path])
 }
 
 deny contains msg if {
-	count(gemini_failure_steps) == 1
-	condition := object.get(gemini_failure_steps[0].value, "if", "")
-	not contains(condition, "failure()")
-	msg := sprintf("%s Gemini failure notice must run after a failed review step", [gemini_workflow_path])
+	_ := documents[claude_reusable_workflow_path]
+	checkouts := claude_analyze_steps_using("actions/checkout@v7")
+	count(checkouts) != 1
+	msg := sprintf("%s must check out only the trusted default branch without persisted credentials", [claude_reusable_workflow_path])
 }
 
 deny contains msg if {
-	count(gemini_failure_steps) == 1
-	condition := object.get(gemini_failure_steps[0].value, "if", "")
-	not contains(condition, gemini_reviewable_condition)
-	msg := sprintf("%s Gemini failure notice must remain scoped to reviewable failures", [gemini_workflow_path])
+	_ := documents[claude_reusable_workflow_path]
+	checkouts := claude_analyze_steps_using("actions/checkout@v7")
+	count(checkouts) == 1
+	not claude_checkout_is_trusted(checkouts[0].value)
+	msg := sprintf("%s must check out only the trusted default branch without persisted credentials", [claude_reusable_workflow_path])
 }
 
 deny contains msg if {
-	count(gemini_review_steps) == 1
-	count(gemini_validation_steps) == 1
-	count(gemini_failure_steps) == 1
-	not gemini_steps_are_ordered
-	msg := sprintf("%s must review, validate, then report failures in that order", [gemini_workflow_path])
+	_ := documents[claude_reusable_workflow_path]
+	model_steps := claude_analyze_steps_using(claude_action)
+	count(model_steps) != 1
+	msg := sprintf("%s must contain exactly one read-only Claude step", [claude_reusable_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	model_steps := claude_analyze_steps_using(claude_action)
+	count(model_steps) == 1
+	not claude_model_is_nonpublishing(model_steps[0].value)
+	msg := sprintf("%s Claude step must disable progress comments and full output", [claude_reusable_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	model_steps := claude_analyze_steps_using(claude_action)
+	count(model_steps) == 1
+	not claude_model_is_read_only(model_steps[0].value)
+	msg := sprintf("%s Claude step must expose only read tools and structured output", [claude_reusable_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	model_steps := claude_analyze_steps_using(claude_action)
+	count(model_steps) == 1
+	not claude_model_auth_is_scoped(model_steps[0].value)
+	msg := sprintf("%s Claude step must use WIF-first authentication with the scoped job token", [claude_reusable_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	expected := {
+		"issues": "write",
+		"pull-requests": "write",
+	}
+	object.get(claude_publish_job, "permissions", {}) != expected
+	msg := sprintf("%s publish job must have comment-only permissions and no checkout", [claude_reusable_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	some step in claude_publish_steps
+	object.get(step, "uses", "") != ""
+	msg := sprintf("%s publish job must have comment-only permissions and no checkout", [claude_reusable_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	steps := claude_publish_named_steps(claude_publish_step_name)
+	count(steps) != 1
+	msg := sprintf("%s publisher must validate structured output and recheck the exact PR head", [claude_reusable_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	steps := claude_publish_named_steps(claude_publish_step_name)
+	count(steps) == 1
+	not claude_publisher_revalidates_head(steps[0].value)
+	msg := sprintf("%s publisher must validate structured output and recheck the exact PR head", [claude_reusable_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[cache_cleanup_workflow_path]
+	not cache_cleanup_is_inert
+	msg := sprintf("%s pull_request_target job must remain cache-only and checkout-free", [cache_cleanup_workflow_path])
 }
 
 deny contains msg if {
@@ -395,8 +586,67 @@ deny contains msg if {
 deny contains msg if {
 	count(authority_uploads) == 1
 	params := object.get(authority_uploads[0].value, "with", {})
-	object.get(params, "token", "") != codecov_input_token
-	msg := sprintf("%s Codecov step must pass inputs.token", [codecov_authority_path])
+	object.get(params, "use_oidc", false) != true
+	msg := sprintf("%s Codecov step must authenticate with GitHub OIDC", [codecov_authority_path])
+}
+
+deny contains msg if {
+	authority := documents[codecov_authority_path]
+	inputs := object.get(authority, "inputs", {})
+	object.get(inputs, "token", null) != null
+	msg := sprintf("%s must not declare or forward a Codecov upload token", [codecov_authority_path])
+}
+
+deny contains msg if {
+	count(authority_uploads) == 1
+	params := object.get(authority_uploads[0].value, "with", {})
+	object.get(params, "token", null) != null
+	msg := sprintf("%s must not declare or forward a Codecov upload token", [codecov_authority_path])
+}
+
+deny contains msg if {
+	some entry in codecov_uploads
+	params := object.get(entry.value, "with", {})
+	object.get(params, "token", null) != null
+	msg := sprintf("%s must not forward a Codecov upload token", [entry.path])
+}
+
+deny contains msg if {
+	_ := documents[ci_workflow_path]
+	expected := {
+		"contents": "read",
+		"id-token": "write",
+	}
+	object.get(ci_tests_call_job, "permissions", {}) != expected
+	msg := sprintf("%s tests call must grant only contents:read and id-token:write", [ci_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[codecov_workflow_path]
+	some name in codecov_oidc_job_names
+	job := object.get(codecov_jobs, name, {})
+	expected := {
+		"contents": "read",
+		"id-token": "write",
+	}
+	object.get(job, "permissions", {}) != expected
+	msg := sprintf("%s job %s must receive the Codecov OIDC permission", [codecov_workflow_path, name])
+}
+
+deny contains msg if {
+	_ := documents[codecov_workflow_path]
+	some name, job in codecov_jobs
+	not name in codecov_oidc_job_names
+	permissions := object.get(job, "permissions", {})
+	object.get(permissions, "id-token", "") == "write"
+	msg := sprintf("%s job %s must not receive the Codecov OIDC permission", [codecov_workflow_path, name])
+}
+
+deny contains msg if {
+	path := {ci_workflow_path, codecov_workflow_path, codecov_authority_path}[_]
+	document := documents[path]
+	contains(json.marshal(document), "CODECOV_TOKEN")
+	msg := sprintf("%s must not reference the retired CODECOV_TOKEN secret", [path])
 }
 
 deny contains msg if {
@@ -459,7 +709,7 @@ deny contains msg if {
 
 deny contains msg if {
 	actual_codecov_routes != expected_codecov_routes
-	msg := "Codecov routes must match the declared paths, files, flags, types, conditions, and token"
+	msg := "Codecov routes must match the declared paths, files, flags, types, and conditions"
 }
 
 deny contains msg if {
@@ -542,6 +792,33 @@ deny contains msg if {
 	engines := object.get(manifest, "engines", {})
 	object.get(engines, "npm", "") != expected_npm_engine
 	msg := sprintf("%s must require npm %s", [site_package_path, expected_npm_engine])
+}
+
+deny contains msg if {
+	release := documents[release_workflow_path]
+	concurrency := object.get(release, "concurrency", {})
+	not release_concurrency_is_lossless(concurrency)
+	msg := sprintf("%s must serialize every release tag through one concurrency group", [release_workflow_path])
+}
+
+deny contains msg if {
+	some document in input.documents
+	document.path != release_workflow_path
+	concurrency := object.get(document.contents, "concurrency", {})
+	object.get(concurrency, "queue", null) != null
+	msg := sprintf("%s must not use the release-only queue compatibility field", [document.path])
+}
+
+deny contains msg if {
+	config := documents[actionlint_config_path]
+	object.get(config, "paths", {}) != expected_actionlint_paths
+	msg := sprintf("%s must keep only the two path-specific upstream compatibility ignores", [actionlint_config_path])
+}
+
+deny contains msg if {
+	config := documents[zizmor_config_path]
+	object.get(config, "rules", {}) != expected_zizmor_rules
+	msg := sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path])
 }
 
 deny contains msg if {
@@ -756,6 +1033,13 @@ deny contains msg if {
 	count(rust_health_steps) == 1
 	not contains(rust_health_steps[0].run, rust_clean_metric)
 	msg := sprintf("%s Rust extraction-health gate must read the clean-files metric", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_health_steps) == 1
+	run := rust_health_steps[0].run
+	not rust_health_summary_is_quantified(run)
+	msg := sprintf("%s Rust extraction-health gate must write a quantified job summary", [codeql_workflow_path])
 }
 
 deny contains msg if {

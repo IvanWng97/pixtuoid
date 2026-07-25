@@ -79,6 +79,15 @@ shellcheck:
 actionlint:
     actionlint
 
+# Security audit for workflows/actions/Dependabot. zizmor owns the parser and
+# audit catalog; .github/zizmor.yml records the repository's deliberate
+# ref-or-SHA pin policy and every accepted finding is suppressed at its exact
+# source location with a WHY.
+[group('rust')]
+[doc('Audit GitHub automation security with zizmor')]
+zizmor:
+    zizmor --strict-collection .
+
 # Cross-file CI contracts that actionlint cannot express. yq owns YAML 1.2
 # parsing, jq owns SARIF fixtures, and Conftest/OPA owns policy evaluation.
 [group('rust')]
@@ -89,8 +98,10 @@ ci-observability:
     files=()
     while IFS= read -r file; do files+=("$file"); done < <(find .github/workflows .github/actions -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort)
     ((${#files[@]})) || { echo "error: no GitHub Actions YAML files found" >&2; exit 1; }
+    [[ -s .github/actionlint.yaml ]] || { echo "error: .github/actionlint.yaml is missing or empty" >&2; exit 1; }
+    [[ -s .github/zizmor.yml ]] || { echo "error: .github/zizmor.yml is missing or empty" >&2; exit 1; }
     [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
-    files+=(site/package.json)
+    files+=(.github/actionlint.yaml .github/zizmor.yml site/package.json)
     combined="$(mktemp)"
     policy_test_results="$(mktemp)"
     trap 'rm -f "$combined" "$policy_test_results"' EXIT
@@ -170,7 +181,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt shellcheck actionlint conftest yq jq iconv cargo-machete cargo-deny lychee; do
+    for t in shfmt shellcheck actionlint zizmor conftest yq jq iconv cargo-machete cargo-deny lychee; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -188,6 +199,7 @@ lint:
     run shfmt   just shfmt-check         & pids+=($!)
     run shell   just shellcheck           & pids+=($!)
     run actions just actionlint          & pids+=($!)
+    run zizmor  just zizmor              & pids+=($!)
     run ci-obs  just ci-observability     & pids+=($!)
     run links   just links               & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
@@ -885,9 +897,9 @@ setup-tools:
     # elsewhere point at the install docs rather than silently leaving `just lint`
     # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
     # ast-grep backs the `comment-lint` advisory (structural Rust lint rules in
-    # .ast-grep/rules/); shfmt/actionlint/shellcheck back workflow linting,
-    # while yq + jq + Conftest/OPA evaluate repository-specific workflow policy.
-    for t in shfmt actionlint shellcheck ast-grep yq jq conftest; do
+    # .ast-grep/rules/); shfmt/actionlint/shellcheck/zizmor back workflow
+    # linting, while yq + jq + Conftest/OPA evaluate repository-specific policy.
+    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -898,7 +910,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck yq jq conftest iconv; do
+    for t in shfmt actionlint shellcheck zizmor yq jq conftest iconv; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then

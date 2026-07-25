@@ -4,12 +4,12 @@ on:
   push:
     tags: ["v*"]
 
-# One release at a time per tag: a tag re-push / rapid double-tag must not run two
-# publishes concurrently (they'd race creating the GH release + crates.io/npm
-# publish). cancel-in-progress: false — never interrupt an in-flight release
-# (mirrors pages.yml's deploy concurrency).
+# One lossless repository-wide release queue: different tags must not interleave
+# irreversible crates.io/npm publication. `queue: max` retains every waiting
+# tag; cancel-in-progress stays false because a publish must never be interrupted.
 concurrency:
-  group: release-${{ github.ref }}
+  group: pixtuoid-release
+  queue: max
   cancel-in-progress: false
 
 # Least-privilege (#215): jobs inherit read-only; the `release` job alone
@@ -32,6 +32,7 @@ jobs:
         with:
           # Full history for the tag-on-main ancestry check below.
           fetch-depth: 0
+          persist-credentials: false
       # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD
       # on Linux (#633) — alsa-sys's build script PANICS when pkg-config can't
       # find them. The CI workflows install this in every Linux job that builds
@@ -43,7 +44,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust
       - uses: taiki-e/install-action@cargo-nextest
@@ -107,12 +108,14 @@ jobs:
             os: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust
           key: ${{ matrix.target }}
@@ -180,12 +183,14 @@ jobs:
             cross: true
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust
           key: deb-${{ matrix.target }}
@@ -227,6 +232,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Download artifacts
         uses: actions/download-artifact@v8
@@ -247,7 +253,7 @@ jobs:
           args: --latest --strip header
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v3 # zizmor: ignore[superfluous-actions] mature release action avoids hand-rolled gh release behavior
         with:
           # Mark v*-rc/-beta/-alpha tags as pre-releases so they don't surface as "latest".
           prerelease: ${{ contains(github.ref_name, '-') }}
@@ -287,8 +293,10 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust
       - name: Authenticate to crates.io (OIDC trusted publishing)
@@ -343,7 +351,9 @@ jobs:
       id-token: write # npm provenance (`npm publish --provenance`)
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7 # zizmor: ignore[cache-poisoning] this publisher does not enable setup-node's package cache
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -359,7 +369,7 @@ jobs:
       # Pinned EXACTLY (not @11): the publish path is irreversible, so what
       # runs must not float with the registry at release time; bump
       # deliberately (and drop this line once node's bundled npm >= 11.5.1).
-      - run: npm install -g npm@11.5.1
+      - run: npm install -g npm@11.5.1 # zizmor: ignore[adhoc-packages] exact OIDC-capable npm bootstrap for trusted publishing
       - uses: extractions/setup-just@v4
 
       - name: Download build artifacts
