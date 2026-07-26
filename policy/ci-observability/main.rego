@@ -91,13 +91,15 @@ codecov_oidc_job_names := {
 	"coverage-macos",
 }
 
-documents := {document.path: document.contents |
+documents[path] := contents if {
 	some document in input.documents
+	path := document.path
+	contents := document.contents
 }
 
 objects := [entry |
 	some document in input.documents
-	some _, value in walk(document.contents)
+	some value in walk(document.contents)
 	is_object(value)
 	entry := {"path": document.path, "value": value}
 ]
@@ -163,7 +165,8 @@ warning_steps := [entry |
 	object.get(entry.value, "if", "") == "${{ steps.upload.outcome == 'failure' }}"
 ]
 
-effective_working_directory(job, step) := directory if {
+# The step's own working-directory wins, so this arm never consults the job.
+effective_working_directory(_, step) := directory if {
 	directory := object.get(step, "working-directory", null)
 	directory != null
 }
@@ -220,8 +223,9 @@ codecov_route(entry) := route if {
 	}
 }
 
-actual_codecov_routes := {codecov_route(entry) |
+actual_codecov_routes contains route if {
 	some entry in codecov_uploads
+	route := codecov_route(entry)
 }
 
 ci_workflow := object.get(documents, ci_workflow_path, {})
@@ -281,7 +285,7 @@ claude_publish_named_steps(name) := indexed_steps_matching(claude_publish_steps,
 claude_caller_jobs(path) := [job |
 	workflow := documents[path]
 	jobs := object.get(workflow, "jobs", {})
-	some _, job in jobs
+	some job in jobs
 	object.get(job, "uses", "") == claude_reusable_reference
 ]
 
@@ -328,14 +332,12 @@ claude_model_is_read_only(step) if {
 	not contains(args, "mcp__github")
 }
 
-# `--json-schema` smuggles a JSON document through a YAML string, so nothing
-# else in the gate stack reads it: actionlint and zizmor see an opaque scalar,
-# and the read-only rule above is satisfied by the flag NAME alone. An
-# unbalanced brace therefore survives every local check and only surfaces on the
-# runner, where the CLI refuses to start and every review run dies with
-# "--json-schema is not valid JSON" — a gate that can never pass. Parse the
-# payload here instead, and hold it to being a well-formed JSON *Schema* rather
-# than merely well-formed JSON, so `--json-schema '123'` fails too.
+# The schema is no longer a literal here: it lives in a committed .json that
+# check-jsonschema gates, and reaches the CLI through a step output. Pin the
+# reference exactly so an inline payload — the shape whose unbalanced brace took
+# both bots down — cannot creep back in and become unreadable to every linter.
+review_schema_reference := "--json-schema ${{ steps.schema.outputs.json }}"
+
 claude_args_schema_entries := [entry |
 	some candidate in objects
 	args := object.get(candidate.value, "claude_args", null)
@@ -343,24 +345,6 @@ claude_args_schema_entries := [entry |
 	contains(args, json_schema_flag)
 	entry := {"path": candidate.path, "args": args}
 ]
-
-claude_json_schema_is_wellformed(args) if {
-	parts := split(args, sprintf("%s '", [json_schema_flag]))
-
-	# Exactly one occurrence; a second copy makes the effective payload ambiguous.
-	count(parts) == 2
-
-	# Cut at the CLOSING quote, not at the end of the string: the schema is not
-	# required to be the final flag, and an earlier draft that trimmed a trailing
-	# quote rejected every valid payload with an argument after it.
-	payload := split(parts[1], "'")[0]
-
-	# split returns the whole remainder when the separator is absent, so this
-	# proves a closing quote exists rather than the payload running off the end.
-	payload != parts[1]
-	json.is_valid(payload)
-	json.verify_schema(json.unmarshal(payload))[0]
-}
 
 claude_model_auth_is_scoped(step) if {
 	params := object.get(step, "with", {})
@@ -411,6 +395,47 @@ has_weekly_codeql_schedule if {
 	some schedule in codeql.on.schedule
 	schedule.cron == "29 11 * * 3"
 }
+
+# A job in a CALLED workflow that omits `permissions:` runs with exactly the set
+# the caller handed down, and ci.yml grants this workflow id-token:write for the
+# Codecov OIDC upload. So an omitted block is not "no permissions" — it IS the
+# grant, and a rule that only inspects the declared block cannot see the very
+# jobs that are exposed. Require every non-Codecov job to declare its own scope.
+codecov_job_scope_is_self_declared(job) if {
+	permissions := object.get(job, "permissions", null)
+	is_object(permissions)
+	object.get(permissions, "id-token", "") != "write"
+}
+
+# `ci-gate` is the ONLY context in branch protection, so its `needs` list plus
+# the results it reads ARE the merge gate. Each reusable workflow already pins
+# its own nested job membership; nothing pinned the level above, where adding a
+# group and forgetting to gate it leaves the single required check green while
+# that group is free to fail. `supplemental` is advisory by design.
+
+# A job-level `uses:` IS a reusable-workflow call — a job cannot carry both
+# `uses:` and `steps:`. Matching on the `./.github/workflows/` prefix instead
+# would drop a cross-repo call out of the group set, and the membership rule
+# would then instruct the maintainer to REMOVE that group from the merge gate.
+calls_a_reusable_workflow(job) if {
+	uses := object.get(job, "uses", "")
+	is_string(uses)
+	uses != ""
+}
+
+ci_gate_job_key := "gate"
+
+ci_advisory_job_keys := {"supplemental"}
+
+ci_gate_job := object.get(ci_jobs, ci_gate_job_key, {})
+
+ci_group_job_keys contains name if {
+	some name, job in ci_jobs
+	calls_a_reusable_workflow(job)
+	not name in ci_advisory_job_keys
+}
+
+ci_gate_needs := {name | some name in object.get(ci_gate_job, "needs", [])}
 
 deny contains msg if {
 	some path in claude_trigger_workflow_paths
@@ -507,15 +532,15 @@ deny contains msg if {
 	msg := sprintf("%s Claude step must use WIF-first authentication with the scoped job token", [claude_reusable_workflow_path])
 }
 
-# Deliberately walks every document rather than the reusable workflow alone: the
-# payload is unreadable to actionlint wherever it appears, so any future caller
-# that grows its own `--json-schema` inherits the same silent-red failure mode.
+# Walks every document, not just the reusable workflow: any future caller that
+# grows its own `--json-schema` inherits the same "invisible to every linter"
+# problem, so it must use the committed file too.
 deny contains msg if {
 	some entry in claude_args_schema_entries
-	not claude_json_schema_is_wellformed(entry.args)
+	not contains(entry.args, review_schema_reference)
 	msg := sprintf(
-		"%s %s must carry exactly one single-quoted, well-formed JSON Schema payload",
-		[entry.path, json_schema_flag],
+		"%s must pass %s via the committed schema file (%s), not an inline literal",
+		[entry.path, json_schema_flag, review_schema_reference],
 	)
 }
 
@@ -531,9 +556,9 @@ deny contains msg if {
 
 deny contains msg if {
 	_ := documents[claude_reusable_workflow_path]
+	msg := sprintf("%s publish job must have comment-only permissions and no checkout", [claude_reusable_workflow_path])
 	some step in claude_publish_steps
 	object.get(step, "uses", "") != ""
-	msg := sprintf("%s publish job must have comment-only permissions and no checkout", [claude_reusable_workflow_path])
 }
 
 deny contains msg if {
@@ -690,25 +715,14 @@ deny contains msg if {
 
 deny contains msg if {
 	_ := documents[codecov_workflow_path]
-	some name in codecov_oidc_job_names
-	job := object.get(codecov_jobs, name, {})
 	expected := {
 		"contents": "read",
 		"id-token": "write",
 	}
+	some name in codecov_oidc_job_names
+	job := object.get(codecov_jobs, name, {})
 	object.get(job, "permissions", {}) != expected
 	msg := sprintf("%s job %s must receive the Codecov OIDC permission", [codecov_workflow_path, name])
-}
-
-# A job in a CALLED workflow that omits `permissions:` runs with exactly the set
-# the caller handed down, and ci.yml grants this workflow id-token:write for the
-# Codecov OIDC upload. So an omitted block is not "no permissions" — it IS the
-# grant, and a rule that only inspects the declared block cannot see the very
-# jobs that are exposed. Require every non-Codecov job to declare its own scope.
-codecov_job_scope_is_self_declared(job) if {
-	permissions := object.get(job, "permissions", null)
-	is_object(permissions)
-	object.get(permissions, "id-token", "") != "write"
 }
 
 deny contains msg if {
@@ -720,40 +734,11 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	path := {ci_workflow_path, codecov_workflow_path, codecov_authority_path}[_]
+	some path in {ci_workflow_path, codecov_workflow_path, codecov_authority_path}
 	document := documents[path]
 	contains(json.marshal(document), "CODECOV_TOKEN")
 	msg := sprintf("%s must not reference the retired CODECOV_TOKEN secret", [path])
 }
-
-# `ci-gate` is the ONLY context in branch protection, so its `needs` list plus
-# the results it reads ARE the merge gate. Each reusable workflow already pins
-# its own nested job membership; nothing pinned the level above, where adding a
-# group and forgetting to gate it leaves the single required check green while
-# that group is free to fail. `supplemental` is advisory by design.
-# A job-level `uses:` IS a reusable-workflow call — a job cannot carry both
-# `uses:` and `steps:`. Matching on the `./.github/workflows/` prefix instead
-# would drop a cross-repo call out of the group set, and the membership rule
-# would then instruct the maintainer to REMOVE that group from the merge gate.
-calls_a_reusable_workflow(job) if {
-	uses := object.get(job, "uses", "")
-	is_string(uses)
-	uses != ""
-}
-
-ci_gate_job_key := "gate"
-
-ci_advisory_job_keys := {"supplemental"}
-
-ci_gate_job := object.get(ci_jobs, ci_gate_job_key, {})
-
-ci_group_job_keys := {name |
-	some name, job in ci_jobs
-	calls_a_reusable_workflow(job)
-	not name in ci_advisory_job_keys
-}
-
-ci_gate_needs := {name | some name in object.get(ci_gate_job, "needs", [])}
 
 deny contains msg if {
 	_ := documents[ci_workflow_path]
@@ -849,33 +834,33 @@ deny contains msg if {
 }
 
 deny contains msg if {
+	msg := sprintf("%s Lighthouse upload must run under !cancelled()", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
 	entry.uses == "actions/upload-artifact@v7"
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(entry.value, "if", "") != "${{ !cancelled() }}"
-	msg := sprintf("%s Lighthouse upload must run under !cancelled()", [lighthouse_workflow_path])
 }
 
 deny contains msg if {
+	msg := sprintf("%s Lighthouse upload must include hidden files", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
 	entry.uses == "actions/upload-artifact@v7"
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(params, "include-hidden-files", false) != true
-	msg := sprintf("%s Lighthouse upload must include hidden files", [lighthouse_workflow_path])
 }
 
 deny contains msg if {
+	msg := sprintf("%s Lighthouse upload must fail when reports are absent", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
 	entry.uses == "actions/upload-artifact@v7"
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(params, "if-no-files-found", "") != "error"
-	msg := sprintf("%s Lighthouse upload must fail when reports are absent", [lighthouse_workflow_path])
 }
 
 deny contains msg if {
@@ -946,7 +931,7 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	codeql.on.push.branches != ["main"]
+	object.get(codeql, ["on", "push", "branches"], null) != ["main"]
 	msg := sprintf("%s must run on pushes to main", [codeql_workflow_path])
 }
 
@@ -966,52 +951,52 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	codeql.permissions.actions != "read"
+	object.get(codeql, ["permissions", "actions"], null) != "read"
 	msg := sprintf("%s must grant actions: read", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.permissions.contents != "read"
+	object.get(codeql, ["permissions", "contents"], null) != "read"
 	msg := sprintf("%s must grant contents: read", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.permissions.packages != "read"
+	object.get(codeql, ["permissions", "packages"], null) != "read"
 	msg := sprintf("%s must grant packages: read", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.permissions["security-events"] != "write"
+	object.get(codeql, ["permissions", "security-events"], null) != "write"
 	msg := sprintf("%s must grant security-events: write", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.concurrency.group != "codeql-${{ github.ref }}"
+	object.get(codeql, ["concurrency", "group"], null) != "codeql-${{ github.ref }}"
 	msg := sprintf("%s must group concurrency by ref", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.concurrency["cancel-in-progress"] != "${{ github.event_name == 'pull_request' }}"
+	object.get(codeql, ["concurrency", "cancel-in-progress"], null) != "${{ github.event_name == 'pull_request' }}"
 	msg := sprintf("%s must cancel only superseded pull-request runs", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql_job["runs-on"] != "ubuntu-latest"
+	object.get(codeql_job, "runs-on", null) != "ubuntu-latest"
 	msg := sprintf("%s analyze job must use ubuntu-latest", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql_job["timeout-minutes"] != 30
+	object.get(codeql_job, "timeout-minutes", null) != 30
 	msg := sprintf("%s analyze job must keep timeout-minutes: 30", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql_job.strategy["fail-fast"] != false
+	object.get(codeql_job, ["strategy", "fail-fast"], null) != false
 	msg := sprintf("%s analyze matrix must keep fail-fast: false", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql_job.strategy.matrix.language != ["actions", "javascript-typescript", "python", "rust"]
+	object.get(codeql_job, ["strategy", "matrix", "language"], null) != ["actions", "javascript-typescript", "python", "rust"]
 	msg := sprintf("%s must analyze actions, JavaScript/TypeScript, Python, and Rust", [codeql_workflow_path])
 }
 
@@ -1168,16 +1153,16 @@ deny contains msg if {
 
 deny contains msg if {
 	checkout_steps := codeql_steps_using("actions/checkout@v7")
-	init_steps := codeql_steps_using("github/codeql-action/init@v4")
 	count(checkout_steps) == 1
+	init_steps := codeql_steps_using("github/codeql-action/init@v4")
 	count(init_steps) == 1
 	checkout_steps[0].index >= init_steps[0].index
 	msg := sprintf("%s must check out before CodeQL init", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	init_steps := codeql_steps_using("github/codeql-action/init@v4")
 	count(rust_setup_steps) == 1
+	init_steps := codeql_steps_using("github/codeql-action/init@v4")
 	count(init_steps) == 1
 	rust_setup_steps[0].index >= init_steps[0].index
 	msg := sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path])

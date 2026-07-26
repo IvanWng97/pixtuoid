@@ -18,12 +18,12 @@ test_unrelated_action_is_not_codecov if {
 }
 
 test_case_variants_cannot_bypass_centralization if {
+	path := ".github/workflows/rogue.yml"
 	every value in {
 		"Codecov/codecov-action@v7",
 		"CODECOV/CODECOV-ACTION@v7",
 		"codecov/Codecov-Action@v7",
 	} {
-		path := ".github/workflows/rogue.yml"
 		fixture := {"documents": [{
 			"path": path,
 			"contents": {"jobs": {"test": {"steps": [{"uses": value}]}}},
@@ -77,10 +77,10 @@ test_codeql_step_selection_preserves_order if {
 		{"uses": "github/codeql-action/analyze@v4"},
 	]
 	checkout := codeql_steps_using("actions/checkout@v7") with codeql_steps as steps
-	initialize := codeql_steps_using("github/codeql-action/init@v4") with codeql_steps as steps
-	analyze := codeql_steps_using("github/codeql-action/analyze@v4") with codeql_steps as steps
 	checkout[0].index == 0
+	initialize := codeql_steps_using("github/codeql-action/init@v4") with codeql_steps as steps
 	initialize[0].index == 1
+	analyze := codeql_steps_using("github/codeql-action/analyze@v4") with codeql_steps as steps
 	analyze[0].index == 2
 }
 
@@ -701,12 +701,10 @@ test_codeql_health_metrics_must_be_visible_in_the_job_summary if {
 	sprintf("%s Rust extraction-health gate must write a quantified job summary", [codeql_workflow_path]) in violations
 }
 
-# The exact payload that shipped in #785: the root "properties" object is never
-# closed (10 `{` against 9 `}`), so every `claude review` and
-# `claude security review` run aborted with "--json-schema is not valid JSON".
-broken_json_schema_args := `--max-turns 60 --allowedTools "Read,Glob,Grep" --json-schema '{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]'`
-
-fixed_json_schema_args := `--max-turns 60 --allowedTools "Read,Glob,Grep" --json-schema '{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]}'`
+schema_reference_message := sprintf(
+	"%s must pass %s via the committed schema file (%s), not an inline literal",
+	[claude_reusable_workflow_path, json_schema_flag, review_schema_reference],
+)
 
 json_schema_fixture(args) := {"documents": [{
 	"path": claude_reusable_workflow_path,
@@ -716,46 +714,31 @@ json_schema_fixture(args) := {"documents": [{
 	}]}}},
 }]}
 
-malformed_json_schema_message := sprintf(
-	"%s %s must carry exactly one single-quoted, well-formed JSON Schema payload",
-	[claude_reusable_workflow_path, json_schema_flag],
-)
-
-test_unbalanced_json_schema_payload_is_denied if {
-	violations := deny with input as json_schema_fixture(broken_json_schema_args)
-	malformed_json_schema_message in violations
+test_committed_schema_reference_is_accepted if {
+	args := sprintf("--max-turns 60 %s", [review_schema_reference])
+	violations := deny with input as json_schema_fixture(args)
+	not schema_reference_message in violations
 }
 
-test_balanced_json_schema_payload_is_accepted if {
-	violations := deny with input as json_schema_fixture(fixed_json_schema_args)
-	not malformed_json_schema_message in violations
-}
-
-# Each variant is a distinct way the payload can be unreadable to the CLI while
-# still satisfying the flag-name-only presence check.
-test_unreadable_json_schema_payloads_are_denied if {
+# The regression that took both bots down for 31h: an inline literal is opaque
+# to actionlint and zizmor, so a single unbalanced brace reached the runner.
+# Any inline payload is now refused outright, balanced or not.
+test_inline_schema_payloads_are_denied if {
 	every args in {
-		# Unquoted, so quote-removal mangles the payload before the CLI sees it.
+		# The exact malformed payload from #785 — ten `{` against nine `}`.
+		`--json-schema '{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]'`,
+		# Balanced, and still refused: inline is the shape being retired.
+		`--json-schema '{"type":"object"}'`,
 		`--json-schema {"type":"object"}`,
-		# Opening quote with no closing quote.
-		`--json-schema '{"type":"object"}`,
-		# Valid JSON, but a scalar is not a schema.
-		`--json-schema '123'`,
-		# Well-formed JSON that is not a well-formed JSON Schema.
-		`--json-schema '{"type":"not-a-type"}'`,
-		# Two payloads make the effective schema ambiguous.
-		`--json-schema '{"type":"object"}' --json-schema '{"type":"array"}'`,
-		# Empty payload.
-		`--json-schema ''`,
 	} {
 		violations := deny with input as json_schema_fixture(args)
-		malformed_json_schema_message in violations
+		schema_reference_message in violations
 	}
 }
 
 test_claude_args_without_a_schema_flag_is_not_denied if {
 	violations := deny with input as json_schema_fixture(`--max-turns 60 --allowedTools "Read,Glob,Grep"`)
-	not malformed_json_schema_message in violations
+	not schema_reference_message in violations
 }
 
 ci_gate_fixture(jobs) := {"documents": [{"path": ci_workflow_path, "contents": {"jobs": jobs}}]}
@@ -775,26 +758,28 @@ ci_gate_shipped_jobs := {
 	},
 }
 
-ci_gate_membership_violations(jobs) := [msg |
-	some msg in deny with input as ci_gate_fixture(jobs)
+ci_gate_membership_violations(violations) := [msg |
+	some msg in violations
 	contains(msg, "must gate exactly the non-advisory group jobs")
 ]
 
-ci_gate_unread_violations(jobs) := [msg |
-	some msg in deny with input as ci_gate_fixture(jobs)
+ci_gate_unread_violations(violations) := [msg |
+	some msg in violations
 	contains(msg, "must read needs.")
 ]
 
 test_ci_gate_covering_every_group_is_accepted if {
-	count(ci_gate_membership_violations(ci_gate_shipped_jobs)) == 0
-	count(ci_gate_unread_violations(ci_gate_shipped_jobs)) == 0
+	shipped_violations := deny with input as ci_gate_fixture(ci_gate_shipped_jobs)
+	count(ci_gate_membership_violations(shipped_violations)) == 0
+	count(ci_gate_unread_violations(shipped_violations)) == 0
 }
 
 # The gap: a fifth reusable group lands and nobody adds it to the gate, so the
 # single protected context stays green while that whole group can fail.
 test_ci_gate_missing_a_new_group_is_denied if {
 	jobs := object.union(ci_gate_shipped_jobs, {"security": {"uses": "./.github/workflows/ci-security.yml"}})
-	count(ci_gate_membership_violations(jobs)) == 1
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 1
 }
 
 # Consistently dropping a group — from `needs` AND from the env the shell reads —
@@ -807,7 +792,8 @@ test_ci_gate_dropping_a_group_entirely_is_denied if {
 			"TESTS_RESULT": "${{ needs.tests.result }}",
 		}}],
 	}})
-	count(ci_gate_membership_violations(jobs)) == 1
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 1
 	sprintf("%s %s must read needs.builds.result", [ci_workflow_path, ci_gate_job_key]) in deny with input as ci_gate_fixture(jobs)
 }
 
@@ -832,22 +818,8 @@ test_ci_gate_need_on_the_advisory_group_is_denied if {
 			"TESTS_RESULT": "${{ needs.tests.result }}",
 		}}],
 	}})
-	count(ci_gate_membership_violations(jobs)) == 1
-}
-
-# The schema is not required to be the LAST flag in claude_args; an earlier
-# draft cut at the end of the string and rejected every valid payload followed
-# by another argument.
-test_json_schema_before_another_flag_is_accepted if {
-	args := sprintf("%s '{\"type\":\"object\"}' --max-turns 60", [json_schema_flag])
-	violations := deny with input as json_schema_fixture(args)
-	not malformed_json_schema_message in violations
-}
-
-test_json_schema_unterminated_before_another_flag_is_denied if {
-	args := sprintf("%s '{\"type\":\"object\"} --max-turns 60", [json_schema_flag])
-	violations := deny with input as json_schema_fixture(args)
-	malformed_json_schema_message in violations
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 1
 }
 
 ci_oidc_call_message(name) := sprintf(
@@ -878,8 +850,9 @@ test_tests_call_granting_oidc_is_accepted if {
 # rule then told the maintainer to REMOVE that group from the merge gate.
 test_cross_repo_group_call_still_counts_as_a_group if {
 	jobs := object.union(ci_gate_shipped_jobs, {"builds": {"uses": "someorg/shared/.github/workflows/ci-builds.yml@v1"}})
-	count(ci_gate_membership_violations(jobs)) == 0
-	count(ci_gate_unread_violations(jobs)) == 0
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 0
+	count(ci_gate_unread_violations(violations)) == 0
 }
 
 test_cross_repo_group_call_ungated_is_denied if {
@@ -893,7 +866,8 @@ test_cross_repo_group_call_ungated_is_denied if {
 			}}],
 		},
 	})
-	count(ci_gate_membership_violations(jobs)) == 1
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 1
 }
 
 test_cross_repo_group_call_granting_oidc_is_denied if {

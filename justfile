@@ -156,6 +156,14 @@ ci-observability:
     trap 'rm -f "$combined" "$policy_test_results"' EXIT
     yq eval-all -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${files[@]}" >"$combined"
     conftest fmt --check policy/ci-observability
+    # conftest embeds OPA but exposes neither `check` nor coverage, so the OPA
+    # binary owns both. `--strict` catches compile-level slop conftest accepts
+    # (an unused argument shipped here undetected); the coverage threshold is a
+    # RATCHET on #789 — an uncovered rule head means "the body was never true",
+    # i.e. no test makes that rule fire, which is how two vacuous rules reached
+    # main. Raise the number as rules gain tests; never lower it.
+    opa check --strict policy/ci-observability
+    opa test --coverage --threshold 94 policy/ci-observability >/dev/null
     if ! conftest verify --policy policy/ci-observability --output json >"$policy_test_results"; then
         yq -P '.' "$policy_test_results" >&2
         exit 1
@@ -166,6 +174,27 @@ ci-observability:
     conftest test --parser json --policy policy/ci-observability "$combined"
     bash policy/ci-observability/action_behavior_test.sh
     iconv -f US-ASCII -t US-ASCII codecov.yml >/dev/null
+    # Regal is the OPA project's own Rego linter; .regal/config.yaml records
+    # every deliberate disagreement with a WHY. LAST on purpose: it judges style,
+    # and under `set -e` an earlier position would abort the recipe before the
+    # correctness checks above ever evaluated the documents.
+    regal lint policy/ci-observability
+
+# Every committed JSON Schema, held to the metaschema. These are contracts a
+# consumer reads at runtime — the review schema reaches the Claude CLI, the
+# raycast ones pin the `--json` shape — and nothing else parses them: a broken
+# one is invisible until the consumer refuses to start, which is exactly how the
+# review bots died for 31h.
+[group('rust')]
+[doc('Validate every committed JSON Schema against the metaschema (check-jsonschema)')]
+json-schemas:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    schemas=(.github/prompts/review-schema.json integrations/raycast/contract/*.schema.json)
+    ((${#schemas[@]})) || { echo "error: no committed JSON Schemas found" >&2; exit 1; }
+    check-jsonschema --check-metaschema "${schemas[@]}"
+    echo "${#schemas[@]} JSON Schemas validated"
 
 # Offline link + anchor check (lychee) over the repo's OWN markdown: every
 # relative cross-link between the nested CLAUDE.md/AGENTS.md guides + docs/ must
@@ -230,7 +259,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt shellcheck actionlint zizmor conftest yq jq iconv cargo-machete cargo-deny lychee; do
+    for t in shfmt shellcheck actionlint zizmor conftest opa regal check-jsonschema yq jq iconv cargo-machete cargo-deny lychee; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -251,6 +280,7 @@ lint:
     run composites just actionlint-composites & pids+=($!)
     run zizmor  just zizmor              & pids+=($!)
     run ci-obs  just ci-observability     & pids+=($!)
+    run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
@@ -961,7 +991,7 @@ setup-tools:
     # ast-grep backs the `comment-lint` advisory (structural Rust lint rules in
     # .ast-grep/rules/); shfmt/actionlint/shellcheck/zizmor back workflow
     # linting, while yq + jq + Conftest/OPA evaluate repository-specific policy.
-    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest; do
+    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest opa regal check-jsonschema; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -972,7 +1002,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck zizmor yq jq conftest iconv; do
+    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema iconv; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then

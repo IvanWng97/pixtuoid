@@ -168,7 +168,7 @@ component — `rust-toolchain.toml` pins only `rustfmt`+`clippy`, so without it 
 editor / AI-agent LSP silently degrades to grep).
 
 ```
-just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+shellcheck+actionlint+actionlint-composites+zizmor+ci-observability+links) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+shellcheck+actionlint+actionlint-composites+zizmor+ci-observability+json-schemas+links) → clippy → hack → test
 just fmt          # auto-format
 git config core.hooksPath .githooks   # activate hooks once per clone
 ```
