@@ -31,7 +31,7 @@ fn dashboard_popup_renders_labels_states_and_live_tool() {
 
 #[test]
 fn connection_panel_renders_both_facets_borderless() {
-    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    use crate::tui::connection::{ConnState, ConnectionRow, LiveFacet, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![
@@ -56,13 +56,17 @@ fn connection_panel_renders_both_facets_borderless() {
     ];
     let live = vec![
         LiveInfo {
-            agents: 2,
-            last_event_age: Some(std::time::Duration::from_secs(3)),
+            facet: LiveFacet::Agents {
+                agents: 2,
+                last_event_age: Some(std::time::Duration::from_secs(3)),
+            },
             dead: false,
         },
         LiveInfo {
-            agents: 1,
-            last_event_age: Some(std::time::Duration::from_secs(12)),
+            facet: LiveFacet::Agents {
+                agents: 1,
+                last_event_age: Some(std::time::Duration::from_secs(12)),
+            },
             dead: false,
         },
     ];

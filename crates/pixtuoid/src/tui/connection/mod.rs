@@ -26,14 +26,51 @@ pub use crate::sources::{
     build_rows, build_rows_from, ConnState, ConnectionRow, RowFacts, RowInput,
 };
 
+/// WHAT is live for one row — a TYPED split, because the two source classes have
+/// nothing to count in common. An `Agent` source's liveness is its `AgentSlot`s; a
+/// `Daemon`'s is its entries in `SceneState::daemons`, and it never creates a slot
+/// at all. Counting slots for both made every running OpenClaw gateway render
+/// `idle` — the panel could not distinguish "no gateway" from "four gateways, one
+/// mid-run" — so the absent capability is typed here rather than stubbed with a
+/// zero (the `SourceKind` discipline, `pixtuoid-core/src/source/registry.rs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiveFacet {
+    /// An `Agent` source: live slots + the freshest event age across them.
+    Agents {
+        agents: usize,
+        last_event_age: Option<Duration>,
+    },
+    /// A `Daemon` source: running INSTANCES (N gateways) rolled up to their worst
+    /// state via the shared `board::gateway_rollup` — the same worst-of the footer's
+    /// `⬢gw` chip and the wall board read, so the three can't disagree. `None` state
+    /// means no instance is present (the daemon isn't running).
+    Daemon {
+        instances: usize,
+        state: Option<pixtuoid_core::state::DaemonState>,
+    },
+}
+
+impl Default for LiveFacet {
+    fn default() -> Self {
+        LiveFacet::Agents {
+            agents: 0,
+            last_event_age: None,
+        }
+    }
+}
+
 /// Live-connection facet, derived per frame from the scene snapshot. Aligned by
 /// index to `ConnectionUi.rows`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LiveInfo {
-    pub agents: usize,
-    pub last_event_age: Option<Duration>,
+    /// What is live, by source class — see [`LiveFacet`].
+    pub facet: LiveFacet,
     /// The source's transport exited (only ever true for sources with a `Source`
-    /// impl that can die — hook-only sources ride CC's socket and never die here).
+    /// impl that can die — hook-only sources AND the daemon ride the `HookRouter`'s
+    /// shared socket, whose own death is attributed in the FOOTER under the
+    /// infrastructure name `hook-router`, deliberately not on any row: one router
+    /// death covers eight CLIs, so propagating it here would falsely mark every
+    /// healthy transcript watcher dead).
     pub dead: bool,
 }
 
@@ -82,6 +119,30 @@ pub fn live_for(
     scene: &SceneState,
     health: &[SourceDeath],
 ) -> LiveInfo {
+    let dead = health.iter().any(|d| d.source == source_id);
+    // A DAEMON's liveness is its instance roster, not slots it never creates.
+    // Registry-driven (`is_daemon`), so a second daemon source inherits this the
+    // day its row lands — no name match here.
+    let is_daemon =
+        pixtuoid_core::source::registry::descriptor_for(source_id).is_some_and(|d| d.is_daemon());
+    if is_daemon {
+        let mut instances = 0usize;
+        for _ in scene.daemons().filter(|(s, _, _)| *s == source_id) {
+            instances += 1;
+        }
+        return LiveInfo {
+            facet: LiveFacet::Daemon {
+                instances,
+                state: pixtuoid_scene::board::gateway_rollup(
+                    scene
+                        .daemons()
+                        .filter(|(s, _, _)| *s == source_id)
+                        .map(|(_, _, p)| p),
+                ),
+            },
+            dead,
+        };
+    }
     let mut agents = 0usize;
     let mut max_evt: Option<SystemTime> = None;
     for slot in scene.agents.values() {
@@ -93,9 +154,11 @@ pub fn live_for(
         }
     }
     LiveInfo {
-        agents,
-        last_event_age: max_evt.map(|t| now.duration_since(t).unwrap_or_default()),
-        dead: health.iter().any(|d| d.source == source_id),
+        facet: LiveFacet::Agents {
+            agents,
+            last_event_age: max_evt.map(|t| now.duration_since(t).unwrap_or_default()),
+        },
+        dead,
     }
 }
 

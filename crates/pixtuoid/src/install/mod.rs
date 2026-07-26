@@ -60,10 +60,28 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
     };
     match io::read_config(&path) {
         Ok(c) if c.trim().is_empty() => false,
-        Ok(c) => (t.merge_uninstall)(&c).map(|o| o.changed).unwrap_or(true),
+        // A merge that ERRS means "we could not tell" — so ask the cheaper question
+        // the parse was only a means to: does this document mention US at all? The
+        // old `unwrap_or(true)` assumed present, which is right for a corrupt config
+        // that DOES bear our hooks (the case its rationale names) but wrong for one
+        // we merely cannot represent: OpenClaw's config is legal JSON5, so a
+        // never-connected user with a comment in theirs was reported hooks-INSTALLED,
+        // then verified BROKEN ("plugin artifact missing…, reconnect openclaw") —
+        // advice that cannot succeed, since the merge refuses that same document by
+        // design (the OpenClaw-JSON5 sharp edge). A substring probe cannot be fooled
+        // into a false NEGATIVE here: every managed config names us, whether by the
+        // `_pixtuoid` sentinel, `plugins.entries.pixtuoid`, or the plugin dir path.
+        Ok(c) => (t.merge_uninstall)(&c)
+            .map(|o| o.changed)
+            .unwrap_or_else(|_| c.contains(PLUGIN_MENTION)),
         Err(_) => true,
     }
 }
+
+/// The substring every config pixtuoid has written contains — our own name, in the
+/// sentinel key, the plugin entry id, or the baked plugin path. Used only as the
+/// "is this ours at all?" fallback when a config cannot be parsed for a real answer.
+const PLUGIN_MENTION: &str = "pixtuoid";
 
 /// Verify a target's installed config is structurally SOUND (the silent-dead
 /// check, #309) — read-only, false-positive-free. Call only when hooks are
@@ -155,12 +173,10 @@ pub(crate) fn verify_target(
     if let Some(make) = t.extra_artifacts {
         match make(std::path::Path::new("pixtuoid-hook")) {
             Ok(arts) => {
+                let mut missing: Vec<PathBuf> = Vec::new();
                 for (p, intended) in arts {
                     if !p.exists() {
-                        issues.push(format!(
-                            "plugin artifact missing: {}",
-                            verify::display_safe(&p)
-                        ));
+                        missing.push(p);
                         continue;
                     }
                     // Existence misses a shim that MOVED (#332 — a green doctor over a
@@ -180,6 +196,7 @@ pub(crate) fn verify_target(
                         )),
                     }
                 }
+                issues.extend(missing_artifact_issue(&missing));
             }
             // Couldn't even compute the paths (e.g. no home dir) — can't confirm,
             // so a soft note, never a spurious "broken" (the config path would have
@@ -188,6 +205,36 @@ pub(crate) fn verify_target(
         }
     }
     verify::SchemaVerifyResult { issues, notes }
+}
+
+/// The HARD issue(s) for missing code artifacts, collapsed when they share a
+/// directory — the whole plugin dir being gone is ONE fact, and OpenClaw ships
+/// three artifacts, so listing each absolute path made the Sources panel's detail
+/// line ~266 chars against a ~62-char budget: half a minute of marquee scrolling
+/// to learn the files are all in the same place. Named the same way either way, so
+/// the "reconnect" remedy reads identically.
+fn missing_artifact_issue(missing: &[PathBuf]) -> Vec<String> {
+    let [first, rest @ ..] = missing else {
+        return Vec::new();
+    };
+    let dir = first.parent();
+    if !rest.is_empty() && dir.is_some() && rest.iter().all(|p| p.parent() == dir) {
+        let names: Vec<String> = missing
+            .iter()
+            .filter_map(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .collect();
+        return vec![format!(
+            "{} plugin artifacts missing from {}: {}",
+            missing.len(),
+            verify::display_safe(dir.unwrap_or(first)),
+            crate::strip_control_chars(&names.join(", "))
+        )];
+    }
+    missing
+        .iter()
+        .map(|p| format!("plugin artifact missing: {}", verify::display_safe(p)))
+        .collect()
 }
 
 /// Stat one resolved shim path — the ONE check shared by an embedded hook command

@@ -971,11 +971,15 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
             let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
         }
         let v = verify_target(t, Some(cfg));
+        // Form-agnostic on purpose: same-directory misses collapse into ONE
+        // "N plugin artifacts missing from <dir>: a, b, c" (the panel's detail line
+        // is ~62 chars and OpenClaw ships three), scattered ones stay per-path. The
+        // INVARIANT is a hard issue naming the artifacts, not a fixed sentence.
         assert!(
             !v.is_sound()
                 && v.issues
                     .iter()
-                    .any(|i| i.contains("plugin artifact missing")),
+                    .any(|i| i.contains("artifact") && i.contains("missing")),
             "{}: a missing code artifact must be a HARD verify issue (the silent-dead \
              invariant) — got {:?}",
             t.name,
@@ -1191,5 +1195,52 @@ fn json_value_equality_ignores_key_order_under_preserve_order() {
         serde_json::json!([1, 2]),
         serde_json::json!([2, 1]),
         "array order is data and must still compare unequal"
+    );
+}
+
+#[test]
+fn a_config_we_cannot_parse_but_never_wrote_is_not_reported_as_installed() {
+    // The JSON5 trap. OpenClaw's config is legal JSON5, so a user's comment makes
+    // our strict merge Err — and `has_hooks`'s old conservative `unwrap_or(true)`
+    // then claimed hooks were INSTALLED for someone who never connected. `doctor`
+    // ran verify on that claim and reported "install broken: plugin artifact
+    // missing…", telling them to reconnect openclaw — advice the merge refuses by
+    // design (the OpenClaw-JSON5 sharp edge), i.e. an unsatisfiable remedy for a
+    // state that was never broken. The honest fallback asks whether the document
+    // mentions us at all.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join("openclaw.json");
+
+    // Valid JSON5, strict-JSON-rejected, and NOT ours.
+    std::fs::write(
+        &cfg,
+        "{\n  // my gateway notes\n  \"gateway\": { \"port\": 18789 },\n}\n",
+    )
+    .unwrap();
+    assert!(
+        !has_hooks(&target::OPENCLAW, Some(cfg.clone())),
+        "a config we cannot parse and never wrote must not count as installed"
+    );
+
+    // The SAME unparseable shape, but ours (a user who connected, then added a
+    // comment): the conservative answer is right here — it IS installed, and the
+    // rationale the old default was written for.
+    std::fs::write(
+        &cfg,
+        "{\n  // mine\n  \"plugins\": { \"entries\": { \"pixtuoid\": { \"enabled\": true } } },\n}\n",
+    )
+    .unwrap();
+    assert!(
+        has_hooks(&target::OPENCLAW, Some(cfg.clone())),
+        "an unparseable config that names us still bears hooks"
+    );
+
+    // A genuinely UNREADABLE config (a directory) keeps the true default — nothing
+    // was read, so nothing can be concluded, and "present" is the safe answer.
+    let dir_cfg = tmp.path().join("as-a-dir.json");
+    std::fs::create_dir(&dir_cfg).unwrap();
+    assert!(
+        has_hooks(&target::OPENCLAW, Some(dir_cfg)),
+        "an unreadable config keeps the conservative default"
     );
 }

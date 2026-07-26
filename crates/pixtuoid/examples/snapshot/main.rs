@@ -591,7 +591,7 @@ fn main() -> Result<()> {
     // Representative Connection-panel fixture (deterministic — no FS probes), so the
     // demo image is reproducible across machines.
     let (connection_rows, connection_live, connection_socket_line) = if args.connection {
-        use pixtuoid::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+        use pixtuoid::tui::connection::{ConnState, ConnectionRow, LiveFacet, LiveInfo};
         use std::path::PathBuf;
         use std::time::Duration;
         let mk = |source_id, label_prefix, display_name, state, cfg: Option<&str>| ConnectionRow {
@@ -646,24 +646,40 @@ fn main() -> Result<()> {
                 ConnState::Connected,
                 None,
             ),
+            // A DAEMON row, so the captured panel shows the daemon LIVE cell (N
+            // gateways + their rolled-up state) next to the agent rows' N-agents
+            // form — the two shapes are what `LiveFacet` exists to keep apart.
+            mk(
+                "openclaw",
+                "ok",
+                "OpenClaw",
+                ConnState::Connected,
+                Some("~/.openclaw/openclaw.json"),
+            ),
         ];
-        let live = vec![
-            LiveInfo {
-                agents: 2,
-                last_event_age: Some(Duration::from_secs(3)),
-                dead: false,
+        let agents = |n: usize, age_s: u64| LiveInfo {
+            facet: LiveFacet::Agents {
+                agents: n,
+                last_event_age: Some(Duration::from_secs(age_s)),
             },
+            dead: false,
+        };
+        let live = vec![
+            agents(2, 3),
             LiveInfo::default(),
             LiveInfo::default(),
             LiveInfo {
-                agents: 0,
-                last_event_age: None,
+                facet: LiveFacet::default(),
                 dead: true,
             },
             LiveInfo::default(),
+            agents(1, 12),
+            // Two live gateways, one mid-run → `2 gateways · busy`.
             LiveInfo {
-                agents: 1,
-                last_event_age: Some(Duration::from_secs(12)),
+                facet: LiveFacet::Daemon {
+                    instances: 2,
+                    state: Some(pixtuoid_core::state::DaemonState::Busy),
+                },
                 dead: false,
             },
         ];

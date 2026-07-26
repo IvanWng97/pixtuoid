@@ -134,20 +134,100 @@ fn live_for_counts_groups_and_ages() {
 
     let none: &[SourceDeath] = &[];
     let cc = live_for(now, "claude-code", &scene, none);
-    assert_eq!(cc.agents, 2);
-    assert_eq!(cc.last_event_age, Some(Duration::from_secs(5)));
+    assert_eq!(
+        cc.facet,
+        LiveFacet::Agents {
+            agents: 2,
+            last_event_age: Some(Duration::from_secs(5))
+        }
+    );
     assert!(!cc.dead);
 
     // An empty source → idle (0 agents, no age) — both sides of the count.
     let empty = live_for(now, "reasonix", &scene, none);
-    assert_eq!(empty.agents, 0);
-    assert_eq!(empty.last_event_age, None);
+    assert_eq!(
+        empty.facet,
+        LiveFacet::Agents {
+            agents: 0,
+            last_event_age: None
+        }
+    );
 
     // `dead` from a matching SourceDeath (keyed on the same name string).
     let health = [SourceDeath::new("codex", "boom")];
     let cx = live_for(now, "codex", &scene, &health);
-    assert_eq!(cx.agents, 1);
+    assert_eq!(
+        cx.facet,
+        LiveFacet::Agents {
+            agents: 1,
+            last_event_age: Some(Duration::from_secs(20))
+        }
+    );
     assert!(cx.dead);
+}
+
+#[test]
+fn live_for_reports_a_daemons_instances_not_the_agent_slots_it_never_creates() {
+    // A DAEMON source (openclaw) creates NO AgentSlot — its liveness is the
+    // instance roster. Counting slots made the panel render `idle` for a host with
+    // four gateways running and one mid-run: the column could not distinguish a
+    // stopped gateway from a busy one. Registry-driven (`is_daemon`), so this is
+    // about the source CLASS, not the name openclaw.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+    let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
+    let none: &[SourceDeath] = &[];
+
+    // No gateway running → NOT the agents facet, and distinguishable from idle.
+    let mut scene = SceneState::uniform(8);
+    assert_eq!(
+        live_for(now, src, &scene, none).facet,
+        LiveFacet::Daemon {
+            instances: 0,
+            state: None
+        },
+        "a daemon with no instance must not report an agent count"
+    );
+
+    // An AgentSlot that (impossibly) claimed the daemon's name must NOT be counted
+    // as its liveness — the class decides the facet, not the data lying around.
+    let ghost = AgentId::from_transcript_path("/p/ghost.jsonl");
+    scene.agents.insert(
+        ghost,
+        mk_slot(ghost, src, SystemTime::UNIX_EPOCH + Duration::from_secs(99)),
+    );
+
+    // Two gateways: one idle, one BUSY → the roster is counted and rolled up
+    // worst-of, the same `gateway_rollup` the footer chip and wall board read.
+    let mut add = |port: &str, runs: &[&str]| {
+        scene.insert_daemon(
+            src,
+            pixtuoid_core::state::DaemonInstanceId::new(port).expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 0,
+                last_seen: now,
+                entered_at: now,
+                in_flight_runs: runs.iter().map(|r| (r.to_string(), now)).collect(),
+                current_pid: Some(1),
+            },
+        );
+    };
+    add("18789", &[]);
+    add("19789", &["r1"]);
+    assert_eq!(
+        live_for(now, src, &scene, none).facet,
+        LiveFacet::Daemon {
+            instances: 2,
+            state: Some(pixtuoid_core::state::DaemonState::Busy)
+        },
+        "two gateways, one busy → 2 instances rolled up to Busy"
+    );
+
+    // An AGENT source in the same scene is unaffected — the split is per class.
+    assert!(matches!(
+        live_for(now, "claude-code", &scene, none).facet,
+        LiveFacet::Agents { .. }
+    ));
 }
 
 #[test]
