@@ -151,4 +151,33 @@ mod tests {
             "the sibling's binding survives its neighbour's death"
         );
     }
+
+    // The two-line WIRING the free-function tests above deliberately can't reach:
+    // `watch` must actually RECORD the binding, not just register the pid with the
+    // platform watcher. Mutation testing found it unreachable from `cargo test` —
+    // emptying `watch` left the whole instant-abrupt-down rung dead (a killed
+    // gateway would wait for TTL decay) with nothing red, because its only cover is
+    // the shell e2e (`openclaw-live-e2e.sh` #318), which mutants cannot see.
+    //
+    // Watches our OWN pid on purpose: the binding is observable immediately and no
+    // process has to die, so this stays off the wall-clock/OS-timing flake class
+    // that keeps `exit_watch.rs` in the mutants exclude list. The death→PidExited
+    // half remains e2e-covered.
+    #[tokio::test]
+    async fn watch_records_the_binding_that_routes_a_death_to_its_instance() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let Some(watch) = spawn_presence_exit_watch(tx) else {
+            // No exit-watch backend on this platform (the TTL sweep is the only
+            // abrupt-down signal there) — nothing to bind.
+            return;
+        };
+        let me = std::process::id() as i32;
+        let key = k("openclaw", "18789");
+        watch.watch(&key, me);
+        assert_eq!(
+            take_keys(&watch.pids, me),
+            vec![key],
+            "watch must bind (pid → instance) or a death routes nowhere"
+        );
+    }
 }
