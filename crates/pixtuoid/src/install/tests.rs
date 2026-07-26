@@ -1250,41 +1250,65 @@ fn a_config_we_cannot_parse_but_never_wrote_is_not_reported_as_installed() {
 }
 
 #[test]
-fn every_target_that_writes_a_config_names_us_in_it_case_insensitively() {
-    // The invariant `has_hooks`'s unparseable-config fallback RESTS on: every config
-    // we write mentions us, so a substring probe can answer "is this ours?" when the
-    // parse fails. It had one existing violator and no test: `kimi` carries no
-    // `_pixtuoid` sentinel at all — its marker is the UPPERCASE `PIXTUOID_SOURCE=kimi`
-    // — so the case-SENSITIVE probe reported a hooks-bearing kimi config as NOT
-    // installed, a regression against the old `unwrap_or(true)`. Loop every target so
-    // a future one cannot reintroduce it.
+fn every_target_that_writes_a_config_names_us_in_it() {
+    // The invariant `has_hooks`'s unparseable-config fallback rests on: a config we
+    // wrote mentions us, so a substring probe can answer "is this ours?" when the
+    // parse fails. In production the shim IS named `pixtuoid-hook`, so every target
+    // that embeds its path satisfies this by construction — that is the case to pin.
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let hook = tmpdir.path().join("pixtuoid-hook");
+    std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
     for t in crate::install::TARGETS {
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join(format!("{}-cfg", t.name));
-        // A shim path that does NOT contain our name. Load-bearing: with the normal
-        // path (`…/pixtuoid.nosync/target/…/pixtuoid-<hash>`) EVERY target's config
-        // contains the lowercase literal incidentally, via the baked binary path — so
-        // the fixture would pass under the very case-sensitive regression it exists to
-        // catch. Here kimi's only marker is the UPPERCASE `PIXTUOID_SOURCE=kimi`,
-        // which is the marker we actually control.
-        let hook = tmp.path().join("HOOK-shim");
-        std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
-        install_target(t, Some(cfg.clone()), Some(hook))
+        install_target(t, Some(cfg.clone()), Some(hook.clone()))
             .unwrap_or_else(|e| panic!("{}: install failed: {e:#}", t.name));
         let content = std::fs::read_to_string(&cfg)
             .unwrap_or_else(|e| panic!("{}: config unreadable: {e}", t.name));
         assert!(
             super::config_mentions_us(&content),
-            "{}: a config we wrote must satisfy the PRODUCTION fallback predicate — \
-             asserting it with the test's own lowercase would pass under the very \
-             case-sensitive regression this pins",
+            "{}: a config we wrote must satisfy the PRODUCTION fallback predicate",
             t.name
         );
-        // …and the fallback itself must therefore answer TRUE for it.
         assert!(
             has_hooks(t, Some(cfg)),
             "{}: has_hooks must see the install it just wrote",
             t.name
         );
     }
+}
+
+/// The fallback's ONE marker-carrier that is not the shim path: kimi ships no
+/// `_pixtuoid` sentinel, so on a config where the embedded path happens not to name
+/// us its only trace is the UPPERCASE `PIXTUOID_SOURCE=kimi` — which is why
+/// `config_mentions_us` folds case. Unix-only BY CONSTRUCTION, and that asymmetry is
+/// the honest residual: Windows uses the bare exec form (`<path> --source kimi`), so
+/// there a marker-less path leaves NO trace at all and the probe answers "not ours".
+/// That direction is safe — it under-reports installed-ness on a CORRUPT config
+/// rather than inventing the false "install broken" the old `unwrap_or(true)` did —
+/// but it is a real limit, so it is asserted where it holds instead of pretended
+/// everywhere.
+#[cfg(unix)]
+#[test]
+fn kimis_uppercase_env_marker_alone_satisfies_the_fallback_probe() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    // A shim path that deliberately does NOT contain our name, so the env prefix is
+    // the only carrier left. Without the case fold this reds.
+    let hook = tmp.path().join("HOOK-shim");
+    std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
+    let cfg = tmp.path().join("kimi-cfg");
+    install_target(&target::KIMI, Some(cfg.clone()), Some(hook)).expect("kimi install");
+    let content = std::fs::read_to_string(&cfg).expect("config readable");
+    assert!(
+        content.contains("PIXTUOID_SOURCE=kimi"),
+        "kimi's only marker here is the env prefix: {content}"
+    );
+    assert!(
+        !content.contains(PLUGIN_MENTION),
+        "fixture must not leak the lowercase form, or it cannot pin the fold"
+    );
+    assert!(
+        super::config_mentions_us(&content),
+        "the fallback must recognise the UPPERCASE marker"
+    );
 }
