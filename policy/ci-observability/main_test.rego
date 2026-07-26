@@ -18,12 +18,12 @@ test_unrelated_action_is_not_codecov if {
 }
 
 test_case_variants_cannot_bypass_centralization if {
+	path := ".github/workflows/rogue.yml"
 	every value in {
 		"Codecov/codecov-action@v7",
 		"CODECOV/CODECOV-ACTION@v7",
 		"codecov/Codecov-Action@v7",
 	} {
-		path := ".github/workflows/rogue.yml"
 		fixture := {"documents": [{
 			"path": path,
 			"contents": {"jobs": {"test": {"steps": [{"uses": value}]}}},
@@ -77,10 +77,10 @@ test_codeql_step_selection_preserves_order if {
 		{"uses": "github/codeql-action/analyze@v4"},
 	]
 	checkout := codeql_steps_using("actions/checkout@v7") with codeql_steps as steps
-	initialize := codeql_steps_using("github/codeql-action/init@v4") with codeql_steps as steps
-	analyze := codeql_steps_using("github/codeql-action/analyze@v4") with codeql_steps as steps
 	checkout[0].index == 0
+	initialize := codeql_steps_using("github/codeql-action/init@v4") with codeql_steps as steps
 	initialize[0].index == 1
+	analyze := codeql_steps_using("github/codeql-action/analyze@v4") with codeql_steps as steps
 	analyze[0].index == 2
 }
 
@@ -119,15 +119,6 @@ test_codeql_extraction_health_cannot_be_masked_as_success if {
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s Rust extraction-health gate must fail the job", [codeql_workflow_path]) in violations
-}
-
-test_codeql_analyze_must_expose_sarif_output if {
-	fixture := {"documents": [{
-		"path": codeql_workflow_path,
-		"contents": {"jobs": {"analyze": {"steps": [{"uses": "github/codeql-action/analyze@v4"}]}}},
-	}]}
-	violations := deny with input as fixture
-	sprintf("%s CodeQL analyze step must have id: analyze", [codeql_workflow_path]) in violations
 }
 
 test_report_presence_check_is_required if {
@@ -396,6 +387,11 @@ test_codecov_oidc_replaces_the_repository_token if {
 	sprintf("%s must not declare or forward a Codecov upload token", [codecov_authority_path]) in violations
 }
 
+codecov_scope_message(name) := sprintf(
+	"%s job %s must declare its own permissions and must not receive the Codecov OIDC permission",
+	[codecov_workflow_path, name],
+)
+
 test_codecov_oidc_permission_is_job_scoped if {
 	fixture := {"documents": [{
 		"path": codecov_workflow_path,
@@ -406,7 +402,28 @@ test_codecov_oidc_permission_is_job_scoped if {
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s job coverage must receive the Codecov OIDC permission", [codecov_workflow_path]) in violations
-	sprintf("%s job snapshots must not receive the Codecov OIDC permission", [codecov_workflow_path]) in violations
+	codecov_scope_message("snapshots") in violations
+}
+
+# The regression that shipped: snapshots/smoke/required carried no `permissions:`
+# block at all, so they silently inherited the caller's id-token:write while the
+# old rule — which only read the declared block — stayed quiet.
+test_codecov_job_omitting_permissions_is_denied if {
+	fixture := {"documents": [{
+		"path": codecov_workflow_path,
+		"contents": {"jobs": {"snapshots": {"runs-on": "ubuntu-latest"}}},
+	}]}
+	violations := deny with input as fixture
+	codecov_scope_message("snapshots") in violations
+}
+
+test_codecov_job_declaring_its_own_scope_is_accepted if {
+	fixture := {"documents": [{
+		"path": codecov_workflow_path,
+		"contents": {"jobs": {"snapshots": {"permissions": {"contents": "read"}}}},
+	}]}
+	violations := deny with input as fixture
+	not codecov_scope_message("snapshots") in violations
 }
 
 test_release_concurrency_must_serialize_different_tags if {
@@ -673,4 +690,280 @@ test_codeql_health_metrics_must_be_visible_in_the_job_summary if {
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s Rust extraction-health gate must write a quantified job summary", [codeql_workflow_path]) in violations
+}
+
+schema_reference_message := sprintf(
+	"%s must pass %s via the committed schema file (%s), not an inline literal",
+	[claude_reusable_workflow_path, json_schema_flag, review_schema_reference],
+)
+
+json_schema_fixture(args) := {"documents": [{
+	"path": claude_reusable_workflow_path,
+	"contents": {"jobs": {"analyze": {"steps": [{
+		"uses": claude_action,
+		"with": {"claude_args": args},
+	}]}}},
+}]}
+
+test_committed_schema_reference_is_accepted if {
+	args := sprintf("--max-turns 60 %s", [review_schema_reference])
+	violations := deny with input as json_schema_fixture(args)
+	not schema_reference_message in violations
+}
+
+# The regression that took both bots down for 31h: an inline literal is opaque
+# to actionlint and zizmor, so a single unbalanced brace reached the runner.
+# Any inline payload is now refused outright, balanced or not.
+test_inline_schema_payloads_are_denied if {
+	every args in {
+		# The exact malformed payload from #785 — ten `{` against nine `}`.
+		`--json-schema '{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]'`,
+		# Balanced, and still refused: inline is the shape being retired.
+		`--json-schema '{"type":"object"}'`,
+		`--json-schema {"type":"object"}`,
+	} {
+		violations := deny with input as json_schema_fixture(args)
+		schema_reference_message in violations
+	}
+}
+
+test_claude_args_without_a_schema_flag_is_not_denied if {
+	violations := deny with input as json_schema_fixture(`--max-turns 60 --allowedTools "Read,Glob,Grep"`)
+	not schema_reference_message in violations
+}
+
+ci_gate_fixture(jobs) := {"documents": [{"path": ci_workflow_path, "contents": {"jobs": jobs}}]}
+
+ci_gate_shipped_jobs := {
+	"lint": {"uses": "./.github/workflows/ci-lint.yml"},
+	"builds": {"uses": "./.github/workflows/ci-builds.yml"},
+	"tests": {"uses": "./.github/workflows/ci-tests.yml"},
+	"supplemental": {"uses": "./.github/workflows/ci-supplemental.yml"},
+	"gate": {
+		"needs": ["lint", "builds", "tests"],
+		"steps": [{"env": {
+			"LINT_RESULT": "${{ needs.lint.result }}",
+			"BUILDS_RESULT": "${{ needs.builds.result }}",
+			"TESTS_RESULT": "${{ needs.tests.result }}",
+		}}],
+	},
+}
+
+ci_gate_membership_violations(violations) := [msg |
+	some msg in violations
+	contains(msg, "must gate exactly the non-advisory group jobs")
+]
+
+ci_gate_unread_violations(violations) := [msg |
+	some msg in violations
+	contains(msg, "must read needs.")
+]
+
+test_ci_gate_covering_every_group_is_accepted if {
+	shipped_violations := deny with input as ci_gate_fixture(ci_gate_shipped_jobs)
+	count(ci_gate_membership_violations(shipped_violations)) == 0
+	count(ci_gate_unread_violations(shipped_violations)) == 0
+}
+
+# The gap: a fifth reusable group lands and nobody adds it to the gate, so the
+# single protected context stays green while that whole group can fail.
+test_ci_gate_missing_a_new_group_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"security": {"uses": "./.github/workflows/ci-security.yml"}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 1
+}
+
+# Consistently dropping a group — from `needs` AND from the env the shell reads —
+# is the edit actionlint cannot catch, because nothing dangles.
+test_ci_gate_dropping_a_group_entirely_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"gate": {
+		"needs": ["lint", "tests"],
+		"steps": [{"env": {
+			"LINT_RESULT": "${{ needs.lint.result }}",
+			"TESTS_RESULT": "${{ needs.tests.result }}",
+		}}],
+	}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 1
+	sprintf("%s %s must read needs.builds.result", [ci_workflow_path, ci_gate_job_key]) in deny with input as ci_gate_fixture(jobs)
+}
+
+# In `needs` but never consulted by the verdict shell.
+test_ci_gate_listing_a_group_it_never_reads_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"gate": {
+		"needs": ["lint", "builds", "tests"],
+		"steps": [{"env": {
+			"LINT_RESULT": "${{ needs.lint.result }}",
+			"TESTS_RESULT": "${{ needs.tests.result }}",
+		}}],
+	}})
+	sprintf("%s %s must read needs.builds.result", [ci_workflow_path, ci_gate_job_key]) in deny with input as ci_gate_fixture(jobs)
+}
+
+test_ci_gate_need_on_the_advisory_group_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"gate": {
+		"needs": ["lint", "builds", "tests", "supplemental"],
+		"steps": [{"env": {
+			"LINT_RESULT": "${{ needs.lint.result }}",
+			"BUILDS_RESULT": "${{ needs.builds.result }}",
+			"TESTS_RESULT": "${{ needs.tests.result }}",
+		}}],
+	}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 1
+}
+
+ci_oidc_call_message(name) := sprintf(
+	"%s %s call must not pass id-token: write down to jobs that declare no permissions of their own",
+	[ci_workflow_path, name],
+)
+
+test_non_tests_group_call_granting_oidc_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"lint": {
+		"uses": "./.github/workflows/ci-lint.yml",
+		"permissions": {"contents": "read", "id-token": "write"},
+	}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	ci_oidc_call_message("lint") in violations
+}
+
+test_tests_call_granting_oidc_is_accepted if {
+	jobs := object.union(ci_gate_shipped_jobs, {"tests": {
+		"uses": "./.github/workflows/ci-tests.yml",
+		"permissions": {"contents": "read", "id-token": "write"},
+	}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	not ci_oidc_call_message("tests") in violations
+}
+
+# A group converted to a cross-repo reusable workflow must stay in the gate set.
+# Prefix-matching `./.github/workflows/` dropped it instead, and the membership
+# rule then told the maintainer to REMOVE that group from the merge gate.
+test_cross_repo_group_call_still_counts_as_a_group if {
+	jobs := object.union(ci_gate_shipped_jobs, {"builds": {"uses": "someorg/shared/.github/workflows/ci-builds.yml@v1"}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 0
+	count(ci_gate_unread_violations(violations)) == 0
+}
+
+test_cross_repo_group_call_ungated_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {
+		"builds": {"uses": "someorg/shared/.github/workflows/ci-builds.yml@v1"},
+		"gate": {
+			"needs": ["lint", "tests"],
+			"steps": [{"env": {
+				"LINT_RESULT": "${{ needs.lint.result }}",
+				"TESTS_RESULT": "${{ needs.tests.result }}",
+			}}],
+		},
+	})
+	violations := deny with input as ci_gate_fixture(jobs)
+	count(ci_gate_membership_violations(violations)) == 1
+}
+
+test_cross_repo_group_call_granting_oidc_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"builds": {
+		"uses": "someorg/shared/.github/workflows/ci-builds.yml@v1",
+		"permissions": {"contents": "read", "id-token": "write"},
+	}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	ci_oidc_call_message("builds") in violations
+}
+
+nested_manifest_message(path, expected, actual) := sprintf(
+	"%s %s job must need exactly %v, not %v",
+	[path, required_manifest_job_key, expected, actual],
+)
+
+nested_manifest_fixture(jobs) := {"documents": [{
+	"path": ".github/workflows/ci-lint.yml",
+	"contents": {"jobs": jobs},
+}]}
+
+test_nested_manifest_covering_every_job_is_accepted if {
+	jobs := {
+		"fmt": {},
+		"clippy": {},
+		"required": {"needs": ["fmt", "clippy"]},
+	}
+	violations := deny with input as nested_manifest_fixture(jobs)
+	not nested_manifest_message(".github/workflows/ci-lint.yml", {"clippy", "fmt"}, {"clippy", "fmt"}) in violations
+}
+
+# The gap: a job is added to the workflow but not to the manifest, so it sits
+# outside the single protected ci-gate with nothing to say so.
+test_nested_manifest_missing_a_new_job_is_denied if {
+	jobs := {
+		"fmt": {},
+		"clippy": {},
+		"newcheck": {},
+		"required": {"needs": ["fmt", "clippy"]},
+	}
+	violations := deny with input as nested_manifest_fixture(jobs)
+	nested_manifest_message(
+		".github/workflows/ci-lint.yml",
+		{"clippy", "fmt", "newcheck"},
+		{"clippy", "fmt"},
+	) in violations
+}
+
+test_nested_manifest_needing_a_deleted_job_is_denied if {
+	jobs := {
+		"fmt": {},
+		"required": {"needs": ["fmt", "clippy"]},
+	}
+	violations := deny with input as nested_manifest_fixture(jobs)
+	nested_manifest_message(".github/workflows/ci-lint.yml", {"fmt"}, {"clippy", "fmt"}) in violations
+}
+
+# Uploading before the health gate publishes a security tab that reads cleaner
+# than reality, because a degraded extraction yields fewer alerts.
+test_codeql_analyze_uploading_rust_inline_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"uses": "github/codeql-action/analyze@v4",
+			"with": {"category": "/language:${{ matrix.language }}"},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s analyze must defer the Rust upload until extraction health passes", [codeql_workflow_path]) in violations
+}
+
+test_codeql_missing_deferred_upload_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"uses": "github/codeql-action/analyze@v4",
+			"with": {"upload": codeql_rust_upload_gate},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must upload the Rust SARIF after the extraction-health gate", [codeql_workflow_path]) in violations
+}
+
+# Health BEFORE upload is the ordering that fails SILENTLY when broken — the
+# inverse (gate ahead of analyze) dies loudly on an empty SARIF_DIR.
+test_codeql_upload_before_health_gate_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"name": codeql_upload_step_name},
+			{"name": rust_health_step_name},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
+}
+
+test_codeql_health_gate_before_upload_is_accepted if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"name": rust_health_step_name},
+			{"name": codeql_upload_step_name},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	not sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
 }

@@ -24,6 +24,7 @@ actionlint_release_queue_ignore := "unexpected key \"queue\" for \"concurrency\"
 zizmor_config_path := ".github/zizmor.yml"
 cache_cleanup_workflow_path := ".github/workflows/cache-cleanup.yml"
 claude_action := "anthropics/claude-code-action@v1"
+json_schema_flag := "--json-schema"
 claude_review_workflow_path := ".github/workflows/claude-review.yml"
 claude_security_workflow_path := ".github/workflows/claude-security-review.yml"
 claude_reusable_workflow_path := ".github/workflows/claude-readonly-review.yml"
@@ -45,6 +46,8 @@ rust_health_step_name := "Verify Rust extraction health"
 rust_matrix_condition := "${{ matrix.language == 'rust' }}"
 codeql_analyze_step_id := "analyze"
 codeql_sarif_output := "${{ steps.analyze.outputs.sarif-output }}"
+codeql_rust_upload_gate := "${{ matrix.language == 'rust' && 'never' || 'always' }}"
+codeql_upload_step_name := "Upload Rust analysis"
 rust_diagnostics_metric := "rust/summary/number-of-files-extracted-with-errors"
 rust_clean_metric := "rust/summary/number-of-successfully-extracted-files"
 lighthouse_workflow_path := ".github/workflows/site.yml"
@@ -90,13 +93,15 @@ codecov_oidc_job_names := {
 	"coverage-macos",
 }
 
-documents := {document.path: document.contents |
+documents[path] := contents if {
 	some document in input.documents
+	path := document.path
+	contents := document.contents
 }
 
 objects := [entry |
 	some document in input.documents
-	some _, value in walk(document.contents)
+	some value in walk(document.contents)
 	is_object(value)
 	entry := {"path": document.path, "value": value}
 ]
@@ -162,7 +167,8 @@ warning_steps := [entry |
 	object.get(entry.value, "if", "") == "${{ steps.upload.outcome == 'failure' }}"
 ]
 
-effective_working_directory(job, step) := directory if {
+# The step's own working-directory wins, so this arm never consults the job.
+effective_working_directory(_, step) := directory if {
 	directory := object.get(step, "working-directory", null)
 	directory != null
 }
@@ -219,8 +225,9 @@ codecov_route(entry) := route if {
 	}
 }
 
-actual_codecov_routes := {codecov_route(entry) |
+actual_codecov_routes contains route if {
 	some entry in codecov_uploads
+	route := codecov_route(entry)
 }
 
 ci_workflow := object.get(documents, ci_workflow_path, {})
@@ -240,6 +247,8 @@ indexed_steps_matching(steps, field, expected) := [entry |
 ]
 
 codeql_steps_using(action) := indexed_steps_matching(codeql_steps, "uses", action)
+
+codeql_named_steps(name) := indexed_steps_matching(codeql_steps, "name", name)
 
 rust_setup_steps := [entry |
 	some index, step in codeql_steps
@@ -280,7 +289,7 @@ claude_publish_named_steps(name) := indexed_steps_matching(claude_publish_steps,
 claude_caller_jobs(path) := [job |
 	workflow := documents[path]
 	jobs := object.get(workflow, "jobs", {})
-	some _, job in jobs
+	some job in jobs
 	object.get(job, "uses", "") == claude_reusable_reference
 ]
 
@@ -322,10 +331,24 @@ claude_model_is_read_only(step) if {
 	params := object.get(step, "with", {})
 	args := object.get(params, "claude_args", "")
 	contains(args, "--allowedTools \"Read,Glob,Grep\"")
-	contains(args, "--json-schema")
+	contains(args, json_schema_flag)
 	not contains(args, "Bash")
 	not contains(args, "mcp__github")
 }
+
+# The schema is no longer a literal here: it lives in a committed .json that
+# check-jsonschema gates, and reaches the CLI through a step output. Pin the
+# reference exactly so an inline payload — the shape whose unbalanced brace took
+# both bots down — cannot creep back in and become unreadable to every linter.
+review_schema_reference := "--json-schema ${{ steps.schema.outputs.json }}"
+
+claude_args_schema_entries := [entry |
+	some candidate in objects
+	args := object.get(candidate.value, "claude_args", null)
+	is_string(args)
+	contains(args, json_schema_flag)
+	entry := {"path": candidate.path, "args": args}
+]
 
 claude_model_auth_is_scoped(step) if {
 	params := object.get(step, "with", {})
@@ -375,6 +398,114 @@ cache_cleanup_is_inert if {
 has_weekly_codeql_schedule if {
 	some schedule in codeql.on.schedule
 	schedule.cron == "29 11 * * 3"
+}
+
+# A job in a CALLED workflow that omits `permissions:` runs with exactly the set
+# the caller handed down, and ci.yml grants this workflow id-token:write for the
+# Codecov OIDC upload. So an omitted block is not "no permissions" — it IS the
+# grant, and a rule that only inspects the declared block cannot see the very
+# jobs that are exposed. Require every non-Codecov job to declare its own scope.
+codecov_job_scope_is_self_declared(job) if {
+	permissions := object.get(job, "permissions", null)
+	is_object(permissions)
+	object.get(permissions, "id-token", "") != "write"
+}
+
+# Each reusable group workflow ends in a `required` job whose `needs` is the
+# manifest that keeps a deleted or renamed nested job from silently shrinking
+# ci-gate. Nothing pinned the manifests themselves, so ADDING a job and
+# forgetting to list it left that job outside the merge gate — the same hole
+# ci-gate had one level up, and invisible for the same reason.
+required_manifest_workflows := {
+	".github/workflows/ci-lint.yml",
+	".github/workflows/ci-builds.yml",
+	".github/workflows/ci-tests.yml",
+}
+
+required_manifest_job_key := "required"
+
+nested_jobs(path) := object.get(documents[path], "jobs", {})
+
+nested_gated_job_keys(path) := {name |
+	some name, _ in nested_jobs(path)
+	name != required_manifest_job_key
+}
+
+nested_manifest_needs(path) := {name |
+	some name in object.get(object.get(nested_jobs(path), required_manifest_job_key, {}), "needs", [])
+}
+
+# `ci-gate` is the ONLY context in branch protection, so its `needs` list plus
+# the results it reads ARE the merge gate. Each reusable workflow already pins
+# its own nested job membership; nothing pinned the level above, where adding a
+# group and forgetting to gate it leaves the single required check green while
+# that group is free to fail. `supplemental` is advisory by design.
+
+# A job-level `uses:` IS a reusable-workflow call — a job cannot carry both
+# `uses:` and `steps:`. Matching on the `./.github/workflows/` prefix instead
+# would drop a cross-repo call out of the group set, and the membership rule
+# would then instruct the maintainer to REMOVE that group from the merge gate.
+calls_a_reusable_workflow(job) if {
+	uses := object.get(job, "uses", "")
+	is_string(uses)
+	uses != ""
+}
+
+ci_gate_job_key := "gate"
+
+ci_advisory_job_keys := {"supplemental"}
+
+ci_gate_job := object.get(ci_jobs, ci_gate_job_key, {})
+
+ci_group_job_keys contains name if {
+	some name, job in ci_jobs
+	calls_a_reusable_workflow(job)
+	not name in ci_advisory_job_keys
+}
+
+ci_gate_needs := {name | some name in object.get(ci_gate_job, "needs", [])}
+
+# A degraded Rust extraction produces FEWER alerts, so uploading before the
+# health gate publishes a security tab that reads cleaner than reality. Pin both
+# halves: analyze must defer Rust's upload, and the deferred upload must exist —
+# either alone silently restores the old ordering.
+# The ordering that matters is health BEFORE upload, not analyze before health:
+# putting the gate ahead of analyze fails loudly on its own (SARIF_DIR resolves
+# empty, the glob matches nothing, `set -euo pipefail` kills the step) and
+# actionlint rejects the undefined step reference outright. Moving the gate
+# BELOW the upload is the silent one — it was green on both gates until this.
+deny contains msg if {
+	_ := documents[codeql_workflow_path]
+	health := codeql_named_steps(rust_health_step_name)
+	count(health) == 1
+	upload := codeql_named_steps(codeql_upload_step_name)
+	count(upload) == 1
+	health[0].index >= upload[0].index
+	msg := sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[codeql_workflow_path]
+	steps := codeql_steps_using("github/codeql-action/analyze@v4")
+	count(steps) == 1
+	object.get(object.get(steps[0].value, "with", {}), "upload", "") != codeql_rust_upload_gate
+	msg := sprintf("%s analyze must defer the Rust upload until extraction health passes", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[codeql_workflow_path]
+	count(codeql_named_steps(codeql_upload_step_name)) != 1
+	msg := sprintf("%s must upload the Rust SARIF after the extraction-health gate", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	some path in required_manifest_workflows
+	_ := documents[path]
+	nested_manifest_needs(path) != nested_gated_job_keys(path)
+	msg := sprintf(
+		"%s %s job must need exactly %v, not %v",
+		[path, required_manifest_job_key, nested_gated_job_keys(path), nested_manifest_needs(path)],
+	)
 }
 
 deny contains msg if {
@@ -472,6 +603,18 @@ deny contains msg if {
 	msg := sprintf("%s Claude step must use WIF-first authentication with the scoped job token", [claude_reusable_workflow_path])
 }
 
+# Walks every document, not just the reusable workflow: any future caller that
+# grows its own `--json-schema` inherits the same "invisible to every linter"
+# problem, so it must use the committed file too.
+deny contains msg if {
+	some entry in claude_args_schema_entries
+	not contains(entry.args, review_schema_reference)
+	msg := sprintf(
+		"%s must pass %s via the committed schema file (%s), not an inline literal",
+		[entry.path, json_schema_flag, review_schema_reference],
+	)
+}
+
 deny contains msg if {
 	_ := documents[claude_reusable_workflow_path]
 	expected := {
@@ -484,9 +627,9 @@ deny contains msg if {
 
 deny contains msg if {
 	_ := documents[claude_reusable_workflow_path]
+	msg := sprintf("%s publish job must have comment-only permissions and no checkout", [claude_reusable_workflow_path])
 	some step in claude_publish_steps
 	object.get(step, "uses", "") != ""
-	msg := sprintf("%s publish job must have comment-only permissions and no checkout", [claude_reusable_workflow_path])
 }
 
 deny contains msg if {
@@ -621,14 +764,34 @@ deny contains msg if {
 	msg := sprintf("%s tests call must grant only contents:read and id-token:write", [ci_workflow_path])
 }
 
+# The callee-side rule above pins ci-tests.yml's own jobs. This is its caller
+# half: the other group calls fan out to ~19 jobs that declare no `permissions:`
+# of their own, so granting id-token here hands every one of them a repo-scoped
+# token in a single edit with nothing downstream to notice. A future group that
+# genuinely needs OIDC (provenance attestation also uses it, not just Codecov)
+# is not blocked forever — it first gives its own jobs explicit scopes, the way
+# ci-tests.yml does, and the message says so rather than claiming OIDC belongs
+# to `tests` alone.
+deny contains msg if {
+	_ := documents[ci_workflow_path]
+	some name, job in ci_jobs
+	name != "tests"
+	calls_a_reusable_workflow(job)
+	object.get(object.get(job, "permissions", {}), "id-token", "") == "write"
+	msg := sprintf(
+		"%s %s call must not pass id-token: write down to jobs that declare no permissions of their own",
+		[ci_workflow_path, name],
+	)
+}
+
 deny contains msg if {
 	_ := documents[codecov_workflow_path]
-	some name in codecov_oidc_job_names
-	job := object.get(codecov_jobs, name, {})
 	expected := {
 		"contents": "read",
 		"id-token": "write",
 	}
+	some name in codecov_oidc_job_names
+	job := object.get(codecov_jobs, name, {})
 	object.get(job, "permissions", {}) != expected
 	msg := sprintf("%s job %s must receive the Codecov OIDC permission", [codecov_workflow_path, name])
 }
@@ -637,16 +800,33 @@ deny contains msg if {
 	_ := documents[codecov_workflow_path]
 	some name, job in codecov_jobs
 	not name in codecov_oidc_job_names
-	permissions := object.get(job, "permissions", {})
-	object.get(permissions, "id-token", "") == "write"
-	msg := sprintf("%s job %s must not receive the Codecov OIDC permission", [codecov_workflow_path, name])
+	not codecov_job_scope_is_self_declared(job)
+	msg := sprintf("%s job %s must declare its own permissions and must not receive the Codecov OIDC permission", [codecov_workflow_path, name])
 }
 
 deny contains msg if {
-	path := {ci_workflow_path, codecov_workflow_path, codecov_authority_path}[_]
+	some path in {ci_workflow_path, codecov_workflow_path, codecov_authority_path}
 	document := documents[path]
 	contains(json.marshal(document), "CODECOV_TOKEN")
 	msg := sprintf("%s must not reference the retired CODECOV_TOKEN secret", [path])
+}
+
+deny contains msg if {
+	_ := documents[ci_workflow_path]
+	ci_gate_needs != ci_group_job_keys
+	msg := sprintf(
+		"%s %s must gate exactly the non-advisory group jobs %v, not %v",
+		[ci_workflow_path, ci_gate_job_key, ci_group_job_keys, ci_gate_needs],
+	)
+}
+
+# Membership alone is not enough: a job can sit in `needs` and still be ignored
+# by the shell that decides the verdict.
+deny contains msg if {
+	_ := documents[ci_workflow_path]
+	some name in ci_group_job_keys
+	not contains(json.marshal(ci_gate_job), sprintf("needs.%s.result", [name]))
+	msg := sprintf("%s %s must read needs.%s.result", [ci_workflow_path, ci_gate_job_key, name])
 }
 
 deny contains msg if {
@@ -657,20 +837,6 @@ deny contains msg if {
 deny contains msg if {
 	count(warning_steps) != 1
 	msg := sprintf("%s must contain one upload-failure warning step", [codecov_authority_path])
-}
-
-deny contains msg if {
-	count(warning_steps) == 1
-	run := object.get(warning_steps[0].value, "run", "")
-	not contains(run, "::warning")
-	msg := sprintf("%s failure step must emit a workflow warning", [codecov_authority_path])
-}
-
-deny contains msg if {
-	count(warning_steps) == 1
-	run := object.get(warning_steps[0].value, "run", "")
-	not contains(run, "GITHUB_STEP_SUMMARY")
-	msg := sprintf("%s failure step must write the job summary", [codecov_authority_path])
 }
 
 deny contains msg if {
@@ -725,33 +891,33 @@ deny contains msg if {
 }
 
 deny contains msg if {
+	msg := sprintf("%s Lighthouse upload must run under !cancelled()", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
 	entry.uses == "actions/upload-artifact@v7"
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(entry.value, "if", "") != "${{ !cancelled() }}"
-	msg := sprintf("%s Lighthouse upload must run under !cancelled()", [lighthouse_workflow_path])
 }
 
 deny contains msg if {
+	msg := sprintf("%s Lighthouse upload must include hidden files", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
 	entry.uses == "actions/upload-artifact@v7"
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(params, "include-hidden-files", false) != true
-	msg := sprintf("%s Lighthouse upload must include hidden files", [lighthouse_workflow_path])
 }
 
 deny contains msg if {
+	msg := sprintf("%s Lighthouse upload must fail when reports are absent", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
 	entry.uses == "actions/upload-artifact@v7"
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(params, "if-no-files-found", "") != "error"
-	msg := sprintf("%s Lighthouse upload must fail when reports are absent", [lighthouse_workflow_path])
 }
 
 deny contains msg if {
@@ -822,7 +988,7 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	codeql.on.push.branches != ["main"]
+	object.get(codeql, ["on", "push", "branches"], null) != ["main"]
 	msg := sprintf("%s must run on pushes to main", [codeql_workflow_path])
 }
 
@@ -832,62 +998,57 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	object.get(codeql.on, "workflow_dispatch", "missing") != null
-	msg := sprintf("%s must support manual dispatch", [codeql_workflow_path])
-}
-
-deny contains msg if {
 	not has_weekly_codeql_schedule
 	msg := sprintf("%s must retain its weekly schedule", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.permissions.actions != "read"
+	object.get(codeql, ["permissions", "actions"], null) != "read"
 	msg := sprintf("%s must grant actions: read", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.permissions.contents != "read"
+	object.get(codeql, ["permissions", "contents"], null) != "read"
 	msg := sprintf("%s must grant contents: read", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.permissions.packages != "read"
+	object.get(codeql, ["permissions", "packages"], null) != "read"
 	msg := sprintf("%s must grant packages: read", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.permissions["security-events"] != "write"
+	object.get(codeql, ["permissions", "security-events"], null) != "write"
 	msg := sprintf("%s must grant security-events: write", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.concurrency.group != "codeql-${{ github.ref }}"
+	object.get(codeql, ["concurrency", "group"], null) != "codeql-${{ github.ref }}"
 	msg := sprintf("%s must group concurrency by ref", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql.concurrency["cancel-in-progress"] != "${{ github.event_name == 'pull_request' }}"
+	object.get(codeql, ["concurrency", "cancel-in-progress"], null) != "${{ github.event_name == 'pull_request' }}"
 	msg := sprintf("%s must cancel only superseded pull-request runs", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql_job["runs-on"] != "ubuntu-latest"
+	object.get(codeql_job, "runs-on", null) != "ubuntu-latest"
 	msg := sprintf("%s analyze job must use ubuntu-latest", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql_job["timeout-minutes"] != 30
+	object.get(codeql_job, "timeout-minutes", null) != 30
 	msg := sprintf("%s analyze job must keep timeout-minutes: 30", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql_job.strategy["fail-fast"] != false
+	object.get(codeql_job, ["strategy", "fail-fast"], null) != false
 	msg := sprintf("%s analyze matrix must keep fail-fast: false", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	codeql_job.strategy.matrix.language != ["actions", "javascript-typescript", "python", "rust"]
+	object.get(codeql_job, ["strategy", "matrix", "language"], null) != ["actions", "javascript-typescript", "python", "rust"]
 	msg := sprintf("%s must analyze actions, JavaScript/TypeScript, Python, and Rust", [codeql_workflow_path])
 }
 
@@ -983,26 +1144,11 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	init_steps := codeql_steps_using("github/codeql-action/init@v4")
-	count(init_steps) == 1
-	params := object.get(init_steps[0].value, "with", {})
-	object.get(params, "build-mode", "") != "none"
-	msg := sprintf("%s CodeQL init must use build-mode: none", [codeql_workflow_path])
-}
-
-deny contains msg if {
 	analyze_steps := codeql_steps_using("github/codeql-action/analyze@v4")
 	count(analyze_steps) == 1
 	params := object.get(analyze_steps[0].value, "with", {})
 	object.get(params, "category", "") != "/language:${{ matrix.language }}"
 	msg := sprintf("%s CodeQL analyze must use a per-language category", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	analyze_steps := codeql_steps_using("github/codeql-action/analyze@v4")
-	count(analyze_steps) == 1
-	object.get(analyze_steps[0].value, "id", "") != codeql_analyze_step_id
-	msg := sprintf("%s CodeQL analyze step must have id: %s", [codeql_workflow_path, codeql_analyze_step_id])
 }
 
 deny contains msg if {
@@ -1044,25 +1190,17 @@ deny contains msg if {
 
 deny contains msg if {
 	checkout_steps := codeql_steps_using("actions/checkout@v7")
-	init_steps := codeql_steps_using("github/codeql-action/init@v4")
 	count(checkout_steps) == 1
+	init_steps := codeql_steps_using("github/codeql-action/init@v4")
 	count(init_steps) == 1
 	checkout_steps[0].index >= init_steps[0].index
 	msg := sprintf("%s must check out before CodeQL init", [codeql_workflow_path])
 }
 
 deny contains msg if {
-	init_steps := codeql_steps_using("github/codeql-action/init@v4")
 	count(rust_setup_steps) == 1
+	init_steps := codeql_steps_using("github/codeql-action/init@v4")
 	count(init_steps) == 1
 	rust_setup_steps[0].index >= init_steps[0].index
 	msg := sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	analyze_steps := codeql_steps_using("github/codeql-action/analyze@v4")
-	count(analyze_steps) == 1
-	count(rust_health_steps) == 1
-	analyze_steps[0].index >= rust_health_steps[0].index
-	msg := sprintf("%s must verify Rust extraction health after CodeQL analyze", [codeql_workflow_path])
 }

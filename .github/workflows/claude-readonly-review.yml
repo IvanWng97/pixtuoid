@@ -105,6 +105,23 @@ jobs:
             echo "Head: $HEAD_SHA"
           } > .claude-review/review-context.md
 
+      # The schema lives in a committed .json so every tool can read it — the
+      # inline literal was invisible to actionlint and zizmor, and an unbalanced
+      # brace in it took both review bots down for 31h. `check-jsonschema
+      # --check-metaschema` gates the file in `just lint`. The CLI has no
+      # --json-schema-file and rejects a path, so it must round-trip through a
+      # step output; shlex.quote does the shell quoting, which (unlike a
+      # hand-written '...' wrapper) survives a payload containing an apostrophe.
+      - name: Load the review schema
+        if: steps.pr.outputs.reviewable == 'true'
+        id: schema
+        run: |
+          set -euo pipefail
+          printf 'json=%s\n' \
+            "$(jq -c . .github/prompts/review-schema.json |
+              python3 -c 'import shlex,sys; sys.stdout.write(shlex.quote(sys.stdin.read().strip()))')" \
+            >>"$GITHUB_OUTPUT"
+
       - name: Run read-only Claude review
         if: steps.pr.outputs.reviewable == 'true'
         id: claude
@@ -133,8 +150,7 @@ jobs:
             --max-budget-usd ${{ inputs.max_budget_usd }}
             --permission-mode dontAsk
             --allowedTools "Read,Glob,Grep"
-            --json-schema
-            '{"type":"object","additionalProperties":false,"properties":{"summary":{"type":"string","minLength":1,"maxLength":8000},"findings":{"type":"array","maxItems":5,"items":{"type":"object","additionalProperties":false,"properties":{"severity":{"type":"string","enum":["HIGH","MEDIUM"]},"path":{"type":"string","minLength":1,"maxLength":512},"line":{"type":"integer","minimum":1},"body":{"type":"string","minLength":1,"maxLength":4000}},"required":["severity","path","line","body"]}},"required":["summary","findings"]}'
+            --json-schema ${{ steps.schema.outputs.json }}
 
       - name: Require a valid structured review
         if: steps.pr.outputs.reviewable == 'true'
