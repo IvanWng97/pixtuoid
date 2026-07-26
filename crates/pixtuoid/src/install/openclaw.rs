@@ -948,6 +948,48 @@ mod tests {
         );
     }
 
+    /// The env-wiring WRAPPER, as opposed to the pure core the cases above drive
+    /// through injected arguments. Mutation testing found the wrapper had no unit
+    /// teeth at all — replacing its whole body with `Ok(Default::default())`, i.e.
+    /// handing the installer an EMPTY path to write into, passed the suite. Asserts
+    /// the shape invariant that holds under any ambient env, so it needs no env
+    /// mutation (which would race the other suites through `TEST_ENV_LOCK`); the
+    /// env→argument MAPPING itself is covered end-to-end by the openclaw e2e
+    /// scripts, where `openclaw plugins list` confirms the plugin landed in the file
+    /// the gateway actually reads — a cover `cargo test` cannot see.
+    #[test]
+    fn default_config_path_is_always_a_real_openclaw_config_file() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let p = default_config_path().expect("a dev machine resolves a home");
+        assert!(
+            p.as_os_str().len() > 0,
+            "an empty path would be merged into, and created, at the filesystem root"
+        );
+        let name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("a config FILE, not a directory");
+        assert!(
+            CONFIG_FILES.contains(&name),
+            "must be one of OpenClaw's own config filenames {CONFIG_FILES:?} — got {name}"
+        );
+        let parent = p.parent().expect("the config sits inside a state dir");
+        let dir = parent
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("a named state dir");
+        assert!(
+            STATE_DIRS.contains(&dir),
+            "must sit in one of OpenClaw's own state dirs {STATE_DIRS:?} — got {dir}"
+        );
+        assert!(
+            p.is_absolute(),
+            "a relative path would resolve against the CLI's cwd at merge time"
+        );
+    }
+
     #[test]
     fn merge_install_is_idempotent() {
         let _env = crate::TEST_ENV_LOCK

@@ -997,6 +997,102 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
     );
 }
 
+/// The collapse itself, which the target sweep above deliberately cannot see: it
+/// asserts only "a hard issue naming the artifacts", satisfied by BOTH forms, so
+/// nothing pinned the shortening that is this function's whole reason to exist.
+/// Mutation testing found exactly that hole — four separate mutations of the branch
+/// condition all survived the suite.
+#[test]
+fn same_dir_artifact_misses_collapse_to_one_short_line_scattered_ones_do_not() {
+    let dir = std::path::Path::new("/o/plugins/pixtuoid");
+
+    // Nothing missing ⇒ no issue at all.
+    assert!(missing_artifact_issue(&[]).is_empty());
+
+    // ONE miss keeps the per-path form: there is no shared-directory fact to state
+    // yet, and "1 plugin artifacts missing from …" would be both wrong and longer.
+    let one = missing_artifact_issue(&[dir.join("index.js")]);
+    assert_eq!(one.len(), 1);
+    assert!(
+        one[0].starts_with("plugin artifact missing:") && one[0].contains("index.js"),
+        "a lone miss names its own path — got {one:?}"
+    );
+
+    // Same directory ⇒ ONE line stating the dir once and naming every file.
+    let same: Vec<PathBuf> = ["index.js", "package.json", "pixtuoid-hook"]
+        .iter()
+        .map(|n| dir.join(n))
+        .collect();
+    let collapsed = missing_artifact_issue(&same);
+    assert_eq!(collapsed.len(), 1, "same-dir misses are ONE fact");
+    let line = &collapsed[0];
+    assert!(
+        line.starts_with("3 plugin artifacts missing from ")
+            && line.contains("/o/plugins/pixtuoid"),
+        "the collapsed line counts them and names the dir ONCE — got {line}"
+    );
+    for n in ["index.js", "package.json", "pixtuoid-hook"] {
+        assert!(line.contains(n), "{n} must still be named — got {line}");
+    }
+    // The shortening is the POINT, so pin its MECHANISM rather than a made-up ratio:
+    // the directory is stated once here and once PER path in the form it replaces.
+    let dir_str = dir.to_string_lossy().into_owned();
+    assert_eq!(
+        line.matches(&dir_str).count(),
+        1,
+        "the shared dir appears exactly once — got {line}"
+    );
+    let per_path: Vec<String> = same
+        .iter()
+        .map(|p| format!("plugin artifact missing: {}", p.display()))
+        .collect();
+    assert_eq!(
+        per_path.iter().filter(|i| i.contains(&dir_str)).count(),
+        same.len(),
+        "the form being replaced repeats it per path (that is the cost)"
+    );
+    assert!(
+        line.chars().count() < per_path.iter().map(|i| i.chars().count()).sum::<usize>(),
+        "and the one line is shorter than the {} it replaces — got {} chars",
+        same.len(),
+        line.chars().count()
+    );
+
+    // DIFFERENT directories ⇒ no shared-dir fact to state, so each keeps its path.
+    let scattered = vec![dir.join("index.js"), PathBuf::from("/elsewhere/hook")];
+    let scattered_issues = missing_artifact_issue(&scattered);
+    assert_eq!(
+        scattered_issues.len(),
+        2,
+        "scattered misses stay one line each"
+    );
+    assert!(
+        scattered_issues
+            .iter()
+            .all(|i| i.starts_with("plugin artifact missing:")),
+        "got {scattered_issues:?}"
+    );
+}
+
+/// WHY `has_hooks`' empty-config guard is a fast path, not load-bearing logic: every
+/// target's uninstall merge already reports an empty document as unchanged, so the
+/// guard's removal would be behaviour-preserving (mutation testing flags it as a
+/// survivor for exactly that reason — an EQUIVALENT mutant, not a test gap). This
+/// pins the property that makes it equivalent, so a future target that claimed
+/// `changed` for an empty config — and would then read as INSTALLED without the
+/// guard — fails here instead of silently making the guard load-bearing.
+#[test]
+fn no_targets_uninstall_merge_claims_a_change_on_an_empty_config() {
+    for t in crate::install::target::TARGETS {
+        let changed = (t.merge_uninstall)("").map(|o| o.changed);
+        assert!(
+            matches!(changed, Ok(false)),
+            "{}: an empty config bears no hooks to remove — got {changed:?}",
+            t.name
+        );
+    }
+}
+
 // The silent-dead class the EXISTENCE stat above is blind to: the artifacts are
 // all present, the config registers them, the plugin loads — but the shim path
 // BAKED INTO the entry module points at a binary that moved (a cargo→brew

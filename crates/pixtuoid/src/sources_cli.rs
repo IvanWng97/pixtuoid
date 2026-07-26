@@ -214,4 +214,46 @@ mod tests {
             r#"[{"id":"codex","outcome":"connected"},{"id":"cursor","outcome":"failed","message":"boom"}]"#
         );
     }
+
+    /// The hint line's GATE and its shape. Mutation testing found this feature had
+    /// no teeth at all: stubbing `hint_line` to `None` (i.e. silently never telling
+    /// the user to restart their gateway) passed the whole suite.
+    #[test]
+    fn the_post_install_hint_line_rides_a_connected_row_only() {
+        let row =
+            |id: &str, oc: sources::ChangeOutcome| sources::OutcomeRow::new(id.to_string(), &oc);
+
+        // A source WITH a step, actually connected ⇒ the indented `↳` second line.
+        let line = hint_line(&row("openclaw", sources::ChangeOutcome::Connected))
+            .expect("openclaw declares a post-install step");
+        assert!(
+            line.starts_with("  \u{21b3} "),
+            "the hint is an indented continuation of its row — got {line:?}"
+        );
+        assert_eq!(
+            line.trim_start_matches([' ', '\u{21b3}']),
+            sources::post_install_hint("openclaw").expect("declared"),
+            "the line carries the target's own hint verbatim, never a re-worded copy"
+        );
+
+        // Every other outcome is NOT a completed install, so the step must not print:
+        // `no_op` especially, or a re-run of `setup --yes` would nag about a gateway
+        // the user already restarted.
+        for oc in [
+            sources::ChangeOutcome::NoOp,
+            sources::ChangeOutcome::Disconnected,
+            sources::ChangeOutcome::Failed("boom".into()),
+        ] {
+            assert!(
+                hint_line(&row("openclaw", oc.clone())).is_none(),
+                "{oc:?} is not a completed install — no step to announce"
+            );
+        }
+
+        // A connected source with no declared step stays a single line.
+        assert!(
+            hint_line(&row("claude-code", sources::ChangeOutcome::Connected)).is_none(),
+            "claude-code's hooks take effect on its next run — nothing to add"
+        );
+    }
 }
