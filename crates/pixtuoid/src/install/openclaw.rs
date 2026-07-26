@@ -552,6 +552,23 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
                 .into(),
         );
     }
+    // A reload mode that will never APPLY our write. Upstream's reload plan marks
+    // `plugins.load` (the key we write) `kind: "restart"`, and
+    // `resolveGatewayReloadSettings` accepts `off|restart|hot|hybrid` defaulting to
+    // `hybrid` — so `restart`/`hybrid` pick our change up on their own, while `off`
+    // (no reload at all) and `hot` (hot-kind changes only) leave a RUNNING gateway
+    // serving without the plugin indefinitely. The user's own switch, so a NOTE:
+    // their install is sound, it just has not taken effect yet. (Both values
+    // verified against the shipped 2026.7.1 bundle + `openclaw config schema`.)
+    if let Some(mode) = root["gateway"]["reload"]["mode"].as_str() {
+        if mode == "off" || mode == "hot" {
+            notes.push(format!(
+                "openclaw.json `gateway.reload.mode = \"{mode}\"` never applies a restart-kind \
+                 change, and the plugin registration is one — a RUNNING gateway keeps serving \
+                 without pixtuoid until it is restarted (`openclaw gateway restart`)"
+            ));
+        }
+    }
     // `plugins.allow`/`plugins.deny` are both FAIL-CLOSED for us and invisible to
     // the entry/paths checks above — the silent-dead class again. A curated
     // allowlist that omits us, or a denylist naming us, means the plugin never
@@ -1123,6 +1140,57 @@ mod tests {
             verdict.notes.iter().any(|n| n.contains("$include")),
             "an include must be surfaced: {:?}",
             verdict.notes
+        );
+    }
+
+    #[test]
+    fn a_reload_mode_that_never_applies_our_write_is_noted_but_not_a_break() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Upstream marks `plugins.load` (the key we write) `kind: "restart"`, and
+        // `off`/`hot` never apply a restart-kind change — so a RUNNING gateway keeps
+        // serving without the plugin. The install is SOUND; it just has not taken
+        // effect, hence a note. `restart`/`hybrid` (the default) pick it up
+        // themselves and must stay silent, or every healthy user gets a scary line.
+        let installed = merge_install("{}", "").unwrap();
+        let with_mode = |mode: &str| {
+            let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+            v["gateway"] = json!({ "reload": { "mode": mode } });
+            verify_schema(&v.to_string())
+        };
+        for mode in ["off", "hot"] {
+            let verdict = with_mode(mode);
+            assert!(
+                verdict.issues.is_empty(),
+                "{mode}: the user's own reload switch is not OUR break: {:?}",
+                verdict.issues
+            );
+            assert!(
+                verdict
+                    .notes
+                    .iter()
+                    .any(|n| n.contains("gateway.reload.mode") && n.contains(mode)),
+                "{mode}: must be surfaced as the reason nothing loaded yet: {:?}",
+                verdict.notes
+            );
+        }
+        for mode in ["restart", "hybrid"] {
+            assert!(
+                !with_mode(mode)
+                    .notes
+                    .iter()
+                    .any(|n| n.contains("gateway.reload.mode")),
+                "{mode} applies our write on its own — it must stay silent"
+            );
+        }
+        // Absent (⇒ the `hybrid` default) is silent too.
+        assert!(
+            !verify_schema(&installed.content)
+                .notes
+                .iter()
+                .any(|n| n.contains("gateway.reload.mode")),
+            "an absent reload mode is the hybrid default — never reported"
         );
     }
 
