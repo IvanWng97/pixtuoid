@@ -24,6 +24,7 @@ actionlint_release_queue_ignore := "unexpected key \"queue\" for \"concurrency\"
 zizmor_config_path := ".github/zizmor.yml"
 cache_cleanup_workflow_path := ".github/workflows/cache-cleanup.yml"
 claude_action := "anthropics/claude-code-action@v1"
+json_schema_flag := "--json-schema"
 claude_review_workflow_path := ".github/workflows/claude-review.yml"
 claude_security_workflow_path := ".github/workflows/claude-security-review.yml"
 claude_reusable_workflow_path := ".github/workflows/claude-readonly-review.yml"
@@ -322,9 +323,40 @@ claude_model_is_read_only(step) if {
 	params := object.get(step, "with", {})
 	args := object.get(params, "claude_args", "")
 	contains(args, "--allowedTools \"Read,Glob,Grep\"")
-	contains(args, "--json-schema")
+	contains(args, json_schema_flag)
 	not contains(args, "Bash")
 	not contains(args, "mcp__github")
+}
+
+# `--json-schema` smuggles a JSON document through a YAML string, so nothing
+# else in the gate stack reads it: actionlint and zizmor see an opaque scalar,
+# and the read-only rule above is satisfied by the flag NAME alone. An
+# unbalanced brace therefore survives every local check and only surfaces on the
+# runner, where the CLI refuses to start and every review run dies with
+# "--json-schema is not valid JSON" — a gate that can never pass. Parse the
+# payload here instead, and hold it to being a well-formed JSON *Schema* rather
+# than merely well-formed JSON, so `--json-schema '123'` fails too.
+claude_args_schema_entries := [entry |
+	some candidate in objects
+	args := object.get(candidate.value, "claude_args", null)
+	is_string(args)
+	contains(args, json_schema_flag)
+	entry := {"path": candidate.path, "args": args}
+]
+
+claude_json_schema_is_wellformed(args) if {
+	parts := split(args, sprintf("%s '", [json_schema_flag]))
+
+	# Exactly one occurrence; a second copy makes the effective payload ambiguous.
+	count(parts) == 2
+	quoted := trim_space(parts[1])
+	payload := trim_suffix(quoted, "'")
+
+	# trim_suffix is a no-op when the suffix is absent, so this proves the
+	# closing quote was actually there and the payload is not truncated.
+	payload != quoted
+	json.is_valid(payload)
+	json.verify_schema(json.unmarshal(payload))[0]
 }
 
 claude_model_auth_is_scoped(step) if {
@@ -470,6 +502,18 @@ deny contains msg if {
 	count(model_steps) == 1
 	not claude_model_auth_is_scoped(model_steps[0].value)
 	msg := sprintf("%s Claude step must use WIF-first authentication with the scoped job token", [claude_reusable_workflow_path])
+}
+
+# Deliberately walks every document rather than the reusable workflow alone: the
+# payload is unreadable to actionlint wherever it appears, so any future caller
+# that grows its own `--json-schema` inherits the same silent-red failure mode.
+deny contains msg if {
+	some entry in claude_args_schema_entries
+	not claude_json_schema_is_wellformed(entry.args)
+	msg := sprintf(
+		"%s %s must carry exactly one single-quoted, well-formed JSON Schema payload",
+		[entry.path, json_schema_flag],
+	)
 }
 
 deny contains msg if {

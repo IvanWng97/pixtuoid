@@ -674,3 +674,60 @@ test_codeql_health_metrics_must_be_visible_in_the_job_summary if {
 	violations := deny with input as fixture
 	sprintf("%s Rust extraction-health gate must write a quantified job summary", [codeql_workflow_path]) in violations
 }
+
+# The exact payload that shipped in #785: the root "properties" object is never
+# closed (10 `{` against 9 `}`), so every `claude review` and
+# `claude security review` run aborted with "--json-schema is not valid JSON".
+broken_json_schema_args := `--max-turns 60 --allowedTools "Read,Glob,Grep" --json-schema '{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]'`
+
+fixed_json_schema_args := `--max-turns 60 --allowedTools "Read,Glob,Grep" --json-schema '{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]}'`
+
+json_schema_fixture(args) := {"documents": [{
+	"path": claude_reusable_workflow_path,
+	"contents": {"jobs": {"analyze": {"steps": [{
+		"uses": claude_action,
+		"with": {"claude_args": args},
+	}]}}},
+}]}
+
+malformed_json_schema_message := sprintf(
+	"%s %s must carry exactly one single-quoted, well-formed JSON Schema payload",
+	[claude_reusable_workflow_path, json_schema_flag],
+)
+
+test_unbalanced_json_schema_payload_is_denied if {
+	violations := deny with input as json_schema_fixture(broken_json_schema_args)
+	malformed_json_schema_message in violations
+}
+
+test_balanced_json_schema_payload_is_accepted if {
+	violations := deny with input as json_schema_fixture(fixed_json_schema_args)
+	not malformed_json_schema_message in violations
+}
+
+# Each variant is a distinct way the payload can be unreadable to the CLI while
+# still satisfying the flag-name-only presence check.
+test_unreadable_json_schema_payloads_are_denied if {
+	every args in {
+		# Not single-quoted, so shell-quote hands the CLI a bare `{`.
+		`--json-schema {"type":"object"}`,
+		# Opening quote with no closing quote.
+		`--json-schema '{"type":"object"}`,
+		# Valid JSON, but a scalar is not a schema.
+		`--json-schema '123'`,
+		# Well-formed JSON that is not a well-formed JSON Schema.
+		`--json-schema '{"type":"not-a-type"}'`,
+		# Two payloads make the effective schema ambiguous.
+		`--json-schema '{"type":"object"}' --json-schema '{"type":"array"}'`,
+		# Empty payload.
+		`--json-schema ''`,
+	} {
+		violations := deny with input as json_schema_fixture(args)
+		malformed_json_schema_message in violations
+	}
+}
+
+test_claude_args_without_a_schema_flag_is_not_denied if {
+	violations := deny with input as json_schema_fixture(`--max-turns 60 --allowedTools "Read,Glob,Grep"`)
+	not malformed_json_schema_message in violations
+}

@@ -134,7 +134,7 @@ jobs:
             --permission-mode dontAsk
             --allowedTools "Read,Glob,Grep"
             --json-schema
-            '{"type":"object","additionalProperties":false,"properties":{"summary":{"type":"string","minLength":1,"maxLength":8000},"findings":{"type":"array","maxItems":5,"items":{"type":"object","additionalProperties":false,"properties":{"severity":{"type":"string","enum":["HIGH","MEDIUM"]},"path":{"type":"string","minLength":1,"maxLength":512},"line":{"type":"integer","minimum":1},"body":{"type":"string","minLength":1,"maxLength":4000}},"required":["severity","path","line","body"]}},"required":["summary","findings"]}'
+            '{"type":"object","additionalProperties":false,"properties":{"summary":{"type":"string","minLength":1,"maxLength":8000},"findings":{"type":"array","maxItems":5,"items":{"type":"object","additionalProperties":false,"properties":{"severity":{"type":"string","enum":["HIGH","MEDIUM"]},"path":{"type":"string","minLength":1,"maxLength":512},"line":{"type":"integer","minimum":1},"body":{"type":"string","minLength":1,"maxLength":4000}},"required":["severity","path","line","body"]}}},"required":["summary","findings"]}'
 
       - name: Require a valid structured review
         if: steps.pr.outputs.reviewable == 'true'
