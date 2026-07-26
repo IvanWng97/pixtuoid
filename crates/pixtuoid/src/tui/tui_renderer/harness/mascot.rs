@@ -489,4 +489,3 @@ fn gateway_mascot_tooltip_on_hover() {
         "hovering the lobster shows the gateway mascot tooltip"
     );
 }
-// appended as a temporary harness test
