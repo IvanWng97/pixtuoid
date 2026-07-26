@@ -163,7 +163,25 @@ given change/tree, say so, don't skip it.
   branches [`duplicate_root_session_start_..._resurrect` + `parent_waiting_..._ends_a_tool` fixed both]);
   isolation & flakiness (real-state writes, wall-clock/order nondeterminism,
   `TEST_ENV_LOCK`, snapshot determinism); CI/build (gate coverage, path-filter
-  holes, toolchain skew); gate-teeth & gate liveness (can this check actually
+  holes, toolchain skew); **gate rules need BOTH directions** — a new check
+  wants a fires-on-violation test AND a stays-silent-on-a-legitimate-variant
+  test, because "can it fire?" and "does it only fire when it should?" are
+  independent failure modes and the second is the one nobody writes. #788 shipped
+  three of them in one PR: the `--json-schema` rule silently required the schema
+  to be the LAST flag (a valid payload with any argument after it was rejected);
+  and prefix-matching `./.github/workflows/` dropped a cross-repo `uses:` out of
+  the group set, whereupon the membership rule instructed the maintainer to
+  REMOVE a group from the ONLY required status check protecting main — a
+  confident wrong instruction carrying a gate's authority, worse than silence.
+  Mutation testing proves only the first direction; `deny_coverage_test.sh`
+  mechanically enforces that a deny message is asserted somewhere, and the
+  legitimate-variant half stays this factor's job; **the message is half the
+  rule** — a deny/error/panic string is the ONLY part of a check a future
+  maintainer reads, so it must name the actual requirement and the remedy, not a
+  plausible-sounding neighbour: #788's OIDC rule denied with "only the tests call
+  uploads via OIDC" while `release.yml` uses `id-token` for provenance, so the
+  sentence was false and pointed the reader nowhere. Review the string with the
+  same care as the condition; gate-teeth & gate liveness (can this check actually
   FAIL, and is it alive: a checker that exits 0 on its own internal error is
   fail-open; an exit code read through a pipe / `; echo $?` is eaten; a check
   never wired into a required workflow gates nothing — the `.harness` fail-open

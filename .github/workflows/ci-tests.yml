@@ -163,6 +163,10 @@ jobs:
 
   snapshots:
     name: snapshot hygiene
+    # Declared, not inherited: an omitted block would take the caller's
+    # id-token: write and hand this job a repo-scoped OIDC minting capability.
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -182,6 +186,8 @@ jobs:
   # Mutation testing remains in its separate on-demand mutants.yml workflow.
   smoke:
     name: smoke
+    permissions:
+      contents: read
     # Independent of lint jobs: parallel execution lowers green-path latency.
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -249,6 +255,8 @@ jobs:
 
   required:
     name: required-test-jobs
+    permissions:
+      contents: read
     # Explicit membership keeps a deleted or renamed nested job from letting the
     # single protected ci-gate silently lose coverage.
     if: ${{ always() }}

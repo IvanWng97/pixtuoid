@@ -128,13 +128,13 @@ jobs:
 
       - name: Install musl-tools
         if: contains(matrix.target, 'musl')
-        run: sudo apt-get install -y musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
         # Linux artifacts build WITHOUT the audio feature: musl can't link
         # ALSA statically and the aarch64 cross image has no ALSA headers.
         # Prebuilt Linux = silent; from-source Linux gets audio (#633).
-        run: just build-target ${{ matrix.target }} ${{ matrix.cross }} "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
+        run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}" "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
@@ -208,7 +208,7 @@ jobs:
         # Linux artifacts build WITHOUT the audio feature: musl can't link
         # ALSA statically and the aarch64 cross image has no ALSA headers.
         # Prebuilt Linux = silent; from-source Linux gets audio (#633).
-        run: just build-target ${{ matrix.target }} ${{ matrix.cross }} "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
+        run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}" "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
 
       - name: Build .deb packages
         run: just deb ${{ matrix.target }}
@@ -296,6 +296,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+      # `cargo publish` BUILDS each crate to verify it, and pixtuoid's default
+      # features pull rodio -> cpal -> ALSA headers. Without these the loop
+      # publishes pixtuoid-core, pixtuoid-scene and pixtuoid-hook — irreversibly
+      # — and only then fails to compile pixtuoid, stranding the release
+      # half-published at a version that can never be reused.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust

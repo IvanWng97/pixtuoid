@@ -25,7 +25,11 @@ set windows-shell := ["bash", "-cu"]
 # newly-published crate is added in ONE place.
 PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 
-# Shell sources share one authority so formatting and lint coverage cannot drift.
+# Standalone shell FILES share one authority so formatting and lint coverage
+# cannot drift. Shell embedded in YAML is a second population this cannot cover:
+# workflow `run:` blocks go to actionlint, composite-action ones to
+# `actionlint-composites`. Both are shellcheck-only — shfmt cannot rewrite a
+# scalar in place — so adding a file here is not enough for embedded shell.
 SHELL_SOURCES := "scripts/*.sh .githooks/* policy/ci-observability/*.sh"
 
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
@@ -79,6 +83,51 @@ shellcheck:
 actionlint:
     actionlint
 
+# The blind spot the recipe above cannot cover: actionlint models WORKFLOWS, so
+# it discovers only .github/workflows and rejects an action.yml outright
+# ("jobs section is missing"). Shell that moves from a workflow into a composite
+# action therefore loses its shellcheck coverage silently — which is exactly
+# what happened to the homebrew-core contract asserts in packaging-build. Pull
+# each `run:` out ourselves and check it with the same linter.
+[group('rust')]
+[doc('Shellcheck every run: block inside the composite actions (actionlint cannot parse action.yml)')]
+actionlint-composites:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    actions=(.github/actions/*/action.y*ml) # GitHub accepts action.yaml too
+    ((${#actions[@]})) || { echo "error: no composite actions found" >&2; exit 1; }
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    checked=0
+    skipped=()
+    for action in "${actions[@]}"; do
+        count="$(yq '[.runs.steps[] | select(has("run"))] | length' "$action")"
+        ((count)) || continue # a pure `uses:` composite has no shell to check
+        for i in $(seq 0 $((count - 1))); do
+            # The default should never fire — a composite run step must name a
+            # shell — but bash is what actionlint assumes for a workflow step.
+            shell="$(yq -r ".runs.steps | map(select(has(\"run\"))) | .[$i].shell // \"bash\"" "$action")"
+            case "$shell" in
+            bash | sh) ;;
+            # pwsh/python are not shellcheck's to judge, but a bounded gate that
+            # does not name what it dropped reads as full coverage.
+            *)
+                skipped+=("$action step $i ($shell)")
+                continue
+                ;;
+            esac
+            script="$work/$(echo "$action" | tr /. __)-$i.$shell"
+            { echo "#!/usr/bin/env $shell"; yq -r ".runs.steps | map(select(has(\"run\"))) | .[$i].run" "$action"; } >"$script"
+            shellcheck -s "$shell" "$script" || { echo "  ^ from $action step $i" >&2; exit 1; }
+            checked=$((checked + 1))
+        done
+    done
+    ((checked > 0)) || { echo "error: no composite run: blocks were checked" >&2; exit 1; }
+    echo "$checked composite run: blocks shellchecked"
+    ((${#skipped[@]})) && printf '  skipped (not a shellcheck dialect): %s\n' "${skipped[@]}"
+    exit 0
+
 # Security audit for workflows/actions/Dependabot. zizmor owns the parser and
 # audit catalog; .github/zizmor.yml records the repository's deliberate
 # ref-or-SHA pin policy and every accepted finding is suppressed at its exact
@@ -107,6 +156,14 @@ ci-observability:
     trap 'rm -f "$combined" "$policy_test_results"' EXIT
     yq eval-all -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${files[@]}" >"$combined"
     conftest fmt --check policy/ci-observability
+    # conftest embeds OPA but exposes neither `check` nor coverage, so the OPA
+    # binary owns both. `--strict` catches compile-level slop conftest accepts
+    # (an unused argument shipped here undetected); the coverage threshold is a
+    # RATCHET on #789 — an uncovered rule head means "the body was never true",
+    # i.e. no test makes that rule fire, which is how two vacuous rules reached
+    # main. Raise the number as rules gain tests; never lower it.
+    opa check --strict policy/ci-observability
+    opa test --coverage --threshold 95 policy/ci-observability >/dev/null
     if ! conftest verify --policy policy/ci-observability --output json >"$policy_test_results"; then
         yq -P '.' "$policy_test_results" >&2
         exit 1
@@ -117,6 +174,27 @@ ci-observability:
     conftest test --parser json --policy policy/ci-observability "$combined"
     bash policy/ci-observability/action_behavior_test.sh
     iconv -f US-ASCII -t US-ASCII codecov.yml >/dev/null
+    # Regal is the OPA project's own Rego linter; .regal/config.yaml records
+    # every deliberate disagreement with a WHY. LAST on purpose: it judges style,
+    # and under `set -e` an earlier position would abort the recipe before the
+    # correctness checks above ever evaluated the documents.
+    regal lint policy/ci-observability
+
+# Every committed JSON Schema, held to the metaschema. These are contracts a
+# consumer reads at runtime — the review schema reaches the Claude CLI, the
+# raycast ones pin the `--json` shape — and nothing else parses them: a broken
+# one is invisible until the consumer refuses to start, which is exactly how the
+# review bots died for 31h.
+[group('rust')]
+[doc('Validate every committed JSON Schema against the metaschema (check-jsonschema)')]
+json-schemas:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    schemas=(.github/prompts/review-schema.json integrations/raycast/contract/*.schema.json)
+    ((${#schemas[@]})) || { echo "error: no committed JSON Schemas found" >&2; exit 1; }
+    check-jsonschema --check-metaschema "${schemas[@]}"
+    echo "${#schemas[@]} JSON Schemas validated"
 
 # Offline link + anchor check (lychee) over the repo's OWN markdown: every
 # relative cross-link between the nested CLAUDE.md/AGENTS.md guides + docs/ must
@@ -181,7 +259,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt shellcheck actionlint zizmor conftest yq jq iconv cargo-machete cargo-deny lychee; do
+    for t in shfmt shellcheck actionlint zizmor conftest opa regal check-jsonschema yq jq iconv cargo-machete cargo-deny lychee; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -199,8 +277,10 @@ lint:
     run shfmt   just shfmt-check         & pids+=($!)
     run shell   just shellcheck           & pids+=($!)
     run actions just actionlint          & pids+=($!)
+    run composites just actionlint-composites & pids+=($!)
     run zizmor  just zizmor              & pids+=($!)
     run ci-obs  just ci-observability     & pids+=($!)
+    run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
@@ -484,13 +564,25 @@ build *args:
 
 # Cross-compile a release build for ONE target triple (release.yml's build
 # matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
-# (CI installs it via taiki-e/install-action@cross).
+# (CI installs it via taiki-e/install-action@cross). `cross` is validated rather
+# than defaulted because callers pass it POSITIONALLY: an unquoted, unset
+# matrix.cross expands to nothing, and the collapse slid `flags` into this slot
+# on both Linux legs that omit the key — pinned by the arg-shift case below.
 [group('rust')]
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
 build-target target cross="false" flags="":
     #!/usr/bin/env bash
     set -euo pipefail
     use_cross="{{ cross }}"
+    # Anything but the two legal words means the caller's positional args
+    # shifted, so fail loudly rather than infer "not true, so cargo".
+    case "$use_cross" in
+    true | false) ;;
+    *)
+        echo "error: cross must be 'true' or 'false', got '$use_cross' (positional args shifted?)" >&2
+        exit 1
+        ;;
+    esac
     # flags: extra cargo flags — release.yml passes --no-default-features for
     # every LINUX artifact (musl can't link ALSA statically; the aarch64 cross
     # image has no ALSA headers), so prebuilt Linux binaries ship SILENT and
@@ -927,7 +1019,7 @@ setup-tools:
     # ast-grep backs the `comment-lint` advisory (structural Rust lint rules in
     # .ast-grep/rules/); shfmt/actionlint/shellcheck/zizmor back workflow
     # linting, while yq + jq + Conftest/OPA evaluate repository-specific policy.
-    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest; do
+    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest opa regal check-jsonschema; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -938,7 +1030,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck zizmor yq jq conftest iconv; do
+    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema iconv; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then

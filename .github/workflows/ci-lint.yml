@@ -87,7 +87,13 @@ jobs:
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           go install github.com/mikefarah/yq/v4@v4.53.3
           CGO_ENABLED=0 go install github.com/open-policy-agent/conftest@v0.68.2
+          # conftest embeds OPA but exposes neither `check` nor test coverage, so
+          # the OPA binary owns both; regal is the OPA project's Rego linter.
+          go install github.com/open-policy-agent/opa@v1.18.2
+          go install github.com/open-policy-agent/regal@v0.42.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Install the JSON Schema validator
+        run: pipx install check-jsonschema==0.37.4
       - uses: taiki-e/install-action@v2
         with:
           tool: lychee@0.24.2,zizmor@1.28.0
@@ -100,10 +106,12 @@ jobs:
       - run: just shfmt-check
       - run: just shellcheck
       - run: just actionlint
+      - run: just actionlint-composites
       - run: just zizmor
         env:
           GH_TOKEN: ${{ github.token }}
       - run: just ci-observability
+      - run: just json-schemas
       - run: just links
 
   msrv:
