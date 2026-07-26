@@ -1088,4 +1088,36 @@ mod tests {
             "degraded's slower cycle must put the mascot in a different phase than idle at this tick"
         );
     }
+
+    /// The ring's whole job is to give N mascots N DISTINCT places to stand at one
+    /// shared visit spot. A duplicate entry silently shrinks the candidate set, so
+    /// two instances collide more often — the "runs four gateways, sees three
+    /// lobsters" bug the ring was written to prevent, back at lower probability.
+    /// Mutation testing found nothing pinned it: deleting any of the three diagonal
+    /// minus signs turns an entry into a copy of its neighbour, and neither scene's
+    /// creature tests nor the binary's mascot harness went red.
+    ///
+    /// Characterizes the set COMPLETELY (rather than spot-checking entries) so one
+    /// assertion covers sign flips, duplicates and a changed magnitude alike.
+    #[test]
+    fn the_mascot_spot_ring_is_the_eight_distinct_neighbours_of_its_spot() {
+        let o = MASCOT_SPOT_OFFSET_PX;
+        let got: std::collections::BTreeSet<(i32, i32)> =
+            MASCOT_SPOT_RING.iter().copied().collect();
+        assert_eq!(
+            got.len(),
+            MASCOT_SPOT_RING.len(),
+            "every ring offset must be DISTINCT — a duplicate re-collides two instances: {MASCOT_SPOT_RING:?}"
+        );
+        let want: std::collections::BTreeSet<(i32, i32)> = [-o, 0, o]
+            .into_iter()
+            .flat_map(|dx| [-o, 0, o].map(move |dy| (dx, dy)))
+            .filter(|&p| p != (0, 0))
+            .collect();
+        assert_eq!(
+            got, want,
+            "the ring must be exactly the 8 one-step neighbours; (0,0) is EXCLUDED because \
+             it is the shared spot itself, which is what two instances must not both take"
+        );
+    }
 }
