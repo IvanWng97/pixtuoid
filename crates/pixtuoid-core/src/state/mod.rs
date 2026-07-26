@@ -1060,6 +1060,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn daemon_instance_id_displays_exactly_its_str() {
+        // `Display` is published API (`api/pixtuoid-core.txt`) with no in-tree
+        // consumer — every internal site takes `as_str()`, so mutation testing found
+        // nothing stopped `fmt` from writing an EMPTY string. For a library consumer
+        // the two spellings must agree, or `format!("{id}")` silently loses the
+        // gateway port that IS the instance's identity.
+        for raw in ["18789", "19789", " 18789 "] {
+            let id = DaemonInstanceId::new(raw).expect("non-blank");
+            assert_eq!(
+                id.to_string(),
+                id.as_str(),
+                "Display and as_str must not diverge"
+            );
+            assert_eq!(format!("{id}"), raw, "and neither may reformat the raw id");
+        }
+    }
+
     fn presence_at(liveness: DaemonLiveness) -> DaemonPresence {
         DaemonPresence {
             liveness,
