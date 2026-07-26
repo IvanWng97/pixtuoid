@@ -993,3 +993,32 @@ test_unrelated_action_does_not_match if {
 test_prefix_lookalike_does_not_match if {
 	not action_matches("github/codeql-action/analyze@v40.1.0", "github/codeql-action/analyze@v4")
 }
+
+# The Lighthouse rules matched `actions/upload-artifact@v7` literally, so an
+# exact pin would have emptied their entry list and spuriously fired all four
+# "must upload site/.lighthouseci/" denials — #786's failure, relocated.
+test_lighthouse_rules_tolerate_an_exact_upload_artifact_pin if {
+	fixture := {"documents": [{
+		"path": lighthouse_workflow_path,
+		"contents": {"jobs": {"lighthouse": {"steps": [{
+			"uses": "actions/upload-artifact@v7.1.2",
+			"if": "${{ !cancelled() }}",
+			"with": {
+				"path": "site/.lighthouseci/",
+				"include-hidden-files": true,
+				"if-no-files-found": "error",
+			},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	every message in {
+		"must upload site/.lighthouseci/ exactly once",
+		"Lighthouse upload must run under !cancelled()",
+		"Lighthouse upload must include hidden files",
+		"Lighthouse upload must fail when reports are absent",
+	} {
+		every violation in violations {
+			not contains(violation, message)
+		}
+	}
+}

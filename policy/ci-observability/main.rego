@@ -6,6 +6,7 @@ codecov_action := "codecov/codecov-action@v7"
 codecov_action_name := "codecov/codecov-action"
 codecov_authority_path := ".github/actions/upload-codecov/action.yml"
 codecov_wrapper := "./.github/actions/upload-codecov"
+upload_artifact_action := "actions/upload-artifact@v7"
 ci_workflow_path := ".github/workflows/ci.yml"
 codecov_workflow_path := ".github/workflows/ci-tests.yml"
 codecov_input_file := "${{ inputs.file }}"
@@ -914,7 +915,7 @@ deny contains msg if {
 	uploads := [entry |
 		some entry in uses_entries
 		entry.path == lighthouse_workflow_path
-		entry.uses == "actions/upload-artifact@v7"
+		action_matches(entry.uses, upload_artifact_action)
 		params := object.get(entry.value, "with", {})
 		object.get(params, "path", "") == "site/.lighthouseci/"
 	]
@@ -926,7 +927,7 @@ deny contains msg if {
 	msg := sprintf("%s Lighthouse upload must run under !cancelled()", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
-	entry.uses == "actions/upload-artifact@v7"
+	action_matches(entry.uses, upload_artifact_action)
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(entry.value, "if", "") != "${{ !cancelled() }}"
@@ -936,7 +937,7 @@ deny contains msg if {
 	msg := sprintf("%s Lighthouse upload must include hidden files", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
-	entry.uses == "actions/upload-artifact@v7"
+	action_matches(entry.uses, upload_artifact_action)
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(params, "include-hidden-files", false) != true
@@ -946,7 +947,7 @@ deny contains msg if {
 	msg := sprintf("%s Lighthouse upload must fail when reports are absent", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
-	entry.uses == "actions/upload-artifact@v7"
+	action_matches(entry.uses, upload_artifact_action)
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(params, "if-no-files-found", "") != "error"
