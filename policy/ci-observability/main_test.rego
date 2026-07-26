@@ -967,3 +967,29 @@ test_codeql_health_gate_before_upload_is_accepted if {
 	violations := deny with input as fixture
 	not sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
 }
+
+# Dependabot pins a floating major to an exact release. That is a STRICTER pin
+# and must not be rejected — #786 failed with "must analyze with CodeQL v4
+# exactly once" against a step that was v4.37.1.
+test_exact_release_pin_matches_the_major if {
+	action_matches("github/codeql-action/analyze@v4.37.1", "github/codeql-action/analyze@v4")
+	action_matches("anthropics/claude-code-action@v1.0.178", claude_action)
+	action_matches("codecov/codecov-action@v7.1.2", codecov_action)
+}
+
+# A real major bump must STILL fail — that is what the pin is for.
+test_major_bump_does_not_match if {
+	not action_matches("github/codeql-action/analyze@v5.0.0", "github/codeql-action/analyze@v4")
+	not action_matches("anthropics/claude-code-action@v2", claude_action)
+}
+
+# A different action that merely shares a version must not match.
+test_unrelated_action_does_not_match if {
+	not action_matches("evil/codeql-action/analyze@v4.37.1", "github/codeql-action/analyze@v4")
+	not action_matches("github/codeql-action/init@v4.37.1", "github/codeql-action/analyze@v4")
+}
+
+# A ref that only PREFIXES the major is not beneath it (v40 is not v4.x).
+test_prefix_lookalike_does_not_match if {
+	not action_matches("github/codeql-action/analyze@v40.1.0", "github/codeql-action/analyze@v4")
+}

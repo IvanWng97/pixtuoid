@@ -27,6 +27,18 @@ updates:
       actions:
         patterns: ["*"]
     open-pull-requests-limit: 5
+    ignore:
+      # This repo pins actions to a FLOATING major (`@v4`), which .github/zizmor.yml
+      # records as deliberate policy — the tag already tracks the newest release, so
+      # patch/minor updates arrive without a PR. Dependabot reads `@v4` as "version
+      # 4" and, filtered by the cooldown below, offers the newest version that is a
+      # week OLD — rewriting the self-updating ref into a stale exact pin. #786 did
+      # exactly that: `@v1` (then v1.0.183) -> v1.0.178, `@v4` (then v4.37.3) ->
+      # v4.37.1. Both downgrades. Only a MAJOR bump needs a human, so only majors
+      # should open a PR.
+      - dependency-name: "*"
+        update-types:
+          ["version-update:semver-patch", "version-update:semver-minor"]
     cooldown:
       default-days: 7
 
