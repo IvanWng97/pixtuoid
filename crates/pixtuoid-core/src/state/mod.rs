@@ -555,8 +555,22 @@ impl DaemonLiveness {
 /// the same port keeps its mascot. The PROCESS incarnation is separate state
 /// ([`DaemonPresence::current_pid`]), which is what makes a stale exit receipt
 /// for the old process a no-op instead of a kill of its replacement.
+/// Deserialization routes through [`DaemonInstanceId::new`] via `try_from` rather
+/// than the derive: a derived impl would reconstruct the blank id that `new`
+/// exists to refuse, so a hand-edited or truncated scene dump could re-introduce
+/// exactly the source-wide bucket this type was created to remove. The wire shape
+/// is unchanged (still a bare JSON string), so the snapshot golden is untouched.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct DaemonInstanceId(String);
+
+impl TryFrom<String> for DaemonInstanceId {
+    type Error = &'static str;
+
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::new(raw).ok_or("a daemon instance id must not be blank")
+    }
+}
 
 impl DaemonInstanceId {
     /// Mint an instance id, refusing an empty/whitespace-only one: an
@@ -1057,6 +1071,29 @@ mod tests {
         assert_eq!(
             DaemonInstanceId::new("18789").map(|i| i.as_str().to_string()),
             Some("18789".to_string())
+        );
+    }
+
+    #[test]
+    fn a_blank_daemon_instance_id_cannot_be_deserialized_back_in() {
+        // `new` refuses a blank id because a blank IS the source-wide bucket this
+        // type exists to remove. A DERIVED Deserialize would reconstruct one anyway,
+        // so a hand-edited or truncated scene dump could smuggle it past the smart
+        // constructor — hence `#[serde(try_from = "String")]`.
+        for blank in ["\"\"", "\"   \"", "\"\\t\""] {
+            assert!(
+                serde_json::from_str::<DaemonInstanceId>(blank).is_err(),
+                "a blank id must not deserialize: {blank}"
+            );
+        }
+        // A real id still round-trips byte-identically (the wire shape is unchanged,
+        // so the scene snapshot golden is untouched).
+        let id = DaemonInstanceId::new("18789").expect("non-blank");
+        let json = serde_json::to_string(&id).expect("serializes");
+        assert_eq!(json, "\"18789\"");
+        assert_eq!(
+            serde_json::from_str::<DaemonInstanceId>(&json).expect("round-trips"),
+            id
         );
     }
 

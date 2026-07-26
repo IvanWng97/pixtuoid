@@ -1026,6 +1026,9 @@ impl core::cmp::PartialEq for pixtuoid_core::state::DaemonInstanceId
 pub fn pixtuoid_core::state::DaemonInstanceId::eq(&self, &pixtuoid_core::state::DaemonInstanceId) -> bool
 impl core::cmp::PartialOrd for pixtuoid_core::state::DaemonInstanceId
 pub fn pixtuoid_core::state::DaemonInstanceId::partial_cmp(&self, &pixtuoid_core::state::DaemonInstanceId) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::TryFrom<alloc::string::String> for pixtuoid_core::state::DaemonInstanceId
+pub type pixtuoid_core::state::DaemonInstanceId::Error = &'static str
+pub fn pixtuoid_core::state::DaemonInstanceId::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
 impl core::fmt::Debug for pixtuoid_core::state::DaemonInstanceId
 pub fn pixtuoid_core::state::DaemonInstanceId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for pixtuoid_core::state::DaemonInstanceId
