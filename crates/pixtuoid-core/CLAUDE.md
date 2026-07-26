@@ -44,9 +44,16 @@ src/
 │                       on GatewayUp{pid} (restart-rebind) AND on PidSeen{pid} (#318 FIXED): the plugin stamps
 │                       _pid on EVERY event, so a MID-ATTACH / reconnect-while-alive adopts current_pid off the
 │                       next event (apply_presence's None-only adopt; driver arms the watch on PidSeen too).
-│                       The 4th state DaemonState::Degraded (#317): agent_end.success:false → RunFailed →
+│                       The 4th state DaemonState::Degraded (#317): agent_end failure → RunFailed →
 │                       Degraded (sickly-red sluggish the lobster), healed by the next clean RunEnded / new RunStarted /
-│                       GatewayUp restart. `DaemonPresence` STORES only the orthogonal axes `liveness:
+│                       GatewayUp restart. `success:false` alone is NOT that failure: upstream builds it as
+│                       `!aborted && !promptError` (both construction sites, shipped 2026.7.1), so a user CANCELLING a
+│                       turn reports it too — and Degraded is sticky (the TTL sweep deliberately never heals it), so an
+│                       abort would latch "model error" until the next run. The plugin forwards `errored` — the mere
+│                       PRESENCE of upstream's `error`, as a bare boolean because the string can embed prompt content —
+│                       and the decoder degrades only on `!success && errored`. An ABSENT `errored` defaults to TRUE
+│                       (an older on-disk plugin keeps the pre-change behaviour rather than becoming un-degradable —
+│                       the same legacy direction as the gatewayPort-less envelope). `DaemonPresence` STORES only the orthogonal axes `liveness:
 │                       DaemonLiveness{Up{degraded}|Down}` + `in_flight_runs` (#460 — a run_key→last-observation
 │                       MAP, so each run expires on its OWN clock: the daemon-wide `last_seen` is refreshed by
 │                       ANY event, so a dropped agent_end used to latch Busy for the gateway's whole life on a
