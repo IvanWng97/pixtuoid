@@ -46,6 +46,8 @@ rust_health_step_name := "Verify Rust extraction health"
 rust_matrix_condition := "${{ matrix.language == 'rust' }}"
 codeql_analyze_step_id := "analyze"
 codeql_sarif_output := "${{ steps.analyze.outputs.sarif-output }}"
+codeql_rust_upload_gate := "${{ matrix.language == 'rust' && 'never' || 'always' }}"
+codeql_upload_step_name := "Upload Rust analysis"
 rust_diagnostics_metric := "rust/summary/number-of-files-extracted-with-errors"
 rust_clean_metric := "rust/summary/number-of-successfully-extracted-files"
 lighthouse_workflow_path := ".github/workflows/site.yml"
@@ -245,6 +247,8 @@ indexed_steps_matching(steps, field, expected) := [entry |
 ]
 
 codeql_steps_using(action) := indexed_steps_matching(codeql_steps, "uses", action)
+
+codeql_named_steps(name) := indexed_steps_matching(codeql_steps, "name", name)
 
 rust_setup_steps := [entry |
 	some index, step in codeql_steps
@@ -460,6 +464,24 @@ ci_group_job_keys contains name if {
 }
 
 ci_gate_needs := {name | some name in object.get(ci_gate_job, "needs", [])}
+
+# A degraded Rust extraction produces FEWER alerts, so uploading before the
+# health gate publishes a security tab that reads cleaner than reality. Pin both
+# halves: analyze must defer Rust's upload, and the deferred upload must exist —
+# either alone silently restores the old ordering.
+deny contains msg if {
+	_ := documents[codeql_workflow_path]
+	steps := codeql_steps_using("github/codeql-action/analyze@v4")
+	count(steps) == 1
+	object.get(object.get(steps[0].value, "with", {}), "upload", "") != codeql_rust_upload_gate
+	msg := sprintf("%s analyze must defer the Rust upload until extraction health passes", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	_ := documents[codeql_workflow_path]
+	count(codeql_named_steps(codeql_upload_step_name)) != 1
+	msg := sprintf("%s must upload the Rust SARIF after the extraction-health gate", [codeql_workflow_path])
+}
 
 deny contains msg if {
 	some path in required_manifest_workflows

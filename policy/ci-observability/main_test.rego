@@ -924,3 +924,29 @@ test_nested_manifest_needing_a_deleted_job_is_denied if {
 	violations := deny with input as nested_manifest_fixture(jobs)
 	nested_manifest_message(".github/workflows/ci-lint.yml", {"fmt"}, {"clippy", "fmt"}) in violations
 }
+
+# Uploading before the health gate publishes a security tab that reads cleaner
+# than reality, because a degraded extraction yields fewer alerts.
+test_codeql_analyze_uploading_rust_inline_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"uses": "github/codeql-action/analyze@v4",
+			"with": {"category": "/language:${{ matrix.language }}"},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s analyze must defer the Rust upload until extraction health passes", [codeql_workflow_path]) in violations
+}
+
+test_codeql_missing_deferred_upload_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"uses": "github/codeql-action/analyze@v4",
+			"with": {"upload": codeql_rust_upload_gate},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must upload the Rust SARIF after the extraction-health gate", [codeql_workflow_path]) in violations
+}

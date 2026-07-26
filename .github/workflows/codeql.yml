@@ -81,6 +81,13 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
+          # Rust defers its upload until the extraction-health gate below has
+          # passed. A degraded extraction yields FEWER alerts, so uploading first
+          # publishes a security tab that looks CLEANER than reality — the job
+          # goes red, but the dashboard says fine. Only Rust defers: upstream
+          # notes `never` complicates debugging, and no other language here has a
+          # health gate to wait for.
+          upload: ${{ matrix.language == 'rust' && 'never' || 'always' }}
 
       # The action can remain green when extractor diagnostics affect most
       # files. Read CodeQL's own SARIF metrics and enforce this repository's
@@ -130,3 +137,13 @@ jobs:
             echo "::error title=Unhealthy Rust CodeQL database::$with_diagnostics files have extraction diagnostics; only $without_diagnostics are clean."
             exit 1
           fi
+
+      # Only now — the SARIF the gate above just vouched for. If that gate failed
+      # this never runs, which is the point: no analysis reaches the security tab
+      # unless it was healthy enough to be worth trusting.
+      - name: Upload Rust analysis
+        if: ${{ matrix.language == 'rust' }}
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ steps.analyze.outputs.sarif-output }}
+          category: /language:${{ matrix.language }}
