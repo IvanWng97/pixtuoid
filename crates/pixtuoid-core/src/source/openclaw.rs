@@ -517,16 +517,47 @@ mod tests {
         // keep its lobster rather than silently vanish; the drift breadcrumb is
         // what tells the user to reconnect. Both events land on ONE instance —
         // exactly the pre-multi-gateway behaviour.
-        let a = decode_openclaw_hook_payload(&json!({"type": "gateway_start", "_pid": 7}))
-            .expect("decodes");
-        let b = decode_openclaw_hook_payload(&json!({"type": "session_start", "sessionId": "s"}))
-            .expect("decodes");
+        let mut decoded = Vec::new();
+        // The breadcrumb is HALF the contract: the fallback keeps the mascot alive,
+        // the breadcrumb is what `doctor` buckets and the footer nudge reads, so
+        // assert its CLASS + the field it names (every peer source pins its
+        // breadcrumbs this way — codex/grok/copilot/cc/antigravity).
+        let logs = crate::test_capture::capture_logs(|| {
+            decoded.push(
+                decode_openclaw_hook_payload(&json!({"type": "gateway_start", "_pid": 7}))
+                    .expect("decodes"),
+            );
+            decoded.push(
+                decode_openclaw_hook_payload(&json!({"type": "session_start", "sessionId": "s"}))
+                    .expect("decodes"),
+            );
+        });
+        let (a, b) = (&decoded[0], &decoded[1]);
         assert_eq!(a.instance.as_str(), LEGACY_INSTANCE_ID);
         assert_eq!(a.instance, b.instance);
         assert_eq!(
             a.updates,
             vec![DaemonPresenceUpdate::GatewayUp { pid: Some(7) }],
             "the fallback changes identity only — never the deltas"
+        );
+        assert!(
+            logs.contains("missing_field") && logs.contains(GATEWAY_PORT_FIELD),
+            "a port-less envelope must breadcrumb the MISSING FIELD class naming \
+             `{GATEWAY_PORT_FIELD}`, got:\n{logs}"
+        );
+    }
+
+    #[test]
+    fn a_valid_port_breadcrumbs_nothing() {
+        // The negative control for the test above: the breadcrumb must fire on the
+        // fallback ONLY, or every healthy gateway would look drifted in `doctor`.
+        let logs = crate::test_capture::capture_logs(|| {
+            decode_openclaw_hook_payload(&json!({"type": "gateway_start", "gatewayPort": 18789}))
+                .expect("decodes");
+        });
+        assert!(
+            !logs.contains("missing_field"),
+            "a port-bearing envelope must be silent, got:\n{logs}"
         );
     }
 

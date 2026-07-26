@@ -132,7 +132,14 @@ const HOOKS = [
 
 // The ONE awaited DECISION hook among them (see the never-block note above).
 const DECISION_HOOK = "before_agent_run";
-const PASS = { outcome: "pass" };
+
+// A FRESH object per decision, never one shared module-level literal: the gateway
+// receives this value and any key it (or a future merge policy) stamps onto it
+// would otherwise persist into every LATER turn's decision — and an extra key is
+// rejected as malformed, i.e. fail-closed forever after one mutation.
+function pass() {
+  return { outcome: "pass" };
+}
 
 export default {
   id: "pixtuoid",
@@ -145,7 +152,7 @@ export default {
           forward(h, ev, ctx);
           // The decision hook passes EXPLICITLY; the observers are void hooks.
           // NEVER derived from the detached spawn.
-          return h === DECISION_HOOK ? PASS : undefined;
+          return h === DECISION_HOOK ? pass() : undefined;
         });
       } catch (_) {
         /* unknown hook name on this OpenClaw version — skip, never throw */

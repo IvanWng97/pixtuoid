@@ -50,7 +50,7 @@ pub struct PixelPassResult {
     pub pet_pos: Option<PetFrame>,
     /// One resolved frame per gateway mascot drawn this tick (for hover
     /// identity). EMPTY when no gateway is present; a Vec because a source can run
-    /// several concurrent instances (two OpenClaw gateways = two lobsters), each
+    /// ANY number of concurrent instances (N OpenClaw gateways = N lobsters), each
     /// independently hoverable.
     pub mascots: Vec<MascotFrame>,
     /// Active speech bubbles this frame, for the caller's widget pass.
@@ -731,7 +731,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
     let resolved_pet_pos = enqueue_pet(ctx, agents, &mut drawables);
-    let resolved_mascots = enqueue_gateway_mascot(ctx, &mut drawables);
+    let resolved_mascots = enqueue_gateway_mascots(ctx, &mut drawables);
 
     enqueue_characters(ctx, frame, &mut drawables);
 
@@ -950,18 +950,6 @@ fn enqueue_pet<'a>(
     })
 }
 
-/// Deterministic wander seed for ONE daemon instance — folded over the source AND
-/// its instance id, so two gateways of the SAME source (two OpenClaw ports) get
-/// different wander phases instead of two lobsters moving in lockstep, while a
-/// gateway restarting on its port keeps the same path (the id is stable).
-fn mascot_seed(source: &str, instance: &pixtuoid_core::state::DaemonInstanceId) -> u64 {
-    source
-        .bytes()
-        .chain(std::iter::once(b'@'))
-        .chain(instance.as_str().bytes())
-        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64))
-}
-
 /// Enqueue every gateway mascot present in `daemons` (only the ground floor
 /// carries the roster, so each mascot shows once). Presence-gated: an absent
 /// entry draws nothing, so the ~99% who don't run a gateway see a normal office.
@@ -969,9 +957,10 @@ fn mascot_seed(source: &str, instance: &pixtuoid_core::state::DaemonInstanceId) 
 /// panel-disconnected gateway has no live entry (the driver's presence
 /// connection-gate drops its hooks and the sweep walks any lingering entry out),
 /// so "entry present" tracks "connected + alive", not merely "a hook arrived".
-/// y-sorted at each mascot's south row. Returns ONE frame per drawn mascot (two
-/// concurrent gateways are two independently hoverable lobsters).
-fn enqueue_gateway_mascot<'a>(
+/// y-sorted at each mascot's south row. Returns ONE frame per drawn mascot — N
+/// concurrent gateways are N independently hoverable lobsters, with no arity
+/// assumption anywhere on this path (the roster is a map, not a pair).
+fn enqueue_gateway_mascots<'a>(
     ctx: &PaintCtx<'_>,
     drawables: &mut Vec<Drawable<'a>>,
 ) -> Vec<MascotFrame> {
@@ -980,7 +969,7 @@ fn enqueue_gateway_mascot<'a>(
         let Some(def) = gateway_mascot_def(source) else {
             continue;
         };
-        let seed = mascot_seed(source, instance);
+        let seed = crate::creatures::mascot_seed(source, instance);
         let Some((pos, anim_name, frame_idx)) =
             mascot_position(ctx.layout, presence, def.walk, def.rest, ctx.now, seed)
         else {
@@ -1007,9 +996,14 @@ fn enqueue_gateway_mascot<'a>(
             w: mascot_w,
             h: mascot_h,
             name: def.display_name,
-            // Only worth showing when there is something to disambiguate: with one
-            // gateway the port is noise, with two it is the whole point.
-            instance: (ctx.scene.daemons().count() > 1).then(|| instance.as_str().to_string()),
+            // Only worth showing when there is something to disambiguate, and that
+            // is per SOURCE: two gateways of ONE daemon need their ports, while a
+            // second daemon source with one instance each already reads apart by
+            // name and sprite. Re-counting per mascot is free — the roster holds one
+            // row per LIVE gateway (1–2 in practice), and this fn only runs at all
+            // when it is non-empty.
+            instance: (ctx.scene.daemons().filter(|(s, _, _)| *s == source).count() > 1)
+                .then(|| instance.as_str().to_string()),
             busy: presence.is_busy(),
             degraded: presence.display_state() == pixtuoid_core::state::DaemonState::Degraded,
             active_sessions: presence.active_sessions,

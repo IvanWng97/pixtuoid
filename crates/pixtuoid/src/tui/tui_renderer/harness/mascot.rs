@@ -48,7 +48,7 @@ fn gateway_scene_runs(
 
 /// The single gateway instance these harness scenes stage (OpenClaw's default
 /// port) — the mascot tests are about the CREATURE, not identity; the
-/// two-gateway render is pinned by `two_gateways_render_two_mascots`.
+/// two-gateway render is pinned by `two_gateways_render_two_independent_mascots`.
 fn harness_gateway() -> pixtuoid_core::state::DaemonInstanceId {
     pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty")
 }
@@ -100,15 +100,7 @@ const LOBSTER_REDS: [pixtuoid_core::sprite::Rgb; 4] = [
 ];
 
 fn lobster_px(buf: &RgbBuffer) -> usize {
-    let mut n = 0;
-    for y in 0..buf.height() {
-        for x in 0..buf.width() {
-            if LOBSTER_REDS.contains(&buf.get(x, y)) {
-                n += 1;
-            }
-        }
-    }
-    n
+    lobster_cells(buf).len()
 }
 
 /// A scene carrying one OpenClaw gateway presence per `ports` entry.
@@ -179,6 +171,72 @@ fn two_gateways_render_two_independent_mascots() {
         both.len(),
         a.len(),
         b.len()
+    );
+
+    // …and there is NO arity assumption on this path: the roster is a map, so N
+    // gateways draw N lobsters. Each added instance must cover MORE floor than the
+    // set without it — a per-instance seed that collapsed two onto one cell (or a
+    // painter that drew only the first/last) would flatten this out. Consecutive
+    // ports on purpose: that is what a real multi-gateway host runs, and their
+    // folded seeds differ by 1.
+    let mut prev = 0usize;
+    for n in 1..=4 {
+        let ports = &["18901", "18902", "18903", "18904"][..n];
+        let cells = cells_of(ports);
+        assert!(
+            cells.len() > prev,
+            "{n} gateways must cover more floor than {}: {} vs {prev}",
+            n - 1,
+            cells.len()
+        );
+        prev = cells.len();
+    }
+}
+
+#[test]
+fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
+    // The PAINTER owns this decision (`MascotFrame.instance`), and the only way to
+    // observe it is the hover text — so without this the gate could pass `Some`
+    // unconditionally and every single-gateway user's tooltip would silently grow a
+    // port. One gateway: the port is noise (the tooltip stays as it was before
+    // multi-gateway). Two: it is the whole point of hovering.
+    let (entered, seen) = (t0() - Duration::from_secs(20), t0());
+    let gateway_tooltips = |ports: &[&str]| -> Vec<String> {
+        let scene = gateway_scene_at(ports, entered, seen);
+        let mut r = build(160, 80, vec![]);
+        r.render(&scene, &pack(), t0()).unwrap();
+        let cells: Vec<_> = lobster_cells(r.buf()).into_iter().collect();
+        assert!(!cells.is_empty(), "the gateways must paint lobsters");
+        let mut out = Vec::new();
+        // Sample across the red cells rather than hovering every one: each lobster
+        // is dozens of cells, and the hitbox is 14px wide, so a stride still lands
+        // inside BOTH mascots without paying a full render per pixel.
+        for &(x, y) in cells.iter().step_by(5) {
+            r.set_mouse_pos(Some((x, y / 2)));
+            r.render(&scene, &pack(), t0()).unwrap();
+            let text = frame_text(r.frame_buffer());
+            if text.contains("gateway") {
+                out.push(text);
+            }
+        }
+        out
+    };
+
+    let lone = gateway_tooltips(&["18789"]);
+    assert!(!lone.is_empty(), "the lone gateway must be hoverable");
+    assert!(
+        lone.iter().all(|t| !t.contains("18789")),
+        "a gateway with no sibling must NOT be named by port: {lone:?}"
+    );
+
+    let pair = gateway_tooltips(&["18789", "19789"]);
+    assert!(
+        pair.iter().any(|t| t.contains("18789")),
+        "with a sibling, each tooltip must name WHICH gateway: {pair:?}"
+    );
+    assert!(
+        pair.iter().any(|t| t.contains("19789")),
+        "…including the second one: {pair:?}"
     );
 }
 
@@ -328,26 +386,12 @@ fn gateway_mascot_wanders_over_time() {
         let now = t0() + Duration::from_secs(k * 3);
         r.render(&scene, &pack(), now).unwrap();
         // Signature: the topmost-leftmost lobster pixel.
-        let buf = r.buf();
-        'scan: for y in 0..buf.height() {
-            for x in 0..buf.width() {
-                let reds = [
-                    pixtuoid_core::sprite::Rgb {
-                        r: 0xd2,
-                        g: 0x40,
-                        b: 0x2f,
-                    },
-                    pixtuoid_core::sprite::Rgb {
-                        r: 0xe8,
-                        g: 0x55,
-                        b: 0x40,
-                    },
-                ];
-                if reds.contains(&buf.get(x, y)) {
-                    tops.insert((x, y));
-                    break 'scan;
-                }
-            }
+        // Signature = the first cell in (y, x) scan order, off the SAME red set.
+        if let Some(top) = lobster_cells(r.buf())
+            .into_iter()
+            .min_by_key(|&(x, y)| (y, x))
+        {
+            tops.insert(top);
         }
     }
     assert!(
@@ -358,42 +402,17 @@ fn gateway_mascot_wanders_over_time() {
 }
 
 /// Bounding box (in PIXEL coords) of the lobster's carapace reds, or `None` if
-/// the lobster isn't on screen. Reuses the `lobster_px` red set.
+/// the lobster isn't on screen. Reads the SAME [`LOBSTER_REDS`] set as
+/// `lobster_cells`/`lobster_px`, so the three can't drift.
 fn lobster_red_bbox(buf: &RgbBuffer) -> Option<(u16, u16, u16, u16)> {
-    let reds = [
-        pixtuoid_core::sprite::Rgb {
-            r: 0xd2,
-            g: 0x40,
-            b: 0x2f,
-        },
-        pixtuoid_core::sprite::Rgb {
-            r: 0xe8,
-            g: 0x55,
-            b: 0x40,
-        },
-        pixtuoid_core::sprite::Rgb {
-            r: 0xc8,
-            g: 0x38,
-            b: 0x28,
-        },
-        pixtuoid_core::sprite::Rgb {
-            r: 0x9e,
-            g: 0x2a,
-            b: 0x20,
-        },
-    ];
     let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0u16, 0u16);
     let mut any = false;
-    for y in 0..buf.height() {
-        for x in 0..buf.width() {
-            if reds.contains(&buf.get(x, y)) {
-                any = true;
-                x0 = x0.min(x);
-                y0 = y0.min(y);
-                x1 = x1.max(x);
-                y1 = y1.max(y);
-            }
-        }
+    for (x, y) in lobster_cells(buf) {
+        any = true;
+        x0 = x0.min(x);
+        y0 = y0.min(y);
+        x1 = x1.max(x);
+        y1 = y1.max(y);
     }
     any.then_some((x0, y0, x1, y1))
 }
@@ -433,3 +452,4 @@ fn gateway_mascot_tooltip_on_hover() {
         "hovering the lobster shows the gateway mascot tooltip"
     );
 }
+// appended as a temporary harness test

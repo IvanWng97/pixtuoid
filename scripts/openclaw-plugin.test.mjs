@@ -59,9 +59,16 @@ async function renderPlugin(t, { shim = "recorder" } = {}) {
   );
 
   const outFile = join(root, "payloads.ndjson");
+  // The recorder also logs its own argv, so the spawn CONTRACT (the `--source`
+  // attribution flag the shim needs) is pinned at runtime and not just by the Rust
+  // side's grep of the template text — which cannot see the argv ARRAY or its value.
+  const argvFile = join(root, "argv.txt");
   const hookPath = join(root, shim === "missing" ? "absent-hook" : "recorder-hook");
   if (shim === "recorder") {
-    await writeFile(hookPath, `#!/bin/sh\ncat >> ${JSON.stringify(outFile)}\n`);
+    await writeFile(
+      hookPath,
+      `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(argvFile)}\ncat >> ${JSON.stringify(outFile)}\n`,
+    );
     await chmod(hookPath, 0o755);
   }
 
@@ -69,7 +76,7 @@ async function renderPlugin(t, { shim = "recorder" } = {}) {
   await writeFile(entry, source.replace(HOOK_PLACEHOLDER, JSON.stringify(hookPath)));
   // Cache-bust: each case needs the module's own `gatewayPort` state fresh.
   const module = await import(`${pathToFileURL(entry)}?v=${cacheBust()}`);
-  return { hookPath, module, outFile, plugin: module.default };
+  return { argvFile, hookPath, module, outFile, plugin: module.default };
 }
 
 let bust = 0;
@@ -266,12 +273,17 @@ test("an out-of-range observed port is refused, keeping the resolved one", { ski
   }
 });
 
-test("the shim is spawned detached with the source flag", { skip: !POSIX }, async (t) => {
-  // The argv the shim needs to stamp `_pixtuoid_source` (its attribution channel).
-  const { module, outFile, plugin } = await renderPlugin(t);
+test("the shim is spawned with the source-attribution flag", { skip: !POSIX }, async (t) => {
+  // `--source openclaw` is how the shim stamps `_pixtuoid_source` — its ONLY
+  // attribution channel, and the reason a payload is demuxed to the daemon lane at
+  // all. The Rust side can only grep the template for the literal, so the VALUE is
+  // pinned here, against the argv the spawned process actually received.
+  const { argvFile, module, outFile, plugin } = await renderPlugin(t);
   assert.equal(module.default.id, "pixtuoid", "the export id must match the manifest id");
   register(plugin).get("gateway_stop")({ reason: "shutdown" }, {});
   const [stop] = await recorded(outFile, 1);
   assert.equal(stop.type, "gateway_stop");
   assert.equal(stop.reason, "shutdown");
+  const argv = (await readFile(argvFile, "utf8")).trim().split("\n");
+  assert.deepEqual(argv, ["--source openclaw"], "the shim must be told which source it speaks for");
 });

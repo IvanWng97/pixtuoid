@@ -50,7 +50,13 @@ pub enum ShimRef {
 /// stats (existence alone can't catch a shim that MOVED — #332's silent-dead
 /// class with a green doctor).
 pub(crate) fn baked_hook_path(content: &str) -> Option<PathBuf> {
-    let line = content.lines().find(|l| l.contains("const HOOK_PATH"))?;
+    // Anchor on the DECLARATION, not a mention: a comment line that merely names
+    // `const HOOK_PATH` (both templates document the baking above the binding)
+    // would otherwise be picked first, yield no JSON literal, and downgrade the
+    // #332 moved-shim HARD check to a soft "could not read" note.
+    let line = content
+        .lines()
+        .find(|l| l.trim_start().starts_with(BAKED_HOOK_MARKER))?;
     let literal = line.split_once('=')?.1.trim().trim_end_matches(';').trim();
     let path: String = serde_json::from_str(literal).ok()?;
     (!path.is_empty()).then(|| PathBuf::from(path))
@@ -306,6 +312,28 @@ mod tests {
         // Empty + plain unquoted pass through verbatim.
         assert_eq!(posix_unquote_if_quoted(""), "");
         assert_eq!(posix_unquote_if_quoted("/plain/path"), "/plain/path");
+    }
+
+    #[test]
+    fn baked_hook_path_anchors_on_the_declaration_not_a_mention() {
+        // A comment naming the marker must not shadow the real binding: both bundled
+        // templates document the baking right above it, and a None here silently
+        // downgrades the HARD moved-shim check (#332) to a soft "could not read".
+        assert_eq!(
+            baked_hook_path(
+                "// HOOK_PATH is baked in — see `const HOOK_PATH` below\n\
+                 const HOOK_PATH = \"/opt/bin/pixtuoid-hook\";\n"
+            ),
+            Some(PathBuf::from("/opt/bin/pixtuoid-hook"))
+        );
+        // opencode's TYPED, semicolon-less form still parses.
+        assert_eq!(
+            baked_hook_path("const HOOK_PATH: string = \"/opt/hook\"\n"),
+            Some(PathBuf::from("/opt/hook"))
+        );
+        // An unrendered placeholder / empty bake is not a path.
+        assert_eq!(baked_hook_path("const HOOK_PATH = \"\";\n"), None);
+        assert_eq!(baked_hook_path("// no binding at all\n"), None);
     }
 
     #[test]

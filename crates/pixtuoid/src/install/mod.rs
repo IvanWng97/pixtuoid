@@ -163,14 +163,8 @@ pub(crate) fn verify_target(
                         ));
                         continue;
                     }
-                    // EXISTENCE is not enough for the artifact that BAKES the shim
-                    // path: pixtuoid-hook moving (a cargo→brew reinstall) leaves the
-                    // plugin loading fine while every forward silently fails — the
-                    // #332 silent-dead class with a GREEN doctor. The config-level
-                    // `verify_schema` can't see it (the path lives in the artifact,
-                    // not the config), so read it back here and stat it exactly like
-                    // an embedded hook command's. The INTENDED render selects the
-                    // artifact, so the manifest/package files are skipped.
+                    // Existence misses a shim that MOVED (#332 — a green doctor over a
+                    // plugin whose every forward fails), so stat the baked path too.
                     if !intended.contains(verify::BAKED_HOOK_MARKER) {
                         continue;
                     }

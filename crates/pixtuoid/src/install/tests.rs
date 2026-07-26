@@ -1166,3 +1166,30 @@ fn verify_target_flags_codewhale_disabled() {
         v.issues
     );
 }
+
+#[test]
+fn json_value_equality_ignores_key_order_under_preserve_order() {
+    // `preserve_order` swaps serde_json's `Map` from BTreeMap to IndexMap so a
+    // merge re-emits the user's own key order instead of alphabetising their file.
+    // The load-bearing consequence to pin: `Value: PartialEq` must stay
+    // order-INDEPENDENT, because every target's `changed` flag is a SEMANTIC diff
+    // (`merged != doc`). Were equality to become order-SENSITIVE, a config whose
+    // keys we merely re-ordered would report `changed` — rewriting the file, taking
+    // a backup, and flipping `has_hooks` on every single connect.
+    let a: serde_json::Value = serde_json::from_str(r#"{"b":1,"a":{"y":2,"x":3}}"#).unwrap();
+    let b: serde_json::Value = serde_json::from_str(r#"{"a":{"x":3,"y":2},"b":1}"#).unwrap();
+    assert_eq!(a, b, "object equality must not depend on key order");
+    // …while SERIALIZATION does preserve each document's own order (the feature's
+    // whole point — the default BTreeMap backing would emit both as `{"a":…,"b":…}`).
+    assert_eq!(
+        serde_json::to_string(&a).unwrap(),
+        r#"{"b":1,"a":{"y":2,"x":3}}"#,
+        "the user's key order must survive the round-trip"
+    );
+    // Array order stays significant (it is data, not layout).
+    assert_ne!(
+        serde_json::json!([1, 2]),
+        serde_json::json!([2, 1]),
+        "array order is data and must still compare unequal"
+    );
+}

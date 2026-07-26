@@ -48,9 +48,10 @@ fn daemons_projects_onto_the_ground_floor_only() {
     // duplicate him on every floor).
     use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
     let mut scene = SceneState::uniform(16);
-    scene.floor_capacities[1] = 16; // a second floor exists
-                                    // TWO gateways of one source, so the projection is also pinned to carry the
-                                    // WHOLE roster (an `Option`-shaped projection would drop the second lobster).
+    // A second floor exists.
+    scene.floor_capacities[1] = 16;
+    // TWO gateways of one source, so the projection is also pinned to carry the
+    // WHOLE roster (an `Option`-shaped projection would drop the second lobster).
     for port in ["18789", "19789"] {
         scene.insert_daemon(
             pixtuoid_core::source::openclaw::SOURCE_NAME,

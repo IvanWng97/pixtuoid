@@ -54,9 +54,10 @@ A **`Source`** is one of two classes (`source/registry.rs`'s `SourceKind`):
   Cursor, …) that produces `AgentEvent`s → `SceneState::agents` → a **desk
   sprite**; or
 - a **Daemon** — a long-running gateway with no transcript and no desk that
-  produces `DaemonPresenceUpdate`s → `SceneState::daemons` → a single
-  **presence-gated wandering mascot** whose *motion* encodes the daemon's
-  liveness.
+  produces `DaemonPresenceUpdate`s → `SceneState::daemons` → one
+  **presence-gated wandering mascot** per running INSTANCE (OpenClaw supports
+  several isolated gateways per host, keyed on the resolved port), each mascot's
+  *motion* encoding that instance's liveness.
 
 The OpenClaw gateway is the first daemon — it ambles the office floor as a
 lobster (idle), shuttles when a turn is in flight (busy), turns a sickly red
@@ -143,13 +144,16 @@ flowchart TB
 **`HookRouter`** at the shared socket reads each payload's source: an agent's
 goes to `decode_hook_payload`; a daemon's (`is_daemon()`) is decoded by the
 source's own `presence_decoder` into `DaemonPresenceUpdate`s and pushed onto a
-**sibling channel** as `PresenceMsg { source, delta }` (invariant #2 — NOT the
-one `AgentEvent` channel). The reducer task merges those via **`apply_presence`**
-— which is `AgentId`-free and never touches `Reducer::apply` — into
-`SceneState::daemons`. The render pass then draws one mascot per live daemon,
-its motion encoding the `DaemonState` (`Idle` / `Busy` / `Degraded` / `Down`).
+**sibling channel** as `PresenceMsg { key, delta }` — where the key is a
+`DaemonInstanceKey { source, instance }`, so N concurrent instances of one daemon
+route to distinct entries (invariant #2 — NOT the one `AgentEvent` channel). The
+reducer task merges those via **`apply_presence`** — which is `AgentId`-free and
+never touches `Reducer::apply` — into `SceneState::daemons`. The render pass then
+draws one mascot per live daemon INSTANCE, its motion encoding that instance's
+`DaemonState` (`Idle` / `Busy` / `Degraded` / `Down`).
 A daemon has no per-session pid, so *silence* is its abrupt-down signal (a TTL
-sweep), while the gateway's own process pid is armed for instant `ExitWatch`.
+sweep, decayed per instance), while each gateway's own process pid is armed for
+instant `ExitWatch`.
 
 ## Seams & invariants
 
@@ -164,8 +168,9 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
   `transcript: None` and supply a custom hook decoder, and each ships an
   install `Target` instead (bound via the in-TUI Sources panel).
 - **A `Source` is an `Agent` or a `Daemon`** (`SourceKind`). A daemon (the
-  OpenClaw gateway is the first) earns a presence-gated wandering mascot, not a
-  desk: its deltas ride a **sibling channel** (`PresenceMsg { source, delta }`,
+  OpenClaw gateway is the first) earns a presence-gated wandering mascot per
+  running instance, not a desk: its deltas ride a **sibling channel**
+  (`PresenceMsg { key: DaemonInstanceKey, delta }`,
   invariant #2 — NOT the one `AgentEvent` channel) and merge via `apply_presence`,
   never `Reducer::apply` (which is `AgentId`-pure). The `HookRouter` demux and
   the daemon-sweep loop both dispatch on this enum, so a **second daemon is one

@@ -5,7 +5,7 @@
 # bundled `claude-cli` backend coding session renders as a full-fidelity `cc·`
 # desk sprite. One headless scene, two sources, two sprites:
 #
-#   agents=[… cc·<workspace>@N …] daemons=[openclaw:busy]
+#   agents=[… cc·<workspace>@N …] daemons=[openclaw@18789:busy]
 #
 # Flow:
 #   1. headless pixtuoid binds an ISOLATED socket + watches ~/.claude/projects
@@ -15,7 +15,12 @@
 #      before_agent_run -> the lobster busy AND a real `claude` writes ~/.claude/projects
 #      -> a NEW `cc·` sprite (label = the openclaw workspace cwd basename)
 #   4. assert a backend cc· label (absent from the pre-gateway baseline) AND
-#      openclaw:busy were both observed; then tear the gateway down
+#      the gateway instance busy were both observed; then tear the gateway down
+#
+# The daemon rows are keyed `openclaw@<gatewayPort>` (the mascot's instance
+# identity), so every assertion below matches the `openclaw@` PREFIX rather than a
+# literal port — this script starts the gateway from the user's own config, whose
+# resolved port need not be the default.
 #
 # ⚠ REAL side effects — UNLIKE the synthetic shim-driven `openclaw-live-e2e.sh`,
 # this is NOT hermetic and NOT a CI test. It starts YOUR gateway (the iMessage
@@ -116,7 +121,7 @@ GWPID=$!
 lobster_up=0
 for _ in $(seq 1 120); do
     case "$(grep 'daemons=' "$PIXLOG" | tail -1)" in
-    *"openclaw:"*)
+    *"openclaw@"*)
         lobster_up=1
         break
         ;;
@@ -138,16 +143,17 @@ echo "[3] openclaw agent --message (routes to the claude-cli backend)"
     echo "AGENT_TURN_EXIT=$?" >>"$AGENTLOG"
 ) &
 
-# Watch for BOTH the backend cc· sprite (the workspace label) AND openclaw:busy —
-# ideally in the SAME line (the literal both-sources coexistence the demo proves).
+# Watch for BOTH the backend cc· sprite (the workspace label) AND the gateway
+# instance busy — ideally in the SAME line (the literal both-sources coexistence
+# the demo proves).
 saw_backend=0
 saw_busy=0
 saw_both=0
 for _ in $(seq 1 480); do
     line="$(grep 'agents=' "$PIXLOG" | tail -1)"
     case "$line" in *"$WS_LABEL"*) saw_backend=1 ;; esac
-    case "$line" in *"openclaw:busy"*) saw_busy=1 ;; esac
-    case "$line" in *"$WS_LABEL"*"openclaw:busy"*) saw_both=1 ;; esac
+    case "$line" in *"openclaw@"*":busy"*) saw_busy=1 ;; esac
+    case "$line" in *"$WS_LABEL"*"openclaw@"*":busy"*) saw_both=1 ;; esac
     [ "$saw_both" = 1 ] && break
     # Turn done + both seen (possibly across frames) is enough — the backend can
     # first-sight a beat after before_agent_run, so don't require same-line.
@@ -156,7 +162,7 @@ for _ in $(seq 1 480); do
 done
 
 echo "--- combined timeline (backend cc· + the gateway daemon) ---"
-grep -F "$WS_LABEL" "$PIXLOG" | grep -E 'daemons=\[openclaw:(busy|idle)\]' |
+grep -F "$WS_LABEL" "$PIXLOG" | grep -E 'daemons=\[openclaw@[0-9]+:(busy|idle)\]' |
     sed 's/:active([^)]*)//g' | tail -4 | sed 's/^/  /'
 echo "--- backend agent reply ---"
 sed 's/^/  /' "$AGENTLOG" | tail -4
@@ -169,12 +175,12 @@ else
     FAILED=1
 fi
 if [ "$saw_busy" = 1 ]; then
-    echo "PASS  the lobster went busy during the backend run (openclaw:busy)"
+    echo "PASS  the lobster went busy during the backend run (openclaw@<port>:busy)"
 else
-    echo "FAIL  never observed openclaw:busy" >&2
+    echo "FAIL  never observed openclaw@<port>:busy" >&2
     FAILED=1
 fi
-[ "$saw_both" = 1 ] && echo "PASS  both rendered in ONE frame ($WS_LABEL + openclaw:busy)"
+[ "$saw_both" = 1 ] && echo "PASS  both rendered in ONE frame ($WS_LABEL + openclaw@<port>:busy)"
 
 if [ "$FAILED" = 0 ]; then
     echo "openclaw-cc-backend-e2e: PASS — the lobster (gateway) + cc· (claude-cli backend) coexist live"

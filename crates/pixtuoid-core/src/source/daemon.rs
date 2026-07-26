@@ -217,7 +217,8 @@ impl DaemonPresence {
     }
 }
 
-/// Merge one presence delta into `scene.daemons[source]`. Called by the reducer
+/// Merge one presence delta into `key`'s `(source, instance)` entry of
+/// `scene.daemons` — never a source-wide one. Called by the reducer
 /// task off the SIBLING channel — NEVER through `Reducer::apply` (which is
 /// `AgentId`-pure). A proof-of-life update refreshes `last_seen` and "any event
 /// implies UP" resurrects a wrongly-DOWN daemon; `PidExited` is the exception — a
@@ -254,9 +255,9 @@ pub fn apply_presence(
                 current_pid: None,
             })
     };
-    // A transition out of Down (or a fresh GatewayUp) re-anchors the enter
-    // animation — the mascot scuttles back in from the elevator. Idle↔Busy
-    // does NOT reset it, so the steady wander clock stays continuous.
+    // Only a transition OUT of Down re-anchors the enter animation below (the
+    // mascot scuttles back in from the elevator); Idle↔Busy — and a `GatewayUp` for
+    // a daemon already UP — leave it, so the steady wander clock stays continuous.
     let was_down = p.liveness == DaemonLiveness::Down;
     p.last_seen = now;
     match update {
@@ -350,7 +351,9 @@ pub fn apply_presence(
 /// self-heals even while the gateway keeps serving other runs — never a latch),
 /// any live state → DOWN after `ttl.presence_ttl_ms` of total silence (SIGTERM),
 /// and a `Down` entry is REMOVED after `ttl.down_remove_ms` (back to absent, so
-/// it doesn't leak forever). Source-scoped so the reducer iterates
+/// it doesn't leak forever). Expiring a run lease never clears `degraded` (a
+/// separate axis — only a real `RunEnded`/`RunStarted`/`GatewayUp` heals that).
+/// Source-scoped so the reducer iterates
 /// `registry::daemon_sources()` and each daemon decays on its own profile.
 pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl, now: SystemTime) {
     let mut doomed: Vec<DaemonInstanceId> = Vec::new();
@@ -373,16 +376,9 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
             // `apply_presence`'s top-level stamp instead.
             p.last_seen = now;
         } else {
-            // Expire each stranded run on ITS OWN clock, not the daemon-wide
-            // `last_seen`: that stamp is refreshed by ANY event, so on a gateway
-            // that keeps serving other traffic a run whose `agent_end` was dropped
-            // would never age out and the mascot would latch Busy for the
-            // gateway's whole life (the "self-healing, never a latch" contract only
-            // held for a SILENT gateway). Busy → Idle then falls out of the
-            // projection once the last lease lapses — there is no state field to
-            // flip. Expiring a lease never clears `degraded` (a separate axis), so
-            // a broken gateway is still healed only by a real
-            // RunEnded/RunStarted/GatewayUp.
+            // Per-RUN clocks, not the daemon-wide `last_seen` (which ANY event
+            // refreshes): otherwise a gateway that keeps serving other traffic
+            // latches Busy forever on one dropped `agent_end`.
             p.in_flight_runs.retain(|_, started| {
                 now.duration_since(*started)
                     .map(|d| (d.as_millis() as u64) < ttl.busy_decay_ms)
@@ -1063,11 +1059,41 @@ mod tests {
     }
 
     #[test]
+    fn a_clock_regression_keeps_an_in_flight_lease() {
+        // `duration_since` FAILS when the run's stamp is in the future (a wall-clock
+        // step back — NTP, a suspend/resume). The lease is then KEPT
+        // (`unwrap_or(true)`, the repo-wide "a regression is not evidence of age"
+        // policy): with `false` a single backwards step would expire EVERY run at
+        // once and drop a live busy gateway to Idle.
+        let ttl = PresenceTtl::DEFAULT;
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "r".into(),
+                },
+                ms(10_000),
+            );
+            assert_eq!(st(&s, src), DaemonState::Busy);
+            // Sweep with `now` BEFORE the run's own stamp.
+            sweep_presence_ttl(&mut s, src, ttl, ms(0));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Busy,
+                "a backwards clock must not expire a live run"
+            );
+        }
+    }
+
+    #[test]
     fn sweep_does_not_busy_decay_a_degraded_daemon_but_ttl_takes_it_down() {
-        // #317: a Degraded gateway is NOT a stale Busy — the busy_decay arm only
-        // matches Busy, so a broken gateway can't silently "heal" to Idle on a
-        // dropped event (only a real RunEnded/RunStarted/GatewayUp heals). It does
-        // still go Down on the presence_ttl silence (covers a SIGTERM'd broken gateway).
+        // #317: a broken gateway must not silently "heal" on a dropped event.
+        // `degraded` is its OWN liveness axis, so expiring run leases (the only
+        // thing the decay arm does since #460 — Busy is projected, not stored)
+        // cannot clear it; only a real RunEnded/RunStarted/GatewayUp does. It does
+        // still go Down on the presence_ttl silence (a SIGTERM'd broken gateway).
         let ttl = PresenceTtl::DEFAULT;
         for src in SOURCES {
             let mut s = SceneState::default();
@@ -1419,6 +1445,14 @@ mod tests {
         assert!(
             s.daemon(src, &inst(A)).is_none() && st_at(&s, src, A).is_none(),
             "no husk source entry survives its last instance"
+        );
+        // Every accessor FLATTENS, so an empty source level is invisible through
+        // them — the serialized shape is the only place the prune is observable, and
+        // without this assertion disabling it passes the whole suite.
+        assert_eq!(
+            serde_json::to_string(&s.daemons).expect("the roster serializes"),
+            "{}",
+            "the emptied source level must be GONE, not an empty husk map"
         );
         apply_at(
             &mut s,

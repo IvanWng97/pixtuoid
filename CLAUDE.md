@@ -94,6 +94,13 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      idle/busy/degraded/down via the headless `daemons=[openclaw@<port>:<state>]` line,
                      incl. #317 degraded, #318 mid-attach pid-adopt→kill→down, and TWO gateways
                      (two ports, two owned pids) coexisting where killing one downs only its own),
+                     openclaw-multi-gateway-e2e.sh (N REAL `openclaw gateway run` processes, each in
+                     its own throwaway OPENCLAW_HOME on its own port, feeding ONE headless pixtuoid →
+                     asserts one `openclaw@<port>` row per gateway + instance-local death, AND that
+                     OpenClaw's OWN `plugins list` reports our plugin `enabled` (the keys we write are
+                     the keys it reads). Zero model calls / zero account footprint — the middle rung
+                     between the hermetic script above and the billed one below; needs a real
+                     `openclaw` on PATH, so NOT a CI test),
                      openclaw-cc-backend-e2e.sh (NON-hermetic: starts a REAL `openclaw gateway run`
                      + one `openclaw agent` turn on the claude-cli backend → proves the gateway
                      the lobster AND its backend `cc·<workspace>` coding sprite coexist live; real
@@ -339,6 +346,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 - `AgentSlot.state_started_at` is `SystemTime` (process-local; the whole `SceneState` tree is `Serialize`/`Deserialize` for debug dumps + the snapshot golden, NOT a stable wire contract — the v2-daemon consumer is closed out-of-scope, #279/#280/#281); `ActivityState::Active` ≠ "tool executing" (debounced via `ACTIVE_GRACE_WINDOW`).
 - A daemon's runtime identity is its SOURCE's wire fact — OpenClaw's resolved gateway PORT, never the profile/pid/session; the process incarnation is separate state, and no pid start-marker guard is needed there.
 - A `gatewayPort`-less OpenClaw envelope (a stale installed plugin) falls back to ONE legacy instance + a drift breadcrumb, rather than vanishing the mascot; a present-but-invalid port is rejected.
+- `GatewayDown` (a first-hand wire report) may create an absent instance; the locally-synthesized `PidExited` never may — the creation-polarity asymmetry is deliberate.
 
 **`pixtuoid-scene` engine + `pixtuoid` painters `tui`/`floating`** ([scene engine crate](crates/pixtuoid-scene/CLAUDE.md), [binary](crates/pixtuoid/CLAUDE.md), [tui painter](crates/pixtuoid/src/tui/CLAUDE.md)). The backend-agnostic render+sim engine is its OWN crate `pixtuoid-scene` (`render_to_rgb_buffer`, layout, pose/motion, pathfind, theme model, pets, chitchat, …), sitting between `pixtuoid-core` and the binary; `tui` and `floating` (in the `pixtuoid` binary) are sibling thin painters over it.
 - `draw_scene` is called through `TuiRenderer` (owns cross-frame state, returns the cached `Layout`) — it's the terminal flush in the binary's `tui::renderer`, delegating the world render to `pixtuoid_scene::pixel_painter::render_to_rgb_buffer`.

@@ -79,10 +79,10 @@ echo "pixtuoid headless up (pid $PIXPID), HookRouter owns $SOCK"
 PORT_A=18789
 PORT_B=19789
 
-# Every envelope carries the gatewayPort the real plugin stamps — the decoder
-# REJECTS one without a usable port only when it is present-but-invalid, but a
-# port-less envelope would fall back to the single legacy instance and the
-# multi-gateway steps below would be vacuous.
+# Every envelope carries the gatewayPort the real plugin stamps. A port-LESS one
+# is not rejected — it falls back to the single legacy instance (the stale-plugin
+# compatibility arm), which would make the multi-gateway steps below vacuous. Only
+# a PRESENT-but-invalid port rejects the whole envelope.
 send() { printf '%s\n' "$1" | PIXTUOID_SOCKET="$SOCK" "$HOOK" --source openclaw; }
 send_a() { send "$(printf '%s' "$1" | sed "s/}\$/,\"gatewayPort\":$PORT_A}/")"; }
 
@@ -223,8 +223,11 @@ kill "$APID" 2>/dev/null
 expect_line "daemons=[openclaw@$PORT_A:down, openclaw@$PORT_B:idle]" exit-is-instance-local
 
 echo "[16] kill B ($BPID) -> B goes down too (its OWN receipt)"
+# Assert only B's row: A has been Down since [15], so a full-line match would also
+# be asserting that A's row has not yet been swept — coupling this step to the
+# down-removal TTL rather than to B's own exit receipt.
 kill "$BPID" 2>/dev/null
-expect_line "daemons=[openclaw@$PORT_A:down, openclaw@$PORT_B:down]" both-down
+expect_line "openclaw@$PORT_B:down" both-down
 
 echo "--- the lobster timeline (headless) ---"
 grep 'daemons=' "$OUT" | sed 's/^/  /'
