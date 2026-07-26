@@ -124,6 +124,14 @@ test("the decision hook passes EXPLICITLY and the observers are void", async (t)
   const decision = handlers.get("before_agent_run")({ runId: "r" }, {});
   assert.deepEqual(decision, { outcome: "pass" });
   assert.deepEqual(Object.keys(decision), ["outcome"]);
+  // A FRESH object per decision, not one shared module-level literal. The gateway
+  // receives this value, so under a shared literal any key a consumer stamps onto
+  // it persists into EVERY later turn — and an extra key is exactly what fails
+  // closed. Mutating turn 1's result and re-checking turn 2 is what distinguishes
+  // the two implementations; the shape assertions above only ever see turn 1.
+  decision.reason = "a consumer stamped this";
+  const next = handlers.get("before_agent_run")({ runId: "r2" }, {});
+  assert.deepEqual(Object.keys(next), ["outcome"], "each decision must be a fresh object");
   for (const hook of EXPECTED_HOOKS.filter((h) => h !== "before_agent_run")) {
     assert.equal(handlers.get(hook)({}, {}), undefined, `${hook} must be a void observer`);
   }

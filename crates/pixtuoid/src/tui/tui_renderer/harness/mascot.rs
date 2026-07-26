@@ -238,6 +238,43 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
         pair.iter().any(|t| t.contains("19789")),
         "…including the second one: {pair:?}"
     );
+
+    // "Has a sibling" is per SOURCE, not roster-wide. A second daemon SOURCE draws
+    // no mascot of its own (`gateway_mascot_def` resolves only openclaw today) yet
+    // still occupies a roster row, so a roster-wide count would make openclaw's LONE
+    // gateway start naming its port the day a second daemon registers — the exact
+    // regression the halves above pin, arriving by a different route. Unreachable
+    // from the registry today, which is precisely why it needs staging by hand.
+    let (entered, seen) = (t0() - Duration::from_secs(20), t0());
+    let mut mixed = gateway_scene_at(&["18789"], entered, seen);
+    mixed.insert_daemon(
+        "daemon2",
+        pixtuoid_core::state::DaemonInstanceId::new("1").expect("non-empty"),
+        pixtuoid_core::state::DaemonPresence {
+            liveness: pixtuoid_core::state::DaemonLiveness::UP,
+            active_sessions: 0,
+            last_seen: seen,
+            entered_at: entered,
+            in_flight_runs: Default::default(),
+            current_pid: Some(1),
+        },
+    );
+    let mut r = build(160, 80, vec![]);
+    r.render(&mixed, &pack(), t0()).unwrap();
+    let cells: Vec<_> = lobster_cells(r.buf()).into_iter().collect();
+    assert!(!cells.is_empty(), "openclaw still paints its lobster");
+    for &(x, y) in cells.iter().step_by(5) {
+        r.set_mouse_pos(Some((x, y / 2)));
+        r.render(&mixed, &pack(), t0()).unwrap();
+        let text = frame_text(r.frame_buffer());
+        if text.contains("gateway") {
+            assert!(
+                !text.contains("18789"),
+                "a foreign daemon SOURCE must not make openclaw's lone gateway \
+                 name its port: {text}"
+            );
+        }
+    }
 }
 
 #[test]

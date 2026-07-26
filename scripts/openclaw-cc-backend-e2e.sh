@@ -145,7 +145,10 @@ echo "[3] openclaw agent --message (routes to the claude-cli backend)"
 
 # Watch for BOTH the backend cc· sprite (the workspace label) AND the gateway
 # instance busy — ideally in the SAME line (the literal both-sources coexistence
-# the demo proves).
+# the demo proves). The two-wildcard globs below would also match a `:busy` that
+# belongs to a DIFFERENT daemon row (`openclaw@N:idle, otherd@1:busy`); harmless
+# because openclaw is the only daemon source, and an agent row's `:busy` can't
+# reach them either since `agents=` always precedes `daemons=` on the line.
 saw_backend=0
 saw_busy=0
 saw_both=0

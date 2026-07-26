@@ -451,6 +451,28 @@ fuzz source dir:
 openclaw-e2e:
     scripts/openclaw-live-e2e.sh
 
+# N REAL `openclaw gateway run` processes, each in its own throwaway
+# OPENCLAW_HOME on its own port, feeding one headless pixtuoid: one
+# `openclaw@<port>` row per gateway, instance-local death, and OpenClaw's OWN
+# `plugins list` confirming our plugin loads. Zero model calls, zero account
+# footprint, but it needs a real `openclaw` on PATH — same on-demand local tier
+# as `openclaw-e2e`. Ports are forwarded (default: four consecutive ones).
+[group('rust')]
+[doc('Multi-gateway live-e2e against the REAL openclaw CLI (needs `just build --release`)')]
+openclaw-multi-e2e *ports:
+    scripts/openclaw-multi-gateway-e2e.sh {{ ports }}
+
+# The EXPENSIVE one: a real `openclaw gateway run` PLUS one real model turn on
+# the claude-cli backend, proving the gateway's lobster and its backend's `cc·`
+# desk sprite coexist live. Real account footprint (your gateway's channels
+# connect) and it bills a turn — recipe exists so the script has an invocation
+# site and cannot silently rot on a summary-format change (it shipped broken
+# once for exactly that reason), NOT because it should be run casually.
+[group('rust')]
+[doc('OpenClaw + claude-cli backend live-e2e — REAL gateway AND one BILLED model turn')]
+openclaw-backend-e2e:
+    scripts/openclaw-cc-backend-e2e.sh
+
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
 #   just build --release                      # release

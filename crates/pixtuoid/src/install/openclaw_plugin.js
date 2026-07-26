@@ -136,7 +136,14 @@ const DECISION_HOOK = "before_agent_run";
 // A FRESH object per decision, never one shared module-level literal: the gateway
 // receives this value and any key it (or a future merge policy) stamps onto it
 // would otherwise persist into every LATER turn's decision — and an extra key is
-// rejected as malformed, i.e. fail-closed forever after one mutation.
+// rejected as malformed, i.e. fail-closed forever after one mutation. Whether
+// upstream mutates it today is NOT established, so this is cheap insurance (one
+// object per turn), not a fix for an observed bug.
+// Deliberately NOT `Object.freeze` on a shared literal, the tempting
+// zero-allocation form: this module is an ES module and therefore strict-mode, so
+// a consumer's stamp would THROW inside UPSTREAM's code — outside the try/catch
+// that wraps only our own handler, i.e. exactly the never-block rule we cannot
+// break. The factory sidesteps the question entirely.
 function pass() {
   return { outcome: "pass" };
 }
