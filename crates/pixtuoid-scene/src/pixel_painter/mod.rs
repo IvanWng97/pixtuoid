@@ -981,6 +981,7 @@ fn enqueue_gateway_mascots<'a>(
             .and_then(|a| a.frames.first())
             .map_or((14, 12), |f| (f.width(), f.height()));
         let run_count = presence.in_flight_runs.len() as u32;
+        let degraded = presence.display_state() == pixtuoid_core::state::DaemonState::Degraded;
         drawables.push(Drawable {
             anchor_y: z_sort_row(Anchor::Center, pos, mascot_h),
             kind: DrawableKind::GatewayMascot {
@@ -988,7 +989,7 @@ fn enqueue_gateway_mascots<'a>(
                 anim_name,
                 frame_idx,
                 run_count,
-                degraded: presence.display_state() == pixtuoid_core::state::DaemonState::Degraded,
+                degraded,
             },
         });
         frames.push(MascotFrame {

@@ -544,6 +544,24 @@ pub(crate) fn mascot_position(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_registered_daemon_source_has_a_mascot_def() {
+        // `gateway_mascot_def` is the ONE per-source daemon table with neither a
+        // compile error nor a lockstep test behind it: a second `SourceKind::Daemon`
+        // row would decode, key, sweep and roll up correctly and render NO mascot at
+        // all — the daemon's only visible output gone, with every test and `doctor`
+        // green. This is the twin of the registry lockstep guards the badge hues and
+        // the wire matrix already carry ("registration is not coverage").
+        use pixtuoid_core::source::registry::REGISTRY;
+        for d in REGISTRY.iter().filter(|d| d.is_daemon()) {
+            assert!(
+                super::gateway_mascot_def(d.name).is_some(),
+                "daemon source {:?} has no GatewayMascotDef — it would render no mascot",
+                d.name
+            );
+        }
+    }
+
     use super::*;
 
     fn p(x: u16, y: u16) -> Point {

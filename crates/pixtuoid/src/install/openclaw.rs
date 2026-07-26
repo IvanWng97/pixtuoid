@@ -32,6 +32,17 @@ use crate::install::target::MergeOutcome;
 
 /// The plugin id — the key under `plugins.entries` and `plugins.load.paths`'s dir.
 const PLUGIN_ID: &str = "pixtuoid";
+
+/// OpenClaw's state-dir names, MODERN first. The pair exists only because of the
+/// clawdbot→openclaw rebrand, i.e. this is a value that has already churned once
+/// upstream — so it is named here rather than spelled at each of the three ladders
+/// (`resolve_openclaw_state_dir`, `resolve_openclaw_config_path`'s legacy sibling
+/// search, `resolve_openclaw_detect`), which is how the same pair came to be
+/// written six times in this file.
+const STATE_DIRS: [&str; 2] = [".openclaw", ".clawdbot"];
+/// The config filenames inside a state dir, MODERN first (`resolveConfigPath`
+/// searches the same order).
+const CONFIG_FILES: [&str; 2] = ["openclaw.json", "clawdbot.json"];
 /// First-line marker in the rendered entry module (provenance; not load-bearing
 /// for detection, which keys on OpenClaw's own dirs). Only the test suite reads
 /// it, so it's test-only.
@@ -123,15 +134,21 @@ fn resolve_openclaw_state_dir(
                  unset); pass --config <path>"
         )
     })?;
-    let modern = home.join(".openclaw");
-    if exists(&modern) {
-        return Ok(modern);
-    }
-    let legacy = home.join(".clawdbot");
-    if exists(&legacy) {
-        return Ok(legacy);
-    }
-    Ok(modern)
+    let candidates = state_dir_candidates(&home);
+    Ok(candidates
+        .iter()
+        .find(|c| exists(c))
+        .cloned()
+        // Nothing exists yet ⇒ a fresh install lands in the MODERN dir; never
+        // shadow a real legacy one, which is why `find` runs first.
+        .unwrap_or_else(|| candidates[0].clone()))
+}
+
+/// The state-dir candidates under one effective home, MODERN first — the ONE
+/// spelling of the [`STATE_DIRS`] ladder that the state-dir resolution, the
+/// config-path legacy sibling search and the presence probe all read.
+fn state_dir_candidates(home: &Path) -> Vec<PathBuf> {
+    STATE_DIRS.iter().map(|d| home.join(d)).collect()
 }
 
 /// The config file we merge into, mirroring OpenClaw's `resolveConfigPath`: the
@@ -187,21 +204,21 @@ fn resolve_openclaw_config_path(
     // the legacy sibling ACROSS dirs.
     let mut dirs = vec![state_dir.clone()];
     if let Some(h) = home {
-        for legacy_dir in [h.join(".openclaw"), h.join(".clawdbot")] {
+        for legacy_dir in state_dir_candidates(&h) {
             if legacy_dir != state_dir {
                 dirs.push(legacy_dir);
             }
         }
     }
     for dir in &dirs {
-        for file in ["openclaw.json", "clawdbot.json"] {
+        for file in CONFIG_FILES {
             let cand = dir.join(file);
             if exists(&cand) {
                 return cand;
             }
         }
     }
-    state_dir.join("openclaw.json")
+    state_dir.join(CONFIG_FILES[0])
 }
 
 /// The wholly-owned plugin dir: `<state-dir>/plugins/pixtuoid`.
@@ -246,7 +263,7 @@ fn resolve_openclaw_detect(
     let Some(home) = openclaw_home_env.or(os_home_first) else {
         return false;
     };
-    exists(&home.join(".openclaw")) || exists(&home.join(".clawdbot"))
+    state_dir_candidates(&home).iter().any(|c| exists(c))
 }
 
 /// The shim's absolute path, baked into the plugin (the gateway runs it under
@@ -259,9 +276,7 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 /// `extra_artifacts` Target hook: written verbatim on install, shim path baked in.
 pub(crate) fn plugin_artifacts(hook_path: &Path) -> Result<Vec<(PathBuf, String)>> {
     let dir = plugin_dir()?;
-    let hook = hook_path
-        .to_str()
-        .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", hook_path.display()))?;
+    let hook = crate::install::merge::hook_path_str(hook_path)?;
     Ok(vec![
         (dir.join("openclaw.plugin.json"), MANIFEST.to_string()),
         (dir.join("package.json"), PACKAGE.to_string()),

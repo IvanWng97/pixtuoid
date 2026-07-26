@@ -247,12 +247,12 @@ impl Office {
         // `GatewayUp` and the wall board showed a stale `gw down` chip for the ~30s
         // tail of every loop. Same fn, same TTL profile as production; the run/TTL
         // decay it also drives is inert here (the script's runs pair cleanly).
-        pixtuoid_core::source::daemon::sweep_presence_ttl(
-            &mut self.scene,
-            hero_gateway().source(),
-            pixtuoid_core::source::daemon::PresenceTtl::DEFAULT,
-            now,
-        );
+        // Registry-driven, exactly like the app's reducer task: the hero must not
+        // re-state WHICH daemon it sweeps or WITH WHAT TTL, or an Nth daemon row
+        // would decay in production and linger here.
+        for (source, ttl) in pixtuoid_core::source::registry::daemon_sources() {
+            pixtuoid_core::source::daemon::sweep_presence_ttl(&mut self.scene, source, ttl, now);
+        }
         // `render` (the FloorSession) evicts per-agent render state for the
         // agents the sweep removed — load-bearing here: the looped script
         // REUSES agent ids, and a returning cast member with stale walk legs

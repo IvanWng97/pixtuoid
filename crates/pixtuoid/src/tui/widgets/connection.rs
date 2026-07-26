@@ -192,10 +192,16 @@ fn connection_line(
             }
             // A daemon counts INSTANCES, and names their rolled-up state — "idle"
             // alone can't distinguish a stopped gateway from a busy one, which is
-            // the whole reason this facet is typed.
-            LiveFacet::Daemon { instances: 0, .. } => {
-                ('\u{25cc}', "not running".to_string(), theme.ui.label_idle)
-            }
+            // the whole reason this facet is typed. Zero instances reports the
+            // OBSERVATION, not a verdict: presence is announce-driven, so a gateway
+            // that announced before this pixtuoid started — or whose plugin has not
+            // loaded yet — is alive and merely unheard. A diagnosis surface must not
+            // assert a fact it cannot observe (the same rule as the socket line).
+            LiveFacet::Daemon { instances: 0, .. } => (
+                '\u{25cc}',
+                "no gateway seen".to_string(),
+                theme.ui.label_idle,
+            ),
             LiveFacet::Daemon { instances, state } => {
                 let plural = if *instances == 1 { "" } else { "s" };
                 // The WORD and the hue both come from the shared board model
@@ -406,11 +412,24 @@ mod tests {
             instances: 0,
             state: None,
         });
-        assert!(stopped.contains("not running"), "{stopped}");
+        assert!(stopped.contains("no gateway seen"), "{stopped}");
+        // The INTENT is "claims no gateway EXISTS", not "avoids the word" — the cell
+        // must carry no instance COUNT and none of the state words a live roster
+        // would produce.
         assert!(
-            !stopped.contains("gateway"),
-            "a stopped daemon must not claim a gateway: {stopped}"
+            !stopped.chars().any(|c| c.is_ascii_digit()),
+            "a zero-instance daemon must report no count: {stopped}"
         );
+        for live_word in [
+            pixtuoid_scene::board::gateway_label(DaemonState::Busy),
+            pixtuoid_scene::board::gateway_label(DaemonState::Degraded),
+            pixtuoid_scene::board::gateway_label(DaemonState::Down),
+        ] {
+            assert!(
+                !stopped.contains(live_word),
+                "a zero-instance daemon must not borrow a live state word ({live_word}): {stopped}"
+            );
+        }
 
         let busy = cell(LiveFacet::Daemon {
             instances: 2,

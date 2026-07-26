@@ -33,9 +33,15 @@
 // `OPENCLAW_GATEWAY_PORT`. So the port is adopted from any hook that carries one
 // and remembered; the registration-time resolution below (upstream's own
 // env → config → default order) is only the fallback for a plugin hot reload,
-// which re-runs `register` WITHOUT replaying `gateway_start`. Accepted residual:
-// a hot reload inside a `--port`-overridden session falls back to the default, so
-// pixtuoid renders a second short-lived mascot that its presence TTL sweeps away.
+// which re-runs `register` WITHOUT replaying `gateway_start`. Accepted residual,
+// and note the DIRECTION: after a plugins-only hot reload of a `--port`-overridden
+// gateway, the re-registered module falls back to the config/default port, so from
+// then on every forwarded event carries the WRONG port. It is the real-port mascot
+// that goes silent and gets TTL-swept, while the wrong-port one is refreshed for the
+// gateway's whole life — i.e. the hover permanently misidentifies which gateway it
+// is, not a transient second lobster. Whether a fix is even possible depends on
+// something not measured here: whether OpenClaw re-imports the module cache-busted
+// on reload (a fresh module cannot remember a learned port; a reused one could).
 //
 // Deliberately NO `import { resolveGatewayPort } from "openclaw/plugin-sdk/core"`:
 // this file is dropped into OpenClaw's state dir, whose path chain contains no
