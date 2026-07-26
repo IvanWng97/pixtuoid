@@ -8,55 +8,59 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use super::{DaemonPresenceUpdate, PresenceMsg};
+use super::{DaemonInstanceKey, DaemonPresenceUpdate, PresenceMsg};
 
 /// The daemon-presence SIDE channel (invariant #2: NOT the one `AgentEvent`
 /// channel). Unbounded — presence deltas are tiny + rare.
 pub type PresenceSender = tokio::sync::mpsc::UnboundedSender<PresenceMsg>;
 
-/// A handle to arm gateway-pid exit watches across ALL daemons. A dying gateway
-/// pid converts to a source-tagged `PidExited` presence delta — the instant
-/// abrupt-down rung — reusing the AGNOSTIC `ExitWatch` (pid → channel, no
+/// A handle to arm gateway-pid exit watches across ALL daemon instances. A dying
+/// gateway pid converts to an instance-tagged `PidExited` presence delta — the
+/// instant abrupt-down rung — reusing the AGNOSTIC `ExitWatch` (pid → channel, no
 /// `AgentId` coupling), NOT `HookPidWatch` (which emits an AgentSlot-shaped
-/// `SessionEnd` the non-slot mascot can't consume). One watcher multiplexes
-/// every daemon's pid; the `pid → source` binding routes the death back.
+/// `SessionEnd` the non-slot mascot can't consume). One watcher multiplexes every
+/// instance's pid; the `pid → DaemonInstanceKey` binding routes the death back to
+/// the exact mascot, so one gateway's death can never down its sibling.
 pub struct PresenceExitWatch {
     inner: crate::source::exit_watch::ExitWatch,
-    /// pid → the daemon sources to take Down when it dies. SET-valued (not a
-    /// lone source) so a transient A→B pid recycle binds BOTH: take-on-death
-    /// ends all, and a spurious cross-source down self-heals on that daemon's
-    /// next presence event — the `HookPidWatch` pattern, keyed by pid alone but
-    /// set-valued so last-writer-wins can't flip a still-live daemon's binding.
-    pids: Arc<Mutex<HashMap<i32, HashSet<String>>>>,
+    /// pid → the daemon instances to take Down when it dies. SET-valued (not a
+    /// lone key) so a transient A→B pid recycle binds BOTH: take-on-death ends
+    /// all, and a spurious cross-instance down self-heals on that instance's next
+    /// presence event — the `HookPidWatch` pattern, keyed by pid alone but
+    /// set-valued so last-writer-wins can't flip a still-live instance's binding.
+    /// The `apply_presence` `current_pid` guard is the second line of defence:
+    /// a delta routed to an instance whose armed pid has moved on is a no-op.
+    pids: Arc<Mutex<HashMap<i32, HashSet<DaemonInstanceKey>>>>,
 }
 
 impl PresenceExitWatch {
-    /// Watch a daemon's gateway pid; its death emits `(source, PidExited)` for
-    /// every bound source. Idempotent per (pid, source) — a re-arm just
-    /// re-inserts into the set.
-    pub fn watch(&self, source: &str, pid: i32) {
-        note_source(&self.pids, pid, source);
+    /// Watch one daemon instance's gateway pid; its death emits `(key,
+    /// PidExited)` for every bound instance. Idempotent per (pid, key) — a re-arm
+    /// just re-inserts into the set.
+    pub fn watch(&self, key: &DaemonInstanceKey, pid: i32) {
+        note_key(&self.pids, pid, key);
         self.inner.watch(pid);
     }
 }
 
-/// Spawn the shared gateway-pid exit watcher: pid deaths drain into source-tagged
-/// `PidExited` on `presence_tx`. `None` where the platform has no exit-watch
+/// Spawn the shared gateway-pid exit watcher: pid deaths drain into
+/// instance-tagged `PidExited` on `presence_tx`. `None` where the platform has no exit-watch
 /// backend (then the `presence_ttl_ms` sweep is the only abrupt-down signal).
 /// Call in a tokio runtime.
 pub fn spawn_presence_exit_watch(presence_tx: PresenceSender) -> Option<PresenceExitWatch> {
-    let pids: Arc<Mutex<HashMap<i32, HashSet<String>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let pids: Arc<Mutex<HashMap<i32, HashSet<DaemonInstanceKey>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
     let (pid_tx, mut pid_rx) = tokio::sync::mpsc::unbounded_channel::<i32>();
     let inner = crate::source::exit_watch::ExitWatch::spawn(pid_tx)?;
     let pids_drain = Arc::clone(&pids);
     tokio::spawn(async move {
         while let Some(pid) = pid_rx.recv().await {
             // Unbound pid = stale receipt (already routed): the empty Vec
-            // iterates zero times. Each bound source gets its own PidExited.
-            for source in take_sources(&pids_drain, pid) {
+            // iterates zero times. Each bound instance gets its own PidExited.
+            for key in take_keys(&pids_drain, pid) {
                 if presence_tx
                     .send(PresenceMsg {
-                        source,
+                        key,
                         delta: DaemonPresenceUpdate::PidExited { pid },
                     })
                     .is_err()
@@ -71,21 +75,21 @@ pub fn spawn_presence_exit_watch(presence_tx: PresenceSender) -> Option<Presence
     Some(PresenceExitWatch { inner, pids })
 }
 
-type PresencePidMap = Mutex<HashMap<i32, HashSet<String>>>;
+type PresencePidMap = Mutex<HashMap<i32, HashSet<DaemonInstanceKey>>>;
 
 /// Registry ops, split from the [`ExitWatch`] side so they're unit-testable
 /// without spawning the platform watcher thread (the `pid_watch` precedent).
-fn note_source(pids: &PresencePidMap, pid: i32, source: &str) {
+fn note_key(pids: &PresencePidMap, pid: i32, key: &DaemonInstanceKey) {
     pids.lock()
         .unwrap_or_else(|e| e.into_inner())
         .entry(pid)
         .or_default()
-        .insert(source.to_string());
+        .insert(key.clone());
 }
 
-/// Remove `pid`'s entry and return the daemon sources bound to it (empty if
+/// Remove `pid`'s entry and return the daemon instances bound to it (empty if
 /// none). The pid dies exactly once, taking its whole set with it.
-fn take_sources(pids: &PresencePidMap, pid: i32) -> Vec<String> {
+fn take_keys(pids: &PresencePidMap, pid: i32) -> Vec<DaemonInstanceKey> {
     pids.lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&pid)
@@ -97,30 +101,54 @@ fn take_sources(pids: &PresencePidMap, pid: i32) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::DaemonInstanceId;
+
+    fn k(source: &str, instance: &str) -> DaemonInstanceKey {
+        DaemonInstanceKey::new(
+            source,
+            DaemonInstanceId::new(instance).expect("non-empty test instance id"),
+        )
+    }
 
     // N-daemon pid recycle: P bound to A, re-armed for B (B reused P before A's
-    // death drained). take must return BOTH; the old lone-String map lost one.
+    // death drained). take must return BOTH; the old lone-value map lost one.
     #[test]
     fn recycled_pid_binds_both_daemons_and_take_ends_all() {
         let pids: PresencePidMap = Mutex::new(HashMap::new());
-        note_source(&pids, 4242, "openclaw");
-        note_source(&pids, 4242, "secondd");
-        let mut taken = take_sources(&pids, 4242);
+        note_key(&pids, 4242, &k("openclaw", "18789"));
+        note_key(&pids, 4242, &k("secondd", "1"));
+        let mut taken = take_keys(&pids, 4242);
         taken.sort();
-        assert_eq!(taken, vec!["openclaw".to_string(), "secondd".to_string()]);
+        assert_eq!(taken, vec![k("openclaw", "18789"), k("secondd", "1")]);
         // The pid dies once — its whole entry is gone.
-        assert!(take_sources(&pids, 4242).is_empty());
+        assert!(take_keys(&pids, 4242).is_empty());
     }
 
-    // Single-daemon path (today's only reality) is byte-identical to the old
-    // lone-source map: a re-arm dedups, take yields exactly one source.
+    // Single-instance path is byte-identical to the old lone-source map: a re-arm
+    // dedups, take yields exactly one key.
     #[test]
     fn single_daemon_rearm_dedups_and_take_yields_one() {
         let pids: PresencePidMap = Mutex::new(HashMap::new());
-        note_source(&pids, 7, "openclaw");
-        note_source(&pids, 7, "openclaw");
-        assert_eq!(take_sources(&pids, 7), vec!["openclaw".to_string()]);
+        note_key(&pids, 7, &k("openclaw", "18789"));
+        note_key(&pids, 7, &k("openclaw", "18789"));
+        assert_eq!(take_keys(&pids, 7), vec![k("openclaw", "18789")]);
         // An unbound pid is a stale receipt — empty, skipped by the drain.
-        assert!(take_sources(&pids, 99).is_empty());
+        assert!(take_keys(&pids, 99).is_empty());
+    }
+
+    // TWO gateways of the SAME source hold two DISTINCT bindings, so one
+    // gateway's death routes only to its own mascot. Against a source-only key
+    // both instances shared one binding and either death downed both.
+    #[test]
+    fn two_instances_of_one_source_bind_separately() {
+        let pids: PresencePidMap = Mutex::new(HashMap::new());
+        note_key(&pids, 100, &k("openclaw", "18789"));
+        note_key(&pids, 200, &k("openclaw", "19789"));
+        assert_eq!(take_keys(&pids, 100), vec![k("openclaw", "18789")]);
+        assert_eq!(
+            take_keys(&pids, 200),
+            vec![k("openclaw", "19789")],
+            "the sibling's binding survives its neighbour's death"
+        );
     }
 }

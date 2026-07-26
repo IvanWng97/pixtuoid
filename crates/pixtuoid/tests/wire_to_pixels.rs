@@ -681,15 +681,16 @@ fn openclaw_presence_envelope_renders_a_lobster() {
         if ty == "session_end" || ty == "gateway_stop" {
             break;
         }
-        let updates = pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&v)
+        let decoded = pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&v)
             .expect("decode_openclaw_hook_payload");
-        for update in updates {
-            apply_presence(
-                &mut scene,
-                pixtuoid_core::source::openclaw::SOURCE_NAME,
-                update,
-                now,
-            );
+        // The captured wire carries its own gateway identity — the key is DECODED
+        // here, never assumed, so a fixture with two ports would render two mascots.
+        let key = pixtuoid_core::source::daemon::DaemonInstanceKey::new(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            decoded.instance.clone(),
+        );
+        for update in decoded.updates {
+            apply_presence(&mut scene, &key, update, now);
             applied += 1;
         }
     }
@@ -700,9 +701,9 @@ fn openclaw_presence_envelope_renders_a_lobster() {
 
     // The presence must have populated the daemon map UP (not Down) — the live
     // gateway whose lobster scuttles the floor.
-    let presence = scene
+    let (_, _, presence) = scene
         .daemons()
-        .get(pixtuoid_core::source::openclaw::SOURCE_NAME)
+        .find(|(source, _, _)| *source == pixtuoid_core::source::openclaw::SOURCE_NAME)
         .expect("openclaw presence must be populated");
     assert_ne!(
         presence.liveness,

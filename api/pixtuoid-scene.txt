@@ -1316,12 +1316,12 @@ pub pixtuoid_scene::pixel_painter::MascotFrame::active_sessions: u32
 pub pixtuoid_scene::pixel_painter::MascotFrame::busy: bool
 pub pixtuoid_scene::pixel_painter::MascotFrame::degraded: bool
 pub pixtuoid_scene::pixel_painter::MascotFrame::h: u16
+pub pixtuoid_scene::pixel_painter::MascotFrame::instance: core::option::Option<alloc::string::String>
 pub pixtuoid_scene::pixel_painter::MascotFrame::name: &'static str
 pub pixtuoid_scene::pixel_painter::MascotFrame::pos: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pixel_painter::MascotFrame::w: u16
 impl core::clone::Clone for pixtuoid_scene::pixel_painter::MascotFrame
 pub fn pixtuoid_scene::pixel_painter::MascotFrame::clone(&self) -> pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::Copy for pixtuoid_scene::pixel_painter::MascotFrame
 impl core::marker::Freeze for pixtuoid_scene::pixel_painter::MascotFrame
 impl core::marker::Send for pixtuoid_scene::pixel_painter::MascotFrame
 impl core::marker::Sync for pixtuoid_scene::pixel_painter::MascotFrame
@@ -1352,7 +1352,7 @@ impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_paint
 impl<'a> !core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::PixelCtx<'a>
 pub struct pixtuoid_scene::pixel_painter::PixelPassResult
 pub pixtuoid_scene::pixel_painter::PixelPassResult::chitchat_bubbles: alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
-pub pixtuoid_scene::pixel_painter::PixelPassResult::mascot_pos: core::option::Option<pixtuoid_scene::pixel_painter::MascotFrame>
+pub pixtuoid_scene::pixel_painter::PixelPassResult::mascots: alloc::vec::Vec<pixtuoid_scene::pixel_painter::MascotFrame>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::new_coffee_carriers: alloc::vec::Vec<pixtuoid_core::id::AgentId>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::occupied_waypoints: std::collections::hash::set::HashSet<usize>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::pet_pos: core::option::Option<pixtuoid_scene::pet::PetFrame>

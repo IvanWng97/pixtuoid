@@ -8,16 +8,16 @@
       "description": "The registry source id the outcome applies to (e.g. `codex`).",
       "type": "string"
     },
+    "outcome": {
+      "description": "The BARE outcome token: `connected` | `disconnected` | `no_op` |\n`failed` — a schema ENUM, so the generated TS side is a string-literal\nunion (machine-matchable with `===`); human text rides in `message`.",
+      "$ref": "#/$defs/WireOutcome"
+    },
     "message": {
       "description": "Human-readable detail for the row — present exactly when the outcome\ncarries any (`failed`), and OMITTED (not `null`) otherwise, so a\nsuccess row stays the minimal `{id, outcome}`.",
       "type": [
         "string",
         "null"
       ]
-    },
-    "outcome": {
-      "description": "The BARE outcome token: `connected` | `disconnected` | `no_op` |\n`failed` — a schema ENUM, so the generated TS side is a string-literal\nunion (machine-matchable with `===`); human text rides in `message`.",
-      "$ref": "#/$defs/WireOutcome"
     }
   },
   "additionalProperties": false,

@@ -94,9 +94,10 @@ pub struct DrawCtx<'a> {
     pub floor: pixtuoid_scene::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
-    /// The gateway mascot's frame this render (for hover identity). Set from the
-    /// pixel pass; `None` when no gateway is present.
-    pub last_mascot_pos: Option<MascotFrame>,
+    /// Every gateway mascot's frame this render (for hover identity). Set from the
+    /// pixel pass; EMPTY when no gateway is present. A Vec because concurrent
+    /// gateways of one source each get their own hoverable lobster.
+    pub last_mascots: Vec<MascotFrame>,
     /// The pet assigned to this floor — its kind AND resolved display name.
     /// `None` when no pets are configured or none maps to this floor seed.
     /// Replaces the former `floor_pet_kind` + `pet_names` pair: the name rides
@@ -298,7 +299,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         debug_walkable: ctx.debug_walkable,
     });
     ctx.last_pet_pos = pixel_result.pet_pos;
-    ctx.last_mascot_pos = pixel_result.mascot_pos;
+    ctx.last_mascots = pixel_result.mascots;
     ctx.chitchat_bubbles = pixel_result.chitchat_bubbles;
     ctx.new_coffee_carriers = pixel_result.new_coffee_carriers;
     ctx.occupied_waypoints = pixel_result.occupied_waypoints;
@@ -396,12 +397,14 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                         theme,
                     );
                 } else if let Some(m) = ctx
-                    .last_mascot_pos
-                    .filter(|m| hit_test_mascot(m.pos, m.w, m.h, mx, my))
+                    .last_mascots
+                    .iter()
+                    .find(|m| hit_test_mascot(m.pos, m.w, m.h, mx, my))
                 {
                     paint_mascot_tooltip(
                         f,
                         m.name,
+                        m.instance.as_deref(),
                         m.busy,
                         m.degraded,
                         m.active_sessions,

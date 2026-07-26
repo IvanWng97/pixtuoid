@@ -26,15 +26,15 @@ export interface OutcomeRow {
    */
   id: string;
   /**
-   * Human-readable detail for the row — present exactly when the outcome
-   * carries any (`failed`), and OMITTED (not `null`) otherwise, so a
-   * success row stays the minimal `{id, outcome}`.
-   */
-  message?: string | null;
-  /**
    * The BARE outcome token: `connected` | `disconnected` | `no_op` |
    * `failed` — a schema ENUM, so the generated TS side is a string-literal
    * union (machine-matchable with `===`); human text rides in `message`.
    */
   outcome: "connected" | "disconnected" | "no_op" | "failed";
+  /**
+   * Human-readable detail for the row — present exactly when the outcome
+   * carries any (`failed`), and OMITTED (not `null`) otherwise, so a
+   * success row stays the minimal `{id, outcome}`.
+   */
+  message?: string | null;
 }

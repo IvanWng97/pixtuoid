@@ -31,6 +31,11 @@ on:
       # those arms must trip the selftest here, not only weekly.
       - "crates/pixtuoid-core/src/source/codex.rs"
       - "crates/pixtuoid/src/install/*.rs"
+      # openclaw_plugin.js: the watch reads the plugin's OWN copy of upstream's
+      # DEFAULT_GATEWAY_PORT out of this template (it can't be imported from a
+      # plugin living in OpenClaw's state dir), so renaming that const would make
+      # the port check silently stop comparing anything.
+      - "crates/pixtuoid/src/install/openclaw_plugin.js"
 
 permissions:
   contents: read

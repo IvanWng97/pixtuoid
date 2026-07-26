@@ -5,40 +5,49 @@
 //! backend) are already visualized by the `cc·` source at full fidelity (a real
 //! `claude` writing `~/.claude/...`).
 //!
-//! This module owns ONLY OpenClaw's WIRE decode (`decode_openclaw_hook_payload`).
-//! The daemon-agnostic presence STATE MACHINE + lifecycle (apply/sweep/mark, the
-//! exit watch, the decay TTLs) lives in the shared [`crate::source::daemon`]
-//! layer, keyed by source name so N daemons coexist — exactly as an agent source
-//! owns its own decoder but shares the reducer.
+//! This module owns ONLY OpenClaw's WIRE decode (`decode_openclaw_hook_payload`),
+//! INCLUDING which gateway an envelope came from — its resolved
+//! `gatewayPort`, normalized to a `DaemonInstanceId`. The
+//! daemon-agnostic presence STATE MACHINE + lifecycle (apply/sweep/mark, the exit
+//! watch, the decay TTLs) lives in the shared [`crate::source::daemon`] layer,
+//! keyed by (source, instance) so N daemons AND N gateways coexist — exactly as an
+//! agent source owns its own decoder but shares the reducer.
 //!
-//! So OpenClaw earns a SINGLE presence-gated mascot (a wandering lobster)
-//! showing the one thing `cc·` can't: is the gateway alive and handling
+//! So each observed gateway earns a presence-gated mascot (a wandering lobster)
+//! showing the one thing `cc·` can't: is that gateway alive and handling
 //! traffic (its motion encodes state — idle ambles, busy shuttles, down leaves).
-//! Its plugin (`install/openclaw_plugin.js`) forwards a strict ALLOWLIST envelope
-//! — never message content (the busy tell needs only the run pairing key) —
-//! stamped `_pixtuoid_source: "openclaw"` by the shim:
+//! OpenClaw officially supports several isolated gateways on one host (each with
+//! its own profile/state dir and base port), so two running gateways render as two
+//! independent lobsters. Its plugin (`install/openclaw_plugin.js`) forwards a
+//! strict ALLOWLIST envelope — never message content (the busy tell needs only the
+//! run pairing key) — stamped `_pixtuoid_source: "openclaw"` by the shim:
 //!
 //! ```json
-//! {"type":"gateway_start","_pid":12345}
-//! {"type":"session_start","sessionId":"…","sessionKey":"agent:main:…"}
-//! {"type":"before_agent_run","runId":"…","sessionId":"…"}
-//! {"type":"agent_end","runId":"…","sessionId":"…"}
-//! {"type":"session_end","sessionId":"…","reason":"idle","messageCount":4}
-//! {"type":"gateway_stop","reason":"shutdown"}
+//! {"type":"gateway_start","gatewayPort":18789,"_pid":12345}
+//! {"type":"session_start","gatewayPort":18789,"sessionId":"…","sessionKey":"agent:main:…"}
+//! {"type":"before_agent_run","gatewayPort":18789,"runId":"…","sessionId":"…"}
+//! {"type":"agent_end","gatewayPort":18789,"runId":"…","sessionId":"…"}
+//! {"type":"session_end","gatewayPort":18789,"sessionId":"…","reason":"idle","messageCount":4}
+//! {"type":"gateway_stop","gatewayPort":18789,"reason":"shutdown"}
 //! ```
 //!
-//! This decoder is PURE (`Value → Vec<DaemonPresenceUpdate>`). The updates ride a
-//! source-tagged SIBLING channel (NOT the one `AgentEvent` channel — invariant
-//! #2), merged into `SceneState::daemons` by the reducer task via
-//! `daemon::apply_presence`, NEVER through `Reducer::apply` (which is
-//! `AgentId`-pure). See the design specs
+//! This decoder is PURE — `Value → DecodedPresence` (the sending gateway's
+//! identity plus its deltas). The updates ride an INSTANCE-tagged SIBLING channel
+//! (NOT the one `AgentEvent` channel — invariant #2), merged into
+//! `SceneState::daemons` by the reducer task via `daemon::apply_presence`, NEVER
+//! through `Reducer::apply` (which is `AgentId`-pure). See the design specs
 //! `docs/superpowers/specs/2026-06-15-openclaw-lobster-hq-design.md` +
 //! `2026-06-15-source-kind-daemon-agent-decouple-design.md`.
 //!
 //! Capture-grounded facts (§2 of the spec): tools are invisible under the
 //! `claude-cli` backend (no `before_tool_call`), `before_agent_run`/`agent_end`
 //! require `allowConversationAccess`, `session_end` fires on clean close but not
-//! on SIGTERM. Busy is therefore a SELF-HEALING last-seen decay, never a latch.
+//! on SIGTERM. Busy is therefore a self-healing decay, never a latch — per RUN,
+//! on that run's own last observation (the daemon-wide `last_seen` is refreshed by
+//! any event, so keying the decay on it latched Busy on a gateway that kept
+//! serving other traffic).
+
+use std::num::NonZeroU16;
 
 use anyhow::{anyhow, Result};
 use serde_json::Value;
@@ -46,10 +55,32 @@ use serde_json::Value;
 // The presence STATE MACHINE + lifecycle (apply/sweep/mark/exit-watch) and the
 // decay knobs (`PresenceTtl::DEFAULT`) live in the shared, daemon-agnostic
 // `crate::source::daemon` layer. This module keeps ONLY OpenClaw's wire decode.
-use crate::source::daemon::DaemonPresenceUpdate;
+use crate::source::daemon::{DaemonPresenceUpdate, DecodedPresence};
+use crate::state::DaemonInstanceId;
 
 /// The OpenClaw daemon source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "openclaw";
+
+/// The wire field the plugin stamps with the gateway's RESOLVED listening port —
+/// OpenClaw's own runtime identity for one gateway, and therefore ours. OpenClaw
+/// officially supports several isolated gateways per host and requires each to
+/// take a distinct base port, so the port is exactly the "which gateway" key: it
+/// is unique among *live* gateways (two can't bind one port) and STABLE across a
+/// restart of the same one (so the mascot persists rather than churning).
+/// Deliberately NOT the profile name (an install scope that never reaches the
+/// wire, and one profile may restart on a different port), the pid (changes every
+/// restart), or the session id (many per gateway).
+const GATEWAY_PORT_FIELD: &str = "gatewayPort";
+
+/// Instance id for an envelope carrying NO [`GATEWAY_PORT_FIELD`] — i.e. a plugin
+/// file written by a pre-multi-gateway pixtuoid that is still on disk (installing
+/// the plugin is a one-shot `connect`; upgrading the binary does NOT re-render it).
+/// Such a gateway is folded into ONE documented instance so its lobster keeps
+/// behaving exactly as it did before this change instead of silently vanishing on
+/// upgrade; the paired `missing_field` breadcrumb is what `pixtuoid doctor` and the
+/// footer drift nudge surface, telling the user to reconnect OpenClaw. Two
+/// STALE-plugin gateways still merge — precisely the old behaviour, never worse.
+const LEGACY_INSTANCE_ID: &str = "legacy";
 
 /// The busy pairing key: prefer a non-empty `runId`; if `runId` is ABSENT (not
 /// merely empty) fall back to `sessionId`; an empty pick collapses to a constant
@@ -67,11 +98,42 @@ fn run_key(obj: &serde_json::Map<String, Value>) -> String {
         .to_string()
 }
 
-/// Decode one OpenClaw plugin envelope into presence deltas. Reads ONLY
-/// allowlisted scalar fields (`type`, `_pid`, `runId`, `sessionId`) — never
+/// Narrow the wire `gatewayPort` to this gateway's stable instance id.
+///
+/// Three outcomes, deliberately distinct: a VALID port is the identity; an ABSENT
+/// field is a stale installed plugin → [`LEGACY_INSTANCE_ID`] + a drift breadcrumb
+/// (graceful, see that const's WHY); a PRESENT-but-unusable value (0, negative,
+/// out of `u16`, non-integer) is a bug or a hostile sender, so the whole envelope
+/// is REJECTED rather than silently bucketed — the untrusted-input rule, and the
+/// case a compatibility fallback must never swallow.
+fn gateway_instance(obj: &serde_json::Map<String, Value>, event: &str) -> Result<DaemonInstanceId> {
+    let Some(raw) = obj.get(GATEWAY_PORT_FIELD) else {
+        crate::source::drift::missing_field(SOURCE_NAME, event, GATEWAY_PORT_FIELD);
+        return instance_id(LEGACY_INSTANCE_ID.to_string());
+    };
+    let port = raw
+        .as_u64()
+        .and_then(|n| u16::try_from(n).ok())
+        .and_then(NonZeroU16::new)
+        .ok_or_else(|| {
+            anyhow!("openclaw {GATEWAY_PORT_FIELD} must be a port in 1..=65535, got {raw}")
+        })?;
+    instance_id(port.to_string())
+}
+
+/// [`DaemonInstanceId::new`] for an id that is statically non-empty (a rendered
+/// port, the legacy const). The `None` arm is unreachable, but production code
+/// must not `unwrap`, so it degrades to an honest decode error.
+fn instance_id(raw: String) -> Result<DaemonInstanceId> {
+    DaemonInstanceId::new(raw).ok_or_else(|| anyhow!("openclaw: blank gateway instance id"))
+}
+
+/// Decode one OpenClaw plugin envelope into the sending gateway's identity plus
+/// its presence deltas. Reads ONLY allowlisted scalar fields (`type`,
+/// `gatewayPort`, `_pid`, `runId`, `sessionId`, `success`) — never
 /// `messages`/`prompt`/`sessionFile`, even if the plugin regressed and forwarded
 /// them (defense in depth for the §4.3 privacy invariant).
-pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdate>> {
+pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
     let obj = v
         .as_object()
         .ok_or_else(|| anyhow!("openclaw hook payload must be an object"))?;
@@ -79,6 +141,9 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdat
         .get("type")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("openclaw payload missing type"))?;
+    // Identity FIRST: an envelope we can't attribute to a gateway is worthless
+    // (and a malformed port must fail the whole decode, not just one delta).
+    let instance = gateway_instance(obj, event)?;
     // Checked narrowing: a crafted out-of-range `_pid` (e.g. 2^32+1) must NOT
     // silently truncate to a valid pid (arming ExitWatch on PID 1) — an
     // unrepresentable pid is dropped (None); the TTL backstop still covers it.
@@ -132,7 +197,10 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdat
             out.insert(0, DaemonPresenceUpdate::PidSeen { pid });
         }
     }
-    Ok(out)
+    Ok(DecodedPresence {
+        instance,
+        updates: out,
+    })
 }
 
 // `decode_openclaw_hook_custom` was DELETED: with `SourceKind::Daemon`,
@@ -146,8 +214,22 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn decode(v: Value) -> Vec<DaemonPresenceUpdate> {
+    /// A gateway port for the arm-mapping cases (any valid port; the identity
+    /// cases below use their own literals).
+    const TEST_PORT: u64 = 18789;
+
+    /// Decode a payload, stamping the CURRENT plugin's `gatewayPort` unless the
+    /// case supplies its own — so the arm-mapping tests exercise the real wire
+    /// rather than the stale-plugin fallback (which has its own tests).
+    fn decode_full(mut v: Value) -> DecodedPresence {
+        if let Some(o) = v.as_object_mut() {
+            o.entry(GATEWAY_PORT_FIELD).or_insert(json!(TEST_PORT));
+        }
         decode_openclaw_hook_payload(&v).expect("decodes")
+    }
+
+    fn decode(v: Value) -> Vec<DaemonPresenceUpdate> {
+        decode_full(v).updates
     }
 
     #[test]
@@ -366,6 +448,85 @@ mod tests {
         assert!(
             decode_openclaw_hook_payload(&json!({"_pid": 1})).is_err(),
             "missing type"
+        );
+    }
+
+    #[test]
+    fn two_gateway_ports_decode_to_two_distinct_instances() {
+        // THE multi-gateway premise: the port is the identity, so two live
+        // gateways are two mascots. Ports are independent literals here, not
+        // values recomputed from the implementation.
+        let a = decode_full(json!({"type": "gateway_start", "gatewayPort": 18789, "_pid": 11}));
+        let b = decode_full(json!({"type": "gateway_start", "gatewayPort": 19789, "_pid": 22}));
+        assert_eq!(a.instance.as_str(), "18789");
+        assert_eq!(b.instance.as_str(), "19789");
+        assert_ne!(a.instance, b.instance);
+    }
+
+    #[test]
+    fn the_same_port_after_a_restart_is_the_same_instance() {
+        // Stable identity across restarts (a NEW pid, the SAME port) — the mascot
+        // must persist, so the ids must compare equal.
+        let first = decode_full(json!({"type": "gateway_start", "gatewayPort": 18789, "_pid": 11}));
+        let after = decode_full(json!({"type": "gateway_start", "gatewayPort": 18789, "_pid": 99}));
+        assert_eq!(first.instance, after.instance);
+    }
+
+    #[test]
+    fn every_event_type_carries_the_gateway_identity() {
+        // Identity rides EVERY envelope, not just `gateway_start`: pixtuoid can
+        // attach mid-life (#318), and a session/run delta must reach the right
+        // gateway even when the start was never observed.
+        for ty in [
+            "gateway_start",
+            "gateway_stop",
+            "session_start",
+            "session_end",
+            "before_agent_run",
+            "agent_end",
+        ] {
+            let d = decode_full(json!({"type": ty, "gatewayPort": 19789, "sessionId": "s1"}));
+            assert_eq!(d.instance.as_str(), "19789", "{ty} lost its identity");
+        }
+    }
+
+    #[test]
+    fn an_unusable_gateway_port_rejects_the_whole_envelope() {
+        // Present-but-invalid is a bug or a hostile sender — never bucketed into
+        // the legacy instance (that fallback is ONLY for an absent field).
+        for bad in [
+            json!(0),
+            json!(-1),
+            json!(65_536),
+            json!(4_294_967_297i64),
+            json!("18789"),
+            json!(18789.5),
+            json!(null),
+        ] {
+            let v = json!({"type": "gateway_start", "gatewayPort": bad, "_pid": 5});
+            assert!(
+                decode_openclaw_hook_payload(&v).is_err(),
+                "gatewayPort {bad} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn a_port_less_envelope_falls_back_to_the_one_legacy_instance() {
+        // A stale installed plugin (upgrading pixtuoid does not re-render it) must
+        // keep its lobster rather than silently vanish; the drift breadcrumb is
+        // what tells the user to reconnect. Both events land on ONE instance —
+        // exactly the pre-multi-gateway behaviour.
+        let a = decode_openclaw_hook_payload(&json!({"type": "gateway_start", "_pid": 7}))
+            .expect("decodes");
+        let b = decode_openclaw_hook_payload(&json!({"type": "session_start", "sessionId": "s"}))
+            .expect("decodes");
+        assert_eq!(a.instance.as_str(), LEGACY_INSTANCE_ID);
+        assert_eq!(a.instance, b.instance);
+        assert_eq!(
+            a.updates,
+            vec![DaemonPresenceUpdate::GatewayUp { pid: Some(7) }],
+            "the fallback changes identity only — never the deltas"
         );
     }
 

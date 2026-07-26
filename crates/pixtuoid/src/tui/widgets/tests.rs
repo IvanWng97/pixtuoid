@@ -178,13 +178,13 @@ fn state_count_maps_each_kind() {
 // genuinely-Busy fixture rather than a silently-Idle one.
 fn daemon(state: pixtuoid_core::state::DaemonState) -> pixtuoid_core::state::DaemonPresence {
     use pixtuoid_core::state::{DaemonLiveness, DaemonState};
-    let (liveness, in_flight_run_keys) = match state {
+    let (liveness, in_flight_runs) = match state {
         DaemonState::Idle => (DaemonLiveness::UP, Default::default()),
         DaemonState::Busy => (
             DaemonLiveness::UP,
-            ["fixture-run".to_string()]
+            [("fixture-run".to_string(), SystemTime::UNIX_EPOCH)]
                 .into_iter()
-                .collect::<std::collections::HashSet<String>>(),
+                .collect::<std::collections::BTreeMap<String, SystemTime>>(),
         ),
         DaemonState::Degraded => (DaemonLiveness::Up { degraded: true }, Default::default()),
         DaemonState::Down => (DaemonLiveness::Down, Default::default()),
@@ -194,7 +194,7 @@ fn daemon(state: pixtuoid_core::state::DaemonState) -> pixtuoid_core::state::Dae
         active_sessions: 0,
         last_seen: SystemTime::UNIX_EPOCH,
         entered_at: SystemTime::UNIX_EPOCH,
-        in_flight_run_keys,
+        in_flight_runs,
         current_pid: None,
     }
 }
@@ -202,23 +202,30 @@ fn daemon(state: pixtuoid_core::state::DaemonState) -> pixtuoid_core::state::Dae
 #[test]
 fn gateway_rollup_is_worst_of() {
     use pixtuoid_core::state::DaemonState;
-    use std::collections::BTreeMap;
-    // Empty map → None (chip SUPPRESSED — distinct from Some(Down) = seen then died).
-    assert_eq!(gateway_rollup(&BTreeMap::new()), None);
+    // Empty → None (chip SUPPRESSED — distinct from Some(Down) = seen then died).
+    assert_eq!(gateway_rollup(std::iter::empty()), None);
     // Single daemon → itself.
-    let mut m = BTreeMap::new();
-    m.insert("gw".to_string(), daemon(DaemonState::Busy));
-    assert_eq!(gateway_rollup(&m), Some(DaemonState::Busy));
-    // Worst-of across many: Idle + Degraded + Down → Down.
-    m.insert("b".to_string(), daemon(DaemonState::Idle));
-    m.insert("c".to_string(), daemon(DaemonState::Degraded));
-    m.insert("d".to_string(), daemon(DaemonState::Down));
-    assert_eq!(gateway_rollup(&m), Some(DaemonState::Down));
+    let busy = daemon(DaemonState::Busy);
+    assert_eq!(
+        gateway_rollup(std::iter::once(&busy)),
+        Some(DaemonState::Busy)
+    );
+    // Worst-of across many INSTANCES (two gateways of one source roll up together,
+    // exactly like two distinct daemons): Idle + Degraded + Down → Down.
+    let (idle, degraded, down) = (
+        daemon(DaemonState::Idle),
+        daemon(DaemonState::Degraded),
+        daemon(DaemonState::Down),
+    );
+    assert_eq!(
+        gateway_rollup([&busy, &idle, &degraded, &down].into_iter()),
+        Some(DaemonState::Down)
+    );
     // Degraded outranks Busy/Idle when nothing is Down.
-    let mut m2 = BTreeMap::new();
-    m2.insert("x".to_string(), daemon(DaemonState::Idle));
-    m2.insert("y".to_string(), daemon(DaemonState::Degraded));
-    assert_eq!(gateway_rollup(&m2), Some(DaemonState::Degraded));
+    assert_eq!(
+        gateway_rollup([&idle, &degraded].into_iter()),
+        Some(DaemonState::Degraded)
+    );
 }
 
 #[test]

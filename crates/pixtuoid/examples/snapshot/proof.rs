@@ -698,7 +698,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             floor: pixtuoid_scene::floor::FloorMeta::ground(),
             active_pet: None,
             last_pet_pos: None,
-            last_mascot_pos: None,
+            last_mascots: Vec::new(),
             floor_pet: None,
             chitchat_state: &mut chitchat_state,
             chitchat_bubbles: Vec::new(),

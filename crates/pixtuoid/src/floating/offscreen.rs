@@ -140,7 +140,7 @@ impl OfficeRenderer {
         let inputs = FooterInputs {
             counts: pixtuoid_scene::board::scene_stats(scene),
             per_floor: &per_floor,
-            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons()),
+            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             floor: None,
             tools: &tools,
             audio_audible,

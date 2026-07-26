@@ -145,14 +145,20 @@ pub(crate) fn inject_openclaw_presence(
     let entered_at = now
         .checked_sub(std::time::Duration::from_secs(20))
         .unwrap_or(now);
-    s.daemons_mut().insert(
-        pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
+    s.insert_daemon(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
         DaemonPresence {
             liveness,
             active_sessions,
             last_seen: now,
             entered_at,
-            in_flight_run_keys: runs.into_iter().collect(),
+            in_flight_runs: runs
+                .into_iter()
+                // Fresh leases at `now`, so the snapshot renders the BUSY mascot
+                // (the decay window is a runtime behaviour, not a still frame).
+                .map(|r| (r, now))
+                .collect(),
             current_pid: Some(4242),
         },
     );

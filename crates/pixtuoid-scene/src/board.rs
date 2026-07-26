@@ -16,7 +16,6 @@
 //! now reachable by every painter crate (the binary's footer AND `pixtuoid-web`),
 //! which is why it moved here out of the binary's tui widgets.
 
-use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::Rgb;
@@ -88,7 +87,9 @@ pub fn per_floor_counts(scene: &SceneState) -> [StateCounts; MAX_FLOORS] {
 /// configured (chip suppressed), distinct from `Some(DaemonState::Down)` (a
 /// daemon was seen, then died). `DaemonState` has no `Ord`, so severity is
 /// ranked explicitly: Idle < Busy < Degraded < Down.
-pub fn gateway_rollup(daemons: &BTreeMap<String, DaemonPresence>) -> Option<DaemonState> {
+pub fn gateway_rollup<'a>(
+    daemons: impl Iterator<Item = &'a DaemonPresence>,
+) -> Option<DaemonState> {
     fn severity(s: DaemonState) -> u8 {
         match s {
             DaemonState::Idle => 0,
@@ -98,7 +99,6 @@ pub fn gateway_rollup(daemons: &BTreeMap<String, DaemonPresence>) -> Option<Daem
         }
     }
     daemons
-        .values()
         .map(|p| p.display_state())
         .max_by_key(|s| severity(*s))
 }

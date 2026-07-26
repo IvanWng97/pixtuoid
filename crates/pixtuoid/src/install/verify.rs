@@ -29,23 +29,48 @@ use std::path::PathBuf;
 /// the config content by a target's `verify_schema`; the filesystem check
 /// (exists/executable, or PATH lookup) is layered on by `install::verify_target`,
 /// which is the only part with I/O.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub enum ShimRef {
     /// An embedded absolute path → stat for exists + executable (hard signal).
     Absolute(PathBuf),
     /// A bare name relying on PATH resolution (Claude/Unix) → soft PATH check
     /// (a doctor-process PATH miss is NOT proof the CLI can't resolve it).
     BareName,
-    /// No command/path could be extracted (parse failure / unexpected shape).
+    /// No command/path could be extracted (parse failure / unexpected shape), or
+    /// the target keeps its shim path outside the config (OpenClaw's entry module).
+    #[default]
     Unknown,
 }
 
+/// Pull the baked shim path back out of a RENDERED code artifact's
+/// `const HOOK_PATH … = "<json string>"` line — the ONE extractor both
+/// code-artifact targets share. opencode's plugin IS its `config_path`, so its
+/// `verify_schema` calls this directly; OpenClaw's entry module is a separate
+/// `extra_artifacts` file, so `install::verify_target` calls it on the file it
+/// stats (existence alone can't catch a shim that MOVED — #332's silent-dead
+/// class with a green doctor).
+pub(crate) fn baked_hook_path(content: &str) -> Option<PathBuf> {
+    let line = content.lines().find(|l| l.contains("const HOOK_PATH"))?;
+    let literal = line.split_once('=')?.1.trim().trim_end_matches(';').trim();
+    let path: String = serde_json::from_str(literal).ok()?;
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+/// The marker identifying a rendered artifact that BAKES the shim path, so
+/// `verify_target` knows which `extra_artifacts` file to read it out of. Matched
+/// against the INTENDED content the installer renders, never the file on disk.
+pub(crate) const BAKED_HOOK_MARKER: &str = "const HOOK_PATH";
+
 /// The PURE, config-content-only half of a verification: everything a target can
 /// decide from the parsed config alone. `issues` are HARD problems (definitely
-/// broken); the shim filesystem check is added later by `verify_target`.
-#[derive(Debug)]
+/// broken); `notes` are SOFT ones — real, actionable, but not proof of a break (a
+/// config we cannot PARSE because the CLI reads a superset format, a fail-closed
+/// switch the user owns); the shim filesystem check is added later by
+/// `verify_target`, which appends to both.
+#[derive(Debug, Default)]
 pub struct SchemaParse {
     pub issues: Vec<String>,
+    pub notes: Vec<String>,
     pub shim: ShimRef,
 }
 
@@ -54,7 +79,7 @@ impl SchemaParse {
     pub fn broken(issue: impl Into<String>) -> Self {
         SchemaParse {
             issues: vec![issue.into()],
-            shim: ShimRef::Unknown,
+            ..Default::default()
         }
     }
 }
@@ -116,7 +141,11 @@ pub(crate) fn assemble(
             missing_events.join(", ")
         ));
     }
-    SchemaParse { issues, shim }
+    SchemaParse {
+        issues,
+        shim,
+        ..Default::default()
+    }
 }
 
 /// Verify a FLAT-JSON hook config (Reasonix, Cursor): `hooks.<event>` is an

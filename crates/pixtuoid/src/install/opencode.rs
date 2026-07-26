@@ -158,21 +158,13 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
             "the opencode plugin's shim-path placeholder was never substituted",
         );
     }
-    match extract_hook_path(content) {
+    match crate::install::verify::baked_hook_path(content) {
         Some(p) => SchemaParse {
-            issues: vec![],
             shim: ShimRef::Absolute(p),
+            ..Default::default()
         },
         None => SchemaParse::broken("could not read HOOK_PATH from the opencode plugin"),
     }
-}
-
-/// Pull the baked shim path back out of `const HOOK_PATH: string = "<json>"`.
-fn extract_hook_path(content: &str) -> Option<PathBuf> {
-    let line = content.lines().find(|l| l.contains("const HOOK_PATH"))?;
-    let literal = line.split_once('=')?.1.trim().trim_end_matches(';').trim();
-    let path: String = serde_json::from_str(literal).ok()?;
-    (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
 fn render_plugin(hook_path: &str) -> Result<String> {

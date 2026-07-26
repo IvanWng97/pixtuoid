@@ -758,7 +758,7 @@ mod tests {
             active_sessions: 0,
             last_seen: now,
             entered_at: now - std::time::Duration::from_millis(age_ms),
-            in_flight_run_keys: std::collections::HashSet::new(),
+            in_flight_runs: Default::default(),
             current_pid: Some(1),
         }
     }
@@ -827,7 +827,7 @@ mod tests {
             active_sessions: 0,
             last_seen: now,
             entered_at,
-            in_flight_run_keys: std::collections::HashSet::new(),
+            in_flight_runs: Default::default(),
             current_pid: Some(1),
         };
 

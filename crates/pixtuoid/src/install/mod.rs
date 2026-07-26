@@ -111,20 +111,11 @@ pub(crate) fn verify_target(
     };
     let parse = (t.verify_schema)(&content);
     let mut issues = parse.issues;
-    let mut notes = Vec::new();
+    // A target's own SOFT observations (a config format we can't strictly parse, a
+    // fail-closed switch the user owns) ride out alongside the filesystem ones.
+    let mut notes = parse.notes;
     match parse.shim {
-        ShimRef::Absolute(p) => {
-            // `display_safe`: the path came from the user's hand-editable hook
-            // command, and these issues reach a real terminal (doctor stdout /
-            // boot eprintln) — strip control chars at the SOURCE so no surface
-            // can leak an ANSI/OSC escape (R0615-06 discipline; online review).
-            let shown = verify::display_safe(&p);
-            if !p.exists() {
-                issues.push(format!("shim binary missing: {shown}"));
-            } else if !is_executable(&p) {
-                issues.push(format!("shim binary not executable: {shown}"));
-            }
-        }
+        ShimRef::Absolute(p) => check_shim_binary(&p, &mut issues),
         ShimRef::BareName => {
             // Claude/Unix bare `pixtuoid-hook` relies on PATH; a doctor-process
             // PATH miss is NOT proof the CLI can't resolve it → soft note only.
@@ -164,12 +155,35 @@ pub(crate) fn verify_target(
     if let Some(make) = t.extra_artifacts {
         match make(std::path::Path::new("pixtuoid-hook")) {
             Ok(arts) => {
-                for (p, _) in arts {
+                for (p, intended) in arts {
                     if !p.exists() {
                         issues.push(format!(
                             "plugin artifact missing: {}",
                             verify::display_safe(&p)
                         ));
+                        continue;
+                    }
+                    // EXISTENCE is not enough for the artifact that BAKES the shim
+                    // path: pixtuoid-hook moving (a cargo→brew reinstall) leaves the
+                    // plugin loading fine while every forward silently fails — the
+                    // #332 silent-dead class with a GREEN doctor. The config-level
+                    // `verify_schema` can't see it (the path lives in the artifact,
+                    // not the config), so read it back here and stat it exactly like
+                    // an embedded hook command's. The INTENDED render selects the
+                    // artifact, so the manifest/package files are skipped.
+                    if !intended.contains(verify::BAKED_HOOK_MARKER) {
+                        continue;
+                    }
+                    match io::read_config(&p)
+                        .ok()
+                        .as_deref()
+                        .and_then(verify::baked_hook_path)
+                    {
+                        Some(baked) => check_shim_binary(&baked, &mut issues),
+                        None => notes.push(format!(
+                            "could not read the baked shim path from {}",
+                            verify::display_safe(&p)
+                        )),
                     }
                 }
             }
@@ -180,6 +194,21 @@ pub(crate) fn verify_target(
         }
     }
     verify::SchemaVerifyResult { issues, notes }
+}
+
+/// Stat one resolved shim path — the ONE check shared by an embedded hook command
+/// (`ShimRef::Absolute`) and a code artifact's baked `HOOK_PATH`, so the two can't
+/// report a moved binary differently. `display_safe`: the path comes from the
+/// user's hand-editable hook command / plugin file and these issues reach a real
+/// terminal (doctor stdout / boot eprintln), so control chars are stripped at the
+/// SOURCE — no surface can leak an ANSI/OSC escape (R0615-06 discipline).
+fn check_shim_binary(p: &std::path::Path, issues: &mut Vec<String>) {
+    let shown = verify::display_safe(p);
+    if !p.exists() {
+        issues.push(format!("shim binary missing: {shown}"));
+    } else if !is_executable(p) {
+        issues.push(format!("shim binary not executable: {shown}"));
+    }
 }
 
 #[cfg(unix)]

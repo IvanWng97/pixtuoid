@@ -268,10 +268,19 @@ pub(crate) async fn handle_conn(
                 ) {
                     if let Some(decode) = crate::source::registry::presence_decoder_for(src) {
                         match decode(&v) {
-                            Ok(updates) => {
-                                for u in updates {
+                            Ok(decoded) => {
+                                // The decoder resolved WHICH instance sent this
+                                // (a gateway port for OpenClaw); the key it forms
+                                // here is the same one the state machine and the
+                                // exit watch route on, so a delta can never land
+                                // on a sibling instance.
+                                let key = crate::source::daemon::DaemonInstanceKey::new(
+                                    src,
+                                    decoded.instance,
+                                );
+                                for u in decoded.updates {
                                     let _ = ptx.send(crate::source::daemon::PresenceMsg {
-                                        source: src.to_string(),
+                                        key: key.clone(),
                                         delta: u,
                                     });
                                 }
@@ -547,7 +556,8 @@ mod tests {
         // A shim-stamped OpenClaw presence line, then an ordinary CC agent line.
         client
             .write_all(
-                b"{\"_pixtuoid_source\":\"openclaw\",\"type\":\"gateway_start\",\"_pid\":4242}\n",
+                b"{\"_pixtuoid_source\":\"openclaw\",\"type\":\"gateway_start\",\
+                  \"gatewayPort\":18789,\"_pid\":4242}\n",
             )
             .await
             .unwrap();
@@ -560,12 +570,18 @@ mod tests {
             .unwrap();
         drop(client);
 
-        // The OpenClaw line → exactly one ("openclaw", GatewayUp) on the SIDE
+        // The OpenClaw line → exactly one (openclaw@18789, GatewayUp) on the SIDE
         // channel, and the AgentEvent channel never sees it (zero AgentEvents).
         let msg = prx.recv().await.expect("one presence update");
         assert_eq!(
-            msg.source, "openclaw",
+            msg.key.source(),
+            "openclaw",
             "presence is source-tagged for N-daemon routing"
+        );
+        assert_eq!(
+            msg.key.instance().as_str(),
+            "18789",
+            "the demux carries the decoder's gateway identity, so N GATEWAYS route too"
         );
         assert!(matches!(
             msg.delta,

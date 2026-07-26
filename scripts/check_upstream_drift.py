@@ -397,6 +397,26 @@ OPENCLAW_HOOK_TYPES_URL = (
 # false-negative); the distinctive `runId`/`sessionId` carry the check.
 OPENCLAW_PAYLOAD_FIELDS = {"runId", "sessionId", "success"}
 
+# The gateway PORT is pixtuoid's runtime identity for one gateway (the inner key of
+# `SceneState::daemons`), and the plugin gets it from `gateway_start`'s event/ctx —
+# `PluginHookGatewayStartEvent = { port: number }` / `PluginHookGatewayContext`.
+# That `port` field is therefore a depended wire name exactly like `runId`: a rename
+# leaves every envelope stamped with the registration-time FALLBACK, so two live
+# gateways collapse onto one mascot again (or one splits into two phantoms). Checked
+# in the SAME hook-types.ts text, one-directional. NB `port` is a common word —
+# the `PluginHookGatewayStartEvent` type name below carries the precise half.
+OPENCLAW_GATEWAY_PORT_TYPES = {"PluginHookGatewayStartEvent", "PluginHookGatewayContext"}
+
+# The plugin's fallback when no hook has handed it the real bound port yet (a hot
+# reload replays no `gateway_start`): upstream's `DEFAULT_GATEWAY_PORT` in
+# `src/config/paths.ts`. We cannot IMPORT it (the plugin lives in OpenClaw's state
+# dir, outside any `node_modules/openclaw` for a global install), so the literal is
+# copied into `openclaw_plugin.js` — and a copied constant is a latent drift bug
+# unless something watches it. This is that watch.
+OPENCLAW_PATHS_URL = (
+    "https://raw.githubusercontent.com/openclaw/openclaw/main/src/config/paths.ts"
+)
+
 # Hermes Agent is a hook-only source: we install SHELL hooks into config.yaml and
 # register 4 of its lifecycle events (`HERMES_EVENTS` in install/hermes.rs). Hermes
 # is open Python: the canonical shell-hook event set is the KEYS of `_DEFAULT_PAYLOADS`
@@ -959,6 +979,20 @@ def read_openclaw_events() -> set[str]:
     `openclaw_events_plugin_decoder_and_const_agree`, so this is a leak-free
     source of truth (mirrors read_cursor_events / read_codewhale_events)."""
     return rust_const_str_array("crates/pixtuoid/src/install/openclaw.rs", "OPENCLAW_EVENTS")
+
+
+def openclaw_plugin_default_port() -> str | None:
+    """The `DEFAULT_GATEWAY_PORT` literal the bundled OpenClaw plugin falls back to.
+
+    Read from the JS template itself (not a second copy here) so the watch compares
+    upstream against the value that actually ships.
+    """
+    try:
+        src = (REPO / "crates/pixtuoid/src/install/openclaw_plugin.js").read_text()
+    except OSError:
+        return None
+    m = re.search(r"const DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", src)
+    return m.group(1) if m else None
 
 
 def read_hermes_events() -> set[str]:
@@ -1722,6 +1756,39 @@ def run_checks(
                         f"GONE from src/plugins/hook-types.ts — renamed; the decoder reads "
                         f"None (wrong run-key / no Degraded gate / no presence)."
                     )
+            # The gateway-identity carriers the plugin reads `port` off.
+            for ty in sorted(OPENCLAW_GATEWAY_PORT_TYPES):
+                if ty not in text:
+                    breaking.append(
+                        f"OpenClaw type `{ty}` (the plugin reads the gateway `port` off it "
+                        f"for the mascot's instance identity) is GONE from "
+                        f"src/plugins/hook-types.ts — renamed; every envelope would carry "
+                        f"the registration-time fallback port, so concurrent gateways "
+                        f"collapse onto one mascot."
+                    )
+
+    # --- OpenClaw default gateway port (the plugin's copied fallback) --------
+    text = try_fetch(OPENCLAW_PATHS_URL, "OpenClaw config/paths", breaking, errors)
+    if text is not None:
+        ours = openclaw_plugin_default_port()
+        m = re.search(r"DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", text)
+        if m is None:
+            breaking.append(
+                "OpenClaw's `DEFAULT_GATEWAY_PORT` is GONE from src/config/paths.ts — the "
+                "plugin's fallback port can no longer be verified against upstream."
+            )
+        elif ours is None:
+            breaking.append(
+                "could not read DEFAULT_GATEWAY_PORT from openclaw_plugin.js — the "
+                "upstream-port watch has nothing to compare (did the const get renamed?)."
+            )
+        elif m.group(1) != ours:
+            breaking.append(
+                f"OpenClaw's DEFAULT_GATEWAY_PORT is now {m.group(1)} but "
+                f"openclaw_plugin.js still falls back to {ours} — a gateway on the new "
+                f"default would be stamped with the stale port (a phantom second mascot "
+                f"until its TTL sweeps it)."
+            )
 
     # --- Hermes shell-hook events + payload fields (only the FETCH is transient)
     if hermes_ours is not None:

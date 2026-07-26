@@ -222,6 +222,21 @@ pub(crate) struct PresenceBeat {
     pub update: DaemonPresenceUpdate,
 }
 
+/// The ONE gateway the hero scripts — OpenClaw's default port, so the authored
+/// timeline lands on exactly one lobster (the site shows the common
+/// single-gateway office; the multi-gateway capability is a runtime one, not a
+/// hero-loop feature).
+pub(crate) fn hero_gateway() -> pixtuoid_core::source::daemon::DaemonInstanceKey {
+    pixtuoid_core::source::daemon::DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        pixtuoid_core::state::DaemonInstanceId::new(HERO_GATEWAY_PORT)
+            .unwrap_or_else(|| unreachable!("HERO_GATEWAY_PORT is a non-empty literal")),
+    )
+}
+
+/// OpenClaw's documented default gateway port — the hero's single instance id.
+const HERO_GATEWAY_PORT: &str = "18789";
+
 /// The lobster's loop (#434): the OpenClaw mascot scuttles in from the
 /// elevator mid-loop, shuttles through two busy runs, and walks out before
 /// the wrap — so every loop replays a clean enter animation (GatewayUp after

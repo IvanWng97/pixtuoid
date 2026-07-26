@@ -808,8 +808,11 @@ fn install_on_a_malformed_config_leaves_no_orphan_extra_artifacts() {
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
     .unwrap_err();
+    // OpenClaw's parse guard names the real reason (its config is JSON5, so a
+    // document our strict parser rejects may be perfectly valid) and points at the
+    // owner CLI — but it is still a BAIL BEFORE ANY WRITE, which is what this pins.
     assert!(
-        format!("{err:#}").contains("refusing to overwrite"),
+        format!("{err:#}").contains("will not rewrite the file"),
         "the bail must come from the parse guard, got: {err:#}"
     );
     // The malformed config is byte-for-byte preserved...
@@ -977,6 +980,55 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
              invariant) — got {:?}",
             t.name,
             v.issues
+        );
+        covered += 1;
+    }
+    assert!(
+        covered >= 1,
+        "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+    );
+}
+
+// The silent-dead class the EXISTENCE stat above is blind to: the artifacts are
+// all present, the config registers them, the plugin loads — but the shim path
+// BAKED INTO the entry module points at a binary that moved (a cargo→brew
+// reinstall of pixtuoid-hook). Every forward then fails inside a plugin that
+// swallows spawn errors by design, so the mascot silently never appears while
+// doctor reports the source healthy. Generic over every `extra_artifacts` target
+// so a future one is auto-guarded.
+#[test]
+fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target() {
+    let _env = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let oc_home = tempfile::TempDir::new().unwrap();
+    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    let mut covered = 0;
+    for &t in target::TARGETS {
+        if t.extra_artifacts.is_none() {
+            continue;
+        }
+        // A REAL executable at install time, so the install itself is honest…
+        let shim_dir = tempfile::TempDir::new().unwrap();
+        let shim = shim_dir.path().join("pixtuoid-hook");
+        std::fs::copy(std::env::current_exe().unwrap(), &shim).unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config");
+        install_target(t, Some(cfg.clone()), Some(shim.clone())).unwrap();
+        assert!(
+            verify_target(t, Some(cfg.clone())).is_sound(),
+            "{}: a fresh install with a real shim must verify sound",
+            t.name
+        );
+        // …then the binary MOVES. Artifacts + config are untouched.
+        std::fs::remove_file(&shim).unwrap();
+        let v = verify_target(t, Some(cfg));
+        assert!(
+            !v.is_sound() && v.issues.iter().any(|i| i.contains("shim binary missing")),
+            "{}: a moved baked shim must be a HARD verify issue — got {:?} / notes {:?}",
+            t.name,
+            v.issues,
+            v.notes
         );
         covered += 1;
     }

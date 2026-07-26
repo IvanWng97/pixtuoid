@@ -196,9 +196,53 @@ impl core::marker::Unpin for pixtuoid_core::source::daemon::DaemonPresenceUpdate
 impl core::marker::UnsafeUnpin for pixtuoid_core::source::daemon::DaemonPresenceUpdate
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::daemon::DaemonPresenceUpdate
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::daemon::DaemonPresenceUpdate
+pub struct pixtuoid_core::source::daemon::DaemonInstanceKey
+impl pixtuoid_core::source::daemon::DaemonInstanceKey
+pub fn pixtuoid_core::source::daemon::DaemonInstanceKey::instance(&self) -> &pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::source::daemon::DaemonInstanceKey::new(impl core::convert::Into<alloc::string::String>, pixtuoid_core::state::DaemonInstanceId) -> Self
+pub fn pixtuoid_core::source::daemon::DaemonInstanceKey::source(&self) -> &str
+impl core::clone::Clone for pixtuoid_core::source::daemon::DaemonInstanceKey
+pub fn pixtuoid_core::source::daemon::DaemonInstanceKey::clone(&self) -> pixtuoid_core::source::daemon::DaemonInstanceKey
+impl core::cmp::Eq for pixtuoid_core::source::daemon::DaemonInstanceKey
+impl core::cmp::Ord for pixtuoid_core::source::daemon::DaemonInstanceKey
+pub fn pixtuoid_core::source::daemon::DaemonInstanceKey::cmp(&self, &pixtuoid_core::source::daemon::DaemonInstanceKey) -> core::cmp::Ordering
+impl core::cmp::PartialEq for pixtuoid_core::source::daemon::DaemonInstanceKey
+pub fn pixtuoid_core::source::daemon::DaemonInstanceKey::eq(&self, &pixtuoid_core::source::daemon::DaemonInstanceKey) -> bool
+impl core::cmp::PartialOrd for pixtuoid_core::source::daemon::DaemonInstanceKey
+pub fn pixtuoid_core::source::daemon::DaemonInstanceKey::partial_cmp(&self, &pixtuoid_core::source::daemon::DaemonInstanceKey) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for pixtuoid_core::source::daemon::DaemonInstanceKey
+pub fn pixtuoid_core::source::daemon::DaemonInstanceKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_core::source::daemon::DaemonInstanceKey
+pub fn pixtuoid_core::source::daemon::DaemonInstanceKey::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for pixtuoid_core::source::daemon::DaemonInstanceKey
+impl core::marker::Freeze for pixtuoid_core::source::daemon::DaemonInstanceKey
+impl core::marker::Send for pixtuoid_core::source::daemon::DaemonInstanceKey
+impl core::marker::Sync for pixtuoid_core::source::daemon::DaemonInstanceKey
+impl core::marker::Unpin for pixtuoid_core::source::daemon::DaemonInstanceKey
+impl core::marker::UnsafeUnpin for pixtuoid_core::source::daemon::DaemonInstanceKey
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::daemon::DaemonInstanceKey
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::daemon::DaemonInstanceKey
+pub struct pixtuoid_core::source::daemon::DecodedPresence
+pub pixtuoid_core::source::daemon::DecodedPresence::instance: pixtuoid_core::state::DaemonInstanceId
+pub pixtuoid_core::source::daemon::DecodedPresence::updates: alloc::vec::Vec<pixtuoid_core::source::daemon::DaemonPresenceUpdate>
+impl core::clone::Clone for pixtuoid_core::source::daemon::DecodedPresence
+pub fn pixtuoid_core::source::daemon::DecodedPresence::clone(&self) -> pixtuoid_core::source::daemon::DecodedPresence
+impl core::cmp::Eq for pixtuoid_core::source::daemon::DecodedPresence
+impl core::cmp::PartialEq for pixtuoid_core::source::daemon::DecodedPresence
+pub fn pixtuoid_core::source::daemon::DecodedPresence::eq(&self, &pixtuoid_core::source::daemon::DecodedPresence) -> bool
+impl core::fmt::Debug for pixtuoid_core::source::daemon::DecodedPresence
+pub fn pixtuoid_core::source::daemon::DecodedPresence::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::source::daemon::DecodedPresence
+impl core::marker::Freeze for pixtuoid_core::source::daemon::DecodedPresence
+impl core::marker::Send for pixtuoid_core::source::daemon::DecodedPresence
+impl core::marker::Sync for pixtuoid_core::source::daemon::DecodedPresence
+impl core::marker::Unpin for pixtuoid_core::source::daemon::DecodedPresence
+impl core::marker::UnsafeUnpin for pixtuoid_core::source::daemon::DecodedPresence
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::daemon::DecodedPresence
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::daemon::DecodedPresence
 pub struct pixtuoid_core::source::daemon::PresenceExitWatch
 impl pixtuoid_core::source::daemon::PresenceExitWatch
-pub fn pixtuoid_core::source::daemon::PresenceExitWatch::watch(&self, &str, i32)
+pub fn pixtuoid_core::source::daemon::PresenceExitWatch::watch(&self, &pixtuoid_core::source::daemon::DaemonInstanceKey, i32)
 impl core::marker::Freeze for pixtuoid_core::source::daemon::PresenceExitWatch
 impl core::marker::Send for pixtuoid_core::source::daemon::PresenceExitWatch
 impl core::marker::Sync for pixtuoid_core::source::daemon::PresenceExitWatch
@@ -208,7 +252,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::daemon::
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::daemon::PresenceExitWatch
 pub struct pixtuoid_core::source::daemon::PresenceMsg
 pub pixtuoid_core::source::daemon::PresenceMsg::delta: pixtuoid_core::source::daemon::DaemonPresenceUpdate
-pub pixtuoid_core::source::daemon::PresenceMsg::source: alloc::string::String
+pub pixtuoid_core::source::daemon::PresenceMsg::key: pixtuoid_core::source::daemon::DaemonInstanceKey
 impl core::clone::Clone for pixtuoid_core::source::daemon::PresenceMsg
 pub fn pixtuoid_core::source::daemon::PresenceMsg::clone(&self) -> pixtuoid_core::source::daemon::PresenceMsg
 impl core::cmp::Eq for pixtuoid_core::source::daemon::PresenceMsg
@@ -246,7 +290,7 @@ impl core::marker::Unpin for pixtuoid_core::source::daemon::PresenceTtl
 impl core::marker::UnsafeUnpin for pixtuoid_core::source::daemon::PresenceTtl
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::daemon::PresenceTtl
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::daemon::PresenceTtl
-pub fn pixtuoid_core::source::daemon::apply_presence(&mut pixtuoid_core::state::SceneState, &str, pixtuoid_core::source::daemon::DaemonPresenceUpdate, std::time::SystemTime)
+pub fn pixtuoid_core::source::daemon::apply_presence(&mut pixtuoid_core::state::SceneState, &pixtuoid_core::source::daemon::DaemonInstanceKey, pixtuoid_core::source::daemon::DaemonPresenceUpdate, std::time::SystemTime)
 pub fn pixtuoid_core::source::daemon::mark_presence_down(&mut pixtuoid_core::state::SceneState, &str, std::time::SystemTime)
 pub fn pixtuoid_core::source::daemon::spawn_presence_exit_watch(pixtuoid_core::source::daemon::PresenceSender) -> core::option::Option<pixtuoid_core::source::daemon::PresenceExitWatch>
 pub fn pixtuoid_core::source::daemon::sweep_presence_ttl(&mut pixtuoid_core::state::SceneState, &str, pixtuoid_core::source::daemon::PresenceTtl, std::time::SystemTime)
@@ -450,7 +494,7 @@ pub fn pixtuoid_core::source::omp::omp_agent_dir() -> std::path::PathBuf
 pub fn pixtuoid_core::source::omp::omp_id_from_path(&std::path::Path) -> alloc::string::String
 pub mod pixtuoid_core::source::openclaw
 pub const pixtuoid_core::source::openclaw::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::daemon::DaemonPresenceUpdate>>
+pub fn pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&serde_json::value::Value) -> anyhow::Result<pixtuoid_core::source::daemon::DecodedPresence>
 pub mod pixtuoid_core::source::opencode
 pub const pixtuoid_core::source::opencode::SOURCE_NAME: &str
 pub fn pixtuoid_core::source::opencode::decode_oc_hook_payload(&serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
@@ -969,11 +1013,42 @@ impl core::marker::Unpin for pixtuoid_core::state::AgentSlot
 impl core::marker::UnsafeUnpin for pixtuoid_core::state::AgentSlot
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::state::AgentSlot
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::state::AgentSlot
+pub struct pixtuoid_core::state::DaemonInstanceId(_)
+impl pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::as_str(&self) -> &str
+pub fn pixtuoid_core::state::DaemonInstanceId::new(impl core::convert::Into<alloc::string::String>) -> core::option::Option<Self>
+impl core::clone::Clone for pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::clone(&self) -> pixtuoid_core::state::DaemonInstanceId
+impl core::cmp::Eq for pixtuoid_core::state::DaemonInstanceId
+impl core::cmp::Ord for pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::cmp(&self, &pixtuoid_core::state::DaemonInstanceId) -> core::cmp::Ordering
+impl core::cmp::PartialEq for pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::eq(&self, &pixtuoid_core::state::DaemonInstanceId) -> bool
+impl core::cmp::PartialOrd for pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::partial_cmp(&self, &pixtuoid_core::state::DaemonInstanceId) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for pixtuoid_core::state::DaemonInstanceId
+impl serde_core::ser::Serialize for pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for pixtuoid_core::state::DaemonInstanceId
+pub fn pixtuoid_core::state::DaemonInstanceId::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for pixtuoid_core::state::DaemonInstanceId
+impl core::marker::Send for pixtuoid_core::state::DaemonInstanceId
+impl core::marker::Sync for pixtuoid_core::state::DaemonInstanceId
+impl core::marker::Unpin for pixtuoid_core::state::DaemonInstanceId
+impl core::marker::UnsafeUnpin for pixtuoid_core::state::DaemonInstanceId
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::state::DaemonInstanceId
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::state::DaemonInstanceId
 pub struct pixtuoid_core::state::DaemonPresence
 pub pixtuoid_core::state::DaemonPresence::active_sessions: u32
 pub pixtuoid_core::state::DaemonPresence::current_pid: core::option::Option<i32>
 pub pixtuoid_core::state::DaemonPresence::entered_at: std::time::SystemTime
-pub pixtuoid_core::state::DaemonPresence::in_flight_run_keys: std::collections::hash::set::HashSet<alloc::string::String>
+pub pixtuoid_core::state::DaemonPresence::in_flight_runs: alloc::collections::btree::map::BTreeMap<alloc::string::String, std::time::SystemTime>
 pub pixtuoid_core::state::DaemonPresence::last_seen: std::time::SystemTime
 pub pixtuoid_core::state::DaemonPresence::liveness: pixtuoid_core::state::DaemonLiveness
 impl pixtuoid_core::state::DaemonPresence
@@ -1074,8 +1149,8 @@ pub struct pixtuoid_core::state::SceneState
 pub pixtuoid_core::state::SceneState::agents: alloc::collections::btree::map::BTreeMap<pixtuoid_core::id::AgentId, pixtuoid_core::state::AgentSlot>
 pub pixtuoid_core::state::SceneState::floor_capacities: [usize; 10]
 impl pixtuoid_core::state::SceneState
-pub fn pixtuoid_core::state::SceneState::daemons(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, pixtuoid_core::state::DaemonPresence>
-pub fn pixtuoid_core::state::SceneState::daemons_mut(&mut self) -> &mut alloc::collections::btree::map::BTreeMap<alloc::string::String, pixtuoid_core::state::DaemonPresence>
+pub fn pixtuoid_core::state::SceneState::daemon(&self, &str, &pixtuoid_core::state::DaemonInstanceId) -> core::option::Option<&pixtuoid_core::state::DaemonPresence>
+pub fn pixtuoid_core::state::SceneState::daemons(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &pixtuoid_core::state::DaemonInstanceId, &pixtuoid_core::state::DaemonPresence)> + '_
 impl pixtuoid_core::state::SceneState
 pub fn pixtuoid_core::state::SceneState::floor_local_desk(&self, pixtuoid_core::state::GlobalDeskIndex) -> pixtuoid_core::state::FloorLocalDeskIndex
 pub fn pixtuoid_core::state::SceneState::floor_of(&self, pixtuoid_core::state::GlobalDeskIndex) -> usize
@@ -1665,8 +1740,8 @@ pub struct pixtuoid_core::SceneState
 pub pixtuoid_core::SceneState::agents: alloc::collections::btree::map::BTreeMap<pixtuoid_core::id::AgentId, pixtuoid_core::state::AgentSlot>
 pub pixtuoid_core::SceneState::floor_capacities: [usize; 10]
 impl pixtuoid_core::state::SceneState
-pub fn pixtuoid_core::state::SceneState::daemons(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, pixtuoid_core::state::DaemonPresence>
-pub fn pixtuoid_core::state::SceneState::daemons_mut(&mut self) -> &mut alloc::collections::btree::map::BTreeMap<alloc::string::String, pixtuoid_core::state::DaemonPresence>
+pub fn pixtuoid_core::state::SceneState::daemon(&self, &str, &pixtuoid_core::state::DaemonInstanceId) -> core::option::Option<&pixtuoid_core::state::DaemonPresence>
+pub fn pixtuoid_core::state::SceneState::daemons(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &pixtuoid_core::state::DaemonInstanceId, &pixtuoid_core::state::DaemonPresence)> + '_
 impl pixtuoid_core::state::SceneState
 pub fn pixtuoid_core::state::SceneState::floor_local_desk(&self, pixtuoid_core::state::GlobalDeskIndex) -> pixtuoid_core::state::FloorLocalDeskIndex
 pub fn pixtuoid_core::state::SceneState::floor_of(&self, pixtuoid_core::state::GlobalDeskIndex) -> usize

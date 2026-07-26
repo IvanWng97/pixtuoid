@@ -824,15 +824,21 @@ bump version:
 
     printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. regenerate committed artifacts — the office HUD bakes CARGO_PKG_VERSION, so a\n       bump drifts every still: just gen, then commit docs/images + site/public/demos\n       (else CI smoke gen-check reds the PR)\n    3. open a PR, review, merge to main\n    4. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + npm, and the tag\n       tarball auto-bumps homebrew-core; see docs/CONTRIBUTING.md#releasing):\n         git tag v%s && git push origin v%s\n' "$ver" "$branch" "$ver" "$ver"
 
-# Unit-test the npm package generator (Node, no cargo). The ONLY validation of
-# npm/generate.mjs — release.yml runs this as a hard gate right before `npm
-# publish`, and ci-lint.yml runs it on every PR so a generator regression is caught
-# at review time, not at the irreversible tag-push. NOT in preflight: a Rust
-# pre-push shouldn't require a Node toolchain. Needs Node ≥ 22.
+# The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
+# OpenClaw plugin contract.
+#   - npm/generate.test.mjs — the ONLY validation of npm/generate.mjs. release.yml
+#     runs it as a hard gate right before `npm publish`, and ci-lint.yml on every PR
+#     so a generator regression is caught at review time, not at the tag-push.
+#   - scripts/openclaw-plugin.test.mjs — drives the RENDERED openclaw_plugin.js the
+#     way OpenClaw's loader does. The Rust side can only grep that template as a
+#     string, so this is the only place its runtime contract (never block the
+#     gateway / never forward content / always stamp the gateway identity) is
+#     actually EXECUTED.
+# NOT in preflight: a Rust pre-push shouldn't require a Node toolchain. Needs Node ≥ 22.
 [group('release')]
-[doc('Test the npm package generator (Node; CI + release call it, not in preflight)')]
+[doc('Node gates: the npm package generator + the OpenClaw plugin contract (CI + release; not in preflight)')]
 npm-check:
-    node --test npm/generate.test.mjs
+    node --test npm/generate.test.mjs scripts/openclaw-plugin.test.mjs
 
 # Fail if the current release_notes() arm still has the uncurated TODO marker.
 # A release-PR guard (#116) — deliberately NOT in preflight, since `just bump`

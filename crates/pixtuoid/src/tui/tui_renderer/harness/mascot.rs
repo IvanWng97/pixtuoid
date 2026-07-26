@@ -26,18 +26,31 @@ fn gateway_scene_runs(
     runs: &[&str],
 ) -> SceneState {
     let mut s = SceneState::uniform(16);
-    s.daemons_mut().insert(
-        pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
+    s.insert_daemon(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        harness_gateway(),
         pixtuoid_core::state::DaemonPresence {
             liveness,
             active_sessions: sessions,
             last_seen,
             entered_at,
-            in_flight_run_keys: runs.iter().map(|s| s.to_string()).collect(),
+            in_flight_runs: runs
+                .iter()
+                // Stamped at the scene's own clock so the run lease is fresh —
+                // these fixtures assert the BUSY render, not the decay.
+                .map(|r| (r.to_string(), last_seen))
+                .collect(),
             current_pid: Some(1),
         },
     );
     s
+}
+
+/// The single gateway instance these harness scenes stage (OpenClaw's default
+/// port) — the mascot tests are about the CREATURE, not identity; the
+/// two-gateway render is pinned by `two_gateways_render_two_mascots`.
+fn harness_gateway() -> pixtuoid_core::state::DaemonInstanceId {
+    pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty")
 }
 
 /// Count the busy activity-bubble pixels (the `0xd6,0xf2,0xf8` rising stream).
@@ -61,38 +74,152 @@ fn bubble_px(buf: &RgbBuffer) -> usize {
 /// Count the lobster's exclusive carapace reds in the buffer (the lobster sprite is
 /// not recolored, so its authored RGBs render exactly). An empty agents scene
 /// means no recolored shirts can collide.
+/// The lobster's EXCLUSIVE carapace palette (body / claw / antenna / shade) — the
+/// one authored red set both `lobster_px` and `lobster_cells` read.
+const LOBSTER_REDS: [pixtuoid_core::sprite::Rgb; 4] = [
+    pixtuoid_core::sprite::Rgb {
+        r: 0xd2,
+        g: 0x40,
+        b: 0x2f,
+    },
+    pixtuoid_core::sprite::Rgb {
+        r: 0xe8,
+        g: 0x55,
+        b: 0x40,
+    },
+    pixtuoid_core::sprite::Rgb {
+        r: 0xc8,
+        g: 0x38,
+        b: 0x28,
+    },
+    pixtuoid_core::sprite::Rgb {
+        r: 0x9e,
+        g: 0x2a,
+        b: 0x20,
+    },
+];
+
 fn lobster_px(buf: &RgbBuffer) -> usize {
-    let reds = [
-        pixtuoid_core::sprite::Rgb {
-            r: 0xd2,
-            g: 0x40,
-            b: 0x2f,
-        }, // body
-        pixtuoid_core::sprite::Rgb {
-            r: 0xe8,
-            g: 0x55,
-            b: 0x40,
-        }, // claw
-        pixtuoid_core::sprite::Rgb {
-            r: 0xc8,
-            g: 0x38,
-            b: 0x28,
-        }, // antenna
-        pixtuoid_core::sprite::Rgb {
-            r: 0x9e,
-            g: 0x2a,
-            b: 0x20,
-        }, // shade
-    ];
     let mut n = 0;
     for y in 0..buf.height() {
         for x in 0..buf.width() {
-            if reds.contains(&buf.get(x, y)) {
+            if LOBSTER_REDS.contains(&buf.get(x, y)) {
                 n += 1;
             }
         }
     }
     n
+}
+
+/// A scene carrying one OpenClaw gateway presence per `ports` entry.
+fn gateway_scene_at(ports: &[&str], entered_at: SystemTime, last_seen: SystemTime) -> SceneState {
+    let mut s = SceneState::uniform(16);
+    for port in ports {
+        s.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::state::DaemonInstanceId::new(*port).expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 0,
+                last_seen,
+                entered_at,
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            },
+        );
+    }
+    s
+}
+
+/// The lobster-red CELLS (not just a count) — so two mascots' positions can be
+/// compared exactly instead of inferred from a pixel total. Same authored carapace
+/// palette `lobster_px` counts, read from ONE place so the two can't drift.
+fn lobster_cells(buf: &RgbBuffer) -> std::collections::BTreeSet<(u16, u16)> {
+    let mut out = std::collections::BTreeSet::new();
+    for y in 0..buf.height() {
+        for x in 0..buf.width() {
+            if LOBSTER_REDS.contains(&buf.get(x, y)) {
+                out.insert((x, y));
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn two_gateways_render_two_independent_mascots() {
+    // THE multi-gateway payoff, at the pixels: two live gateways are two lobsters,
+    // and they must not sit on top of each other. Each gateway is rendered ALONE
+    // first: identical presences (same entered_at/state) differing ONLY in port
+    // must occupy DIFFERENT cells, which is exactly what folding the instance id
+    // into the wander seed buys — a source-only seed put both on the same cell, so
+    // two gateways read as one lobster.
+    let (entered, seen) = (t0() - Duration::from_secs(20), t0());
+    let cells_of = |ports: &[&str]| {
+        let mut r = build(160, 80, vec![]);
+        r.render(&gateway_scene_at(ports, entered, seen), &pack(), t0())
+            .unwrap();
+        lobster_cells(r.buf())
+    };
+    let a = cells_of(&["18789"]);
+    let b = cells_of(&["19789"]);
+    assert!(
+        !a.is_empty() && !b.is_empty(),
+        "each gateway draws a lobster"
+    );
+    assert_ne!(
+        a, b,
+        "two gateways differing only in port must wander to DIFFERENT cells"
+    );
+    // Together: both are on the floor — the union of what each draws alone.
+    let both = cells_of(&["18789", "19789"]);
+    assert!(
+        both.len() > a.len() && both.len() > b.len(),
+        "two mascots must cover more floor than either alone (got {} vs {}/{})",
+        both.len(),
+        a.len(),
+        b.len()
+    );
+}
+
+#[test]
+fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
+    // Instance-local liveness, at the pixels: gateway A walks out while B keeps
+    // wandering. With the old source-keyed roster A's `gateway_stop` WAS B's.
+    let (entered, seen) = (t0() - Duration::from_secs(20), t0());
+    let mut scene = gateway_scene_at(&["18789", "19789"], entered, seen);
+    let a = pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty");
+    pixtuoid_core::source::daemon::apply_presence(
+        &mut scene,
+        &pixtuoid_core::source::daemon::DaemonInstanceKey::new(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            a.clone(),
+        ),
+        pixtuoid_core::source::daemon::DaemonPresenceUpdate::GatewayDown,
+        t0(),
+    );
+    assert_eq!(
+        scene
+            .daemon(pixtuoid_core::source::openclaw::SOURCE_NAME, &a)
+            .map(|p| p.display_state()),
+        Some(pixtuoid_core::state::DaemonState::Down)
+    );
+    let b = pixtuoid_core::state::DaemonInstanceId::new("19789").expect("non-empty");
+    assert_eq!(
+        scene
+            .daemon(pixtuoid_core::source::openclaw::SOURCE_NAME, &b)
+            .map(|p| p.display_state()),
+        Some(pixtuoid_core::state::DaemonState::Idle),
+        "the sibling gateway is untouched"
+    );
+    // Well past the walk-out: A is gone from the floor, B is still drawn.
+    let mut r = build(160, 80, vec![]);
+    r.render(&scene, &pack(), t0() + Duration::from_secs(5))
+        .unwrap();
+    assert!(
+        lobster_px(r.buf()) > 0,
+        "the surviving gateway must still paint its lobster"
+    );
 }
 
 #[test]

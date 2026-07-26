@@ -739,7 +739,7 @@ fn main() -> Result<()> {
         },
         active_pet: None,
         last_pet_pos: None,
-        last_mascot_pos: None,
+        last_mascots: Vec::new(),
         floor_pet: None,
         chitchat_state: &mut chitchat_state,
         chitchat_bubbles: Vec::new(),
@@ -761,10 +761,10 @@ fn main() -> Result<()> {
 
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
-        // the renderer actually resolved (written back to last_mascot_pos), not
+        // the renderer actually resolved (written back to last_mascots), not
         // a precomputed layout point. pos is the logical half-block buffer (1px
         // per cell across, 2px down — same convention as compute_crop_rect).
-        let m = draw_ctx.last_mascot_pos.as_ref().ok_or_else(|| {
+        let m = draw_ctx.last_mascots.first().ok_or_else(|| {
             anyhow::anyhow!("--crop-mascot needs a visible mascot; pass --openclaw <state>")
         })?;
         Some(centered_crop(m.pos.x, m.pos.y / 2, cols, rows))
