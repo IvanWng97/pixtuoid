@@ -25,7 +25,11 @@ set windows-shell := ["bash", "-cu"]
 # newly-published crate is added in ONE place.
 PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 
-# Shell sources share one authority so formatting and lint coverage cannot drift.
+# Standalone shell FILES share one authority so formatting and lint coverage
+# cannot drift. Shell embedded in YAML is a second population this cannot cover:
+# workflow `run:` blocks go to actionlint, composite-action ones to
+# `actionlint-composites`. Both are shellcheck-only — shfmt cannot rewrite a
+# scalar in place — so adding a file here is not enough for embedded shell.
 SHELL_SOURCES := "scripts/*.sh .githooks/* policy/ci-observability/*.sh"
 
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is

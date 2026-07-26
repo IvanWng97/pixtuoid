@@ -668,18 +668,24 @@ deny contains msg if {
 	msg := sprintf("%s tests call must grant only contents:read and id-token:write", [ci_workflow_path])
 }
 
-# The callee-side rule above pins ci-tests.yml's own jobs, but only the `tests`
-# call is supposed to carry OIDC at all. The other group calls fan out to ~19
-# jobs that legitimately declare no `permissions:` of their own, so granting
-# id-token here would hand every one of them a repo-scoped token in a single
-# edit, with nothing downstream to notice.
+# The callee-side rule above pins ci-tests.yml's own jobs. This is its caller
+# half: the other group calls fan out to ~19 jobs that declare no `permissions:`
+# of their own, so granting id-token here hands every one of them a repo-scoped
+# token in a single edit with nothing downstream to notice. A future group that
+# genuinely needs OIDC (provenance attestation also uses it, not just Codecov)
+# is not blocked forever — it first gives its own jobs explicit scopes, the way
+# ci-tests.yml does, and the message says so rather than claiming OIDC belongs
+# to `tests` alone.
 deny contains msg if {
 	_ := documents[ci_workflow_path]
 	some name, job in ci_jobs
 	name != "tests"
 	startswith(object.get(job, "uses", ""), "./.github/workflows/")
 	object.get(object.get(job, "permissions", {}), "id-token", "") == "write"
-	msg := sprintf("%s %s call must not grant id-token: write — only the tests call uploads via OIDC", [ci_workflow_path, name])
+	msg := sprintf(
+		"%s %s call must not pass id-token: write down to jobs that declare no permissions of their own",
+		[ci_workflow_path, name],
+	)
 }
 
 deny contains msg if {

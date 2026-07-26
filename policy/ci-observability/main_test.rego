@@ -851,7 +851,7 @@ test_json_schema_unterminated_before_another_flag_is_denied if {
 }
 
 ci_oidc_call_message(name) := sprintf(
-	"%s %s call must not grant id-token: write — only the tests call uploads via OIDC",
+	"%s %s call must not pass id-token: write down to jobs that declare no permissions of their own",
 	[ci_workflow_path, name],
 )
 
