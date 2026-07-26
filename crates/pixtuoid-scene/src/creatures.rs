@@ -364,7 +364,7 @@ const MASCOT_ENTER_STAGGER_MS: u64 = 900;
 /// realistic multi-gateway deployment is CONSECUTIVE ports, whose folded seeds
 /// differ by 1 — a raw modulo reads only the low bits and would hand four adjacent
 /// gateways delays 1 ms apart, i.e. no stagger at all (measured: 396/397/398/399
-/// for ports 18901-18904, vs 177/215/486/394 once mixed). Distribution, not
+/// for ports 18901-18904, vs 4/506/750/704 once mixed). Distribution, not
 /// adversarial separation, is the claim: a rare near-collision between two
 /// instances is possible and self-corrects at the wander, but the SYSTEMATIC
 /// collapse is gone.
