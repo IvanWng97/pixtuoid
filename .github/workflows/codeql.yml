@@ -69,7 +69,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v4.37.1
         with:
           languages: ${{ matrix.language }}
           # Rust supports only the no-build extractor. The interpreted
@@ -78,7 +78,7 @@ jobs:
 
       - name: Analyze
         id: analyze
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v4.37.1
         with:
           category: /language:${{ matrix.language }}
           # Rust defers its upload until the extraction-health gate below has
@@ -143,7 +143,7 @@ jobs:
       # unless it was healthy enough to be worth trusting.
       - name: Upload Rust analysis
         if: ${{ matrix.language == 'rust' }}
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.1
         with:
           sarif_file: ${{ steps.analyze.outputs.sarif-output }}
           category: /language:${{ matrix.language }}

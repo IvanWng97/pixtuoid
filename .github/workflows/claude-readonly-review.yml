@@ -125,7 +125,7 @@ jobs:
       - name: Run read-only Claude review
         if: steps.pr.outputs.reviewable == 'true'
         id: claude
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@v1.0.178
         with:
           github_token: ${{ github.token }}
           anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
