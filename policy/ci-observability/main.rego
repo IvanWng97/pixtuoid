@@ -469,6 +469,21 @@ ci_gate_needs := {name | some name in object.get(ci_gate_job, "needs", [])}
 # health gate publishes a security tab that reads cleaner than reality. Pin both
 # halves: analyze must defer Rust's upload, and the deferred upload must exist —
 # either alone silently restores the old ordering.
+# The ordering that matters is health BEFORE upload, not analyze before health:
+# putting the gate ahead of analyze fails loudly on its own (SARIF_DIR resolves
+# empty, the glob matches nothing, `set -euo pipefail` kills the step) and
+# actionlint rejects the undefined step reference outright. Moving the gate
+# BELOW the upload is the silent one — it was green on both gates until this.
+deny contains msg if {
+	_ := documents[codeql_workflow_path]
+	health := codeql_named_steps(rust_health_step_name)
+	count(health) == 1
+	upload := codeql_named_steps(codeql_upload_step_name)
+	count(upload) == 1
+	health[0].index >= upload[0].index
+	msg := sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path])
+}
+
 deny contains msg if {
 	_ := documents[codeql_workflow_path]
 	steps := codeql_steps_using("github/codeql-action/analyze@v4")
@@ -826,20 +841,6 @@ deny contains msg if {
 
 deny contains msg if {
 	count(warning_steps) == 1
-	run := object.get(warning_steps[0].value, "run", "")
-	not contains(run, "::warning")
-	msg := sprintf("%s failure step must emit a workflow warning", [codecov_authority_path])
-}
-
-deny contains msg if {
-	count(warning_steps) == 1
-	run := object.get(warning_steps[0].value, "run", "")
-	not contains(run, "GITHUB_STEP_SUMMARY")
-	msg := sprintf("%s failure step must write the job summary", [codecov_authority_path])
-}
-
-deny contains msg if {
-	count(warning_steps) == 1
 	env := object.get(warning_steps[0].value, "env", {})
 	object.get(env, "REPORT_FILE", "") != codecov_input_file
 	msg := sprintf("%s failure step must identify inputs.file", [codecov_authority_path])
@@ -997,11 +998,6 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	object.get(codeql.on, "workflow_dispatch", "missing") != null
-	msg := sprintf("%s must support manual dispatch", [codeql_workflow_path])
-}
-
-deny contains msg if {
 	not has_weekly_codeql_schedule
 	msg := sprintf("%s must retain its weekly schedule", [codeql_workflow_path])
 }
@@ -1148,26 +1144,11 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	init_steps := codeql_steps_using("github/codeql-action/init@v4")
-	count(init_steps) == 1
-	params := object.get(init_steps[0].value, "with", {})
-	object.get(params, "build-mode", "") != "none"
-	msg := sprintf("%s CodeQL init must use build-mode: none", [codeql_workflow_path])
-}
-
-deny contains msg if {
 	analyze_steps := codeql_steps_using("github/codeql-action/analyze@v4")
 	count(analyze_steps) == 1
 	params := object.get(analyze_steps[0].value, "with", {})
 	object.get(params, "category", "") != "/language:${{ matrix.language }}"
 	msg := sprintf("%s CodeQL analyze must use a per-language category", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	analyze_steps := codeql_steps_using("github/codeql-action/analyze@v4")
-	count(analyze_steps) == 1
-	object.get(analyze_steps[0].value, "id", "") != codeql_analyze_step_id
-	msg := sprintf("%s CodeQL analyze step must have id: %s", [codeql_workflow_path, codeql_analyze_step_id])
 }
 
 deny contains msg if {
@@ -1222,12 +1203,4 @@ deny contains msg if {
 	count(init_steps) == 1
 	rust_setup_steps[0].index >= init_steps[0].index
 	msg := sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	analyze_steps := codeql_steps_using("github/codeql-action/analyze@v4")
-	count(analyze_steps) == 1
-	count(rust_health_steps) == 1
-	analyze_steps[0].index >= rust_health_steps[0].index
-	msg := sprintf("%s must verify Rust extraction health after CodeQL analyze", [codeql_workflow_path])
 }

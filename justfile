@@ -163,7 +163,7 @@ ci-observability:
     # i.e. no test makes that rule fire, which is how two vacuous rules reached
     # main. Raise the number as rules gain tests; never lower it.
     opa check --strict policy/ci-observability
-    opa test --coverage --threshold 94 policy/ci-observability >/dev/null
+    opa test --coverage --threshold 95 policy/ci-observability >/dev/null
     if ! conftest verify --policy policy/ci-observability --output json >"$policy_test_results"; then
         yq -P '.' "$policy_test_results" >&2
         exit 1

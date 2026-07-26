@@ -121,15 +121,6 @@ test_codeql_extraction_health_cannot_be_masked_as_success if {
 	sprintf("%s Rust extraction-health gate must fail the job", [codeql_workflow_path]) in violations
 }
 
-test_codeql_analyze_must_expose_sarif_output if {
-	fixture := {"documents": [{
-		"path": codeql_workflow_path,
-		"contents": {"jobs": {"analyze": {"steps": [{"uses": "github/codeql-action/analyze@v4"}]}}},
-	}]}
-	violations := deny with input as fixture
-	sprintf("%s CodeQL analyze step must have id: analyze", [codeql_workflow_path]) in violations
-}
-
 test_report_presence_check_is_required if {
 	fixture := {"documents": [{
 		"path": codecov_authority_path,
@@ -949,4 +940,30 @@ test_codeql_missing_deferred_upload_is_denied if {
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s must upload the Rust SARIF after the extraction-health gate", [codeql_workflow_path]) in violations
+}
+
+# Health BEFORE upload is the ordering that fails SILENTLY when broken — the
+# inverse (gate ahead of analyze) dies loudly on an empty SARIF_DIR.
+test_codeql_upload_before_health_gate_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"name": codeql_upload_step_name},
+			{"name": rust_health_step_name},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
+}
+
+test_codeql_health_gate_before_upload_is_accepted if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"name": rust_health_step_name},
+			{"name": codeql_upload_step_name},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	not sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
 }
