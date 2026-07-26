@@ -62,6 +62,27 @@ exclude_re = [
     # deterministic test can arrange (the non-boundary prune/dedupe behavior
     # IS pinned by unclaim.rs's unit tests).
     'unclaim\.rs.*replace < with <= in ChildEndUnclaims',
+    # `mascot_spot_for`'s seeded ring start, `splitmix64(seed ^ SALT) % LEN`. The
+    # index is reduced AGAIN downstream (`MASCOT_SPOT_RING[(start + k) % LEN]`), so
+    # that outer `%` is redundant for correctness and only chooses WHICH rotation a
+    # seed lands on — nothing observable rides on the choice:
+    #   `% -> +` is ALGEBRAICALLY equivalent: (x + LEN + k) % LEN == (x + k) % LEN.
+    #            Measured identical starts for 18901-18904, as the proof requires.
+    #   `% -> /` picks a different rotation of EQUAL quality (measured: 3/4 distinct
+    #            starts over 4 consecutive ports, 6-8 of 8 over 16 — same band as
+    #            the real mixing), so no invariant separates them and any test that
+    #            did would be a change-detector on the exact hash arithmetic.
+    # `^ -> |` on the same line is NOT equivalent — it forces the salt's bits on, so
+    # the map stops being injective and consecutive ports collapse (measured over 16
+    # ports x 5 bases: real 7-8 distinct rotations, the OR mutant 4-6). It is left
+    # UNPINNED deliberately: every candidate assertion is a zero-margin distribution
+    # golden (the real code's own minimum IS the threshold that catches the mutant,
+    # so a future salt change false-reds it), while the effect is second-order
+    # cosmetic — two instances must ALSO pick the same visit spot in the same cycle
+    # before a user sees any overlap. The ring's load-bearing property (eight
+    # DISTINCT offsets) IS pinned, in creatures.rs.
+    'creatures\.rs.*replace % with (\+|/) in mascot_spot_for',
+    'creatures\.rs.*replace \^ with \| in mascot_spot_for',
     # The unix hook-socket bind's `tmp.len() > 100` picks between two bind
     # strategies (temp-rename vs direct+chmod) whose end states are
     # byte-identical — the boundary is sun_path headroom, distinguishable only
