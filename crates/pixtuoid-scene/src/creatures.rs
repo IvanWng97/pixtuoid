@@ -1097,6 +1097,122 @@ mod tests {
     /// minus signs turns an entry into a copy of its neighbour, and neither scene's
     /// creature tests nor the binary's mascot harness went red.
     ///
+    /// The ring must actually be USED, not merely declared correctly. Mutation
+    /// testing found the const test below cannot see this: turning the INDEX
+    /// reduction `(start + k) % LEN` into `/ LEN` leaves the const pristine while
+    /// making the index only ever 0 or 1 — on an open floor every instance then
+    /// returns ring[0], so all N mascots stand on the identical cell and the whole
+    /// per-instance offset is dead.
+    ///
+    /// Threshold is 4 of 8 with deliberate margin, measured: 16 consecutive ports
+    /// spread over 7 ring positions here, the collapse yields exactly 1, and the two
+    /// mixing mutants adjudicated in `.cargo/mutants.toml` yield 6 — so this catches
+    /// the collapse ONLY, and does not become a golden on the hash arithmetic.
+    #[test]
+    fn consecutive_gateway_ports_spread_over_the_ring_instead_of_one_offset() {
+        use pixtuoid_core::state::DaemonInstanceId;
+        use pixtuoid_core::walkable::WalkableMask;
+        let (w, h) = (200u16, 120u16);
+        let mut layout = crate::layout::Layout::compute(w, h, Some(4)).expect("layout fits");
+        // Fully open floor: no candidate is ever rejected, so the returned point is
+        // exactly the ring entry the seed selected — this isolates the SELECTION
+        // from the walkability filter.
+        layout.walkable = WalkableMask::new_open(w, h);
+        let spot = p(100, 60);
+
+        // Consecutive ports are the realistic multi-gateway deployment (and what
+        // `just openclaw-multi-e2e` runs), so they are the case that must not clump.
+        let offsets: std::collections::BTreeSet<(i32, i32)> = (0..16u32)
+            .map(|i| {
+                let id = DaemonInstanceId::new((18901 + i).to_string()).expect("non-empty");
+                let got = mascot_spot_for(&layout, spot, mascot_seed("openclaw", &id));
+                (
+                    i32::from(got.x) - i32::from(spot.x),
+                    i32::from(got.y) - i32::from(spot.y),
+                )
+            })
+            .collect();
+
+        assert!(
+            offsets.len() >= 4,
+            "16 consecutive gateways must spread over the ring, not clump onto a few \
+             cells — got {} distinct offsets: {offsets:?}",
+            offsets.len()
+        );
+        assert!(
+            !offsets.contains(&(0, 0)),
+            "no instance may stand ON the shared spot — that is the collision the \
+             offset exists to break: {offsets:?}"
+        );
+    }
+
+    /// The BLOCKED half of the ring walk, which the open-floor test above cannot
+    /// reach: it always succeeds at `k == 0`, so nothing there advances the cursor.
+    /// Mutation testing exposed that gap — turning `(start + k)` into `(start - k)`
+    /// survived, and it is a latent PANIC, not a cosmetic drift: `start` and `k` are
+    /// `usize`, so the first seed with `start < k` underflows the moment a candidate
+    /// is rejected. Only a mascot standing near furniture reaches that, which is
+    /// precisely the case no test covered.
+    #[test]
+    fn a_boxed_in_spot_falls_back_to_itself_and_a_crowded_one_still_finds_a_free_cell() {
+        use pixtuoid_core::state::DaemonInstanceId;
+        use pixtuoid_core::walkable::WalkableMask;
+        let (w, h) = (200u16, 120u16);
+        let base = crate::layout::Layout::compute(w, h, Some(4)).expect("layout fits");
+        let spot = p(100, 60);
+        let seeds: Vec<u64> = (0..16u32)
+            .map(|i| {
+                let id = DaemonInstanceId::new((18901 + i).to_string()).expect("non-empty");
+                mascot_seed("openclaw", &id)
+            })
+            .collect();
+
+        // FULLY boxed in: every ring candidate blocked ⇒ the documented fallback is
+        // the shared spot itself. Walks all 8 candidates for every seed, so an
+        // underflowing cursor cannot hide behind an early success.
+        let mut boxed = WalkableMask::new_open(w, h);
+        for (dx, dy) in MASCOT_SPOT_RING {
+            let x = (i32::from(spot.x) + dx) as u16;
+            let y = (i32::from(spot.y) + dy) as u16;
+            boxed.mark_blocked(x, y, 1, 1, 0);
+        }
+        let mut layout = base.clone();
+        layout.walkable = boxed;
+        for &seed in &seeds {
+            assert_eq!(
+                mascot_spot_for(&layout, spot, seed),
+                spot,
+                "a boxed-in spot has no free offset — the fallback is the spot itself"
+            );
+        }
+
+        // CROWDED: exactly one candidate left open. Every seed must converge on it,
+        // which means the cursor advanced past up to seven rejections.
+        let free = MASCOT_SPOT_RING[3];
+        let mut crowded = WalkableMask::new_open(w, h);
+        for (dx, dy) in MASCOT_SPOT_RING {
+            if (dx, dy) == free {
+                continue;
+            }
+            let x = (i32::from(spot.x) + dx) as u16;
+            let y = (i32::from(spot.y) + dy) as u16;
+            crowded.mark_blocked(x, y, 1, 1, 0);
+        }
+        let mut layout = base;
+        layout.walkable = crowded;
+        let want = Point {
+            x: (i32::from(spot.x) + free.0) as u16,
+            y: (i32::from(spot.y) + free.1) as u16,
+        };
+        for &seed in &seeds {
+            assert_eq!(
+                mascot_spot_for(&layout, spot, seed),
+                want,
+                "the ONE walkable offset must be found from any seeded start"
+            );
+        }
+    }
+
     /// Characterizes the set COMPLETELY (rather than spot-checking entries) so one
     /// assertion covers sign flips, duplicates and a changed magnitude alike.
     #[test]
