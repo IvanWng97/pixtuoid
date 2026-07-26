@@ -208,6 +208,15 @@ pub enum DisconnectOutcome {
     HookRemovalFailed(String),
 }
 
+/// The step (if any) a user must still take after a successful `connect` of `id`,
+/// read from that target's ONE `post_install_hint` — exposed here because the
+/// scriptable CLI presenter lives in the bin crate and `install::target` is
+/// `pub(crate)`. `None` for a source with no target, and for every target whose
+/// hooks take effect on the CLI's next run.
+pub fn post_install_hint(id: &str) -> Option<&'static str> {
+    crate::install::target::by_source(id).and_then(|t| t.post_install_hint)
+}
+
 /// Connect a source: PERSIST the `[sources]` flag FIRST (so it survives restart),
 /// then — only for a target-bearing source — install its hooks, rolling the flag
 /// back if the install fails (a persisted "connected" with no integration behind
@@ -222,15 +231,6 @@ pub enum DisconnectOutcome {
 /// stated intent. (`detect()` returns only PRESENT CLIs, so onboarding offers
 /// only installed ones; a `connect <absent-cli>` is a deliberate user/script
 /// choice that materializes that CLI's config dir.)
-/// The step (if any) a user must still take after a successful `connect` of `id`,
-/// read from that target's ONE `post_install_hint` — exposed here because the
-/// scriptable CLI presenter lives in the bin crate and `install::target` is
-/// `pub(crate)`. `None` for a source with no target, and for every target whose
-/// hooks take effect on the CLI's next run.
-pub fn post_install_hint(id: &str) -> Option<&'static str> {
-    crate::install::target::by_source(id).and_then(|t| t.post_install_hint)
-}
-
 pub fn connect(cfg: &Path, id: &str) -> Result<ConnectOutcome> {
     let sid = registered_id(id)?;
     connect_target(cfg, sid, by_source(sid))

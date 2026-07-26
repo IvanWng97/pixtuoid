@@ -686,7 +686,7 @@ fn main() -> Result<()> {
         (
             rows,
             live,
-            "socket  /run/user/501/pixtuoid.sock  (listening)".to_string(),
+            "socket  /run/user/501/pixtuoid.sock".to_string(),
         )
     } else {
         (Vec::new(), Vec::new(), String::new())

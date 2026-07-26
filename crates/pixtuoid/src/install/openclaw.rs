@@ -299,15 +299,22 @@ const OWNER_CLI_ADVICE: &str = "register it with OpenClaw's own CLI instead: \
 /// not be the one in this document.
 const INCLUDE_KEY: &str = "$include";
 
-/// Does this JSON value name OUR plugin id? Upstream normalizes plugin ids to
-/// lowercase before comparing (`normalizeOptionalLowercaseString`, verified in
-/// `src/plugins/effective-plugin-ids.ts` @ `29ca6322`), so a hand-written
-/// `"Pixtuoid"` in `plugins.allow`/`plugins.deny` DOES refer to us. Comparing
-/// case-sensitively would make `verify_schema` report a hard "the allowlist omits
-/// pixtuoid" for a config that loads the plugin perfectly well.
+/// Does this JSON value name OUR plugin id? TRIM-only and CASE-SENSITIVE, because
+/// that is what upstream does — read out of the shipped 2026.7.1 bundle, not
+/// inferred: `normalizePluginIdWithLookup` lowercases only to build an ALIAS
+/// LOOKUP KEY and returns the `trimmed` original when no alias matches (`pixtuoid`
+/// is not a built-in alias), and `collectExplicitEffectivePluginIds` then compares
+/// exactly — `plugins.allow.includes(pluginId)` / `plugins.deny.delete(pluginId)`.
+///
+/// An earlier revision of this fn compared case-INSENSITIVELY on the belief that
+/// upstream normalizes to lowercase. That was a REGRESSION in both directions: an
+/// allowlist containing `"Pixtuoid"` made install skip the join, leaving OpenClaw
+/// reporting the plugin `disabled` while `doctor` printed `✓ ok` (the green-doctor
+/// silent-dead class), and a `deny: ["Pixtuoid"]` made `doctor` claim a break over
+/// a plugin OpenClaw had actually loaded. Do not "restore" the case-insensitive
+/// form without re-reading `normalizePluginIdWithLookup`.
 fn is_plugin_id(v: &Value) -> bool {
-    v.as_str()
-        .is_some_and(|s| s.trim().eq_ignore_ascii_case(PLUGIN_ID))
+    v.as_str().is_some_and(|s| s.trim() == PLUGIN_ID)
 }
 
 /// Does `v` carry an [`INCLUDE_KEY`] ANYWHERE, not just at the document root?
@@ -468,8 +475,13 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
             // it is both non-destructive and the fail-CLOSED residue; upstream's own
             // warning is then the honest nudge to clean it up.
             if let Some(allow) = plugins.get_mut("allow").and_then(Value::as_array_mut) {
-                if allow.len() > 1 {
-                    allow.retain(|v| !is_plugin_id(v));
+                // Guard the POST-condition, not a pre-count: `["pixtuoid", " pixtuoid "]`
+                // is two entries that are BOTH ours, so a `len() > 1` pre-check let the
+                // retain empty the list — `[]` reads as NO restriction upstream, exactly
+                // the fail-OPEN this guard exists to prevent.
+                let kept: Vec<Value> = allow.iter().filter(|v| !is_plugin_id(v)).cloned().collect();
+                if !kept.is_empty() {
+                    *allow = kept;
                 }
             }
             // PRUNE the containers that are now OURS-ONLY-AND-EMPTY, so a disconnect
@@ -984,22 +996,28 @@ mod tests {
         let again = merge_install(&curated.content, "").unwrap();
         assert!(!again.changed, "a re-install is a semantic no-op");
 
-        // A list already naming us in ANOTHER CASE needs no join: upstream lowercases
-        // plugin ids before comparing, so `"Pixtuoid"` IS us. Appending a second
-        // spelling would churn the user's file on every connect.
+        // A case-VARIANT is NOT us: upstream compares plugin ids exactly (its
+        // lowercasing only builds an alias-lookup key, see `is_plugin_id`), so
+        // `"Pixtuoid"` in the allowlist does not admit `pixtuoid` — install must add
+        // our exact id, and skipping the join here would leave the plugin unloaded
+        // with a green doctor.
         let cased = merge_install(r#"{"plugins":{"allow":["Pixtuoid"]}}"#, "").unwrap();
         let v: Value = serde_json::from_str(&cased.content).unwrap();
         assert_eq!(
             v["plugins"]["allow"],
-            json!(["Pixtuoid"]),
-            "a case-variant of our own id must not be duplicated"
+            json!(["Pixtuoid", "pixtuoid"]),
+            "a case-variant does not admit us — our exact id must be joined"
         );
         assert!(
-            verify_schema(&cased.content)
-                .issues
-                .iter()
-                .all(|i| !i.contains("`plugins.allow`")),
-            "…nor reported as an allowlist that omits us"
+            verify_schema(&cased.content).issues.is_empty(),
+            "…and the joined list is then sound"
+        );
+        // Whitespace, however, IS trimmed upstream, so a padded entry IS us.
+        let padded = merge_install(r#"{"plugins":{"allow":[" pixtuoid "]}}"#, "").unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&padded.content).unwrap()["plugins"]["allow"],
+            json!([" pixtuoid "]),
+            "a padded form of our id is already us — no duplicate"
         );
 
         // An EMPTY `allow: []` is NO restriction upstream (`allow.length === 0 || …`),
@@ -1038,13 +1056,21 @@ mod tests {
         };
 
         // `plugins.deny` naming us — the mirror of an allowlist that omits us.
-        let verdict = with(&|v| v["plugins"]["deny"] = json!(["Pixtuoid"]));
+        let verdict = with(&|v| v["plugins"]["deny"] = json!(["pixtuoid"]));
         assert!(
             verdict
                 .issues
                 .iter()
                 .any(|i| i.contains("`plugins.deny` lists pixtuoid")),
-            "a denylist naming us (any case) is a HARD break: {:?}",
+            "a denylist naming us is a HARD break: {:?}",
+            verdict.issues
+        );
+        // …but a case-VARIANT is a different id upstream, so claiming a break there
+        // would be a false "install broken" over a plugin OpenClaw actually loaded.
+        let verdict = with(&|v| v["plugins"]["deny"] = json!(["Pixtuoid"]));
+        assert!(
+            verdict.issues.is_empty(),
+            "a case-variant in deny is NOT us — must not report a break: {:?}",
             verdict.issues
         );
 
@@ -1312,15 +1338,42 @@ mod tests {
             "the last member must survive — emptying it widens the allowlist, got {v}"
         );
 
-        // A case-variant the USER wrote is still ours to un-join (upstream lowercases).
+        // A case-variant is the USER'S entry, not ours: upstream compares ids exactly,
+        // so `"Pixtuoid"` never admitted us — install joined our own `pixtuoid` beside
+        // it and uninstall removes only that, leaving their list as they wrote it.
         let cased = merge_install(r#"{"plugins":{"allow":["anthropic","Pixtuoid"]}}"#, "").unwrap();
         let v: Value = serde_json::from_str(&merge_uninstall(&cased.content).unwrap().content)
             .expect("valid json");
         assert_eq!(
             v["plugins"]["allow"],
-            json!(["anthropic"]),
-            "a case-variant of our id must be un-joined too, got {v}"
+            json!(["anthropic", "Pixtuoid"]),
+            "only OUR exact id is un-joined; the user's own entries survive, got {v}"
         );
+    }
+
+    #[test]
+    fn uninstall_never_empties_the_allowlist_even_when_every_entry_is_ours() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // The fail-OPEN a `len() > 1` PRE-count missed: two entries that are BOTH ours
+        // (upstream trims, so a padded copy is the same id) would retain to `[]`, and
+        // `[]` reads as NO restriction upstream — an uninstall that widens a
+        // fail-closed key. The guard must test the RESULT, not the input length.
+        for input in [
+            r#"{"plugins":{"allow":["pixtuoid"," pixtuoid "]}}"#,
+            r#"{"plugins":{"allow":["pixtuoid","pixtuoid"]}}"#,
+            r#"{"plugins":{"allow":["pixtuoid"]}}"#,
+        ] {
+            let installed = merge_install(input, "").unwrap();
+            let out = merge_uninstall(&installed.content).unwrap();
+            let v: Value = serde_json::from_str(&out.content).unwrap();
+            let allow = v["plugins"]["allow"].as_array();
+            assert!(
+                allow.is_none_or(|a| !a.is_empty()),
+                "uninstall emptied a curated allowlist (fail-OPEN) for {input}: {v}"
+            );
+        }
     }
 
     #[test]

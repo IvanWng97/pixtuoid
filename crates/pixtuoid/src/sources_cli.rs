@@ -38,7 +38,15 @@ pub(crate) fn run_setup(yes: bool) -> Result<()> {
         if matches!(oc, sources::ChangeOutcome::Failed(_)) {
             any_failed = true;
         }
-        println!("{}", text_line(&sources::OutcomeRow::new(id, &oc)));
+        let row = sources::OutcomeRow::new(id, &oc);
+        println!("{}", text_line(&row));
+        // The THIRD presenter of a connect result: onboarding must not silently drop
+        // the post-install step the panel and `connect` both surface.
+        if row.outcome == sources::WireOutcome::Connected {
+            if let Some(hint) = sources::post_install_hint(&row.id) {
+                println!("  \u{21b3} {hint}");
+            }
+        }
     }
     if any_failed {
         anyhow::bail!("one or more sources failed to connect (see the rows above)");

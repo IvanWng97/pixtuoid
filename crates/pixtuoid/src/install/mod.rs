@@ -73,15 +73,33 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
         // `_pixtuoid` sentinel, `plugins.entries.pixtuoid`, or the plugin dir path.
         Ok(c) => (t.merge_uninstall)(&c)
             .map(|o| o.changed)
-            .unwrap_or_else(|_| c.contains(PLUGIN_MENTION)),
+            // Case-INSENSITIVE, and that is not the same question as matching an
+            // OpenClaw plugin id (which is case-sensitive upstream — see
+            // `openclaw::is_plugin_id`): this probes OUR OWN marker in a config we
+            // wrote, and kimi is the one target that carries no `_pixtuoid` sentinel
+            // — its marker is the UPPERCASE `PIXTUOID_SOURCE=kimi`. Don't "harmonize"
+            // the two comparisons; they answer different questions.
+            .unwrap_or_else(|_| config_mentions_us(&c)),
         Err(_) => true,
     }
 }
 
 /// The substring every config pixtuoid has written contains — our own name, in the
-/// sentinel key, the plugin entry id, or the baked plugin path. Used only as the
-/// "is this ours at all?" fallback when a config cannot be parsed for a real answer.
+/// sentinel key, the plugin entry id, the baked plugin path, or an env prefix. Used
+/// only as the "is this ours at all?" fallback when a config cannot be parsed for a
+/// real answer.
 const PLUGIN_MENTION: &str = "pixtuoid";
+
+/// Does `content` bear OUR marker? The fallback DECISION, extracted so a test can
+/// drive it against every target's real written config instead of only through
+/// `has_hooks` (whose fallback is unreachable for a config that parses). Folded to
+/// lowercase because `kimi` — the one target with no `_pixtuoid` sentinel — marks
+/// itself with the UPPERCASE `PIXTUOID_SOURCE=kimi`. This is NOT the same question
+/// as matching an OpenClaw plugin id, which is case-SENSITIVE upstream (see
+/// `openclaw::is_plugin_id`); don't harmonize the two.
+fn config_mentions_us(content: &str) -> bool {
+    content.to_ascii_lowercase().contains(PLUGIN_MENTION)
+}
 
 /// Verify a target's installed config is structurally SOUND (the silent-dead
 /// check, #309) — read-only, false-positive-free. Call only when hooks are
