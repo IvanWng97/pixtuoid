@@ -126,13 +126,9 @@ pub fn live_for(
     let is_daemon =
         pixtuoid_core::source::registry::descriptor_for(source_id).is_some_and(|d| d.is_daemon());
     if is_daemon {
-        let mut instances = 0usize;
-        for _ in scene.daemons().filter(|(s, _, _)| *s == source_id) {
-            instances += 1;
-        }
         return LiveInfo {
             facet: LiveFacet::Daemon {
-                instances,
+                instances: scene.daemons().filter(|(s, _, _)| *s == source_id).count(),
                 state: pixtuoid_scene::board::gateway_rollup(
                     scene
                         .daemons()

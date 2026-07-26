@@ -71,34 +71,31 @@ fn bubble_px(buf: &RgbBuffer) -> usize {
     n
 }
 
+/// The lobster's EXCLUSIVE carapace palette keys — body / shade / highlight / claw /
+/// antenna. Each is used by the three `lobster_*.sprite` files and NOTHING else in
+/// the pack, which is what makes a hit on one proof the mascot is on screen.
+const LOBSTER_KEYS: [char; 5] = ['o', 'N', 'Q', 'A', 'a'];
+
+/// The carapace RGBs, resolved from the PACK the harness renders with rather than
+/// transcribed here. A hand-copied list silently weakens every assertion in this
+/// file the moment the sprite is re-tinted — and did: the copy omitted `Q`
+/// (`#f0895a`, 4 px of every lobster frame) while claiming to be the whole set.
+fn lobster_reds() -> Vec<pixtuoid_core::sprite::Rgb> {
+    let pack = pack();
+    LOBSTER_KEYS
+        .iter()
+        .map(|k| {
+            pack.palette
+                .get(*k)
+                .flatten()
+                .unwrap_or_else(|| panic!("pack.toml defines the lobster key {k:?}"))
+        })
+        .collect()
+}
+
 /// Count the lobster's exclusive carapace reds in the buffer (the lobster sprite is
 /// not recolored, so its authored RGBs render exactly). An empty agents scene
 /// means no recolored shirts can collide.
-/// The lobster's EXCLUSIVE carapace palette (body / claw / antenna / shade) — the
-/// one authored red set both `lobster_px` and `lobster_cells` read.
-const LOBSTER_REDS: [pixtuoid_core::sprite::Rgb; 4] = [
-    pixtuoid_core::sprite::Rgb {
-        r: 0xd2,
-        g: 0x40,
-        b: 0x2f,
-    },
-    pixtuoid_core::sprite::Rgb {
-        r: 0xe8,
-        g: 0x55,
-        b: 0x40,
-    },
-    pixtuoid_core::sprite::Rgb {
-        r: 0xc8,
-        g: 0x38,
-        b: 0x28,
-    },
-    pixtuoid_core::sprite::Rgb {
-        r: 0x9e,
-        g: 0x2a,
-        b: 0x20,
-    },
-];
-
 fn lobster_px(buf: &RgbBuffer) -> usize {
     lobster_cells(buf).len()
 }
@@ -127,10 +124,11 @@ fn gateway_scene_at(ports: &[&str], entered_at: SystemTime, last_seen: SystemTim
 /// compared exactly instead of inferred from a pixel total. Same authored carapace
 /// palette `lobster_px` counts, read from ONE place so the two can't drift.
 fn lobster_cells(buf: &RgbBuffer) -> std::collections::BTreeSet<(u16, u16)> {
+    let reds = lobster_reds();
     let mut out = std::collections::BTreeSet::new();
     for y in 0..buf.height() {
         for x in 0..buf.width() {
-            if LOBSTER_REDS.contains(&buf.get(x, y)) {
+            if reds.contains(&buf.get(x, y)) {
                 out.insert((x, y));
             }
         }
@@ -439,8 +437,8 @@ fn gateway_mascot_wanders_over_time() {
 }
 
 /// Bounding box (in PIXEL coords) of the lobster's carapace reds, or `None` if
-/// the lobster isn't on screen. Reads the SAME [`LOBSTER_REDS`] set as
-/// `lobster_cells`/`lobster_px`, so the three can't drift.
+/// the lobster isn't on screen. Goes through `lobster_cells`, so all three read the
+/// one pack-resolved [`LOBSTER_KEYS`] set and can't drift.
 fn lobster_red_bbox(buf: &RgbBuffer) -> Option<(u16, u16, u16, u16)> {
     let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0u16, 0u16);
     let mut any = false;

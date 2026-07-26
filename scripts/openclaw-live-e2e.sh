@@ -87,26 +87,11 @@ send() { printf '%s\n' "$1" | PIXTUOID_SOCKET="$SOCK" "$HOOK" --source openclaw;
 send_a() { send "$(printf '%s' "$1" | sed "s/}\$/,\"gatewayPort\":$PORT_A}/")"; }
 
 FAILED=0
-# Wait until the LATEST `daemons=` line is the wanted state — distinguishes the
-# idle -> busy -> idle round trip (a plain grep-anywhere can't).
-expect() {
-    local want="$1" label="$2" last
-    for _ in $(seq 1 40); do
-        last="$(grep 'daemons=' "$OUT" | tail -1)"
-        case "$last" in
-        *"daemons=[openclaw@$PORT_A:$want]"*)
-            echo "  PASS $label  ($last)"
-            return 0
-            ;;
-        esac
-        sleep 0.2
-    done
-    echo "  FAIL $label — wanted openclaw@$PORT_A:$want, last: $(grep 'daemons=' "$OUT" | tail -1)" >&2
-    FAILED=1
-}
-
-# Wait until the LATEST `daemons=` line matches a full glob — the multi-gateway
-# steps assert on BOTH instances at once, which `expect`'s single-state form can't.
+# Wait until the LATEST `daemons=` line matches a glob — the LAST line, not any
+# line, so the idle -> busy -> idle round trip is distinguishable (a plain
+# grep-anywhere can't). The 8s bound covers an in-process shim -> HookRouter ->
+# reducer -> summary hop; the multi-gateway script's longer bound waits on real
+# node gateway boots, a different event class.
 expect_line() {
     local want="$1" label="$2" last
     for _ in $(seq 1 40); do
@@ -122,6 +107,10 @@ expect_line() {
     echo "  FAIL $label — wanted '$want', last: $(grep 'daemons=' "$OUT" | tail -1)" >&2
     FAILED=1
 }
+
+# The single-gateway shorthand: assert gateway A is in exactly one state. A strict
+# specialization of `expect_line`, so the poll + the row format live in one place.
+expect() { expect_line "daemons=[openclaw@$PORT_A:$1]" "$2"; }
 
 echo "[1] gateway_start    -> idle"
 send_a '{"type":"gateway_start"}'

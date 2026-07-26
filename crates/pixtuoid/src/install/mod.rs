@@ -81,12 +81,7 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
         // `kimis_uppercase_env_marker_alone_satisfies_the_fallback_probe` (unix).
         Ok(c) => (t.merge_uninstall)(&c)
             .map(|o| o.changed)
-            // Case-INSENSITIVE, and that is not the same question as matching an
-            // OpenClaw plugin id (which is case-sensitive upstream — see
-            // `openclaw::is_plugin_id`): this probes OUR OWN marker in a config we
-            // wrote, and kimi is the one target that carries no `_pixtuoid` sentinel
-            // — its marker is the UPPERCASE `PIXTUOID_SOURCE=kimi`. Don't "harmonize"
-            // the two comparisons; they answer different questions.
+            // Unparseable ⇒ fall back to the marker probe (see `config_mentions_us`).
             .unwrap_or_else(|_| config_mentions_us(&c)),
         Err(_) => true,
     }
@@ -393,9 +388,10 @@ pub struct InstallReport {
     /// hook). An install-time environment check, surfaced by the presenter.
     pub path_warning: bool,
     /// The target's `post_install_hint` — a step the user must still take for the
-    /// install to take effect (OpenClaw's running gateway must restart). Stamped
-    /// here rather than looked up per presenter, so the panel and the CLI cannot
-    /// disagree about whether connecting was the last step.
+    /// install to take effect (OpenClaw's running gateway must restart). Stamped for
+    /// the panel, which has the report but not the source id; the CLI presenters read
+    /// the SAME `Target` field through `sources::post_install_hint`, so every surface
+    /// resolves one authority and none can invent its own advice.
     pub post_install_hint: Option<&'static str>,
 }
 

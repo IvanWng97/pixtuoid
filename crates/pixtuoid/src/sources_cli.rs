@@ -40,12 +40,8 @@ pub(crate) fn run_setup(yes: bool) -> Result<()> {
         }
         let row = sources::OutcomeRow::new(id, &oc);
         println!("{}", text_line(&row));
-        // The THIRD presenter of a connect result: onboarding must not silently drop
-        // the post-install step the panel and `connect` both surface.
-        if row.outcome == sources::WireOutcome::Connected {
-            if let Some(hint) = sources::post_install_hint(&row.id) {
-                println!("  \u{21b3} {hint}");
-            }
+        if let Some(hint) = hint_line(&row) {
+            println!("{hint}");
         }
     }
     if any_failed {
@@ -153,14 +149,8 @@ fn emit_outcomes(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
     } else {
         for row in rows {
             println!("{}", text_line(row));
-            // Connecting is not always the last step (OpenClaw's running gateway must
-            // restart before it loads the plugin). Human output only: the `--json`
-            // envelope is the frozen {id, outcome, message?} Raycast contract, where
-            // `message` means FAILURE — an advisory there would change its meaning.
-            if row.outcome == sources::WireOutcome::Connected {
-                if let Some(hint) = sources::post_install_hint(&row.id) {
-                    println!("  \u{21b3} {hint}");
-                }
+            if let Some(hint) = hint_line(row) {
+                println!("{hint}");
             }
         }
     }
@@ -175,6 +165,22 @@ fn text_line(row: &sources::OutcomeRow) -> String {
         Some(m) => format!("{}: {}: {m}", row.id, row.outcome),
         None => format!("{}: {}", row.id, row.outcome),
     }
+}
+
+/// The optional SECOND human line under a row — the target's post-install step,
+/// because connecting is not always the last one (OpenClaw's running gateway must
+/// restart before it loads the plugin). `None` unless the row actually connected
+/// AND its target declares a step.
+///
+/// Owned here, not written at each call site, so `connect` and `setup --yes` cannot
+/// disagree on the gate or the glyph. HUMAN output only: the `--json` envelope is
+/// the frozen `{id, outcome, message?}` Raycast contract where `message` means
+/// FAILURE, so an advisory there would change its meaning.
+fn hint_line(row: &sources::OutcomeRow) -> Option<String> {
+    (row.outcome == sources::WireOutcome::Connected)
+        .then(|| sources::post_install_hint(&row.id))
+        .flatten()
+        .map(|hint| format!("  \u{21b3} {hint}"))
 }
 
 #[cfg(test)]

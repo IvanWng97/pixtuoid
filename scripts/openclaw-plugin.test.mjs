@@ -267,6 +267,42 @@ test("port resolution falls back env > config > default", { skip: !POSIX }, asyn
   }
 });
 
+// Verified against the SHIPPED bundle (openclaw 2026.7.1,
+// `dist/paths-*.js::parseGatewayPortEnvValue` → `parseTcpPort`): a bare
+// `Number.parseInt` agrees with upstream on plain digits and diverges on every
+// other form — it stops at the first non-digit, so `127.0.0.1:18902` became port
+// `127`. That port IS the mascot's identity, so the divergence keyed the lobster
+// to a gateway nobody was running. `CONFIG_PORT` is distinct from every expected
+// value so "fell through to config" can never be mistaken for a parse.
+const CONFIG_PORT = 20100;
+for (const [raw, want, why] of [
+  ["18902", 18902, "bare digits"],
+  ["  18902  ", 18902, "trimmed"],
+  ["127.0.0.1:18902", 18902, "host:port — the parseInt regression (was 127)"],
+  ["[::1]:18902", 18902, "bracketed IPv6"],
+  ["18902abc", CONFIG_PORT, "trailing garbage is not a port (was 18902)"],
+  ["a:b:18902", CONFIG_PORT, "two colons is not host:port"],
+  ["70000", CONFIG_PORT, "above the TCP max"],
+  ["0", CONFIG_PORT, "not positive"],
+  ["", CONFIG_PORT, "empty"],
+]) {
+  test(`env port form: ${JSON.stringify(raw)} ⇒ ${want} (${why})`, { skip: !POSIX }, async (t) => {
+    const original = process.env.OPENCLAW_GATEWAY_PORT;
+    t.after(() => {
+      if (original === undefined) delete process.env.OPENCLAW_GATEWAY_PORT;
+      else process.env.OPENCLAW_GATEWAY_PORT = original;
+    });
+    process.env.OPENCLAW_GATEWAY_PORT = raw;
+    const { outFile, plugin } = await renderPlugin(t);
+    register(plugin, { config: { gateway: { port: CONFIG_PORT } } }).get("session_start")(
+      { sessionId: "s" },
+      {},
+    );
+    const [only] = await recorded(outFile, 1);
+    assert.equal(only.gatewayPort, want);
+  });
+}
+
 test("an out-of-range observed port is refused, keeping the resolved one", { skip: !POSIX }, async (t) => {
   // Defence in depth at the producer: pixtuoid's decoder REJECTS an envelope whose
   // port is unusable, so stamping a bogus value would silently drop the mascot.

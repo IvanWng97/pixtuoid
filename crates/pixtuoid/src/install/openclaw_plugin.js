@@ -74,9 +74,32 @@ function validPort(n) {
   return Number.isInteger(n) && n > 0 && n <= 65535;
 }
 
+// Mirrors upstream's `parseGatewayPortEnvValue` (config/paths) form-for-form:
+// bare digits, bracketed IPv6 `[host]:port`, or a single-colon `host:port`;
+// anything else is NOT a port and must fall through to config/default. A plain
+// `Number.parseInt` is NOT a valid shortcut here — it stops at the first
+// non-digit, so `OPENCLAW_GATEWAY_PORT=127.0.0.1:18902` parsed to `127` where
+// upstream binds 18902. Since this port IS the mascot's identity, that
+// silently keyed the lobster to a gateway that does not exist.
+function portFromEnvValue(raw) {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return null;
+  if (/^\d+$/.test(trimmed)) return validPort(Number(trimmed)) ? Number(trimmed) : null;
+  const bracketedIpv6 = trimmed.match(/^\[[^\]]+\]:(\d+)$/);
+  if (bracketedIpv6) {
+    const n = Number(bracketedIpv6[1]);
+    return validPort(n) ? n : null;
+  }
+  const firstColon = trimmed.indexOf(":");
+  if (firstColon <= 0 || firstColon !== trimmed.lastIndexOf(":")) return null;
+  const suffix = trimmed.slice(firstColon + 1);
+  if (!/^\d+$/.test(suffix)) return null;
+  return validPort(Number(suffix)) ? Number(suffix) : null;
+}
+
 function resolvePort(config) {
-  const fromEnv = Number.parseInt(process.env.OPENCLAW_GATEWAY_PORT ?? "", 10);
-  if (validPort(fromEnv)) return fromEnv;
+  const fromEnv = portFromEnvValue(process.env.OPENCLAW_GATEWAY_PORT);
+  if (fromEnv !== null) return fromEnv;
   const fromConfig = config && config.gateway && config.gateway.port;
   if (validPort(fromConfig)) return fromConfig;
   return DEFAULT_GATEWAY_PORT;

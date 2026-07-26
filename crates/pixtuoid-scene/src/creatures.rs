@@ -378,7 +378,10 @@ fn mascot_enter_delay(seed: u64) -> u64 {
 /// happens constantly), and without an offset they rest pixel-IDENTICAL: the user
 /// runs four gateways and sees three lobsters. The office already answers exactly
 /// this for multiple occupants of a SHAREABLE queue spot
-/// (`motion::waypoint_rank_offset_x`'s ±6/±9); this is the mascot lane's version.
+/// (`pixel_painter::anchors::waypoint_rank_offset_x`'s ±`STEP_ASIDE_DX`); this is the
+/// mascot lane's version. It cannot reuse that one: rank-keyed offsets require
+/// knowing which siblings exist, and it takes a `WaypointKind` a mascot spot has no
+/// equivalent of.
 /// (No claim/probe machinery: these are shared social venues — two creatures at
 /// the pantry is honest — and claims would couple one mascot's motion to which
 /// siblings exist, breaking the stateless invariant.)
