@@ -100,6 +100,7 @@ actionlint-composites:
     work="$(mktemp -d)"
     trap 'rm -rf "$work"' EXIT
     checked=0
+    skipped=()
     for action in "${actions[@]}"; do
         count="$(yq '[.runs.steps[] | select(has("run"))] | length' "$action")"
         ((count)) || continue # a pure `uses:` composite has no shell to check
@@ -109,7 +110,12 @@ actionlint-composites:
             shell="$(yq -r ".runs.steps | map(select(has(\"run\"))) | .[$i].shell // \"bash\"" "$action")"
             case "$shell" in
             bash | sh) ;;
-            *) continue ;; # pwsh/python are not shellcheck's to judge
+            # pwsh/python are not shellcheck's to judge, but a bounded gate that
+            # does not name what it dropped reads as full coverage.
+            *)
+                skipped+=("$action step $i ($shell)")
+                continue
+                ;;
             esac
             script="$work/$(echo "$action" | tr /. __)-$i.$shell"
             { echo "#!/usr/bin/env $shell"; yq -r ".runs.steps | map(select(has(\"run\"))) | .[$i].run" "$action"; } >"$script"
@@ -119,6 +125,8 @@ actionlint-composites:
     done
     ((checked > 0)) || { echo "error: no composite run: blocks were checked" >&2; exit 1; }
     echo "$checked composite run: blocks shellchecked"
+    ((${#skipped[@]})) && printf '  skipped (not a shellcheck dialect): %s\n' "${skipped[@]}"
+    exit 0
 
 # Security audit for workflows/actions/Dependabot. zizmor owns the parser and
 # audit catalog; .github/zizmor.yml records the repository's deliberate
