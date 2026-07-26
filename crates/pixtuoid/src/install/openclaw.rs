@@ -1020,6 +1020,117 @@ mod tests {
         assert_eq!(paths.len(), 2, "ours appended, foreign kept");
     }
 
+    /// `$include` detection, in both directions. Mutation testing found the whole
+    /// note untested: making `contains_include` return `true` unconditionally — a
+    /// spurious "your effective config may come from elsewhere" on EVERY sound
+    /// install — passed the suite, and so did deleting its array arm.
+    #[test]
+    fn include_is_detected_at_any_depth_and_only_when_present() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        // The negative case is the one that matters most: a normal config must NOT
+        // earn the note, or every user reads a warning that does not apply to them.
+        for clean in [
+            json!({}),
+            json!({"gateway": {"port": 18789}}),
+            json!({"plugins": {"entries": {"pixtuoid": {"enabled": true}},
+                               "load": {"paths": ["/o/plugins/pixtuoid"]}}}),
+            // A key merely CONTAINING the word, and a VALUE that looks like one.
+            json!({"notes": "$included by hand", "x": {"include": "y"}}),
+        ] {
+            assert!(
+                !contains_include(&clean),
+                "no {INCLUDE_KEY} here — must not be flagged: {clean}"
+            );
+        }
+
+        // Present at the root, nested in an object, and nested inside an ARRAY —
+        // OpenClaw configs are full of arrays (`plugins.load.paths`, `plugins.allow`),
+        // so the array arm is a real path, not defensive padding.
+        for dirty in [
+            json!({INCLUDE_KEY: "./base.json"}),
+            json!({"plugins": {INCLUDE_KEY: "./plugins.json"}}),
+            json!({"plugins": {"load": {"paths": [{INCLUDE_KEY: "./p.json"}]}}}),
+            json!({"a": [[{"deep": {INCLUDE_KEY: "./d.json"}}]]}),
+        ] {
+            assert!(
+                contains_include(&dirty),
+                "an {INCLUDE_KEY} anywhere means our verdict may not describe what the \
+                 gateway loads: {dirty}"
+            );
+        }
+
+        // And the note actually rides the verdict, as a NOTE (advisory) not an issue.
+        let sound = merge_install("{}", "").unwrap().content;
+        assert!(
+            !verify_schema(&sound)
+                .notes
+                .iter()
+                .any(|n| n.contains(INCLUDE_KEY)),
+            "a config we just wrote has no {INCLUDE_KEY} to report"
+        );
+        let mut with_include: Value = serde_json::from_str(&sound).unwrap();
+        with_include["plugins"][INCLUDE_KEY] = json!("./more.json");
+        let v = verify_schema(&with_include.to_string());
+        assert!(
+            v.notes.iter().any(|n| n.contains(INCLUDE_KEY)),
+            "the note must surface — got {:?}",
+            v.notes
+        );
+        assert!(
+            v.issues.is_empty(),
+            "…but an include is not itself broken, so never a HARD issue — got {:?}",
+            v.issues
+        );
+    }
+
+    /// Removing ONLY our load path (no `plugins.entries` row — a partial install, or a
+    /// user who hand-deleted the entry) still counts as "we removed something of
+    /// ours", so the `plugins.allow` residue is cleaned too. Mutation testing found
+    /// `removed |= …` could become `&=` — which, since `removed` starts false, makes
+    /// the path branch unable to ever set it — with nothing red.
+    #[test]
+    fn removing_only_our_load_path_still_counts_as_ours() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // A full install, then hand-drop the entry so ONLY the path identifies us.
+        let installed = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
+        let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+        v["plugins"]["entries"]
+            .as_object_mut()
+            .expect("install wrote an entries map")
+            .remove(PLUGIN_ID);
+        assert!(
+            v["plugins"]["load"]["paths"]
+                .as_array()
+                .expect("install wrote a paths array")
+                .iter()
+                .any(|p| p.as_str() == plugin_dir().unwrap().to_str()),
+            "precondition: our path is what is left identifying us"
+        );
+
+        let out = merge_uninstall(&v.to_string()).unwrap();
+        assert!(out.changed, "our path was removed — that IS a change");
+        let after: Value = serde_json::from_str(&out.content).unwrap();
+        assert!(
+            !after["plugins"]["load"]["paths"]
+                .as_array()
+                .map(|a| a
+                    .iter()
+                    .any(|p| p.as_str() == plugin_dir().unwrap().to_str()))
+                .unwrap_or(false),
+            "our path is gone: {after}"
+        );
+        assert_eq!(
+            after["plugins"]["allow"],
+            json!(["anthropic"]),
+            "and the allow JOIN is undone symmetrically, leaving the user's own id"
+        );
+    }
+
     #[test]
     fn install_joins_a_curated_allowlist_but_never_an_empty_one() {
         let _env = crate::TEST_ENV_LOCK
