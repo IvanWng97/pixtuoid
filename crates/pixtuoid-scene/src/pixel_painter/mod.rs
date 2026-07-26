@@ -1006,7 +1006,7 @@ fn enqueue_gateway_mascots<'a>(
             instance: (ctx.scene.daemons().filter(|(s, _, _)| *s == source).count() > 1)
                 .then(|| instance.as_str().to_string()),
             busy: presence.is_busy(),
-            degraded: presence.display_state() == pixtuoid_core::state::DaemonState::Degraded,
+            degraded,
             active_sessions: presence.active_sessions,
         });
     }

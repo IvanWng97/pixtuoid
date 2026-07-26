@@ -39,9 +39,12 @@ pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 /// Whether `t`'s config currently bears pixtuoid hooks — the load-bearing gate
 /// for `verify_target` (an uninstalled config would verify "broken"; see
 /// `doctor::diagnose`). A dry-run uninstall that would change the parsed doc
-/// means managed hooks are present. An absent/empty config is excluded; a
-/// config present but unreadable or unparseable is INCLUDED (true) so a
-/// hooks-bearing-but-malformed config still counts as installed. (Until 0.12.0
+/// means managed hooks are present. An absent/empty config is excluded. A config
+/// present but UNREADABLE is INCLUDED (true) — we cannot look, so we must not
+/// claim it is uninstalled. A config that reads but cannot be PARSED falls back to
+/// the marker probe (`config_mentions_us`) instead: asserting "installed" about a
+/// document we could not interpret produced advice that could not succeed (the
+/// WHY, and the one bounded false negative, are at the call site). (Until 0.12.0
 /// this was also `config::resolve_connected`'s migrate-default signal for an
 /// absent `[sources]` flag — that inference was dropped, so this went
 /// `pub` → `pub(crate)`. Callers: `doctor::diagnose`'s verify gate,

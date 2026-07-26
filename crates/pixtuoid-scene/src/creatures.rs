@@ -1104,10 +1104,14 @@ mod tests {
     /// returns ring[0], so all N mascots stand on the identical cell and the whole
     /// per-instance offset is dead.
     ///
-    /// Threshold is 4 of 8 with deliberate margin, measured: 16 consecutive ports
-    /// spread over 7 ring positions here, the collapse yields exactly 1, and the two
-    /// mixing mutants adjudicated in `.cargo/mutants.toml` yield 6 — so this catches
-    /// the collapse ONLY, and does not become a golden on the hash arithmetic.
+    /// Threshold is 4 of 8 — the FLOOR of what the adjudicated mixing mutants
+    /// produce, NOT a margin above them. Measured over ports 18901-18916: the real
+    /// mixing spreads over 7 ring positions, the collapse yields exactly 1, and the
+    /// two mutants excluded in `.cargo/mutants.toml` yield 4 (`^ -> |`) and 6
+    /// (`^ -> &`). So this catches the collapse ONLY and never becomes a golden on
+    /// the hash arithmetic — and do NOT tighten `>= 4`, because the OR mutant sits
+    /// exactly ON it: tightening would start failing for a degradation this repo has
+    /// deliberately left unpinned (see that config entry for why).
     #[test]
     fn consecutive_gateway_ports_spread_over_the_ring_instead_of_one_offset() {
         use pixtuoid_core::state::DaemonInstanceId;
@@ -1152,8 +1156,8 @@ mod tests {
     /// wander phase as the walk-in" — and the Down path implements it by subtracting
     /// `MASCOT_ENTER_MS + enter_delay`, exactly what the live path subtracts. Nothing
     /// tested it: mutation testing flipped that `+` to `-`, shifting the
-    /// reconstruction by TWICE the stagger (up to 972ms against a 9000ms idle cycle,
-    /// so ~11% of a lap — a visible jump, not a rounding wobble) with the suite green.
+    /// reconstruction by TWICE the stagger (up to 1500ms against a 9000ms idle cycle,
+    /// so ~17% of a lap — a visible jump, not a rounding wobble) with the suite green.
     ///
     /// Asserted at the instant of death (`now == last_seen`, so the exit lerp is at
     /// t=0 and yields its own origin), which is what makes the two paths directly
@@ -1189,7 +1193,7 @@ mod tests {
             // NOT byte-equality: the exit lerp routes its origin through
             // `walk_between`'s A*+snap, which can shift it a pixel or two off the raw
             // wander point. Measured — real code deviates 0-2px across these four
-            // ports, the `+ -> -` mutant 24px (port 18903, whose 486ms stagger is the
+            // ports, the `+ -> -` mutant 24px (port 18903, whose 750ms stagger is the
             // largest) — so 4 sits clear of both.
             const MAX_SNAP_DRIFT_PX: i32 = 4;
             let drift = (i32::from(leaving_from.x) - i32::from(was.x))

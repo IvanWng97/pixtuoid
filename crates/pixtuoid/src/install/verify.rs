@@ -51,7 +51,7 @@ pub enum ShimRef {
 /// class with a green doctor).
 pub(crate) fn baked_hook_path(content: &str) -> Option<PathBuf> {
     // Anchor on the DECLARATION, not a mention: a comment line that merely names
-    // `const HOOK_PATH` (both templates document the baking above the binding)
+    // `const HOOK_PATH` (the opencode template documents the baking above the binding)
     // would otherwise be picked first, yield no JSON literal, and downgrade the
     // #332 moved-shim HARD check to a soft "could not read" note.
     let line = content

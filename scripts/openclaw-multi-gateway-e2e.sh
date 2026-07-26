@@ -138,10 +138,14 @@ for port in "${PORTS[@]}"; do
         openclaw gateway run --bind loopback >"$MG/gw$port.log" 2>&1 &
     GW_PIDS+=("$!")
 done
+# The roster is a BTreeMap keyed by the instance STRING, so the summary lists
+# gateways in LEXICOGRAPHIC port order — not the order they were passed. Sort here
+# or `just openclaw-multi-e2e 18902 18901` fails on ordering alone while the render
+# is perfectly correct.
 want=""
-for port in "${PORTS[@]}"; do
+while read -r port; do
     want="$want${want:+, }openclaw@$port:idle"
-done
+done < <(printf '%s\n' "${PORTS[@]}" | LC_ALL=C sort)
 expect_line "daemons=[$want]" "${#PORTS[@]} gateways render ${#PORTS[@]} independent mascots"
 
 echo "[2] kill the FIRST gateway (${PORTS[0]}) — only its own mascot walks out"

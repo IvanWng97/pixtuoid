@@ -332,9 +332,14 @@ fn contains_include(v: &Value) -> bool {
 
 /// Parse `openclaw.json` for a MERGE — strict JSON only, with the honest reason.
 ///
-/// OpenClaw reads its own config with **JSON5** (unconditionally — `config/
-/// io.load.ts`), so comments, trailing commas, single quotes and unquoted keys are
-/// all LEGAL on disk even though OpenClaw's own writer emits strict JSON. Our
+/// OpenClaw reads its own config with **JSON5**, so comments, trailing commas,
+/// single quotes and unquoted keys are
+/// all LEGAL on disk even though OpenClaw's own writer emits strict JSON. Checkable
+/// two ways rather than from an unverifiable source path: the shipped 2026.7.1
+/// bundle carries upstream's own surviving doc-comment "Config file path (JSON or
+/// JSON5)" (`dist/paths-BMBAvkNf.js`), and `openclaw config patch` was measured
+/// round-tripping a COMMENTED config successfully (it parsed, then re-serialised
+/// strict and dropped the comment — see the JSON5 sharp edge). Our
 /// read→merge→write round-trip re-serializes through `serde_json`, which cannot
 /// represent any of that: parsing it would mean silently DELETING the user's
 /// comments on their next `connect`. So a non-strict document is refused with the
