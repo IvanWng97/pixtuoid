@@ -145,6 +145,15 @@ fn emit_outcomes(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
     } else {
         for row in rows {
             println!("{}", text_line(row));
+            // Connecting is not always the last step (OpenClaw's running gateway must
+            // restart before it loads the plugin). Human output only: the `--json`
+            // envelope is the frozen {id, outcome, message?} Raycast contract, where
+            // `message` means FAILURE — an advisory there would change its meaning.
+            if row.outcome == sources::WireOutcome::Connected {
+                if let Some(hint) = sources::post_install_hint(&row.id) {
+                    println!("  \u{21b3} {hint}");
+                }
+            }
         }
     }
     Ok(())

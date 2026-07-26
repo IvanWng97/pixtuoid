@@ -203,6 +203,14 @@ pub fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
     if r.path_warning {
         s.push_str(" \u{00b7} \u{26a0} pixtuoid-hook not on PATH");
     }
+    // Connecting is not always the last step: OpenClaw's `plugins.load` is
+    // `kind: "restart"` upstream, so a RUNNING gateway keeps serving without our
+    // plugin and no lobster appears until it restarts. Saying "connected" and
+    // stopping there is technically true and practically misleading.
+    if let Some(hint) = r.post_install_hint {
+        s.push_str(" \u{00b7} ");
+        s.push_str(hint);
+    }
     s
 }
 

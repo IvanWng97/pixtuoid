@@ -360,6 +360,7 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
         config_path: PathBuf::from("/c"),
         backup,
         path_warning,
+        post_install_hint: None,
     };
     // Both outcomes read as "connected" (the flag flip is the real action).
     let plain = format_connect_result(&base(InstallOutcome::Installed, None, false), "Claude Code");
@@ -383,6 +384,52 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
     assert!(noted.contains("connected"), "{noted}");
     assert!(noted.contains("backup saved"), "{noted}");
     assert!(noted.contains("PATH"), "{noted}");
+
+    // A target whose install is NOT the last step says so on the same line —
+    // "connected" alone is technically true and practically misleading when the
+    // running gateway will not load the plugin until it restarts.
+    let hinted = format_connect_result(
+        &InstallReport {
+            outcome: InstallOutcome::Installed,
+            config_path: PathBuf::from("/c"),
+            backup: None,
+            path_warning: false,
+            post_install_hint: Some("restart the gateway to load it"),
+        },
+        "OpenClaw",
+    );
+    assert!(hinted.contains("connected"), "{hinted}");
+    assert!(
+        hinted.contains("restart the gateway"),
+        "a post-install step must ride the connect line: {hinted}"
+    );
+    // …and a target with no such step is byte-unchanged.
+    assert_eq!(plain, "\u{2713} Claude Code connected");
+}
+
+#[test]
+fn only_openclaw_declares_a_post_install_step_and_it_names_the_restart() {
+    // The hint is per-TARGET data, not a string in a presenter: OpenClaw is the only
+    // target whose write does not take effect on the CLI's next run, because
+    // upstream's own reload plan marks `plugins.load` as `kind: "restart"` (verified
+    // in the shipped 2026.7.1 bundle). If a future target gains a post-install step
+    // it sets this field and both presenters surface it for free.
+    let mut with_hint = Vec::new();
+    for t in crate::install::TARGETS {
+        if let Some(h) = t.post_install_hint {
+            assert!(
+                h.contains("restart"),
+                "{}: a post-install hint must name the action: {h}",
+                t.name
+            );
+            with_hint.push(t.core_source);
+        }
+    }
+    assert_eq!(
+        with_hint,
+        vec![pixtuoid_core::source::openclaw::SOURCE_NAME],
+        "only openclaw needs a post-install step today"
+    );
 }
 
 #[test]

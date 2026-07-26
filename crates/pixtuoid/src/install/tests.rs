@@ -51,6 +51,7 @@ static FAKE: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 // A per-process config path under the system temp dir, used by FAKE2/FAKE_DIR
@@ -92,6 +93,7 @@ static FAKE2: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 // FAKE_DIR: default_config_path points at a path the test creates as a
@@ -119,6 +121,7 @@ static FAKE_DIR: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 // FAKE_NO_HOME: default_config_path returns Err (no home dir resolves) and
@@ -146,6 +149,7 @@ static FAKE_NO_HOME: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 /// A platform-absolute fixture path: `/x/hook` is DRIVE-RELATIVE on

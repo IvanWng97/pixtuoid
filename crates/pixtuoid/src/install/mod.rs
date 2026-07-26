@@ -366,6 +366,11 @@ pub struct InstallReport {
     /// True when the bare `pixtuoid-hook` isn't on PATH (Claude/Unix, no explicit
     /// hook). An install-time environment check, surfaced by the presenter.
     pub path_warning: bool,
+    /// The target's `post_install_hint` — a step the user must still take for the
+    /// install to take effect (OpenClaw's running gateway must restart). Stamped
+    /// here rather than looked up per presenter, so the panel and the CLI cannot
+    /// disagree about whether connecting was the last step.
+    pub post_install_hint: Option<&'static str>,
 }
 
 /// Install pixtuoid hooks into `t`'s config, returning a structured report.
@@ -435,6 +440,7 @@ pub(crate) fn install_target(
             config_path: path,
             backup: None,
             path_warning,
+            post_install_hint: t.post_install_hint,
         });
     }
     let backup = lock.backup_once(BACKUP_SUFFIX)?;
@@ -444,6 +450,7 @@ pub(crate) fn install_target(
         config_path: path,
         backup,
         path_warning,
+        post_install_hint: t.post_install_hint,
     })
 }
 
