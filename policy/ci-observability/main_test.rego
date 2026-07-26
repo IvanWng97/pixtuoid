@@ -396,6 +396,11 @@ test_codecov_oidc_replaces_the_repository_token if {
 	sprintf("%s must not declare or forward a Codecov upload token", [codecov_authority_path]) in violations
 }
 
+codecov_scope_message(name) := sprintf(
+	"%s job %s must declare its own permissions and must not receive the Codecov OIDC permission",
+	[codecov_workflow_path, name],
+)
+
 test_codecov_oidc_permission_is_job_scoped if {
 	fixture := {"documents": [{
 		"path": codecov_workflow_path,
@@ -406,7 +411,28 @@ test_codecov_oidc_permission_is_job_scoped if {
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s job coverage must receive the Codecov OIDC permission", [codecov_workflow_path]) in violations
-	sprintf("%s job snapshots must not receive the Codecov OIDC permission", [codecov_workflow_path]) in violations
+	codecov_scope_message("snapshots") in violations
+}
+
+# The regression that shipped: snapshots/smoke/required carried no `permissions:`
+# block at all, so they silently inherited the caller's id-token:write while the
+# old rule — which only read the declared block — stayed quiet.
+test_codecov_job_omitting_permissions_is_denied if {
+	fixture := {"documents": [{
+		"path": codecov_workflow_path,
+		"contents": {"jobs": {"snapshots": {"runs-on": "ubuntu-latest"}}},
+	}]}
+	violations := deny with input as fixture
+	codecov_scope_message("snapshots") in violations
+}
+
+test_codecov_job_declaring_its_own_scope_is_accepted if {
+	fixture := {"documents": [{
+		"path": codecov_workflow_path,
+		"contents": {"jobs": {"snapshots": {"permissions": {"contents": "read"}}}},
+	}]}
+	violations := deny with input as fixture
+	not codecov_scope_message("snapshots") in violations
 }
 
 test_release_concurrency_must_serialize_different_tags if {
@@ -730,4 +756,81 @@ test_unreadable_json_schema_payloads_are_denied if {
 test_claude_args_without_a_schema_flag_is_not_denied if {
 	violations := deny with input as json_schema_fixture(`--max-turns 60 --allowedTools "Read,Glob,Grep"`)
 	not malformed_json_schema_message in violations
+}
+
+ci_gate_fixture(jobs) := {"documents": [{"path": ci_workflow_path, "contents": {"jobs": jobs}}]}
+
+ci_gate_shipped_jobs := {
+	"lint": {"uses": "./.github/workflows/ci-lint.yml"},
+	"builds": {"uses": "./.github/workflows/ci-builds.yml"},
+	"tests": {"uses": "./.github/workflows/ci-tests.yml"},
+	"supplemental": {"uses": "./.github/workflows/ci-supplemental.yml"},
+	"gate": {
+		"needs": ["lint", "builds", "tests"],
+		"steps": [{"env": {
+			"LINT_RESULT": "${{ needs.lint.result }}",
+			"BUILDS_RESULT": "${{ needs.builds.result }}",
+			"TESTS_RESULT": "${{ needs.tests.result }}",
+		}}],
+	},
+}
+
+ci_gate_membership_violations(jobs) := [msg |
+	some msg in deny with input as ci_gate_fixture(jobs)
+	contains(msg, "must gate exactly the non-advisory group jobs")
+]
+
+ci_gate_unread_violations(jobs) := [msg |
+	some msg in deny with input as ci_gate_fixture(jobs)
+	contains(msg, "must read needs.")
+]
+
+test_ci_gate_covering_every_group_is_accepted if {
+	count(ci_gate_membership_violations(ci_gate_shipped_jobs)) == 0
+	count(ci_gate_unread_violations(ci_gate_shipped_jobs)) == 0
+}
+
+# The gap: a fifth reusable group lands and nobody adds it to the gate, so the
+# single protected context stays green while that whole group can fail.
+test_ci_gate_missing_a_new_group_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"security": {"uses": "./.github/workflows/ci-security.yml"}})
+	count(ci_gate_membership_violations(jobs)) == 1
+}
+
+# Consistently dropping a group — from `needs` AND from the env the shell reads —
+# is the edit actionlint cannot catch, because nothing dangles.
+test_ci_gate_dropping_a_group_entirely_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"gate": {
+		"needs": ["lint", "tests"],
+		"steps": [{"env": {
+			"LINT_RESULT": "${{ needs.lint.result }}",
+			"TESTS_RESULT": "${{ needs.tests.result }}",
+		}}],
+	}})
+	count(ci_gate_membership_violations(jobs)) == 1
+	sprintf("%s %s must read needs.builds.result", [ci_workflow_path, ci_gate_job_key]) in deny with input as ci_gate_fixture(jobs)
+}
+
+# In `needs` but never consulted by the verdict shell.
+test_ci_gate_listing_a_group_it_never_reads_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"gate": {
+		"needs": ["lint", "builds", "tests"],
+		"steps": [{"env": {
+			"LINT_RESULT": "${{ needs.lint.result }}",
+			"TESTS_RESULT": "${{ needs.tests.result }}",
+		}}],
+	}})
+	sprintf("%s %s must read needs.builds.result", [ci_workflow_path, ci_gate_job_key]) in deny with input as ci_gate_fixture(jobs)
+}
+
+test_ci_gate_need_on_the_advisory_group_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"gate": {
+		"needs": ["lint", "builds", "tests", "supplemental"],
+		"steps": [{"env": {
+			"LINT_RESULT": "${{ needs.lint.result }}",
+			"BUILDS_RESULT": "${{ needs.builds.result }}",
+			"TESTS_RESULT": "${{ needs.tests.result }}",
+		}}],
+	}})
+	count(ci_gate_membership_violations(jobs)) == 1
 }

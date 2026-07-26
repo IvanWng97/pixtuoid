@@ -677,13 +677,23 @@ deny contains msg if {
 	msg := sprintf("%s job %s must receive the Codecov OIDC permission", [codecov_workflow_path, name])
 }
 
+# A job in a CALLED workflow that omits `permissions:` runs with exactly the set
+# the caller handed down, and ci.yml grants this workflow id-token:write for the
+# Codecov OIDC upload. So an omitted block is not "no permissions" — it IS the
+# grant, and a rule that only inspects the declared block cannot see the very
+# jobs that are exposed. Require every non-Codecov job to declare its own scope.
+codecov_job_scope_is_self_declared(job) if {
+	permissions := object.get(job, "permissions", null)
+	is_object(permissions)
+	object.get(permissions, "id-token", "") != "write"
+}
+
 deny contains msg if {
 	_ := documents[codecov_workflow_path]
 	some name, job in codecov_jobs
 	not name in codecov_oidc_job_names
-	permissions := object.get(job, "permissions", {})
-	object.get(permissions, "id-token", "") == "write"
-	msg := sprintf("%s job %s must not receive the Codecov OIDC permission", [codecov_workflow_path, name])
+	not codecov_job_scope_is_self_declared(job)
+	msg := sprintf("%s job %s must declare its own permissions and must not receive the Codecov OIDC permission", [codecov_workflow_path, name])
 }
 
 deny contains msg if {
@@ -691,6 +701,45 @@ deny contains msg if {
 	document := documents[path]
 	contains(json.marshal(document), "CODECOV_TOKEN")
 	msg := sprintf("%s must not reference the retired CODECOV_TOKEN secret", [path])
+}
+
+# `ci-gate` is the ONLY context in branch protection, so its `needs` list plus
+# the results it reads ARE the merge gate. Each reusable workflow already pins
+# its own nested job membership; nothing pinned the level above, where adding a
+# group and forgetting to gate it leaves the single required check green while
+# that group is free to fail. `supplemental` is advisory by design.
+ci_gate_job_key := "gate"
+
+ci_advisory_job_keys := {"supplemental"}
+
+ci_jobs := object.get(ci_workflow, "jobs", {})
+
+ci_gate_job := object.get(ci_jobs, ci_gate_job_key, {})
+
+ci_group_job_keys := {name |
+	some name, job in ci_jobs
+	startswith(object.get(job, "uses", ""), "./.github/workflows/")
+	not name in ci_advisory_job_keys
+}
+
+ci_gate_needs := {name | some name in object.get(ci_gate_job, "needs", [])}
+
+deny contains msg if {
+	_ := documents[ci_workflow_path]
+	ci_gate_needs != ci_group_job_keys
+	msg := sprintf(
+		"%s %s must gate exactly the non-advisory group jobs %v, not %v",
+		[ci_workflow_path, ci_gate_job_key, ci_group_job_keys, ci_gate_needs],
+	)
+}
+
+# Membership alone is not enough: a job can sit in `needs` and still be ignored
+# by the shell that decides the verdict.
+deny contains msg if {
+	_ := documents[ci_workflow_path]
+	some name in ci_group_job_keys
+	not contains(json.marshal(ci_gate_job), sprintf("needs.%s.result", [name]))
+	msg := sprintf("%s %s must read needs.%s.result", [ci_workflow_path, ci_gate_job_key, name])
 }
 
 deny contains msg if {

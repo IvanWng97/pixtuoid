@@ -79,6 +79,43 @@ shellcheck:
 actionlint:
     actionlint
 
+# The blind spot the recipe above cannot cover: actionlint models WORKFLOWS, so
+# it discovers only .github/workflows and rejects an action.yml outright
+# ("jobs section is missing"). Shell that moves from a workflow into a composite
+# action therefore loses its shellcheck coverage silently — which is exactly
+# what happened to the homebrew-core contract asserts in packaging-build. Pull
+# each `run:` out ourselves and check it with the same linter.
+[group('rust')]
+[doc('Shellcheck every run: block inside the composite actions (actionlint cannot parse action.yml)')]
+actionlint-composites:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    actions=(.github/actions/*/action.yml)
+    ((${#actions[@]})) || { echo "error: no composite actions found" >&2; exit 1; }
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    checked=0
+    for action in "${actions[@]}"; do
+        count="$(yq '[.runs.steps[] | select(has("run"))] | length' "$action")"
+        ((count)) || continue # a pure `uses:` composite has no shell to check
+        for i in $(seq 0 $((count - 1))); do
+            # Default to bash: composite steps must name a shell, and actionlint
+            # treats bash as the default elsewhere. sh gets the stricter dialect.
+            shell="$(yq -r ".runs.steps | map(select(has(\"run\"))) | .[$i].shell // \"bash\"" "$action")"
+            case "$shell" in
+            bash | sh) ;;
+            *) continue ;; # pwsh/python are not shellcheck's to judge
+            esac
+            script="$work/$(echo "$action" | tr /. __)-$i.$shell"
+            { echo "#!/usr/bin/env $shell"; yq -r ".runs.steps | map(select(has(\"run\"))) | .[$i].run" "$action"; } >"$script"
+            shellcheck -s "$shell" "$script" || { echo "  ^ from $action step $i" >&2; exit 1; }
+            checked=$((checked + 1))
+        done
+    done
+    ((checked > 0)) || { echo "error: no composite run: blocks were checked" >&2; exit 1; }
+    echo "$checked composite run: blocks shellchecked"
+
 # Security audit for workflows/actions/Dependabot. zizmor owns the parser and
 # audit catalog; .github/zizmor.yml records the repository's deliberate
 # ref-or-SHA pin policy and every accepted finding is suppressed at its exact
@@ -199,6 +236,7 @@ lint:
     run shfmt   just shfmt-check         & pids+=($!)
     run shell   just shellcheck           & pids+=($!)
     run actions just actionlint          & pids+=($!)
+    run composites just actionlint-composites & pids+=($!)
     run zizmor  just zizmor              & pids+=($!)
     run ci-obs  just ci-observability     & pids+=($!)
     run links   just links               & pids+=($!)
@@ -469,6 +507,17 @@ build-target target cross="false" flags="":
     #!/usr/bin/env bash
     set -euo pipefail
     use_cross="{{ cross }}"
+    # An unquoted, unset matrix.cross in release.yml used to expand to nothing and
+    # slide `flags` into this slot, so the LINUX artifacts silently built WITHOUT
+    # --no-default-features. Anything but the two legal words is a caller bug, so
+    # fail loudly here rather than infer "not true, so cargo".
+    case "$use_cross" in
+    true | false) ;;
+    *)
+        echo "error: cross must be 'true' or 'false', got '$use_cross' (positional args shifted?)" >&2
+        exit 1
+        ;;
+    esac
     # flags: extra cargo flags — release.yml passes --no-default-features for
     # every LINUX artifact (musl can't link ALSA statically; the aarch64 cross
     # image has no ALSA headers), so prebuilt Linux binaries ship SILENT and

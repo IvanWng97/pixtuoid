@@ -43,6 +43,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
+          # Without pipefail the pipeline reports python3's status, so a failed
+          # `gh pr diff` reads as success on empty input and the guard below
+          # publishes a confident "no seams touched" verdict for an unread diff.
+          set -euo pipefail
           gh pr diff "$PR" --name-only | python3 scripts/risk-radar.py >radar.md
           {
             echo "## Risk radar"
