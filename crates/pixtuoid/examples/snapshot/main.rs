@@ -744,10 +744,16 @@ fn main() -> Result<()> {
         theme,
         theme_picker: args.theme_picker,
         floor_info: None,
-        // Single-floor still, no gateway: empty office-wide tallies (no cross-floor
-        // cue, chip suppressed). The footer's counts come from `scene_stats(scene)`.
+        // Single-floor still: empty office-wide tallies (no cross-floor cue). The
+        // footer's counts come from `scene_stats(scene)`.
         per_floor: Default::default(),
-        gateway: None,
+        // DERIVED from the scene, exactly as the runtime does — not hardcoded `None`.
+        // A hardcoded suppression made the `--openclaw <state>` scenes, whose whole
+        // job is demoing the gateway, render their lobster while the `⬢gw` chip that
+        // reports its state was OFF on both the wall board and the footer. Scenes
+        // with no daemon are unaffected: `gateway_rollup` returns `None` for an empty
+        // roster, which is the same suppression, now earned rather than asserted.
+        gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
         audio_audible: false,
         volume_flash: None,
         floor: {

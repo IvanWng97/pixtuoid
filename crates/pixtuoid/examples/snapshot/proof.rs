@@ -692,7 +692,11 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             theme_picker: None,
             floor_info: None,
             per_floor: Default::default(),
-            gateway: None,
+            // DERIVED from the scene, as the runtime does. All THREE DrawCtx sites in
+            // this example must agree: a hardcoded `None` here is what kept the `⬢gw`
+            // chip off the very CLIP whose job is demoing the gateway, and clips are
+            // NOT pixel-gated by `gen-check` (presence-only), so nothing would catch it.
+            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: false,
             volume_flash: None,
             floor: pixtuoid_scene::floor::FloorMeta::ground(),
