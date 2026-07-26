@@ -6,6 +6,7 @@ codecov_action := "codecov/codecov-action@v7"
 codecov_action_name := "codecov/codecov-action"
 codecov_authority_path := ".github/actions/upload-codecov/action.yml"
 codecov_wrapper := "./.github/actions/upload-codecov"
+upload_artifact_action := "actions/upload-artifact@v7"
 ci_workflow_path := ".github/workflows/ci.yml"
 codecov_workflow_path := ".github/workflows/ci-tests.yml"
 codecov_input_file := "${{ inputs.file }}"
@@ -117,9 +118,32 @@ uses_entries := [entry |
 	}
 ]
 
+# Dependabot pins a floating major to an exact release (`@v4` -> `@v4.37.1`),
+# which is a STRICTER pin and exactly what this repo's ref-pin policy wants. The
+# rules used to compare the literal string, so that improvement was rejected
+# with "must analyze with CodeQL v4 exactly once" — of a step that WAS v4.
+# Compare the action path and the pinned major, and accept any more precise ref
+# beneath it; a real major bump (v4 -> v5) still fails, which is the point.
+split_action(value) := parts if {
+	parts := split(value, "@")
+	count(parts) == 2
+}
+
+action_matches(uses, expected) if {
+	uses == expected
+}
+
+action_matches(uses, expected) if {
+	uses != expected
+	actual := split_action(uses)
+	wanted := split_action(expected)
+	actual[0] == wanted[0]
+	startswith(actual[1], sprintf("%s.", [wanted[1]]))
+}
+
 entries_using(action) := [entry |
 	some entry in uses_entries
-	entry.uses == action
+	action_matches(entry.uses, action)
 ]
 
 codecov_action_reference(value) if {
@@ -136,13 +160,13 @@ rogue_codecov_entries := [entry |
 
 canonical_codecov_entry(entry) if {
 	entry.path == codecov_authority_path
-	entry.uses == codecov_action
+	action_matches(entry.uses, codecov_action)
 }
 
 authority_uploads := [entry |
 	some entry in uses_entries
 	entry.path == codecov_authority_path
-	entry.uses == codecov_action
+	action_matches(entry.uses, codecov_action)
 ]
 
 authority_objects := [entry |
@@ -210,7 +234,7 @@ pinned_npm_setup_steps(path, job_name) := [step |
 
 codecov_uploads := [entry |
 	some entry in uses_entries
-	entry.uses == codecov_wrapper
+	action_matches(entry.uses, codecov_wrapper)
 ]
 
 codecov_route(entry) := route if {
@@ -246,7 +270,16 @@ indexed_steps_matching(steps, field, expected) := [entry |
 	entry := {"index": index, "value": step}
 ]
 
-codeql_steps_using(action) := indexed_steps_matching(codeql_steps, "uses", action)
+# The `uses` twin of indexed_steps_matching: same indexed-entry shape, but the
+# comparison is version-tolerant rather than literal. Shared so a future change
+# to the matching contract cannot land on one call site and miss the other.
+steps_using_action(steps, action) := [entry |
+	some index, step in steps
+	action_matches(object.get(step, "uses", ""), action)
+	entry := {"index": index, "value": step}
+]
+
+codeql_steps_using(action) := steps_using_action(codeql_steps, action)
 
 codeql_named_steps(name) := indexed_steps_matching(codeql_steps, "name", name)
 
@@ -280,7 +313,7 @@ claude_publish_job := object.get(claude_reusable_jobs, "publish", {})
 claude_analyze_steps := object.get(claude_analyze_job, "steps", [])
 claude_publish_steps := object.get(claude_publish_job, "steps", [])
 
-claude_analyze_steps_using(action) := indexed_steps_matching(claude_analyze_steps, "uses", action)
+claude_analyze_steps_using(action) := steps_using_action(claude_analyze_steps, action)
 
 claude_analyze_named_steps(name) := indexed_steps_matching(claude_analyze_steps, "name", name)
 
@@ -862,7 +895,7 @@ deny contains msg if {
 
 deny contains msg if {
 	some entry in uses_entries
-	entry.uses == codecov_wrapper
+	action_matches(entry.uses, codecov_wrapper)
 	params := object.get(entry.value, "with", {})
 	object.get(params, "report-type", null) != null
 	msg := sprintf("%s must use report_type, not report-type", [entry.path])
@@ -882,7 +915,7 @@ deny contains msg if {
 	uploads := [entry |
 		some entry in uses_entries
 		entry.path == lighthouse_workflow_path
-		entry.uses == "actions/upload-artifact@v7"
+		action_matches(entry.uses, upload_artifact_action)
 		params := object.get(entry.value, "with", {})
 		object.get(params, "path", "") == "site/.lighthouseci/"
 	]
@@ -894,7 +927,7 @@ deny contains msg if {
 	msg := sprintf("%s Lighthouse upload must run under !cancelled()", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
-	entry.uses == "actions/upload-artifact@v7"
+	action_matches(entry.uses, upload_artifact_action)
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(entry.value, "if", "") != "${{ !cancelled() }}"
@@ -904,7 +937,7 @@ deny contains msg if {
 	msg := sprintf("%s Lighthouse upload must include hidden files", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
-	entry.uses == "actions/upload-artifact@v7"
+	action_matches(entry.uses, upload_artifact_action)
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(params, "include-hidden-files", false) != true
@@ -914,7 +947,7 @@ deny contains msg if {
 	msg := sprintf("%s Lighthouse upload must fail when reports are absent", [lighthouse_workflow_path])
 	some entry in uses_entries
 	entry.path == lighthouse_workflow_path
-	entry.uses == "actions/upload-artifact@v7"
+	action_matches(entry.uses, upload_artifact_action)
 	params := object.get(entry.value, "with", {})
 	object.get(params, "path", "") == "site/.lighthouseci/"
 	object.get(params, "if-no-files-found", "") != "error"

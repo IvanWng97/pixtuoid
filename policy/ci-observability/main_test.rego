@@ -967,3 +967,58 @@ test_codeql_health_gate_before_upload_is_accepted if {
 	violations := deny with input as fixture
 	not sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
 }
+
+# Dependabot pins a floating major to an exact release. That is a STRICTER pin
+# and must not be rejected — #786 failed with "must analyze with CodeQL v4
+# exactly once" against a step that was v4.37.1.
+test_exact_release_pin_matches_the_major if {
+	action_matches("github/codeql-action/analyze@v4.37.1", "github/codeql-action/analyze@v4")
+	action_matches("anthropics/claude-code-action@v1.0.178", claude_action)
+	action_matches("codecov/codecov-action@v7.1.2", codecov_action)
+}
+
+# A real major bump must STILL fail — that is what the pin is for.
+test_major_bump_does_not_match if {
+	not action_matches("github/codeql-action/analyze@v5.0.0", "github/codeql-action/analyze@v4")
+	not action_matches("anthropics/claude-code-action@v2", claude_action)
+}
+
+# A different action that merely shares a version must not match.
+test_unrelated_action_does_not_match if {
+	not action_matches("evil/codeql-action/analyze@v4.37.1", "github/codeql-action/analyze@v4")
+	not action_matches("github/codeql-action/init@v4.37.1", "github/codeql-action/analyze@v4")
+}
+
+# A ref that only PREFIXES the major is not beneath it (v40 is not v4.x).
+test_prefix_lookalike_does_not_match if {
+	not action_matches("github/codeql-action/analyze@v40.1.0", "github/codeql-action/analyze@v4")
+}
+
+# The Lighthouse rules matched `actions/upload-artifact@v7` literally, so an
+# exact pin would have emptied their entry list and spuriously fired all four
+# "must upload site/.lighthouseci/" denials — #786's failure, relocated.
+test_lighthouse_rules_tolerate_an_exact_upload_artifact_pin if {
+	fixture := {"documents": [{
+		"path": lighthouse_workflow_path,
+		"contents": {"jobs": {"lighthouse": {"steps": [{
+			"uses": "actions/upload-artifact@v7.1.2",
+			"if": "${{ !cancelled() }}",
+			"with": {
+				"path": "site/.lighthouseci/",
+				"include-hidden-files": true,
+				"if-no-files-found": "error",
+			},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	every message in {
+		"must upload site/.lighthouseci/ exactly once",
+		"Lighthouse upload must run under !cancelled()",
+		"Lighthouse upload must include hidden files",
+		"Lighthouse upload must fail when reports are absent",
+	} {
+		every violation in violations {
+			not contains(violation, message)
+		}
+	}
+}
