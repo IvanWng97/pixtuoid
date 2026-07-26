@@ -68,9 +68,17 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
         // never-connected user with a comment in theirs was reported hooks-INSTALLED,
         // then verified BROKEN ("plugin artifact missing…, reconnect openclaw") —
         // advice that cannot succeed, since the merge refuses that same document by
-        // design (the OpenClaw-JSON5 sharp edge). A substring probe cannot be fooled
-        // into a false NEGATIVE here: every managed config names us, whether by the
-        // `_pixtuoid` sentinel, `plugins.entries.pixtuoid`, or the plugin dir path.
+        // design (the OpenClaw-JSON5 sharp edge). ONE uniform rule for all targets —
+        // no per-target branch — because `unwrap_or(true)` was wrong for every one of
+        // them: asserting "installed" about a config we could not read is a claim we
+        // cannot support. A false NEGATIVE is possible but bounded: a managed config
+        // normally names us (the `_pixtuoid` sentinel, `plugins.entries.pixtuoid`, or
+        // the embedded `pixtuoid-hook` path), and the one gap is kimi on WINDOWS,
+        // which carries no sentinel and whose bare exec form (`<path> --source kimi`)
+        // spells our name only if the shim path does. There the probe answers "not
+        // ours" for a CORRUPT config — under-reporting installed-ness, never the false
+        // "install broken" the old default produced. Asserted where it holds by
+        // `kimis_uppercase_env_marker_alone_satisfies_the_fallback_probe` (unix).
         Ok(c) => (t.merge_uninstall)(&c)
             .map(|o| o.changed)
             // Case-INSENSITIVE, and that is not the same question as matching an
