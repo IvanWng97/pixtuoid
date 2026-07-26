@@ -872,3 +872,35 @@ test_tests_call_granting_oidc_is_accepted if {
 	violations := deny with input as ci_gate_fixture(jobs)
 	not ci_oidc_call_message("tests") in violations
 }
+
+# A group converted to a cross-repo reusable workflow must stay in the gate set.
+# Prefix-matching `./.github/workflows/` dropped it instead, and the membership
+# rule then told the maintainer to REMOVE that group from the merge gate.
+test_cross_repo_group_call_still_counts_as_a_group if {
+	jobs := object.union(ci_gate_shipped_jobs, {"builds": {"uses": "someorg/shared/.github/workflows/ci-builds.yml@v1"}})
+	count(ci_gate_membership_violations(jobs)) == 0
+	count(ci_gate_unread_violations(jobs)) == 0
+}
+
+test_cross_repo_group_call_ungated_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {
+		"builds": {"uses": "someorg/shared/.github/workflows/ci-builds.yml@v1"},
+		"gate": {
+			"needs": ["lint", "tests"],
+			"steps": [{"env": {
+				"LINT_RESULT": "${{ needs.lint.result }}",
+				"TESTS_RESULT": "${{ needs.tests.result }}",
+			}}],
+		},
+	})
+	count(ci_gate_membership_violations(jobs)) == 1
+}
+
+test_cross_repo_group_call_granting_oidc_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"builds": {
+		"uses": "someorg/shared/.github/workflows/ci-builds.yml@v1",
+		"permissions": {"contents": "read", "id-token": "write"},
+	}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	ci_oidc_call_message("builds") in violations
+}

@@ -680,7 +680,7 @@ deny contains msg if {
 	_ := documents[ci_workflow_path]
 	some name, job in ci_jobs
 	name != "tests"
-	startswith(object.get(job, "uses", ""), "./.github/workflows/")
+	calls_a_reusable_workflow(job)
 	object.get(object.get(job, "permissions", {}), "id-token", "") == "write"
 	msg := sprintf(
 		"%s %s call must not pass id-token: write down to jobs that declare no permissions of their own",
@@ -731,6 +731,16 @@ deny contains msg if {
 # its own nested job membership; nothing pinned the level above, where adding a
 # group and forgetting to gate it leaves the single required check green while
 # that group is free to fail. `supplemental` is advisory by design.
+# A job-level `uses:` IS a reusable-workflow call — a job cannot carry both
+# `uses:` and `steps:`. Matching on the `./.github/workflows/` prefix instead
+# would drop a cross-repo call out of the group set, and the membership rule
+# would then instruct the maintainer to REMOVE that group from the merge gate.
+calls_a_reusable_workflow(job) if {
+	uses := object.get(job, "uses", "")
+	is_string(uses)
+	uses != ""
+}
+
 ci_gate_job_key := "gate"
 
 ci_advisory_job_keys := {"supplemental"}
@@ -739,7 +749,7 @@ ci_gate_job := object.get(ci_jobs, ci_gate_job_key, {})
 
 ci_group_job_keys := {name |
 	some name, job in ci_jobs
-	startswith(object.get(job, "uses", ""), "./.github/workflows/")
+	calls_a_reusable_workflow(job)
 	not name in ci_advisory_job_keys
 }
 
