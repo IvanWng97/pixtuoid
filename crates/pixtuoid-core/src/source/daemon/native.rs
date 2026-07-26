@@ -163,14 +163,28 @@ mod tests {
     // process has to die, so this stays off the wall-clock/OS-timing flake class
     // that keeps `exit_watch.rs` in the mutants exclude list. The death→PidExited
     // half remains e2e-covered.
+    /// cfg-TWIN of the test below, following `exit_watch`'s own
+    /// `spawn_is_none_on_unsupported_platforms` pattern: where there is no backend
+    /// the whole rung is absent by design and the TTL sweep is the only
+    /// abrupt-down signal.
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[tokio::test]
+    async fn spawning_the_presence_exit_watch_is_none_without_a_backend() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        assert!(spawn_presence_exit_watch(tx).is_none());
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[tokio::test]
     async fn watch_records_the_binding_that_routes_a_death_to_its_instance() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let Some(watch) = spawn_presence_exit_watch(tx) else {
-            // No exit-watch backend on this platform (the TTL sweep is the only
-            // abrupt-down signal there) — nothing to bind.
-            return;
-        };
+        // ASSERTED, not `let else`-skipped: a graceful skip here is indistinguishable
+        // from `spawn_presence_exit_watch` returning None outright, which would
+        // silently disarm the whole instant-down rung — mutation testing caught
+        // exactly that hole in this test's first draft. macOS/Linux HAVE a backend
+        // (kqueue / pidfd), so on them Some is the contract.
+        let watch = spawn_presence_exit_watch(tx)
+            .expect("macOS/Linux have an exit-watch backend (kqueue / pidfd)");
         let me = std::process::id() as i32;
         let key = k("openclaw", "18789");
         watch.watch(&key, me);
