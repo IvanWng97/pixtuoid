@@ -3,6 +3,28 @@
 # that line/region coverage can't see. Use the project's runner (nextest) and
 # exclude paths where a surviving mutant is NOISE, not a real gap, so the
 # advisory signal stays high.
+#
+# READ THIS BEFORE ACTING ON A `pixtuoid-core` / `pixtuoid-scene` SURVIVOR.
+# `test_workspace` is deliberately left at its default, which means "only the
+# tests in the mutated package are run" (`cargo mutants --help`). That is a
+# systematic BLIND SPOT for this repo specifically, because core/scene behaviour
+# is covered on purpose by the BINARY's headless harness (~100 integration tests
+# driving the real TuiRenderer), not by core's own unit tests. So a core/scene
+# mutant can be reported MISSED while `-p pixtuoid` catches it outright —
+# measured, not theorised: making `SceneState::insert_daemon` a no-op reds 8 of 9
+# `harness::mascot` tests while all 52 of core's own daemon tests stay green, and
+# it still reported as a survivor.
+#
+# So: for a survivor in core/scene, REPRODUCE IT FIRST — apply the mutation and
+# run `-p pixtuoid` too. Only write a new test if the mutation genuinely survives
+# the whole workspace. Otherwise you are padding the suite, or "fixing" code that
+# already works.
+#
+# Turning it on is the accurate-but-unusable option: per-package is ~18s/mutant
+# here, the full workspace suite is ~135s, so a typical ~220-mutant diff run goes
+# from ~45min to ~8h. For an ADVISORY check that trade is not worth it. Pass
+# `--test-workspace true` by hand (`just mutants --test-workspace true`) when
+# auditing core/scene specifically and you can afford the wall-clock.
 test_tool = "nextest"
 
 exclude_globs = [
