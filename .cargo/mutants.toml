@@ -62,14 +62,19 @@ exclude_re = [
     # deterministic test can arrange (the non-boundary prune/dedupe behavior
     # IS pinned by unclaim.rs's unit tests).
     'unclaim\.rs.*replace < with <= in ChildEndUnclaims',
-    # `mascot_position`'s stagger guard, `if age < enter_delay`. `<=` holds the mascot
-    # at the elevator for one extra millisecond — the single input where the two
-    # differ — and at that instant the real code takes the walk-in at t=0, which lands
-    # EXACTLY on the elevator anyway. Measured for all four consecutive-port seeds
-    # (delays 4/506/750/704 ms): both branches render the identical Point, so the
-    # mutation is unobservable through the function's output, not merely untested.
-    # The guard's load-bearing direction IS pinned — `< -> ==` underflows
-    # `age - enter_delay` and dies in
+    # `mascot_position`'s TWO leg boundaries — `if age < enter_delay` (the stagger)
+    # and `if entered < MASCOT_ENTER_MS` (the walk-in). `<=` extends each leg by one
+    # millisecond, and at that single instant the next leg's own origin is the SAME
+    # point, because the legs are built to join without a pop:
+    #   stagger: the walk-in at t=0 IS the elevator, where the hold would keep it.
+    #   walk-in: the walk-in at t=1 IS `home`, which is also the wander's forced
+    #            cycle-0 origin ("Cycle 0's origin is forced to `home` so it joins the
+    #            enter walk pop-free" — mascot_wander).
+    # Measured both, per consecutive-port seed: the two branches render the identical
+    # Point, and the frames either side are identical too. So the design's continuity
+    # is exactly what makes an off-by-one-ms here unobservable, not merely untested.
+    # Each guard's load-bearing direction IS pinned — `< -> ==` on the stagger
+    # underflows `age - enter_delay` and dies in
     # `the_walk_out_starts_from_where_the_mascot_was_when_it_died`.
     'creatures\.rs.*replace < with <= in mascot_position',
     # `mascot_spot_for`'s salt XOR, `splitmix64(seed ^ SALT)`. Replacing `^` with a
