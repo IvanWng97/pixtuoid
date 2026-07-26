@@ -28,6 +28,7 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
 use crate::install::io;
+use crate::install::merge::{prune_empty, prune_empty_root};
 use crate::install::target::MergeOutcome;
 
 /// The plugin id — the key under `plugins.entries` and `plugins.load.paths`'s dir.
@@ -356,27 +357,6 @@ fn parse_for_merge(content: &str) -> Result<Value> {
              rewrite the file rather than drop them — {OWNER_CLI_ADVICE}"
         )
     })
-}
-
-/// Drop `key` from `parent` when it is an EMPTY object/array — the uninstall's
-/// husk sweeper. Anything with content (a foreign plugin's entry, another load
-/// path, the user's own allowlist members) is left exactly as found.
-fn prune_empty(parent: &mut serde_json::Map<String, Value>, key: &str) {
-    let empty = match parent.get(key) {
-        Some(Value::Object(m)) => m.is_empty(),
-        Some(Value::Array(a)) => a.is_empty(),
-        _ => false,
-    };
-    if empty {
-        parent.remove(key);
-    }
-}
-
-/// [`prune_empty`] for a top-level key of the document root.
-fn prune_empty_root(root: &mut Value, key: &str) {
-    if let Some(obj) = root.as_object_mut() {
-        prune_empty(obj, key);
-    }
 }
 
 fn obj_mut<'a>(v: &'a mut Value, key: &str) -> Result<&'a mut serde_json::Map<String, Value>> {

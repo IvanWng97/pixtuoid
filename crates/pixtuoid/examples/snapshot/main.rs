@@ -591,7 +591,9 @@ fn main() -> Result<()> {
     // Representative Connection-panel fixture (deterministic — no FS probes), so the
     // demo image is reproducible across machines.
     let (connection_rows, connection_live, connection_socket_line) = if args.connection {
-        use pixtuoid::tui::connection::{ConnState, ConnectionRow, LiveFacet, LiveInfo};
+        use pixtuoid::tui::connection::{
+            ConnState, ConnectionRow, DaemonRollup, LiveFacet, LiveInfo,
+        };
         use std::path::PathBuf;
         use std::time::Duration;
         let mk = |source_id, label_prefix, display_name, state, cfg: Option<&str>| ConnectionRow {
@@ -676,10 +678,10 @@ fn main() -> Result<()> {
             agents(1, 12),
             // Two live gateways, one mid-run → `2 gateways · busy`.
             LiveInfo {
-                facet: LiveFacet::Daemon {
-                    instances: 2,
-                    state: Some(pixtuoid_core::state::DaemonState::Busy),
-                },
+                facet: LiveFacet::Daemon(Some(DaemonRollup {
+                    instances: std::num::NonZeroUsize::new(2).expect("two gateways"),
+                    state: pixtuoid_core::state::DaemonState::Busy,
+                })),
                 dead: false,
             },
         ];

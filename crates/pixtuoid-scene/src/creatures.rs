@@ -482,6 +482,14 @@ pub(crate) fn mascot_position(
     // Every clock below is measured from the END of this instance's stagger, so the
     // walk-out's reconstructed origin stays on the same wander phase as the walk-in.
     let enter_delay = mascot_enter_delay(seed);
+    // The door is an anchor like any other: with N gateways first-sighted in one
+    // beat — the very case the stagger exists for — all N would otherwise share this
+    // ONE cell for up to 900ms before peeling off, which is the elevator half of the
+    // overlap residual the scene guide quantifies. Same seeded ring the wander spots
+    // use, applied at ALL THREE elevator sites below (hold, walk-in origin, walk-out
+    // target) so the legs still join pop-free — offsetting only the hold would put a
+    // jump at t=0.
+    let door = mascot_spot_for(layout, elevator, seed);
 
     if presence.liveness == DaemonLiveness::Down {
         // Walk-out: from where the lobster was at the instant of Down, to the elevator.
@@ -508,19 +516,21 @@ pub(crate) fn mascot_position(
             .saturating_sub(MASCOT_ENTER_MS + enter_delay);
         let (from, _) = mascot_wander(layout, down_we, seed, &spots, home, MASCOT_IDLE_CYCLE_MS);
         let t = down_age as f32 / MASCOT_LEAVE_MS as f32;
-        return Some((walk_between(layout, from, elevator, t), walk_anim, frame));
+        return Some((walk_between(layout, from, door, t), walk_anim, frame));
     }
 
     let age = now.duration_since(presence.entered_at).ok()?.as_millis() as u64;
     if age < enter_delay {
-        // Still holding at the elevator — this instance's stagger.
-        return Some((elevator, walk_anim, frame));
+        // Still holding at the door — this instance's stagger. REST, not walk: the
+        // position is fixed, so an advancing walk cycle paddles in place (visible for
+        // three of four consecutive-port gateways, whose delays are 4/506/750/704ms).
+        return Some((door, rest_anim, 0));
     }
     let entered = age - enter_delay;
     if entered < MASCOT_ENTER_MS {
-        // Walk-in from the elevator to the home beat.
+        // Walk-in from the door to the home beat.
         let t = entered as f32 / MASCOT_ENTER_MS as f32;
-        return Some((walk_between(layout, elevator, home, t), walk_anim, frame));
+        return Some((walk_between(layout, door, home, t), walk_anim, frame));
     }
 
     // Steady wander, styled by state.
@@ -965,10 +975,9 @@ mod tests {
                 .0
         };
         // The window where the claim holds: from when the LATER instance leaves the
-        // elevator to before the EARLIER one joins its wander. Outside it, both are
-        // legitimately co-located — held together at the elevator door before their
-        // staggers elapse, and crossing at the shared `home` beat as one arrives
-        // while the other departs (ordinary traffic, not the collapse).
+        // door to before the EARLIER one joins its wander. The only remaining
+        // legitimate co-location is crossing at the shared `home` beat as one
+        // arrives while the other departs — ordinary traffic, not the collapse.
         let (da, db) = (mascot_enter_delay(a), mascot_enter_delay(b));
         let (lo, hi) = (da.max(db) + 1, da.min(db) + MASCOT_ENTER_MS);
         assert!(
@@ -980,6 +989,19 @@ mod tests {
                 pos_at(a, age),
                 pos_at(b, age),
                 "two instances must never occupy one cell mid-walk-in (age {age}ms)"
+            );
+        }
+
+        // The STAGGER window itself, which this test used to concede ("held together
+        // at the elevator door"): each instance now waits on its OWN seeded ring
+        // offset from the door, so they are separated from the very first frame — the
+        // elevator was the one anchor the standing-offset ring did not cover, and with
+        // N gateways first-sighted in one beat it was where they visibly stacked.
+        for age in (0..=da.min(db)).step_by(1) {
+            assert_ne!(
+                pos_at(a, age),
+                pos_at(b, age),
+                "two instances held at the door must not share its cell (age {age}ms)"
             );
         }
     }
@@ -1001,10 +1023,14 @@ mod tests {
             mascot_position(&layout, &p0, "lobster_walk", "lobster_rest", now, seed)
                 .expect("walk-in position");
         assert_eq!(anim0, "lobster_walk", "enter window → walk anim");
+        // The walk-in starts at THIS instance's door — the seeded ring offset from
+        // the shared elevator cell, so N gateways don't stack on it — and the hold
+        // before it uses the same point, so the leg joins pop-free.
+        let door = mascot_spot_for(&layout, elevator, seed);
         assert_eq!(
             pos0,
-            walk_between(&layout, elevator, home, 0.0),
-            "age 0 → exactly at the elevator end"
+            walk_between(&layout, door, home, 0.0),
+            "age 0 → exactly at this instance's door"
         );
 
         // age = 1100 (half the 2200 window) → midway along elevator→home.
@@ -1017,14 +1043,14 @@ mod tests {
         let t = age as f32 / MASCOT_ENTER_MS as f32;
         assert_eq!(
             pos_mid,
-            walk_between(&layout, elevator, home, t),
-            "mid enter → the elevator→home interpolation"
+            walk_between(&layout, door, home, t),
+            "mid enter → the door→home interpolation"
         );
         // Sanity: midway is genuinely off both endpoints (so the lerp is live, not a
-        // degenerate where elevator==home).
+        // degenerate where door==home).
         assert_ne!(
-            elevator, home,
-            "elevator and home must differ for a real walk-in"
+            door, home,
+            "the door and home must differ for a real walk-in"
         );
     }
 
@@ -1220,12 +1246,21 @@ mod tests {
                     last_seen: at,
                     ..alive.clone()
                 };
-                let (pos, _, _) = mascot_position(&layout, &held, "w", "r", at, seed)
+                let (pos, anim, frame) = mascot_position(&layout, &held, "w", "r", at, seed)
                     .expect("a staggered mascot still renders");
+                // HELD means still: the position is fixed for the whole slice, so an
+                // advancing walk cycle would paddle in place (visible for three of
+                // four consecutive-port gateways, whose delays are 4/506/750/704ms).
                 assert_eq!(
-                    pos, elevator,
+                    (anim, frame),
+                    ("r", 0),
+                    "gateway {port} held at the door must REST, not walk in place"
+                );
+                assert_eq!(
+                    pos,
+                    mascot_spot_for(&layout, elevator, seed),
                     "gateway {port} at age {early_ms}ms (< {delay}ms stagger) must hold \
-                     at the elevator"
+                     at ITS OWN door offset, not the shared elevator cell"
                 );
             }
         }

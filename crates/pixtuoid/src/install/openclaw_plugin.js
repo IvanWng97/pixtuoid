@@ -135,6 +135,17 @@ function forward(type, ev, ctx) {
     // (#318). The plugin runs IN the gateway process, so process.pid is the
     // gateway's pid for every hook.
     payload._pid = process.pid;
+    // WHY `success: false` alone is not enough to call a gateway degraded: upstream
+    // builds it as `!aborted && !promptError` (verified in the shipped 2026.7.1
+    // bundle at BOTH construction sites — `run-attempt-*.js` and `selection-*.js`),
+    // so a user CANCELLING a turn is indistinguishable from the provider being down.
+    // Only a prompt error carries `error`, so its mere PRESENCE is the discriminator
+    // — forwarded as a bare boolean because the error STRING can embed prompt
+    // content and is deliberately excluded from ALLOW.
+    if (type === "agent_end" && payload.success === false) {
+      payload.errored =
+        (ev && ev.error !== undefined) || (ctx && ctx.error !== undefined);
+    }
 
     const proc = spawn(HOOK_PATH, ["--source", "openclaw"], {
       stdio: ["pipe", "ignore", "ignore"],

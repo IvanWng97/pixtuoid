@@ -33,8 +33,9 @@ on:
       - "crates/pixtuoid/src/install/*.rs"
       # openclaw_plugin.js: the watch reads the plugin's OWN copy of upstream's
       # DEFAULT_GATEWAY_PORT out of this template (it can't be imported from a
-      # plugin living in OpenClaw's state dir), so renaming that const would make
-      # the port check silently stop comparing anything.
+      # plugin living in OpenClaw's state dir). Renaming that const would leave the
+      # port check comparing nothing — which the selftest's own port tooth now
+      # catches, and this path is what makes it run at PR time instead of weekly.
       - "crates/pixtuoid/src/install/openclaw_plugin.js"
 
 permissions:

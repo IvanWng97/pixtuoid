@@ -85,6 +85,12 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
         Ok(c) => (t.merge_uninstall)(&c)
             .map(|o| o.changed)
             // Unparseable ⇒ fall back to the marker probe (see `config_mentions_us`).
+            // Its residual false-POSITIVE is narrowed, not gone: an unparseable config
+            // that merely MENTIONS the string — a comment, or a foreign load path under
+            // a directory named after us — still reads as ours and then verifies BROKEN
+            // on its absent artifacts. Accepted: that needs a coincidence, where the old
+            // `unwrap_or(true)` fired for every JSON5 document. Tighten to the
+            // per-format markers if it ever bites.
             .unwrap_or_else(|_| config_mentions_us(&c)),
         Err(_) => true,
     }

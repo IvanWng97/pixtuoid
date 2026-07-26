@@ -40,14 +40,31 @@ pub enum LiveFacet {
         agents: usize,
         last_event_age: Option<Duration>,
     },
-    /// A `Daemon` source: running INSTANCES (N gateways) rolled up to their worst
-    /// state via the shared `board::gateway_rollup` — the same worst-of the footer's
-    /// `⬢gw` chip and the wall board read, so the three can't disagree. `None` state
-    /// means no instance is present (the daemon isn't running).
-    Daemon {
-        instances: usize,
-        state: Option<pixtuoid_core::state::DaemonState>,
-    },
+    /// A `Daemon` source: its running instances, or `None` when none is present
+    /// (nothing observed — the panel's `no gateway seen` cell).
+    ///
+    /// ATOMIC on purpose. A separate `instances: usize` + `state: Option<_>` pair
+    /// admitted `{0, Some(_)}` and `{N, None}`, neither of which `live_for` can
+    /// produce (the count and the rollup come from ONE filter, and
+    /// `board::gateway_rollup` returns `None` iff its iterator is empty) — and the
+    /// painter had to paper the hole over by inventing a state
+    /// (`state.unwrap_or(Idle)`). That is the same stubbed-zero this enum was
+    /// introduced to remove, one level down.
+    Daemon(Option<DaemonRollup>),
+}
+
+/// N ≥ 1 running instances of a daemon source and the state they roll up to.
+///
+/// `NonZeroUsize` is what makes "present" and "how many" the same fact: the
+/// `no gateway seen` case is `Daemon(None)`, so a zero count is unrepresentable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DaemonRollup {
+    /// How many instances (gateways) of this source are present.
+    pub instances: std::num::NonZeroUsize,
+    /// Their worst-of state via the shared `board::gateway_rollup` — the same
+    /// worst-of the footer's `⬢gw` chip and the wall board read, so the three
+    /// can't disagree.
+    pub state: pixtuoid_core::state::DaemonState,
 }
 
 impl Default for LiveFacet {
@@ -126,16 +143,18 @@ pub fn live_for(
     let is_daemon =
         pixtuoid_core::source::registry::descriptor_for(source_id).is_some_and(|d| d.is_daemon());
     if is_daemon {
+        // ONE walk, so the count and the rollup cannot disagree — and `zip` makes
+        // the pair atomic: either both halves exist or the facet is `None`.
+        let mine: Vec<_> = scene
+            .daemons()
+            .filter(|(s, _, _)| *s == source_id)
+            .map(|(_, _, p)| p)
+            .collect();
+        let rollup = std::num::NonZeroUsize::new(mine.len())
+            .zip(pixtuoid_scene::board::gateway_rollup(mine.into_iter()))
+            .map(|(instances, state)| DaemonRollup { instances, state });
         return LiveInfo {
-            facet: LiveFacet::Daemon {
-                instances: scene.daemons().filter(|(s, _, _)| *s == source_id).count(),
-                state: pixtuoid_scene::board::gateway_rollup(
-                    scene
-                        .daemons()
-                        .filter(|(s, _, _)| *s == source_id)
-                        .map(|(_, _, p)| p),
-                ),
-            },
+            facet: LiveFacet::Daemon(rollup),
             dead,
         };
     }

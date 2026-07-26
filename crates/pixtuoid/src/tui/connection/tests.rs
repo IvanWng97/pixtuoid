@@ -181,10 +181,7 @@ fn live_for_reports_a_daemons_instances_not_the_agent_slots_it_never_creates() {
     let mut scene = SceneState::uniform(8);
     assert_eq!(
         live_for(now, src, &scene, none).facet,
-        LiveFacet::Daemon {
-            instances: 0,
-            state: None
-        },
+        LiveFacet::Daemon(None),
         "a daemon with no instance must not report an agent count"
     );
 
@@ -216,10 +213,10 @@ fn live_for_reports_a_daemons_instances_not_the_agent_slots_it_never_creates() {
     add("19789", &["r1"]);
     assert_eq!(
         live_for(now, src, &scene, none).facet,
-        LiveFacet::Daemon {
-            instances: 2,
-            state: Some(pixtuoid_core::state::DaemonState::Busy)
-        },
+        LiveFacet::Daemon(Some(DaemonRollup {
+            instances: std::num::NonZeroUsize::new(2).expect("two gateways"),
+            state: pixtuoid_core::state::DaemonState::Busy
+        })),
         "two gateways, one busy → 2 instances rolled up to Busy"
     );
 

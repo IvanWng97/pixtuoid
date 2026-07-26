@@ -163,13 +163,29 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
         }],
         "agent_end" => {
             // #317: `agent_end` carries `success: boolean` (PluginHookAgentEndEvent).
-            // `false` = the run failed (the model backend is broken — auth revoked,
-            // provider down) → Degraded; `true`/absent = OK → RunEnded. Absent
-            // defaults to OK (an older plugin not forwarding `success` must never
-            // false-degrade a healthy gateway).
+            // `true`/absent = OK → RunEnded. Absent defaults to OK (an older plugin
+            // not forwarding `success` must never false-degrade a healthy gateway).
+            //
+            // `false` is NOT sufficient for Degraded on its own. Upstream builds it
+            // as `!aborted && !promptError` — verified at both construction sites in
+            // the shipped 2026.7.1 bundle — so a user CANCELLING a turn produces the
+            // same `false` as a provider outage, and Degraded is sticky (only a clean
+            // RunEnded / a new RunStarted / a GatewayUp clears it; the TTL sweep
+            // deliberately never heals it). Cancelling a turn would therefore latch
+            // the lobster into "model error" until the next run. The plugin forwards
+            // `errored` — the mere PRESENCE of upstream's `error`, as a bare boolean
+            // because the string can embed prompt content — which separates the two.
+            //
+            // Absent `errored` means an OLDER plugin (installing is one-shot; a
+            // pixtuoid upgrade does not re-render the on-disk `index.js`), so it
+            // defaults to TRUE: that reproduces the pre-change behaviour EXACTLY for
+            // an un-reconnected user rather than silently making their gateway
+            // un-degradable, which is the same legacy-fallback direction the
+            // `gatewayPort`-less envelope takes.
             let ok = obj.get("success").and_then(|s| s.as_bool()).unwrap_or(true);
+            let errored = obj.get("errored").and_then(|v| v.as_bool()).unwrap_or(true);
             let run_key = run_key(obj);
-            vec![if ok {
+            vec![if ok || !errored {
                 DaemonPresenceUpdate::RunEnded { run_key }
             } else {
                 DaemonPresenceUpdate::RunFailed { run_key }
@@ -320,6 +336,21 @@ mod tests {
     #[test]
     fn agent_end_success_false_decodes_to_run_failed() {
         // #317: a failed run (the model backend broke) → RunFailed (drives Degraded).
+        // A plugin that forwards the `errored` discriminator says so explicitly.
+        assert_eq!(
+            decode(
+                json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1",
+                          "success": false, "errored": true})
+            ),
+            vec![DaemonPresenceUpdate::RunFailed {
+                run_key: "run_1".into()
+            }]
+        );
+        // A LEGACY plugin (installing is one-shot; upgrading pixtuoid does not
+        // re-render the on-disk index.js) forwards no `errored`, so the absent case
+        // must keep TODAY's behaviour rather than making their gateway
+        // un-degradable — the same legacy direction the gatewayPort-less envelope
+        // takes.
         assert_eq!(
             decode(
                 json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1", "success": false})
@@ -327,6 +358,26 @@ mod tests {
             vec![DaemonPresenceUpdate::RunFailed {
                 run_key: "run_1".into()
             }]
+        );
+    }
+
+    #[test]
+    fn a_cancelled_turn_ends_the_run_without_degrading_the_gateway() {
+        // Upstream builds `success` as `!aborted && !promptError` — verified at BOTH
+        // construction sites in the shipped 2026.7.1 bundle — so a user CANCELLING a
+        // turn is indistinguishable from a provider outage on that field alone. Only
+        // a prompt error carries `error`, which the plugin forwards as the bare
+        // boolean `errored`. Degraded is sticky (no TTL heals it), so without this an
+        // aborted turn latched the lobster into "model error" until the next run.
+        assert_eq!(
+            decode(
+                json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1",
+                          "success": false, "errored": false})
+            ),
+            vec![DaemonPresenceUpdate::RunEnded {
+                run_key: "run_1".into()
+            }],
+            "an abort is an ordinary end, not a degradation"
         );
     }
 

@@ -194,6 +194,11 @@ test("forwards ONLY the allowlist plus identity, never content", { skip: !POSIX 
     runId: "event-run",
     sessionId: "event-session",
     success: false,
+    // The error's PRESENCE rides along as a bare boolean — that is what separates a
+    // provider outage from a user abort, both of which upstream reports as
+    // `success: false`. The string itself stays behind (asserted below), which is
+    // the whole point of forwarding a discriminator instead of the message.
+    errored: true,
     gatewayPort: 19789,
     _pid: process.pid,
   });
@@ -302,6 +307,38 @@ for (const [raw, want, why] of [
     assert.equal(only.gatewayPort, want);
   });
 }
+
+test("agent_end forwards the errored discriminator, never the error string", { skip: !POSIX }, async (t) => {
+  // Upstream builds `success` as `!aborted && !promptError`, so success:false alone
+  // cannot tell a user CANCELLING a turn from a provider outage — and Degraded is
+  // sticky. Only a prompt error carries `error`, so its PRESENCE is the signal. The
+  // string itself can embed prompt content and must never leave the gateway.
+  const { outFile, plugin } = await renderPlugin(t);
+  const handlers = register(plugin, { config: { gateway: { port: 18789 } } });
+  handlers.get("agent_end")(
+    { runId: "r1", sessionId: "s1", success: false, error: "Provider 500: upstream down" },
+    {},
+  );
+  handlers.get("agent_end")({ runId: "r2", sessionId: "s1", success: false }, {});
+  handlers.get("agent_end")({ runId: "r3", sessionId: "s1", success: true }, {});
+  const rows = await recorded(outFile, 3);
+  const byRun = new Map(rows.map((r) => [r.runId, r]));
+
+  assert.equal(byRun.get("r1").errored, true, "a prompt error is a real failure");
+  assert.equal(byRun.get("r2").errored, false, "an abort carries no error → not degraded");
+  assert.equal(
+    byRun.get("r3").errored,
+    undefined,
+    "success:true needs no discriminator at all",
+  );
+  for (const row of rows) {
+    assert.equal(row.error, undefined, "the error STRING must never be forwarded");
+    assert.ok(
+      !JSON.stringify(row).includes("upstream down"),
+      `no error text may leak: ${JSON.stringify(row)}`,
+    );
+  }
+});
 
 test("an out-of-range observed port is refused, keeping the resolved one", { skip: !POSIX }, async (t) => {
   // Defence in depth at the producer: pixtuoid's decoder REJECTS an envelope whose

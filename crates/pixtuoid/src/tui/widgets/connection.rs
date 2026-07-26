@@ -9,7 +9,6 @@ use super::{
     marquee_or_truncate, marquee_window, paint_panel, panel_inner_width, source_badge_span,
     to_color, Overflow,
 };
-use pixtuoid_core::state::DaemonState;
 
 use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveFacet, LiveInfo};
 use pixtuoid_scene::theme::Theme;
@@ -197,18 +196,20 @@ fn connection_line(
             // that announced before this pixtuoid started — or whose plugin has not
             // loaded yet — is alive and merely unheard. A diagnosis surface must not
             // assert a fact it cannot observe (the same rule as the socket line).
-            LiveFacet::Daemon { instances: 0, .. } => (
+            LiveFacet::Daemon(None) => (
                 '\u{25cc}',
                 "no gateway seen".to_string(),
                 theme.ui.label_idle,
             ),
-            LiveFacet::Daemon { instances, state } => {
-                let plural = if *instances == 1 { "" } else { "s" };
+            LiveFacet::Daemon(Some(rollup)) => {
+                let instances = rollup.instances.get();
+                let plural = if instances == 1 { "" } else { "s" };
                 // The WORD and the hue both come from the shared board model
                 // (`gateway_label`/`gateway_tone`) — the exact pair the footer's
                 // `⬢gw` chip renders, so the panel can't describe the same gateway
-                // differently from the chip two rows below it.
-                let rolled = state.unwrap_or(DaemonState::Idle);
+                // differently from the chip two rows below it. No default needed:
+                // the state rides WITH the count, so there is no absent case here.
+                let rolled = rollup.state;
                 (
                     '\u{25cf}',
                     format!(
@@ -268,8 +269,17 @@ fn fmt_age(d: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// `Daemon` facet for `n` instances at `state` — the panel's live half. `n == 0`
+    /// is `Daemon(None)` by construction, which is the point of the atomic pair.
+    fn daemon_facet(n: usize, state: pixtuoid_core::state::DaemonState) -> LiveFacet {
+        LiveFacet::Daemon(
+            std::num::NonZeroUsize::new(n).map(|instances| DaemonRollup { instances, state }),
+        )
+    }
     use super::*;
-    use crate::tui::connection::{RowFacts, RowInput};
+    use crate::tui::connection::{DaemonRollup, RowFacts, RowInput};
+    use pixtuoid_core::state::DaemonState;
     use pixtuoid_scene::theme::NORMAL;
 
     fn row(source_id: &'static str, label_prefix: &'static str, state: ConnState) -> ConnectionRow {
@@ -408,10 +418,7 @@ mod tests {
                 .collect()
         };
 
-        let stopped = cell(LiveFacet::Daemon {
-            instances: 0,
-            state: None,
-        });
+        let stopped = cell(LiveFacet::Daemon(None));
         assert!(stopped.contains("no gateway seen"), "{stopped}");
         // The INTENT is "claims no gateway EXISTS", not "avoids the word" — the cell
         // must carry no instance COUNT and none of the state words a live roster
@@ -431,20 +438,14 @@ mod tests {
             );
         }
 
-        let busy = cell(LiveFacet::Daemon {
-            instances: 2,
-            state: Some(DaemonState::Busy),
-        });
+        let busy = cell(daemon_facet(2, DaemonState::Busy));
         assert!(busy.contains("2 gateways"), "{busy}");
         assert!(
             busy.contains(pixtuoid_scene::board::gateway_label(DaemonState::Busy)),
             "the state word must be the shared board vocabulary: {busy}"
         );
 
-        let one = cell(LiveFacet::Daemon {
-            instances: 1,
-            state: Some(DaemonState::Degraded),
-        });
+        let one = cell(daemon_facet(1, DaemonState::Degraded));
         assert!(
             one.contains("1 gateway \u{00b7}"),
             "singular, no 's': {one}"

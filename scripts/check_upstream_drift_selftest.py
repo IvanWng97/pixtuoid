@@ -121,9 +121,9 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     # `openclaw_plugin_default_port` returns a single VALUE, not a set, so it rides
     # its own check (the read_codex_rollout_types precedent). It exists because the
     # port literal is COPIED into the plugin (un-importable from OpenClaw's state
-    # dir), and the live comparison is PR-gated off — so renaming the const would
-    # make the weekly check silently stop comparing anything, and nothing at PR time
-    # would notice. This is that tooth.
+    # dir) and the live comparison is PR-gated off, so renaming the const would leave
+    # the weekly check comparing nothing. THIS is what notices — and the workflow
+    # lists the template in its PR `paths`, so it fires on the renaming PR itself.
     port = d.openclaw_plugin_default_port()
     check(
         port is not None and port.isdigit(),

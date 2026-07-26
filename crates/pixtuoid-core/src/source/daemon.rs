@@ -259,7 +259,18 @@ pub fn apply_presence(
     // mascot scuttles back in from the elevator); Idle↔Busy — and a `GatewayUp` for
     // a daemon already UP — leave it, so the steady wander clock stays continuous.
     let was_down = p.liveness == DaemonLiveness::Down;
-    p.last_seen = now;
+    // Proof-of-life ONLY. A `PidExited` is a receipt our own exit watch synthesized,
+    // and on the ordinary clean stop it arrives AFTER `GatewayDown` has already
+    // cleared `current_pid` — so its arm is a no-op, yet stamping the clock here
+    // restarted the walk-out the renderer times off `last_seen` (and pushed out the
+    // sweep's removal), making the lobster vanish and then leave a second time.
+    // Upstream awaits its stop hook before closing, so that ordering is the NORM,
+    // not a race: our forward is a detached spawn, so `GatewayDown` lands in ms
+    // while the process death lands later. `GatewayDown` itself keeps refreshing —
+    // that receipt is FIRST-HAND from a process demonstrably alive when it spoke.
+    if !matches!(update, PidExited { .. }) {
+        p.last_seen = now;
+    }
     match update {
         // UP-winning + idempotent. A (re)start resets the multiplexed-session
         // count + in-flight runs and rebinds the armed pid — so a later stale
@@ -1269,6 +1280,54 @@ mod tests {
         assert_eq!(
             s.daemon(src, &inst(A)).and_then(|p| p.current_pid),
             Some(200)
+        );
+    }
+
+    #[test]
+    fn a_non_matching_exit_receipt_does_not_restart_the_walk_out_clock() {
+        // The ORDINARY clean stop hits this: `GatewayDown` clears `current_pid`, so
+        // the armed pid's receipt arrives NON-matching and its arm is a no-op — but
+        // stamping `last_seen` in the prologue still moved the clock the renderer
+        // times the walk-out off (`down_age = now - last_seen`, capped at
+        // MASCOT_LEAVE_MS) and the sweep removes on. The lobster finished leaving,
+        // then left a second time. Upstream awaits its stop hook before closing, so
+        // this ordering is the norm, not a race.
+        let src = "openclaw";
+        let mut s = SceneState::default();
+        apply_at(
+            &mut s,
+            src,
+            A,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            0,
+        );
+        apply_at(&mut s, src, A, DaemonPresenceUpdate::GatewayDown, 1_000);
+        let at_down = s.daemon(src, &inst(A)).expect("present").last_seen;
+        // The disarmed pid's receipt lands 3s later.
+        apply_at(
+            &mut s,
+            src,
+            A,
+            DaemonPresenceUpdate::PidExited { pid: 7 },
+            4_000,
+        );
+        assert_eq!(
+            s.daemon(src, &inst(A)).expect("present").last_seen,
+            at_down,
+            "a death receipt must not refresh the presence clock — the walk-out is \
+             timed off it"
+        );
+        // A proof-of-life delta still does, so the clock is not simply frozen.
+        apply_at(
+            &mut s,
+            src,
+            A,
+            DaemonPresenceUpdate::PidSeen { pid: 9 },
+            5_000,
+        );
+        assert!(
+            s.daemon(src, &inst(A)).expect("present").last_seen > at_down,
+            "proof of life must still refresh it"
         );
     }
 
