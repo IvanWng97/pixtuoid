@@ -269,11 +269,16 @@ indexed_steps_matching(steps, field, expected) := [entry |
 	entry := {"index": index, "value": step}
 ]
 
-codeql_steps_using(action) := [entry |
-	some index, step in codeql_steps
+# The `uses` twin of indexed_steps_matching: same indexed-entry shape, but the
+# comparison is version-tolerant rather than literal. Shared so a future change
+# to the matching contract cannot land on one call site and miss the other.
+steps_using_action(steps, action) := [entry |
+	some index, step in steps
 	action_matches(object.get(step, "uses", ""), action)
 	entry := {"index": index, "value": step}
 ]
+
+codeql_steps_using(action) := steps_using_action(codeql_steps, action)
 
 codeql_named_steps(name) := indexed_steps_matching(codeql_steps, "name", name)
 
@@ -307,11 +312,7 @@ claude_publish_job := object.get(claude_reusable_jobs, "publish", {})
 claude_analyze_steps := object.get(claude_analyze_job, "steps", [])
 claude_publish_steps := object.get(claude_publish_job, "steps", [])
 
-claude_analyze_steps_using(action) := [entry |
-	some index, step in claude_analyze_steps
-	action_matches(object.get(step, "uses", ""), action)
-	entry := {"index": index, "value": step}
-]
+claude_analyze_steps_using(action) := steps_using_action(claude_analyze_steps, action)
 
 claude_analyze_named_steps(name) := indexed_steps_matching(claude_analyze_steps, "name", name)
 
