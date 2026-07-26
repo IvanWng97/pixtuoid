@@ -964,7 +964,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let p = default_config_path().expect("a dev machine resolves a home");
         assert!(
-            p.as_os_str().len() > 0,
+            !p.as_os_str().is_empty(),
             "an empty path would be merged into, and created, at the filesystem root"
         );
         let name = p

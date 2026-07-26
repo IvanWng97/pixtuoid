@@ -175,7 +175,6 @@ fn render_plugin(hook_path: &str) -> Result<String> {
 mod tests {
     use super::*;
 
-    #[test]
     /// `verify_schema` is the #309 silent-dead check, and it had NO test of its own:
     /// mutation testing replaced the whole body with `Default::default()` — no issues,
     /// no shim, i.e. a MISSING or replaced plugin verifying SOUND — and the suite
