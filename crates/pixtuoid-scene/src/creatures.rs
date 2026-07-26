@@ -1146,6 +1146,87 @@ mod tests {
         );
     }
 
+    /// The walk-out must begin where the lobster actually WAS. `mascot_position`
+    /// states this in a comment — "every clock below is measured from the END of this
+    /// instance's stagger, so the walk-out's reconstructed origin stays on the same
+    /// wander phase as the walk-in" — and the Down path implements it by subtracting
+    /// `MASCOT_ENTER_MS + enter_delay`, exactly what the live path subtracts. Nothing
+    /// tested it: mutation testing flipped that `+` to `-`, shifting the
+    /// reconstruction by TWICE the stagger (up to 972ms against a 9000ms idle cycle,
+    /// so ~11% of a lap — a visible jump, not a rounding wobble) with the suite green.
+    ///
+    /// Asserted at the instant of death (`now == last_seen`, so the exit lerp is at
+    /// t=0 and yields its own origin), which is what makes the two paths directly
+    /// comparable without pinning any ms arithmetic.
+    #[test]
+    fn the_walk_out_starts_from_where_the_mascot_was_when_it_died() {
+        use pixtuoid_core::state::DaemonInstanceId;
+        let layout = crate::layout::Layout::compute(200, 120, Some(4)).expect("layout fits");
+        let entered_at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        // Well past the stagger + the 2.2s walk-in, so both paths are in the wander.
+        let died_at = entered_at + std::time::Duration::from_millis(30_000);
+
+        for port in ["18901", "18902", "18903", "18904"] {
+            let id = DaemonInstanceId::new(port).expect("non-empty");
+            let seed = mascot_seed("openclaw", &id);
+            let alive = DaemonPresence {
+                liveness: DaemonLiveness::Up { degraded: false },
+                active_sessions: 0,
+                last_seen: died_at,
+                entered_at,
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            };
+            let down = DaemonPresence {
+                liveness: DaemonLiveness::Down,
+                ..alive.clone()
+            };
+
+            let (was, _, _) = mascot_position(&layout, &alive, "w", "r", died_at, seed)
+                .expect("a live gateway renders a mascot");
+            let (leaving_from, _, _) = mascot_position(&layout, &down, "w", "r", died_at, seed)
+                .expect("a just-died gateway is still walking out");
+            // NOT byte-equality: the exit lerp routes its origin through
+            // `walk_between`'s A*+snap, which can shift it a pixel or two off the raw
+            // wander point. Measured — real code deviates 0-2px across these four
+            // ports, the `+ -> -` mutant 24px (port 18903, whose 486ms stagger is the
+            // largest) — so 4 sits clear of both.
+            const MAX_SNAP_DRIFT_PX: i32 = 4;
+            let drift = (i32::from(leaving_from.x) - i32::from(was.x))
+                .abs()
+                .max((i32::from(leaving_from.y) - i32::from(was.y)).abs());
+            assert!(
+                drift <= MAX_SNAP_DRIFT_PX,
+                "gateway {port}: the walk-out must start at the lobster's last live \
+                 position, or it teleports before heading for the elevator — was \
+                 {was:?}, leaving from {leaving_from:?} ({drift}px)"
+            );
+
+            // The stagger itself, which every assertion above sits PAST (age 30s).
+            // During it the mascot holds AT the elevator; the frame after, it has
+            // started walking. Turning the `age < enter_delay` guard into `==` makes
+            // `age - enter_delay` underflow on the very first frame of a mascot's
+            // life — a panic reachable by simply having a gateway appear.
+            let delay = mascot_enter_delay(seed);
+            assert!(delay > 0, "port {port} must exercise a real stagger");
+            let elevator = mascot_elevator(&layout).expect("layout has an elevator");
+            for early_ms in [0, delay / 2, delay - 1] {
+                let at = entered_at + std::time::Duration::from_millis(early_ms);
+                let held = DaemonPresence {
+                    last_seen: at,
+                    ..alive.clone()
+                };
+                let (pos, _, _) = mascot_position(&layout, &held, "w", "r", at, seed)
+                    .expect("a staggered mascot still renders");
+                assert_eq!(
+                    pos, elevator,
+                    "gateway {port} at age {early_ms}ms (< {delay}ms stagger) must hold \
+                     at the elevator"
+                );
+            }
+        }
+    }
+
     /// The BLOCKED half of the ring walk, which the open-floor test above cannot
     /// reach: it always succeeds at `k == 0`, so nothing there advances the cursor.
     /// Mutation testing exposed that gap — turning `(start + k)` into `(start - k)`
