@@ -735,7 +735,7 @@ test_balanced_json_schema_payload_is_accepted if {
 # still satisfying the flag-name-only presence check.
 test_unreadable_json_schema_payloads_are_denied if {
 	every args in {
-		# Not single-quoted, so shell-quote hands the CLI a bare `{`.
+		# Unquoted, so quote-removal mangles the payload before the CLI sees it.
 		`--json-schema {"type":"object"}`,
 		# Opening quote with no closing quote.
 		`--json-schema '{"type":"object"}`,

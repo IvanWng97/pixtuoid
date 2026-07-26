@@ -35,7 +35,12 @@ jobs:
         run: just risk-radar-test
 
       # continue-on-error: a transient `gh pr diff` hiccup must not redden an
-      # advisory, non-required job. The step summary is the durable floor.
+      # advisory, non-required job. The step summary is the durable floor, so it
+      # is written on BOTH paths — but the two must not look alike. Without
+      # pipefail the pipeline reported python3's status, so a failed diff read as
+      # success on empty input and printed the same confident "no seams touched"
+      # as a genuinely clean diff. Pipefail separates them; the explicit else
+      # keeps the floor that a bare `set -e` would have removed entirely.
       - name: Compute risk radar
         id: compute
         continue-on-error: true
@@ -43,15 +48,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          # Without pipefail the pipeline reports python3's status, so a failed
-          # `gh pr diff` reads as success on empty input and the guard below
-          # publishes a confident "no seams touched" verdict for an unread diff.
-          set -euo pipefail
-          gh pr diff "$PR" --name-only | python3 scripts/risk-radar.py >radar.md
-          {
-            echo "## Risk radar"
-            if [ -s radar.md ]; then cat radar.md; else echo "_No high-blast-radius seams touched._"; fi
-          } >>"$GITHUB_STEP_SUMMARY"
+          set -uo pipefail
+          if gh pr diff "$PR" --name-only | python3 scripts/risk-radar.py >radar.md; then
+            {
+              echo "## Risk radar"
+              if [ -s radar.md ]; then cat radar.md; else echo "_No high-blast-radius seams touched._"; fi
+            } >>"$GITHUB_STEP_SUMMARY"
+          else
+            # Not a verdict: discard the partial file so nothing downstream reads it.
+            rm -f radar.md
+            {
+              echo "## Risk radar"
+              echo "_Could not read the pull-request diff — radar not computed._"
+            } >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       # Only upsert when the radar was actually computed (else radar.md is
       # untrustworthy and the empty-body branch would wrongly delete the

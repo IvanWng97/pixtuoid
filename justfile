@@ -100,8 +100,8 @@ actionlint-composites:
         count="$(yq '[.runs.steps[] | select(has("run"))] | length' "$action")"
         ((count)) || continue # a pure `uses:` composite has no shell to check
         for i in $(seq 0 $((count - 1))); do
-            # Default to bash: composite steps must name a shell, and actionlint
-            # treats bash as the default elsewhere. sh gets the stricter dialect.
+            # The default should never fire — a composite run step must name a
+            # shell — but bash is what actionlint assumes for a workflow step.
             shell="$(yq -r ".runs.steps | map(select(has(\"run\"))) | .[$i].shell // \"bash\"" "$action")"
             case "$shell" in
             bash | sh) ;;
@@ -500,17 +500,18 @@ build *args:
 
 # Cross-compile a release build for ONE target triple (release.yml's build
 # matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
-# (CI installs it via taiki-e/install-action@cross).
+# (CI installs it via taiki-e/install-action@cross). `cross` is validated rather
+# than defaulted because callers pass it POSITIONALLY: an unquoted, unset
+# matrix.cross expands to nothing, and the collapse slid `flags` into this slot
+# on both Linux legs that omit the key — pinned by the arg-shift case below.
 [group('rust')]
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
 build-target target cross="false" flags="":
     #!/usr/bin/env bash
     set -euo pipefail
     use_cross="{{ cross }}"
-    # An unquoted, unset matrix.cross in release.yml used to expand to nothing and
-    # slide `flags` into this slot, so the LINUX artifacts silently built WITHOUT
-    # --no-default-features. Anything but the two legal words is a caller bug, so
-    # fail loudly here rather than infer "not true, so cargo".
+    # Anything but the two legal words means the caller's positional args
+    # shifted, so fail loudly rather than infer "not true, so cargo".
     case "$use_cross" in
     true | false) ;;
     *)
