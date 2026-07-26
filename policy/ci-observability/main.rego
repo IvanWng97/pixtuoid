@@ -349,12 +349,15 @@ claude_json_schema_is_wellformed(args) if {
 
 	# Exactly one occurrence; a second copy makes the effective payload ambiguous.
 	count(parts) == 2
-	quoted := trim_space(parts[1])
-	payload := trim_suffix(quoted, "'")
 
-	# trim_suffix is a no-op when the suffix is absent, so this proves the
-	# closing quote was actually there and the payload is not truncated.
-	payload != quoted
+	# Cut at the CLOSING quote, not at the end of the string: the schema is not
+	# required to be the final flag, and an earlier draft that trimmed a trailing
+	# quote rejected every valid payload with an argument after it.
+	payload := split(parts[1], "'")[0]
+
+	# split returns the whole remainder when the separator is absent, so this
+	# proves a closing quote exists rather than the payload running off the end.
+	payload != parts[1]
 	json.is_valid(payload)
 	json.verify_schema(json.unmarshal(payload))[0]
 }
@@ -665,6 +668,20 @@ deny contains msg if {
 	msg := sprintf("%s tests call must grant only contents:read and id-token:write", [ci_workflow_path])
 }
 
+# The callee-side rule above pins ci-tests.yml's own jobs, but only the `tests`
+# call is supposed to carry OIDC at all. The other group calls fan out to ~19
+# jobs that legitimately declare no `permissions:` of their own, so granting
+# id-token here would hand every one of them a repo-scoped token in a single
+# edit, with nothing downstream to notice.
+deny contains msg if {
+	_ := documents[ci_workflow_path]
+	some name, job in ci_jobs
+	name != "tests"
+	startswith(object.get(job, "uses", ""), "./.github/workflows/")
+	object.get(object.get(job, "permissions", {}), "id-token", "") == "write"
+	msg := sprintf("%s %s call must not grant id-token: write — only the tests call uploads via OIDC", [ci_workflow_path, name])
+}
+
 deny contains msg if {
 	_ := documents[codecov_workflow_path]
 	some name in codecov_oidc_job_names
@@ -711,8 +728,6 @@ deny contains msg if {
 ci_gate_job_key := "gate"
 
 ci_advisory_job_keys := {"supplemental"}
-
-ci_jobs := object.get(ci_workflow, "jobs", {})
 
 ci_gate_job := object.get(ci_jobs, ci_gate_job_key, {})
 

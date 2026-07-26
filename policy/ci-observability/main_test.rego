@@ -834,3 +834,41 @@ test_ci_gate_need_on_the_advisory_group_is_denied if {
 	}})
 	count(ci_gate_membership_violations(jobs)) == 1
 }
+
+# The schema is not required to be the LAST flag in claude_args; an earlier
+# draft cut at the end of the string and rejected every valid payload followed
+# by another argument.
+test_json_schema_before_another_flag_is_accepted if {
+	args := sprintf("%s '{\"type\":\"object\"}' --max-turns 60", [json_schema_flag])
+	violations := deny with input as json_schema_fixture(args)
+	not malformed_json_schema_message in violations
+}
+
+test_json_schema_unterminated_before_another_flag_is_denied if {
+	args := sprintf("%s '{\"type\":\"object\"} --max-turns 60", [json_schema_flag])
+	violations := deny with input as json_schema_fixture(args)
+	malformed_json_schema_message in violations
+}
+
+ci_oidc_call_message(name) := sprintf(
+	"%s %s call must not grant id-token: write — only the tests call uploads via OIDC",
+	[ci_workflow_path, name],
+)
+
+test_non_tests_group_call_granting_oidc_is_denied if {
+	jobs := object.union(ci_gate_shipped_jobs, {"lint": {
+		"uses": "./.github/workflows/ci-lint.yml",
+		"permissions": {"contents": "read", "id-token": "write"},
+	}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	ci_oidc_call_message("lint") in violations
+}
+
+test_tests_call_granting_oidc_is_accepted if {
+	jobs := object.union(ci_gate_shipped_jobs, {"tests": {
+		"uses": "./.github/workflows/ci-tests.yml",
+		"permissions": {"contents": "read", "id-token": "write"},
+	}})
+	violations := deny with input as ci_gate_fixture(jobs)
+	not ci_oidc_call_message("tests") in violations
+}

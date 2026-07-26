@@ -91,7 +91,7 @@ actionlint-composites:
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s nullglob
-    actions=(.github/actions/*/action.yml)
+    actions=(.github/actions/*/action.y*ml) # GitHub accepts action.yaml too
     ((${#actions[@]})) || { echo "error: no composite actions found" >&2; exit 1; }
     work="$(mktemp -d)"
     trap 'rm -rf "$work"' EXIT
