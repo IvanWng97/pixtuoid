@@ -878,3 +878,49 @@ test_cross_repo_group_call_granting_oidc_is_denied if {
 	violations := deny with input as ci_gate_fixture(jobs)
 	ci_oidc_call_message("builds") in violations
 }
+
+nested_manifest_message(path, expected, actual) := sprintf(
+	"%s %s job must need exactly %v, not %v",
+	[path, required_manifest_job_key, expected, actual],
+)
+
+nested_manifest_fixture(jobs) := {"documents": [{
+	"path": ".github/workflows/ci-lint.yml",
+	"contents": {"jobs": jobs},
+}]}
+
+test_nested_manifest_covering_every_job_is_accepted if {
+	jobs := {
+		"fmt": {},
+		"clippy": {},
+		"required": {"needs": ["fmt", "clippy"]},
+	}
+	violations := deny with input as nested_manifest_fixture(jobs)
+	not nested_manifest_message(".github/workflows/ci-lint.yml", {"clippy", "fmt"}, {"clippy", "fmt"}) in violations
+}
+
+# The gap: a job is added to the workflow but not to the manifest, so it sits
+# outside the single protected ci-gate with nothing to say so.
+test_nested_manifest_missing_a_new_job_is_denied if {
+	jobs := {
+		"fmt": {},
+		"clippy": {},
+		"newcheck": {},
+		"required": {"needs": ["fmt", "clippy"]},
+	}
+	violations := deny with input as nested_manifest_fixture(jobs)
+	nested_manifest_message(
+		".github/workflows/ci-lint.yml",
+		{"clippy", "fmt", "newcheck"},
+		{"clippy", "fmt"},
+	) in violations
+}
+
+test_nested_manifest_needing_a_deleted_job_is_denied if {
+	jobs := {
+		"fmt": {},
+		"required": {"needs": ["fmt", "clippy"]},
+	}
+	violations := deny with input as nested_manifest_fixture(jobs)
+	nested_manifest_message(".github/workflows/ci-lint.yml", {"fmt"}, {"clippy", "fmt"}) in violations
+}

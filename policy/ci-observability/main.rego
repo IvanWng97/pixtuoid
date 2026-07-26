@@ -407,6 +407,30 @@ codecov_job_scope_is_self_declared(job) if {
 	object.get(permissions, "id-token", "") != "write"
 }
 
+# Each reusable group workflow ends in a `required` job whose `needs` is the
+# manifest that keeps a deleted or renamed nested job from silently shrinking
+# ci-gate. Nothing pinned the manifests themselves, so ADDING a job and
+# forgetting to list it left that job outside the merge gate — the same hole
+# ci-gate had one level up, and invisible for the same reason.
+required_manifest_workflows := {
+	".github/workflows/ci-lint.yml",
+	".github/workflows/ci-builds.yml",
+	".github/workflows/ci-tests.yml",
+}
+
+required_manifest_job_key := "required"
+
+nested_jobs(path) := object.get(documents[path], "jobs", {})
+
+nested_gated_job_keys(path) := {name |
+	some name, _ in nested_jobs(path)
+	name != required_manifest_job_key
+}
+
+nested_manifest_needs(path) := {name |
+	some name in object.get(object.get(nested_jobs(path), required_manifest_job_key, {}), "needs", [])
+}
+
 # `ci-gate` is the ONLY context in branch protection, so its `needs` list plus
 # the results it reads ARE the merge gate. Each reusable workflow already pins
 # its own nested job membership; nothing pinned the level above, where adding a
@@ -436,6 +460,16 @@ ci_group_job_keys contains name if {
 }
 
 ci_gate_needs := {name | some name in object.get(ci_gate_job, "needs", [])}
+
+deny contains msg if {
+	some path in required_manifest_workflows
+	_ := documents[path]
+	nested_manifest_needs(path) != nested_gated_job_keys(path)
+	msg := sprintf(
+		"%s %s job must need exactly %v, not %v",
+		[path, required_manifest_job_key, nested_gated_job_keys(path), nested_manifest_needs(path)],
+	)
+}
 
 deny contains msg if {
 	some path in claude_trigger_workflow_paths
