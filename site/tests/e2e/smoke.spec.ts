@@ -1154,6 +1154,34 @@ test('the reveal roll survives a main-thread stall instead of snapping past it',
   expect(errors()).toEqual([]);
 });
 
+test('un-reducing motion mid-session rolls the office in again, it does not snap', async ({
+  page,
+}) => {
+  // The reduced-motion arm sets `live = false`; its un-reduce arm re-covers and
+  // boots "so the office rolls back in". The roll's progress must rewind with
+  // it — frame-accumulated progress that SURVIVES the de-live leaves rt >= 1, so
+  // the office blits its settled frame and SNAPS: the exact failure the
+  // frame-driven roll exists to prevent, reintroduced on the neighbouring path.
+  // Nothing else in this suite un-reduces (every other test only reduces), so
+  // this is the sole guard on that direction.
+  const errors = watchErrors(page);
+  const captionsOn = () =>
+    page.evaluate(() => !!document.getElementById('office-overlay')?.classList.contains('is-on'));
+  await page.goto('./');
+  await expect(page.locator('.backdrop')).toHaveClass(/\bis-live\b/, { timeout: 15_000 });
+  // let the first roll finish, so accumulated progress is past REVEAL_MS
+  await expect.poll(captionsOn, { timeout: 15_000 }).toBe(true);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.locator('.backdrop')).not.toHaveClass(/\bis-live\b/, { timeout: 5_000 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(page.locator('.backdrop')).toHaveClass(/\bis-live\b/, { timeout: 15_000 });
+  // Live again — so the reveal must be REPLAYING, i.e. captions still off. A
+  // stale accumulator settles on the first frame and turns them straight on.
+  expect(await captionsOn()).toBe(false);
+  await expect.poll(captionsOn, { timeout: 15_000 }).toBe(true); // ...and it completes
+  expect(errors()).toEqual([]);
+});
+
 test('the office still goes live on a device that never meets the frame budget', async ({
   page,
 }) => {

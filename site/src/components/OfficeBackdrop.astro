@@ -412,10 +412,21 @@ const officeDriverUrl = asset('office-driver.js');
     const hasWasm = typeof WebAssembly !== 'undefined';
 
     // ── First-visit reveal (option A cover + Level-2 splash gate) ──────────────
-    let revealElapsed = 0; // roll progress, accumulated from PAINTED frames only
-    let revealLastSim = 0; // previous frame's sim clock, for the per-frame delta
-    let revealReady = 0; // consecutive on-budget frames seen before the roll starts
-    let revealWaited = 0; // total frames spent waiting, bounding that hold
+    // ONE object, not four flat lets: these don't all mutate together (ready /
+    // waited only while the gate holds, elapsed / lastSim only after it lifts)
+    // but they share one LIFECYCLE — every re-live restarts ALL of them, and a
+    // flat set lets a later edit reset three of four. `live = false` on the
+    // reduced-motion path is exactly that reset, and its un-reduce arm expects a
+    // FRESH roll ("rolls back in", below).
+    function freshReveal() {
+      return {
+        elapsed: 0, // roll progress, accumulated from PAINTED frames only
+        lastSim: 0, // previous frame's sim clock, for the per-frame delta
+        ready: 0, // consecutive on-budget frames seen before the roll starts
+        waited: 0, // total frames spent waiting, bounding that hold
+      };
+    }
+    let reveal = freshReveal();
     let splashCleared = !!window.__pixRevealed; // seeded/repeat visit: already lifted
     // Option A: on the boot path, cover the baked poster with the canvas's own bg
     // tone (CSS background: var(--bg)) from the first paint, so the office reveals
@@ -479,11 +490,22 @@ const officeDriverUrl = asset('office-driver.js');
     // per-frame step makes a hitch PAUSE the roll instead of skipping it, and
     // holding the start until frames flow puts the stall in the flat bg-tone
     // cover, where it reads as a beat rather than a broken frame.
-    const REVEAL_MAX_STEP_MS = 50; // a longer frame is a hitch, not motion
+    // DERIVED from the paint gate, never a second literal: `frame()` only paints
+    // once `t - last >= FRAME_MS`, so a step can never be below FRAME_MS, and the
+    // budget must clear that floor with headroom — one dropped frame is still
+    // motion, two is a hitch. Hardcoding 50 would silently break if FRAME_MS ever
+    // rose to meet it: EVERY frame would read over-budget, the readiness gate
+    // would never pass, and every reveal would take the MAX_WAIT fallback — green,
+    // with no test able to see it. (pixtuoid-scene's audio engine settled the same
+    // question with `MAX_DT_S`; deliberately NOT shared — different clock, different
+    // unit, wrong side of the wasm boundary.)
+    const REVEAL_MAX_STEP_MS = Math.round(FRAME_MS * 1.5); // 50ms at the 33ms cap
     const REVEAL_READY_FRAMES = 3; // consecutive on-budget frames before the roll starts
     // ...but a device that never sustains the budget must still get its office:
-    // the gate is a courtesy, never a precondition for going live.
-    const REVEAL_READY_MAX_WAIT = 30; // frames (~1s at the 33ms cap) before starting anyway
+    // the gate is a courtesy, never a precondition for going live. This is the
+    // SECOND bounded hold on a first visit — Base.astro's MAX_ENGINE_WAITS (~4s)
+    // runs first, and the two caps stack.
+    const REVEAL_READY_MAX_WAIT = Math.round(1000 / FRAME_MS); // ~1s of frames
 
     let office = null;
     let wasm = null;
@@ -670,30 +692,33 @@ const officeDriverUrl = asset('office-driver.js');
       // Hold on the bg-tone cover until the boot splash has lifted, so the roll is
       // never played hidden behind the overlay (the office keeps stepping meanwhile).
       if (!splashCleared) return;
+      // Per-frame delta off the SIM clock, so an explicit pause freezes the roll
+      // exactly as it freezes the office (pauseOffset already absorbs the gap).
+      const step = reveal.lastSim ? nowMs - reveal.lastSim : 0;
+      reveal.lastSim = nowMs;
+      const onBudget = step > 0 && step <= REVEAL_MAX_STEP_MS;
       // Under reduced motion the office is a poster-still: NO paint caller
       // may re-live it (the mq listener de-lives; a stray repaint — a
       // resize, a background tick — must not undo that). The un-reduce
       // path re-lives through boot()/start() as before.
-      // Per-frame delta off the SIM clock, so an explicit pause freezes the roll
-      // exactly as it freezes the office (pauseOffset already absorbs the gap).
-      const step = revealLastSim ? nowMs - revealLastSim : 0;
-      revealLastSim = nowMs;
-      const onBudget = step > 0 && step <= REVEAL_MAX_STEP_MS;
       if (!live && !mq.matches) {
-        // Hold on the bg-tone cover until frames are actually flowing, so a
-        // stall lands on the flat tone instead of a half-drawn reveal frame.
-        revealReady = onBudget ? revealReady + 1 : 0;
-        revealWaited++;
-        if (revealReady < REVEAL_READY_FRAMES && revealWaited < REVEAL_READY_MAX_WAIT) return;
+        // Frames must be flowing before the roll starts: that keeps a stall on
+        // the flat bg tone, and — the sturdier reason — defers `is-live`, the
+        // pix:onair the statusline lights its ON-AIR readout from, and the ♩
+        // button, so an office about to freeze never announces itself live.
+        reveal.ready = onBudget ? reveal.ready + 1 : 0;
+        reveal.waited++;
+        if (reveal.ready < REVEAL_READY_FRAMES && reveal.waited < REVEAL_READY_MAX_WAIT) return;
         live = true;
         wrap.classList.add('is-live');
         document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
         showAudioBtn(); // a live office exists → offer the ♩ sound toggle
       }
       // A hitch contributes at most one frame of progress, so the roll pauses
-      // through it and resumes — it can never be skipped.
-      revealElapsed += Math.min(step, REVEAL_MAX_STEP_MS);
-      const rt = mq.matches ? 1 : revealElapsed / REVEAL_MS;
+      // through it and resumes — it can never be skipped. Date.now() is not
+      // monotonic, so a backward clock jump holds the roll rather than rewinding it.
+      reveal.elapsed += Math.max(0, Math.min(step, REVEAL_MAX_STEP_MS));
+      const rt = mq.matches ? 1 : reveal.elapsed / REVEAL_MS;
       if (rt < 1) {
         drawRevealFrame(view, rt < 0 ? 0 : rt);
       } else {
@@ -1391,6 +1416,11 @@ const officeDriverUrl = asset('office-driver.js');
           wrap.classList.remove('is-live');
           if (overlayEl) overlayEl.classList.remove('is-on');
           live = false;
+          // …and rewind the reveal with it: the un-reduce arm below re-covers
+          // and expects a FRESH roll. Without this the accumulated progress
+          // survives, rt is already >= 1, and the office SNAPS back in — the
+          // very failure this frame-driven roll exists to prevent.
+          reveal = freshReveal();
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));
           // Reduced motion stops the rAF loop, so the sound loops would drone
           // unfed behind the poster — suspend the context (the flag stays on, so
