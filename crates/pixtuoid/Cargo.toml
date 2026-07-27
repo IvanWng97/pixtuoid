@@ -133,6 +133,13 @@ schemars = "1"
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
 insta    = "1"
+# Phase 0 spike for the 2.5D arc (examples/graphics_spike.rs). A DEV-dep on
+# purpose: nothing ships against it until the design gate ratifies the approach.
+# `default-features = false` is LOAD-BEARING — the default set turns on
+# `chafa-dyn`, which dynamically links libchafa.so and needs it at runtime too.
+# That would break the musl/cross Linux prebuilds the same way ALSA already
+# does (see the audio feature). Its sixel backend is `icy_sixel`, pure Rust.
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 # Integration tests parse the `--json` CLI output back (the delivery-contract
 # e2e in cli_json.rs). Already a normal dep, so no new lockfile entry.
 serde_json = { workspace = true }
