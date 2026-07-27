@@ -15,7 +15,10 @@
 //!
 //! So each observed gateway earns a presence-gated mascot (a wandering lobster)
 //! showing the one thing `cc·` can't: is that gateway alive and handling
-//! traffic (its motion encodes state — idle ambles, busy shuttles, down leaves).
+//! traffic (its motion encodes state in its CADENCE — idle ambles on a 9s wander
+//! cycle, busy shuttles on 4.5s, degraded crawls on 14s, down leaves. Destinations
+//! are drawn from the whole floor and are state-INDEPENDENT: a curated per-state spot
+//! list was small enough that N gateways crowded onto it, see `creatures.rs`).
 //! OpenClaw officially supports several isolated gateways on one host (each with
 //! its own profile/state dir and base port), so two running gateways render as two
 //! independent lobsters. Its plugin (`install/openclaw_plugin.js`) forwards a

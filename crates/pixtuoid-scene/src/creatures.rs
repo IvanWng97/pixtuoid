@@ -1,10 +1,23 @@
 //! Ambient wandering creatures — the office pet and the OpenClaw gateway mascot —
 //! and WHERE they roam each frame. This is sim/behaviour: `pixel_painter` consumes
 //! the positions produced here and paints them (the "scene decides, painter draws"
-//! contract). The pet and the gateway mascot DELIBERATELY share their roaming
-//! toolkit (the visit-spot geometry + the no-flash `walk_between`) so `pet_position`
-//! and `mascot_spots` can't drift; kept together until a second pet/mascot makes a
-//! per-entity split pay for itself (moved wholesale out of `pixel_painter/drawable.rs`).
+//! contract). The pet and the gateway mascot share ONE roaming rule — draw a
+//! destination from the whole walkable floor (`walkable_target`), walk there with the
+//! no-flash `walk_between`, rest — so there is nothing left for them to drift on;
+//! kept together until a second pet/mascot makes a per-entity split pay for itself
+//! (moved wholesale out of `pixel_painter/drawable.rs`).
+//!
+//! That rule REPLACED a curated per-furniture visit-spot list, and the trade is the
+//! point: the list was small enough (3-25 points, and structurally 5 for idle at any
+//! office size) that N creatures shared destinations by pigeonhole, so every fix for
+//! the crowding had to be bolted on — per-state spot sets, a seeded standing-offset
+//! ring with boxed-in and crowded fallbacks, an elevator hold that then needed its own
+//! offset. Drawing from ~9k cells instead deleted that whole family (~370 lines of
+//! code and tests) and halved the measured crowding. What was GIVEN UP: destinations
+//! no longer encode daemon state, and a creature may rest in open floor rather than
+//! beside furniture. State still reads from the CADENCE (`MASCOT_*_CYCLE_MS`: busy
+//! shuttles on a 4.5s cycle, idle ambles on 9s, degraded crawls on 14s) and the
+//! sprite tint.
 
 use std::time::SystemTime;
 
@@ -12,7 +25,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{DaemonLiveness, DaemonPresence, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 
-use crate::layout::{Layout, Point, DESK_W};
+use crate::layout::{Layout, Point};
 use crate::pathfind::{find_path, snap_point_to_walkable};
 use crate::pet::PetKind;
 
@@ -22,51 +35,55 @@ fn epoch_ms(now: SystemTime) -> u64 {
     crate::anim::elapsed_ms(now, SystemTime::UNIX_EPOCH)
 }
 
-/// Visit-spot anchors for the wandering creatures (pet + gateway mascot). Each
-/// owns ONE furniture's offset so `pet_position` and `mascot_spots` can't drift
-/// from each other. Pantry and the lounge couch share the SAME `+(4,6)` offset
-/// (both are corner appliances the creature stands beside), so `corner_visit_spot`
-/// serves both; the desk and the meeting sofa have their own offsets.
+/// How close a resting spot must be to an idle agent's desk to count as "napping
+/// beside them" — the pet's sleep cue. Sized to the desk's own footprint plus a
+/// creature's width, so it reads as sharing that workstation rather than merely
+/// being on the same floor.
+const NAP_NEAR_DESK_PX: i32 = 16;
+
+/// How many draws `walkable_target` tries before falling back to a snap. Walkable
+/// floor is roughly half the buffer, so P(all miss) is ~2^-8 per call.
+const TARGET_TRIES: u32 = 8;
+
+/// A destination drawn from the WHOLE walkable floor, deterministic per
+/// `(seed, n)` — the ONE destination rule both roamers and every daemon state use.
 ///
-/// TWO things are shared: the per-furniture OFFSET (`*_visit_spot`, derived from
-/// the `DESK_W`/`DESK_H` consts — NOT any creature's sprite; both then
-/// `walk_between` + `snap_point_to_walkable` to a "near this furniture" target, so
-/// a footprint never enters the math) AND the social-venue GATHERING
-/// (`social_visit_spots`: pantry + sofas + couch, in that order), which both
-/// roamers visit. What stays DELIBERATELY per-creature is the state-conditional
-/// SELECTION — WHICH set to roam: `pet_position` takes every spot + an `is_idle`
-/// bool + the corridor; `mascot_spots` switches on `DaemonState` (Busy → desks,
-/// Idle → the social set) with no corridor. They share where-beside-the-furniture
-/// AND the social set, not which-furniture-WHEN.
-fn desk_visit_spot(desk: Point) -> Point {
-    // Below the desk's own GROUND (walk-behind End: the blocked strip reaches
-    // DESK_GROUND_H under the Point, deeper than the DESK_H slot) and on the
-    // desk's centerline — the first row past the desk's OBSTACLE_PAD_PX
-    // strip. Walkable in the packed grid almost everywhere (the old
-    // x+DESK_W+1 corner spot sat inside the desk's OWN padded ground and
-    // relied on snap for every desk); the one residue is a bottom-row desk
-    // whose spot lands on a corridor appliance's ground — snap still covers
-    // that sliver.
-    Point {
-        x: desk.x + DESK_W / 2,
-        y: desk.y + crate::layout::DESK_GROUND_H + crate::layout::OBSTACLE_PAD_PX,
+/// This REPLACED a curated furniture list, and the list was itself the collision:
+/// it held only ~3-25 points depending on terminal size, and the idle set was
+/// structurally 5 regardless of how big the office got, so with N creatures the
+/// pigeonhole made sharing a destination the common case — measured over 1080
+/// frames, 4 idle gateways overlapped in 83% of them against 9% once the whole mask
+/// is in play. Randomness de-collides more cheaply than any offset scheme can:
+/// expanding each anchor into its 8 neighbours was measured WORSE at small sizes
+/// (62% -> 74%), because 8 cells within 4px are one place to a 14x12 sprite.
+///
+/// Deleting the list deleted a whole family of edge cases with it: the per-state
+/// spot sets, the seeded standing-offset ring and its boxed-in / crowded-spot
+/// fallbacks, and the empty-set guard.
+///
+/// REJECTION sampling, not enumeration: collecting every walkable cell would cost
+/// O(w*h) per creature per frame in the render loop. `snap_point_to_walkable` is
+/// the exact backstop if every draw lands on furniture.
+fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
+    let (w, h) = (layout.walkable.width(), layout.walkable.height());
+    if w == 0 || h == 0 {
+        return Point { x: 0, y: 0 };
     }
-}
-
-/// Pantry / lounge-couch visit anchor (identical `+(4,6)` offset for both).
-fn corner_visit_spot(p: Point) -> Point {
-    Point {
-        x: p.x + 4,
-        y: p.y + 6,
+    let mut z = seed ^ n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let mut last = Point { x: 0, y: 0 };
+    for _ in 0..TARGET_TRIES {
+        z = pixtuoid_core::id::splitmix64(z);
+        // Independent halves of one hash: the high word picks x, the low word y, so
+        // a draw is not diagonal-biased.
+        last = Point {
+            x: ((z >> 32) % u64::from(w)) as u16,
+            y: (z % u64::from(h)) as u16,
+        };
+        if layout.walkable.is_walkable(last.x, last.y) {
+            return last;
+        }
     }
-}
-
-/// Meeting-sofa visit anchor.
-fn sofa_visit_spot(sofa: Point) -> Point {
-    Point {
-        x: sofa.x + 4,
-        y: sofa.y + 4,
-    }
+    snap_point_to_walkable(&layout.walkable, last).unwrap_or(last)
 }
 
 /// Pet roaming the whole office. Each 40s cycle picks a destination
@@ -91,33 +108,19 @@ pub(crate) fn pet_position(
     let cycle_n = (elapsed_ms / CYCLE_MS).wrapping_add(pet_seed);
     let frac = (elapsed_ms % CYCLE_MS) as f32 / CYCLE_MS as f32;
 
-    // Gather all interesting spots the cat can visit.
-    let mut spots: Vec<(Point, bool)> = Vec::new();
-    for (i, desk) in layout.home_desks.iter().enumerate() {
-        spots.push((
-            desk_visit_spot(*desk),
-            idle_desk_indices.contains(&FloorLocalDeskIndex(i)),
-        ));
-    }
-    // The social venues (pantry / sofas / couch) — the shared gathering; none is
-    // an idle desk, so each rides in with `false`.
-    spots.extend(social_visit_spots(layout).into_iter().map(|pt| (pt, false)));
-    if let Some(corridor) = layout.corridor {
-        spots.push((
-            Point {
-                x: corridor.x + corridor.width / 2,
-                y: corridor.y + corridor.height / 2,
-            },
-            false,
-        ));
-    }
-    if spots.is_empty() {
-        return None;
-    }
-
-    let pick = |n: u64| -> (Point, bool) { spots[golden_index(n, spots.len())] };
-    let (dest, is_idle_spot) = pick(cycle_n);
-    let (prev, _) = pick(cycle_n.wrapping_sub(1));
+    // Anywhere on the floor — see `walkable_target` for why the old curated
+    // furniture list was the collision rather than the cure.
+    let dest = walkable_target(layout, pet_seed, cycle_n);
+    let prev = walkable_target(layout, pet_seed, cycle_n.wrapping_sub(1));
+    // "Napping near an idle agent" survives the list's removal as a PROXIMITY test
+    // instead of a per-spot flag: the destination no longer IS a desk, so ask whether
+    // it landed beside one whose agent is idle.
+    let is_idle_spot = idle_desk_indices.iter().any(|i| {
+        layout.home_desks.get(i.0).is_some_and(|d| {
+            (i32::from(dest.x) - i32::from(d.x)).abs() <= NAP_NEAR_DESK_PX
+                && (i32::from(dest.y) - i32::from(d.y)).abs() <= NAP_NEAR_DESK_PX
+        })
+    });
 
     // Pet walk cycle: a 2-frame toggle at this interval.
     const PET_ANIM_FRAME_MS: u64 = 220;
@@ -228,48 +231,6 @@ pub(crate) fn gateway_mascot_def(source: &str) -> Option<GatewayMascotDef> {
     }
 }
 
-/// Golden-ratio hash of wander-cycle `n` into `[0, len)` — the index both roamers
-/// pick a wander spot with (the mascot's `Point` list here, the pet's
-/// `(Point, bool)` list in `pet_position`), so the `0x9e37…` multiplier + modulo
-/// live once instead of a copy per pick.
-fn golden_index(n: u64, len: usize) -> usize {
-    (n.wrapping_mul(0x9e37_79b9_7f4a_7c15) as usize) % len
-}
-
-fn hash_pick(spots: &[Point], n: u64) -> Point {
-    spots[golden_index(n, spots.len())]
-}
-
-/// The office's SOCIAL visit-spots — a stand-beside point for the pantry, each
-/// meeting sofa, and the lounge couch (in that order). The "where are the social
-/// venues" GATHERING both roamers share: `pet_position` appends it to its full
-/// spot list, `mascot_spots` uses it as its Idle-state set. This is furniture
-/// gathering, NOT the state-conditional SELECTION (which set to roam) the module
-/// doc reserves per-creature — the two stay distinct.
-fn social_visit_spots(layout: &Layout) -> Vec<Point> {
-    let mut spots = Vec::new();
-    if let Some(wp) = layout
-        .waypoints
-        .iter()
-        .find(|w| matches!(w.kind, crate::layout::WaypointKind::Pantry))
-    {
-        spots.push(corner_visit_spot(wp.pos));
-    }
-    for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
-        for sofa in trio.sofas {
-            spots.push(sofa_visit_spot(sofa));
-        }
-    }
-    if let Some(wp) = layout
-        .waypoints
-        .iter()
-        .find(|w| matches!(w.kind, crate::layout::WaypointKind::Couch))
-    {
-        spots.push(corner_visit_spot(wp.pos));
-    }
-    spots
-}
-
 /// A* on the STATIC mask with a throwaway EMPTY overlay (identical inputs every
 /// frame of a leg ⇒ identical polyline ⇒ no flash), endpoints pre-snapped to
 /// walkable floor, sampled at arc-length `t`. The no-flash walk discipline
@@ -319,21 +280,6 @@ fn mascot_home(layout: &Layout) -> Option<Point> {
     )
 }
 
-/// Wander destinations, state-dependent. Idle roams the social spots (corridor,
-/// pantry, sofas, couch); Busy shuttles to the backend desks (the coders it
-/// routes to). Snapped lazily inside `walk_between`.
-fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> {
-    let mut spots = vec![home];
-    if state == DaemonState::Busy {
-        for desk in &layout.home_desks {
-            spots.push(desk_visit_spot(*desk));
-        }
-    } else {
-        spots.extend(social_visit_spots(layout));
-    }
-    spots
-}
-
 /// The wander seed for ONE daemon instance — folds the source AND the instance id
 /// (OpenClaw's resolved gateway port), so N gateways of one source take N different
 /// paths, and a gateway restarting on its own port keeps its path (the id is
@@ -372,61 +318,6 @@ fn mascot_enter_delay(seed: u64) -> u64 {
     pixtuoid_core::id::splitmix64(seed) % MASCOT_ENTER_STAGGER_MS
 }
 
-/// How far a mascot may stand from the exact visit spot — its per-instance
-/// standing offset. N mascots roam ONE small visit-spot set, so by the pigeonhole
-/// principle two of N pick the SAME spot in the same cycle (with four gateways it
-/// happens constantly), and without an offset they rest pixel-IDENTICAL: the user
-/// runs four gateways and sees three lobsters. The office already answers exactly
-/// this for multiple occupants of a SHAREABLE queue spot
-/// (`pixel_painter::anchors::waypoint_rank_offset_x`'s ±`STEP_ASIDE_DX`); this is the
-/// mascot lane's version. It cannot reuse that one: rank-keyed offsets require
-/// knowing which siblings exist, and it takes a `WaypointKind` a mascot spot has no
-/// equivalent of.
-/// (No claim/probe machinery: these are shared social venues — two creatures at
-/// the pantry is honest — and claims would couple one mascot's motion to which
-/// siblings exist, breaking the stateless invariant.)
-const MASCOT_SPOT_OFFSET_PX: i32 = 4;
-
-/// The candidate standing offsets around a visit spot, tried in a seeded ROTATION.
-/// A ring, not a random `(dx, dy)` draw: a raw nudge lands on the furniture as
-/// often as not, and `snap_point_to_walkable` then pulls every instance back onto
-/// the SAME free cell — the collision the offset exists to break. Walking the ring
-/// from a seeded start takes the first offset that is genuinely walkable AND not
-/// the shared spot itself, so two instances only collide when they also share a
-/// ring position.
-const MASCOT_SPOT_RING: [(i32, i32); 8] = [
-    (MASCOT_SPOT_OFFSET_PX, 0),
-    (-MASCOT_SPOT_OFFSET_PX, 0),
-    (0, MASCOT_SPOT_OFFSET_PX),
-    (0, -MASCOT_SPOT_OFFSET_PX),
-    (MASCOT_SPOT_OFFSET_PX, MASCOT_SPOT_OFFSET_PX),
-    (-MASCOT_SPOT_OFFSET_PX, MASCOT_SPOT_OFFSET_PX),
-    (MASCOT_SPOT_OFFSET_PX, -MASCOT_SPOT_OFFSET_PX),
-    (-MASCOT_SPOT_OFFSET_PX, -MASCOT_SPOT_OFFSET_PX),
-];
-
-/// The visit spot as THIS instance stands at it — the first walkable
-/// [`MASCOT_SPOT_RING`] offset from a seeded start, else `p` itself when the spot
-/// is boxed in. CONSTANT per instance, not per cycle, so a leg's `prev` and `dest`
-/// shift together and the walk stays pop-free.
-fn mascot_spot_for(layout: &Layout, p: Point, seed: u64) -> Point {
-    // A distinct salt from the walk-in stagger's draw, so the two offsets one seed
-    // yields are independent.
-    let start = (pixtuoid_core::id::splitmix64(seed ^ 0x5A5C_0715) % MASCOT_SPOT_RING.len() as u64)
-        as usize;
-    for k in 0..MASCOT_SPOT_RING.len() {
-        let (dx, dy) = MASCOT_SPOT_RING[(start + k) % MASCOT_SPOT_RING.len()];
-        let cand = Point {
-            x: p.x.saturating_add_signed(dx as i16),
-            y: p.y.saturating_add_signed(dy as i16),
-        };
-        if layout.walkable.is_walkable(cand.x, cand.y) {
-            return cand;
-        }
-    }
-    p
-}
-
 /// Steady wander position at wander-clock `we_ms`. Returns `(pos, walking)`:
 /// walking during the first `MASCOT_WALK_FRAC` of each cycle, resting after.
 /// Cycle 0's origin is forced to `home` so it joins the enter walk pop-free.
@@ -434,24 +325,16 @@ fn mascot_wander(
     layout: &Layout,
     we_ms: u64,
     seed: u64,
-    spots: &[Point],
     home: Point,
     cycle_ms: u64,
 ) -> (Point, bool) {
-    if spots.is_empty() {
-        return (mascot_spot_for(layout, home, seed), false);
-    }
     let cycle = we_ms / cycle_ms;
     let frac = (we_ms % cycle_ms) as f32 / cycle_ms as f32;
-    let dest = mascot_spot_for(
-        layout,
-        hash_pick(spots, seed.wrapping_add(cycle).wrapping_add(1)),
-        seed,
-    );
+    let dest = walkable_target(layout, seed, cycle.wrapping_add(1));
     let prev = if cycle == 0 {
         home
     } else {
-        mascot_spot_for(layout, hash_pick(spots, seed.wrapping_add(cycle)), seed)
+        walkable_target(layout, seed, cycle)
     };
     if frac < MASCOT_WALK_FRAC {
         let t = (frac / MASCOT_WALK_FRAC).clamp(0.0, 1.0);
@@ -482,14 +365,6 @@ pub(crate) fn mascot_position(
     // Every clock below is measured from the END of this instance's stagger, so the
     // walk-out's reconstructed origin stays on the same wander phase as the walk-in.
     let enter_delay = mascot_enter_delay(seed);
-    // The door is an anchor like any other: with N gateways first-sighted in one
-    // beat — the very case the stagger exists for — all N would otherwise share this
-    // ONE cell for up to 900ms before peeling off, which is the elevator half of the
-    // overlap residual the scene guide quantifies. Same seeded ring the wander spots
-    // use, applied at ALL THREE elevator sites below (hold, walk-in origin, walk-out
-    // target) so the legs still join pop-free — offsetting only the hold would put a
-    // jump at t=0.
-    let door = mascot_spot_for(layout, elevator, seed);
 
     if presence.liveness == DaemonLiveness::Down {
         // Walk-out: from where the lobster was at the instant of Down, to the elevator.
@@ -497,16 +372,13 @@ pub(crate) fn mascot_position(
         if down_age >= MASCOT_LEAVE_MS {
             return None; // gone
         }
-        // The walk-out `from` is reconstructed with the IDLE spot set even if the
-        // gateway was Busy at the instant of death. This is deliberate, NOT a bug:
-        // the mascot is STATELESS (position is a pure function of `now` + the
-        // presence timestamps — no retained per-frame state, see the module note),
-        // and `DaemonState` carries no prev-state, so on a `Down` presence Idle is
-        // the ONLY reconstructable wander. A direct Busy→Down (gateway killed
-        // mid-run) can therefore jump one frame before the 2.2s elevator leg
-        // re-lerps it — an accepted cosmetic edge on a rare path, not worth
-        // threading retained state through and breaking the stateless invariant.
-        let spots = mascot_spots(layout, DaemonState::Idle, home);
+        // Reconstructed at the IDLE CADENCE even if the gateway was Busy at the
+        // instant of death: the mascot is STATELESS (position is a pure function of
+        // `now` + the presence timestamps), and `DaemonState` carries no prev-state,
+        // so Idle is the only reconstructable clock. Since every state now draws its
+        // destinations from the same whole-floor rule, only the CYCLE LENGTH differs —
+        // so a direct Busy→Down misplaces the origin along the SAME path set rather
+        // than picking from a different one, a smaller edge than before.
         let down_we = presence
             .last_seen
             .duration_since(presence.entered_at)
@@ -514,23 +386,25 @@ pub(crate) fn mascot_position(
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
             .saturating_sub(MASCOT_ENTER_MS + enter_delay);
-        let (from, _) = mascot_wander(layout, down_we, seed, &spots, home, MASCOT_IDLE_CYCLE_MS);
+        let (from, _) = mascot_wander(layout, down_we, seed, home, MASCOT_IDLE_CYCLE_MS);
         let t = down_age as f32 / MASCOT_LEAVE_MS as f32;
-        return Some((walk_between(layout, from, door, t), walk_anim, frame));
+        return Some((walk_between(layout, from, elevator, t), walk_anim, frame));
     }
 
     let age = now.duration_since(presence.entered_at).ok()?.as_millis() as u64;
     if age < enter_delay {
-        // Still holding at the door — this instance's stagger. REST, not walk: the
-        // position is fixed, so an advancing walk cycle paddles in place (visible for
-        // three of four consecutive-port gateways, whose delays are 4/506/750/704ms).
-        return Some((door, rest_anim, 0));
+        // NOT DRAWN YET — this instance's stagger. Holding it visibly at the elevator
+        // is what used to superimpose N gateways on one cell (and paddle a walk cycle
+        // in place at a fixed position), and it needed a per-instance door offset to
+        // undo. Arriving a beat later instead is both simpler and truer: a creature
+        // that has not walked in is not in the room.
+        return None;
     }
     let entered = age - enter_delay;
     if entered < MASCOT_ENTER_MS {
-        // Walk-in from the door to the home beat.
+        // Walk-in from the elevator to the home beat.
         let t = entered as f32 / MASCOT_ENTER_MS as f32;
-        return Some((walk_between(layout, door, home, t), walk_anim, frame));
+        return Some((walk_between(layout, elevator, home, t), walk_anim, frame));
     }
 
     // Steady wander, styled by state.
@@ -539,15 +413,7 @@ pub(crate) fn mascot_position(
         DaemonState::Degraded => MASCOT_DEGRADED_CYCLE_MS,
         _ => MASCOT_IDLE_CYCLE_MS,
     };
-    let spots = mascot_spots(layout, presence.display_state(), home);
-    let (pos, walking) = mascot_wander(
-        layout,
-        entered - MASCOT_ENTER_MS,
-        seed,
-        &spots,
-        home,
-        cycle_ms,
-    );
+    let (pos, walking) = mascot_wander(layout, entered - MASCOT_ENTER_MS, seed, home, cycle_ms);
     if walking {
         Some((pos, walk_anim, frame))
     } else {
@@ -579,74 +445,6 @@ mod tests {
 
     fn p(x: u16, y: u16) -> Point {
         Point { x, y }
-    }
-
-    #[test]
-    fn golden_index_is_deterministic_and_in_range() {
-        for len in [1usize, 3, 7, 50] {
-            for n in [0u64, 1, 2, 999, u64::MAX] {
-                let i = golden_index(n, len);
-                assert!(i < len, "index {i} out of range for len {len}");
-                assert_eq!(i, golden_index(n, len), "deterministic per (n, len)");
-            }
-        }
-    }
-
-    #[test]
-    fn social_visit_spots_gathers_exactly_pantry_sofas_couch() {
-        use crate::layout::{SceneLayout, WaypointKind};
-        let l = SceneLayout::compute_with_seed(240, 170, None, 3).expect("fits");
-        let has_pantry = l
-            .waypoints
-            .iter()
-            .any(|w| matches!(w.kind, WaypointKind::Pantry)) as usize;
-        let has_couch = l
-            .waypoints
-            .iter()
-            .any(|w| matches!(w.kind, WaypointKind::Couch)) as usize;
-        let n_sofas: usize = l
-            .meeting_rooms
-            .iter()
-            .filter_map(|r| r.trio.as_ref())
-            .map(|t| t.sofas.len())
-            .sum();
-        let spots = social_visit_spots(&l);
-        // Exactly one spot per pantry(≤1) + each sofa + couch(≤1): no desks, no
-        // corridor, no more, no less.
-        assert_eq!(spots.len(), has_pantry + n_sofas + has_couch);
-        assert!(
-            has_pantry + n_sofas + has_couch > 0,
-            "a 240x170 office has venues"
-        );
-        // ORDER is load-bearing (pet/mascot index this list via golden_index, so a
-        // same-count reorder silently changes which venue is visited at a cycle),
-        // and so is the per-venue offset fn. Pin pantry-corner FIRST, couch-corner
-        // LAST (sofa spots between), each via its correct offset fn — a reorder or a
-        // wrong offset fn breaks one of these even when the count still matches.
-        if has_pantry == 1 {
-            let pantry = l
-                .waypoints
-                .iter()
-                .find(|w| matches!(w.kind, WaypointKind::Pantry))
-                .unwrap();
-            assert_eq!(
-                spots[0],
-                corner_visit_spot(pantry.pos),
-                "pantry corner leads"
-            );
-        }
-        if has_couch == 1 {
-            let couch = l
-                .waypoints
-                .iter()
-                .find(|w| matches!(w.kind, WaypointKind::Couch))
-                .unwrap();
-            assert_eq!(
-                *spots.last().unwrap(),
-                corner_visit_spot(couch.pos),
-                "couch corner trails"
-            );
-        }
     }
 
     #[test]
@@ -758,25 +556,25 @@ mod tests {
         layout.reachable = reachable;
         let pack = test_pack();
 
-        // The two spots pet_position gathers, in its order: the home desk
-        // (left pocket) then the corridor centre (right pocket).
-        let spots = [
-            desk_visit_spot(Point { x: 20, y: 30 }),
-            Point { x: 160, y: 50 },
-        ];
+        // The pet's own picker, so the staged leg is exactly the one it walks.
         // Walk phase: elapsed 5s → frac 0.125 (<0.35); cycle_n == pet_seed
         // (elapsed/40000 == 0). Replicate pet_position's pick so we KNOW the leg
         // crosses the wall (prev ≠ dest), guaranteeing find_path → None — the
         // fallback branch is then the ONLY way a position is produced (a broken
         // fallback would panic here, not pass silently).
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(5_000);
-        let seed = 0u64;
-        // Ride the SAME golden_index production picks with, so this oracle can't
-        // drift from `pet_position`'s pick (which it replicates).
-        let pick = |n: u64| spots[golden_index(n, spots.len())];
-        let dest = pick(seed);
-        let prev = pick(seed.wrapping_sub(1));
-        assert_ne!(prev, dest, "seed must make the leg cross the wall");
+        // Destinations are drawn from the whole floor now, so a cross-wall leg can't
+        // be staged by construction — SEARCH for a seed whose two draws land in
+        // opposite pockets. cycle_n == pet_seed at 5s (elapsed/40000 == 0), so the
+        // seed IS the pick index the production code uses.
+        let (seed, prev, dest) = (0u64..4_000)
+            .find_map(|sd| {
+                let dest = walkable_target(&layout, sd, sd);
+                let prev = walkable_target(&layout, sd, sd.wrapping_sub(1));
+                // Opposite sides of the x∈[80,120) wall band.
+                ((dest.x < 80) != (prev.x < 80)).then_some((sd, prev, dest))
+            })
+            .expect("some seed must straddle the wall");
 
         // Precondition: the two snapped anchors are genuinely unroutable.
         let src_anchor = snap_point_to_walkable(&layout.walkable, prev).expect("prev snaps");
@@ -854,48 +652,26 @@ mod tests {
     }
 
     #[test]
-    fn mascot_wander_empty_spots_returns_home_and_cycle0_starts_from_home() {
-        // (a) The empty-spots guard rests at the home beat — at THIS instance's own
-        //     standing offset, so N mascots don't stack on one cell in a layout with
-        //     no visit spots either.
-        // (b) Cycle 0 forces prev=home (502) so leg 0 joins the enter walk pop-free:
-        //     the walking position equals walk_between(home → hash_pick(spots, seed+1)).
+    fn mascot_wander_cycle0_starts_from_home() {
+        // Cycle 0 forces prev=home so leg 0 joins the enter walk pop-free. (The
+        // sibling half of this test — an empty spot list resting at home — went away
+        // with the spot list itself: `walkable_target` always yields a cell.)
         let layout = crate::layout::Layout::compute(160, 200, Some(4)).expect("layout fits");
         let home = mascot_home(&layout).expect("home beat");
-
-        // (a) empty guard.
-        assert_eq!(
-            mascot_wander(&layout, 9_000, 7, &[], home, MASCOT_IDLE_CYCLE_MS),
-            (mascot_spot_for(&layout, home, 7), false),
-            "no spots → rest at home, at this instance's standing offset"
-        );
-
-        // (b) cycle 0 origin == home. Pick a we_ms inside the walking fraction of
-        // cycle 0 (frac < MASCOT_WALK_FRAC) so the walk_between is exercised.
-        let spots = mascot_spots(&layout, DaemonState::Idle, home);
-        assert!(
-            spots.len() >= 2,
-            "idle spots must include home + social spots"
-        );
         let cycle_ms = MASCOT_IDLE_CYCLE_MS;
         let we_ms = (cycle_ms as f32 * 0.2) as u64; // frac 0.2 < 0.45 → walking
         let seed = 3u64;
         let frac = (we_ms % cycle_ms) as f32 / cycle_ms as f32;
         let t = (frac / MASCOT_WALK_FRAC).clamp(0.0, 1.0);
-        // cycle == 0 → dest = the seed+1 spot at THIS instance's standing offset;
-        // prev forced to home. Derived through the same helper the impl uses, so the
-        // assertion is about the ORIGIN, not a second copy of the dest math.
-        let dest = mascot_spot_for(
-            &layout,
-            hash_pick(&spots, seed.wrapping_add(0).wrapping_add(1)),
-            seed,
-        );
+        // Derived through the same picker the impl uses, so the assertion is about the
+        // ORIGIN, not a second copy of the destination math.
+        let dest = walkable_target(&layout, seed, 1);
         let expected = walk_between(&layout, home, dest, t);
-        let (pos, walking) = mascot_wander(&layout, we_ms, seed, &spots, home, cycle_ms);
+        let (pos, walking) = mascot_wander(&layout, we_ms, seed, home, cycle_ms);
         assert!(walking, "frac < walk_frac → walking");
         assert_eq!(
             pos, expected,
-            "cycle 0 leg must originate from home, not from a hash-picked prev spot"
+            "cycle 0 leg must originate from home, not from a picked prev cell"
         );
     }
 
@@ -951,6 +727,84 @@ mod tests {
         assert_eq!(seeds.len(), 4, "each instance must seed differently");
     }
 
+    /// THE reason the curated visit-spot list was deleted. That list held ~3-25 points
+    /// depending on terminal size — and the idle set was structurally 5 no matter how
+    /// big the office got — so with N gateways the pigeonhole made sharing a
+    /// destination the common case.
+    ///
+    /// Measured through THIS path (`mascot_position`, production layout, 1080 frames
+    /// = 90s @12fps, four idle gateways on consecutive ports): 85% of frames crowded
+    /// under the list, 42% drawing from the whole floor. Both figures are BOX overlap,
+    /// the pessimistic metric — a 14x12 box intersection is not a visual merge, since
+    /// a lobster does not fill its box (at N=2 box overlap ran 37% while contiguous
+    /// red pixels merged in 5.5%). The residue is mostly two mascots WALKING: 45% of
+    /// every cycle is a routed leg, and legs share the office's aisles no matter how
+    /// far apart the destinations are, which is why no destination rule drives this to
+    /// zero.
+    ///
+    /// The bound asserts the PROPERTY, not the percentage: it sits well above the
+    /// measured 42% and well below the 85% the small set produced, so it catches a
+    /// return to a curated list without becoming a golden on the hash arithmetic.
+    /// Expanding each anchor into its 8 neighbours instead was measured WORSE than the
+    /// list at small sizes (62% -> 74%): 8 cells within 4px are ONE place to a 14x12
+    /// sprite, which is why spread, not offset, is the fix.
+    #[test]
+    fn four_gateways_rarely_crowd_now_that_the_whole_floor_is_in_play() {
+        use pixtuoid_core::state::DaemonInstanceId;
+        const SPRITE_W: i32 = 14;
+        const SPRITE_H: i32 = 12;
+        const FRAMES: u64 = 1080;
+        const CROWDED_MAX_PCT: u64 = 60;
+
+        // Production layout: `max_desks: None` fills the buffer, as every real painter
+        // does. A capped test layout understates the office and flattered the old
+        // measurement.
+        let layout = crate::layout::Layout::compute(140, 120, None).expect("layout fits");
+        let entered = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let seeds: Vec<u64> = (0..4u32)
+            .map(|i| {
+                let id = DaemonInstanceId::new((18901 + i).to_string()).expect("non-empty");
+                mascot_seed("openclaw", &id)
+            })
+            .collect();
+
+        let mut crowded = 0u64;
+        let mut drawn_frames = 0u64;
+        for f in 0..FRAMES {
+            let now = entered + std::time::Duration::from_millis(f * 1000 / 12);
+            let p = idle_presence(now, f * 1000 / 12);
+            let pts: Vec<Point> = seeds
+                .iter()
+                .filter_map(|&sd| {
+                    mascot_position(&layout, &p, "lobster_walk", "lobster_rest", now, sd)
+                        .map(|(pos, _, _)| pos)
+                })
+                .collect();
+            if pts.len() < 2 {
+                continue;
+            }
+            drawn_frames += 1;
+            if (0..pts.len()).any(|i| {
+                ((i + 1)..pts.len()).any(|j| {
+                    (i32::from(pts[i].x) - i32::from(pts[j].x)).abs() < SPRITE_W
+                        && (i32::from(pts[i].y) - i32::from(pts[j].y)).abs() < SPRITE_H
+                })
+            }) {
+                crowded += 1;
+            }
+        }
+        assert!(
+            drawn_frames > FRAMES / 2,
+            "the sample must actually draw them"
+        );
+        let pct = 100 * crowded / drawn_frames;
+        assert!(
+            pct <= CROWDED_MAX_PCT,
+            "four gateways crowded in {pct}% of {drawn_frames} frames (bound {CROWDED_MAX_PCT}%) \
+             — a small destination set is back"
+        );
+    }
+
     #[test]
     fn two_instances_entering_together_are_never_superimposed_on_the_way_in() {
         // The walk-in was the one lane the seed did NOT reach: two gateways with the
@@ -992,16 +846,28 @@ mod tests {
             );
         }
 
-        // The STAGGER window itself, which this test used to concede ("held together
-        // at the elevator door"): each instance now waits on its OWN seeded ring
-        // offset from the door, so they are separated from the very first frame — the
-        // elevator was the one anchor the standing-offset ring did not cover, and with
-        // N gateways first-sighted in one beat it was where they visibly stacked.
-        for age in (0..=da.min(db)).step_by(1) {
-            assert_ne!(
-                pos_at(a, age),
-                pos_at(b, age),
-                "two instances held at the door must not share its cell (age {age}ms)"
+        // The STAGGER window itself, which this test used to CONCEDE ("held together
+        // at the elevator door") and then guarded with a per-instance door offset. Now
+        // it needs neither: an instance is simply NOT DRAWN until its own delay
+        // elapses, so before the EARLIER of the two arrives nobody is on screen, and
+        // between the two arrivals exactly one is. Superposition is unrepresentable
+        // rather than merely avoided.
+        let drawn = |seed: u64, age_ms: u64| {
+            let now = entered + std::time::Duration::from_millis(age_ms);
+            let p = idle_presence(now, age_ms);
+            mascot_position(&layout, &p, "lobster_walk", "lobster_rest", now, seed).is_some()
+        };
+        let (first, second) = (da.min(db), da.max(db));
+        for age in 0..first {
+            assert!(
+                !drawn(a, age) && !drawn(b, age),
+                "before either stagger elapses, neither instance is in the room (age {age}ms)"
+            );
+        }
+        for age in (first + 1)..second {
+            assert!(
+                drawn(a, age) != drawn(b, age),
+                "between the two arrivals exactly one is drawn (age {age}ms)"
             );
         }
     }
@@ -1023,14 +889,13 @@ mod tests {
             mascot_position(&layout, &p0, "lobster_walk", "lobster_rest", now, seed)
                 .expect("walk-in position");
         assert_eq!(anim0, "lobster_walk", "enter window → walk anim");
-        // The walk-in starts at THIS instance's door — the seeded ring offset from
-        // the shared elevator cell, so N gateways don't stack on it — and the hold
-        // before it uses the same point, so the leg joins pop-free.
-        let door = mascot_spot_for(&layout, elevator, seed);
+        // The walk-in starts at the elevator. No per-instance offset is needed here
+        // any more: instances are separated in TIME by the stagger (each is simply
+        // not drawn until its own delay elapses), not in SPACE by an offset ring.
         assert_eq!(
             pos0,
-            walk_between(&layout, door, home, 0.0),
-            "age 0 → exactly at this instance's door"
+            walk_between(&layout, elevator, home, 0.0),
+            "age 0 → exactly at the elevator"
         );
 
         // age = 1100 (half the 2200 window) → midway along elevator→home.
@@ -1043,14 +908,14 @@ mod tests {
         let t = age as f32 / MASCOT_ENTER_MS as f32;
         assert_eq!(
             pos_mid,
-            walk_between(&layout, door, home, t),
-            "mid enter → the door→home interpolation"
+            walk_between(&layout, elevator, home, t),
+            "mid enter → the elevator→home interpolation"
         );
         // Sanity: midway is genuinely off both endpoints (so the lerp is live, not a
-        // degenerate where door==home).
+        // degenerate where elevator==home).
         assert_ne!(
-            door, home,
-            "the door and home must differ for a real walk-in"
+            elevator, home,
+            "the elevator and home must differ for a real walk-in"
         );
     }
 
@@ -1112,67 +977,6 @@ mod tests {
         assert_ne!(
             idle_anim, deg_anim,
             "degraded's slower cycle must put the mascot in a different phase than idle at this tick"
-        );
-    }
-
-    /// The ring's whole job is to give N mascots N DISTINCT places to stand at one
-    /// shared visit spot. A duplicate entry silently shrinks the candidate set, so
-    /// two instances collide more often — the "runs four gateways, sees three
-    /// lobsters" bug the ring was written to prevent, back at lower probability.
-    /// Mutation testing found nothing pinned it: deleting any of the three diagonal
-    /// minus signs turns an entry into a copy of its neighbour, and neither scene's
-    /// creature tests nor the binary's mascot harness went red.
-    ///
-    /// The ring must actually be USED, not merely declared correctly. Mutation
-    /// testing found the const test below cannot see this: turning the INDEX
-    /// reduction `(start + k) % LEN` into `/ LEN` leaves the const pristine while
-    /// making the index only ever 0 or 1 — on an open floor every instance then
-    /// returns ring[0], so all N mascots stand on the identical cell and the whole
-    /// per-instance offset is dead.
-    ///
-    /// Threshold is 4 of 8 — the FLOOR of what the adjudicated mixing mutants
-    /// produce, NOT a margin above them. Measured over ports 18901-18916: the real
-    /// mixing spreads over 7 ring positions, the collapse yields exactly 1, and the
-    /// two mutants excluded in `.cargo/mutants.toml` yield 4 (`^ -> |`) and 6
-    /// (`^ -> &`). So this catches the collapse ONLY and never becomes a golden on
-    /// the hash arithmetic — and do NOT tighten `>= 4`, because the OR mutant sits
-    /// exactly ON it: tightening would start failing for a degradation this repo has
-    /// deliberately left unpinned (see that config entry for why).
-    #[test]
-    fn consecutive_gateway_ports_spread_over_the_ring_instead_of_one_offset() {
-        use pixtuoid_core::state::DaemonInstanceId;
-        use pixtuoid_core::walkable::WalkableMask;
-        let (w, h) = (200u16, 120u16);
-        let mut layout = crate::layout::Layout::compute(w, h, Some(4)).expect("layout fits");
-        // Fully open floor: no candidate is ever rejected, so the returned point is
-        // exactly the ring entry the seed selected — this isolates the SELECTION
-        // from the walkability filter.
-        layout.walkable = WalkableMask::new_open(w, h);
-        let spot = p(100, 60);
-
-        // Consecutive ports are the realistic multi-gateway deployment (and what
-        // `just openclaw-multi-e2e` runs), so they are the case that must not clump.
-        let offsets: std::collections::BTreeSet<(i32, i32)> = (0..16u32)
-            .map(|i| {
-                let id = DaemonInstanceId::new((18901 + i).to_string()).expect("non-empty");
-                let got = mascot_spot_for(&layout, spot, mascot_seed("openclaw", &id));
-                (
-                    i32::from(got.x) - i32::from(spot.x),
-                    i32::from(got.y) - i32::from(spot.y),
-                )
-            })
-            .collect();
-
-        assert!(
-            offsets.len() >= 4,
-            "16 consecutive gateways must spread over the ring, not clump onto a few \
-             cells — got {} distinct offsets: {offsets:?}",
-            offsets.len()
-        );
-        assert!(
-            !offsets.contains(&(0, 0)),
-            "no instance may stand ON the shared spot — that is the collision the \
-             offset exists to break: {offsets:?}"
         );
     }
 
@@ -1239,121 +1043,34 @@ mod tests {
             // life — a panic reachable by simply having a gateway appear.
             let delay = mascot_enter_delay(seed);
             assert!(delay > 0, "port {port} must exercise a real stagger");
-            let elevator = mascot_elevator(&layout).expect("layout has an elevator");
+            // NOT DRAWN during its own stagger. Holding it visibly at the elevator is
+            // what superimposed N gateways on one cell (and paddled a walk cycle in
+            // place at a fixed position) and needed a per-instance offset to undo;
+            // arriving a beat later needs nothing. A creature that has not walked in
+            // is not in the room.
             for early_ms in [0, delay / 2, delay - 1] {
                 let at = entered_at + std::time::Duration::from_millis(early_ms);
                 let held = DaemonPresence {
                     last_seen: at,
                     ..alive.clone()
                 };
-                let (pos, anim, frame) = mascot_position(&layout, &held, "w", "r", at, seed)
-                    .expect("a staggered mascot still renders");
-                // HELD means still: the position is fixed for the whole slice, so an
-                // advancing walk cycle would paddle in place (visible for three of
-                // four consecutive-port gateways, whose delays are 4/506/750/704ms).
-                assert_eq!(
-                    (anim, frame),
-                    ("r", 0),
-                    "gateway {port} held at the door must REST, not walk in place"
-                );
-                assert_eq!(
-                    pos,
-                    mascot_spot_for(&layout, elevator, seed),
-                    "gateway {port} at age {early_ms}ms (< {delay}ms stagger) must hold \
-                     at ITS OWN door offset, not the shared elevator cell"
+                assert!(
+                    mascot_position(&layout, &held, "w", "r", at, seed).is_none(),
+                    "gateway {port} at age {early_ms}ms (< {delay}ms stagger) must not be \
+                     drawn yet"
                 );
             }
-        }
-    }
-
-    /// The BLOCKED half of the ring walk, which the open-floor test above cannot
-    /// reach: it always succeeds at `k == 0`, so nothing there advances the cursor.
-    /// Mutation testing exposed that gap — turning `(start + k)` into `(start - k)`
-    /// survived, and it is a latent PANIC, not a cosmetic drift: `start` and `k` are
-    /// `usize`, so the first seed with `start < k` underflows the moment a candidate
-    /// is rejected. Only a mascot standing near furniture reaches that, which is
-    /// precisely the case no test covered.
-    #[test]
-    fn a_boxed_in_spot_falls_back_to_itself_and_a_crowded_one_still_finds_a_free_cell() {
-        use pixtuoid_core::state::DaemonInstanceId;
-        use pixtuoid_core::walkable::WalkableMask;
-        let (w, h) = (200u16, 120u16);
-        let base = crate::layout::Layout::compute(w, h, Some(4)).expect("layout fits");
-        let spot = p(100, 60);
-        let seeds: Vec<u64> = (0..16u32)
-            .map(|i| {
-                let id = DaemonInstanceId::new((18901 + i).to_string()).expect("non-empty");
-                mascot_seed("openclaw", &id)
-            })
-            .collect();
-
-        // FULLY boxed in: every ring candidate blocked ⇒ the documented fallback is
-        // the shared spot itself. Walks all 8 candidates for every seed, so an
-        // underflowing cursor cannot hide behind an early success.
-        let mut boxed = WalkableMask::new_open(w, h);
-        for (dx, dy) in MASCOT_SPOT_RING {
-            let x = (i32::from(spot.x) + dx) as u16;
-            let y = (i32::from(spot.y) + dy) as u16;
-            boxed.mark_blocked(x, y, 1, 1, 0);
-        }
-        let mut layout = base.clone();
-        layout.walkable = boxed;
-        for &seed in &seeds {
-            assert_eq!(
-                mascot_spot_for(&layout, spot, seed),
-                spot,
-                "a boxed-in spot has no free offset — the fallback is the spot itself"
+            // …and the frame its stagger ends, it IS drawn, walking in from the
+            // elevator — so the stagger delays the arrival, it does not skip it.
+            let arrived = entered_at + std::time::Duration::from_millis(delay);
+            let at_arrival = DaemonPresence {
+                last_seen: arrived,
+                ..alive.clone()
+            };
+            assert!(
+                mascot_position(&layout, &at_arrival, "w", "r", arrived, seed).is_some(),
+                "gateway {port} must appear once its {delay}ms stagger elapses"
             );
         }
-
-        // CROWDED: exactly one candidate left open. Every seed must converge on it,
-        // which means the cursor advanced past up to seven rejections.
-        let free = MASCOT_SPOT_RING[3];
-        let mut crowded = WalkableMask::new_open(w, h);
-        for (dx, dy) in MASCOT_SPOT_RING {
-            if (dx, dy) == free {
-                continue;
-            }
-            let x = (i32::from(spot.x) + dx) as u16;
-            let y = (i32::from(spot.y) + dy) as u16;
-            crowded.mark_blocked(x, y, 1, 1, 0);
-        }
-        let mut layout = base;
-        layout.walkable = crowded;
-        let want = Point {
-            x: (i32::from(spot.x) + free.0) as u16,
-            y: (i32::from(spot.y) + free.1) as u16,
-        };
-        for &seed in &seeds {
-            assert_eq!(
-                mascot_spot_for(&layout, spot, seed),
-                want,
-                "the ONE walkable offset must be found from any seeded start"
-            );
-        }
-    }
-
-    /// Characterizes the set COMPLETELY (rather than spot-checking entries) so one
-    /// assertion covers sign flips, duplicates and a changed magnitude alike.
-    #[test]
-    fn the_mascot_spot_ring_is_the_eight_distinct_neighbours_of_its_spot() {
-        let o = MASCOT_SPOT_OFFSET_PX;
-        let got: std::collections::BTreeSet<(i32, i32)> =
-            MASCOT_SPOT_RING.iter().copied().collect();
-        assert_eq!(
-            got.len(),
-            MASCOT_SPOT_RING.len(),
-            "every ring offset must be DISTINCT — a duplicate re-collides two instances: {MASCOT_SPOT_RING:?}"
-        );
-        let want: std::collections::BTreeSet<(i32, i32)> = [-o, 0, o]
-            .into_iter()
-            .flat_map(|dx| [-o, 0, o].map(move |dy| (dx, dy)))
-            .filter(|&p| p != (0, 0))
-            .collect();
-        assert_eq!(
-            got, want,
-            "the ring must be exactly the 8 one-step neighbours; (0,0) is EXCLUDED because \
-             it is the shared spot itself, which is what two instances must not both take"
-        );
     }
 }

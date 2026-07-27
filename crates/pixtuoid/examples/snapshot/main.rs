@@ -134,6 +134,15 @@ struct SnapshotArgs {
     #[arg(long)]
     openclaw: Option<String>,
 
+    /// Gateway PORTS to stage for `--openclaw`, comma-separated (default: one, the
+    /// upstream default port). The multi-instance render is the one thing no gate
+    /// can check — clips are presence-only in `gen-check` and the harness asserts
+    /// cell-set inequality, not "reads as N creatures" — so N gateways must be
+    /// renderable to a PNG a human can look at. `--openclaw-ports 18901,18902,18903,18904`
+    /// is what `just openclaw-multi-e2e` runs.
+    #[arg(long, value_delimiter = ',')]
+    openclaw_ports: Vec<String>,
+
     /// Override local hour-of-day (0–23) used by time-of-day effects
     /// (sun spot, dust motes, lighting). Useful for capturing screenshots
     /// of daylight effects from a machine running at night.
@@ -444,7 +453,7 @@ fn main() -> Result<()> {
         }
     }
     if let Some(state) = args.openclaw.as_deref() {
-        inject_openclaw_presence(&mut scene, state, now)?;
+        inject_openclaw_presence(&mut scene, state, now, &args.openclaw_ports)?;
     }
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;

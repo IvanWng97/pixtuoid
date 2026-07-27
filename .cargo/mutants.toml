@@ -63,45 +63,24 @@ exclude_re = [
     # deterministic test can arrange (the non-boundary prune/dedupe behavior
     # IS pinned by unclaim.rs's unit tests).
     'unclaim\.rs.*replace < with <= in ChildEndUnclaims',
-    # `mascot_position`'s TWO leg boundaries — `if age < enter_delay` (the stagger)
-    # and `if entered < MASCOT_ENTER_MS` (the walk-in). `<=` extends each leg by one
-    # millisecond, and at that single instant the next leg's own origin is the SAME
-    # point, because the legs are built to join without a pop:
-    #   stagger: the walk-in at t=0 IS the elevator, where the hold would keep it.
-    #   walk-in: the walk-in at t=1 IS `home`, which is also the wander's forced
-    #            cycle-0 origin ("Cycle 0's origin is forced to `home` so it joins the
-    #            enter walk pop-free" — mascot_wander).
-    # Measured both, per consecutive-port seed: the two branches render the identical
-    # Point, and the frames either side are identical too. So the design's continuity
-    # is exactly what makes an off-by-one-ms here unobservable, not merely untested.
-    # Each guard's load-bearing direction IS pinned — `< -> ==` on the stagger
-    # underflows `age - enter_delay` and dies in
-    # `the_walk_out_starts_from_where_the_mascot_was_when_it_died`.
-    'creatures\.rs.*replace < with <= in mascot_position',
-    # `mascot_spot_for`'s salt XOR, `splitmix64(seed ^ SALT)`. Replacing `^` with a
-    # bitwise OR or AND forces/masks the salt's bits, so the map stops being
-    # injective and consecutive ports crowd onto fewer ring rotations (measured over
-    # 16 ports x 5 port bases: the real mixing spreads over 7-8 of 8, the OR mutant
-    # 4-6, the AND mutant 6). Degraded, but NOT a collapse, and left unpinned on
-    # purpose: every candidate assertion is a zero-margin distribution golden — the
-    # real code's own minimum IS the threshold that would catch the mutant, so a
-    # future salt change false-reds it — while the effect is second-order cosmetic,
-    # needing two instances to ALSO pick the same visit spot in the same cycle before
-    # anything is visible. The load-bearing properties ARE pinned in creatures.rs:
-    # the ring is eight DISTINCT offsets, and consecutive ports must spread over at
-    # least 4 of them (which is what catches an actual collapse, below).
-    'creatures\.rs.*replace \^ with (\||&) in mascot_spot_for',
-    # NOT excluded, deliberately, though they are also equivalent/harmless: the OUTER
-    # `% LEN` in the same `start` expression (`% -> +` is algebraically identical
-    # since (x + LEN + k) % LEN == (x + k) % LEN; `% -> /` picks a different rotation
-    # of equal measured quality). cargo-mutants describes them as "replace % with /
-    # in mascot_spot_for" — WORD-FOR-WORD identical to the INNER
-    # `MASCOT_SPOT_RING[(start + k) % LEN]`, which is load-bearing (turning it into
-    # `/` pins every instance on ring[0] — the whole per-instance offset dead) and is
-    # now covered by `consecutive_gateway_ports_spread_over_the_ring_instead_of_one_offset`.
-    # No regex separates the two, and an exclusion that could hide a real regression
-    # is worse than two known-noise rows in the report. (The outer `%` is NOT itself
-    # removable: it keeps `start` small so `start + k` cannot overflow `usize`.)
+    # `mascot_position`'s walk-in boundary, `if entered < MASCOT_ENTER_MS`. `<=`
+    # extends the leg by one millisecond, and at that instant the walk-in's own t=1
+    # endpoint IS `home`, which is also the wander's forced cycle-0 origin ("Cycle 0's
+    # origin is forced to `home` so it joins the enter walk pop-free" — mascot_wander),
+    # so both branches render the identical Point. Measured per consecutive-port seed,
+    # including the frames either side.
+    #
+    # Its SIBLING boundary is deliberately NOT excluded any more: `if age < enter_delay`
+    # used to HOLD the mascot at the elevator, making `<=` a one-millisecond no-op, but
+    # the stagger now returns `None` instead — so `<=` changes drawn to not-drawn at
+    # exactly `age == enter_delay`, which is observable and IS killed (verified) by
+    # `the_walk_out_starts_from_where_the_mascot_was_when_it_died`'s arrival assertion.
+    # An exclusion that hides a killable mutant is worse than a noisy row — and
+    # cargo-mutants describes the two boundaries IDENTICALLY ("replace < with <= in
+    # mascot_position"), so no regex can exclude one without the other. Hence NEITHER
+    # is excluded: the walk-in one will show up as a known-noise row, documented here,
+    # and the stagger one is genuinely caught. (Same call as the `% with /` pair in
+    # `mascot_spot_for` before that fn was deleted.)
     # The unix hook-socket bind's `tmp.len() > 100` picks between two bind
     # strategies (temp-rename vs direct+chmod) whose end states are
     # byte-identical — the boundary is sun_path headroom, distinguishable only
