@@ -1118,6 +1118,100 @@ test('first visit: boot intro auto-runs, reveals the page, seeds the gate', asyn
   await expectSectionReveal(page, 'install');
 });
 
+test('the reveal roll survives a main-thread stall instead of snapping past it', async ({
+  page,
+}) => {
+  // Safari blocks the page's main thread for ~1.3-1.5s right after a first
+  // visit settles, inside its OWN tab-snapshot IPC: WebPage::TakeSnapshot ->
+  // RemoteImageBufferProxy::flushDrawingContext -> IPC::Semaphore::waitFor ->
+  // semaphore_timedwait_trap, while the GPU process sits blocked in
+  // CA::CG::ContextDelegate::operation_'s dispatch_sync (profiled with `sample`
+  // on Safari 27; neither process is doing work — it is a lock wait, which is
+  // why the duration is near-constant). Nothing here can stop that stall. What
+  // it MUST NOT do is eat the reveal: a wall-clock ramp keeps advancing while
+  // nothing paints, so the roll froze on a half-drawn frame and then snapped to
+  // the settled office — the animation never played (the reported bug).
+  // The roll is therefore driven by PAINTED frames, not by the clock.
+  const errors = watchErrors(page);
+  await page.goto('./'); // real first visit — the boot path is the only one that rolls
+  await expect(page.locator('.backdrop')).toHaveClass(/\bis-live\b/, { timeout: 15_000 });
+  const settled = () =>
+    page.evaluate(() => !!document.getElementById('office-overlay')?.classList.contains('is-on'));
+  expect(await settled()).toBe(false); // the roll is running
+  // Block the main thread for a full REVEAL_MS the way the snapshot IPC does.
+  await page.evaluate(() => {
+    const until = performance.now() + 1600;
+    while (performance.now() < until) {
+      /* synchronous stall — no frames can paint */
+    }
+  });
+  // A clock-driven ramp is now past REVEAL_MS: it would already have snapped to
+  // the settled office and switched the captions on. A frame-driven one has
+  // barely advanced, so the reveal still has its animation left to play.
+  expect(await settled()).toBe(false);
+  // ...and it must still finish on its own rather than hanging mid-roll.
+  await expect.poll(settled, { timeout: 10_000 }).toBe(true);
+  expect(errors()).toEqual([]);
+});
+
+test('un-reducing motion mid-session rolls the office in again, it does not snap', async ({
+  page,
+}) => {
+  // The reduced-motion arm sets `live = false`; its un-reduce arm re-covers and
+  // boots "so the office rolls back in". The roll's progress must rewind with
+  // it — frame-accumulated progress that SURVIVES the de-live leaves rt >= 1, so
+  // the office blits its settled frame and SNAPS: the exact failure the
+  // frame-driven roll exists to prevent, reintroduced on the neighbouring path.
+  // Nothing else in this suite un-reduces (every other test only reduces), so
+  // this is the sole guard on that direction.
+  const errors = watchErrors(page);
+  const captionsOn = () =>
+    page.evaluate(() => !!document.getElementById('office-overlay')?.classList.contains('is-on'));
+  await page.goto('./');
+  await expect(page.locator('.backdrop')).toHaveClass(/\bis-live\b/, { timeout: 15_000 });
+  // let the first roll finish, so accumulated progress is past REVEAL_MS
+  await expect.poll(captionsOn, { timeout: 15_000 }).toBe(true);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.locator('.backdrop')).not.toHaveClass(/\bis-live\b/, { timeout: 5_000 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(page.locator('.backdrop')).toHaveClass(/\bis-live\b/, { timeout: 15_000 });
+  // Live again — so the reveal must be REPLAYING, i.e. captions still off. A
+  // stale accumulator settles on the first frame and turns them straight on.
+  expect(await captionsOn()).toBe(false);
+  await expect.poll(captionsOn, { timeout: 15_000 }).toBe(true); // ...and it completes
+  expect(errors()).toEqual([]);
+});
+
+test('the office still goes live on a device that never meets the frame budget', async ({
+  page,
+}) => {
+  // The roll waits for a few on-budget frames so a main-thread stall lands on
+  // the flat bg cover rather than a half-drawn frame. That wait is a COURTESY,
+  // never a precondition: a machine that cannot sustain the budget at all would
+  // otherwise sit on the cover forever and never get an office. Every frame
+  // here is deliberately pushed over budget, and the office must still come up.
+  const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    // Push every frame past REVEAL_MAX_STEP_MS, but only ONCE the engine is up —
+    // starving the wasm boot itself would test a different thing (and never get
+    // as far as the readiness gate this pins).
+    const raf = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (cb) =>
+      raf((t) => {
+        if ((window as unknown as { __pixEngineReady?: boolean }).__pixEngineReady) {
+          const until = performance.now() + 70;
+          while (performance.now() < until) {
+            /* every frame is a hitch */
+          }
+        }
+        cb(t);
+      });
+  });
+  await page.goto('./');
+  await expect(page.locator('.backdrop')).toHaveClass(/\bis-live\b/, { timeout: 20_000 });
+  expect(errors()).toEqual([]);
+});
+
 test('a keypress during the Level-2 engine hold force-settles the splash immediately', async ({
   page,
 }) => {

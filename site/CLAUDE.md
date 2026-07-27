@@ -182,6 +182,40 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   `hire()` easter egg is politely refused for lack of a free desk — graceful
   and owner-accepted, not a bug (pinned by pixtuoid-web's
   `a_phone_narrow_office_the_cast_fills_refuses_hires_outright`).
+- **SHARP EDGE — `OfficeBackdrop.astro`'s reveal roll is FRAME-driven, never
+  clock-driven.** Right after a first visit settles, Safari blocks the page's
+  ENTIRE main thread for ~1.3-1.5s inside its own tab-snapshot IPC:
+  `WebPage::TakeSnapshot` → `RemoteImageBufferProxy::flushDrawingContext()` →
+  `IPC::Semaphore::waitFor` → `semaphore_timedwait_trap`, while the GPU process
+  sits in `CA::CG::ContextDelegate::operation_`'s `dispatch_sync` (captured with
+  `sample` on BOTH processes, Safari 27). Neither side is computing — it is a
+  CoreAnimation queue-ownership wait, which is why the duration is near-constant
+  and why no JS callback in the profile exceeded ~4ms. It co-occurs with the
+  first live office frame — the same moment the splash's Level-2
+  `__pixEngineReady` gate lifts on — so when it fires it lands on the roll.
+  (Co-occurrence, not a known common trigger: a profile shows timing, not
+  WebKit's snapshot heuristic.) A wall-clock ramp
+  (`(nowMs - revealStartSim) / REVEAL_MS`) kept advancing while nothing painted,
+  so the roll froze on a half-drawn frame and SNAPPED to the settled office — the
+  reveal was never seen. So `paint()` accumulates `reveal.elapsed` from
+  `Math.min(step, REVEAL_MAX_STEP_MS)` per PAINTED frame, and holds the start
+  until `REVEAL_READY_FRAMES` consecutive on-budget frames land — which keeps the
+  stall on the flat bg tone rather than a faint chroma-split ghost of the
+  scrolling floors, and (the sturdier reason) defers `is-live`, the `pix:onair`
+  the statusline lights its ON-AIR readout from, and the ♩ button, so an office
+  about to freeze for 1.4s never announces itself live — bounded by
+  `REVEAL_READY_MAX_WAIT` so a device that never meets the budget still gets its
+  office. Don't "simplify" the accumulator, the step clamp, or the readiness gate
+  back to a clock. `REVEAL_MAX_STEP_MS` DERIVES from `FRAME_MS` on purpose: a
+  hardcoded twin silently disables the gate if `FRAME_MS` ever rises to meet it.
+  The four reveal fields live in ONE `reveal` object because they share a
+  LIFECYCLE — the reduced-motion arm's `live = false` must rewind ALL of them or
+  the un-reduce SNAPS (pinned by the un-reduce e2e test). The stall itself is
+  Safari's and cannot be prevented; it does NOT reproduce in Playwright's WebKit
+  or Chromium (no tab UI to snapshot), and it is INTERMITTENT — a single-shot A/B
+  against it will lie, so pin changes here with repeated interleaved trials.
+  This is also the SECOND bounded hold on a first visit: `Base.astro`'s
+  `MAX_ENGINE_WAITS` (~4s) runs first, and the two caps stack.
 - **The crisp AA caption layer (`#office-overlay`).** The canvas renders a
   ~130px buffer that CSS upscales with `image-rendering: pixelated`, so text
   BAKED into the office pixels blows up blocky. Instead the engine exports the
