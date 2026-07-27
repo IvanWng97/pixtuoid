@@ -125,6 +125,46 @@ fn main() -> Result<()> {
         );
     }
 
+    // Does frame cost track the AGENTS or the static room? If cost is flat in
+    // agent count the room dominates, which makes caching the static layers the
+    // one high-leverage optimization (§13 lists it only as a "candidate").
+    println!("\ncost vs agent count at 768x640 (is the room or the cast dominant?):");
+    for n in [0usize, 4, 12, 30, 60] {
+        let mut scene = SceneState::uniform(64);
+        populate(&mut scene, base, n);
+        let mut r = OfficeRenderer::new();
+        for i in 0..15u64 {
+            let now = base + Duration::from_millis(i * 33);
+            let _ = r.render(
+                &scene,
+                &pack,
+                theme,
+                now,
+                768,
+                640,
+                FloorMeta::ground(),
+                None,
+            );
+        }
+        let mut best = f64::MAX;
+        for i in 0..60u64 {
+            let now = base + Duration::from_millis((15 + i) * 33);
+            let t = Instant::now();
+            let _ = r.render(
+                &scene,
+                &pack,
+                theme,
+                now,
+                768,
+                640,
+                FloorMeta::ground(),
+                None,
+            );
+            best = best.min(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        println!("  {n:>3} agents: {best:>7.3} ms");
+    }
+
     // Transport arithmetic: what a rich Adapter must push per frame.
     println!("\ntransport cost per frame (uncompressed RGB -> base64, the Kitty/iTerm2 wire):");
     for (label, w, h) in cases {
