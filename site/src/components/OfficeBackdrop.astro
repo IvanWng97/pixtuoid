@@ -412,7 +412,10 @@ const officeDriverUrl = asset('office-driver.js');
     const hasWasm = typeof WebAssembly !== 'undefined';
 
     // ── First-visit reveal (option A cover + Level-2 splash gate) ──────────────
-    let revealStartSim = 0; // sim-clock t0 of the roll (pause freezes it via nowMs)
+    let revealElapsed = 0; // roll progress, accumulated from PAINTED frames only
+    let revealLastSim = 0; // previous frame's sim clock, for the per-frame delta
+    let revealReady = 0; // consecutive on-budget frames seen before the roll starts
+    let revealWaited = 0; // total frames spent waiting, bounding that hold
     let splashCleared = !!window.__pixRevealed; // seeded/repeat visit: already lifted
     // Option A: on the boot path, cover the baked poster with the canvas's own bg
     // tone (CSS background: var(--bg)) from the first paint, so the office reveals
@@ -460,6 +463,27 @@ const officeDriverUrl = asset('office-driver.js');
     const REVEAL_MS = 1600;
     const FLOORS_PAST = 3.2;
     const CHROMA_SPLIT_PX = 3;
+    // The roll advances by PAINTED FRAMES, not by the wall clock, and only
+    // starts once frames are actually flowing. Right after a first visit
+    // settles, Safari blocks the page's whole main thread for ~1.3-1.5s inside
+    // its own tab-snapshot IPC (WebPage::TakeSnapshot ->
+    // RemoteImageBufferProxy::flushDrawingContext -> IPC::Semaphore::waitFor ->
+    // semaphore_timedwait_trap, with the GPU process parked in
+    // CA::CG::ContextDelegate::operation_'s dispatch_sync — profiled with
+    // `sample` on Safari 27; neither side is computing, it is a lock wait, hence
+    // the near-constant duration). The splash gates the reveal on
+    // __pixEngineReady and Safari snapshots on the same "page settled" signal,
+    // so the stall lands ON the roll every time it fires. A clock ramp keeps
+    // running while nothing paints, so the roll froze on a half-drawn frame and
+    // SNAPPED to the settled office — the reveal was never seen. Clamping the
+    // per-frame step makes a hitch PAUSE the roll instead of skipping it, and
+    // holding the start until frames flow puts the stall in the flat bg-tone
+    // cover, where it reads as a beat rather than a broken frame.
+    const REVEAL_MAX_STEP_MS = 50; // a longer frame is a hitch, not motion
+    const REVEAL_READY_FRAMES = 3; // consecutive on-budget frames before the roll starts
+    // ...but a device that never sustains the budget must still get its office:
+    // the gate is a courtesy, never a precondition for going live.
+    const REVEAL_READY_MAX_WAIT = 30; // frames (~1s at the 33ms cap) before starting anyway
 
     let office = null;
     let wasm = null;
@@ -650,14 +674,26 @@ const officeDriverUrl = asset('office-driver.js');
       // may re-live it (the mq listener de-lives; a stray repaint — a
       // resize, a background tick — must not undo that). The un-reduce
       // path re-lives through boot()/start() as before.
+      // Per-frame delta off the SIM clock, so an explicit pause freezes the roll
+      // exactly as it freezes the office (pauseOffset already absorbs the gap).
+      const step = revealLastSim ? nowMs - revealLastSim : 0;
+      revealLastSim = nowMs;
+      const onBudget = step > 0 && step <= REVEAL_MAX_STEP_MS;
       if (!live && !mq.matches) {
+        // Hold on the bg-tone cover until frames are actually flowing, so a
+        // stall lands on the flat tone instead of a half-drawn reveal frame.
+        revealReady = onBudget ? revealReady + 1 : 0;
+        revealWaited++;
+        if (revealReady < REVEAL_READY_FRAMES && revealWaited < REVEAL_READY_MAX_WAIT) return;
         live = true;
-        revealStartSim = nowMs; // sim-clock t0 → pause freezes the roll too
         wrap.classList.add('is-live');
         document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
         showAudioBtn(); // a live office exists → offer the ♩ sound toggle
       }
-      const rt = mq.matches ? 1 : (nowMs - revealStartSim) / REVEAL_MS;
+      // A hitch contributes at most one frame of progress, so the roll pauses
+      // through it and resumes — it can never be skipped.
+      revealElapsed += Math.min(step, REVEAL_MAX_STEP_MS);
+      const rt = mq.matches ? 1 : revealElapsed / REVEAL_MS;
       if (rt < 1) {
         drawRevealFrame(view, rt < 0 ? 0 : rt);
       } else {

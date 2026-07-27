@@ -173,6 +173,28 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   wrong-time still — the day/night flip is gone by construction; the splash in
   turn HOLDS on `window.__pixEngineReady` (Level-2 gate) so it lifts straight into
   the roll. Any failure / no-JS / no-wasm / reduced-motion keeps the still poster).
+  **SHARP EDGE — the reveal roll is FRAME-driven, never clock-driven.** Right
+  after a first visit settles, Safari blocks the page's ENTIRE main thread for
+  ~1.3-1.5s inside its own tab-snapshot IPC: `WebPage::TakeSnapshot` →
+  `RemoteImageBufferProxy::flushDrawingContext()` → `IPC::Semaphore::waitFor` →
+  `semaphore_timedwait_trap`, while the GPU process sits in
+  `CA::CG::ContextDelegate::operation_`'s `dispatch_sync` (captured with `sample`
+  on both processes, Safari 27). NEITHER side is computing — it is a
+  CoreAnimation queue-ownership wait, which is why the duration is near-constant
+  and why no JS callback ever exceeds 4ms. It fires on the same "page settled"
+  signal the splash's Level-2 `__pixEngineReady` gate waits for, so it lands ON
+  the roll whenever it fires. A wall-clock ramp
+  (`(nowMs - revealStartSim) / REVEAL_MS`) kept advancing while nothing painted,
+  so the roll froze on a half-drawn frame and SNAPPED to the settled office — the
+  reveal was never seen. So `paint()` accumulates `revealElapsed` from
+  `Math.min(step, REVEAL_MAX_STEP_MS)` per PAINTED frame, and holds the start
+  until `REVEAL_READY_FRAMES` consecutive on-budget frames land (putting the
+  stall on the flat bg tone instead of a broken frame) — bounded by
+  `REVEAL_READY_MAX_WAIT` so a device that never meets the budget still gets its
+  office. Don't "simplify" any of the three back to a clock. The stall itself is
+  Safari's and cannot be prevented; it does NOT reproduce in Playwright's WebKit
+  or Chromium (no tab UI to snapshot), and it is INTERMITTENT — a single-shot A/B
+  against it will lie, so pin changes here with repeated interleaved trials.
   Never hand-edit
   (prettier/eslint/knip all ignore it); regenerate from the crate.
   The hero renders at `BUF_H=130`, `SEED=0` (a deliberately closer camera than
