@@ -254,9 +254,18 @@ REASONIX_KNOWN_OMITTED = {
 # reason, #302).
 REASONIX_PAYLOAD_FIELDS = {"event", "cwd", "toolName", "toolArgs", "subject", "message"}
 
+# CodeWhale split `crates/tui/src/hooks.rs` into a module DIRECTORY (#793): the
+# old path still 200s as the module root, but it is now a `mod`/`pub use` shim,
+# so both depended surfaces read empty there — the enum moved to `hooks/config.rs`
+# and `HookContext::to_env_vars` to `hooks/executor.rs`. They are two files now,
+# hence two URLs; neither surface's CONTENT changed.
 CODEWHALE_HOOK_URL = (
     "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
-    "crates/tui/src/hooks.rs"
+    "crates/tui/src/hooks/config.rs"
+)
+CODEWHALE_EXECUTOR_URL = (
+    "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
+    "crates/tui/src/hooks/executor.rs"
 )
 
 # CodeWhale hook events we DELIBERATELY do not register (snake_case wire names):
@@ -274,7 +283,8 @@ CODEWHALE_KNOWN_OMITTED = {
 # env vars into the cwd-keyed `{cwd, tool, tool_args}` envelope the decoder reads
 # (source/codewhale.rs). The envelope FIELD names are our own shim contract (they
 # can't drift), but the DEEPSEEK_* names are CodeWhale's — set by
-# `HookContext::to_env_vars` in the SAME hooks.rs the event check fetches. WORKSPACE
+# `HookContext::to_env_vars` in hooks/executor.rs (its own fetch since the
+# hooks.rs -> hooks/ split; it used to share the event check's file). WORKSPACE
 # is load-bearing: it becomes the envelope `cwd` = the AgentId KEY, so a rename →
 # the shim reads None → empty cwd → the decoder drops EVERY session (no sprite).
 # (DEEPSEEK_SESSION_ID is deliberately NOT read — proven inconsistent — so it's
@@ -1032,11 +1042,30 @@ def read_kimi_events() -> set[str]:
 
 def upstream_grok_hooks(text: str) -> set[str] | None:
     """The HookEventName enum variants (bare Rust idents — registration keys
-    accept the PascalCase spelling, so these ARE the names we register)."""
+    accept the PascalCase spelling, so these ARE the names we register).
+
+    TWO declaration shapes, tried in order. Upstream originally wrote a plain
+    `pub enum HookEventName { … }`; it now GENERATES that enum from a
+    `hook_events! { … }` macro table (one row per event, carrying the event's
+    display name, deserialize aliases and trait triple). The plain-enum regex
+    still matches the macro DEFINITION's body — but that body holds `$variant`
+    placeholders, not variants, so it reads empty and the whole 15-variant set
+    looked "not found at the pinned path" (#793). Hence the fall-THROUGH: an
+    empty plain-enum parse is not an answer, it's a signal to read the table.
+    """
     m = re.search(r"pub enum HookEventName \{(.*?)\n\}", text, re.S)
-    if not m:
+    if m:
+        found = set(re.findall(r"(?m)^\s*([A-Z]\w+),", m.group(1)))
+        if found:
+            return found
+    # Comments first: `rust_block_after` measures braces, and a doc comment on a
+    # row would otherwise read as a variant (upstream annotates Stop/SubagentEnd).
+    block = rust_block_after(strip_rust_comments(text), r"(?m)^\s*hook_events!\s*")
+    if block is None:
         return None
-    found = set(re.findall(r"(?m)^\s*([A-Z]\w+),", m.group(1)))
+    # Row headers only (`Variant {`) — the row BODY is `key: value` lines whose
+    # aliases/traits carry CamelCase tokens (Observe/Tested) we must not admit.
+    found = set(re.findall(r"(?m)^\s*([A-Z]\w+)\s*\{", block))
     return found or None
 
 
@@ -1403,7 +1432,7 @@ def run_checks(
             if upstream is None:
                 breaking.append(
                     "CodeWhale `pub enum HookEvent` not found at the pinned path "
-                    "(crates/tui/src/hooks.rs) — upstream moved it; update "
+                    "(crates/tui/src/hooks/config.rs) — upstream moved it; update "
                     "CODEWHALE_HOOK_URL / the parser."
                 )
             else:
@@ -1420,16 +1449,20 @@ def run_checks(
                         f"intentionally omit it (add a decoder arm + CODEWHALE_EVENTS, "
                         f"or add it to CODEWHALE_KNOWN_OMITTED)."
                     )
-            # Env-mode identity fields: the DEEPSEEK_* names CodeWhale sets in
-            # `HookContext::to_env_vars` (same hooks.rs). ONE-DIRECTIONAL.
+        # Env-mode identity fields: the DEEPSEEK_* names CodeWhale sets in
+        # `HookContext::to_env_vars`, a SEPARATE file from the enum since the
+        # hooks.rs -> hooks/ split. ONE-DIRECTIONAL. Its own fetch, so a failure
+        # to read the executor can't be mistaken for every env var vanishing.
+        exec_text = try_fetch(CODEWHALE_EXECUTOR_URL, "CodeWhale executor", breaking, errors)
+        if exec_text is not None:
             for field in sorted(CODEWHALE_ENV_FIELDS):
-                if f'"{field}"' not in text:
+                if f'"{field}"' not in exec_text:
                     breaking.append(
                         f"CodeWhale env var `{field}` (folded by the shim's env-mode "
                         f"into the {{cwd,tool,tool_args}} envelope) is GONE from "
-                        f"hooks.rs `to_env_vars` — renamed; the shim reads None, the "
-                        f"envelope omits its field, and the cwd-keyed decoder drops "
-                        f"the event (empty cwd = no sprite / no activity)."
+                        f"hooks/executor.rs `to_env_vars` — renamed; the shim reads "
+                        f"None, the envelope omits its field, and the cwd-keyed "
+                        f"decoder drops the event (empty cwd = no sprite / no activity)."
                     )
 
     # --- opencode EventV2 types (only the FETCH is transient) --------------

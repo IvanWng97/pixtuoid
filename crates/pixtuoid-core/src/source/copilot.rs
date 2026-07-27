@@ -123,6 +123,13 @@ const KNOWN_NAMESPACES: &[&str] = &[
     "elicitation",
     "exit_plan_mode",
     "external_tool",
+    // `factory.run_updated` only — an ephemeral (`ephemeral: true`, never
+    // persisted to the on-disk event log) invalidation ping for a changed
+    // factory run, so the transcript tail should never even see it. Listed as a
+    // KNOWINGLY IGNORED family rather than decoded: it carries no lifecycle we
+    // render, and leaving it out would breadcrumb every line of it if upstream
+    // ever does persist one.
+    "factory",
     "hook",
     "mcp",
     "mcp_app",

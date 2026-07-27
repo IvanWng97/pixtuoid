@@ -224,6 +224,49 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     check(up is not None and {"session_start", "pre_tool_use"} <= up, f"codewhale enum parse: {up}")
     check(d.upstream_codewhale_hooks("no enum here") is None, "codewhale none -> None")
 
+    # grok HookEventName — BOTH declaration shapes, because upstream moved from a
+    # plain enum to a `hook_events!` macro TABLE and the enum-only regex then read
+    # empty, reporting the 15 unchanged variants as "not found at the pinned path"
+    # (#793). The macro-def arm is the trap: its body carries a literal
+    # `pub enum HookEventName {` with `$variant` placeholders and no real variants,
+    # so a parser must fall THROUGH it to the invocation rather than stop there.
+    grok_plain = "pub enum HookEventName {\n    SessionStart,\n    PreToolUse,\n}"
+    up = d.upstream_grok_hooks(grok_plain)
+    check(up is not None and {"SessionStart", "PreToolUse"} <= up, f"grok plain enum parse: {up}")
+    grok_macro = (
+        "macro_rules! hook_events {\n"
+        "    ($($variant:ident { display: $d:literal, }),* $(,)?) => {\n"
+        "        pub enum HookEventName {\n"
+        "            $($variant),*\n"
+        "        }\n"
+        "    };\n"
+        "}\n"
+        "\n"
+        "hook_events! {\n"
+        "    SessionStart {\n"
+        '        display: "session_start",\n'
+        '        aliases: ["SessionStart", "session_start"],\n'
+        "        traits: (Observe, Tested, true),\n"
+        "    },\n"
+        "    /// A doc comment on a row must not be read as a variant.\n"
+        "    SubagentEnd {\n"
+        '        display: "subagent_stop",\n'
+        '        aliases: ["SubagentEnd"],\n'
+        "        traits: (Stop, Tested, true),\n"
+        "    },\n"
+        "}\n"
+    )
+    up = d.upstream_grok_hooks(grok_macro)
+    check(
+        up is not None and up == {"SessionStart", "SubagentEnd"},
+        f"grok macro-table parse (exact, no alias/trait leakage): {up}",
+    )
+    # A macro DEFINITION with no invocation must read None (a real "it moved"),
+    # never the placeholder-only enum body.
+    grok_def_only = grok_macro.split("hook_events! {")[0]
+    check(d.upstream_grok_hooks(grok_def_only) is None, "grok macro def without invocation -> None")
+    check(d.upstream_grok_hooks("no enum here") is None, "grok none -> None")
+
     # Codex EventMsg / ResponseItem: #[serde(tag="type", rename_all="snake_case")]
     # enums. snake_case(variant) + explicit rename/alias, with nested tuple/struct
     # bodies stripped so a CamelCase field TYPE isn't mistaken for a variant.

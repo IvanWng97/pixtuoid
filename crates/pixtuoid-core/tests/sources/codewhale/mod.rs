@@ -10,7 +10,7 @@
 //! parent (cwd-keyed) and child (agent_id-keyed) are DISTINCT sprites, the child
 //! links to the parent, and `subagent_complete` ends the child (`as_child`) while
 //! the parent keeps running. Payload shapes follow CodeWhale's documented
-//! observer-hook wire (Hmbown/CodeWhale `crates/tui/src/hooks.rs` `HookEvent` +
+//! observer-hook wire (Hmbown/CodeWhale `crates/tui/src/hooks/config.rs` `HookEvent` +
 //! `docs/CONFIGURATION.md`).
 
 use std::path::Path;
