@@ -3,6 +3,29 @@
 # that line/region coverage can't see. Use the project's runner (nextest) and
 # exclude paths where a surviving mutant is NOISE, not a real gap, so the
 # advisory signal stays high.
+#
+# READ THIS BEFORE ACTING ON A `pixtuoid-core` / `pixtuoid-scene` SURVIVOR.
+# `test_workspace` is deliberately left at its default, which means "only the
+# tests in the mutated package are run" (`cargo mutants --help`). That is a
+# systematic BLIND SPOT for this repo specifically, because core/scene behaviour
+# is covered on purpose by the BINARY's headless harness (~100 integration tests
+# driving the real TuiRenderer), not by core's own unit tests. So a core/scene
+# mutant can be reported MISSED while `-p pixtuoid` catches it outright —
+# measured, not theorised: making `SceneState::insert_daemon` a no-op reds 8 of 9
+# `harness::mascot` tests while all 53 of core's own daemon tests stay green, and
+# it still reported as a survivor.
+#
+# So: for a survivor in core/scene, REPRODUCE IT FIRST — apply the mutation and
+# run `-p pixtuoid` too. Only write a new test if the mutation genuinely survives
+# the whole workspace. Otherwise you are padding the suite, or "fixing" code that
+# already works.
+#
+# Turning it on is the accurate-but-unusable option: the 2026-07 run of this diff
+# took 2h for 221 mutants package-scoped (~33s each), while the full workspace
+# suite is ~135s per mutant — so the same run would be ~8h. For an ADVISORY check
+# that trade is not worth it. Pass `--test-workspace true` by hand
+# (`just mutants --test-workspace true`) when auditing core/scene specifically and
+# you can afford the wall-clock.
 test_tool = "nextest"
 
 exclude_globs = [
@@ -40,6 +63,24 @@ exclude_re = [
     # deterministic test can arrange (the non-boundary prune/dedupe behavior
     # IS pinned by unclaim.rs's unit tests).
     'unclaim\.rs.*replace < with <= in ChildEndUnclaims',
+    # `mascot_position`'s walk-in boundary, `if entered < MASCOT_ENTER_MS`. `<=`
+    # extends the leg by one millisecond, and at that instant the walk-in's own t=1
+    # endpoint IS `home`, which is also the wander's forced cycle-0 origin ("Cycle 0's
+    # origin is forced to `home` so it joins the enter walk pop-free" — mascot_wander),
+    # so both branches render the identical Point. Measured per consecutive-port seed,
+    # including the frames either side.
+    #
+    # Its SIBLING boundary is deliberately NOT excluded any more: `if age < enter_delay`
+    # used to HOLD the mascot at the elevator, making `<=` a one-millisecond no-op, but
+    # the stagger now returns `None` instead — so `<=` changes drawn to not-drawn at
+    # exactly `age == enter_delay`, which is observable and IS killed (verified) by
+    # `the_walk_out_starts_from_where_the_mascot_was_when_it_died`'s arrival assertion.
+    # An exclusion that hides a killable mutant is worse than a noisy row — and
+    # cargo-mutants describes the two boundaries IDENTICALLY ("replace < with <= in
+    # mascot_position"), so no regex can exclude one without the other. Hence NEITHER
+    # is excluded: the walk-in one will show up as a known-noise row, documented here,
+    # and the stagger one is genuinely caught. (Same call as the `% with /` pair in
+    # `mascot_spot_for` before that fn was deleted.)
     # The unix hook-socket bind's `tmp.len() > 100` picks between two bind
     # strategies (temp-rename vs direct+chmod) whose end states are
     # byte-identical — the boundary is sun_path headroom, distinguishable only

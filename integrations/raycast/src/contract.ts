@@ -12,12 +12,12 @@
  * UI concern free to change).
  */
 export interface SourceStatus {
-  cli_present: boolean;
-  connected: boolean;
+  id: string;
   display_name: string;
+  connected: boolean;
+  cli_present: boolean;
   /**
    * A health/issue summary (install-broken / decode-drift), or `null` when n/a.
    */
   health?: string | null;
-  id: string;
 }

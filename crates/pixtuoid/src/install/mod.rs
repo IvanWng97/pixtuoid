@@ -39,9 +39,12 @@ pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 /// Whether `t`'s config currently bears pixtuoid hooks — the load-bearing gate
 /// for `verify_target` (an uninstalled config would verify "broken"; see
 /// `doctor::diagnose`). A dry-run uninstall that would change the parsed doc
-/// means managed hooks are present. An absent/empty config is excluded; a
-/// config present but unreadable or unparseable is INCLUDED (true) so a
-/// hooks-bearing-but-malformed config still counts as installed. (Until 0.12.0
+/// means managed hooks are present. An absent/empty config is excluded. A config
+/// present but UNREADABLE is INCLUDED (true) — we cannot look, so we must not
+/// claim it is uninstalled. A config that reads but cannot be PARSED falls back to
+/// the marker probe (`config_mentions_us`) instead: asserting "installed" about a
+/// document we could not interpret produced advice that could not succeed (the
+/// WHY, and the one bounded false negative, are at the call site). (Until 0.12.0
 /// this was also `config::resolve_connected`'s migrate-default signal for an
 /// absent `[sources]` flag — that inference was dropped, so this went
 /// `pub` → `pub(crate)`. Callers: `doctor::diagnose`'s verify gate,
@@ -60,9 +63,54 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
     };
     match io::read_config(&path) {
         Ok(c) if c.trim().is_empty() => false,
-        Ok(c) => (t.merge_uninstall)(&c).map(|o| o.changed).unwrap_or(true),
+        // A merge that ERRS means "we could not tell" — so ask the cheaper question
+        // the parse was only a means to: does this document mention US at all? The
+        // old `unwrap_or(true)` assumed present, which is right for a corrupt config
+        // that DOES bear our hooks (the case its rationale names) but wrong for one
+        // we merely cannot represent: OpenClaw's config is legal JSON5, so a
+        // never-connected user with a comment in theirs was reported hooks-INSTALLED,
+        // then verified BROKEN ("plugin artifact missing…, reconnect openclaw") —
+        // advice that cannot succeed, since the merge refuses that same document by
+        // design (the OpenClaw-JSON5 sharp edge). ONE uniform rule for all targets —
+        // no per-target branch — because `unwrap_or(true)` was wrong for every one of
+        // them: asserting "installed" about a config we could not read is a claim we
+        // cannot support. A false NEGATIVE is possible but bounded: a managed config
+        // normally names us (the `_pixtuoid` sentinel, `plugins.entries.pixtuoid`, or
+        // the embedded `pixtuoid-hook` path), and the one gap is kimi on WINDOWS,
+        // which carries no sentinel and whose bare exec form (`<path> --source kimi`)
+        // spells our name only if the shim path does. There the probe answers "not
+        // ours" for a CORRUPT config — under-reporting installed-ness, never the false
+        // "install broken" the old default produced. Asserted where it holds by
+        // `kimis_uppercase_env_marker_alone_satisfies_the_fallback_probe` (unix).
+        Ok(c) => (t.merge_uninstall)(&c)
+            .map(|o| o.changed)
+            // Unparseable ⇒ fall back to the marker probe (see `config_mentions_us`).
+            // Its residual false-POSITIVE is narrowed, not gone: an unparseable config
+            // that merely MENTIONS the string — a comment, or a foreign load path under
+            // a directory named after us — still reads as ours and then verifies BROKEN
+            // on its absent artifacts. Accepted: that needs a coincidence, where the old
+            // `unwrap_or(true)` fired for every JSON5 document. Tighten to the
+            // per-format markers if it ever bites.
+            .unwrap_or_else(|_| config_mentions_us(&c)),
         Err(_) => true,
     }
+}
+
+/// The substring every config pixtuoid has written contains — our own name, in the
+/// sentinel key, the plugin entry id, the baked plugin path, or an env prefix. Used
+/// only as the "is this ours at all?" fallback when a config cannot be parsed for a
+/// real answer.
+const PLUGIN_MENTION: &str = "pixtuoid";
+
+/// Does `content` bear OUR marker? The fallback DECISION, extracted so a test can
+/// drive it against every target's real written config instead of only through
+/// `has_hooks` (whose fallback is unreachable for a config that parses). Folded to
+/// lowercase because `kimi` — the one target with no `_pixtuoid` sentinel — marks
+/// itself with the UPPERCASE `PIXTUOID_SOURCE=kimi`. This is NOT the same question
+/// as matching an OpenClaw plugin id, which is case-SENSITIVE upstream (see
+/// `openclaw::is_plugin_id`); don't harmonize the two.
+fn config_mentions_us(content: &str) -> bool {
+    content.to_ascii_lowercase().contains(PLUGIN_MENTION)
 }
 
 /// Verify a target's installed config is structurally SOUND (the silent-dead
@@ -111,20 +159,11 @@ pub(crate) fn verify_target(
     };
     let parse = (t.verify_schema)(&content);
     let mut issues = parse.issues;
-    let mut notes = Vec::new();
+    // A target's own SOFT observations (a config format we can't strictly parse, a
+    // fail-closed switch the user owns) ride out alongside the filesystem ones.
+    let mut notes = parse.notes;
     match parse.shim {
-        ShimRef::Absolute(p) => {
-            // `display_safe`: the path came from the user's hand-editable hook
-            // command, and these issues reach a real terminal (doctor stdout /
-            // boot eprintln) — strip control chars at the SOURCE so no surface
-            // can leak an ANSI/OSC escape (R0615-06 discipline; online review).
-            let shown = verify::display_safe(&p);
-            if !p.exists() {
-                issues.push(format!("shim binary missing: {shown}"));
-            } else if !is_executable(&p) {
-                issues.push(format!("shim binary not executable: {shown}"));
-            }
-        }
+        ShimRef::Absolute(p) => check_shim_binary(&p, &mut issues),
         ShimRef::BareName => {
             // Claude/Unix bare `pixtuoid-hook` relies on PATH; a doctor-process
             // PATH miss is NOT proof the CLI can't resolve it → soft note only.
@@ -164,14 +203,30 @@ pub(crate) fn verify_target(
     if let Some(make) = t.extra_artifacts {
         match make(std::path::Path::new("pixtuoid-hook")) {
             Ok(arts) => {
-                for (p, _) in arts {
+                let mut missing: Vec<PathBuf> = Vec::new();
+                for (p, intended) in arts {
                     if !p.exists() {
-                        issues.push(format!(
-                            "plugin artifact missing: {}",
+                        missing.push(p);
+                        continue;
+                    }
+                    // Existence misses a shim that MOVED (#332 — a green doctor over a
+                    // plugin whose every forward fails), so stat the baked path too.
+                    if !intended.contains(verify::BAKED_HOOK_MARKER) {
+                        continue;
+                    }
+                    match io::read_config(&p)
+                        .ok()
+                        .as_deref()
+                        .and_then(verify::baked_hook_path)
+                    {
+                        Some(baked) => check_shim_binary(&baked, &mut issues),
+                        None => notes.push(format!(
+                            "could not read the baked shim path from {}",
                             verify::display_safe(&p)
-                        ));
+                        )),
                     }
                 }
+                issues.extend(missing_artifact_issue(&missing));
             }
             // Couldn't even compute the paths (e.g. no home dir) — can't confirm,
             // so a soft note, never a spurious "broken" (the config path would have
@@ -180,6 +235,51 @@ pub(crate) fn verify_target(
         }
     }
     verify::SchemaVerifyResult { issues, notes }
+}
+
+/// The HARD issue(s) for missing code artifacts, collapsed when they share a
+/// directory — the whole plugin dir being gone is ONE fact, and OpenClaw ships
+/// three artifacts, so listing each absolute path made the Sources panel's detail
+/// line ~266 chars against a ~62-char budget: half a minute of marquee scrolling
+/// to learn the files are all in the same place. Named the same way either way, so
+/// the "reconnect" remedy reads identically.
+fn missing_artifact_issue(missing: &[PathBuf]) -> Vec<String> {
+    let [first, rest @ ..] = missing else {
+        return Vec::new();
+    };
+    let dir = first.parent();
+    if !rest.is_empty() && dir.is_some() && rest.iter().all(|p| p.parent() == dir) {
+        let names: Vec<String> = missing
+            .iter()
+            .filter_map(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .collect();
+        return vec![format!(
+            "{} plugin artifacts missing from {}: {}",
+            missing.len(),
+            verify::display_safe(dir.unwrap_or(first)),
+            crate::strip_control_chars(&names.join(", "))
+        )];
+    }
+    missing
+        .iter()
+        .map(|p| format!("plugin artifact missing: {}", verify::display_safe(p)))
+        .collect()
+}
+
+/// Stat one resolved shim path — the ONE check shared by an embedded hook command
+/// (`ShimRef::Absolute`) and a code artifact's baked `HOOK_PATH`, so the two can't
+/// report a moved binary differently. `display_safe`: the path comes from the
+/// user's hand-editable hook command / plugin file and these issues reach a real
+/// terminal (doctor stdout / boot eprintln), so control chars are stripped at the
+/// SOURCE — no surface can leak an ANSI/OSC escape (R0615-06 discipline).
+fn check_shim_binary(p: &std::path::Path, issues: &mut Vec<String>) {
+    let shown = verify::display_safe(p);
+    if !p.exists() {
+        issues.push(format!("shim binary missing: {shown}"));
+    } else if !is_executable(p) {
+        issues.push(format!("shim binary not executable: {shown}"));
+    }
 }
 
 #[cfg(unix)]
@@ -296,6 +396,12 @@ pub struct InstallReport {
     /// True when the bare `pixtuoid-hook` isn't on PATH (Claude/Unix, no explicit
     /// hook). An install-time environment check, surfaced by the presenter.
     pub path_warning: bool,
+    /// The target's `post_install_hint` — a step the user must still take for the
+    /// install to take effect (OpenClaw's running gateway must restart). Stamped for
+    /// the panel, which has the report but not the source id; the CLI presenters read
+    /// the SAME `Target` field through `sources::post_install_hint`, so every surface
+    /// resolves one authority and none can invent its own advice.
+    pub post_install_hint: Option<&'static str>,
 }
 
 /// Install pixtuoid hooks into `t`'s config, returning a structured report.
@@ -365,6 +471,7 @@ pub(crate) fn install_target(
             config_path: path,
             backup: None,
             path_warning,
+            post_install_hint: t.post_install_hint,
         });
     }
     let backup = lock.backup_once(BACKUP_SUFFIX)?;
@@ -374,6 +481,7 @@ pub(crate) fn install_target(
         config_path: path,
         backup,
         path_warning,
+        post_install_hint: t.post_install_hint,
     })
 }
 

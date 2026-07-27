@@ -24,14 +24,26 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
 use crate::install::io;
+use crate::install::merge::{prune_empty, prune_empty_root};
 use crate::install::target::MergeOutcome;
 
 /// The plugin id — the key under `plugins.entries` and `plugins.load.paths`'s dir.
 const PLUGIN_ID: &str = "pixtuoid";
+
+/// OpenClaw's state-dir names, MODERN first. The pair exists only because of the
+/// clawdbot→openclaw rebrand, i.e. this is a value that has already churned once
+/// upstream — so it is named here rather than spelled at each of the three ladders
+/// (`resolve_openclaw_state_dir`, `resolve_openclaw_config_path`'s legacy sibling
+/// search, `resolve_openclaw_detect`), which is how the same pair came to be
+/// written six times in this file.
+const STATE_DIRS: [&str; 2] = [".openclaw", ".clawdbot"];
+/// The config filenames inside a state dir, MODERN first (`resolveConfigPath`
+/// searches the same order).
+const CONFIG_FILES: [&str; 2] = ["openclaw.json", "clawdbot.json"];
 /// First-line marker in the rendered entry module (provenance; not load-bearing
 /// for detection, which keys on OpenClaw's own dirs). Only the test suite reads
 /// it, so it's test-only.
@@ -123,52 +135,91 @@ fn resolve_openclaw_state_dir(
                  unset); pass --config <path>"
         )
     })?;
-    let modern = home.join(".openclaw");
-    if exists(&modern) {
-        return Ok(modern);
-    }
-    let legacy = home.join(".clawdbot");
-    if exists(&legacy) {
-        return Ok(legacy);
-    }
-    Ok(modern)
+    let candidates = state_dir_candidates(&home);
+    Ok(candidates
+        .iter()
+        .find(|c| exists(c))
+        .cloned()
+        // Nothing exists yet ⇒ a fresh install lands in the MODERN dir; never
+        // shadow a real legacy one, which is why `find` runs first.
+        .unwrap_or_else(|| candidates[0].clone()))
+}
+
+/// The state-dir candidates under one effective home, MODERN first — the ONE
+/// spelling of the [`STATE_DIRS`] ladder that the state-dir resolution, the
+/// config-path legacy sibling search and the presence probe all read.
+fn state_dir_candidates(home: &Path) -> Vec<PathBuf> {
+    STATE_DIRS.iter().map(|d| home.join(d)).collect()
 }
 
 /// The config file we merge into, mirroring OpenClaw's `resolveConfigPath`: the
 /// `OPENCLAW_CONFIG_PATH` override (a FULL config-file path, assumed absolute — see
 /// the CodeWhale note on why a relative override can't be reconciled across
-/// processes) wins; else prefer an existing `openclaw.json` in the state dir, then
-/// the legacy `clawdbot.json`, else `openclaw.json` for a fresh install (never
-/// shadow a real `clawdbot.json` the gateway still reads).
+/// processes) wins; else the first EXISTING of the four modern/legacy
+/// dir × file candidates; else `<modern-dir>/openclaw.json` for a fresh install
+/// (never shadow a real config the gateway still reads).
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     // OPENCLAW_CONFIG_PATH is `~`-expanded too (resolveUserPath, #342).
     let home = pixtuoid_core::platform::home_first_dir();
+    let state_env = io::nonempty_env("OPENCLAW_STATE_DIR");
+    // The home whose `.openclaw`/`.clawdbot` pair may hold the config. An explicit
+    // OPENCLAW_STATE_DIR points AT the dir and bypasses home resolution entirely,
+    // so it gets NO sibling search (the operator named the scope); otherwise the
+    // effective home is OPENCLAW_HOME-then-OS-home, exactly as the state dir's own
+    // resolution derives it.
+    let legacy_home = match state_env {
+        Some(_) => None,
+        None => io::nonempty_env("OPENCLAW_HOME")
+            .map(|v| io::expand_tilde(&v, home.as_deref()))
+            .or_else(|| home.clone()),
+    };
     Ok(resolve_openclaw_config_path(
         io::nonempty_env("OPENCLAW_CONFIG_PATH").map(|v| io::expand_tilde(&v, home.as_deref())),
         openclaw_state_dir()?,
+        legacy_home,
         |p| p.exists(),
     ))
 }
 
-/// Pure core for [`default_config_path`] — the override + resolved state dir +
-/// existence check injected.
+/// Pure core for [`default_config_path`] — the override, the resolved state dir,
+/// the OS home and the existence check injected.
+///
+/// The candidate list is FLAT across both dirs, not "pick a dir, then pick a file
+/// in it" (upstream searches the same way). The nested form had a real hole: with
+/// `~/.openclaw` PRESENT (so it wins as the state dir) but the actual config at
+/// `~/.clawdbot/openclaw.json`, we resolved a path the gateway never reads —
+/// installing hooks into a file nobody loads, with `doctor` reporting green. The
+/// `state_dir` stays first in the list so an `OPENCLAW_STATE_DIR`/`OPENCLAW_HOME`
+/// override still outranks the legacy dir; `home` only contributes the legacy
+/// SIBLING (`None` ⇒ just the state dir's two candidates).
 fn resolve_openclaw_config_path(
     config_path_env: Option<PathBuf>,
     state_dir: PathBuf,
+    home: Option<PathBuf>,
     exists: impl Fn(&Path) -> bool,
 ) -> PathBuf {
     if let Some(p) = config_path_env {
         return p;
     }
-    let modern = state_dir.join("openclaw.json");
-    if exists(&modern) {
-        return modern;
+    // Modern file before legacy file WITHIN a dir; the resolved state dir before
+    // the legacy sibling ACROSS dirs.
+    let mut dirs = vec![state_dir.clone()];
+    if let Some(h) = home {
+        for legacy_dir in state_dir_candidates(&h) {
+            if legacy_dir != state_dir {
+                dirs.push(legacy_dir);
+            }
+        }
     }
-    let legacy = state_dir.join("clawdbot.json");
-    if exists(&legacy) {
-        return legacy;
+    for dir in &dirs {
+        for file in CONFIG_FILES {
+            let cand = dir.join(file);
+            if exists(&cand) {
+                return cand;
+            }
+        }
     }
-    modern
+    state_dir.join(CONFIG_FILES[0])
 }
 
 /// The wholly-owned plugin dir: `<state-dir>/plugins/pixtuoid`.
@@ -213,7 +264,7 @@ fn resolve_openclaw_detect(
     let Some(home) = openclaw_home_env.or(os_home_first) else {
         return false;
     };
-    exists(&home.join(".openclaw")) || exists(&home.join(".clawdbot"))
+    state_dir_candidates(&home).iter().any(|c| exists(c))
 }
 
 /// The shim's absolute path, baked into the plugin (the gateway runs it under
@@ -226,9 +277,7 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 /// `extra_artifacts` Target hook: written verbatim on install, shim path baked in.
 pub(crate) fn plugin_artifacts(hook_path: &Path) -> Result<Vec<(PathBuf, String)>> {
     let dir = plugin_dir()?;
-    let hook = hook_path
-        .to_str()
-        .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", hook_path.display()))?;
+    let hook = crate::install::merge::hook_path_str(hook_path)?;
     Ok(vec![
         (dir.join("openclaw.plugin.json"), MANIFEST.to_string()),
         (dir.join("package.json"), PACKAGE.to_string()),
@@ -238,6 +287,76 @@ pub(crate) fn plugin_artifacts(hook_path: &Path) -> Result<Vec<(PathBuf, String)
 
 fn render_plugin(hook_path: &str) -> Result<String> {
     crate::install::merge::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook_path, "openclaw")
+}
+
+/// The one-line advice both the JSON5 refusal and the `plugins.allow` note point
+/// at — OpenClaw's OWN commands write exactly the keys our merge does.
+const OWNER_CLI_ADVICE: &str = "register it with OpenClaw's own CLI instead: \
+     `openclaw plugins install --link <dir>` + `openclaw plugins enable pixtuoid`, \
+     then set plugins.entries.pixtuoid.hooks.allowConversationAccess = true";
+
+/// The key OpenClaw's config loader uses to pull in another file
+/// (`config/includes.ts`) — its presence means the EFFECTIVE `plugins` block may
+/// not be the one in this document.
+const INCLUDE_KEY: &str = "$include";
+
+/// Does this JSON value name OUR plugin id? TRIM-only and CASE-SENSITIVE, because
+/// that is what upstream does — read out of the shipped 2026.7.1 bundle, not
+/// inferred: `normalizePluginIdWithLookup` lowercases only to build an ALIAS
+/// LOOKUP KEY and returns the `trimmed` original when no alias matches (`pixtuoid`
+/// is not a built-in alias), and `collectExplicitEffectivePluginIds` then compares
+/// exactly — `plugins.allow.includes(pluginId)` / `plugins.deny.delete(pluginId)`.
+///
+/// An earlier revision of this fn compared case-INSENSITIVELY on the belief that
+/// upstream normalizes to lowercase. That was a REGRESSION in both directions: an
+/// allowlist containing `"Pixtuoid"` made install skip the join, leaving OpenClaw
+/// reporting the plugin `disabled` while `doctor` printed `✓ ok` (the green-doctor
+/// silent-dead class), and a `deny: ["Pixtuoid"]` made `doctor` claim a break over
+/// a plugin OpenClaw had actually loaded. Do not "restore" the case-insensitive
+/// form without re-reading `normalizePluginIdWithLookup`.
+fn is_plugin_id(v: &Value) -> bool {
+    v.as_str().is_some_and(|s| s.trim() == PLUGIN_ID)
+}
+
+/// Does `v` carry an [`INCLUDE_KEY`] ANYWHERE, not just at the document root?
+/// pixtuoid never reads included files at all, so any `$include` in the document
+/// is a reason our verdict may not describe what the gateway actually loads — a
+/// root-only check would hand a clean bill to a config whose real `plugins` block
+/// we never saw. Depth is bounded by serde_json's own parse recursion limit.
+fn contains_include(v: &Value) -> bool {
+    match v {
+        Value::Object(m) => m.contains_key(INCLUDE_KEY) || m.values().any(contains_include),
+        Value::Array(a) => a.iter().any(contains_include),
+        _ => false,
+    }
+}
+
+/// Parse `openclaw.json` for a MERGE — strict JSON only, with the honest reason.
+///
+/// OpenClaw reads its own config with **JSON5**, so comments, trailing commas,
+/// single quotes and unquoted keys are
+/// all LEGAL on disk even though OpenClaw's own writer emits strict JSON. Checkable
+/// two ways rather than from an unverifiable source path: the shipped 2026.7.1
+/// bundle carries upstream's own surviving doc-comment "Config file path (JSON or
+/// JSON5)" (`dist/paths-BMBAvkNf.js`), and `openclaw config patch` was measured
+/// round-tripping a COMMENTED config successfully (it parsed, then re-serialised
+/// strict and dropped the comment — see the JSON5 sharp edge). Our
+/// read→merge→write round-trip re-serializes through `serde_json`, which cannot
+/// represent any of that: parsing it would mean silently DELETING the user's
+/// comments on their next `connect`. So a non-strict document is refused with the
+/// owner-CLI path instead of being rewritten — the same "never destroy the user's
+/// config" rule as CodeWhale's untouched `enabled = false`.
+fn parse_for_merge(content: &str) -> Result<Value> {
+    if content.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_str(content).map_err(|e| {
+        anyhow!(
+            "openclaw.json is not strict JSON ({e}). OpenClaw parses it as JSON5, so \
+             comments/trailing commas/single quotes are legal there and pixtuoid will not \
+             rewrite the file rather than drop them — {OWNER_CLI_ADVICE}"
+        )
+    })
 }
 
 fn obj_mut<'a>(v: &'a mut Value, key: &str) -> Result<&'a mut serde_json::Map<String, Value>> {
@@ -258,8 +377,7 @@ pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutco
         .to_str()
         .ok_or_else(|| anyhow!("plugin dir path is non-UTF-8: {}", dir.display()))?
         .to_string();
-    let mut root =
-        crate::install::merge::parse_json_or_empty(content).context("parsing openclaw.json")?;
+    let mut root = parse_for_merge(content)?;
     let before = root.clone();
     {
         let root_obj = obj_mut(&mut root, "root")?;
@@ -282,6 +400,17 @@ pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutco
             PLUGIN_ID.to_string(),
             json!({ "enabled": true, "hooks": { "allowConversationAccess": true } }),
         );
+
+        // `plugins.allow` is fail-closed only while NON-EMPTY: upstream gates on
+        // `allow.length === 0 || allow.includes(id)`, so a curated list that omits
+        // us means the plugin never loads however enabled its entry is — join it.
+        // An EMPTY `allow: []` already means NO restriction, so there is nothing to
+        // join and the user's key is left exactly as found.
+        if let Some(allow) = plugins.get_mut("allow").and_then(Value::as_array_mut) {
+            if !allow.is_empty() && !allow.iter().any(is_plugin_id) {
+                allow.push(json!(PLUGIN_ID));
+            }
+        }
     }
     let changed = root != before;
     Ok(MergeOutcome {
@@ -296,9 +425,14 @@ pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutco
 pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     let dir = plugin_dir()?;
     let dir_str = dir.to_str().map(str::to_string);
-    let mut root =
-        crate::install::merge::parse_json_or_empty(content).context("parsing openclaw.json")?;
+    let mut root = parse_for_merge(content)?;
     let before = root.clone();
+    // Did we remove anything OF OURS? The husk prune must be gated on this.
+    // `has_hooks` asks "does a dry-run uninstall CHANGE the parsed doc", so pruning
+    // a pre-existing empty `plugins: {}` — a shape we never wrote — would report
+    // OpenClaw as hooks-installed to a user who never connected, and `doctor` would
+    // then verify that config and tell them to "reconnect openclaw".
+    let mut removed = false;
     if let Some(plugins) = root.get_mut("plugins").and_then(Value::as_object_mut) {
         if let Some(paths) = plugins
             .get_mut("load")
@@ -306,11 +440,49 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
             .and_then(|l| l.get_mut("paths"))
             .and_then(Value::as_array_mut)
         {
+            let was = paths.len();
             paths.retain(|p| p.as_str().map(str::to_string) != dir_str);
+            removed |= paths.len() != was;
         }
         if let Some(entries) = plugins.get_mut("entries").and_then(Value::as_object_mut) {
-            entries.remove(PLUGIN_ID);
+            removed |= entries.remove(PLUGIN_ID).is_some();
         }
+        if removed {
+            // Undo the `plugins.allow` JOIN symmetrically — but NEVER by emptying the
+            // list. Two facts pin this shape. (1) A dangling id is not inert: a live
+            // `openclaw plugins list` reports `plugins.allow: plugin not found:
+            // pixtuoid (stale config entry)`, so leaving it always would hand the
+            // user upstream noise they can't explain. (2) Dropping the LAST member
+            // turns `["pixtuoid"]` into `[]`, which upstream reads as NO restriction
+            // — every plugin suddenly permitted, i.e. a fail-closed key flipped
+            // fail-OPEN by an uninstall. A single-member list is also one we never
+            // wrote (install only joins a list that ALREADY had members), so leaving
+            // it is both non-destructive and the fail-CLOSED residue; upstream's own
+            // warning is then the honest nudge to clean it up.
+            if let Some(allow) = plugins.get_mut("allow").and_then(Value::as_array_mut) {
+                // Guard the POST-condition, not a pre-count: `["pixtuoid", " pixtuoid "]`
+                // is two entries that are BOTH ours, so a `len() > 1` pre-check let the
+                // retain empty the list — `[]` reads as NO restriction upstream, exactly
+                // the fail-OPEN this guard exists to prevent.
+                let kept: Vec<Value> = allow.iter().filter(|v| !is_plugin_id(v)).cloned().collect();
+                if !kept.is_empty() {
+                    *allow = kept;
+                }
+            }
+            // PRUNE the containers that are now OURS-ONLY-AND-EMPTY, so a disconnect
+            // leaves OpenClaw's config as it found it instead of a husk
+            // `plugins: { entries: {}, load: { paths: [] } }` (the flat-JSON targets
+            // already prune — `merge::flat_json_merge_uninstall`). A container the
+            // user has anything else in is never touched.
+            prune_empty(plugins, "entries");
+            if let Some(load) = plugins.get_mut("load").and_then(Value::as_object_mut) {
+                prune_empty(load, "paths");
+            }
+            prune_empty(plugins, "load");
+        }
+    }
+    if removed {
+        prune_empty_root(&mut root, "plugins");
     }
     let changed = root != before;
     Ok(MergeOutcome {
@@ -330,7 +502,19 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{SchemaParse, ShimRef};
     let Ok(root) = serde_json::from_str::<Value>(content) else {
-        return SchemaParse::broken("openclaw.json is not valid JSON — reconnect openclaw");
+        // NOT "broken": OpenClaw reads this file as JSON5, so a document our strict
+        // parser rejects can be perfectly valid and LOADING FINE (comments, trailing
+        // commas). Reporting a hard break here told the user to "reconnect openclaw"
+        // — advice that cannot succeed, because the merge refuses the same document
+        // by design. Report the truth (we cannot verify) and the path that works.
+        return SchemaParse {
+            issues: vec![],
+            notes: vec![format!(
+                "openclaw.json is not strict JSON (OpenClaw reads it as JSON5), so pixtuoid \
+                 cannot verify the plugin registration — {OWNER_CLI_ADVICE}"
+            )],
+            shim: ShimRef::Unknown,
+        };
     };
     let entry = &root["plugins"]["entries"][PLUGIN_ID];
     if entry.is_null() {
@@ -339,8 +523,81 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
         );
     }
     let mut issues = Vec::new();
+    let mut notes = Vec::new();
     if entry["enabled"] != json!(true) {
         issues.push("the pixtuoid openclaw plugin is installed but disabled".into());
+    }
+    // The grant is ours to WRITE, so it is ours to VERIFY: without it the gateway
+    // fires no `before_agent_run`/`agent_end`, so the mascot renders but never
+    // leaves Idle — a half-dead install the entry/paths checks both pass.
+    if entry["hooks"]["allowConversationAccess"] != json!(true) {
+        issues.push(
+            "openclaw.json `plugins.entries.pixtuoid.hooks.allowConversationAccess` is not true \
+             — the gateway fires no run hooks, so the lobster never shows busy"
+                .into(),
+        );
+    }
+    // `plugins.enabled` gates the WHOLE plugin system upstream (`if (!plugins.enabled)
+    // return []`). An ABSENT key means enabled — OpenClaw's own `plugins enable`
+    // writes only the entry, never this — so only an EXPLICIT `false` is reportable,
+    // and it is the user's own global switch: a NOTE, never our break (the CodeWhale
+    // `[hooks].enabled = false` precedent).
+    if root["plugins"]["enabled"] == json!(false) {
+        notes.push(
+            "openclaw.json `plugins.enabled = false` — OpenClaw loads NO plugin at all (your \
+             own switch; pixtuoid leaves it untouched)"
+                .into(),
+        );
+    }
+    // A reload mode that will never APPLY our write. Upstream's reload plan marks
+    // `plugins.load` (the key we write) `kind: "restart"`, and
+    // `resolveGatewayReloadSettings` accepts `off|restart|hot|hybrid` defaulting to
+    // `hybrid` — so `restart`/`hybrid` pick our change up on their own, while `off`
+    // (no reload at all) and `hot` (hot-kind changes only) leave a RUNNING gateway
+    // serving without the plugin indefinitely. The user's own switch, so a NOTE:
+    // their install is sound, it just has not taken effect yet. (Both values
+    // verified against the shipped 2026.7.1 bundle + `openclaw config schema`.)
+    if let Some(mode) = root["gateway"]["reload"]["mode"].as_str() {
+        if mode == "off" || mode == "hot" {
+            notes.push(format!(
+                "openclaw.json `gateway.reload.mode = \"{mode}\"` never applies a restart-kind \
+                 change, and the plugin registration is one — a RUNNING gateway keeps serving \
+                 without pixtuoid until it is restarted (`openclaw gateway restart`)"
+            ));
+        }
+    }
+    // `plugins.allow`/`plugins.deny` are both FAIL-CLOSED for us and invisible to
+    // the entry/paths checks above — the silent-dead class again. A curated
+    // allowlist that omits us, or a denylist naming us, means the plugin never
+    // loads however enabled its entry is. An EMPTY allow list is NO restriction
+    // upstream (`allow.length === 0 || allow.includes(id)`), so it is silent.
+    if root["plugins"]["allow"]
+        .as_array()
+        .is_some_and(|allow| !allow.is_empty() && !allow.iter().any(is_plugin_id))
+    {
+        issues.push(
+            "openclaw.json `plugins.allow` does not list pixtuoid — the allowlist is \
+             fail-closed, so the plugin never loads"
+                .into(),
+        );
+    }
+    if root["plugins"]["deny"]
+        .as_array()
+        .is_some_and(|deny| deny.iter().any(is_plugin_id))
+    {
+        issues.push(
+            "openclaw.json `plugins.deny` lists pixtuoid — the plugin is denied, so it never \
+             loads"
+                .into(),
+        );
+    }
+    // An `$include` ANYWHERE means the EFFECTIVE plugins block may come from another
+    // file, so a sound-looking document here is not proof the gateway sees it.
+    if contains_include(&root) {
+        notes.push(format!(
+            "openclaw.json uses `{INCLUDE_KEY}` — the effective plugins config may come from \
+             an included file, which pixtuoid does not read"
+        ));
     }
     // `load.paths` must still point at our plugin dir (`…/plugins/pixtuoid`).
     // Separator-tolerant so a Windows backslash path still matches.
@@ -360,6 +617,10 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     }
     SchemaParse {
         issues,
+        notes,
+        // The shim path lives in the SEPARATE plugin entry module (an
+        // `extra_artifact`), so it is read + stat'd by `verify_target` instead —
+        // see its baked-shim check.
         shim: ShimRef::Unknown,
     }
 }
@@ -426,25 +687,65 @@ mod tests {
 
     #[test]
     fn openclaw_config_path_override_and_legacy_file_preference() {
-        let state = PathBuf::from("/home/u/.openclaw");
+        let home = PathBuf::from("/home/u");
+        let state = home.join(".openclaw");
         let modern = state.join("openclaw.json");
         let legacy = state.join("clawdbot.json");
+        let h = || Some(home.clone());
         // OPENCLAW_CONFIG_PATH wins verbatim — exists() never consulted.
-        let p = resolve_openclaw_config_path(Some("/custom/oc.json".into()), state.clone(), |_| {
-            panic!("exists() must not be consulted when OPENCLAW_CONFIG_PATH is set")
-        });
+        let p = resolve_openclaw_config_path(
+            Some("/custom/oc.json".into()),
+            state.clone(),
+            h(),
+            |_| panic!("exists() must not be consulted when OPENCLAW_CONFIG_PATH is set"),
+        );
         assert_eq!(p, PathBuf::from("/custom/oc.json"));
         // No override: prefer existing openclaw.json, then legacy clawdbot.json,
         // else openclaw.json for a fresh install.
         assert_eq!(
-            resolve_openclaw_config_path(None, state.clone(), |q| q == modern),
+            resolve_openclaw_config_path(None, state.clone(), h(), |q| q == modern),
             modern
         );
         assert_eq!(
-            resolve_openclaw_config_path(None, state.clone(), |q| q == legacy),
+            resolve_openclaw_config_path(None, state.clone(), h(), |q| q == legacy),
             legacy
         );
-        assert_eq!(resolve_openclaw_config_path(None, state, |_| false), modern);
+        assert_eq!(
+            resolve_openclaw_config_path(None, state.clone(), h(), |_| false),
+            modern
+        );
+    }
+
+    #[test]
+    fn openclaw_config_path_finds_a_config_in_the_legacy_dir_sibling() {
+        // The hole the flat candidate list closes: `~/.openclaw` EXISTS (so it wins
+        // as the state dir) but the real config lives in the legacy dir. Resolving
+        // `<state>/openclaw.json` there installs hooks into a file the gateway never
+        // reads — silently no lobster, with a GREEN doctor.
+        let home = PathBuf::from("/home/u");
+        let state = home.join(".openclaw"); // present, but holds no config
+        let real = home.join(".clawdbot").join("openclaw.json");
+        assert_eq!(
+            resolve_openclaw_config_path(None, state.clone(), Some(home.clone()), |q| q == real),
+            real,
+            "the legacy dir's config must win over a config-less modern dir"
+        );
+        // …and the modern dir still wins when BOTH exist (never demote a real one).
+        let modern = state.join("openclaw.json");
+        assert_eq!(
+            resolve_openclaw_config_path(None, state.clone(), Some(home.clone()), |q| q == real
+                || q == modern),
+            modern
+        );
+        // An explicit state-dir override searches NO sibling (`legacy_home: None`,
+        // which is what `default_config_path` passes for OPENCLAW_STATE_DIR): the
+        // operator named the scope, so the fresh-install path stays inside it.
+        let overridden = PathBuf::from("/custom/state");
+        assert_eq!(
+            resolve_openclaw_config_path(None, overridden.clone(), None, |q| q == real),
+            overridden.join("openclaw.json"),
+            "an overridden state dir outranks the legacy home sibling"
+        );
     }
 
     #[test]
@@ -532,13 +833,19 @@ mod tests {
             registered, expected,
             "plugin HOOKS drifted from OPENCLAW_EVENTS"
         );
-        // 3) Every const event has a decoder arm (non-empty presence update).
+        // 3) Every const event has a decoder arm (non-empty presence update), and
+        // carries the gateway identity the plugin stamps on every forwarded hook.
         for ev in OPENCLAW_EVENTS {
-            let payload = json!({ "type": ev });
-            let updates = decode_openclaw_hook_payload(&payload).unwrap();
+            let payload = json!({ "type": ev, "gatewayPort": 18789 });
+            let decoded = decode_openclaw_hook_payload(&payload).unwrap();
             assert!(
-                !updates.is_empty(),
+                !decoded.updates.is_empty(),
                 "decode_openclaw_hook_payload has no arm for registered event `{ev}`"
+            );
+            assert_eq!(
+                decoded.instance.as_str(),
+                "18789",
+                "`{ev}` must resolve its sending gateway, not fall back"
             );
         }
     }
@@ -626,6 +933,48 @@ mod tests {
         );
     }
 
+    /// The env-wiring WRAPPER, as opposed to the pure core the cases above drive
+    /// through injected arguments. Mutation testing found the wrapper had no unit
+    /// teeth at all — replacing its whole body with `Ok(Default::default())`, i.e.
+    /// handing the installer an EMPTY path to write into, passed the suite. Asserts
+    /// the shape invariant that holds under any ambient env, so it needs no env
+    /// mutation (which would race the other suites through `TEST_ENV_LOCK`); the
+    /// env→argument MAPPING itself is covered end-to-end by the openclaw e2e
+    /// scripts, where `openclaw plugins list` confirms the plugin landed in the file
+    /// the gateway actually reads — a cover `cargo test` cannot see.
+    #[test]
+    fn default_config_path_is_always_a_real_openclaw_config_file() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let p = default_config_path().expect("a dev machine resolves a home");
+        assert!(
+            !p.as_os_str().is_empty(),
+            "an empty path would be merged into, and created, at the filesystem root"
+        );
+        let name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("a config FILE, not a directory");
+        assert!(
+            CONFIG_FILES.contains(&name),
+            "must be one of OpenClaw's own config filenames {CONFIG_FILES:?} — got {name}"
+        );
+        let parent = p.parent().expect("the config sits inside a state dir");
+        let dir = parent
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("a named state dir");
+        assert!(
+            STATE_DIRS.contains(&dir),
+            "must sit in one of OpenClaw's own state dirs {STATE_DIRS:?} — got {dir}"
+        );
+        assert!(
+            p.is_absolute(),
+            "a relative path would resolve against the CLI's cwd at merge time"
+        );
+    }
+
     #[test]
     fn merge_install_is_idempotent() {
         let _env = crate::TEST_ENV_LOCK
@@ -656,6 +1005,385 @@ mod tests {
         assert_eq!(paths.len(), 2, "ours appended, foreign kept");
     }
 
+    /// `$include` detection, in both directions. Mutation testing found the whole
+    /// note untested: making `contains_include` return `true` unconditionally — a
+    /// spurious "your effective config may come from elsewhere" on EVERY sound
+    /// install — passed the suite, and so did deleting its array arm.
+    #[test]
+    fn include_is_detected_at_any_depth_and_only_when_present() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        // The negative case is the one that matters most: a normal config must NOT
+        // earn the note, or every user reads a warning that does not apply to them.
+        for clean in [
+            json!({}),
+            json!({"gateway": {"port": 18789}}),
+            json!({"plugins": {"entries": {"pixtuoid": {"enabled": true}},
+                               "load": {"paths": ["/o/plugins/pixtuoid"]}}}),
+            // A key merely CONTAINING the word, and a VALUE that looks like one.
+            json!({"notes": "$included by hand", "x": {"include": "y"}}),
+        ] {
+            assert!(
+                !contains_include(&clean),
+                "no {INCLUDE_KEY} here — must not be flagged: {clean}"
+            );
+        }
+
+        // Present at the root, nested in an object, and nested inside an ARRAY —
+        // OpenClaw configs are full of arrays (`plugins.load.paths`, `plugins.allow`),
+        // so the array arm is a real path, not defensive padding.
+        for dirty in [
+            json!({INCLUDE_KEY: "./base.json"}),
+            json!({"plugins": {INCLUDE_KEY: "./plugins.json"}}),
+            json!({"plugins": {"load": {"paths": [{INCLUDE_KEY: "./p.json"}]}}}),
+            json!({"a": [[{"deep": {INCLUDE_KEY: "./d.json"}}]]}),
+        ] {
+            assert!(
+                contains_include(&dirty),
+                "an {INCLUDE_KEY} anywhere means our verdict may not describe what the \
+                 gateway loads: {dirty}"
+            );
+        }
+
+        // And the note actually rides the verdict, as a NOTE (advisory) not an issue.
+        let sound = merge_install("{}", "").unwrap().content;
+        assert!(
+            !verify_schema(&sound)
+                .notes
+                .iter()
+                .any(|n| n.contains(INCLUDE_KEY)),
+            "a config we just wrote has no {INCLUDE_KEY} to report"
+        );
+        let mut with_include: Value = serde_json::from_str(&sound).unwrap();
+        with_include["plugins"][INCLUDE_KEY] = json!("./more.json");
+        let v = verify_schema(&with_include.to_string());
+        assert!(
+            v.notes.iter().any(|n| n.contains(INCLUDE_KEY)),
+            "the note must surface — got {:?}",
+            v.notes
+        );
+        assert!(
+            v.issues.is_empty(),
+            "…but an include is not itself broken, so never a HARD issue — got {:?}",
+            v.issues
+        );
+    }
+
+    /// Removing ONLY our load path (no `plugins.entries` row — a partial install, or a
+    /// user who hand-deleted the entry) still counts as "we removed something of
+    /// ours", so the `plugins.allow` residue is cleaned too. Mutation testing found
+    /// `removed |= …` could become `&=` — which, since `removed` starts false, makes
+    /// the path branch unable to ever set it — with nothing red.
+    #[test]
+    fn removing_only_our_load_path_still_counts_as_ours() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // A full install, then hand-drop the entry so ONLY the path identifies us.
+        let installed = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
+        let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+        v["plugins"]["entries"]
+            .as_object_mut()
+            .expect("install wrote an entries map")
+            .remove(PLUGIN_ID);
+        assert!(
+            v["plugins"]["load"]["paths"]
+                .as_array()
+                .expect("install wrote a paths array")
+                .iter()
+                .any(|p| p.as_str() == plugin_dir().unwrap().to_str()),
+            "precondition: our path is what is left identifying us"
+        );
+
+        let out = merge_uninstall(&v.to_string()).unwrap();
+        assert!(out.changed, "our path was removed — that IS a change");
+        let after: Value = serde_json::from_str(&out.content).unwrap();
+        assert!(
+            !after["plugins"]["load"]["paths"]
+                .as_array()
+                .map(|a| a
+                    .iter()
+                    .any(|p| p.as_str() == plugin_dir().unwrap().to_str()))
+                .unwrap_or(false),
+            "our path is gone: {after}"
+        );
+        assert_eq!(
+            after["plugins"]["allow"],
+            json!(["anthropic"]),
+            "and the allow JOIN is undone symmetrically, leaving the user's own id"
+        );
+    }
+
+    #[test]
+    fn install_joins_a_curated_allowlist_but_never_an_empty_one() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // A CURATED allowlist is fail-closed upstream: absent from it, our plugin
+        // never loads however enabled its entry is. Join it.
+        let curated = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
+        let v: Value = serde_json::from_str(&curated.content).unwrap();
+        let allow = v["plugins"]["allow"].as_array().unwrap();
+        assert!(
+            allow.iter().any(|x| x == "pixtuoid") && allow.iter().any(|x| x == "anthropic"),
+            "join the allowlist without evicting the user's own ids: {allow:?}"
+        );
+        // Idempotent — a re-install neither duplicates nor reports a change.
+        let again = merge_install(&curated.content, "").unwrap();
+        assert!(!again.changed, "a re-install is a semantic no-op");
+
+        // A case-VARIANT is NOT us: upstream compares plugin ids exactly (its
+        // lowercasing only builds an alias-lookup key, see `is_plugin_id`), so
+        // `"Pixtuoid"` in the allowlist does not admit `pixtuoid` — install must add
+        // our exact id, and skipping the join here would leave the plugin unloaded
+        // with a green doctor.
+        let cased = merge_install(r#"{"plugins":{"allow":["Pixtuoid"]}}"#, "").unwrap();
+        let v: Value = serde_json::from_str(&cased.content).unwrap();
+        assert_eq!(
+            v["plugins"]["allow"],
+            json!(["Pixtuoid", "pixtuoid"]),
+            "a case-variant does not admit us — our exact id must be joined"
+        );
+        assert!(
+            verify_schema(&cased.content).issues.is_empty(),
+            "…and the joined list is then sound"
+        );
+        // Whitespace, however, IS trimmed upstream, so a padded entry IS us.
+        let padded = merge_install(r#"{"plugins":{"allow":[" pixtuoid "]}}"#, "").unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&padded.content).unwrap()["plugins"]["allow"],
+            json!([" pixtuoid "]),
+            "a padded form of our id is already us — no duplicate"
+        );
+
+        // An EMPTY `allow: []` is NO restriction upstream (`allow.length === 0 || …`),
+        // so there is nothing to join — the user's key is left exactly as found, and
+        // it is not a diagnostic either (nothing is wrong).
+        let empty = merge_install(r#"{"plugins":{"allow":[]}}"#, "").unwrap();
+        let v: Value = serde_json::from_str(&empty.content).unwrap();
+        assert_eq!(
+            v["plugins"]["allow"].as_array().map(Vec::len),
+            Some(0),
+            "an empty allowlist must not be written into"
+        );
+        let verdict = verify_schema(&empty.content);
+        assert!(
+            verdict.issues.is_empty(),
+            "an empty allowlist permits every plugin — not a break: {:?}",
+            verdict.issues
+        );
+        assert!(
+            !verdict.notes.iter().any(|n| n.contains("`plugins.allow`")),
+            "…and not worth a note either: {:?}",
+            verdict.notes
+        );
+    }
+
+    #[test]
+    fn verify_flags_every_fail_closed_switch_that_silently_stops_the_plugin() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let installed = merge_install("{}", "").unwrap();
+        let with = |mutate: &dyn Fn(&mut Value)| {
+            let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+            mutate(&mut v);
+            verify_schema(&v.to_string())
+        };
+
+        // `plugins.deny` naming us — the mirror of an allowlist that omits us.
+        let verdict = with(&|v| v["plugins"]["deny"] = json!(["pixtuoid"]));
+        assert!(
+            verdict
+                .issues
+                .iter()
+                .any(|i| i.contains("`plugins.deny` lists pixtuoid")),
+            "a denylist naming us is a HARD break: {:?}",
+            verdict.issues
+        );
+        // …but a case-VARIANT is a different id upstream, so claiming a break there
+        // would be a false "install broken" over a plugin OpenClaw actually loaded.
+        let verdict = with(&|v| v["plugins"]["deny"] = json!(["Pixtuoid"]));
+        assert!(
+            verdict.issues.is_empty(),
+            "a case-variant in deny is NOT us — must not report a break: {:?}",
+            verdict.issues
+        );
+
+        // The conversation-access grant is what un-gates the run hooks; without it
+        // the mascot renders but never goes busy.
+        let verdict = with(&|v| v["plugins"]["entries"]["pixtuoid"]["hooks"] = json!({}));
+        assert!(
+            verdict
+                .issues
+                .iter()
+                .any(|i| i.contains("allowConversationAccess")),
+            "the grant we write must be verified: {:?}",
+            verdict.issues
+        );
+
+        // `plugins.enabled = false` is the user's own global switch → NOTE, not break.
+        let verdict = with(&|v| v["plugins"]["enabled"] = json!(false));
+        assert!(
+            verdict.issues.is_empty(),
+            "the user's global switch is not OUR break: {:?}",
+            verdict.issues
+        );
+        assert!(
+            verdict
+                .notes
+                .iter()
+                .any(|n| n.contains("`plugins.enabled = false`")),
+            "…but it IS why nothing loads: {:?}",
+            verdict.notes
+        );
+        // An ABSENT `plugins.enabled` means enabled (OpenClaw's own `plugins enable`
+        // never writes it), so a plain install must stay silent about it.
+        assert!(
+            !verify_schema(&installed.content)
+                .notes
+                .iter()
+                .any(|n| n.contains("plugins.enabled")),
+            "an absent key is the enabled default — never reported"
+        );
+
+        // A NESTED `$include` is just as capable of supplying the plugins block as a
+        // root-level one, and pixtuoid reads neither.
+        let verdict = with(&|v| v["gateway"] = json!({ "$include": "./gw.json" }));
+        assert!(
+            verdict.notes.iter().any(|n| n.contains("$include")),
+            "an include under any key must be surfaced: {:?}",
+            verdict.notes
+        );
+    }
+
+    #[test]
+    fn verify_flags_an_allowlist_that_omits_us_and_notes_json5_and_include() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let installed = merge_install("{}", "").unwrap();
+        assert!(verify_schema(&installed.content).issues.is_empty());
+
+        // A curated allowlist that does NOT list us: enabled entry, registered path,
+        // and the gateway still never loads the plugin → HARD.
+        let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+        v["plugins"]["allow"] = json!(["anthropic"]);
+        let verdict = verify_schema(&v.to_string());
+        assert!(
+            verdict
+                .issues
+                .iter()
+                .any(|i| i.contains("`plugins.allow` does not list pixtuoid")),
+            "a fail-closed allowlist must be a HARD issue: {:?}",
+            verdict.issues
+        );
+
+        // JSON5 (what OpenClaw actually parses) is NOT a break — we simply cannot
+        // verify it, and "reconnect openclaw" would be advice that cannot succeed.
+        let json5 = "{\n  // the user's note\n  \"plugins\": {},\n}\n";
+        let verdict = verify_schema(json5);
+        assert!(
+            verdict.issues.is_empty(),
+            "a JSON5 config is legal upstream — never a hard break: {:?}",
+            verdict.issues
+        );
+        assert!(
+            verdict.notes.iter().any(|n| n.contains("JSON5")),
+            "…but it must say why it could not be verified: {:?}",
+            verdict.notes
+        );
+
+        // `$include` means the effective plugins block may live in another file.
+        let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+        v["$include"] = json!("./extra.json");
+        let verdict = verify_schema(&v.to_string());
+        assert!(
+            verdict.notes.iter().any(|n| n.contains("$include")),
+            "an include must be surfaced: {:?}",
+            verdict.notes
+        );
+    }
+
+    #[test]
+    fn a_reload_mode_that_never_applies_our_write_is_noted_but_not_a_break() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Upstream marks `plugins.load` (the key we write) `kind: "restart"`, and
+        // `off`/`hot` never apply a restart-kind change — so a RUNNING gateway keeps
+        // serving without the plugin. The install is SOUND; it just has not taken
+        // effect, hence a note. `restart`/`hybrid` (the default) pick it up
+        // themselves and must stay silent, or every healthy user gets a scary line.
+        let installed = merge_install("{}", "").unwrap();
+        let with_mode = |mode: &str| {
+            let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+            v["gateway"] = json!({ "reload": { "mode": mode } });
+            verify_schema(&v.to_string())
+        };
+        for mode in ["off", "hot"] {
+            let verdict = with_mode(mode);
+            assert!(
+                verdict.issues.is_empty(),
+                "{mode}: the user's own reload switch is not OUR break: {:?}",
+                verdict.issues
+            );
+            assert!(
+                verdict
+                    .notes
+                    .iter()
+                    .any(|n| n.contains("gateway.reload.mode") && n.contains(mode)),
+                "{mode}: must be surfaced as the reason nothing loaded yet: {:?}",
+                verdict.notes
+            );
+        }
+        for mode in ["restart", "hybrid"] {
+            assert!(
+                !with_mode(mode)
+                    .notes
+                    .iter()
+                    .any(|n| n.contains("gateway.reload.mode")),
+                "{mode} applies our write on its own — it must stay silent"
+            );
+        }
+        // Absent (⇒ the `hybrid` default) is silent too.
+        assert!(
+            !verify_schema(&installed.content)
+                .notes
+                .iter()
+                .any(|n| n.contains("gateway.reload.mode")),
+            "an absent reload mode is the hybrid default — never reported"
+        );
+    }
+
+    #[test]
+    fn uninstall_prunes_its_own_husk_but_keeps_anything_foreign() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Install into an EMPTY config, then uninstall: OpenClaw's config must come
+        // back to `{}` rather than keeping a husk `plugins:{entries:{},load:{paths:[]}}`
+        // that we alone created.
+        let installed = merge_install("{}", "").unwrap();
+        let removed = merge_uninstall(&installed.content).unwrap();
+        assert!(removed.changed);
+        let v: Value = serde_json::from_str(&removed.content).unwrap();
+        assert_eq!(v, json!({}), "no husk left behind, got {v}");
+
+        // With a foreign plugin present, its containers survive untouched.
+        let shared = merge_install(
+            r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
+            "",
+        )
+        .unwrap();
+        let removed = merge_uninstall(&shared.content).unwrap();
+        let v: Value = serde_json::from_str(&removed.content).unwrap();
+        assert_eq!(v["plugins"]["entries"]["anthropic"]["enabled"], json!(true));
+        assert!(v["plugins"]["entries"].get("pixtuoid").is_none());
+    }
+
     #[test]
     fn uninstall_revokes_the_grant_but_keeps_foreign_entries() {
         let _env = crate::TEST_ENV_LOCK
@@ -678,12 +1406,15 @@ mod tests {
             json!(true),
             "a foreign plugin's grant survives"
         );
-        let paths = v["plugins"]["load"]["paths"].as_array().unwrap();
+        // Our path is gone. `load.paths` here held ONLY ours, so the uninstall
+        // prunes the emptied array (and its `load` container) rather than leaving a
+        // husk in OpenClaw's config — either shape satisfies "our path removed".
+        let paths = v["plugins"]["load"]["paths"].as_array();
         assert!(
-            !paths
+            paths.is_none_or(|ps| !ps
                 .iter()
-                .any(|p| p.as_str().unwrap().ends_with("plugins/pixtuoid")),
-            "our load.path removed"
+                .any(|p| p.as_str().is_some_and(|s| s.ends_with("plugins/pixtuoid")))),
+            "our load.path removed, got {paths:?}"
         );
     }
 
@@ -692,13 +1423,118 @@ mod tests {
         let _env = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        assert!(!merge_uninstall("{}").unwrap().changed);
-        assert!(!merge_uninstall("").unwrap().changed);
-        assert!(
-            !merge_uninstall(r#"{"gateway":{"mode":"local"}}"#)
-                .unwrap()
-                .changed
+        // `changed` IS the `has_hooks` signal, so any shape we did not write must
+        // report false — including the empty containers our own prune produces.
+        // Pruning those unconditionally told a never-connected user's `doctor` that
+        // openclaw had hooks installed, then that they were broken ("reconnect
+        // openclaw").
+        for unmanaged in [
+            "{}",
+            "",
+            r#"{"gateway":{"mode":"local"}}"#,
+            r#"{"plugins":{}}"#,
+            r#"{"plugins":{"entries":{}}}"#,
+            r#"{"plugins":{"load":{"paths":[]}}}"#,
+            r#"{"plugins":{"allow":[]}}"#,
+            r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
+        ] {
+            assert!(
+                !merge_uninstall(unmanaged).unwrap().changed,
+                "uninstall must be a no-op on a config we never wrote: {unmanaged}"
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_undoes_the_allowlist_join_without_ever_emptying_it() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // A JOINED list is restored VERBATIM: leaving our id behind is not inert —
+        // a live `openclaw plugins list` reports it as "plugin not found: pixtuoid
+        // (stale config entry)".
+        let joined = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
+        let v: Value = serde_json::from_str(&merge_uninstall(&joined.content).unwrap().content)
+            .expect("valid json");
+        assert_eq!(
+            v["plugins"]["allow"],
+            json!(["anthropic"]),
+            "the user's own allowlist must come back exactly as we found it, got {v}"
         );
+        assert!(v["plugins"]["entries"].get("pixtuoid").is_none());
+
+        // A SINGLE-member `["pixtuoid"]` is left alone: emptying it would turn "only
+        // pixtuoid may load" into `[]` = NO restriction (every plugin permitted) —
+        // an uninstall must never flip a fail-closed key fail-OPEN. It is also a
+        // list we never wrote (install only joins a NON-empty one).
+        let lone = merge_install(r#"{"plugins":{"allow":["pixtuoid"]}}"#, "").unwrap();
+        let v: Value = serde_json::from_str(&merge_uninstall(&lone.content).unwrap().content)
+            .expect("valid json");
+        assert_eq!(
+            v["plugins"]["allow"],
+            json!(["pixtuoid"]),
+            "the last member must survive — emptying it widens the allowlist, got {v}"
+        );
+
+        // A case-variant is the USER'S entry, not ours: upstream compares ids exactly,
+        // so `"Pixtuoid"` never admitted us — install joined our own `pixtuoid` beside
+        // it and uninstall removes only that, leaving their list as they wrote it.
+        let cased = merge_install(r#"{"plugins":{"allow":["anthropic","Pixtuoid"]}}"#, "").unwrap();
+        let v: Value = serde_json::from_str(&merge_uninstall(&cased.content).unwrap().content)
+            .expect("valid json");
+        assert_eq!(
+            v["plugins"]["allow"],
+            json!(["anthropic", "Pixtuoid"]),
+            "only OUR exact id is un-joined; the user's own entries survive, got {v}"
+        );
+    }
+
+    #[test]
+    fn uninstall_never_empties_the_allowlist_even_when_every_entry_is_ours() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // The fail-OPEN a `len() > 1` PRE-count missed: two entries that are BOTH ours
+        // (upstream trims, so a padded copy is the same id) would retain to `[]`, and
+        // `[]` reads as NO restriction upstream — an uninstall that widens a
+        // fail-closed key. The guard must test the RESULT, not the input length.
+        for input in [
+            r#"{"plugins":{"allow":["pixtuoid"," pixtuoid "]}}"#,
+            r#"{"plugins":{"allow":["pixtuoid","pixtuoid"]}}"#,
+            r#"{"plugins":{"allow":["pixtuoid"]}}"#,
+        ] {
+            let installed = merge_install(input, "").unwrap();
+            let out = merge_uninstall(&installed.content).unwrap();
+            let v: Value = serde_json::from_str(&out.content).unwrap();
+            let allow = v["plugins"]["allow"].as_array();
+            assert!(
+                allow.is_none_or(|a| !a.is_empty()),
+                "uninstall emptied a curated allowlist (fail-OPEN) for {input}: {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn merge_refuses_a_json5_document_instead_of_dropping_its_comments() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // VALID JSON5 (what OpenClaw actually parses) that serde_json cannot
+        // represent: a comment plus a trailing comma. Both merges must bail — a
+        // JSON5-tolerant parse + strict re-serialize would silently delete the
+        // user's note on their next connect (the sharp edge in the crate guide
+        // forbids exactly that "fix").
+        let json5 = "{\n  // my gateway notes — DO NOT LOSE\n  \"gateway\": { \"port\": 19789 },\n  \"plugins\": {},\n}\n";
+        for err in [
+            merge_install(json5, "/x").unwrap_err(),
+            merge_uninstall(json5).unwrap_err(),
+        ] {
+            let msg = err.to_string();
+            assert!(
+                msg.contains("not strict JSON") && msg.contains("openclaw plugins install"),
+                "the refusal must name the reason AND the owner CLI: {msg}"
+            );
+        }
     }
 
     #[test]

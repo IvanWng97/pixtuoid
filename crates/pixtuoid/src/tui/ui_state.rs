@@ -434,7 +434,11 @@ impl UiState {
             self.connection.selected =
                 connection::move_selection(&self.connection.rows, self.connection.selected, 0);
             let live = connection::live_view(now, &self.connection.rows, scene, health);
-            let socket_line = format!("socket  {}  (listening)", self.socket_path.display());
+            // NOT "(listening)": a second pixtuoid instance loses the hook plane to
+            // the lock-holding owner, so THIS process may own no socket at all — and
+            // this is the one line that could explain a missing lobster. Don't assert
+            // what we haven't checked.
+            let socket_line = format!("socket  {}", self.socket_path.display());
             ConnectionFrame {
                 open: true,
                 rows: self.connection.rows.clone(),

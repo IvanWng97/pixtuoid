@@ -490,14 +490,16 @@ impl UsageObservation {
 /// wandering lobster mascot's behaviour (idle ambles, busy shuttles, down
 /// walks out). A daemon is NOT an `AgentSlot` (it has no desk / no agent
 /// activity), so its presence lives in `SceneState::daemons`, read
-/// directly by the geometry pass. `Down` is distinct from *absent* (no map
-/// entry): absent = not configured / plugin not loaded (the lobster not on the
-/// floor); `Down` = the daemon was seen and then died (the lobster walks out).
+/// directly by the geometry pass. It is PER-INSTANCE (see
+/// [`DaemonInstanceId`]) — one gateway going Down says nothing about its
+/// siblings. `Down` is distinct from *absent* (no roster entry): absent = never
+/// observed / plugin not loaded (that lobster not on the floor); `Down` = this
+/// instance was seen and then died (its lobster walks out).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DaemonState {
     /// Alive with no run in flight — the mascot ambles.
     Idle,
-    /// ≥1 run in flight (projected from `DaemonPresence::in_flight_run_keys`).
+    /// ≥1 run in flight (projected from `DaemonPresence::in_flight_runs`).
     Busy,
     /// Gateway is UP but its model backend is failing every run (#317) — the
     /// Apr-2026 Anthropic-ban failure mode: `gateway_start`/`session_start`/
@@ -515,7 +517,7 @@ pub enum DaemonState {
 /// alive gateway (healthy, or `degraded` = its model backend is failing every
 /// run, #317); `Down` is seen-then-died. The remaining render distinction —
 /// Idle vs Busy — is deliberately NOT a field here: it is a pure function of
-/// [`DaemonPresence::in_flight_run_keys`], projected by
+/// [`DaemonPresence::in_flight_runs`], projected by
 /// [`DaemonPresence::display_state`]. Storing `Busy`/`Idle` separately was the
 /// hand-synced duplication this split removes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -539,14 +541,66 @@ impl DaemonLiveness {
     pub const UP: DaemonLiveness = DaemonLiveness::Up { degraded: false };
 }
 
-/// Per-daemon presence for the gateway mascot (the P-A representation): lives on
-/// `SceneState` so the serializable scene snapshot the renderer reads carries
-/// the mascot's state + concurrency (bubble) intensity.
+/// One daemon INSTANCE's stable identity — the inner key of
+/// [`SceneState::daemons`], so N concurrently-running instances of ONE daemon
+/// source (OpenClaw officially supports multiple isolated gateways on a host)
+/// each earn their own mascot instead of collapsing onto the source name.
+///
+/// OPAQUE to the shared daemon layer BY DESIGN: only a source's own wire decoder
+/// mints one (OpenClaw normalizes its resolved gateway port), so "what makes two
+/// instances different" stays source knowledge while the presence state machine
+/// and every renderer stay daemon-agnostic.
+///
+/// STABLE across a restart of the same logical instance — a gateway restarting on
+/// the same port keeps its mascot. The PROCESS incarnation is separate state
+/// ([`DaemonPresence::current_pid`]), which is what makes a stale exit receipt
+/// for the old process a no-op instead of a kill of its replacement.
+/// Deserialization routes through [`DaemonInstanceId::new`] via `try_from` rather
+/// than the derive: a derived impl would reconstruct the blank id that `new`
+/// exists to refuse, so a hand-edited or truncated scene dump could re-introduce
+/// exactly the source-wide bucket this type was created to remove. The wire shape
+/// is unchanged (still a bare JSON string), so the snapshot golden is untouched.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+pub struct DaemonInstanceId(String);
+
+impl TryFrom<String> for DaemonInstanceId {
+    type Error = &'static str;
+
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::new(raw).ok_or("a daemon instance id must not be blank")
+    }
+}
+
+impl DaemonInstanceId {
+    /// Mint an instance id, refusing an empty/whitespace-only one: an
+    /// identity-less daemon event must never collapse onto a blank key (that
+    /// blank key would be the source-wide bucket this type exists to remove).
+    pub fn new(raw: impl Into<String>) -> Option<Self> {
+        let raw = raw.into();
+        (!raw.trim().is_empty()).then_some(Self(raw))
+    }
+
+    /// The id as its wire/display string (an OpenClaw gateway port, `"18789"`).
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for DaemonInstanceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Per-daemon-INSTANCE presence for the gateway mascot (the P-A representation):
+/// lives on `SceneState` so the serializable scene snapshot the renderer reads
+/// carries the mascot's state + concurrency (bubble) intensity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonPresence {
     /// The stored liveness axes ([`DaemonLiveness`]). The 4-way render state
     /// (incl. Idle/Busy) is PROJECTED via [`display_state`](Self::display_state),
-    /// never stored — Busy is derived from `in_flight_run_keys`.
+    /// never stored — Busy is derived from `in_flight_runs`.
     pub liveness: DaemonLiveness,
     /// Concurrent sessions the gateway is multiplexing (bubble intensity).
     pub active_sessions: u32,
@@ -560,12 +614,18 @@ pub struct DaemonPresence {
     /// mascot's enter animation (walk in from the elevator) and is the steady
     /// wander clock — process-local timing only, like `AgentSlot.state_started_at`.
     pub entered_at: SystemTime,
-    /// In-flight run keys (busy iff non-empty). Transient process state: a
-    /// daemon restart resets it and a dropped `agent_end` self-heals via the
-    /// TTL decay, so it is NOT serialized (a restored dump must not strand a
-    /// perpetual Busy).
+    /// In-flight runs (busy iff non-empty), each keyed by its correlation key and
+    /// stamped with its LAST observation. The per-run stamp is what makes the
+    /// busy-decay honest: the daemon-wide `last_seen` is refreshed by ANY event, so
+    /// on a gateway that keeps serving other traffic a run whose `agent_end` was
+    /// dropped would never age out and the mascot would latch Busy forever
+    /// (`sweep_presence_ttl` expires each run on its OWN clock instead).
+    ///
+    /// Transient process state: a daemon restart resets it and a dropped
+    /// `agent_end` self-heals via that decay, so it is NOT serialized (a restored
+    /// dump must not strand a perpetual Busy).
     #[serde(skip)]
-    pub in_flight_run_keys: std::collections::HashSet<String>,
+    pub in_flight_runs: BTreeMap<String, SystemTime>,
     /// The gateway pid currently armed for `ExitWatch` (None until first seen).
     /// Kept for debug dumps + the restart pid-rebind guard; not a wire contract.
     pub current_pid: Option<i32>,
@@ -583,7 +643,7 @@ impl DaemonPresence {
             DaemonLiveness::Down => DaemonState::Down,
             DaemonLiveness::Up { degraded: true } => DaemonState::Degraded,
             DaemonLiveness::Up { degraded: false } => {
-                if self.in_flight_run_keys.is_empty() {
+                if self.in_flight_runs.is_empty() {
                     DaemonState::Idle
                 } else {
                     DaemonState::Busy
@@ -609,25 +669,139 @@ pub struct SceneState {
     /// Desk capacity per floor, indexed by floor (`0..MAX_FLOORS`).
     pub floor_capacities: [usize; MAX_FLOORS],
     /// Daemon-style sources (the OpenClaw gateway is instance #1) rendered as
-    /// wandering mascots, keyed on the registry source name. Empty for an
-    /// all-agent scene. PRIVATE (with `daemons`/`daemons_mut` accessors) on
-    /// purpose: a pub mutable `BTreeMap` is a leaky surface — the renderer reads
-    /// via the accessor. `pub(crate)` so the reducer/source modules still touch
-    /// it directly while the field stays out of the external public API.
+    /// wandering mascots — keyed on the registry source name, then on the
+    /// source-owned [`DaemonInstanceId`], so two concurrently-running gateways
+    /// are two independent presences (and two mascots) rather than one collapsed
+    /// entry. Empty for an all-agent scene. The outer level keeps the source
+    /// rollup every consumer already groups by; the inner level is what makes
+    /// instance A's stop/expiry unable to touch instance B.
+    ///
+    /// PRIVATE with READ-ONLY accessors on purpose: a pub mutable `BTreeMap` is a
+    /// leaky surface, and mutation must stay inside the daemon layer's
+    /// apply/sweep/mark entry points (nothing else may invent presence).
     #[serde(default)]
-    pub(crate) daemons: BTreeMap<String, DaemonPresence>,
+    pub(crate) daemons: DaemonRoster,
 }
 
 impl SceneState {
-    /// Daemon-presence map (the gateway mascots) — read access for the renderer.
-    pub fn daemons(&self) -> &BTreeMap<String, DaemonPresence> {
-        &self.daemons
+    /// Every daemon mascot as `(source, instance, presence)` — the ONE read seam
+    /// the renderers/rollups iterate. Deterministic order (source, then instance).
+    pub fn daemons(&self) -> impl Iterator<Item = (&str, &DaemonInstanceId, &DaemonPresence)> + '_ {
+        self.daemons.iter()
     }
 
-    /// Mutable daemon-presence map — for the shared `daemon::apply_presence`
-    /// merge and the per-floor projection.
-    pub fn daemons_mut(&mut self) -> &mut BTreeMap<String, DaemonPresence> {
-        &mut self.daemons
+    /// One exact daemon instance's presence, if present.
+    pub fn daemon(&self, source: &str, instance: &DaemonInstanceId) -> Option<&DaemonPresence> {
+        self.daemons.get(source, instance)
+    }
+
+    /// Copy another scene's whole daemon roster over this one's — the per-floor
+    /// projection's one mutation (daemons are office-global, projected onto the
+    /// ground floor). `#[doc(hidden)]`: a workspace-internal mechanism for
+    /// `pixtuoid_scene::floor`, not stable API.
+    #[doc(hidden)]
+    pub fn clone_daemons_from(&mut self, other: &SceneState) {
+        self.daemons.clone_from(&other.daemons);
+    }
+
+    /// Place one exact daemon instance's presence verbatim. `#[doc(hidden)]`: the
+    /// workspace-internal FIXTURE seam (render harnesses, the `snapshot` example's
+    /// `--openclaw` visual loop) that needs a presence with a chosen `entered_at`
+    /// / run set — timings `apply_presence` can only stamp as "now". PRODUCTION
+    /// presence mutation goes through `daemon::apply_presence`/the sweeps, which
+    /// stay the only writers of live state.
+    #[doc(hidden)]
+    pub fn insert_daemon(
+        &mut self,
+        source: &str,
+        instance: DaemonInstanceId,
+        presence: DaemonPresence,
+    ) {
+        self.daemons.insert(source, instance, presence);
+    }
+}
+
+/// The `source → instance → presence` roster behind [`SceneState::daemons`]. A
+/// named type (not a bare nested map) so the nesting lives in ONE place and the
+/// mutation ops stay `pub(crate)` to the daemon layer.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct DaemonRoster(BTreeMap<String, BTreeMap<DaemonInstanceId, DaemonPresence>>);
+
+impl DaemonRoster {
+    fn iter(&self) -> impl Iterator<Item = (&str, &DaemonInstanceId, &DaemonPresence)> + '_ {
+        self.0.iter().flat_map(|(source, instances)| {
+            instances
+                .iter()
+                .map(move |(instance, presence)| (source.as_str(), instance, presence))
+        })
+    }
+
+    fn get(&self, source: &str, instance: &DaemonInstanceId) -> Option<&DaemonPresence> {
+        self.0.get(source)?.get(instance)
+    }
+
+    /// Place one instance's presence verbatim (the fixture seam behind
+    /// [`SceneState::insert_daemon`]).
+    pub(crate) fn insert(
+        &mut self,
+        source: &str,
+        instance: DaemonInstanceId,
+        presence: DaemonPresence,
+    ) {
+        self.0
+            .entry(source.to_string())
+            .or_default()
+            .insert(instance, presence);
+    }
+
+    /// One exact instance, mutably — the apply/mark path's lookup.
+    pub(crate) fn get_mut(
+        &mut self,
+        source: &str,
+        instance: &DaemonInstanceId,
+    ) -> Option<&mut DaemonPresence> {
+        self.0.get_mut(source)?.get_mut(instance)
+    }
+
+    /// One exact instance, creating it from `make` when absent — the
+    /// proof-of-life apply path (every non-death delta creates).
+    pub(crate) fn get_or_insert_with(
+        &mut self,
+        source: &str,
+        instance: &DaemonInstanceId,
+        make: impl FnOnce() -> DaemonPresence,
+    ) -> &mut DaemonPresence {
+        self.0
+            .entry(source.to_string())
+            .or_default()
+            .entry(instance.clone())
+            .or_insert_with(make)
+    }
+
+    /// Every instance of ONE source, mutably — the source-scoped sweep/disconnect
+    /// walks (both are documented as source-wide, instance-by-instance).
+    pub(crate) fn instances_of_mut(
+        &mut self,
+        source: &str,
+    ) -> impl Iterator<Item = (&DaemonInstanceId, &mut DaemonPresence)> + '_ {
+        self.0
+            .get_mut(source)
+            .into_iter()
+            .flat_map(|m| m.iter_mut())
+    }
+
+    /// Drop the named instances of one source, pruning an emptied source level so
+    /// an absent daemon leaves no husk entry behind.
+    pub(crate) fn remove_instances(&mut self, source: &str, doomed: &[DaemonInstanceId]) {
+        let Some(instances) = self.0.get_mut(source) else {
+            return;
+        };
+        for id in doomed {
+            instances.remove(id);
+        }
+        if instances.is_empty() {
+            self.0.remove(source);
+        }
     }
 }
 
@@ -643,7 +817,7 @@ impl SceneState {
         Self {
             agents: BTreeMap::new(),
             floor_capacities,
-            daemons: BTreeMap::new(),
+            daemons: DaemonRoster::default(),
         }
     }
 
@@ -801,7 +975,7 @@ mod tests {
     fn daemon_presence_round_trips_and_skips_in_flight_keys() {
         // The openclaw daemon-presence (mascot) lives on SceneState (P-A) so the
         // geometry pass can read it. It serializes like the rest of the tree
-        // (#279). `in_flight_run_keys` is transient process state — a daemon
+        // (#279). `in_flight_runs` is transient process state — a daemon
         // restart resets it — so it is `#[serde(skip)]` and restores empty.
         // Consequence of the #460 split: since Busy is DERIVED from the run set
         // (never a serialized field), a restored dump with a drained run set reads
@@ -812,8 +986,9 @@ mod tests {
             active_sessions: 3,
             last_seen: SystemTime::now(),
             entered_at: SystemTime::now(),
-            in_flight_run_keys: ["run-1".to_string(), "run-2".to_string()]
+            in_flight_runs: ["run-1", "run-2"]
                 .into_iter()
+                .map(|k| (k.to_string(), SystemTime::now()))
                 .collect(),
             current_pid: Some(4242),
         };
@@ -825,7 +1000,7 @@ mod tests {
         let json = serde_json::to_string(&p).expect("serialize");
         assert!(
             !json.contains("run-1"),
-            "in_flight_run_keys must be skipped on the wire: {json}"
+            "in_flight_runs must be skipped on the wire: {json}"
         );
         let back: DaemonPresence = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.liveness, DaemonLiveness::UP);
@@ -837,7 +1012,7 @@ mod tests {
         assert_eq!(back.active_sessions, 3);
         assert_eq!(back.current_pid, Some(4242));
         assert!(
-            back.in_flight_run_keys.is_empty(),
+            back.in_flight_runs.is_empty(),
             "skipped field restores empty"
         );
 
@@ -862,17 +1037,17 @@ mod tests {
         // A SceneState carrying an openclaw daemon-presence entry round-trips
         // byte-stably alongside the agents tree.
         let mut s = SceneState::uniform(8);
-        s.daemons.insert(
-            "openclaw".to_string(),
-            DaemonPresence {
+        let inst = DaemonInstanceId::new("18789").expect("non-empty");
+        s.daemons
+            .get_or_insert_with("openclaw", &inst, || DaemonPresence {
                 liveness: DaemonLiveness::UP,
                 active_sessions: 0,
                 last_seen: SystemTime::now(),
                 entered_at: SystemTime::now(),
-                in_flight_run_keys: Default::default(),
-                current_pid: Some(900),
-            },
-        );
+                in_flight_runs: Default::default(),
+                current_pid: None,
+            })
+            .current_pid = Some(900);
         let json = serde_json::to_string(&s).expect("serialize");
         let back: SceneState = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(
@@ -880,8 +1055,64 @@ mod tests {
             serde_json::to_string(&back).expect("re-serialize"),
             "round-trip must be byte-stable"
         );
-        assert_eq!(back.daemons["openclaw"].liveness, DaemonLiveness::UP);
-        assert_eq!(back.daemons["openclaw"].current_pid, Some(900));
+        let p = back
+            .daemon("openclaw", &inst)
+            .expect("instance round-trips");
+        assert_eq!(p.liveness, DaemonLiveness::UP);
+        assert_eq!(p.current_pid, Some(900));
+    }
+
+    #[test]
+    fn daemon_instance_id_refuses_a_blank_identity() {
+        // A blank id IS the source-wide bucket the instance key exists to remove,
+        // so minting one must be impossible — the decoder falls back explicitly.
+        assert!(DaemonInstanceId::new("").is_none());
+        assert!(DaemonInstanceId::new("   ").is_none());
+        assert_eq!(
+            DaemonInstanceId::new("18789").map(|i| i.as_str().to_string()),
+            Some("18789".to_string())
+        );
+    }
+
+    #[test]
+    fn a_blank_daemon_instance_id_cannot_be_deserialized_back_in() {
+        // `new` refuses a blank id because a blank IS the source-wide bucket this
+        // type exists to remove. A DERIVED Deserialize would reconstruct one anyway,
+        // so a hand-edited or truncated scene dump could smuggle it past the smart
+        // constructor — hence `#[serde(try_from = "String")]`.
+        for blank in ["\"\"", "\"   \"", "\"\\t\""] {
+            assert!(
+                serde_json::from_str::<DaemonInstanceId>(blank).is_err(),
+                "a blank id must not deserialize: {blank}"
+            );
+        }
+        // A real id still round-trips byte-identically (the wire shape is unchanged,
+        // so the scene snapshot golden is untouched).
+        let id = DaemonInstanceId::new("18789").expect("non-blank");
+        let json = serde_json::to_string(&id).expect("serializes");
+        assert_eq!(json, "\"18789\"");
+        assert_eq!(
+            serde_json::from_str::<DaemonInstanceId>(&json).expect("round-trips"),
+            id
+        );
+    }
+
+    #[test]
+    fn daemon_instance_id_displays_exactly_its_str() {
+        // `Display` is published API (`api/pixtuoid-core.txt`) with no in-tree
+        // consumer — every internal site takes `as_str()`, so mutation testing found
+        // nothing stopped `fmt` from writing an EMPTY string. For a library consumer
+        // the two spellings must agree, or `format!("{id}")` silently loses the
+        // gateway port that IS the instance's identity.
+        for raw in ["18789", "19789", " 18789 "] {
+            let id = DaemonInstanceId::new(raw).expect("non-blank");
+            assert_eq!(
+                id.to_string(),
+                id.as_str(),
+                "Display and as_str must not diverge"
+            );
+            assert_eq!(format!("{id}"), raw, "and neither may reformat the raw id");
+        }
     }
 
     fn presence_at(liveness: DaemonLiveness) -> DaemonPresence {
@@ -890,22 +1121,22 @@ mod tests {
             active_sessions: 0,
             last_seen: SystemTime::UNIX_EPOCH,
             entered_at: SystemTime::UNIX_EPOCH,
-            in_flight_run_keys: Default::default(),
+            in_flight_runs: Default::default(),
             current_pid: None,
         }
     }
 
     #[test]
     fn display_state_derives_busy_from_the_run_set_not_a_stored_flag() {
-        // Busy is a pure function of `in_flight_run_keys`, never a separately
+        // Busy is a pure function of `in_flight_runs`, never a separately
         // stored field that could drift from the set (the #460 invariant).
         let mut p = presence_at(DaemonLiveness::Up { degraded: false });
         assert_eq!(p.display_state(), DaemonState::Idle);
         assert!(!p.is_busy());
-        p.in_flight_run_keys.insert("r".into());
+        p.in_flight_runs.insert("r".into(), SystemTime::UNIX_EPOCH);
         assert_eq!(p.display_state(), DaemonState::Busy);
         assert!(p.is_busy());
-        p.in_flight_run_keys.clear();
+        p.in_flight_runs.clear();
         assert_eq!(p.display_state(), DaemonState::Idle, "drained ⇒ Idle");
     }
 
@@ -916,7 +1147,8 @@ mod tests {
         // is exactly why the projection checks `degraded` BEFORE the run set (a
         // naive `Up && !empty ⇒ Busy` would regress it).
         let mut p = presence_at(DaemonLiveness::Up { degraded: true });
-        p.in_flight_run_keys.insert("still-running".into());
+        p.in_flight_runs
+            .insert("still-running".into(), SystemTime::UNIX_EPOCH);
         assert_eq!(p.display_state(), DaemonState::Degraded);
         assert!(!p.is_busy(), "a degraded daemon never reads as Busy");
     }
@@ -926,7 +1158,8 @@ mod tests {
         // Down is terminal for the projection; a defensively non-empty run set
         // (enter_down clears it, but the type permits it) can't read as Busy.
         let mut p = presence_at(DaemonLiveness::Down);
-        p.in_flight_run_keys.insert("stray".into());
+        p.in_flight_runs
+            .insert("stray".into(), SystemTime::UNIX_EPOCH);
         assert_eq!(p.display_state(), DaemonState::Down);
         assert!(!p.is_busy());
     }

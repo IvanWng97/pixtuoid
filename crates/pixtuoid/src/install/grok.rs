@@ -294,7 +294,11 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     if matches!(shim, ShimRef::Unknown) {
         issues.push("could not read the shim path from the grok hooks file".to_string());
     }
-    SchemaParse { issues, shim }
+    SchemaParse {
+        issues,
+        shim,
+        ..Default::default()
+    }
 }
 
 /// Undo `hook_command`'s three shapes: bare path, `'…'` (Unix shell route),

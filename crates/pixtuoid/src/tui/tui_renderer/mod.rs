@@ -511,7 +511,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let footer_stats = crate::tui::widgets::FooterStats {
                 counts: per_floor[to_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)],
                 per_floor: &per_floor,
-                gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+                gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
                 audio_audible: self.audio.is_audible(),
                 volume_flash: self.volume_flash,
             };
@@ -676,7 +676,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let footer_stats = crate::tui::widgets::FooterStats {
             counts: crate::tui::widgets::scene_stats(&to_scene),
             per_floor: &transition_per_floor,
-            gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+            gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: self.audio.is_audible(),
             volume_flash: self.volume_flash,
         };
@@ -790,13 +790,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             // Office-wide truth computed from the FULL un-projected scene (C1):
             // the footer's cross-floor cue + gateway chip render even single-floor.
             per_floor: crate::tui::widgets::per_floor_counts(scene),
-            gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+            gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: self.audio.is_audible(),
             volume_flash: self.volume_flash,
             floor: floor_meta,
             active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,
-            last_mascot_pos: None,
+            last_mascots: Vec::new(),
             // Borrows `self.pets` immutably — disjoint from the `&mut fctx`
             // (self.floors) above, so the field-split borrow is fine (same
             // as `self.office.coffee.map()` here). The picked `&Pet`

@@ -9,7 +9,8 @@ use super::{
     marquee_or_truncate, marquee_window, paint_panel, panel_inner_width, source_badge_span,
     to_color, Overflow,
 };
-use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveInfo};
+
+use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveFacet, LiveInfo};
 use pixtuoid_scene::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -170,16 +171,58 @@ fn connection_line(
             "transport died".to_string(),
             theme.ui.label_waiting,
         )
-    } else if live.agents > 0 {
-        let age = live.last_event_age.map(fmt_age).unwrap_or_default();
-        let plural = if live.agents == 1 { "" } else { "s" };
-        (
-            '\u{25cf}',
-            format!("{} agent{plural} \u{00b7} {age} ago", live.agents),
-            theme.ui.label_active,
-        )
     } else {
-        ('\u{25cc}', "idle".to_string(), theme.ui.label_idle)
+        match &live.facet {
+            LiveFacet::Agents {
+                agents: 0,
+                last_event_age: _,
+            } => ('\u{25cc}', "idle".to_string(), theme.ui.label_idle),
+            LiveFacet::Agents {
+                agents,
+                last_event_age,
+            } => {
+                let age = last_event_age.map(fmt_age).unwrap_or_default();
+                let plural = if *agents == 1 { "" } else { "s" };
+                (
+                    '\u{25cf}',
+                    format!("{agents} agent{plural} \u{00b7} {age} ago"),
+                    theme.ui.label_active,
+                )
+            }
+            // A daemon counts INSTANCES, and names their rolled-up state — "idle"
+            // alone can't distinguish a stopped gateway from a busy one, which is
+            // the whole reason this facet is typed. Zero instances reports the
+            // OBSERVATION, not a verdict: presence is announce-driven, so a gateway
+            // that announced before this pixtuoid started — or whose plugin has not
+            // loaded yet — is alive and merely unheard. A diagnosis surface must not
+            // assert a fact it cannot observe (the same rule as the socket line).
+            LiveFacet::Daemon(None) => (
+                '\u{25cc}',
+                "no gateway seen".to_string(),
+                theme.ui.label_idle,
+            ),
+            LiveFacet::Daemon(Some(rollup)) => {
+                let instances = rollup.instances.get();
+                let plural = if instances == 1 { "" } else { "s" };
+                // The WORD and the hue both come from the shared board model
+                // (`gateway_label`/`gateway_tone`) — the exact pair the footer's
+                // `⬢gw` chip renders, so the panel can't describe the same gateway
+                // differently from the chip two rows below it. No default needed:
+                // the state rides WITH the count, so there is no absent case here.
+                let rolled = rollup.state;
+                (
+                    '\u{25cf}',
+                    format!(
+                        "{instances} gateway{plural} \u{00b7} {}",
+                        pixtuoid_scene::board::gateway_label(rolled)
+                    ),
+                    pixtuoid_scene::board::tone_rgb(
+                        pixtuoid_scene::board::gateway_tone(rolled),
+                        theme,
+                    ),
+                )
+            }
+        }
     };
 
     let name_cell = format!(
@@ -226,8 +269,17 @@ fn fmt_age(d: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// `Daemon` facet for `n` instances at `state` — the panel's live half. `n == 0`
+    /// is `Daemon(None)` by construction, which is the point of the atomic pair.
+    fn daemon_facet(n: usize, state: pixtuoid_core::state::DaemonState) -> LiveFacet {
+        LiveFacet::Daemon(
+            std::num::NonZeroUsize::new(n).map(|instances| DaemonRollup { instances, state }),
+        )
+    }
     use super::*;
-    use crate::tui::connection::{RowFacts, RowInput};
+    use crate::tui::connection::{DaemonRollup, RowFacts, RowInput};
+    use pixtuoid_core::state::DaemonState;
     use pixtuoid_scene::theme::NORMAL;
 
     fn row(source_id: &'static str, label_prefix: &'static str, state: ConnState) -> ConnectionRow {
@@ -336,8 +388,10 @@ mod tests {
     fn connection_line_renders_state_and_live_text() {
         let r = row("claude", "cc", ConnState::Connected);
         let live = LiveInfo {
-            agents: 2,
-            last_event_age: Some(Duration::from_secs(3)),
+            facet: LiveFacet::Agents {
+                agents: 2,
+                last_event_age: Some(Duration::from_secs(3)),
+            },
             dead: false,
         };
         let line = connection_line(&r, &live, false, SystemTime::UNIX_EPOCH, &NORMAL);
@@ -349,11 +403,67 @@ mod tests {
     }
 
     #[test]
+    fn connection_line_daemon_names_its_gateways_and_their_state() {
+        // The daemon LIVE cell must distinguish "not running" from "running, and
+        // how" — a stopped gateway and four busy ones both read `idle` before this
+        // facet was typed. The word comes from the shared board vocabulary, so it
+        // matches the footer's `⬢gw` chip exactly.
+        let r = row("openclaw", "ok", ConnState::Connected);
+        let cell = |facet: LiveFacet| -> String {
+            let live = LiveInfo { facet, dead: false };
+            connection_line(&r, &live, false, SystemTime::UNIX_EPOCH, &NORMAL)
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect()
+        };
+
+        let stopped = cell(LiveFacet::Daemon(None));
+        assert!(stopped.contains("no gateway seen"), "{stopped}");
+        // The INTENT is "claims no gateway EXISTS", not "avoids the word" — the cell
+        // must carry no instance COUNT and none of the state words a live roster
+        // would produce.
+        assert!(
+            !stopped.chars().any(|c| c.is_ascii_digit()),
+            "a zero-instance daemon must report no count: {stopped}"
+        );
+        for live_word in [
+            pixtuoid_scene::board::gateway_label(DaemonState::Busy),
+            pixtuoid_scene::board::gateway_label(DaemonState::Degraded),
+            pixtuoid_scene::board::gateway_label(DaemonState::Down),
+        ] {
+            assert!(
+                !stopped.contains(live_word),
+                "a zero-instance daemon must not borrow a live state word ({live_word}): {stopped}"
+            );
+        }
+
+        let busy = cell(daemon_facet(2, DaemonState::Busy));
+        assert!(busy.contains("2 gateways"), "{busy}");
+        assert!(
+            busy.contains(pixtuoid_scene::board::gateway_label(DaemonState::Busy)),
+            "the state word must be the shared board vocabulary: {busy}"
+        );
+
+        let one = cell(daemon_facet(1, DaemonState::Degraded));
+        assert!(
+            one.contains("1 gateway \u{00b7}"),
+            "singular, no 's': {one}"
+        );
+        assert!(
+            one.contains(pixtuoid_scene::board::gateway_label(DaemonState::Degraded)),
+            "{one}"
+        );
+    }
+
+    #[test]
     fn connection_line_dead_transport_overrides_live_column() {
         let r = row("codex", "cx", ConnState::Connected);
         let live = LiveInfo {
-            agents: 1,
-            last_event_age: Some(Duration::from_secs(1)),
+            facet: LiveFacet::Agents {
+                agents: 1,
+                last_event_age: Some(Duration::from_secs(1)),
+            },
             dead: true,
         };
         let line = connection_line(&r, &live, false, SystemTime::UNIX_EPOCH, &NORMAL);
@@ -367,8 +477,10 @@ mod tests {
         let one = connection_line(
             &r,
             &LiveInfo {
-                agents: 1,
-                last_event_age: Some(Duration::from_secs(0)),
+                facet: LiveFacet::Agents {
+                    agents: 1,
+                    last_event_age: Some(Duration::from_secs(0)),
+                },
                 dead: false,
             },
             false,

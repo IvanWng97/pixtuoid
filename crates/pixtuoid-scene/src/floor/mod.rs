@@ -719,7 +719,7 @@ impl FloorSession {
             crate::board::scene_stats(scene),
             crate::board::scene_uptime_secs(scene, now),
             floor,
-            crate::board::gateway_rollup(scene.daemons()),
+            crate::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
         )
     }
 
@@ -1031,7 +1031,7 @@ pub fn project_floor_scene(scene: &SceneState, floor_idx: usize) -> SceneState {
     // Daemon presences (the OpenClaw gateway mascot) are global, not per-desk —
     // carry them onto the GROUND floor only so the mascot renders exactly once.
     if floor_idx == 0 {
-        *s.daemons_mut() = scene.daemons().clone();
+        s.clone_daemons_from(scene);
     }
     s
 }

@@ -31,7 +31,7 @@ fn dashboard_popup_renders_labels_states_and_live_tool() {
 
 #[test]
 fn connection_panel_renders_both_facets_borderless() {
-    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    use crate::tui::connection::{ConnState, ConnectionRow, LiveFacet, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![
@@ -56,13 +56,17 @@ fn connection_panel_renders_both_facets_borderless() {
     ];
     let live = vec![
         LiveInfo {
-            agents: 2,
-            last_event_age: Some(std::time::Duration::from_secs(3)),
+            facet: LiveFacet::Agents {
+                agents: 2,
+                last_event_age: Some(std::time::Duration::from_secs(3)),
+            },
             dead: false,
         },
         LiveInfo {
-            agents: 1,
-            last_event_age: Some(std::time::Duration::from_secs(12)),
+            facet: LiveFacet::Agents {
+                agents: 1,
+                last_event_age: Some(std::time::Duration::from_secs(12)),
+            },
             dead: false,
         },
     ];
@@ -73,7 +77,7 @@ fn connection_panel_renders_both_facets_borderless() {
         0,
         None,
         None,
-        "socket  /tmp/p.sock  (listening)".into(),
+        "socket  /tmp/p.sock".into(),
     );
     r.render(&scene, &pack(), t0()).unwrap();
 
@@ -126,7 +130,7 @@ fn connection_panel_health_flag_and_detail_preempt_the_install_path() {
         0,
         None,
         None,
-        "socket  /tmp/p.sock  (listening)".into(),
+        "socket  /tmp/p.sock".into(),
     );
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -199,7 +203,7 @@ fn connection_panel_disconnected_selected_shows_connect_hint() {
         0,
         None,
         None,
-        "socket  /tmp/p.sock  (listening)".into(),
+        "socket  /tmp/p.sock".into(),
     );
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -236,7 +240,7 @@ fn connection_panel_no_cli_selected_shows_not_detected_hint() {
         0,
         None,
         None,
-        "socket  /tmp/p.sock  (listening)".into(),
+        "socket  /tmp/p.sock".into(),
     );
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -274,7 +278,7 @@ fn connection_panel_connected_without_config_path_shows_connected() {
         0,
         None,
         None,
-        "socket  /tmp/p.sock  (listening)".into(),
+        "socket  /tmp/p.sock".into(),
     );
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -312,7 +316,7 @@ fn connection_panel_last_result_overrides_per_state_detail() {
         0,
         None,
         Some("X-RESULT-SENTINEL".to_string()),
-        "socket  /tmp/p.sock  (listening)".into(),
+        "socket  /tmp/p.sock".into(),
     );
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -341,7 +345,7 @@ fn connection_panel_empty_rows_renders_panel_with_blank_detail() {
         0,
         None,
         None,
-        "socket  /tmp/p.sock  (listening)".into(),
+        "socket  /tmp/p.sock".into(),
     );
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());

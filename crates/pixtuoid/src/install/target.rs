@@ -100,6 +100,17 @@ pub struct Target {
     /// repairs a tampered/stale plugin file (`install_target` does an
     /// unconditional write, NOT a content-diff).
     pub extra_artifacts: Option<ExtraArtifactsFn>,
+
+    /// A one-line note the presenters append after a SUCCESSFUL connect, when
+    /// installing is not the last step the user must take. OpenClaw is the only
+    /// target with one today: its `plugins.load` key is `kind: "restart"` in
+    /// upstream's own reload plan (verified in the shipped 2026.7.1 bundle,
+    /// `config-reload-plan-*.js`), so a gateway that is ALREADY RUNNING does not
+    /// hot-load our plugin — `connect` legitimately reports success while no
+    /// lobster appears until the gateway restarts. OpenClaw's own `config patch`
+    /// prints the same advice, so we are mirroring its guidance, not inventing it.
+    /// `None` for every target whose hooks take effect on the CLI's next run.
+    pub post_install_hint: Option<&'static str>,
 }
 
 /// Backup suffix — the same constant for every target (not a per-target field).
@@ -124,6 +135,7 @@ pub(crate) const CLAUDE: Target = Target {
     },
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 pub(crate) const CODEX: Target = Target {
@@ -138,6 +150,7 @@ pub(crate) const CODEX: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 pub(crate) const REASONIX: Target = Target {
@@ -152,6 +165,7 @@ pub(crate) const REASONIX: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: Some(crate::install::reasonix::detect_installed),
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 pub(crate) const CODEWHALE: Target = Target {
@@ -166,6 +180,7 @@ pub(crate) const CODEWHALE: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: Some(crate::install::codewhale::detect_installed),
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 pub(crate) const OPENCODE: Target = Target {
@@ -185,6 +200,7 @@ pub(crate) const OPENCODE: Target = Target {
     // `@pixtuoid-opencode-plugin` sentinel, not mere file existence.
     presence_probe: Some(crate::install::opencode::detect_installed),
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 pub(crate) const GROK: Target = Target {
@@ -205,6 +221,7 @@ pub(crate) const GROK: Target = Target {
     // instead, the opencode/Reasonix rule.
     presence_probe: Some(crate::install::grok::detect_installed),
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 pub(crate) const CURSOR: Target = Target {
@@ -220,6 +237,7 @@ pub(crate) const CURSOR: Target = Target {
     // Cursor never creates ~/.cursor/hooks.json itself — probe ~/.cursor instead.
     presence_probe: Some(crate::install::cursor::detect_installed),
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 pub(crate) const HERMES: Target = Target {
@@ -238,6 +256,7 @@ pub(crate) const HERMES: Target = Target {
     // home dir rather than the shared config file.
     presence_probe: Some(crate::install::hermes::detect_installed),
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 pub(crate) const OPENCLAW: Target = Target {
@@ -259,6 +278,9 @@ pub(crate) const OPENCLAW: Target = Target {
     // auto-detect fires whether or not we've installed (the opencode rationale).
     presence_probe: Some(crate::install::openclaw::detect_installed),
     extra_artifacts: Some(crate::install::openclaw::plugin_artifacts),
+    // `plugins.load` is `kind: "restart"` upstream, so a RUNNING gateway does
+    // not hot-load the plugin — the lobster appears on its next restart.
+    post_install_hint: Some("restart the gateway to load it (openclaw gateway restart)"),
     verify_schema: crate::install::openclaw::verify_schema,
 };
 
@@ -279,6 +301,7 @@ pub(crate) const KIMI: Target = Target {
     // file we write (the Reasonix/CodeWhale rule).
     presence_probe: Some(crate::install::kimi::detect_installed),
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 pub const TARGETS: &[&Target] = &[
@@ -383,6 +406,7 @@ mod tests {
             binary_strategy: BinaryStrategy::EmbedAbsolute,
             presence_probe: None,
             extra_artifacts: None,
+            post_install_hint: None,
         };
         assert!(!is_present(&NO_HOME));
     }

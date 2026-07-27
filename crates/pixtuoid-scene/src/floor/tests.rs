@@ -46,26 +46,34 @@ fn daemons_projects_onto_the_ground_floor_only() {
     // daemons onto floor 0 ONLY, so a multi-floor office renders the lobster
     // exactly once (a regression dropping the gate / flipping the index would
     // duplicate him on every floor).
-    use pixtuoid_core::state::{DaemonLiveness, DaemonPresence};
+    use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
     let mut scene = SceneState::uniform(16);
-    scene.floor_capacities[1] = 16; // a second floor exists
-    scene.daemons_mut().insert(
-        pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
-        DaemonPresence {
-            liveness: DaemonLiveness::UP,
-            active_sessions: 0,
-            last_seen: SystemTime::UNIX_EPOCH,
-            entered_at: SystemTime::UNIX_EPOCH,
-            in_flight_run_keys: Default::default(),
-            current_pid: Some(1),
-        },
+    // A second floor exists.
+    scene.floor_capacities[1] = 16;
+    // TWO gateways of one source, so the projection is also pinned to carry the
+    // WHOLE roster (an `Option`-shaped projection would drop the second lobster).
+    for port in ["18789", "19789"] {
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            DaemonInstanceId::new(port).expect("non-empty"),
+            DaemonPresence {
+                liveness: DaemonLiveness::UP,
+                active_sessions: 0,
+                last_seen: SystemTime::UNIX_EPOCH,
+                entered_at: SystemTime::UNIX_EPOCH,
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            },
+        );
+    }
+    assert_eq!(
+        project_floor_scene(&scene, 0).daemons().count(),
+        2,
+        "floor 0 carries EVERY gateway mascot"
     );
-    assert!(
-        !project_floor_scene(&scene, 0).daemons().is_empty(),
-        "floor 0 carries the mascot"
-    );
-    assert!(
-        project_floor_scene(&scene, 1).daemons().is_empty(),
+    assert_eq!(
+        project_floor_scene(&scene, 1).daemons().count(),
+        0,
         "floor 1+ must NOT (render-once invariant)"
     );
 }

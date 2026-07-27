@@ -360,10 +360,12 @@ pub fn cwd_extractor_for(source: &str) -> CwdExtractor {
         .unwrap_or(extract_top_level_cwd)
 }
 
-/// A daemon source's wire decoder: its envelope → presence deltas. The pointer
-/// type the registry hands the `HookRouter` demux so each daemon routes to its
-/// OWN decoder (a 2nd daemon needs no `handle_conn` edit).
-pub type PresenceDecoder = fn(&Value) -> Result<Vec<crate::source::daemon::DaemonPresenceUpdate>>;
+/// A daemon source's wire decoder: its envelope → the sending INSTANCE's identity
+/// plus its presence deltas. The pointer type the registry hands the `HookRouter`
+/// demux so each daemon routes to its OWN decoder (a 2nd daemon needs no
+/// `handle_conn` edit) — and so the demux itself never learns what makes two
+/// instances of a daemon different (that stays the source's wire knowledge).
+pub type PresenceDecoder = fn(&Value) -> Result<crate::source::daemon::DecodedPresence>;
 
 /// The presence decoder for a daemon source, or `None` for an agent source.
 /// Registry-DRIVEN — the demux never names a source, so a 2nd daemon needs no

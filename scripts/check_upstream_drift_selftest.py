@@ -118,6 +118,18 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     offenders = [m for m in (ev | ri) if not re.match(r"^[a-z][a-z_]*$", m)]
     check(not offenders, f"codex rollout members are snake_case; offenders={offenders}")
 
+    # `openclaw_plugin_default_port` returns a single VALUE, not a set, so it rides
+    # its own check (the read_codex_rollout_types precedent). It exists because the
+    # port literal is COPIED into the plugin (un-importable from OpenClaw's state
+    # dir) and the live comparison is PR-gated off, so renaming the const would leave
+    # the weekly check comparing nothing. THIS is what notices — and the workflow
+    # lists the template in its PR `paths`, so it fires on the renaming PR itself.
+    port = d.openclaw_plugin_default_port()
+    check(
+        port is not None and port.isdigit(),
+        f"openclaw_plugin_default_port reads a numeric literal from the plugin, got {port!r}",
+    )
+
 
 def test_upstream_parsers_extract_from_a_snippet() -> None:
     # Codex HookEventName enum snippet.

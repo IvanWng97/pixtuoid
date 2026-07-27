@@ -94,9 +94,10 @@ pub struct DrawCtx<'a> {
     pub floor: pixtuoid_scene::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
-    /// The gateway mascot's frame this render (for hover identity). Set from the
-    /// pixel pass; `None` when no gateway is present.
-    pub last_mascot_pos: Option<MascotFrame>,
+    /// Every gateway mascot's frame this render (for hover identity). Set from the
+    /// pixel pass; EMPTY when no gateway is present. A Vec because concurrent
+    /// gateways of one source each get their own hoverable lobster.
+    pub last_mascots: Vec<MascotFrame>,
     /// The pet assigned to this floor — its kind AND resolved display name.
     /// `None` when no pets are configured or none maps to this floor seed.
     /// Replaces the former `floor_pet_kind` + `pet_names` pair: the name rides
@@ -298,7 +299,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         debug_walkable: ctx.debug_walkable,
     });
     ctx.last_pet_pos = pixel_result.pet_pos;
-    ctx.last_mascot_pos = pixel_result.mascot_pos;
+    ctx.last_mascots = pixel_result.mascots;
     ctx.chitchat_bubbles = pixel_result.chitchat_bubbles;
     ctx.new_coffee_carriers = pixel_result.new_coffee_carriers;
     ctx.occupied_waypoints = pixel_result.occupied_waypoints;
@@ -395,13 +396,11 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                         actual_scene,
                         theme,
                     );
-                } else if let Some(m) = ctx
-                    .last_mascot_pos
-                    .filter(|m| hit_test_mascot(m.pos, m.w, m.h, mx, my))
-                {
+                } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, mx, my) {
                     paint_mascot_tooltip(
                         f,
                         m.name,
+                        m.instance.as_deref(),
                         m.busy,
                         m.degraded,
                         m.active_sessions,
@@ -558,9 +557,78 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
     }
 }
 
+/// The mascot under the cursor that the user can actually SEE — the one painted on
+/// TOP, not merely the first in the roster.
+///
+/// `last_mascots` arrives in roster order (lexicographic instance, so port), while
+/// the painter y-sorts its drawables ascending
+/// (`pixel_painter`: `drawables.sort_by_key(|d| d.anchor_y)`) — so among overlapping
+/// mascots the greatest `pos.y` is drawn LAST and occludes the others. Picking the
+/// FIRST hit instead named the lower-numbered gateway whichever lobster was visible,
+/// breaking the promise `MascotFrame::instance` documents ("so a hover over one of
+/// two concurrent lobsters names the one under the cursor").
+fn topmost_mascot_at(
+    mascots: &[pixtuoid_scene::pixel_painter::MascotFrame],
+    mx: u16,
+    my: u16,
+) -> Option<&pixtuoid_scene::pixel_painter::MascotFrame> {
+    mascots
+        .iter()
+        .filter(|m| hit_test_mascot(m.pos, m.w, m.h, mx, my))
+        .max_by_key(|m| m.pos.y)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two gateways whose sprites overlap must hover as the one drawn ON TOP. The
+    /// roster order is lexicographic by port, so a first-hit pick silently reported
+    /// 18789 while the user was pointing at 19789's lobster.
+    #[test]
+    fn hovering_overlapping_mascots_names_the_one_painted_on_top() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::pixel_painter::MascotFrame;
+        let frame = |instance: &str, x: u16, y: u16| MascotFrame {
+            pos: Point { x, y },
+            w: 14,
+            h: 12,
+            name: "OpenClaw",
+            instance: Some(instance.to_string()),
+            busy: false,
+            degraded: false,
+            active_sessions: 0,
+        };
+        // Roster order (lexicographic port) puts 18789 first; 19789 stands LOWER on
+        // screen, so the painter draws it last and it occludes its sibling.
+        // `hit_test_mascot` centres the 14x12 box on `pos` and doubles the cell y
+        // (half-block), so 18789 covers x[33,47) my[22,28) and 19789 x[37,51)
+        // my[25,31) — overlapping at x[37,47) my[25,28).
+        let mascots = vec![frame("18789", 40, 50), frame("19789", 44, 56)];
+        let hit = |mx, my| {
+            topmost_mascot_at(&mascots, mx, my)
+                .and_then(|m| m.instance.clone())
+                .unwrap_or_else(|| "none".into())
+        };
+
+        // Inside the overlap of both boxes ⇒ the lower (later-painted) one wins.
+        assert_eq!(hit(40, 26), "19789", "the visible lobster must be named");
+        // Above/left of the overlap, only the upper sprite is under the cursor.
+        assert_eq!(hit(34, 23), "18789");
+        // Below the upper sprite's box, only the lower one is.
+        assert_eq!(hit(49, 29), "19789");
+        // Clear of both.
+        assert_eq!(hit(5, 5), "none");
+        // Order in the slice must not matter — reversing the roster changes nothing.
+        let reversed = vec![frame("19789", 44, 56), frame("18789", 40, 50)];
+        assert_eq!(
+            topmost_mascot_at(&reversed, 40, 26)
+                .and_then(|m| m.instance.clone())
+                .as_deref(),
+            Some("19789"),
+            "the pick must be by paint order, not slice position"
+        );
+    }
 
     #[test]
     fn clip_widget_rect_fully_inside() {

@@ -194,15 +194,24 @@ fn summarize(scene: &SceneState) -> String {
     // every other field on this println path (R0609-02).
     let daemons: Vec<String> = scene
         .daemons()
-        .iter()
-        .map(|(source, p)| {
+        .map(|(source, instance, p)| {
             let state = match p.display_state() {
                 DaemonState::Idle => "idle",
                 DaemonState::Busy => "busy",
                 DaemonState::Degraded => "degraded",
                 DaemonState::Down => "down",
             };
-            format!("{}:{}", sanitize_line(source), state)
+            // `source@instance:state` — the instance (an OpenClaw gateway port) is
+            // load-bearing here, not cosmetic: two gateways are two rows, so the
+            // live-e2e can assert one going down leaves the other alone. The id is
+            // decoder-minted (a checked port), but sanitize like every other field
+            // on this println path (R0609-02).
+            format!(
+                "{}@{}:{}",
+                sanitize_line(source),
+                sanitize_line(instance.as_str()),
+                state
+            )
         })
         .collect();
     format!(
@@ -469,14 +478,22 @@ mod tests {
 
     // Headless must surface the DAEMON layer too (the OpenClaw gateway lobster),
     // not just agents — in headless it is the ONLY programmatic window onto a
-    // daemon's presence. Format is `<source>:<idle|busy|down>`, source-keyed so N
-    // daemons each get an entry. (This is also what the live-e2e harness asserts.)
+    // daemon's presence. Format is `<source>@<instance>:<idle|busy|degraded|down>`,
+    // keyed by source AND instance so N daemons — and N gateways of one daemon —
+    // each get an entry. (This is also what the live-e2e harness asserts.)
     #[test]
     fn summarize_reports_daemon_presence() {
-        use pixtuoid_core::source::daemon::{apply_presence, DaemonPresenceUpdate};
+        use pixtuoid_core::source::daemon::{
+            apply_presence, DaemonInstanceKey, DaemonPresenceUpdate,
+        };
+        use pixtuoid_core::state::DaemonInstanceId;
 
         let mut scene = SceneState::new([8; MAX_FLOORS]);
         let now = SystemTime::now();
+        let gw = DaemonInstanceKey::new(
+            "openclaw",
+            DaemonInstanceId::new("18789").expect("non-empty"),
+        );
 
         // No daemon configured → an empty (but present) daemons section.
         assert!(
@@ -488,12 +505,12 @@ mod tests {
         // gateway_start → idle.
         apply_presence(
             &mut scene,
-            "openclaw",
+            &gw,
             DaemonPresenceUpdate::GatewayUp { pid: Some(4242) },
             now,
         );
         assert!(
-            summarize(&scene).contains("daemons=[openclaw:idle]"),
+            summarize(&scene).contains("daemons=[openclaw@18789:idle]"),
             "got: {}",
             summarize(&scene)
         );
@@ -501,14 +518,14 @@ mod tests {
         // a run in flight → busy.
         apply_presence(
             &mut scene,
-            "openclaw",
+            &gw,
             DaemonPresenceUpdate::RunStarted {
                 run_key: "r".into(),
             },
             now,
         );
         assert!(
-            summarize(&scene).contains("daemons=[openclaw:busy]"),
+            summarize(&scene).contains("daemons=[openclaw@18789:busy]"),
             "got: {}",
             summarize(&scene)
         );
@@ -517,27 +534,22 @@ mod tests {
         // in-flight run, so the subsequent GatewayDown still reads as down.
         apply_presence(
             &mut scene,
-            "openclaw",
+            &gw,
             DaemonPresenceUpdate::RunFailed {
                 run_key: "r".into(),
             },
             now,
         );
         assert!(
-            summarize(&scene).contains("daemons=[openclaw:degraded]"),
+            summarize(&scene).contains("daemons=[openclaw@18789:degraded]"),
             "got: {}",
             summarize(&scene)
         );
 
         // gateway_stop → down.
-        apply_presence(
-            &mut scene,
-            "openclaw",
-            DaemonPresenceUpdate::GatewayDown,
-            now,
-        );
+        apply_presence(&mut scene, &gw, DaemonPresenceUpdate::GatewayDown, now);
         assert!(
-            summarize(&scene).contains("daemons=[openclaw:down]"),
+            summarize(&scene).contains("daemons=[openclaw@18789:down]"),
             "got: {}",
             summarize(&scene)
         );

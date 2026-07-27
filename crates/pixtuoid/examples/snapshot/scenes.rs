@@ -115,10 +115,15 @@ pub(crate) fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -
 /// Inject an OpenClaw gateway presence for the beautify visual loop — drives
 /// the wandering lobster mascot. `state` ∈ {idle, busy, down}; off the gen-media
 /// path so baselines hold.
+/// Stage one OpenClaw presence per entry in `ports` (empty ⇒ the single upstream
+/// default port, so every existing caller and every gen-media baseline is
+/// unchanged). Several ports is how the multi-gateway crowding is made LOOKABLE:
+/// nothing else in the tree renders N mascots to an image.
 pub(crate) fn inject_openclaw_presence(
     s: &mut SceneState,
     state: &str,
     now: SystemTime,
+    ports: &[String],
 ) -> Result<()> {
     use pixtuoid_core::state::{DaemonLiveness, DaemonPresence};
     // Busy carries in-flight RUN keys (two, for a lively demo stream) — Busy is
@@ -145,17 +150,33 @@ pub(crate) fn inject_openclaw_presence(
     let entered_at = now
         .checked_sub(std::time::Duration::from_secs(20))
         .unwrap_or(now);
-    s.daemons_mut().insert(
-        pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
-        DaemonPresence {
-            liveness,
-            active_sessions,
-            last_seen: now,
-            entered_at,
-            in_flight_run_keys: runs.into_iter().collect(),
-            current_pid: Some(4242),
-        },
-    );
+    let ports: Vec<&str> = if ports.is_empty() {
+        vec!["18789"]
+    } else {
+        ports.iter().map(String::as_str).collect()
+    };
+    for (i, port) in ports.iter().enumerate() {
+        s.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::state::DaemonInstanceId::new(*port)
+                .ok_or_else(|| anyhow::anyhow!("--openclaw-ports entries must be non-empty"))?,
+            DaemonPresence {
+                liveness,
+                active_sessions,
+                last_seen: now,
+                entered_at,
+                in_flight_runs: runs
+                    .iter()
+                    // Fresh leases at `now`, so the snapshot renders the BUSY mascot
+                    // (the decay window is a runtime behaviour, not a still frame).
+                    .map(|r| (r.clone(), now))
+                    .collect(),
+                // Distinct per instance: a shared pid would make one exit receipt
+                // look like every gateway's.
+                current_pid: Some(4242 + i as i32),
+            },
+        );
+    }
     Ok(())
 }
 

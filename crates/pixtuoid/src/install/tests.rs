@@ -51,6 +51,7 @@ static FAKE: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 // A per-process config path under the system temp dir, used by FAKE2/FAKE_DIR
@@ -92,6 +93,7 @@ static FAKE2: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 // FAKE_DIR: default_config_path points at a path the test creates as a
@@ -119,6 +121,7 @@ static FAKE_DIR: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 // FAKE_NO_HOME: default_config_path returns Err (no home dir resolves) and
@@ -146,6 +149,7 @@ static FAKE_NO_HOME: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
+    post_install_hint: None,
 };
 
 /// A platform-absolute fixture path: `/x/hook` is DRIVE-RELATIVE on
@@ -808,8 +812,11 @@ fn install_on_a_malformed_config_leaves_no_orphan_extra_artifacts() {
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
     .unwrap_err();
+    // OpenClaw's parse guard names the real reason (its config is JSON5, so a
+    // document our strict parser rejects may be perfectly valid) and points at the
+    // owner CLI — but it is still a BAIL BEFORE ANY WRITE, which is what this pins.
     assert!(
-        format!("{err:#}").contains("refusing to overwrite"),
+        format!("{err:#}").contains("will not rewrite the file"),
         "the bail must come from the parse guard, got: {err:#}"
     );
     // The malformed config is byte-for-byte preserved...
@@ -968,15 +975,164 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
             let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
         }
         let v = verify_target(t, Some(cfg));
+        // Form-agnostic on purpose: same-directory misses collapse into ONE
+        // "N plugin artifacts missing from <dir>: a, b, c" (the panel's detail line
+        // is ~62 chars and OpenClaw ships three), scattered ones stay per-path. The
+        // INVARIANT is a hard issue naming the artifacts, not a fixed sentence.
         assert!(
             !v.is_sound()
                 && v.issues
                     .iter()
-                    .any(|i| i.contains("plugin artifact missing")),
+                    .any(|i| i.contains("artifact") && i.contains("missing")),
             "{}: a missing code artifact must be a HARD verify issue (the silent-dead \
              invariant) — got {:?}",
             t.name,
             v.issues
+        );
+        covered += 1;
+    }
+    assert!(
+        covered >= 1,
+        "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+    );
+}
+
+/// The collapse itself, which the target sweep above deliberately cannot see: it
+/// asserts only "a hard issue naming the artifacts", satisfied by BOTH forms, so
+/// nothing pinned the shortening that is this function's whole reason to exist.
+/// Mutation testing found exactly that hole — four separate mutations of the branch
+/// condition all survived the suite.
+#[test]
+fn same_dir_artifact_misses_collapse_to_one_short_line_scattered_ones_do_not() {
+    let dir = std::path::Path::new("/o/plugins/pixtuoid");
+
+    // Nothing missing ⇒ no issue at all.
+    assert!(missing_artifact_issue(&[]).is_empty());
+
+    // ONE miss keeps the per-path form: there is no shared-directory fact to state
+    // yet, and "1 plugin artifacts missing from …" would be both wrong and longer.
+    let one = missing_artifact_issue(&[dir.join("index.js")]);
+    assert_eq!(one.len(), 1);
+    assert!(
+        one[0].starts_with("plugin artifact missing:") && one[0].contains("index.js"),
+        "a lone miss names its own path — got {one:?}"
+    );
+
+    // Same directory ⇒ ONE line stating the dir once and naming every file.
+    let same: Vec<PathBuf> = ["index.js", "package.json", "pixtuoid-hook"]
+        .iter()
+        .map(|n| dir.join(n))
+        .collect();
+    let collapsed = missing_artifact_issue(&same);
+    assert_eq!(collapsed.len(), 1, "same-dir misses are ONE fact");
+    let line = &collapsed[0];
+    assert!(
+        line.starts_with("3 plugin artifacts missing from ")
+            && line.contains("/o/plugins/pixtuoid"),
+        "the collapsed line counts them and names the dir ONCE — got {line}"
+    );
+    for n in ["index.js", "package.json", "pixtuoid-hook"] {
+        assert!(line.contains(n), "{n} must still be named — got {line}");
+    }
+    // The shortening is the POINT, so pin its MECHANISM rather than a made-up ratio:
+    // the directory is stated once here and once PER path in the form it replaces.
+    let dir_str = dir.to_string_lossy().into_owned();
+    assert_eq!(
+        line.matches(&dir_str).count(),
+        1,
+        "the shared dir appears exactly once — got {line}"
+    );
+    let per_path: Vec<String> = same
+        .iter()
+        .map(|p| format!("plugin artifact missing: {}", p.display()))
+        .collect();
+    assert_eq!(
+        per_path.iter().filter(|i| i.contains(&dir_str)).count(),
+        same.len(),
+        "the form being replaced repeats it per path (that is the cost)"
+    );
+    assert!(
+        line.chars().count() < per_path.iter().map(|i| i.chars().count()).sum::<usize>(),
+        "and the one line is shorter than the {} it replaces — got {} chars",
+        same.len(),
+        line.chars().count()
+    );
+
+    // DIFFERENT directories ⇒ no shared-dir fact to state, so each keeps its path.
+    let scattered = vec![dir.join("index.js"), PathBuf::from("/elsewhere/hook")];
+    let scattered_issues = missing_artifact_issue(&scattered);
+    assert_eq!(
+        scattered_issues.len(),
+        2,
+        "scattered misses stay one line each"
+    );
+    assert!(
+        scattered_issues
+            .iter()
+            .all(|i| i.starts_with("plugin artifact missing:")),
+        "got {scattered_issues:?}"
+    );
+}
+
+/// WHY `has_hooks`' empty-config guard is a fast path, not load-bearing logic: every
+/// target's uninstall merge already reports an empty document as unchanged, so the
+/// guard's removal would be behaviour-preserving (mutation testing flags it as a
+/// survivor for exactly that reason — an EQUIVALENT mutant, not a test gap). This
+/// pins the property that makes it equivalent, so a future target that claimed
+/// `changed` for an empty config — and would then read as INSTALLED without the
+/// guard — fails here instead of silently making the guard load-bearing.
+#[test]
+fn no_targets_uninstall_merge_claims_a_change_on_an_empty_config() {
+    for t in crate::install::target::TARGETS {
+        let changed = (t.merge_uninstall)("").map(|o| o.changed);
+        assert!(
+            matches!(changed, Ok(false)),
+            "{}: an empty config bears no hooks to remove — got {changed:?}",
+            t.name
+        );
+    }
+}
+
+// The silent-dead class the EXISTENCE stat above is blind to: the artifacts are
+// all present, the config registers them, the plugin loads — but the shim path
+// BAKED INTO the entry module points at a binary that moved (a cargo→brew
+// reinstall of pixtuoid-hook). Every forward then fails inside a plugin that
+// swallows spawn errors by design, so the mascot silently never appears while
+// doctor reports the source healthy. Generic over every `extra_artifacts` target
+// so a future one is auto-guarded.
+#[test]
+fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target() {
+    let _env = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let oc_home = tempfile::TempDir::new().unwrap();
+    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    let mut covered = 0;
+    for &t in target::TARGETS {
+        if t.extra_artifacts.is_none() {
+            continue;
+        }
+        // A REAL executable at install time, so the install itself is honest…
+        let shim_dir = tempfile::TempDir::new().unwrap();
+        let shim = shim_dir.path().join("pixtuoid-hook");
+        std::fs::copy(std::env::current_exe().unwrap(), &shim).unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config");
+        install_target(t, Some(cfg.clone()), Some(shim.clone())).unwrap();
+        assert!(
+            verify_target(t, Some(cfg.clone())).is_sound(),
+            "{}: a fresh install with a real shim must verify sound",
+            t.name
+        );
+        // …then the binary MOVES. Artifacts + config are untouched.
+        std::fs::remove_file(&shim).unwrap();
+        let v = verify_target(t, Some(cfg));
+        assert!(
+            !v.is_sound() && v.issues.iter().any(|i| i.contains("shim binary missing")),
+            "{}: a moved baked shim must be a HARD verify issue — got {:?} / notes {:?}",
+            t.name,
+            v.issues,
+            v.notes
         );
         covered += 1;
     }
@@ -1112,5 +1268,143 @@ fn verify_target_flags_codewhale_disabled() {
         v.issues.iter().any(|i| i.contains("enabled = false")),
         "{:?}",
         v.issues
+    );
+}
+
+#[test]
+fn json_value_equality_ignores_key_order_under_preserve_order() {
+    // `preserve_order` swaps serde_json's `Map` from BTreeMap to IndexMap so a
+    // merge re-emits the user's own key order instead of alphabetising their file.
+    // The load-bearing consequence to pin: `Value: PartialEq` must stay
+    // order-INDEPENDENT, because every target's `changed` flag is a SEMANTIC diff
+    // (`merged != doc`). Were equality to become order-SENSITIVE, a config whose
+    // keys we merely re-ordered would report `changed` — rewriting the file, taking
+    // a backup, and flipping `has_hooks` on every single connect.
+    let a: serde_json::Value = serde_json::from_str(r#"{"b":1,"a":{"y":2,"x":3}}"#).unwrap();
+    let b: serde_json::Value = serde_json::from_str(r#"{"a":{"x":3,"y":2},"b":1}"#).unwrap();
+    assert_eq!(a, b, "object equality must not depend on key order");
+    // …while SERIALIZATION does preserve each document's own order (the feature's
+    // whole point — the default BTreeMap backing would emit both as `{"a":…,"b":…}`).
+    assert_eq!(
+        serde_json::to_string(&a).unwrap(),
+        r#"{"b":1,"a":{"y":2,"x":3}}"#,
+        "the user's key order must survive the round-trip"
+    );
+    // Array order stays significant (it is data, not layout).
+    assert_ne!(
+        serde_json::json!([1, 2]),
+        serde_json::json!([2, 1]),
+        "array order is data and must still compare unequal"
+    );
+}
+
+#[test]
+fn a_config_we_cannot_parse_but_never_wrote_is_not_reported_as_installed() {
+    // The JSON5 trap. OpenClaw's config is legal JSON5, so a user's comment makes
+    // our strict merge Err — and `has_hooks`'s old conservative `unwrap_or(true)`
+    // then claimed hooks were INSTALLED for someone who never connected. `doctor`
+    // ran verify on that claim and reported "install broken: plugin artifact
+    // missing…", telling them to reconnect openclaw — advice the merge refuses by
+    // design (the OpenClaw-JSON5 sharp edge), i.e. an unsatisfiable remedy for a
+    // state that was never broken. The honest fallback asks whether the document
+    // mentions us at all.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join("openclaw.json");
+
+    // Valid JSON5, strict-JSON-rejected, and NOT ours.
+    std::fs::write(
+        &cfg,
+        "{\n  // my gateway notes\n  \"gateway\": { \"port\": 18789 },\n}\n",
+    )
+    .unwrap();
+    assert!(
+        !has_hooks(&target::OPENCLAW, Some(cfg.clone())),
+        "a config we cannot parse and never wrote must not count as installed"
+    );
+
+    // The SAME unparseable shape, but ours (a user who connected, then added a
+    // comment): the conservative answer is right here — it IS installed, and the
+    // rationale the old default was written for.
+    std::fs::write(
+        &cfg,
+        "{\n  // mine\n  \"plugins\": { \"entries\": { \"pixtuoid\": { \"enabled\": true } } },\n}\n",
+    )
+    .unwrap();
+    assert!(
+        has_hooks(&target::OPENCLAW, Some(cfg.clone())),
+        "an unparseable config that names us still bears hooks"
+    );
+
+    // A genuinely UNREADABLE config (a directory) keeps the true default — nothing
+    // was read, so nothing can be concluded, and "present" is the safe answer.
+    let dir_cfg = tmp.path().join("as-a-dir.json");
+    std::fs::create_dir(&dir_cfg).unwrap();
+    assert!(
+        has_hooks(&target::OPENCLAW, Some(dir_cfg)),
+        "an unreadable config keeps the conservative default"
+    );
+}
+
+#[test]
+fn every_target_that_writes_a_config_names_us_in_it() {
+    // The invariant `has_hooks`'s unparseable-config fallback rests on: a config we
+    // wrote mentions us, so a substring probe can answer "is this ours?" when the
+    // parse fails. In production the shim IS named `pixtuoid-hook`, so every target
+    // that embeds its path satisfies this by construction — that is the case to pin.
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let hook = tmpdir.path().join("pixtuoid-hook");
+    std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
+    for t in crate::install::TARGETS {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join(format!("{}-cfg", t.name));
+        install_target(t, Some(cfg.clone()), Some(hook.clone()))
+            .unwrap_or_else(|e| panic!("{}: install failed: {e:#}", t.name));
+        let content = std::fs::read_to_string(&cfg)
+            .unwrap_or_else(|e| panic!("{}: config unreadable: {e}", t.name));
+        assert!(
+            super::config_mentions_us(&content),
+            "{}: a config we wrote must satisfy the PRODUCTION fallback predicate",
+            t.name
+        );
+        assert!(
+            has_hooks(t, Some(cfg)),
+            "{}: has_hooks must see the install it just wrote",
+            t.name
+        );
+    }
+}
+
+/// The fallback's ONE marker-carrier that is not the shim path: kimi ships no
+/// `_pixtuoid` sentinel, so on a config where the embedded path happens not to name
+/// us its only trace is the UPPERCASE `PIXTUOID_SOURCE=kimi` — which is why
+/// `config_mentions_us` folds case. Unix-only BY CONSTRUCTION, and that asymmetry is
+/// the honest residual: Windows uses the bare exec form (`<path> --source kimi`), so
+/// there a marker-less path leaves NO trace at all and the probe answers "not ours".
+/// That direction is safe — it under-reports installed-ness on a CORRUPT config
+/// rather than inventing the false "install broken" the old `unwrap_or(true)` did —
+/// but it is a real limit, so it is asserted where it holds instead of pretended
+/// everywhere.
+#[cfg(unix)]
+#[test]
+fn kimis_uppercase_env_marker_alone_satisfies_the_fallback_probe() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    // A shim path that deliberately does NOT contain our name, so the env prefix is
+    // the only carrier left. Without the case fold this reds.
+    let hook = tmp.path().join("HOOK-shim");
+    std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
+    let cfg = tmp.path().join("kimi-cfg");
+    install_target(&target::KIMI, Some(cfg.clone()), Some(hook)).expect("kimi install");
+    let content = std::fs::read_to_string(&cfg).expect("config readable");
+    assert!(
+        content.contains("PIXTUOID_SOURCE=kimi"),
+        "kimi's only marker here is the env prefix: {content}"
+    );
+    assert!(
+        !content.contains(PLUGIN_MENTION),
+        "fixture must not leak the lowercase form, or it cannot pin the fold"
+    );
+    assert!(
+        super::config_mentions_us(&content),
+        "the fallback must recognise the UPPERCASE marker"
     );
 }

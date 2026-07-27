@@ -48,9 +48,11 @@ pub(super) fn epoch_ms(now: SystemTime) -> u64 {
 pub struct PixelPassResult {
     /// The office pet's resolved frame this tick (for hit-testing), if present.
     pub pet_pos: Option<PetFrame>,
-    /// The gateway mascot's resolved frame this tick (for hover identity).
-    /// `None` when no gateway is present.
-    pub mascot_pos: Option<MascotFrame>,
+    /// One resolved frame per gateway mascot drawn this tick (for hover
+    /// identity). EMPTY when no gateway is present; a Vec because a source can run
+    /// ANY number of concurrent instances (N OpenClaw gateways = N lobsters), each
+    /// independently hoverable.
+    pub mascots: Vec<MascotFrame>,
     /// Active speech bubbles this frame, for the caller's widget pass.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agent ids observed in `Walking { carrying_coffee: true }` this
@@ -66,7 +68,7 @@ pub struct PixelPassResult {
 /// The gateway mascot's screen frame — enough to hover-identify it (which
 /// gateway, how busy). The wandering position is recomputed every frame, so
 /// this is recaptured each render like `PetFrame`.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct MascotFrame {
     /// The mascot's top-left screen position this tick.
     pub pos: Point,
@@ -78,6 +80,11 @@ pub struct MascotFrame {
     pub h: u16,
     /// Human-readable gateway name (e.g. "OpenClaw").
     pub name: &'static str,
+    /// WHICH instance of that gateway this mascot is (an OpenClaw port), so a
+    /// hover over one of two concurrent lobsters names the one under the cursor.
+    /// `None` when the source runs a single instance whose id carries no meaning
+    /// for the user — see `DaemonInstanceId`'s stale-plugin fallback.
+    pub instance: Option<String>,
     /// An agent run is in flight (the tooltip's idle-vs-working verb). Keyed on
     /// the run state, NOT the session count — a single-user gateway holds one
     /// persistent session even at rest, so session count is a poor idle/busy tell.
@@ -362,7 +369,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // Phase 2 — PAINT: an immutable read of the SimFrame that mutates only
     // the buffer + the recolor cache. Painting the same frame twice is
     // byte-identical (pinned by `paint_frame_is_pure_and_byte_identical`).
-    let (pet_pos, mascot_pos) = paint_frame(
+    let (pet_pos, mascots) = paint_frame(
         &mut PaintCtx {
             scene: ctx.scene,
             layout: ctx.layout,
@@ -383,7 +390,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     );
     PixelPassResult {
         pet_pos,
-        mascot_pos,
+        mascots,
         chitchat_bubbles: frame.chitchat_bubbles,
         new_coffee_carriers: frame.new_coffee_carriers,
         occupied_waypoints: frame.occupied_waypoints,
@@ -545,12 +552,9 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
 /// The PAINT half of the frame: blit the world the sim already advanced.
 /// Reads the [`SimFrame`] immutably; every positional/lifecycle decision was
 /// made in `sim_step` — this pass only resolves presentation (theme colors,
-/// sprite pixels) and composites. Returns the resolved pet + mascot frames
-/// for the caller's hit-testing.
-fn paint_frame(
-    ctx: &mut PaintCtx<'_>,
-    frame: &SimFrame,
-) -> (Option<PetFrame>, Option<MascotFrame>) {
+/// sprite pixels) and composites. Returns the resolved pet frame + every mascot
+/// frame for the caller's hit-testing.
+fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, Vec<MascotFrame>) {
     let agents: &[AgentSlot] = &frame.agents;
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
@@ -727,7 +731,7 @@ fn paint_frame(
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
     let resolved_pet_pos = enqueue_pet(ctx, agents, &mut drawables);
-    let resolved_mascot_pos = enqueue_gateway_mascot(ctx, &mut drawables);
+    let resolved_mascots = enqueue_gateway_mascots(ctx, &mut drawables);
 
     enqueue_characters(ctx, frame, &mut drawables);
 
@@ -765,7 +769,7 @@ fn paint_frame(
         debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.motion);
     }
 
-    (resolved_pet_pos, resolved_mascot_pos)
+    (resolved_pet_pos, resolved_mascots)
 }
 
 /// Map the sim's resolved [`sim::CharacterPlacement`]s 1:1 onto y-sorted
@@ -946,27 +950,26 @@ fn enqueue_pet<'a>(
     })
 }
 
-/// Enqueue any gateway mascots present in `daemons` (only the ground
-/// floor carries the map, so a mascot shows once). Presence-gated: an absent
+/// Enqueue every gateway mascot present in `daemons` (only the ground floor
+/// carries the roster, so each mascot shows once). Presence-gated: an absent
 /// entry draws nothing, so the ~99% who don't run a gateway see a normal office.
-/// The runtime is responsible for KEEPING the map honest — a never-connected or
+/// The runtime is responsible for KEEPING the roster honest — a never-connected or
 /// panel-disconnected gateway has no live entry (the driver's presence
 /// connection-gate drops its hooks and the sweep walks any lingering entry out),
 /// so "entry present" tracks "connected + alive", not merely "a hook arrived".
-/// y-sorted at the mascot's south row.
-fn enqueue_gateway_mascot<'a>(
+/// y-sorted at each mascot's south row. Returns ONE frame per drawn mascot — N
+/// concurrent gateways are N independently hoverable lobsters, with no arity
+/// assumption anywhere on this path (the roster is a map, not a pair).
+fn enqueue_gateway_mascots<'a>(
     ctx: &PaintCtx<'_>,
     drawables: &mut Vec<Drawable<'a>>,
-) -> Option<MascotFrame> {
-    let mut hover = None;
-    for (source, presence) in ctx.scene.daemons() {
+) -> Vec<MascotFrame> {
+    let mut frames = Vec::new();
+    for (source, instance, presence) in ctx.scene.daemons() {
         let Some(def) = gateway_mascot_def(source) else {
             continue;
         };
-        // Per-source deterministic seed so two gateways don't wander in lockstep.
-        let seed = source
-            .bytes()
-            .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
+        let seed = crate::creatures::mascot_seed(source, instance);
         let Some((pos, anim_name, frame_idx)) =
             mascot_position(ctx.layout, presence, def.walk, def.rest, ctx.now, seed)
         else {
@@ -977,7 +980,8 @@ fn enqueue_gateway_mascot<'a>(
             .animation(anim_name)
             .and_then(|a| a.frames.first())
             .map_or((14, 12), |f| (f.width(), f.height()));
-        let run_count = presence.in_flight_run_keys.len() as u32;
+        let run_count = presence.in_flight_runs.len() as u32;
+        let degraded = presence.display_state() == pixtuoid_core::state::DaemonState::Degraded;
         drawables.push(Drawable {
             anchor_y: z_sort_row(Anchor::Center, pos, mascot_h),
             kind: DrawableKind::GatewayMascot {
@@ -985,21 +989,28 @@ fn enqueue_gateway_mascot<'a>(
                 anim_name,
                 frame_idx,
                 run_count,
-                degraded: presence.display_state() == pixtuoid_core::state::DaemonState::Degraded,
+                degraded,
             },
         });
-        // First present gateway wins the hover frame (single-gateway today).
-        hover.get_or_insert(MascotFrame {
+        frames.push(MascotFrame {
             pos,
             w: mascot_w,
             h: mascot_h,
             name: def.display_name,
+            // Only worth showing when there is something to disambiguate, and that
+            // is per SOURCE: two gateways of ONE daemon need their ports, while a
+            // second daemon source with one instance each already reads apart by
+            // name and sprite. Re-counting per mascot is free — the roster holds one
+            // row per LIVE gateway (1–2 in practice), and this fn only runs at all
+            // when it is non-empty.
+            instance: (ctx.scene.daemons().filter(|(s, _, _)| *s == source).count() > 1)
+                .then(|| instance.as_str().to_string()),
             busy: presence.is_busy(),
-            degraded: presence.display_state() == pixtuoid_core::state::DaemonState::Degraded,
+            degraded,
             active_sessions: presence.active_sessions,
         });
     }
-    hover
+    frames
 }
 
 /// Meeting-room rugs + sofas + tables. For dual-meeting layouts sofas come in

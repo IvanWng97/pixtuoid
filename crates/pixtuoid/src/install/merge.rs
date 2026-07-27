@@ -116,6 +116,32 @@ pub(crate) fn flat_json_merge_install(
     Value::Object(root)
 }
 
+/// Drop `key` from `parent` when it is an EMPTY object/array — the uninstall's husk
+/// sweeper. Anything with content (a foreign plugin's entry, another load path, the
+/// user's own allowlist members) is left exactly as found.
+///
+/// Lives HERE, beside [`flat_json_merge_uninstall`], because the DECISION — "a
+/// container WE emptied must not be left behind, one with content must not be
+/// touched" — is one rule, and a future refinement (say, also pruning a container
+/// holding only nulls) must not land in one uninstall path and miss the other.
+pub(crate) fn prune_empty(parent: &mut serde_json::Map<String, Value>, key: &str) {
+    let empty = match parent.get(key) {
+        Some(Value::Object(m)) => m.is_empty(),
+        Some(Value::Array(a)) => a.is_empty(),
+        _ => false,
+    };
+    if empty {
+        parent.remove(key);
+    }
+}
+
+/// [`prune_empty`] for a top-level key of the document root.
+pub(crate) fn prune_empty_root(root: &mut Value, key: &str) {
+    if let Some(obj) = root.as_object_mut() {
+        prune_empty(obj, key);
+    }
+}
+
 /// Remove managed hook entries (keyed on `sentinel`) from `doc`, then drop any
 /// event key whose array went empty and the `hooks` object if it emptied. The
 /// inverse of `flat_json_merge_install`, shared by Reasonix, Cursor, AND Claude
@@ -144,9 +170,7 @@ pub(crate) fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value
     for k in to_remove {
         hooks_obj.remove(&k);
     }
-    if hooks_obj.is_empty() {
-        root.remove("hooks");
-    }
+    prune_empty(root, "hooks");
     doc
 }
 

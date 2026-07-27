@@ -453,7 +453,19 @@ pub(crate) fn save_as_gif(
 
     let mut chitchat_state = std::collections::HashMap::new();
     for i in 0..(skip_frames + frame_count) {
-        let now = start_now + Duration::from_millis(i as u64 * frame_ms);
+        // Exact, not `i * frame_ms` — the same truncation the GIF path above already
+        // fixed with the same reasoning, which this one never got (the sibling-set
+        // class). At 12fps the truncated 83ms makes a "9s" clip span 8964ms, so every
+        // time-derived element drifts 36ms off the wall clock by the last frame.
+        //
+        // This does NOT make the site's `loop`ed clip seam-free, and no timing choice
+        // can: `mascot_wander` picks each cycle's destination from a hash of the cycle
+        // NUMBER, so the wander is aperiodic BY DESIGN and frame N is never frame 0
+        // however the duration is chosen. Verified by looking — the lobster still
+        // stands in a different column at the seam. Closing it would mean a scripted
+        // (non-wandering) timeline for the demo, which is a media decision, not a
+        // rendering one.
+        let now = start_now + Duration::from_millis(i as u64 * 1000 / fps.max(1));
         let mut draw_ctx = DrawCtx {
             buf,
             store,
@@ -463,7 +475,11 @@ pub(crate) fn save_as_gif(
             theme_picker: None,
             floor_info: None,
             per_floor: Default::default(),
-            gateway: None,
+            // DERIVED from the scene, as the runtime does. All THREE DrawCtx sites in
+            // this example must agree: a hardcoded `None` here is what kept the `⬢gw`
+            // chip off the very CLIP whose job is demoing the gateway, and clips are
+            // NOT pixel-gated by `gen-check` (presence-only), so nothing would catch it.
+            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: false,
             volume_flash: None,
             floor: {
@@ -473,7 +489,7 @@ pub(crate) fn save_as_gif(
             },
             active_pet: None,
             last_pet_pos: None,
-            last_mascot_pos: None,
+            last_mascots: Vec::new(),
             floor_pet: None,
             chitchat_state: &mut chitchat_state,
             chitchat_bubbles: Vec::new(),

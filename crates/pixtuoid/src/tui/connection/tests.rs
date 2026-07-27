@@ -134,20 +134,97 @@ fn live_for_counts_groups_and_ages() {
 
     let none: &[SourceDeath] = &[];
     let cc = live_for(now, "claude-code", &scene, none);
-    assert_eq!(cc.agents, 2);
-    assert_eq!(cc.last_event_age, Some(Duration::from_secs(5)));
+    assert_eq!(
+        cc.facet,
+        LiveFacet::Agents {
+            agents: 2,
+            last_event_age: Some(Duration::from_secs(5))
+        }
+    );
     assert!(!cc.dead);
 
     // An empty source → idle (0 agents, no age) — both sides of the count.
     let empty = live_for(now, "reasonix", &scene, none);
-    assert_eq!(empty.agents, 0);
-    assert_eq!(empty.last_event_age, None);
+    assert_eq!(
+        empty.facet,
+        LiveFacet::Agents {
+            agents: 0,
+            last_event_age: None
+        }
+    );
 
     // `dead` from a matching SourceDeath (keyed on the same name string).
     let health = [SourceDeath::new("codex", "boom")];
     let cx = live_for(now, "codex", &scene, &health);
-    assert_eq!(cx.agents, 1);
+    assert_eq!(
+        cx.facet,
+        LiveFacet::Agents {
+            agents: 1,
+            last_event_age: Some(Duration::from_secs(20))
+        }
+    );
     assert!(cx.dead);
+}
+
+#[test]
+fn live_for_reports_a_daemons_instances_not_the_agent_slots_it_never_creates() {
+    // A DAEMON source (openclaw) creates NO AgentSlot — its liveness is the
+    // instance roster. Counting slots made the panel render `idle` for a host with
+    // four gateways running and one mid-run: the column could not distinguish a
+    // stopped gateway from a busy one. Registry-driven (`is_daemon`), so this is
+    // about the source CLASS, not the name openclaw.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+    let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
+    let none: &[SourceDeath] = &[];
+
+    // No gateway running → NOT the agents facet, and distinguishable from idle.
+    let mut scene = SceneState::uniform(8);
+    assert_eq!(
+        live_for(now, src, &scene, none).facet,
+        LiveFacet::Daemon(None),
+        "a daemon with no instance must not report an agent count"
+    );
+
+    // An AgentSlot that (impossibly) claimed the daemon's name must NOT be counted
+    // as its liveness — the class decides the facet, not the data lying around.
+    let ghost = AgentId::from_transcript_path("/p/ghost.jsonl");
+    scene.agents.insert(
+        ghost,
+        mk_slot(ghost, src, SystemTime::UNIX_EPOCH + Duration::from_secs(99)),
+    );
+
+    // Two gateways: one idle, one BUSY → the roster is counted and rolled up
+    // worst-of, the same `gateway_rollup` the footer chip and wall board read.
+    let mut add = |port: &str, runs: &[&str]| {
+        scene.insert_daemon(
+            src,
+            pixtuoid_core::state::DaemonInstanceId::new(port).expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 0,
+                last_seen: now,
+                entered_at: now,
+                in_flight_runs: runs.iter().map(|r| (r.to_string(), now)).collect(),
+                current_pid: Some(1),
+            },
+        );
+    };
+    add("18789", &[]);
+    add("19789", &["r1"]);
+    assert_eq!(
+        live_for(now, src, &scene, none).facet,
+        LiveFacet::Daemon(Some(DaemonRollup {
+            instances: std::num::NonZeroUsize::new(2).expect("two gateways"),
+            state: pixtuoid_core::state::DaemonState::Busy
+        })),
+        "two gateways, one busy → 2 instances rolled up to Busy"
+    );
+
+    // An AGENT source in the same scene is unaffected — the split is per class.
+    assert!(matches!(
+        live_for(now, "claude-code", &scene, none).facet,
+        LiveFacet::Agents { .. }
+    ));
 }
 
 #[test]
@@ -280,6 +357,7 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
         config_path: PathBuf::from("/c"),
         backup,
         path_warning,
+        post_install_hint: None,
     };
     // Both outcomes read as "connected" (the flag flip is the real action).
     let plain = format_connect_result(&base(InstallOutcome::Installed, None, false), "Claude Code");
@@ -303,6 +381,52 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
     assert!(noted.contains("connected"), "{noted}");
     assert!(noted.contains("backup saved"), "{noted}");
     assert!(noted.contains("PATH"), "{noted}");
+
+    // A target whose install is NOT the last step says so on the same line —
+    // "connected" alone is technically true and practically misleading when the
+    // running gateway will not load the plugin until it restarts.
+    let hinted = format_connect_result(
+        &InstallReport {
+            outcome: InstallOutcome::Installed,
+            config_path: PathBuf::from("/c"),
+            backup: None,
+            path_warning: false,
+            post_install_hint: Some("restart the gateway to load it"),
+        },
+        "OpenClaw",
+    );
+    assert!(hinted.contains("connected"), "{hinted}");
+    assert!(
+        hinted.contains("restart the gateway"),
+        "a post-install step must ride the connect line: {hinted}"
+    );
+    // …and a target with no such step is byte-unchanged.
+    assert_eq!(plain, "\u{2713} Claude Code connected");
+}
+
+#[test]
+fn only_openclaw_declares_a_post_install_step_and_it_names_the_restart() {
+    // The hint is per-TARGET data, not a string in a presenter: OpenClaw is the only
+    // target whose write does not take effect on the CLI's next run, because
+    // upstream's own reload plan marks `plugins.load` as `kind: "restart"` (verified
+    // in the shipped 2026.7.1 bundle). If a future target gains a post-install step
+    // it sets this field and both presenters surface it for free.
+    let mut with_hint = Vec::new();
+    for t in crate::install::TARGETS {
+        if let Some(h) = t.post_install_hint {
+            assert!(
+                h.contains("restart"),
+                "{}: a post-install hint must name the action: {h}",
+                t.name
+            );
+            with_hint.push(t.core_source);
+        }
+    }
+    assert_eq!(
+        with_hint,
+        vec![pixtuoid_core::source::openclaw::SOURCE_NAME],
+        "only openclaw needs a post-install step today"
+    );
 }
 
 #[test]

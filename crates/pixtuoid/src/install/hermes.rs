@@ -298,7 +298,11 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
             "config.yaml has no pixtuoid-managed hooks (the _pixtuoid sentinel is absent)".into(),
         );
     }
-    SchemaParse { issues, shim }
+    SchemaParse {
+        issues,
+        shim,
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]

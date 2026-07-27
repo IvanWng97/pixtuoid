@@ -447,8 +447,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         let office_idle = scene.agents.is_empty()
             && scene
                 .daemons()
-                .values()
-                .all(|d| d.liveness == DaemonLiveness::Down);
+                .all(|(_, _, d)| d.liveness == DaemonLiveness::Down);
         let next_tick = if office_idle {
             Duration::from_millis(1000 / IDLE_AMBIENT_FPS)
         } else {

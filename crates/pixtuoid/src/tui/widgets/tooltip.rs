@@ -421,6 +421,7 @@ pub(crate) fn paint_pet_tooltip(
 pub(crate) fn paint_mascot_tooltip(
     f: &mut ratatui::Frame<'_>,
     name: &str,
+    instance: Option<&str>,
     busy: bool,
     degraded: bool,
     active_sessions: u32,
@@ -429,7 +430,7 @@ pub(crate) fn paint_mascot_tooltip(
     scene_rect: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    let text = mascot_tooltip_text(name, busy, degraded, active_sessions);
+    let text = mascot_tooltip_text(name, instance, busy, degraded, active_sessions);
     paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
 }
 
@@ -438,7 +439,19 @@ pub(crate) fn paint_mascot_tooltip(
 /// model backend failing every run) takes precedence over busy/idle so a
 /// sickly-red lobster reads "model error". The `>1` session count is a power-user
 /// garnish only. Plain text (no emoji) to keep the width math exact.
-fn mascot_tooltip_text(name: &str, busy: bool, degraded: bool, active_sessions: u32) -> String {
+fn mascot_tooltip_text(
+    name: &str,
+    instance: Option<&str>,
+    busy: bool,
+    degraded: bool,
+    active_sessions: u32,
+) -> String {
+    // `OpenClaw:19789` — only when there IS a sibling to tell apart (the painter
+    // sets `instance` only then), so the single-gateway tooltip is byte-unchanged.
+    let name = match instance {
+        Some(i) => format!("{name}:{i}"),
+        None => name.to_string(),
+    };
     let verb = if degraded {
         "model error"
     } else if busy {
@@ -538,6 +551,7 @@ mod tests {
             super::paint_mascot_tooltip(
                 f,
                 "OpenClaw",
+                None,
                 true,
                 false,
                 1,
@@ -564,6 +578,7 @@ mod tests {
                 super::paint_mascot_tooltip(
                     f,
                     "OpenClaw",
+                    None,
                     true,
                     true,
                     1,
@@ -739,20 +754,41 @@ mod tests {
         // idle vs working keys on `busy`; the session count only shows as a >1
         // garnish (one persistent session is the single-user norm, not "1 session").
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", false, false, 0),
+            mascot_tooltip_text("OpenClaw", None, false, false, 0),
             " OpenClaw gateway · idle "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", false, false, 1),
+            mascot_tooltip_text("OpenClaw", None, false, false, 1),
             " OpenClaw gateway · idle "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", true, false, 1),
+            mascot_tooltip_text("OpenClaw", None, true, false, 1),
             " OpenClaw gateway · working "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", true, false, 3),
+            mascot_tooltip_text("OpenClaw", None, true, false, 3),
             " OpenClaw gateway · working · 3 sessions "
+        );
+    }
+
+    #[test]
+    fn mascot_tooltip_names_the_instance_only_when_there_is_a_sibling() {
+        // With two concurrent gateways both lobsters would otherwise hover
+        // identically — the port is what tells the user which one they're pointing
+        // at. With ONE gateway the painter passes `None` and the text is unchanged
+        // (the port would be noise), so this pins both halves.
+        assert_eq!(
+            mascot_tooltip_text("OpenClaw", Some("19789"), true, false, 0),
+            " OpenClaw:19789 gateway · working "
+        );
+        assert_eq!(
+            mascot_tooltip_text("OpenClaw", Some("18789"), false, true, 2),
+            " OpenClaw:18789 gateway · model error · 2 sessions "
+        );
+        assert_eq!(
+            mascot_tooltip_text("OpenClaw", None, false, false, 0),
+            " OpenClaw gateway · idle ",
+            "a single gateway's tooltip stays byte-identical"
         );
     }
 
@@ -762,15 +798,15 @@ mod tests {
         // wins over both busy and idle (a degraded gateway is degraded whether or
         // not a run is in flight). The session garnish still rides along.
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", false, true, 0),
+            mascot_tooltip_text("OpenClaw", None, false, true, 0),
             " OpenClaw gateway · model error "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", true, true, 1),
+            mascot_tooltip_text("OpenClaw", None, true, true, 1),
             " OpenClaw gateway · model error "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", true, true, 3),
+            mascot_tooltip_text("OpenClaw", None, true, true, 3),
             " OpenClaw gateway · model error · 3 sessions "
         );
     }

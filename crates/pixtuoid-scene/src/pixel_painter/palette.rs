@@ -321,9 +321,10 @@ const SKIN_PRESETS: &[Rgb] = &[
     }, // warm tan
 ];
 
-/// Deterministic seed from a normalized cwd string: byte-fold (cf.
-/// `pixel_painter/mod.rs` label hash) then the splitmix64 finalizer used
-/// across the scene (`ambient.rs`, `core::id`). No `DefaultHasher` (its
+/// Deterministic seed from a normalized cwd string: byte-fold (the ×131 fold is
+/// also open-coded by `creatures::mascot_seed` — the two need not agree on output,
+/// so they stay separate; this note is the pairing) then the splitmix64 finalizer
+/// used across the scene (`ambient.rs`, `core::id`). No `DefaultHasher` (its
 /// per-process randomization would flicker colors across runs), no new dep.
 fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     let folded = cwd_norm

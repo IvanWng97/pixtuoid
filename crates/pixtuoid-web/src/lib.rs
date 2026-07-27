@@ -21,13 +21,14 @@ use std::time::{Duration, SystemTime};
 use wasm_bindgen::prelude::*;
 
 use pixtuoid_core::source::daemon::apply_presence;
-use pixtuoid_core::source::openclaw;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::{AgentEvent, AgentId, Transport};
 
-use crate::script::{hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, LOOP_MS};
+use crate::script::{
+    hero_gateway, hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, LOOP_MS,
+};
 
 use pixtuoid_scene::audio::OneShotPool;
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
@@ -241,6 +242,17 @@ impl Office {
         self.advance_script(now);
         // The per-frame sweep: Active→Idle debounce, exit GC, walkouts.
         self.reducer.tick(&mut self.scene, now);
+        // The DAEMON sweep the app's reducer task runs on its own tick — the hero
+        // was missing it, so the lobster's `Down` row lived until the next loop's
+        // `GatewayUp` and the wall board showed a stale `gw down` chip for the ~30s
+        // tail of every loop. Same fn, same TTL profile as production; the run/TTL
+        // decay it also drives is inert here (the script's runs pair cleanly).
+        // Registry-driven, exactly like the app's reducer task: the hero must not
+        // re-state WHICH daemon it sweeps or WITH WHAT TTL, or an Nth daemon row
+        // would decay in production and linger here.
+        for (source, ttl) in pixtuoid_core::source::registry::daemon_sources() {
+            pixtuoid_core::source::daemon::sweep_presence_ttl(&mut self.scene, source, ttl, now);
+        }
         // `render` (the FloorSession) evicts per-agent render state for the
         // agents the sweep removed — load-bearing here: the looped script
         // REUSES agent ids, and a returning cast member with stale walk legs
@@ -685,12 +697,7 @@ impl Office {
                     break;
                 }
                 let at = epoch + Duration::from_millis(pb.at_ms);
-                apply_presence(
-                    &mut self.scene,
-                    openclaw::SOURCE_NAME,
-                    pb.update.clone(),
-                    at,
-                );
+                apply_presence(&mut self.scene, &hero_gateway(), pb.update.clone(), at);
                 self.presence_cursor += 1;
             }
             if elapsed < LOOP_MS {
@@ -1164,32 +1171,48 @@ mod tests {
     fn lobster_presence_follows_the_scripted_loop_through_the_real_state_machine() {
         use pixtuoid_core::state::DaemonState;
         let mut o = office();
-        let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
+        let gw = hero_gateway();
+        let lobster = |o: &Office| {
+            o.scene
+                .daemon(gw.source(), gw.instance())
+                .map(|p| p.display_state())
+        };
         o.step(T0_MS, 160, 96); // anchor the loop epoch at T0
                                 // Before the GatewayUp beat: absent (the ~99% no-gateway office).
         o.step(T0_MS + 10_000.0, 160, 96);
-        assert!(
-            !o.scene.daemons().contains_key(src),
-            "no lobster before 25s"
-        );
+        assert!(lobster(&o).is_none(), "no lobster before 25s");
         // 30s: up + idle amble.
         o.step(T0_MS + 30_000.0, 160, 96);
-        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Idle);
+        assert_eq!(lobster(&o), Some(DaemonState::Idle));
         // 45s: run 1 in flight → busy shuttle.
         o.step(T0_MS + 45_000.0, 160, 96);
-        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Busy);
-        assert_eq!(o.scene.daemons()[src].in_flight_run_keys.len(), 1);
+        assert_eq!(lobster(&o), Some(DaemonState::Busy));
+        assert_eq!(
+            o.scene
+                .daemon(gw.source(), gw.instance())
+                .map(|p| p.in_flight_runs.len()),
+            Some(1)
+        );
         // 100s (the wide poster's instant): both runs done → idle.
         o.step(T0_MS + 100_000.0, 160, 96);
-        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Idle);
+        assert_eq!(lobster(&o), Some(DaemonState::Idle));
         // 115s: walked out (Down ≠ absent — the leave animation anchors on it).
         o.step(T0_MS + 115_000.0, 160, 96);
-        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Down);
+        assert_eq!(lobster(&o), Some(DaemonState::Down));
+        // …and the daemon sweep then REMOVES the row once the walk-out window has
+        // passed, exactly as the app does. Without it the hero kept a `Down` entry
+        // for the rest of the loop and the wall board showed a stale `gw down` chip.
+        o.step(T0_MS + 121_000.0, 160, 96);
+        assert_eq!(
+            lobster(&o),
+            None,
+            "a walked-out gateway must go ABSENT, not linger Down to the loop wrap"
+        );
         // Next loop, 30s in: the wrap reset the presence cursor; GatewayUp
         // resurrects Down → Idle and re-anchors the enter walk.
         let wrap30 = T0_MS + LOOP_MS as f64 + 30_000.0;
         o.step(wrap30, 160, 96);
-        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Idle);
+        assert_eq!(lobster(&o), Some(DaemonState::Idle));
     }
 
     #[test]

@@ -4,14 +4,17 @@
   "description": "A serializable status row for `pixtuoid sources --json` — the STABLE wire\ncontract the Raycast extension parses (pinned by `source_status_json_shape`).\nDeliberately a flat DTO, NOT the internal `ConnectionRow` (whose shape is a\nUI concern free to change).",
   "type": "object",
   "properties": {
-    "cli_present": {
-      "type": "boolean"
+    "id": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
     },
     "connected": {
       "type": "boolean"
     },
-    "display_name": {
-      "type": "string"
+    "cli_present": {
+      "type": "boolean"
     },
     "health": {
       "description": "A health/issue summary (install-broken / decode-drift), or `null` when n/a.",
@@ -19,9 +22,6 @@
         "string",
         "null"
       ]
-    },
-    "id": {
-      "type": "string"
     }
   },
   "additionalProperties": false,

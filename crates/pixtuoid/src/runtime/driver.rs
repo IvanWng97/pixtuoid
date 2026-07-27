@@ -240,13 +240,15 @@ pub(crate) async fn reducer_task(
                     break;
                 }
             }
-            // Daemon-presence deltas — source-tagged `(source, delta)` (hook-derived
-            // + `(source, PidExited)` from the shared exit watch) — merged into
+            // Daemon-presence deltas — instance-tagged `(DaemonInstanceKey, delta)`
+            // (hook-derived + `PidExited` from the shared exit watch) — merged into
             // SceneState::daemons, NEVER through Reducer::apply (which is
-            // AgentId-pure). Invariant #2. N daemons route by the tuple's source.
+            // AgentId-pure). Invariant #2. N daemons AND N instances of one daemon
+            // (two OpenClaw gateways) route by that key, so nothing here is
+            // per-source special-cased.
             update = presence_rx.recv(), if presence_open => {
                 match update {
-                    Some(PresenceMsg { source, delta }) => {
+                    Some(PresenceMsg { key, delta }) => {
                         // Connection gate + armable-pid selection + apply, in the
                         // shared `gate` core (covered + mutation-tested) — the
                         // presence twin of `apply_gated_event`. A disconnected
@@ -254,7 +256,7 @@ pub(crate) async fn reducer_task(
                         // reconcile); only `ew.watch` (IO) + the publish stay here.
                         if let gate::PresenceGate::Applied { arm_pid } = gate::apply_gated_presence(
                             &mut scene,
-                            &source,
+                            &key,
                             delta,
                             &connected,
                             SystemTime::now(),
@@ -267,7 +269,7 @@ pub(crate) async fn reducer_task(
                             // LATER select iteration — it can never observe a
                             // half-applied arm within this synchronous arm.
                             if let (Some(ew), Some(pid)) = (presence_exit_watch.as_ref(), arm_pid) {
-                                ew.watch(&source, pid);
+                                ew.watch(&key, pid);
                             }
                             if scene_tx.send(Arc::new(scene.clone())).is_err() {
                                 tracing::warn!("scene channel closed — renderer dropped");

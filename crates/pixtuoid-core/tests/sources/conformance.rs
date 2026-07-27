@@ -257,18 +257,36 @@ fn all_source_fixtures_decode_and_coalesce() {
                 // (`runId`→`run_id`) FAILS here, not just the synthetic units that
                 // hardcode the same names. Matches the byte-real-pin standard
                 // (Copilot #294 / CodeWhale #276).
-                let updates: Vec<_> = d
+                let decoded: Vec<_> = d
                     .hooks_raw
                     .iter()
-                    .flat_map(|v| {
-                        pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(v)
-                            .unwrap_or_default()
+                    .filter_map(|v| {
+                        pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(v).ok()
                     })
                     .collect();
                 assert!(
-                    !updates.is_empty(),
+                    decoded.iter().any(|d| !d.updates.is_empty()),
                     "{source}/{scenario}: the byte-real fixture decoded to ZERO presence deltas \
                      — the presence decoder's field names drifted from the captured wire format"
+                );
+                // The gateway IDENTITY is part of that byte-real pin: every event
+                // must resolve to ONE real instance (never the stale-plugin
+                // fallback), so a `gatewayPort` rename fails here too — and a
+                // fixture that forgot the field can't pass vacuously.
+                let instances: std::collections::BTreeSet<_> =
+                    decoded.iter().map(|d| d.instance.as_str()).collect();
+                assert_eq!(
+                    instances.len(),
+                    1,
+                    "{source}/{scenario}: one captured gateway must resolve to exactly one \
+                     instance id, got {instances:?}"
+                );
+                assert!(
+                    instances
+                        .iter()
+                        .all(|i| i.chars().all(|c| c.is_ascii_digit())),
+                    "{source}/{scenario}: the captured wire must carry a real gateway port \
+                     (got {instances:?} — the stale-plugin fallback is not a byte-real pin)"
                 );
                 insta::assert_yaml_snapshot!(format!("{source}__{scenario}"), events);
                 ran += 1;

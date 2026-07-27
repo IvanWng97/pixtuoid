@@ -134,6 +134,15 @@ struct SnapshotArgs {
     #[arg(long)]
     openclaw: Option<String>,
 
+    /// Gateway PORTS to stage for `--openclaw`, comma-separated (default: one, the
+    /// upstream default port). The multi-instance render is the one thing no gate
+    /// can check — clips are presence-only in `gen-check` and the harness asserts
+    /// cell-set inequality, not "reads as N creatures" — so N gateways must be
+    /// renderable to a PNG a human can look at. `--openclaw-ports 18901,18902,18903,18904`
+    /// is what `just openclaw-multi-e2e` runs.
+    #[arg(long, value_delimiter = ',')]
+    openclaw_ports: Vec<String>,
+
     /// Override local hour-of-day (0–23) used by time-of-day effects
     /// (sun spot, dust motes, lighting). Useful for capturing screenshots
     /// of daylight effects from a machine running at night.
@@ -444,7 +453,7 @@ fn main() -> Result<()> {
         }
     }
     if let Some(state) = args.openclaw.as_deref() {
-        inject_openclaw_presence(&mut scene, state, now)?;
+        inject_openclaw_presence(&mut scene, state, now, &args.openclaw_ports)?;
     }
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
@@ -591,7 +600,9 @@ fn main() -> Result<()> {
     // Representative Connection-panel fixture (deterministic — no FS probes), so the
     // demo image is reproducible across machines.
     let (connection_rows, connection_live, connection_socket_line) = if args.connection {
-        use pixtuoid::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+        use pixtuoid::tui::connection::{
+            ConnState, ConnectionRow, DaemonRollup, LiveFacet, LiveInfo,
+        };
         use std::path::PathBuf;
         use std::time::Duration;
         let mk = |source_id, label_prefix, display_name, state, cfg: Option<&str>| ConnectionRow {
@@ -646,31 +657,47 @@ fn main() -> Result<()> {
                 ConnState::Connected,
                 None,
             ),
+            // A DAEMON row, so the captured panel shows the daemon LIVE cell (N
+            // gateways + their rolled-up state) next to the agent rows' N-agents
+            // form — the two shapes are what `LiveFacet` exists to keep apart.
+            mk(
+                "openclaw",
+                "ok",
+                "OpenClaw",
+                ConnState::Connected,
+                Some("~/.openclaw/openclaw.json"),
+            ),
         ];
-        let live = vec![
-            LiveInfo {
-                agents: 2,
-                last_event_age: Some(Duration::from_secs(3)),
-                dead: false,
+        let agents = |n: usize, age_s: u64| LiveInfo {
+            facet: LiveFacet::Agents {
+                agents: n,
+                last_event_age: Some(Duration::from_secs(age_s)),
             },
+            dead: false,
+        };
+        let live = vec![
+            agents(2, 3),
             LiveInfo::default(),
             LiveInfo::default(),
             LiveInfo {
-                agents: 0,
-                last_event_age: None,
+                facet: LiveFacet::default(),
                 dead: true,
             },
             LiveInfo::default(),
+            agents(1, 12),
+            // Two live gateways, one mid-run → `2 gateways · busy`.
             LiveInfo {
-                agents: 1,
-                last_event_age: Some(Duration::from_secs(12)),
+                facet: LiveFacet::Daemon(Some(DaemonRollup {
+                    instances: std::num::NonZeroUsize::new(2).expect("two gateways"),
+                    state: pixtuoid_core::state::DaemonState::Busy,
+                })),
                 dead: false,
             },
         ];
         (
             rows,
             live,
-            "socket  /run/user/501/pixtuoid.sock  (listening)".to_string(),
+            "socket  /run/user/501/pixtuoid.sock".to_string(),
         )
     } else {
         (Vec::new(), Vec::new(), String::new())
@@ -726,10 +753,16 @@ fn main() -> Result<()> {
         theme,
         theme_picker: args.theme_picker,
         floor_info: None,
-        // Single-floor still, no gateway: empty office-wide tallies (no cross-floor
-        // cue, chip suppressed). The footer's counts come from `scene_stats(scene)`.
+        // Single-floor still: empty office-wide tallies (no cross-floor cue). The
+        // footer's counts come from `scene_stats(scene)`.
         per_floor: Default::default(),
-        gateway: None,
+        // DERIVED from the scene, exactly as the runtime does — not hardcoded `None`.
+        // A hardcoded suppression made the `--openclaw <state>` scenes, whose whole
+        // job is demoing the gateway, render their lobster while the `⬢gw` chip that
+        // reports its state was OFF on both the wall board and the footer. Scenes
+        // with no daemon are unaffected: `gateway_rollup` returns `None` for an empty
+        // roster, which is the same suppression, now earned rather than asserted.
+        gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
         audio_audible: false,
         volume_flash: None,
         floor: {
@@ -739,7 +772,7 @@ fn main() -> Result<()> {
         },
         active_pet: None,
         last_pet_pos: None,
-        last_mascot_pos: None,
+        last_mascots: Vec::new(),
         floor_pet: None,
         chitchat_state: &mut chitchat_state,
         chitchat_bubbles: Vec::new(),
@@ -761,10 +794,10 @@ fn main() -> Result<()> {
 
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
-        // the renderer actually resolved (written back to last_mascot_pos), not
+        // the renderer actually resolved (written back to last_mascots), not
         // a precomputed layout point. pos is the logical half-block buffer (1px
         // per cell across, 2px down — same convention as compute_crop_rect).
-        let m = draw_ctx.last_mascot_pos.as_ref().ok_or_else(|| {
+        let m = draw_ctx.last_mascots.first().ok_or_else(|| {
             anyhow::anyhow!("--crop-mascot needs a visible mascot; pass --openclaw <state>")
         })?;
         Some(centered_crop(m.pos.x, m.pos.y / 2, cols, rows))

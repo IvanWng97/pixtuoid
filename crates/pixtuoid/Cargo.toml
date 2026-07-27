@@ -37,7 +37,15 @@ crossterm          = { workspace = true }
 unicode-width      = { workspace = true }
 clap               = { workspace = true }
 serde              = { workspace = true }
-serde_json         = { workspace = true }
+# `preserve_order` is enabled HERE, not workspace-wide: config merges
+# (claude/cursor/reasonix settings.json, openclaw.json) are a READ→MERGE→WRITE
+# round-trip, and serde_json's default BTreeMap-backed `Map` re-emits every object
+# ALPHABETICALLY — silently reordering the user's own hand-authored file on a
+# `connect`. IndexMap-backed order keeps their key order (and ours) stable, so a
+# merge only ever adds our block. Scoped to this crate because it is the only one
+# that WRITES a user's config, and because `pixtuoid-web` (which does not depend on
+# it) must not pay indexmap's code size in the committed wasm artifact.
+serde_json         = { workspace = true, features = ["preserve_order"] }
 toml               = { workspace = true }
 toml_edit          = { workspace = true }
 # YAML parse+emit for the Hermes install target (config.yaml hooks merge). saphyr

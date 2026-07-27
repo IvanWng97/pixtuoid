@@ -158,21 +158,13 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
             "the opencode plugin's shim-path placeholder was never substituted",
         );
     }
-    match extract_hook_path(content) {
+    match crate::install::verify::baked_hook_path(content) {
         Some(p) => SchemaParse {
-            issues: vec![],
             shim: ShimRef::Absolute(p),
+            ..Default::default()
         },
         None => SchemaParse::broken("could not read HOOK_PATH from the opencode plugin"),
     }
-}
-
-/// Pull the baked shim path back out of `const HOOK_PATH: string = "<json>"`.
-fn extract_hook_path(content: &str) -> Option<PathBuf> {
-    let line = content.lines().find(|l| l.contains("const HOOK_PATH"))?;
-    let literal = line.split_once('=')?.1.trim().trim_end_matches(';').trim();
-    let path: String = serde_json::from_str(literal).ok()?;
-    (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
 fn render_plugin(hook_path: &str) -> Result<String> {
@@ -182,6 +174,64 @@ fn render_plugin(hook_path: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `verify_schema` is the #309 silent-dead check, and it had NO test of its own:
+    /// mutation testing replaced the whole body with `Default::default()` — no issues,
+    /// no shim, i.e. a MISSING or replaced plugin verifying SOUND — and the suite
+    /// stayed green, because `verify_target_is_sound_after_a_real_install_for_every_target`
+    /// only asserts the positive direction. Deleting the `shim:` field also survived,
+    /// which silently disables the shim-on-disk stat for this target.
+    #[test]
+    fn verify_schema_reports_the_baked_shim_and_every_way_the_plugin_can_be_dead() {
+        use crate::install::verify::ShimRef;
+
+        // A real install: the ONLY sound case, and it must hand the baked absolute
+        // path onward or `verify_target` cannot stat the shim.
+        let installed = merge_install("", "/opt/bin/pixtuoid-hook").unwrap().content;
+        let sound = verify_schema(&installed);
+        assert!(
+            sound.issues.is_empty(),
+            "a freshly rendered plugin is sound — got {:?}",
+            sound.issues
+        );
+        assert_eq!(
+            sound.shim,
+            ShimRef::Absolute(std::path::PathBuf::from("/opt/bin/pixtuoid-hook")),
+            "the baked HOOK_PATH must be reported, or the shim-on-disk check is skipped"
+        );
+
+        // Replaced by a foreign plugin / removed: the sentinel is the tell.
+        let foreign = verify_schema("export default function () {}\n");
+        assert_eq!(foreign.shim, ShimRef::Unknown);
+        assert!(
+            foreign
+                .issues
+                .iter()
+                .any(|i| i.contains("reconnect opencode")),
+            "a sentinel-less file must be a HARD issue naming the remedy — got {:?}",
+            foreign.issues
+        );
+
+        // Rendered but never substituted (a bake that failed half-way).
+        let unsubstituted = format!("// {SENTINEL}\nconst HOOK_PATH = {HOOK_PLACEHOLDER};\n");
+        assert!(
+            verify_schema(&unsubstituted)
+                .issues
+                .iter()
+                .any(|i| i.contains("placeholder")),
+            "an unsubstituted placeholder must be reported"
+        );
+
+        // Sentinel present but no readable HOOK_PATH binding at all.
+        let no_binding = format!("// {SENTINEL}\nexport default function () {{}}\n");
+        assert!(
+            verify_schema(&no_binding)
+                .issues
+                .iter()
+                .any(|i| i.contains("HOOK_PATH")),
+            "an unreadable HOOK_PATH must be reported, not silently accepted"
+        );
+    }
 
     #[test]
     fn install_bakes_the_hook_path_and_carries_the_sentinel() {

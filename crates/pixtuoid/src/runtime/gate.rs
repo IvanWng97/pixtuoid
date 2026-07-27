@@ -109,17 +109,20 @@ pub(crate) enum PresenceGate {
 /// publish stay in the shell.
 pub(crate) fn apply_gated_presence(
     scene: &mut SceneState,
-    source: &str,
+    key: &daemon::DaemonInstanceKey,
     delta: daemon::DaemonPresenceUpdate,
     connected: &ConnectedSources,
     now: SystemTime,
 ) -> PresenceGate {
-    if !connected.is_connected(source) {
+    // The gate is SOURCE-level (one Sources-panel row per CLI), so every instance
+    // of a disconnected daemon is dropped together — the instance dimension is
+    // rendering identity, never a second connection axis.
+    if !connected.is_connected(key.source()) {
         return PresenceGate::Dropped;
     }
     // Selected BEFORE the move into apply_presence; the shell arms after.
     let arm_pid = delta.armable_pid();
-    daemon::apply_presence(scene, source, delta, now);
+    daemon::apply_presence(scene, key, delta, now);
     PresenceGate::Applied { arm_pid }
 }
 
@@ -297,6 +300,13 @@ mod tests {
         assert_eq!(event_source(&scene, &empty), Some("claude-code"));
     }
 
+    fn daemon_key(source: &str, instance: &str) -> daemon::DaemonInstanceKey {
+        daemon::DaemonInstanceKey::new(
+            source,
+            pixtuoid_core::state::DaemonInstanceId::new(instance).expect("non-empty"),
+        )
+    }
+
     #[test]
     fn presence_gate_drops_a_disconnected_daemon_and_applies_a_connected_one() {
         use pixtuoid_core::source::daemon::DaemonPresenceUpdate;
@@ -309,9 +319,10 @@ mod tests {
         // A disconnected daemon's GatewayUp is Dropped: nothing applied, nothing
         // lands in scene.daemons (mutate the gate to `if false` and this reds — the
         // presence twin of the AgentEvent gate's teeth).
+        let other = daemon_key("not-connected", "18789");
         let dropped = apply_gated_presence(
             &mut scene,
-            "not-connected",
+            &other,
             DaemonPresenceUpdate::GatewayUp { pid: Some(4321) },
             &cs,
             now,
@@ -320,15 +331,16 @@ mod tests {
             matches!(dropped, PresenceGate::Dropped),
             "a disconnected daemon's presence must be dropped"
         );
-        assert!(scene.daemons().get("not-connected").is_none());
+        assert!(scene.daemon(other.source(), other.instance()).is_none());
 
         // A connected daemon Applies (returns the armable pid) AND the delta lands
         // in scene.daemons as Up->Idle — the daemons assertion gives the
         // `daemon::apply_presence` call itself teeth (deleting it reds this), the
         // whole point of moving the seam into a covered module.
+        let oc = daemon_key("openclaw", "18789");
         let applied = apply_gated_presence(
             &mut scene,
-            "openclaw",
+            &oc,
             DaemonPresenceUpdate::GatewayUp { pid: Some(4321) },
             &cs,
             now,
@@ -343,9 +355,55 @@ mod tests {
             "a connected daemon's presence must apply and arm its GatewayUp pid"
         );
         assert_eq!(
-            scene.daemons().get("openclaw").map(|p| p.display_state()),
+            scene
+                .daemon(oc.source(), oc.instance())
+                .map(|p| p.display_state()),
             Some(DaemonState::Idle),
             "apply_presence must land the GatewayUp in scene.daemons"
+        );
+    }
+
+    #[test]
+    fn the_connection_gate_is_source_wide_across_every_instance() {
+        use pixtuoid_core::source::daemon::DaemonPresenceUpdate;
+
+        // The Sources panel has ONE openclaw row, so connecting/disconnecting is a
+        // source-level decision: a second gateway of a CONNECTED source applies,
+        // and every instance of a DISCONNECTED one drops.
+        let cs = ConnectedSources::new(["openclaw".to_string()].into_iter().collect());
+        let mut scene = SceneState::uniform(8);
+        let now = SystemTime::now();
+        for port in ["18789", "19789"] {
+            let k = daemon_key("openclaw", port);
+            assert!(matches!(
+                apply_gated_presence(
+                    &mut scene,
+                    &k,
+                    DaemonPresenceUpdate::GatewayUp { pid: None },
+                    &cs,
+                    now
+                ),
+                PresenceGate::Applied { .. }
+            ));
+        }
+        assert_eq!(scene.daemons().count(), 2, "both gateways render");
+        for port in ["18789", "19789"] {
+            let k = daemon_key("other-daemon", port);
+            assert!(matches!(
+                apply_gated_presence(
+                    &mut scene,
+                    &k,
+                    DaemonPresenceUpdate::GatewayUp { pid: None },
+                    &cs,
+                    now
+                ),
+                PresenceGate::Dropped
+            ));
+        }
+        assert_eq!(
+            scene.daemons().count(),
+            2,
+            "a disconnected source contributes no instance"
         );
     }
 }

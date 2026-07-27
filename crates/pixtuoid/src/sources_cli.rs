@@ -38,7 +38,11 @@ pub(crate) fn run_setup(yes: bool) -> Result<()> {
         if matches!(oc, sources::ChangeOutcome::Failed(_)) {
             any_failed = true;
         }
-        println!("{}", text_line(&sources::OutcomeRow::new(id, &oc)));
+        let row = sources::OutcomeRow::new(id, &oc);
+        println!("{}", text_line(&row));
+        if let Some(hint) = hint_line(&row) {
+            println!("{hint}");
+        }
     }
     if any_failed {
         anyhow::bail!("one or more sources failed to connect (see the rows above)");
@@ -145,6 +149,9 @@ fn emit_outcomes(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
     } else {
         for row in rows {
             println!("{}", text_line(row));
+            if let Some(hint) = hint_line(row) {
+                println!("{hint}");
+            }
         }
     }
     Ok(())
@@ -158,6 +165,22 @@ fn text_line(row: &sources::OutcomeRow) -> String {
         Some(m) => format!("{}: {}: {m}", row.id, row.outcome),
         None => format!("{}: {}", row.id, row.outcome),
     }
+}
+
+/// The optional SECOND human line under a row — the target's post-install step,
+/// because connecting is not always the last one (OpenClaw's running gateway must
+/// restart before it loads the plugin). `None` unless the row actually connected
+/// AND its target declares a step.
+///
+/// Owned here, not written at each call site, so `connect` and `setup --yes` cannot
+/// disagree on the gate or the glyph. HUMAN output only: the `--json` envelope is
+/// the frozen `{id, outcome, message?}` Raycast contract where `message` means
+/// FAILURE, so an advisory there would change its meaning.
+fn hint_line(row: &sources::OutcomeRow) -> Option<String> {
+    (row.outcome == sources::WireOutcome::Connected)
+        .then(|| sources::post_install_hint(&row.id))
+        .flatten()
+        .map(|hint| format!("  \u{21b3} {hint}"))
 }
 
 #[cfg(test)]
@@ -189,6 +212,48 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&rows).unwrap(),
             r#"[{"id":"codex","outcome":"connected"},{"id":"cursor","outcome":"failed","message":"boom"}]"#
+        );
+    }
+
+    /// The hint line's GATE and its shape. Mutation testing found this feature had
+    /// no teeth at all: stubbing `hint_line` to `None` (i.e. silently never telling
+    /// the user to restart their gateway) passed the whole suite.
+    #[test]
+    fn the_post_install_hint_line_rides_a_connected_row_only() {
+        let row =
+            |id: &str, oc: sources::ChangeOutcome| sources::OutcomeRow::new(id.to_string(), &oc);
+
+        // A source WITH a step, actually connected ⇒ the indented `↳` second line.
+        let line = hint_line(&row("openclaw", sources::ChangeOutcome::Connected))
+            .expect("openclaw declares a post-install step");
+        assert!(
+            line.starts_with("  \u{21b3} "),
+            "the hint is an indented continuation of its row — got {line:?}"
+        );
+        assert_eq!(
+            line.trim_start_matches([' ', '\u{21b3}']),
+            sources::post_install_hint("openclaw").expect("declared"),
+            "the line carries the target's own hint verbatim, never a re-worded copy"
+        );
+
+        // Every other outcome is NOT a completed install, so the step must not print:
+        // `no_op` especially, or a re-run of `setup --yes` would nag about a gateway
+        // the user already restarted.
+        for oc in [
+            sources::ChangeOutcome::NoOp,
+            sources::ChangeOutcome::Disconnected,
+            sources::ChangeOutcome::Failed("boom".into()),
+        ] {
+            assert!(
+                hint_line(&row("openclaw", oc.clone())).is_none(),
+                "{oc:?} is not a completed install — no step to announce"
+            );
+        }
+
+        // A connected source with no declared step stays a single line.
+        assert!(
+            hint_line(&row("claude-code", sources::ChangeOutcome::Connected)).is_none(),
+            "claude-code's hooks take effect on its next run — nothing to add"
         );
     }
 }

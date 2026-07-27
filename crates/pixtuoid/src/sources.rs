@@ -208,6 +208,15 @@ pub enum DisconnectOutcome {
     HookRemovalFailed(String),
 }
 
+/// The step (if any) a user must still take after a successful `connect` of `id`,
+/// read from that target's ONE `post_install_hint` — exposed here because the
+/// scriptable CLI presenter lives in the bin crate and `install::target` is
+/// `pub(crate)`. `None` for a source with no target, and for every target whose
+/// hooks take effect on the CLI's next run.
+pub fn post_install_hint(id: &str) -> Option<&'static str> {
+    crate::install::target::by_source(id).and_then(|t| t.post_install_hint)
+}
+
 /// Connect a source: PERSIST the `[sources]` flag FIRST (so it survives restart),
 /// then — only for a target-bearing source — install its hooks, rolling the flag
 /// back if the install fails (a persisted "connected" with no integration behind
@@ -639,6 +648,40 @@ mod tests {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
+    /// The lookup behind every presenter's post-install step. Mutation testing found
+    /// it wholly untested: returning `None`, `Some("")` or `Some("xyzzy")` from here
+    /// all passed the suite, so the feature could have gone silent — or started
+    /// printing nonsense — without one red test.
+    #[test]
+    fn post_install_hint_names_a_real_step_only_for_targets_that_need_one() {
+        // OpenClaw is the one target whose install does NOT take effect on the CLI's
+        // next run: a RUNNING gateway loads plugins at boot, so it must be restarted.
+        let hint = post_install_hint("openclaw").expect("openclaw needs a restart step");
+        assert!(
+            hint.contains("restart") && hint.contains("gateway"),
+            "the step must actually say to restart the gateway — got {hint:?}"
+        );
+        assert!(
+            hint.contains("openclaw gateway restart"),
+            "and name the runnable command, so the user need not guess — got {hint:?}"
+        );
+
+        // Every other registered source's hooks apply on its next run, so a hint there
+        // would be a nag with no action. Ranged over the REGISTRY, not a hand list, so
+        // a new source must consciously opt in.
+        for id in pixtuoid_core::source::registry::registered_source_names() {
+            if id == "openclaw" {
+                continue;
+            }
+            assert!(
+                post_install_hint(id).is_none(),
+                "{id} declares a post-install step — if that is intended, assert it here"
+            );
+        }
+        // An id with no target at all resolves to no step rather than panicking.
+        assert!(post_install_hint("not-a-source").is_none());
+    }
+
     #[test]
     fn status_from_row_connected_is_present_and_bound_not_persisted_intent() {
         // The wire `connected` is PRESENT-AND-BOUND (state == Connected), NOT the
@@ -775,6 +818,7 @@ mod tests {
         binary_strategy: crate::install::target::BinaryStrategy::EmbedAbsolute,
         presence_probe: None,
         extra_artifacts: None,
+        post_install_hint: None,
     };
 
     #[test]
