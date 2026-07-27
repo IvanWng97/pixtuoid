@@ -179,5 +179,144 @@ fn main() -> Result<()> {
         );
     }
 
+    // SIXEL is the one protocol that can neither scale nor reuse an uploaded
+    // image, so it pays full freight every frame. The RGB->base64 arithmetic
+    // above does NOT describe it: sixel is palette-indexed and run-length
+    // encoded, so the real wire cost has to be encoded to be known.
+    println!("\nSIXEL wire cost (fixed startup palette, full-frame encode):");
+    println!(
+        "  {:<24} {:>10} {:>11} {:>12} {:>11}",
+        "buffer", "encode ms", "KiB/frame", "MiB/s @30fps", "vs raw RGB"
+    );
+    let mut out = Vec::new();
+    for (_, w, h) in cases {
+        let mut scene = SceneState::uniform(64);
+        populate(&mut scene, base, 12);
+        let mut r = OfficeRenderer::new();
+        let mut enc_ms = f64::MAX;
+        let mut bytes = 0usize;
+        for i in 0..12u64 {
+            let now = base + Duration::from_millis(i * 33);
+            let buf = r.render(&scene, &pack, theme, now, w, h, FloorMeta::ground(), None);
+            let (bw, bh) = (buf.width() as usize, buf.height() as usize);
+            let t = Instant::now();
+            sixel_encode(buf.as_slice(), bw, bh, &mut out);
+            enc_ms = enc_ms.min(t.elapsed().as_secs_f64() * 1000.0);
+            bytes = out.len();
+        }
+        let raw = w as f64 * h as f64 * 3.0;
+        println!(
+            "  {:<24} {:>10.2} {:>11.1} {:>12.1} {:>10.2}x",
+            format!("{}x{}", w, h),
+            enc_ms,
+            bytes as f64 / 1024.0,
+            bytes as f64 * 30.0 / (1024.0 * 1024.0),
+            bytes as f64 / raw
+        );
+        // Dump the EXACT pixels just encoded, so an independent encoder
+        // (img2sixel) can be run over the same input as a cross-check. Our
+        // encoder is an instrument; an instrument nobody validated is a guess.
+        if let Ok(dir) = std::env::var("PIXTUOID_BENCH_DUMP") {
+            let buf = r.render(&scene, &pack, theme, base, w, h, FloorMeta::ground(), None);
+            let (bw, bh) = (buf.width() as u32, buf.height() as u32);
+            let mut img = image::RgbImage::new(bw, bh);
+            for (i, p) in buf.as_slice().iter().enumerate() {
+                img.put_pixel(i as u32 % bw, i as u32 / bw, image::Rgb([p.r, p.g, p.b]));
+            }
+            let path = format!("{dir}/frame_{w}x{h}.png");
+            img.save(&path).ok();
+            println!("      dumped {path}");
+        }
+    }
+
     Ok(())
+}
+
+/// A minimal but faithful SIXEL encoder — enough to measure the real wire cost.
+///
+/// The palette is a FIXED 6x7x6 colour cube resolved by a shift, not a
+/// per-frame quantisation search. That is the measurement's whole premise: if
+/// the render scale is pinned at startup, the palette can be pinned with it,
+/// so quantising is one table lookup per pixel instead of a nearest-colour
+/// search. Output shape follows the DEC format: `DCS q`, palette definitions,
+/// then one band per six pixel rows, each band emitting one run-length-encoded
+/// row per colour present in it.
+fn sixel_encode(px: &[pixtuoid_core::sprite::Rgb], w: usize, h: usize, out: &mut Vec<u8>) {
+    /// 6x7x6 = 252 entries, under the 256 registers a sixel palette addresses.
+    const LEVELS_R: usize = 6;
+    const LEVELS_G: usize = 7;
+    const LEVELS_B: usize = 6;
+    const PALETTE_LEN: usize = LEVELS_R * LEVELS_G * LEVELS_B;
+    /// A sixel data byte is the 6-bit column pattern offset into printable ASCII.
+    const SIXEL_BASE: u8 = 63;
+    /// Below this a literal run is shorter than the `!<count><char>` form.
+    const RLE_MIN_RUN: usize = 4;
+
+    let index_of = |p: &pixtuoid_core::sprite::Rgb| -> usize {
+        let r = p.r as usize * LEVELS_R / 256;
+        let g = p.g as usize * LEVELS_G / 256;
+        let b = p.b as usize * LEVELS_B / 256;
+        (r * LEVELS_G + g) * LEVELS_B + b
+    };
+
+    out.clear();
+    out.extend_from_slice(b"\x1bPq");
+    for i in 0..PALETTE_LEN {
+        let r = (i / (LEVELS_G * LEVELS_B)) * 100 / (LEVELS_R - 1);
+        let g = (i / LEVELS_B % LEVELS_G) * 100 / (LEVELS_G - 1);
+        let b = (i % LEVELS_B) * 100 / (LEVELS_B - 1);
+        out.extend_from_slice(format!("#{i};2;{r};{g};{b}").as_bytes());
+    }
+
+    let mut band = vec![0usize; w * 6];
+    let mut row = vec![0u8; w];
+    let mut y = 0;
+    while y < h {
+        let rows = 6.min(h - y);
+        let mut present = [false; PALETTE_LEN];
+        for i in 0..rows {
+            for x in 0..w {
+                let idx = index_of(&px[(y + i) * w + x]);
+                band[i * w + x] = idx;
+                present[idx] = true;
+            }
+        }
+        let mut first = true;
+        for (color, _) in present.iter().enumerate().filter(|(_, p)| **p) {
+            if !first {
+                out.push(b'$'); // carriage return: overlay the next colour
+            }
+            first = false;
+            out.extend_from_slice(format!("#{color}").as_bytes());
+            for x in 0..w {
+                let mut bits = 0u8;
+                for i in 0..rows {
+                    if band[i * w + x] == color {
+                        bits |= 1 << i;
+                    }
+                }
+                row[x] = SIXEL_BASE + bits;
+            }
+            let mut x = 0;
+            while x < w {
+                let c = row[x];
+                let mut run = 1;
+                while x + run < w && row[x + run] == c {
+                    run += 1;
+                }
+                if run >= RLE_MIN_RUN {
+                    out.extend_from_slice(format!("!{run}").as_bytes());
+                    out.push(c);
+                } else {
+                    for _ in 0..run {
+                        out.push(c);
+                    }
+                }
+                x += run;
+            }
+        }
+        out.push(b'-'); // next band
+        y += 6;
+    }
+    out.extend_from_slice(b"\x1b\\");
 }
