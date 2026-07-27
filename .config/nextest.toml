@@ -39,19 +39,11 @@ threads-required = "num-cpus"
 filter = 'test(connected_codex_rollout_becomes_a_sprite) | test(disconnected_codex_rollout_is_dropped_by_the_gate)'
 threads-required = "num-cpus"
 
-# `generated_beds_…` composes + synthesizes 4 full arrangements (2 moods × 2
-# seeds) — ~100s of IRREDUCIBLE unique work, and the ONE synth test that actually
-# tripped the 180s cap under contention (#736). It has no redundancy to cut (the
-# other two synth tests DID — they re-synthesized shared take-stems, now
-# de-duplicated), and its seed count is the author's stated minimum smoke ("a
-# couple suffice"; the musical invariants are the compose seed-sweep's job). So
-# NOT `threads-required` (giving a ~100s test the whole machine serialises it and
-# taxes every CI job's wall-clock) — instead raise only the hard KILL. Keep the
-# 60s SLOW marker so its growth stays VISIBLE every run; lift terminate to 5×60=300s
-# so coverage instrumentation (~2×) + CI contention can't false-red it while a real
-# ≥1.5× synthesis regression still trips it. REVISIT if CI shows this past ~250s:
-# the headroom is gone — dedup further, split the smoke, or reduce the seed sweep
-# rather than lifting the cap again (the SLOW marker is only a soft signal).
-[[profile.default.overrides]]
-filter = 'test(generated_beds_are_finite_phase_locked_and_in_the_sound_world)'
-slow-timeout = { period = "60s", terminate-after = 5 }
+# NO synth override any more. #736 read the synth tests' ~100s as IRREDUCIBLE
+# unique work and lifted `generated_beds_…`'s kill to 5×60s; #795 measured where
+# the time actually went and it was the `test` profile inheriting `dev`'s
+# opt-level 0, not the workload — the FFT butterflies and per-sample loops ran
+# unoptimized. `[profile.dev.package.pixtuoid-scene] opt-level = 2` (workspace
+# Cargo.toml) took the whole suite 87s -> 15s, so both synth tests now sit ~12-15s
+# against the default 60s SLOW marker and 180s kill. Restoring the default is the
+# point: a raised cap would keep hiding the next regression behind 5× headroom.
