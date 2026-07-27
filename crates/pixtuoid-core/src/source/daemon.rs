@@ -207,13 +207,23 @@ impl DaemonPresence {
     /// live gateway pid: leaving it set strands the binding on the dead pid, so a
     /// reconnect-as-a-new-pid whose `gateway_start` is missed can't re-adopt via
     /// `PidSeen` (None-only) and the instant abrupt-down rung silently disarms on
-    /// the SECOND cycle until the 5-min presence sweep. Does NOT touch
-    /// `last_seen`: the `apply_presence` callers ride its top-level stamp, and the
-    /// sweep / `mark_presence_down` re-anchor it explicitly for the walk-out timer.
-    fn enter_down(&mut self) {
+    /// the SECOND cycle until the 5-min presence sweep.
+    ///
+    /// `last_seen` is anchored to `now` HERE — it is a must-set-on-down field like
+    /// the other three, because the renderer times the walk-out off it
+    /// (`down_age = now - last_seen`, gone at `MASCOT_LEAVE_MS`) and the sweep
+    /// removes the entry on the same clock. It used to be left to each site: three
+    /// re-anchored explicitly and the fourth rode `apply_presence`'s top-level
+    /// proof-of-life stamp, so excluding `PidExited` from that stamp (right, for the
+    /// non-matching no-op receipt) silently un-anchored the MATCHING one — the abrupt
+    /// death, where `last_seen` can be minutes stale, so the lobster vanished with no
+    /// walk-out in exactly the case the exit watch exists for. Taking `now` makes
+    /// entering Down without anchoring the clock unrepresentable.
+    fn enter_down(&mut self, now: SystemTime) {
         self.liveness = DaemonLiveness::Down;
         self.clear_concurrency();
         self.current_pid = None;
+        self.last_seen = now;
     }
 }
 
@@ -268,6 +278,9 @@ pub fn apply_presence(
     // not a race: our forward is a detached spawn, so `GatewayDown` lands in ms
     // while the process death lands later. `GatewayDown` itself keeps refreshing —
     // that receipt is FIRST-HAND from a process demonstrably alive when it spoke.
+    // This skips BOTH `PidExited` sub-cases, which is why the anchoring for the
+    // MATCHING one (the abrupt death — a real transition, not a no-op) lives in
+    // `enter_down` instead: the clock must start at the death instant there.
     if !matches!(update, PidExited { .. }) {
         p.last_seen = now;
     }
@@ -281,7 +294,7 @@ pub fn apply_presence(
             p.liveness = DaemonLiveness::UP;
         }
         GatewayDown => {
-            p.enter_down();
+            p.enter_down(now);
         }
         SessionStarted => {
             p.active_sessions = p.active_sessions.saturating_add(1);
@@ -344,7 +357,7 @@ pub fn apply_presence(
         // still arms this instant abrupt-down rung off the next event's `PidSeen`.
         PidExited { pid } => {
             if p.current_pid == Some(pid) {
-                p.enter_down();
+                p.enter_down(now);
             }
         }
     }
@@ -379,13 +392,11 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
                 doomed.push(instance.clone());
             }
         } else if idle_ms >= ttl.presence_ttl_ms {
-            p.enter_down();
-            // Re-anchor `last_seen` to NOW so the renderer's `now - last_seen`
-            // walk-out timer starts at 0 and the mascot plays the elevator
-            // leave (without this the entry is ≥TTL stale → it vanishes with
-            // no walk-out). The apply-path GatewayDown/PidExited ride
-            // `apply_presence`'s top-level stamp instead.
-            p.last_seen = now;
+            // `enter_down` re-anchors `last_seen` to NOW, so the renderer's
+            // `now - last_seen` walk-out timer starts at 0 and the mascot plays the
+            // elevator leave — without it the entry is ≥TTL stale and vanishes with no
+            // walk-out. That anchor is the fn's job at every down site, not this one's.
+            p.enter_down(now);
         } else {
             // Per-RUN clocks, not the daemon-wide `last_seen` (which ANY event
             // refreshes): otherwise a gateway that keeps serving other traffic
@@ -413,8 +424,7 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
 pub fn mark_presence_down(scene: &mut SceneState, source: &str, now: SystemTime) {
     for (_, p) in scene.daemons.instances_of_mut(source) {
         if p.liveness != DaemonLiveness::Down {
-            p.enter_down();
-            p.last_seen = now;
+            p.enter_down(now);
         }
     }
 }
@@ -1280,6 +1290,48 @@ mod tests {
         assert_eq!(
             s.daemon(src, &inst(A)).and_then(|p| p.current_pid),
             Some(200)
+        );
+    }
+
+    #[test]
+    fn an_abrupt_matching_exit_anchors_the_walk_out_clock_at_the_death_instant() {
+        // The #318 abrupt death (SIGKILL/OOM — no stop hook, so no `GatewayDown`
+        // ever lands): our own exit watch synthesizes the receipt and its pid STILL
+        // MATCHES, so unlike the clean-stop case above this arm really transitions to
+        // Down. An idle gateway is legitimately silent for minutes (`presence_ttl_ms`
+        // is 5), so `last_seen` is STALE at the death instant — and the renderer times
+        // the walk-out off it (`down_age = now - last_seen`, gone at MASCOT_LEAVE_MS)
+        // while the sweep removes on the same clock. Unless entering Down re-anchors,
+        // the lobster vanishes with no walk-out on the very next frame, in exactly the
+        // case this whole exit-watch rung exists for.
+        let src = "openclaw";
+        let mut s = SceneState::default();
+        apply_at(
+            &mut s,
+            src,
+            A,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            0,
+        );
+        // 60s of idle silence (well past MASCOT_LEAVE_MS), then the kill.
+        apply_at(
+            &mut s,
+            src,
+            A,
+            DaemonPresenceUpdate::PidExited { pid: 7 },
+            60_000,
+        );
+        let p = s.daemon(src, &inst(A)).expect("present");
+        assert_eq!(
+            p.liveness,
+            DaemonLiveness::Down,
+            "the matching pid downs it"
+        );
+        assert_eq!(
+            p.last_seen,
+            ms(60_000),
+            "entering Down must anchor the walk-out clock at the DEATH instant, not \
+             leave it at the last proof-of-life 60s earlier"
         );
     }
 

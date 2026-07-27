@@ -992,6 +992,65 @@ mod tests {
     /// Asserted at the instant of death (`now == last_seen`, so the exit lerp is at
     /// t=0 and yields its own origin), which is what makes the two paths directly
     /// comparable without pinning any ms arithmetic.
+    /// The SYMPTOM-level twin of `daemon.rs`'s
+    /// `an_abrupt_matching_exit_anchors_the_walk_out_clock_at_the_death_instant`:
+    /// that one pins the state contract, this one proves the pixel consequence
+    /// through the REAL `apply_presence`.
+    ///
+    /// Every other Down test in this module hand-builds `DaemonPresence { last_seen:
+    /// died_at, .. }` — i.e. it ASSUMES a correctly anchored clock, so none of them can
+    /// observe a mis-anchored one however wrong the state machine gets. That blind spot
+    /// is what let a real HIGH through: suppressing the `last_seen` stamp for the
+    /// non-matching (already-Down, no-op) receipt correctly stopped a double walk-out,
+    /// but it also suppressed it for the MATCHING receipt, which is the abrupt death.
+    /// An idle gateway is silent for minutes by design, so the stale clock put
+    /// `down_age` past MASCOT_LEAVE_MS immediately and the lobster vanished.
+    #[test]
+    fn an_idle_gateway_that_is_killed_still_walks_out_instead_of_vanishing() {
+        use pixtuoid_core::source::daemon::{
+            apply_presence, DaemonInstanceKey, DaemonPresenceUpdate,
+        };
+        use pixtuoid_core::state::{DaemonInstanceId, SceneState};
+
+        let layout = crate::layout::Layout::compute(200, 120, Some(4)).expect("layout fits");
+        let boot = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        // Idle far longer than the 2.2s walk-out window (and past the stagger +
+        // walk-in, so the mascot is out in the wander when it dies).
+        let killed_at = boot + std::time::Duration::from_millis(30_000);
+
+        let src = "openclaw";
+        let id = DaemonInstanceId::new("18901").expect("non-empty");
+        let key = DaemonInstanceKey::new(src, id.clone());
+        let mut scene = SceneState::default();
+        apply_presence(
+            &mut scene,
+            &key,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            boot,
+        );
+        // No traffic in between — an idle gateway sends nothing, so this is the only
+        // proof-of-life the clock has. Then SIGKILL: our exit watch synthesizes the
+        // receipt for the pid it armed, so it MATCHES and really transitions to Down.
+        apply_presence(
+            &mut scene,
+            &key,
+            DaemonPresenceUpdate::PidExited { pid: 7 },
+            killed_at,
+        );
+
+        let presence = scene
+            .daemon(src, &id)
+            .expect("the killed gateway is still Down");
+        assert_eq!(presence.liveness, DaemonLiveness::Down);
+        let seed = mascot_seed(src, &id);
+        assert!(
+            mascot_position(&layout, presence, "w", "r", killed_at, seed).is_some(),
+            "a gateway killed after idling must play its elevator walk-out; it \
+             vanished instantly instead, which is what the exit-watch rung exists \
+             to avoid"
+        );
+    }
+
     #[test]
     fn the_walk_out_starts_from_where_the_mascot_was_when_it_died() {
         use pixtuoid_core::state::DaemonInstanceId;
