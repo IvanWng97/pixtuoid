@@ -116,11 +116,6 @@ pub(crate) fn flat_json_merge_install(
     Value::Object(root)
 }
 
-/// Remove managed hook entries (keyed on `sentinel`) from `doc`, then drop any
-/// event key whose array went empty and the `hooks` object if it emptied. The
-/// inverse of `flat_json_merge_install`, shared by Reasonix, Cursor, AND Claude
-/// (the sentinel-keyed removal is shape-agnostic — it strips Claude's nested
-/// entries the same way). A target-specific key the install set (Cursor's
 /// Drop `key` from `parent` when it is an EMPTY object/array — the uninstall's husk
 /// sweeper. Anything with content (a foreign plugin's entry, another load path, the
 /// user's own allowlist members) is left exactly as found.
@@ -147,6 +142,11 @@ pub(crate) fn prune_empty_root(root: &mut Value, key: &str) {
     }
 }
 
+/// Remove managed hook entries (keyed on `sentinel`) from `doc`, then drop any
+/// event key whose array went empty and the `hooks` object if it emptied. The
+/// inverse of `flat_json_merge_install`, shared by Reasonix, Cursor, AND Claude
+/// (the sentinel-keyed removal is shape-agnostic — it strips Claude's nested
+/// entries the same way). A target-specific key the install set (Cursor's
 /// `version`) is deliberately preserved — this only touches `hooks`.
 pub(crate) fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value {
     let Some(root) = doc.as_object_mut() else {

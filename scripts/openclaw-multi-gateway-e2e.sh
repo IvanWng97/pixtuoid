@@ -61,8 +61,10 @@ cleanup() {
         [ -n "$p" ] && kill "$p" 2>/dev/null
     done
     sleep 1
-    # `openclaw gateway run` forks a child node that HOLDS the port — killing the
-    # wrapper alone leaks it, so reap whatever still listens on each test port.
+    # Belt-and-braces port reap. `$!` IS the listener on openclaw 2026.7.1 (verified:
+    # the job pid holds the port, comm `openclaw-gateway`), so the kills above are
+    # normally enough — this catches a version that daemonises instead, or a gateway
+    # that outlived a failed kill, so a crashed run can't leave a test port bound.
     for port in "${PORTS[@]}"; do
         left="$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null)"
         # shellcheck disable=SC2086  # word-split intended — one kill per listener pid
@@ -149,9 +151,14 @@ done < <(printf '%s\n' "${PORTS[@]}" | LC_ALL=C sort)
 expect_line "daemons=[$want]" "${#PORTS[@]} gateways render ${#PORTS[@]} independent mascots"
 
 echo "[2] kill the FIRST gateway (${PORTS[0]}) — only its own mascot walks out"
+# `$!` is the process that holds the port and stamps `_pid` into every envelope, so
+# this exercises the INSTANT abrupt-down rung (ExitWatch on the gateway pid), not a
+# timeout. That the assertion below can pass at all is the proof: `expect_line` gives
+# up after ~36s while the silence path (`PresenceTtl::DEFAULT.presence_ttl_ms`) is
+# FIVE MINUTES, so a regression that lost the pid rung could not sneak through here.
 kill "${GW_PIDS[0]}" 2>/dev/null
 GW_PIDS[0]=""
-expect_line "openclaw@${PORTS[0]}:down" "the killed gateway goes down"
+expect_line "openclaw@${PORTS[0]}:down" "the killed gateway goes down (instant pid rung)"
 for port in "${PORTS[@]:1}"; do
     expect_line "openclaw@$port:idle" "sibling $port is untouched"
 done
