@@ -62,10 +62,11 @@ impl ClaudeCodeSource {
             // No XDG_RUNTIME_DIR (macOS, bare Linux): a per-user SUBDIR the bind
             // creates 0700-owned-by-us (`hook::unix::ensure_owned_socket_dir`),
             // NOT a flat predictable `pixtuoid-{uid}.sock` a co-located user
-            // could squat/lock to silently kill the hook plane (#485). Parity-
-            // pinned to the shim's branch 3 by tests/socket_path_parity.rs.
-            let uid = rustix::process::getuid().as_raw();
-            PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"))
+            // could squat/lock to silently kill the hook plane (#485). Built
+            // from the same `owned_socket_dir()` that guard compares against,
+            // so the two cannot drift apart. Parity-pinned to the shim's
+            // branch 3 by tests/socket_path_parity.rs.
+            crate::source::hook::owned_socket_dir().join(crate::source::hook::SOCKET_FILE_NAME)
         }
         #[cfg(windows)]
         {
