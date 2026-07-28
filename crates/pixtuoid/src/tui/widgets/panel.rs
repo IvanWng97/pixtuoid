@@ -33,8 +33,10 @@ const PANEL_MIN_H: u16 = 3;
 /// paints straight over it — the version popup did exactly that at 32×31, where
 /// the wrapped release notes outgrow the frame. Reserved HERE rather than by
 /// shrinking each caller's `bounds`, because centering in a shorter box would
-/// also move every panel that already fits.
-const RESERVED_FOOTER_ROWS: u16 = 1;
+/// also move every panel that already fits. This is only the card BODY's half of
+/// the rule — the drop shadow is offset a row further down and clips itself
+/// (`super::cast_drop_shadow`).
+const RESERVED_FOOTER_ROWS: u16 = crate::tui::renderer::FOOTER_ROWS;
 
 /// Inner content `Rect` of a borderless panel: `outer` inset by `PANEL_PAD_*`
 /// with the title row (when present) dropped. Raw-area fallback when `outer` is
@@ -495,6 +497,55 @@ mod tests {
         assert_eq!(r(0, 0), 200, "cells outside the band stay bright");
     }
 
+    /// The clamp keeps the card BODY off the footer row — but the silhouette is
+    /// offset a row further DOWN, so a card ending one row short still dropped its
+    /// band onto the live `[q]uit` text (`fg` only, bg left lit: a ~5.2:1 → ~1.55:1
+    /// contrast fall, invisible to any substring assertion). Covers BOTH card kinds
+    /// — the hover tooltips anchor inside `scene_rect` and sit at the same edge.
+    #[test]
+    fn a_card_at_the_scene_floor_casts_no_shadow_onto_the_footer_row() {
+        use ratatui::style::Color;
+        let bright = Color::Rgb(200, 200, 200);
+        let (w, h) = (20u16, 12u16);
+        let footer_y = h - crate::tui::renderer::FOOTER_ROWS;
+        // A card whose last row is the one above the footer — where the clamp
+        // parks a too-tall panel, and where a bottom-anchored tooltip lands.
+        let area = Rect::new(2, footer_y - 4, 8, 4);
+        assert_eq!(
+            area.bottom(),
+            footer_y,
+            "the card ends right above the footer"
+        );
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| {
+            let full = f.area();
+            for y in 0..full.height {
+                for x in 0..full.width {
+                    let cell = &mut f.buffer_mut()[(x, y)];
+                    cell.set_symbol("\u{2580}");
+                    cell.fg = bright;
+                    cell.bg = bright;
+                }
+            }
+            borderless_panel(f, area, None, &pixtuoid_scene::theme::NORMAL);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        for x in 0..w {
+            let cell = buf.cell((x, footer_y)).expect("footer cell");
+            assert_eq!(
+                (cell.fg, cell.bg),
+                (bright, bright),
+                "the footer row must be untouched at x={x}, got {cell:?}"
+            );
+        }
+        // The card's own right band still casts — the clip is the footer row only.
+        assert!(
+            matches!(buf.cell((area.right(), area.y + 1)).expect("cell").fg, Color::Rgb(r, _, _) if r < 200),
+            "the right band still casts above the footer"
+        );
+    }
+
     // ---- PanelGeometry: the pure geometry authority (no TestBackend) ----------
 
     #[test]
@@ -521,19 +572,22 @@ mod tests {
     }
 
     /// A panel taller than its bounds clamps — and used to clamp right over the
-    /// footer, the one persistent `[q]uit` affordance. It must stop one row
-    /// short, WITHOUT moving a panel that already fits (that shift would redraw
-    /// every committed modal still).
+    /// footer, the one persistent `[q]uit` affordance. It must stop above the
+    /// footer ROW, WITHOUT moving a panel that already fits (that shift would
+    /// redraw every committed modal still).
     #[test]
     fn a_too_tall_panel_stops_one_row_short_of_the_footer() {
         let b = Rect::new(0, 0, 40, 20);
         let tall = PanelGeometry::compute(b, 30, 100, Some("t"), 1.0)
             .outer()
             .expect("renders");
-        assert_eq!(
-            tall.bottom(),
-            b.bottom() - RESERVED_FOOTER_ROWS,
-            "a clamped panel must leave the footer row free, got {tall:?}"
+        // Asserted against the FOOTER's own authority, not against the constant
+        // under test: `bottom() == b.bottom() - RESERVED_FOOTER_ROWS` restates the
+        // mechanism and would survive that constant being zero.
+        let footer_row = b.bottom() - crate::tui::renderer::FOOTER_ROWS;
+        assert!(
+            tall.bottom() <= footer_row,
+            "a clamped panel must leave the footer row (y={footer_row}) free, got {tall:?}"
         );
         // A panel that FITS keeps its exact centering — the reserve only bites
         // the clamp, never the common case.

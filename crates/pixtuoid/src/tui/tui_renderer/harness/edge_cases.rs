@@ -159,6 +159,67 @@ fn a_full_height_modal_never_covers_the_footer_row() {
         "the footer must survive a full-height modal, got last row {last_row:?};\
          \nframe was:\n{text}"
     );
+
+    // TEETH, in cells rather than in a substring: the glyphs surviving is not the
+    // same as the footer being READABLE. `cast_drop_shadow` offsets the card's
+    // silhouette one row DOWN, and its bottom band dims `fg` only — so a panel
+    // that stops exactly one row short still repaints the footer's own text at
+    // SHADOW_FACTOR while leaving its bg lit (measured: the brightest `[q]uit`
+    // pixel fell 140 → 58 luminance, ~5.2:1 → ~1.55:1 contrast). Compare the
+    // footer row against the same frame with no modal open: byte-identical or the
+    // reserve is too small.
+    let mut plain = build(32, 31, vec![]);
+    plain.render(&scene, &pack(), t).expect("render");
+    let (lit, dimmed) = (plain.frame_buffer(), r.frame_buffer());
+    let footer_y = lit.area.height - 1;
+    for x in 0..lit.area.width {
+        let (a, b) = (
+            lit.cell((x, footer_y)).expect("footer cell"),
+            dimmed.cell((x, footer_y)).expect("footer cell"),
+        );
+        assert_eq!(
+            (a.symbol(), a.fg, a.bg),
+            (b.symbol(), b.fg, b.bg),
+            "the modal (or its drop shadow) repainted footer cell x={x}; \
+             frame was:\n{text}"
+        );
+    }
+}
+
+// Regression (the N-1-of-N half of the every-frame rule): the modal state reaches
+// `render_transition`'s too-small arm too — a floor slide can be in flight when
+// the terminal is below the 20x12 scene gate, and `Tab`/`s`/`?` are not
+// transition-gated. Reverting that arm's `paint_overlays` left the whole suite
+// green, so this is the arm's own pin: the panel text AND the popup scale the
+// mouse handler reads.
+#[test]
+fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
+    let scene = two_floor_scene();
+    // 19 cols ⇒ scene_rect 19x11, under the 20x12 gate on BOTH axes.
+    let mut r = build(19, 12, vec![]);
+    let now = t0();
+    r.render(&scene, &pack(), now).expect("render");
+    r.set_help_open(true);
+    r.set_version_popup(true, now);
+    r.navigate_floor(1, now);
+
+    let t = now + Duration::from_millis(100); // mid-slide, mid-entrance
+    let painted = r.version_popup_scale(t);
+    assert!(painted > 0.0, "the popup is animating this frame");
+    r.render(&scene, &pack(), t)
+        .expect("transition render on a tiny terminal must not panic");
+
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("Keyboard"),
+        "the help overlay must paint on the slide's footer-only frame; \
+         frame was:\n{text}"
+    );
+    assert_eq!(
+        r.last_popup_scale(),
+        painted,
+        "the click hit-box must carry the scale this arm painted at"
+    );
 }
 
 // Regression: per-agent MotionState was evicted only on the CURRENT floor, so an

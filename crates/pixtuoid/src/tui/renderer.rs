@@ -170,7 +170,13 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
 
-/// The drawable scene rect: the full terminal area minus the 1-row footer.
+/// How many rows at the bottom of the terminal the status footer owns. THE
+/// authority for that count: `scene_rect` subtracts it, `panel::RESERVED_FOOTER_ROWS`
+/// keeps a clamped modal off it, and the card drop shadow clips to it — three
+/// consumers of one fact rather than three copies of a bare `1`.
+pub(crate) const FOOTER_ROWS: u16 = 1;
+
+/// The drawable scene rect: the full terminal area minus the footer.
 /// Single source of truth for the "everything but the footer" geometry that
 /// both `draw_scene` and the floor-transition path re-derive each frame.
 pub(crate) fn scene_rect(full: Rect) -> Rect {
@@ -178,7 +184,7 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
         x: 0,
         y: 0,
         width: full.width,
-        height: full.height.saturating_sub(1),
+        height: full.height.saturating_sub(FOOTER_ROWS),
     }
 }
 

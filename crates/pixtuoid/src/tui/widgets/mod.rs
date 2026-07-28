@@ -157,7 +157,15 @@ fn dim_cell(f: &mut ratatui::Frame<'_>, x: u16, y: u16, bounds: Rect, top_half_o
 /// the bottom shadow reads as a 1px contact line instead of a full 2px cell, while
 /// the vertical right strip stays full cells. Bounds-checked per cell.
 fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
-    let bounds = f.area();
+    // The footer is painted BEFORE every card on all three draw paths, and the
+    // bottom band dims `fg` only — so a shadow reaching that row repaints the live
+    // `[q]uit`/`[?]help` text at SHADOW_FACTOR over its still-lit bg. Keeping the
+    // card BODY off the footer (`panel::RESERVED_FOOTER_ROWS`) is only half the
+    // rule: the silhouette is offset SHADOW_OFFSET rows DOWN, so a card that stops
+    // exactly one row short still lands its band there. Clipping here covers BOTH
+    // card kinds — modals and the hover tooltips, which anchor inside `scene_rect`
+    // and so sit one row above the same edge.
+    let bounds = crate::tui::renderer::scene_rect(f.area());
     let sx = area.x.saturating_add(SHADOW_OFFSET);
     let sy = area.y.saturating_add(SHADOW_OFFSET);
     let last_row = sy.saturating_add(area.height.saturating_sub(1));
