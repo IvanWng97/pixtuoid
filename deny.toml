@@ -1,8 +1,13 @@
 [advisories]
 # Issue #440 owns removal when upstream releases.
 ignore = [
-    # ttf-parser declared unmaintained; only via sctk-adwaita (Linux Wayland
-    # CSD titlebar text, local system fonts). Upstream is migrating to skrifa.
+    # ttf-parser declared unmaintained, and no fixed release exists. It is NOT
+    # the Linux-only sctk-adwaita titlebar route #440's table records: the
+    # primary path is our OWN direct `ab_glyph` dep (crates/pixtuoid/src/aa_text.rs),
+    # so it is in the graph on macOS and Windows too and winit dropping
+    # ab_glyph would NOT clear it. Exposure is nil regardless — the only face
+    # ab_glyph ever parses is the `include_bytes!`-compiled Monaspace Neon,
+    # never a user-supplied font.
     "RUSTSEC-2026-0192",
 ]
 
