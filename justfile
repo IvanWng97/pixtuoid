@@ -243,11 +243,18 @@ arch:
     # painters + audio gateway own those. The
     # crate boundary already makes this a COMPILER fact; this pins it at the dep-tree
     # level too (a transitive pull-in via a feature would slip past the boundary).
+    # `--target all` + `--all-features` are LOAD-BEARING, not thoroughness: cargo
+    # tree defaults to the runner's own triple under default features, so a
+    # `[target.'cfg(windows)'.dependencies] crossterm` in pixtuoid-core resolved
+    # green on macOS AND on the ubuntu CI runner — invariant #1 broken on Windows
+    # behind a passing gate, and `just check-windows` compiles it happily because
+    # the dep is legitimate for that target. `--target all` is metadata-only (it
+    # installs nothing), and both crates' feature sets are one flag wide.
     for crate in pixtuoid-core pixtuoid-scene; do
         # Capture first so a cargo-tree ERROR (e.g. a crate rename) kills the
         # recipe via set -e, instead of reading as "no match" inside the if —
         # which would print the green line without having checked anything.
-        deps="$(cargo tree -p "$crate" --edges normal --prefix none)"
+        deps="$(cargo tree -p "$crate" --edges normal --prefix none --target all --all-features)"
         if grep -qE '^(ratatui|crossterm|winit|softbuffer|rodio|cpal)' <<<"$deps"; then
             echo "ARCH VIOLATION: $crate depends on a terminal/window crate (CLAUDE.md invariant #1)"; exit 1
         fi
