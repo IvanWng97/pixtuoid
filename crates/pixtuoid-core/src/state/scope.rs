@@ -50,8 +50,10 @@ pub(crate) enum StampRoot {
 /// Mark every not-yet-exiting descendant of `root` exiting, BFS over `parent_id`
 /// links (exit flows DOWN) — and, when `stamp_root` is [`StampRoot::Yes`], mark
 /// `root` itself exiting first (via [`fsm::mark_exiting`], so the earliest
-/// `exiting_at` wins). Idempotent: slots already exiting are filtered out, so a
-/// leaf or a partly-exiting subtree is a safe no-op.
+/// `exiting_at` wins). Idempotent through that write-once stamp, NOT by pruning
+/// the walk: an already-exiting node keeps its original `exiting_at` but is
+/// still traversed, so a descendant registered under it after it started exiting
+/// is reached. A leaf or a partly-exiting subtree is a safe no-op.
 ///
 /// The four callers: `SessionEnd`, `sweep_stale`, and `reconcile_connected` pass
 /// [`StampRoot::Yes`] (the whole tree leaves together); the b1
@@ -72,16 +74,26 @@ pub(crate) fn cascade_exit(
     visited.insert(root);
     let mut frontier = vec![root];
     while let Some(parent) = frontier.pop() {
+        // EVERY child is enqueued, including an already-exiting one: "already
+        // exiting" only implies "subtree already handled" if the subtree was
+        // fully populated at that earlier cascade, and a descendant registered
+        // afterwards would otherwise escape every later cascade. `visited`
+        // alone bounds the walk. The stamp goes through the write-once
+        // `fsm::mark_exiting` — the same call the root branch above makes —
+        // because without the filter a raw `Some(now)` would RE-stamp an
+        // exiting node, resetting its walkout animation and pushing its
+        // `sweep_exited` GC out by another grace window on each ancestor
+        // cascade.
         let children: Vec<AgentId> = scene
             .agents
             .values()
-            .filter(|s| s.parent_id == Some(parent) && s.exiting_at.is_none())
+            .filter(|s| s.parent_id == Some(parent))
             .map(|s| s.agent_id)
             .collect();
         for cid in children {
             if visited.insert(cid) {
                 if let Some(slot) = scene.agents.get_mut(&cid) {
-                    slot.exiting_at = Some(now);
+                    fsm::mark_exiting(slot, now);
                 }
                 frontier.push(cid);
             }
@@ -404,6 +416,52 @@ mod tests {
             .agents
             .insert(child, slot(child, None, ActivityState::Idle));
         assert!(!would_create_cycle(&scene.agents, child, a));
+    }
+
+    #[test]
+    fn cascade_exit_reaches_a_descendant_added_under_an_already_exiting_node() {
+        // "Already exiting" meant "subtree already handled", which only holds
+        // if the subtree was fully populated at the earlier cascade. A
+        // descendant registered AFTER an intermediate node started exiting was
+        // filtered out of `children`, so it was never enqueued and its own
+        // subtree was never visited — it survived every later cascade with a
+        // dangling parent_id, contradicting scope.rs's one invariant (a
+        // subagent's lifetime is contained in its parent's) and the
+        // `sweep_exited` doc's "cascade_exit reaps the subtree alongside the
+        // parent".
+        let root = AgentId::from_transcript_path("/p/root.jsonl");
+        let mid = AgentId::from_transcript_path("/p/mid.jsonl");
+        let leaf = AgentId::from_transcript_path("/p/leaf.jsonl");
+        let mut scene = SceneState::uniform(8);
+        scene
+            .agents
+            .insert(root, slot(root, None, ActivityState::Idle));
+        scene
+            .agents
+            .insert(mid, slot(mid, Some(root), ActivityState::Idle));
+        scene
+            .agents
+            .insert(leaf, slot(leaf, Some(mid), ActivityState::Idle));
+
+        // `mid` ends on its own (its SubagentStop) before `leaf` exists.
+        let t_mid = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000);
+        fsm::mark_exiting(scene.agents.get_mut(&mid).unwrap(), t_mid);
+
+        let t_root = t_mid + Duration::from_secs(2);
+        cascade_exit(&mut scene, root, StampRoot::Yes, t_root);
+
+        assert_eq!(scene.agents[&root].exiting_at, Some(t_root));
+        assert_eq!(
+            scene.agents[&mid].exiting_at,
+            Some(t_mid),
+            "the walk must not RE-stamp an exiting node — that would reset its \
+             walkout clock and push its GC out by another grace window"
+        );
+        assert_eq!(
+            scene.agents[&leaf].exiting_at,
+            Some(t_root),
+            "the grandchild added under the exiting node must still be reached"
+        );
     }
 
     #[test]
