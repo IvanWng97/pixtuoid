@@ -75,7 +75,7 @@
   --fg: var(--ink);
   /* Tuned against --surface-2, the TIGHTEST opaque plate muted text lands on
      (the terminal chrome bar) — not --bg: the old #6f6453 cleared the page at
-     5.02:1 but only reached 4.476:1 on the bar. 4.69:1 there, 5.25:1 on --bg. */
+     5.02:1 but only reached 4.476:1 on the bar. */
   --fg-muted: #6c614f;
   --border: color-mix(in srgb, var(--ink) 12%, transparent);
   --border-strong: color-mix(in srgb, var(--ink) 20%, transparent);
@@ -838,9 +838,9 @@ code {
      (#44475a, upstream "Current Line") than day/night do, so the muted ink has
      to climb to match: the old #8b92bd measured 3.03:1 on the terminal bar and
      3.90:1 on --surface (the OSD chips, the stage caption, the sky ticks, the
-     docs pager). 4.75:1 / 6.13:1 here. Lightening the INK, not darkening the
-     plate — no ink clears 4.5:1 on #44475a from below #8b92bd's luminance, and
-     the plate hexes are upstream Dracula. */
+     docs pager). Lightening the INK, not darkening the plate — no ink clears
+     4.5:1 on #44475a from below #8b92bd's luminance, and the plate hexes are
+     upstream Dracula. */
   --fg-muted: #b2b9e0;
   --border: color-mix(in srgb, #f8f8f2 13%, transparent);
   --border-strong: color-mix(in srgb, #f8f8f2 24%, transparent);
