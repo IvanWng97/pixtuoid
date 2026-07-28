@@ -105,11 +105,12 @@ impl ChangeOutcome {
 /// (`integrations/raycast/contract/outcome-row.schema.json`, golden-tested below)
 /// the extension's TS type is generated from (`gen:contract`). The wire shape is
 /// `{id, outcome, message?}` — a bare machine token plus an optional human-detail
-/// field, split from the older folded `failed: <msg>` string BEFORE the
-/// extension's store publication (the in-repo extension ships atomically with
-/// the binary, so no installed consumer parsed the old form). Once the extension
-/// is store-published, changing this shape needs a version handshake — see the
-/// sharp edge in `crates/pixtuoid/CLAUDE.md`. Pinned by
+/// field, split from the older folded `failed: <msg>` string back when the
+/// in-repo extension shipped atomically with the binary and was the only
+/// consumer. That window is CLOSED — the extension is on the Raycast store, so
+/// installed copies parse this wire independently of the binary's version and a
+/// further shape change needs a version handshake, never another flag-day edit;
+/// see the sharp edge in `crates/pixtuoid/CLAUDE.md`. Pinned by
 /// `outcome_row_json_shape_is_the_raycast_contract` + the envelope test in
 /// `sources_cli.rs`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
