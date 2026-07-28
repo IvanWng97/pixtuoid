@@ -349,8 +349,11 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
     font-family: var(--font-mono);
     font-size: 0.6rem;
     letter-spacing: 0.08em;
+    /* de-emphasis comes from the 0.6rem size alone — the same call `.boot__hint`
+       already made (global.css). The `opacity: .7` this used to carry showed 30%
+       of the --surface plate through the glyph, dropping --fg-muted under the
+       4.5:1 floor in every theme. */
     color: var(--fg-muted);
-    opacity: 0.7;
   }
   .vibing__clock {
     min-width: 4.1em;

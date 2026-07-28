@@ -6,17 +6,18 @@
       "startServerReadyTimeout": 20000,
       "numberOfRuns": 3,
       "url": [
-        "http://localhost:4321/",
-        "http://localhost:4321/architecture/",
-        "http://localhost:4321/config/",
-        "http://localhost:4321/contributing/",
-        "http://localhost:4321/knowledge-base/",
-        "http://localhost:4321/parallel-delivery/"
+        "http://localhost:4321/?theme=day",
+        "http://localhost:4321/architecture/?theme=day",
+        "http://localhost:4321/config/?theme=day",
+        "http://localhost:4321/contributing/?theme=day",
+        "http://localhost:4321/knowledge-base/?theme=day",
+        "http://localhost:4321/parallel-delivery/?theme=day"
       ]
     },
     "assert": {
       "assertions": {
         "categories:accessibility": ["error", { "minScore": 0.9 }],
+        "color-contrast": ["error", { "minScore": 1, "aggregationMethod": "pessimistic" }],
         "categories:seo": ["error", { "minScore": 0.9 }],
         "categories:best-practices": ["error", { "minScore": 0.9 }],
         "categories:performance": ["error", { "minScore": 0.7, "aggregationMethod": "median" }],

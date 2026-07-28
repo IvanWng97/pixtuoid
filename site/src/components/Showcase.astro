@@ -643,7 +643,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     color: var(--fg);
   }
   .dial__ch[aria-pressed='true'] .dial__num {
-    color: var(--led);
+    /* --led-ink, not --led: the dial is the one LED surface with no --screen
+       under it (see the token's note in global.css). */
+    color: var(--led-ink);
     text-shadow: 0 0 6px var(--led-glow);
   }
   .dial__num {
@@ -663,7 +665,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     letter-spacing: 0.08em;
   }
   .dial__live {
-    color: var(--led);
+    color: var(--led-ink);
     text-shadow: 0 0 6px var(--led-glow);
   }
   /* the ONE accordion slot for the picked demo's feature desc — sits in the

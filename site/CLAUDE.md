@@ -78,7 +78,29 @@ terminal-window callout via [`config/rehype-callouts.mjs`](config/rehype-callout
 processor AFTER `rehypeRepoLinks` (order matters: it walks the final tree).
 Note its smartypants quirk: Astro's remark-smartypants has already turned a
 straight `'` into a curly U+2019 by the time the transform runs, so the
-imperative-warning sniff normalizes back before matching. Elsewhere in the
+imperative-warning sniff normalizes back before matching. **SHARP EDGE — the
+callout window is a `--screen` panel dropped inside `.prose`, so every
+`.prose <tag>` colour rule is a cascade trap**: a rule that matches the tag
+DIRECTLY (`.prose p`, `.prose li`, `.prose a`, `.prose :not(pre) > code`)
+always beats the `--chip-ink` the `.callout__body` blockquote hands DOWN —
+inheritance loses to any match, whatever the specificity. `Docs.astro`
+therefore reclaims each of them at `.docs :global(.callout__body <tag>)`,
+which Astro's attribute scoping compiles to
+`.docs[data-astro-cid-…] .callout__body <tag>` = **(0,3,1)** — three
+class-level components plus one type, beating `.prose <tag>` (0,1,1) by
+WEIGHT. `p`/`li` were missed when `a`
+and `code` were first noticed, which shipped day's body copy as `--fg` ink on
+the near-black screen (1.16:1, three published pages) until the smoke suite's
+callout AA sweep pinned it. Add a `.prose` colour rule ⇒ add its callout
+twin, and let that sweep prove it — but COUNT the twin: a theme-prefixed
+global rule (`:root[data-theme='night'] .prose a`) is ALSO (0,3,1), an exact
+TIE that the twin wins only on source order (Astro emits component styles
+after `global.css`), and one carrying a second type selector
+(`… .prose a > code`, (0,3,2)) OUTWEIGHS a plain twin outright — which is how
+dracula's link-wrapped code chip briefly wore `--surface` beside its
+`--hw-hover` siblings inside the terminal window. That twin therefore lifts to
+`.docs :global(.callout .callout__body a > code)` (0,4,2) and wins on weight.
+Elsewhere in the
 same arc: `src/faq.json` is a NEW single-sourced content manifest (the pantry
 chitchat FAQ copy, every answer citing a repo contract, e.g. the hook-shim
 200ms/exit-0 invariant); the lobby tenant-directory board restyle kept
@@ -250,6 +272,63 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   dark text-shadow) by design — raw label/badge hues are deliberately not
   WCAG-gated against the office pixels (the idle/exiting grays never were;
   the flat chips elsewhere on the page are the raw-contrast surfaces).
+  **The DOM chrome that sits bare over the office is the opposite case**, and
+  its sweep is `smoke.spec.ts`'s "bare hero text clears WCAG AA at the real
+  office composite": it scrolls each selector on screen, reads the office
+  canvas under its box, composites the live dimmer and grades the element's
+  real ink. **SHARP EDGE — an office grade only means anything for an element
+  that is ON SCREEN**: the canvas is a viewport-fixed backdrop with a tiny
+  buffer, so an unscrolled below-fold selector indexes past it and
+  `getImageData` returns zeroed pixels — the sweep then silently grades
+  "dimmer over black" instead of the office. `officeGrounds` therefore both
+  scrolls the element in first AND asserts the read landed on painted canvas,
+  so that failure is now a loud one rather than a wrong number. (It is NOT what
+  hid the studio dial's `--led` accents — two independent holes were fused into
+  one story here once, so: those accents were never in the selector list at
+  all, scoped away by the rest row's `:not([aria-pressed='true'])`, and the
+  zeroed-pixel grade would have failed them anyway. Measured by restoring the
+  raw `--led` on the pressed number: 1.02:1 against "dimmer over black", ~1.15:1
+  against the real day composite — both an order of magnitude under the floor,
+  so no scroll fix would have caught what was never swept.) Day and night pull the ink
+  in OPPOSITE directions (day's dimmer lightens the composite toward `--paper`,
+  night's darkens it toward `--bg`), so any hue that lands here needs a
+  theme-aware token measured against the REAL composite — `--office-ink` /
+  `--office-ink-accent` for body/eyebrow copy, `--led-ink` for the 5F studio
+  dial. `--led` itself is a HARDWARE hue (global.css: "HARDWARE components …
+  are `.hw-panel` … dark `--screen` ground"); the dial is the one place it is
+  used with no `--screen` under it, hence its own token rather than a fourth
+  bare `--led` site. Its `--led-glow` text-shadow deliberately stays the
+  theme-independent lime: a shadow the GLYPH paints is decoration, not the
+  ground it is graded against (WCAG 1.4.3 and axe both read ink vs
+  background), and at 0.55 alpha over day's light composite it leaves no lit
+  ring — in a 3× render of the day dial the most green-biased pixel in the row
+  IS the glyph. Measured worst case against the real office composite: 5.28:1
+  for the pressed number, 5.55:1 for `live`.
+  Text on the page's DOM plates is swept by "plate and chip
+  text clears WCAG AA in every theme" — and that one runs **dracula** too.
+  There are FOUR populations, not three: bare-over-office (above); the OPAQUE
+  plates (terminal chrome bar, stage OSD chips / caption / sky ticks, docs
+  pager, prose code chips); the TRANSLUCENT `--screen` chips, whose ground is
+  the office seen THROUGH the chip (the footer line, the nav version tag) — the
+  population the plate sweep's own introducing change had just repaired
+  (`.footer__coffee`) and still left unpinned, with `.nav__version` sitting at
+  2.34:1; and the docs callout window (its own sweep, below §6).
+  `paintedContrast` grades all four the same way — composite every ancestor
+  background down, seed the ground from the office canvas when no ancestor
+  plate is opaque, and **FOLD ancestor `opacity` into the ink**: an
+  `opacity: .7` group shows 30% of its ground through the glyph, so a raw
+  `getComputedStyle().color` read reports a ratio nobody sees (`.vibing__ticks`
+  graded 5.77:1 while rendering 3.06:1 until the fold landed). The corollary,
+  which `.boot__hint` had already reached: on any of these surfaces
+  de-emphasis comes from SIZE, never from a sub-AA ink or an `opacity`
+  multiplier. Dracula is visitor-reachable (`?theme=dracula`
+  via `VALID_THEMES`, plus `Base.astro`'s keydown egg) but nothing measured it:
+  the office sweep is day+night on purpose (dracula's `--bg` darkens the same
+  way night's does, so it piggybacks) and Lighthouse only ever scores the
+  pinned theme. Its own palette steps much further from `--bg` to `--surface-2`
+  than day/night do, which is why its `--fg-muted` and upstream Dracula Purple
+  needed their own tuning against its own plates rather than inheriting the
+  assumption that "dark theme ⇒ fine".
   Pinned by `smoke.spec.ts` ("crisp AA captions
   overlay the live office" — incl. the 3-span split with a colored prefix —
   + the reduced-motion hide twin). This layer is part
@@ -451,7 +530,30 @@ the Rust `ci.yml`).
 
 Lighthouse runs every route three times and gates volatile lab metrics by their
 median; the one first-visit reveal timing stays pessimistic because all three
-visits must clear it. `src/styles/fonts.css` uses Fontsource's own WOFF2 assets
+visits must clear it. **SHARP EDGE — a `categories:*` assertion cannot fail on
+one audit.** `color-contrast` weighs 7 of the accessibility category's 195
+points, so a TOTAL contrast failure costs 3.6% against a `minScore: 0.9` floor:
+the landing page really did score 0.93 with `color-contrast` at 0 and a hard AA
+failure in the footer, green. `lighthouserc.json` therefore asserts
+`"color-contrast": ["error", { "minScore": 1, "aggregationMethod":
+"pessimistic" }]` alongside the category — a category score is a budget, not a
+contract, so anything that must NEVER regress needs its own per-audit
+assertion, and a CONTRACT audit needs every run to clear it. The
+`aggregationMethod` is not decoration: LHCI defaults to `optimistic`
+(`@lhci/utils/src/assertions.js`), which for a `minScore` assertion takes
+`Math.max` over the three runs — so ONE passing run would green a binary 0/1
+axe audit. Second surprise: Lighthouse does **not** pick a theme of its own.
+`Base.astro`'s init falls back to night off the 7/19 wall clock, so an
+unqualified URL audits whatever palette the runner's clock happens to hold —
+half of all CI runs on one palette, half on the other, and a hard per-audit
+assertion on top of that is a coin flip. The collect URLs therefore carry
+`?theme=day` (the `Base.astro` override, ahead of storage/clock/system): ONE
+deterministic palette, the default one, and the one whose light ground the
+`--screen`-chip inks are hardest on. **Lighthouse is the rendered-DOM axe
+backstop on the pinned theme, not the theme matrix** — the theme matrix is
+`smoke.spec.ts`, which drives day/night/dracula explicitly; adding a
+theme-dependent surface means adding it THERE, not doubling the collect list.
+`src/styles/fonts.css` uses Fontsource's own WOFF2 assets
 with `font-display: optional`, while `Base.astro` preloads the regular faces.
 Do not replace those declarations with Fontsource's default `swap` CSS: an
 Ubuntu cold visit lacks the metric-matched Georgia fallback and reflows long doc

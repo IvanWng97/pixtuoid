@@ -20,9 +20,10 @@ const supportedSources = (sourcesData as SourceRow[]).filter((s) => s.status ===
 
 /**
  * WCAG 2.1 relative luminance + contrast ratio (per the spec's definitions),
- * plus the minimal alpha-compositing needed to pin `.text-scrim`'s worst case:
- * the scrim is painted over the dimmer, which is itself translucent over the
- * live office. Kept fn-local (used by one test) rather than a shared util.
+ * plus the alpha-compositing every contrast pin here needs: nothing on this
+ * page sits on a flat colour — a scrim over a dimmer over the live office, a
+ * `--screen` chip over that office, an `opacity` group over a plate.
+ * {@link paintedContrast} is the one place that walk lives.
  */
 function relLuminance([r, g, b]: [number, number, number]): number {
   const lin = (c: number) => {
@@ -59,6 +60,176 @@ function parseRgb(css: string): [number, number, number, number] {
     return [r! * 255, g! * 255, b! * 255, a ?? 1];
   }
   throw new Error(`unparseable color: ${css}`);
+}
+
+// Settle window after scrolling a selector on screen: the dimmer controller is
+// IntersectionObserver-driven, so its target opacity lands a frame or two after
+// the scroll (the canvas itself is under the dimmer, so any painted frame is a
+// valid sample).
+const SCROLL_SETTLE_MS = 300;
+
+/**
+ * Put every reveal-on-scroll section in its RESTED state before grading.
+ *
+ * `.reveal` starts at `opacity: 0` and the IntersectionObserver adds `.in` once
+ * (then unobserves — Base.astro), so `.in` IS the settled state, not a shortcut.
+ * It matters because {@link paintedContrast} folds ancestor opacity into the
+ * ink: an unrevealed section would grade at alpha 0 and a mid-entrance one at
+ * some transient alpha, neither of which is what a visitor reads.
+ */
+async function settleReveals(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    document.querySelectorAll('.reveal').forEach((el) => el.classList.add('in'))
+  );
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('.reveal')].every(
+      (el) => parseFloat(getComputedStyle(el).opacity) === 1
+    )
+  );
+}
+
+/**
+ * The office grounds under an element's box — the canvas's BRIGHTEST and
+ * DARKEST pixel there, each composited with the live dimmer. `null` on a route
+ * with no live office (the doc pages), where the ground is pure DOM.
+ *
+ * Day's dimmer LIGHTENS the composite toward `--paper` and night's DARKENS it
+ * toward `--bg`, so the true worst case is either extreme depending on theme —
+ * hence both, never an average.
+ *
+ * SHARP EDGE this both scrolls for and then GUARDS: the canvas is a
+ * viewport-fixed backdrop with a tiny buffer, so an element's canvas
+ * coordinates are only real once it is on screen. An unscrolled below-fold
+ * selector indexes past the buffer and `getImageData` hands back ZEROED pixels
+ * — a silent "dimmer over black" grade instead of the office. The assertion
+ * below turns that into a loud failure instead of a wrong number.
+ */
+async function officeGrounds(
+  page: Page,
+  selector: string,
+  nth = 0
+): Promise<[number, number, number][] | null> {
+  if ((await page.locator('#office-live').count()) === 0) return null;
+  await page.locator(selector).nth(nth).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(SCROLL_SETTLE_MS);
+  const sampled = await page.evaluate(
+    ([sel, i]) => {
+      const canvas = document.getElementById('office-live') as HTMLCanvasElement | null;
+      if (!canvas || parseFloat(getComputedStyle(canvas).opacity) === 0) return null;
+      const el = document.querySelectorAll(sel)[i as number];
+      const r = el.getBoundingClientRect();
+      const cr = canvas.getBoundingClientRect();
+      const sx = canvas.width / cr.width;
+      const sy = canvas.height / cr.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      const x0 = Math.min(canvas.width - 1, Math.max(0, Math.floor((r.left - cr.left) * sx)));
+      const y0 = Math.min(canvas.height - 1, Math.max(0, Math.floor((r.top - cr.top) * sy)));
+      const w = Math.min(Math.max(1, Math.ceil(r.width * sx)), canvas.width - x0);
+      const h = Math.min(Math.max(1, Math.ceil(r.height * sy)), canvas.height - y0);
+      const data = ctx.getImageData(x0, y0, w, h).data;
+      const relLum = ([rr, gg, bb]: number[]) => {
+        const lin = (c: number) => {
+          const s = c / 255;
+          return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * lin(rr) + 0.7152 * lin(gg) + 0.0722 * lin(bb);
+      };
+      let maxLum = -1,
+        maxPx = [0, 0, 0],
+        minLum = 2,
+        minPx = [0, 0, 0],
+        painted = 0;
+      for (let k = 0; k < data.length; k += 4) {
+        if (data[k + 3] === 0) continue;
+        painted++;
+        const px = [data[k], data[k + 1], data[k + 2]];
+        const lum = relLum(px);
+        if (lum > maxLum) {
+          maxLum = lum;
+          maxPx = px;
+        }
+        if (lum < minLum) {
+          minLum = lum;
+          minPx = px;
+        }
+      }
+      const dimmer = document.getElementById('dimmer') as HTMLElement;
+      return {
+        maxPx,
+        minPx,
+        painted,
+        total: data.length / 4,
+        dimmerBg: getComputedStyle(dimmer).backgroundColor,
+        dimmerOpacity: parseFloat(dimmer.style.opacity || '0'),
+      };
+    },
+    [selector, nth] as const
+  );
+  if (!sampled) return null;
+  expect(
+    sampled.painted,
+    `${selector}[${nth}]: sampled ${sampled.total} office pixels, none painted — the box indexed past the canvas buffer, so the grade below would be "dimmer over black", not the office`
+  ).toBeGreaterThan(0);
+  const dim = [
+    ...(parseRgb(sampled.dimmerBg).slice(0, 3) as [number, number, number]),
+    sampled.dimmerOpacity,
+  ] as [number, number, number, number];
+  return [
+    compositeOver(dim, sampled.maxPx as [number, number, number]),
+    compositeOver(dim, sampled.minPx as [number, number, number]),
+  ];
+}
+
+/**
+ * The worst contrast ratio the element's text ACTUALLY renders at: every
+ * ancestor background composited down (translucent chips included), every
+ * ancestor `opacity` folded into the ink, over the office composite where a
+ * live office is the ground and over the page's own opaque plate where it is
+ * not.
+ *
+ * Folding `opacity` is the difference between graded and rendered: a group at
+ * `opacity: .7` shows 30% of its ground through the glyph, so grading the raw
+ * `getComputedStyle().color` reports a ratio the visitor never sees.
+ */
+async function paintedContrast(page: Page, selector: string, nth = 0): Promise<number> {
+  const { ink, chain } = await page.evaluate(
+    ([sel, i]) => {
+      const el = document.querySelectorAll(sel)[i as number];
+      const chain: { bg: string; opacity: number; isPageRoot: boolean }[] = [];
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        const cs = getComputedStyle(n);
+        chain.push({
+          bg: cs.backgroundColor,
+          opacity: parseFloat(cs.opacity),
+          isPageRoot: n === document.body || n === document.documentElement,
+        });
+      }
+      return { ink: getComputedStyle(el).color, chain };
+    },
+    [selector, nth] as const
+  );
+  const inkRgb = parseRgb(ink).slice(0, 3) as [number, number, number];
+  // `opacity` fades a node's OWN background and everything inside it, never an
+  // ancestor's — so a layer's group factor is the product from the ROOT down.
+  const inkAlpha = chain.reduce((p, c) => p * c.opacity, 1);
+  const groupAt = chain.map((_, k) => chain.slice(k).reduce((p, c) => p * c.opacity, 1));
+  // An opaque plate makes whatever is under the page immaterial, so only a
+  // chain translucent all the way out pays for the office sample's scroll.
+  const plated = chain.some((c, k) => !c.isPageRoot && parseRgb(c.bg)[3] * groupAt[k] >= 1);
+  const grounds = plated ? null : await officeGrounds(page, selector, nth);
+  const seeds: [number, number, number][] = grounds ?? [[255, 255, 255]];
+  let worst = Infinity;
+  for (const seed of seeds) {
+    let ground = seed;
+    for (let k = chain.length - 1; k >= 0; k--) {
+      // the office backdrop is a fixed sibling painting OVER the page background
+      if (grounds && chain[k].isPageRoot) continue;
+      const [r, g, b, a] = parseRgb(chain[k].bg);
+      if (a * groupAt[k] > 0) ground = compositeOver([r, g, b, a * groupAt[k]], ground);
+    }
+    worst = Math.min(worst, contrastRatio(compositeOver([...inkRgb, inkAlpha], ground), ground));
+  }
+  return worst;
 }
 /**
  * Fail the calling test if the page logs an uncaught error or console.error.
@@ -1809,82 +1980,10 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
   // 5F band — see the .text-scrim test above — so the bare-ink-token
   // legibility path no longer applies to them). Legibility now depends
   // entirely on the ink token clearing contrast against whatever the office
-  // ACTUALLY renders behind it, so this samples the REAL canvas pixels (not a --screen proxy
-  // — with no opaque plate the underlying office pixel is no longer
-  // "immaterial") across the sampled element's bounding box, finds the
-  // brightest AND darkest pixel in it (day's dimmer LIGHTENS the composite
-  // toward --paper, night's DARKENS it toward --bg — opposite directions, so
-  // the true worst case can be either extreme depending on theme), composites
-  // each with the live dimmer, and checks both against the element's real
-  // computed ink color.
-  async function worstCaseRatio(selector: string): Promise<{ ratio: number; theme: string }> {
-    const theme = await page.evaluate(() => document.documentElement.dataset.theme || 'day');
-    const measured = await page.evaluate((sel) => {
-      const canvas = document.getElementById('office-live') as HTMLCanvasElement;
-      const el = document.querySelector(sel)!;
-      const r = el.getBoundingClientRect();
-      const cr = canvas.getBoundingClientRect();
-      const sx = canvas.width / cr.width;
-      const sy = canvas.height / cr.height;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-      const x0 = Math.max(0, Math.floor((r.left - cr.left) * sx));
-      const y0 = Math.max(0, Math.floor((r.top - cr.top) * sy));
-      const w = Math.max(1, Math.ceil(r.width * sx));
-      const h = Math.max(1, Math.ceil(r.height * sy));
-      const data = ctx.getImageData(
-        x0,
-        y0,
-        Math.min(w, canvas.width - x0),
-        Math.min(h, canvas.height - y0)
-      ).data;
-      let maxLum = -1,
-        maxPx = [0, 0, 0];
-      let minLum = 2,
-        minPx = [0, 0, 0];
-      const relLum = ([rr, gg, bb]: number[]) => {
-        const lin = (c: number) => {
-          const s = c / 255;
-          return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-        };
-        return 0.2126 * lin(rr) + 0.7152 * lin(gg) + 0.0722 * lin(bb);
-      };
-      for (let i = 0; i < data.length; i += 4) {
-        const px = [data[i], data[i + 1], data[i + 2]];
-        const lum = relLum(px);
-        if (lum > maxLum) {
-          maxLum = lum;
-          maxPx = px;
-        }
-        if (lum < minLum) {
-          minLum = lum;
-          minPx = px;
-        }
-      }
-      return {
-        maxPx,
-        minPx,
-        dimmerBg: getComputedStyle(document.getElementById('dimmer')!).backgroundColor,
-        dimmerOpacity: parseFloat(
-          (document.getElementById('dimmer') as HTMLElement).style.opacity || '0'
-        ),
-        textColor: getComputedStyle(el).color,
-      };
-    }, selector);
-
-    const dim = parseRgb(measured.dimmerBg).slice(0, 3) as [number, number, number];
-    const textRgb = parseRgb(measured.textColor).slice(0, 3) as [number, number, number];
-    const afterMax = compositeOver(
-      [...dim, measured.dimmerOpacity] as [number, number, number, number],
-      measured.maxPx as [number, number, number]
-    );
-    const afterMin = compositeOver(
-      [...dim, measured.dimmerOpacity] as [number, number, number, number],
-      measured.minPx as [number, number, number]
-    );
-    const ratio = Math.min(contrastRatio(textRgb, afterMax), contrastRatio(textRgb, afterMin));
-    return { ratio, theme };
-  }
-
+  // ACTUALLY renders behind it, so this grades through `paintedContrast` — the
+  // REAL canvas pixels under the box (not a --screen proxy: with no opaque
+  // plate the underlying office pixel is no longer "immaterial"), both
+  // luminance extremes, composited with the live dimmer.
   for (const theme of ['day', 'night'] as const) {
     await page.addInitScript((t) => {
       sessionStorage.setItem('pix-booted', '1');
@@ -1892,6 +1991,7 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
     }, theme);
     await page.goto('./');
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await settleReveals(page);
 
     // Every BARE muted-text surface over the office, not just the hero's
     // (lens B measured #showcase's lead + roster body at 3.79-3.96:1 day —
@@ -1907,18 +2007,82 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
       // over the office too (were --fg-muted, sub-AA — audit finding A1).
       ".dial__ch:not([aria-pressed='true'])",
       '.dial__desc',
+      // …and so are the dial's two LED accents. The `:not()` above deliberately
+      // scoped the rest row, but the PRESSED row overrides its number's colour
+      // and `live` is the only marker for the one interactive demo — both were
+      // bare `--led`, an on-`--screen` hardware hue with no screen under it.
+      ".dial__ch[aria-pressed='true'] .dial__num",
+      '.dial__live',
       '#how .eyebrow',
       '#tools .section-head .lead',
       '#install .section-head .lead',
       '#amenities .eyebrow',
       '.pantry__cite',
     ]) {
-      const { ratio } = await worstCaseRatio(selector);
+      const ratio = await paintedContrast(page, selector);
       expect(
         ratio,
         `${theme} ${selector}: WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`
       ).toBeGreaterThanOrEqual(4.5);
     }
+  }
+});
+
+test('plate and chip text clears WCAG AA in every theme (day + night + dracula)', async ({
+  page,
+}) => {
+  // The sweep above grades BARE text over the office canvas. This one grades
+  // the two DOM-plate populations: the page's OPAQUE plates — the terminal
+  // chrome bar (--surface-2), the stage OSD chips / caption / sky ticks and the
+  // docs pager (--surface), the inline code chip inside a prose link — and the
+  // TRANSLUCENT --screen chips, which are neither bare nor opaque: the footer
+  // line and the nav's version tag composite --chip-bg over the LIVE office, so
+  // their ground is the office pixel seen through the chip. `paintedContrast`
+  // grades all three the same way; only the populations differ.
+  // DRACULA is the point: it is visitor-reachable (`?theme=dracula`, validated
+  // by VALID_THEMES, plus Base.astro's keydown egg) but it is the one theme
+  // NOTHING measured — the office sweep runs day+night by design (dracula's
+  // --bg darkens the same way night's does) and Lighthouse only ever scores the
+  // pinned theme, so dracula's own --fg-muted/--coral had never been checked
+  // against dracula's own plates.
+  const PLATE_SURFACES: Record<string, string[]> = {
+    './': [
+      '.terminal__title',
+      '.osd__chip',
+      '.stage__caption',
+      '.vibing__ticks span',
+      '.footer__line a.footer__coffee',
+      '.footer__sep',
+      '.nav__version',
+    ],
+    './404': ['.terminal__title'],
+    './architecture': ['.prose :not(pre) > code', '.prose a > code', '.docs__pager-dir'],
+  };
+
+  for (const theme of ['day', 'night', 'dracula'] as const) {
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('pix-booted', '1');
+      localStorage.setItem('pix-theme', t);
+    }, theme);
+    let swept = 0;
+    for (const [route, selectors] of Object.entries(PLATE_SURFACES)) {
+      await page.goto(route);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await settleReveals(page);
+      for (const selector of selectors) {
+        const count = await page.locator(selector).count();
+        expect(count, `${theme} ${route}: no ${selector} to sweep`).toBeGreaterThan(0);
+        for (let i = 0; i < count; i++) {
+          const ratio = await paintedContrast(page, selector, i);
+          expect(
+            ratio,
+            `${theme} ${route} ${selector}[${i}]: WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`
+          ).toBeGreaterThanOrEqual(4.5);
+          swept++;
+        }
+      }
+    }
+    expect(swept, `${theme}: swept nothing`).toBeGreaterThan(0);
   }
 });
 
@@ -2211,6 +2375,69 @@ test('pantry chitchat bubble text clears WCAG AA against its own dark ground (da
         `${theme} "${label}": WCAG AA floor is 4.5:1; ${color} on ${bg} measured ${ratio.toFixed(2)}:1`
       ).toBeGreaterThanOrEqual(4.5);
     }
+  }
+});
+
+test('docs callout body copy clears WCAG AA against the callout screen (day + night + dracula)', async ({
+  page,
+}) => {
+  // A markdown callout is a terminal window on the theme-independent --screen,
+  // so ALL of its ink must come from the chip palette. `.prose p`/`.prose li`
+  // match the callout's own <p>/<li> DIRECTLY, and a direct match always beats
+  // the --chip-ink the .callout__body blockquote hands DOWN — the sibling `a`
+  // and `code` overrides exist for exactly that reason. This sweeps every
+  // text-bearing tag markdown can put in the window (not just the two that
+  // were noticed), across every doc route and every theme, so the next
+  // .prose rule to land can't silently re-darken the body copy.
+  const TEXT_TAGS = 'p, li, strong, em, a, code';
+  for (const theme of ['day', 'night', 'dracula'] as const) {
+    await page.addInitScript((t) => localStorage.setItem('pix-theme', t), theme);
+    await page.goto('./config');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    // the doc routes come off the rendered sidebar (itself stamped from the one
+    // DOCS manifest) so a new/renamed doc joins the sweep without an edit here
+    const routes = await page.evaluate(() =>
+      [...document.querySelectorAll('.docs__sidebar .docs__list:not(.docs__list--building) a')].map(
+        (a) => (a as HTMLAnchorElement).getAttribute('href')!
+      )
+    );
+    expect(routes.length, `${theme}: no doc routes in the sidebar`).toBeGreaterThan(0);
+
+    let swept = 0;
+    for (const route of routes) {
+      await page.goto(`.${route}`);
+      const rows = await page.evaluate((tags) => {
+        const transparent = (c: string) => /,\s*0\)\s*$/.test(c);
+        return [...document.querySelectorAll('.callout__body')].flatMap((body) => {
+          const screen = getComputedStyle(body.closest('.callout')!).backgroundColor;
+          return [...body.querySelectorAll(tags)].map((el) => {
+            const cs = getComputedStyle(el);
+            return {
+              tag: el.tagName.toLowerCase(),
+              color: cs.color,
+              bg: transparent(cs.backgroundColor) ? screen : cs.backgroundColor,
+              text: (el.textContent || '').trim().slice(0, 48),
+            };
+          });
+        });
+      }, TEXT_TAGS);
+      for (const { tag, color, bg, text } of rows) {
+        const ratio = contrastRatio(
+          parseRgb(color).slice(0, 3) as [number, number, number],
+          parseRgb(bg).slice(0, 3) as [number, number, number]
+        );
+        expect(
+          ratio,
+          `${theme} ${route} <${tag}> "${text}": WCAG AA floor is 4.5:1; ${color} on ${bg} measured ${ratio.toFixed(2)}:1`
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+      swept += rows.length;
+    }
+    // teeth: a docs tree that stopped emitting callouts would pass vacuously
+    expect(
+      swept,
+      `${theme}: no .callout__body text swept across ${routes.length} doc routes`
+    ).toBeGreaterThan(0);
   }
 });
 

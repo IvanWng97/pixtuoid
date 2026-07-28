@@ -189,7 +189,14 @@ const { floating = false } = Astro.props;
   .nav__version {
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    color: var(--chip-dim);
+    /* --chip-ink, not --chip-dim: the dim tone is tuned for an OPAQUE --screen
+       (5.34:1 — see SupportedTools' board note) and this chip is only 72% of
+       it, so day's light ground shows through into a mid gray in BOTH nav
+       variants — --chip-dim measured 2.85:1 floating over the office and 2.34:1
+       on the sticky docs bar (axe's own colour-contrast violation on all five
+       doc routes). --chip-ink clears at 6.13:1 / 5.54:1; the version tag's
+       de-emphasis comes from its 0.75rem size, the `.boot__hint` call. */
+    color: var(--chip-ink);
     background: color-mix(in srgb, var(--screen) 72%, transparent);
     padding: 0.15rem 0.45rem;
     margin-left: -0.4rem;
