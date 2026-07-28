@@ -104,6 +104,11 @@ pub(crate) fn paint_label_widgets(
     }
 }
 
+/// The dossier's detail-column budget — the ONE quantity BOTH detail sources are
+/// clipped to (Active's tool args and Waiting's reason feed the same `detail_line`
+/// slot), so widening the card can't leave one row ragged against the other.
+const DETAIL_CHARS: usize = 34;
+
 /// A char-safe, ~30-column short form of a cwd path for the tooltip: the TAIL
 /// (most informative — project dir) with a leading `…` when truncated. Char-
 /// sliced, never a byte slice, so a multibyte path can't panic.
@@ -190,12 +195,12 @@ pub(crate) fn paint_hover_tooltip(
                     ));
                 }
                 if !rest.is_empty() {
-                    detail_line = Some(rest.chars().take(34).collect());
+                    detail_line = Some(rest.chars().take(DETAIL_CHARS).collect());
                 }
             }
         } else if let ActivityState::Waiting { reason } = &agent.state {
             // WHY leads for a blocked agent: the reason IS the detail, `?`-flagged.
-            let r: String = reason.chars().take(34).collect();
+            let r: String = reason.chars().take(DETAIL_CHARS).collect();
             detail_line = Some(format!("?{r}"));
         }
     }
@@ -710,6 +715,80 @@ mod tests {
         assert!(
             shadowed,
             "the agent hover tooltip must cast a drop shadow via the shared backing"
+        );
+    }
+
+    /// Active's tool args and Waiting's reason feed the SAME `detail_line` slot,
+    /// so they must clip at the same column — a per-branch literal drifts into a
+    /// ragged right edge between two rows of one card, with nothing to catch it.
+    #[test]
+    fn both_detail_sources_clip_at_the_one_card_budget() {
+        use std::path::Path;
+        use std::sync::Arc;
+        use std::time::{Duration, SystemTime};
+
+        use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, ToolKind};
+        use pixtuoid_core::{AgentId, SceneState};
+
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
+        let id = AgentId::from_transcript_path("/budget/0.jsonl");
+        // Long enough that DETAIL_CHARS + 1 chars still exist to over-render.
+        let payload: String = ('a'..='z').chain('A'..='Z').collect();
+        let render = |state: ActivityState| {
+            let slot = AgentSlot {
+                agent_id: id,
+                source: Arc::from("claude-code"),
+                session_id: Arc::from("s"),
+                cwd: Arc::from(Path::new("/repo")),
+                label: "budget".into(),
+                state,
+                state_started_at: now,
+                created_at: now - Duration::from_secs(2),
+                last_event_at: now,
+                exiting_at: None,
+                pending_idle_at: None,
+                desk_index: GlobalDeskIndex(0),
+                floor_idx: 0,
+                tool_call_count: 0,
+                active_ms: 0,
+                unknown_cwd: false,
+                parent_id: None,
+                pid: None,
+                model: None,
+                effort: None,
+                tokens_used: 0,
+                last_usage: None,
+            };
+            let mut scene = SceneState::uniform(12);
+            scene.agents.insert(id, slot);
+            let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+            term.draw(|f| {
+                super::paint_hover_tooltip(f, &scene, id, 20, 12, f.area(), now, &theme::NORMAL);
+            })
+            .unwrap();
+            buffer_text(&term)
+        };
+
+        let budget = super::DETAIL_CHARS;
+        let fits: String = payload.chars().take(budget).collect();
+        let overruns: String = payload.chars().take(budget + 1).collect();
+
+        let active = render(ActivityState::Active {
+            detail: Some(Arc::from(format!("Read {payload}").as_str())),
+            kind: ToolKind::Read,
+            tool_use_id: None,
+        });
+        assert!(
+            active.contains(&fits) && !active.contains(&overruns),
+            "the Active tool-detail row must clip at exactly {budget} chars, got: {active:?}"
+        );
+
+        let waiting = render(ActivityState::Waiting {
+            reason: Arc::from(payload.as_str()),
+        });
+        assert!(
+            waiting.contains(&fits) && !waiting.contains(&overruns),
+            "the Waiting reason row must clip at the SAME {budget} chars, got: {waiting:?}"
         );
     }
 
