@@ -29,18 +29,30 @@
 test_tool = "nextest"
 
 exclude_globs = [
-    # Untestable painter / async + winit glue — these six are the painter files
-    # codecov.yml ALSO ignores; no headless test can kill their mutants, so every
-    # one "survives" = noise. The two ignore lists OVERLAP, not subset: codecov
-    # also ignores crash/logging/sources_cli (pure helpers stay unit-tested —
-    # sources_cli via the cli_json e2e — so their mutants stay IN), and this file
-    # also excludes the pixtuoid-core probe files below. Edit shared entries together.
+    # Untestable painter / async + winit glue — no headless test can kill their
+    # mutants, so every one "survives" = noise. These four are a SUBSET of the
+    # painter files codecov.yml ignores; the lists overlap without either being
+    # a subset of the other, since codecov also ignores crash/logging/sources_cli
+    # (pure helpers stay unit-tested — sources_cli via the cli_json e2e — so
+    # their mutants stay IN), this file also excludes the pixtuoid-core probe
+    # files below, and tui/mod.rs + driver.rs are ignored THERE but mutated HERE
+    # (see the note under this list). Edit shared entries together.
     "crates/pixtuoid/src/main.rs",
-    "crates/pixtuoid/src/tui/mod.rs",
-    "crates/pixtuoid/src/runtime/driver.rs",
     "crates/pixtuoid/src/runtime/pipeline.rs",
     "crates/pixtuoid/src/floating/mod.rs",
     "crates/pixtuoid/src/floating/window.rs",
+    # NOT excluded, though codecov.yml ignores both: `tui/mod.rs` and
+    # `runtime/driver.rs` are line-uncoverable in BULK while still carrying a
+    # unit-tested pure decision layer, and per-FUNCTION mutants see that split
+    # where per-LINE coverage cannot. Measured, not assumed: 22 mutants across
+    # tui/mod.rs's `dispatch_key`/`toggle_intent`/`is_quit_chord`/
+    # `should_dispatch_key` = 19 caught, 1 unviable, and the only 2 missed are
+    # in `run_tui` itself; driver.rs's `build_source_set` mutant is caught by
+    # the registry-drift test written to close that gap. Excluding the files
+    # hid ~132 and ~9 mutants respectively — an exclusion that hides a killable
+    # mutant is worse than a noisy row (the same call as the `mascot_position`
+    # pair below). `run_tui`'s own ~44 mutants stay as documented known noise;
+    # `just mutants` is --in-diff, so they only surface when you edit `run_tui`.
     # Timing / FFI liveness probes: their tests assert wall-clock + OS behavior and
     # flake under mutation load — a "survivor" here is a flaked test, not a missing
     # assertion (this repo is flake-averse; #352-#354).
