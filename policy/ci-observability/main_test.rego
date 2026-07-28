@@ -968,6 +968,55 @@ test_codeql_health_gate_before_upload_is_accepted if {
 	not sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
 }
 
+codeql_pull_request_message := sprintf("%s must analyze every pull request: keep on.pull_request present and unfiltered", [codeql_workflow_path])
+
+test_codeql_dropping_the_pull_request_trigger_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"on": {"push": {"branches": ["main"]}}},
+	}]}
+	violations := deny with input as fixture
+	codeql_pull_request_message in violations
+}
+
+# A filtered trigger still "runs on pull requests", so the old wording accused
+# the maintainer of the opposite of what they did. The requirement is that NO
+# pull request can skip analysis, which only a bare `pull_request:` guarantees.
+test_codeql_filtered_pull_request_trigger_is_denied if {
+	every trigger in {
+		{"types": ["opened", "synchronize", "reopened"]},
+		{"branches": ["main"]},
+		{"paths-ignore": ["docs/**"]},
+	} {
+		fixture := {"documents": [{
+			"path": codeql_workflow_path,
+			"contents": {"on": {"pull_request": trigger}},
+		}]}
+		violations := deny with input as fixture
+		codeql_pull_request_message in violations
+	}
+}
+
+test_bare_codeql_pull_request_trigger_is_accepted if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"on": {"pull_request": null}},
+	}]}
+	violations := deny with input as fixture
+	not codeql_pull_request_message in violations
+}
+
+# Reaching through `codeql.on` made the whole rule undefined — silently green —
+# when the trigger block itself was gone, the one shape that disables every arm.
+test_codeql_losing_its_trigger_block_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": []}}},
+	}]}
+	violations := deny with input as fixture
+	codeql_pull_request_message in violations
+}
+
 # Dependabot pins a floating major to an exact release. That is a STRICTER pin
 # and must not be rejected — #786 failed with "must analyze with CodeQL v4
 # exactly once" against a step that was v4.37.1.

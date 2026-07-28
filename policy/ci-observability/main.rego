@@ -1025,9 +1025,12 @@ deny contains msg if {
 	msg := sprintf("%s must run on pushes to main", [codeql_workflow_path])
 }
 
+# Only a bare `pull_request:` analyzes EVERY pull request; any filter (types,
+# branches, paths) lets some PR merge unanalyzed, so the pin is exact-null. The
+# path form keeps the rule defined — and firing — when `on:` itself is gone.
 deny contains msg if {
-	object.get(codeql.on, "pull_request", "missing") != null
-	msg := sprintf("%s must run on pull requests", [codeql_workflow_path])
+	object.get(codeql, ["on", "pull_request"], "missing") != null
+	msg := sprintf("%s must analyze every pull request: keep on.pull_request present and unfiltered", [codeql_workflow_path])
 }
 
 deny contains msg if {
