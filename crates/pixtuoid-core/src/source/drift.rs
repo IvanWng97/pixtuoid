@@ -30,7 +30,7 @@
 //! `source` is a static registry source name (safe). The free-form values
 //! (`name`/`field`/`tool`/`detail`) are untrusted wire content, so they are made
 //! display-safe HERE, at emission — control-stripped and capped by
-//! [`crate::source::decoder::display_safe`]. Per-consumer sanitizing was not
+//! `decoder::display_safe`. Per-consumer sanitizing was not
 //! enough: the non-TUI `tracing` stream writes to RAW stderr, which no cell
 //! buffer clips and no presenter sanitizes, and it is on by default at `warn`.
 
