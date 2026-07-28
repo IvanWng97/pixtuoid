@@ -14,7 +14,11 @@
 //! `<cli> --version` subprocess probes (stdin nulled so they can't block; argv
 //! from the static registry, never user input). It never writes config
 //! (re-connecting hooks stays the Sources panel's job) and never spawns the
-//! TUI. The untrusted wire values (event/tool names) it samples are
+//! TUI. The PROBED CLI is not read-only about its own state, though — several
+//! bootstrap their state dir on any invocation — so the probe is gated by
+//! [`may_probe_version`] on evidence the user already runs that CLI; see the
+//! `doctor`-probe sharp edge in `crates/pixtuoid/CLAUDE.md`. The untrusted wire
+//! values (event/tool names) it samples are
 //! `sanitize`d before display (R0615-06) — `doctor` is the third consumer of
 //! those breadcrumbs and must hold the same line as the headless path + footer.
 
@@ -544,6 +548,23 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
     first_sanitized_line(&output.stdout).or_else(|| first_sanitized_line(&output.stderr))
 }
 
+/// Whether `doctor` may spawn this source's `<cli> --version` probe: only with
+/// evidence the user already runs that CLI — it is either CONNECTED, or its
+/// install target probed PRESENT. `cli_detected` is `None` for a transcript-only
+/// source (no install target, so nothing to detect).
+///
+/// `--version` is not side-effect-free on the other side: several agent CLIs
+/// bootstrap their own state dir on ANY invocation, and those dirs are exactly
+/// what `presence_probe` / `detect_installed` key on — so an unconditional probe
+/// MANUFACTURED the presence it was diagnosing (`cli_present` false→true), and
+/// the natural `doctor` → `setup --yes` order then installed hooks into CLIs
+/// `setup --yes` alone had just declined to touch. Gating on presence removes
+/// the observer effect by construction: a CLI that has already written its own
+/// state cannot be perturbed into existence by one more `--version`.
+fn may_probe_version(connected: bool, cli_detected: Option<bool>) -> bool {
+    connected || cli_detected.unwrap_or(false)
+}
+
 /// The desktop activation backend focus-jump would use on THIS host — the
 /// per-OS half of the #526 focus diagnostic. Linux detection is the pure
 /// [`linux_activation_backend`] over the env markers `focus/linux.rs` keys on.
@@ -758,13 +779,17 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
         // Sources panel + boot preflight read, so the report can't drift apart
         // from the live surfaces.
         let diag = diagnose(src, &log, None);
+        let is_connected = connected.contains(src);
+        let cli_detected = target.map(crate::install::target::is_present);
         let row = DoctorSourceRow {
             prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
             source_id: src,
-            connected: connected.contains(src),
+            connected: is_connected,
             has_target: target.is_some(),
             hooks_installed,
-            installed_version: desc.and_then(|d| d.version_probe).and_then(probe_version),
+            installed_version: may_probe_version(is_connected, cli_detected)
+                .then(|| desc.and_then(|d| d.version_probe).and_then(probe_version))
+                .flatten(),
             verified_version: desc.map(|d| d.verified_version).unwrap_or("unknown"),
             diag,
         };
@@ -947,6 +972,72 @@ mod tests {
         assert!(out.contains("config:"), "{out}");
         assert!(out.contains("terminal: TERM="), "{out}");
         assert!(out.contains("sources \u{b7}"), "{out}");
+    }
+
+    #[test]
+    fn version_probe_is_gated_on_evidence_the_user_runs_that_cli() {
+        // Explicitly connected → probe, even before the CLI has written anything.
+        assert!(may_probe_version(true, Some(false)));
+        assert!(may_probe_version(true, None));
+        // Already initialised on disk → probing can't bootstrap what exists.
+        assert!(may_probe_version(false, Some(true)));
+        // No evidence at all → never spawn. Both the target-bearing "probed
+        // absent" case and the transcript-only "nothing to probe" case.
+        assert!(!may_probe_version(false, Some(false)));
+        assert!(!may_probe_version(false, None));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_never_spawns_a_version_probe_for_a_cli_it_has_no_evidence_of() {
+        // `<cli> --version` is NOT side-effect-free: several agent CLIs bootstrap
+        // their own state dir on ANY invocation, and those dirs are exactly what
+        // `presence_probe`/`detect_installed` key on. An unconditional probe
+        // therefore flipped `cli_present` false→true, so the natural
+        // troubleshooting order `doctor` → `setup --yes` installed hooks into CLIs
+        // that `setup --yes` alone had just declined to touch.
+        use std::os::unix::fs::PermissionsExt;
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let (home, bin) = (dir.path().join("home"), dir.path().join("bin"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        // A stand-in for the real CLI: spawning it AT ALL leaves this trace.
+        let marker = dir.path().join("spawned");
+        let fake = bin.join("opencode");
+        std::fs::write(
+            &fake,
+            format!("#!/bin/sh\n: > '{}'\necho 1.0.0\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
+            ["HOME", "XDG_CONFIG_HOME", "PATH", "OPENCODE_CONFIG_DIR"]
+                .iter()
+                .map(|k| (*k, std::env::var_os(k)))
+                .collect();
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+        std::env::remove_var("OPENCODE_CONFIG_DIR");
+        std::env::set_var("PATH", &bin);
+        let out = run(std::path::Path::new("/nonexistent-pixtuoid-doctor-log"));
+        let spawned = marker.exists();
+        for (k, v) in saved {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+
+        out.expect("the report still builds");
+        assert!(
+            !spawned,
+            "doctor spawned `opencode --version` in a pristine HOME where opencode \
+             is undetected — the probe must be gated on evidence the user runs it"
+        );
     }
 
     #[derive(Clone, Default)]
