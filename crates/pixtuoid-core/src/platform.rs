@@ -33,7 +33,9 @@ pub(crate) fn user_home() -> String {
 /// supply its own (the installer's config/install call sites call this directly
 /// and keep their own per-call fallbacks). This is the one place that knows the
 /// precedence; both the `String` and `Option` shapes are derived from
-/// [`resolve_user_home_opt`].
+/// `resolve_user_home_opt` (crate-internal — a plain code span, because
+/// `[workspace.lints.rustdoc] private_intra_doc_links = "deny"` rejects a
+/// public item linking a private target).
 pub fn user_home_opt() -> Option<String> {
     resolve_user_home_opt(
         cfg!(windows),
@@ -190,8 +192,10 @@ fn resolve_home(
 /// then HOME on Windows, HOME only on Unix, with empty strings treated as
 /// unset and `None` when nothing resolves. Both `resolve_home` (String, with
 /// a host fallback) and [`user_home_opt`] (the `Option` shape the installer
-/// calls) derive from this — pure, so the Windows arm is unit-testable on any host.
-pub fn resolve_user_home_opt(
+/// calls) derive from this — pure, so the Windows arm is unit-testable on any
+/// host. Those two public shapes are the whole cross-crate API, so re-promote
+/// this one only alongside a named out-of-crate caller.
+pub(crate) fn resolve_user_home_opt(
     windows: bool,
     userprofile: Option<String>,
     home: Option<String>,

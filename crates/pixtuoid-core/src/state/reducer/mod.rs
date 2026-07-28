@@ -288,7 +288,6 @@ impl Reducer {
             .retain(|id, _| scene.agents.contains_key(id));
     }
 
-    /// Gracefully evict every live agent of `source_id` — mark each exiting and
     /// Reconcile the scene toward the `connected` set: mark exiting every
     /// non-exiting slot whose source is NOT connected, then cascade to its subtree
     /// (exactly as the `SessionEnd` arm does per agent), so the existing EXIT-walk
@@ -1508,10 +1507,13 @@ impl Reducer {
     /// Removing a parent does NOT null any surviving child's `parent_id` — that
     /// pointer is left dangling intentionally. The scope walks tolerate it (the
     /// `None => break` guards in `scope::{refresh_lineage, has_waiting_ancestor}`),
-    /// so it never crashes; in practice `cascade_exit` reaps the subtree alongside
-    /// the parent, so a lingering dangle is only observable for a true orphan
-    /// (JSONL-first child of a never-created parent). Scanning every child on each
-    /// parent removal to null the pointer would add cost with no behavioral benefit.
+    /// so it never crashes; `cascade_exit` reaps the subtree alongside the parent
+    /// whenever the child EXISTS by then. A child whose registration lands AFTER
+    /// its parent's cascade (inside the grace, or later — the cascade is a
+    /// one-shot push and nothing re-runs it) is the second, KNOWN dangle source,
+    /// bounded by its own stale sweep — see the crate guide's sharp edge. Scanning
+    /// every child on each parent removal to null the pointer would add cost with
+    /// no behavioral benefit either way.
     fn sweep_exited(&mut self, scene: &mut SceneState, now: SystemTime) {
         let expired: Vec<AgentId> = scene
             .agents

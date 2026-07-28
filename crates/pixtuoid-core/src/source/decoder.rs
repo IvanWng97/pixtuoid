@@ -29,10 +29,6 @@ pub type LineDecoder = fn(&str, &str, Value) -> Result<Vec<AgentEvent>>;
 /// the session with a foreign, identity-bearing cwd).
 pub type CwdExtractor = fn(&Value) -> Option<PathBuf>;
 
-/// The shared/default [`CwdExtractor`]: a TOP-LEVEL `cwd` string. CC writes it
-/// on every transcript line (and Antigravity's row points here too — its steps
-/// carry no cwd field, so the shape simply never matches and the label falls
-/// back); also the fallback for sources with no registry row (test harnesses).
 /// Narrow a raw JSON integer to a valid POSIX pid: in `i32` range AND strictly
 /// positive. The `> 0` reject is load-bearing — `kill(0)`/`kill(-n)` target
 /// process GROUPS, and a bogus/zero `_pid` would otherwise synthesize a phantom
@@ -45,6 +41,10 @@ pub(crate) fn checked_pid(raw: i64) -> Option<i32> {
     i32::try_from(raw).ok().filter(|&p| p > 0)
 }
 
+/// The shared/default [`CwdExtractor`]: a TOP-LEVEL `cwd` string. CC writes it
+/// on every transcript line (and Antigravity's row points here too — its steps
+/// carry no cwd field, so the shape simply never matches and the label falls
+/// back); also the fallback for sources with no registry row (test harnesses).
 pub(crate) fn extract_top_level_cwd(v: &Value) -> Option<PathBuf> {
     v.get("cwd").and_then(Value::as_str).map(PathBuf::from)
 }
@@ -221,10 +221,15 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         None => {}
     }
 
+    // Both bails below breadcrumb, undeduped — the two fields are the whole
+    // hook plane's chokepoint (the crate guide's drift defense #2).
     let event = obj
         .get("hook_event_name")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("missing hook_event_name"))?;
+        .ok_or_else(|| {
+            super::drift::missing_field(source, "hook", "hook_event_name");
+            anyhow!("missing hook_event_name")
+        })?;
 
     // `.filter(non-empty)`: an empty session_id passes `as_str` but, for Codex
     // (which keys the AgentId on session_id), would mint a phantom agent that
@@ -234,7 +239,10 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         .get("session_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("missing/empty session_id"))?
+        .ok_or_else(|| {
+            super::drift::missing_field(source, event, "session_id");
+            anyhow!("missing/empty session_id")
+        })?
         .to_string();
     // The per-session key strategy is registry data (`HookDecoding::id_key`),
     // not a name match: CC and Codex key on `session_id` (the session UUID);
@@ -1297,6 +1305,69 @@ mod tests {
         );
     }
 
+    /// The shared hook arms' two REQUIRED-field bails are the whole hook
+    /// plane's chokepoint: an upstream rename of either field makes EVERY hook
+    /// event of every source riding those arms fail to decode. Without a
+    /// breadcrumb the only trace is a default-target `warn!` that
+    /// `doctor::parse_drift_line` (which requires the literal `pixtuoid::drift`
+    /// marker) is structurally blind to — the hook plane goes dark while
+    /// `pixtuoid doctor` reports every source healthy.
+    #[test]
+    fn the_hook_planes_required_field_bails_leave_drift_breadcrumbs() {
+        // An upstream rename looks exactly like this: the envelope is intact,
+        // the key we depend on is not.
+        let renamed_event = capture_logs(|| {
+            assert!(decode_hook_payload(json!({
+                "hookEventNameZ": "Stop",
+                "session_id": "ses-1",
+                "_pixtuoid_source": "claude-code",
+            }))
+            .is_err());
+        });
+        for needle in [
+            crate::source::drift::TARGET,
+            "missing_field",
+            "hook_event_name",
+        ] {
+            assert!(
+                renamed_event.contains(needle),
+                "missing {needle:?} in captured log:\n{renamed_event}"
+            );
+        }
+
+        let renamed_session = capture_logs(|| {
+            assert!(decode_hook_payload(json!({
+                "hook_event_name": "Stop",
+                "sessionIdZ": "ses-1",
+                "_pixtuoid_source": "claude-code",
+            }))
+            .is_err());
+        });
+        for needle in [crate::source::drift::TARGET, "missing_field", "session_id"] {
+            assert!(
+                renamed_session.contains(needle),
+                "missing {needle:?} in captured log:\n{renamed_session}"
+            );
+        }
+
+        // Flood control: the documented grok cross-fire (a camelCase envelope
+        // arriving on CC's/cursor's shim) is a KNOWN duplicate, dropped quietly
+        // before these bails — it must stay breadcrumb-silent or it would fire
+        // once per tool call of every grok session.
+        let cross_fire = capture_logs(|| {
+            assert!(decode_hook_payload(json!({
+                "hookEventName": "pre_tool_use",
+                "sessionId": "ses-1",
+                "_pixtuoid_source": "claude-code",
+            }))
+            .is_ok());
+        });
+        assert!(
+            !cross_fire.contains("missing_field"),
+            "the grok cross-fire drop must stay breadcrumb-silent, got:\n{cross_fire}"
+        );
+    }
+
     // tool_name is wire/transcript content landing in Active.detail → the
     // unbounded headless summary — capped in the Generic display like its
     // target.
@@ -1537,6 +1608,241 @@ mod tests {
             let daemon = registry::descriptor_for(s).is_some_and(|d| d.is_daemon());
             if !daemon {
                 assert!(covered.contains(s), "add {s} to the decoder cap table");
+            }
+        }
+        for &c in &covered {
+            let daemon = registry::descriptor_for(c).is_some_and(|d| d.is_daemon());
+            assert!(!daemon, "{c} is a daemon — remove it from the cap table");
+        }
+    }
+
+    /// How a source derives its `Waiting.reason` — the axis this gate keys on.
+    enum ReasonKind {
+        /// Minted from raw wire content: must route through `ellipsize`.
+        Wire,
+        /// A fixed `&'static str`: the over-cap wire value must NOT leak in, so
+        /// a later switch to a wire field cannot slip past uncapped.
+        Fixed,
+        /// No Waiting wire today. The row exists so adding one forces a visit.
+        NoWaiting,
+    }
+
+    // The `Waiting.reason` twin of the tool-display gate above. Same #272 class:
+    // content-derived, persisted in `AgentSlot` for the session's lifetime, and
+    // egressed UNBOUNDED by the headless summary (`runtime/mod.rs` wraps it in
+    // `sanitize_line`, which strips Cc/Cf but does not truncate). Every producer
+    // is correct today; what was missing is the registry-driven completeness
+    // assert, so a NEW source shipping `reason: raw_msg.to_string()` passed
+    // every gate.
+    #[test]
+    fn every_agent_decoder_caps_its_waiting_reason() {
+        use crate::source::{
+            antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, kimi, omp,
+            opencode, reasonix, registry,
+        };
+        use serde_json::json;
+        use std::collections::HashSet;
+
+        let raw_s = "R".repeat(MAX_DECODED_FIELD_CHARS * 4);
+        let raw = raw_s.as_str();
+        // A prefix long enough that a Fixed reason cannot contain it by accident.
+        let marker = &raw_s[..MAX_DECODED_FIELD_CHARS / 2];
+        // Capped value + the one '…' the cap appends.
+        let bound = MAX_DECODED_FIELD_CHARS + 1;
+
+        type Row<'a> = (
+            &'static str,
+            ReasonKind,
+            Box<dyn Fn() -> Vec<AgentEvent> + 'a>,
+        );
+        let table: Vec<Row> = vec![
+            (
+                claude_code::SOURCE_NAME,
+                ReasonKind::Wire,
+                Box::new(|| {
+                    decode_hook_payload(json!({
+                        "hook_event_name":"Notification","session_id":"s","cwd":"/r",
+                        "message":raw,"_pixtuoid_source":"claude-code"}))
+                    .expect("cc decodes")
+                }),
+            ),
+            (
+                codex::SOURCE_NAME,
+                ReasonKind::Fixed,
+                Box::new(|| {
+                    decode_hook_payload(json!({
+                        "hook_event_name":"PermissionRequest","session_id":"s","cwd":"/r",
+                        "message":raw,"_pixtuoid_source":"codex"}))
+                    .expect("codex decodes")
+                }),
+            ),
+            (
+                antigravity::SOURCE_NAME,
+                ReasonKind::Fixed,
+                Box::new(|| {
+                    antigravity::decode_ag_line(
+                        "/x/transcript.jsonl",
+                        "antigravity",
+                        json!({"type":"PLANNER_RESPONSE","step_index":0,"tool_calls":[
+                            {"name":"ask_permission","args":{"CommandLine":raw}}]}),
+                    )
+                    .expect("antigravity decodes")
+                }),
+            ),
+            (
+                copilot::SOURCE_NAME,
+                ReasonKind::Wire,
+                Box::new(|| {
+                    copilot::decode_copilot_line(
+                        "/c/id/events.jsonl",
+                        "copilot",
+                        json!({"type":"permission.requested","data":{
+                            "permissionRequest":{"kind":raw}}}),
+                    )
+                    .expect("copilot decodes")
+                }),
+            ),
+            (
+                omp::SOURCE_NAME,
+                ReasonKind::Wire,
+                Box::new(|| {
+                    omp::decode_omp_line(
+                        "/o/s.jsonl",
+                        "omp",
+                        json!({"type":"message","message":{"role":"assistant","content":[
+                            {"type":"toolCall","id":"t1","name":"ask","arguments":{"i":raw}}]}}),
+                    )
+                    .expect("omp decodes")
+                }),
+            ),
+            (
+                reasonix::SOURCE_NAME,
+                ReasonKind::Wire,
+                Box::new(|| {
+                    reasonix::decode_rx_hook_payload(
+                        &json!({"event":"Notification","cwd":"/r","message":raw}),
+                    )
+                    .expect("reasonix decodes")
+                }),
+            ),
+            (
+                opencode::SOURCE_NAME,
+                ReasonKind::Wire,
+                Box::new(|| {
+                    opencode::decode_oc_hook_payload(&json!({
+                        "type":"permission.asked",
+                        "properties":{"sessionID":"ses-1","action":raw}}))
+                    .expect("opencode decodes")
+                }),
+            ),
+            (
+                grok::SOURCE_NAME,
+                ReasonKind::Wire,
+                Box::new(|| {
+                    grok::decode_grok_hook_payload(&json!({
+                        "hookEventName":"notification","sessionId":"s","cwd":"/r",
+                        "workspaceRoot":"/r","notificationType":"permission_prompt",
+                        "message":raw}))
+                    .expect("grok decodes")
+                }),
+            ),
+            (
+                // CodeWhale's ApprovalRequired shows UI + writes the audit log but
+                // fires NO hook — proven upstream, not a scope cut.
+                codewhale::SOURCE_NAME,
+                ReasonKind::NoWaiting,
+                Box::new(|| {
+                    codewhale::decode_cw_hook_payload(&json!({
+                        "event":"tool_call_before","cwd":"/r","tool":"bash",
+                        "tool_args":"{}","message":raw}))
+                    .expect("codewhale decodes")
+                }),
+            ),
+            (
+                cursor::SOURCE_NAME,
+                ReasonKind::NoWaiting,
+                Box::new(|| {
+                    cursor::decode_cursor_hook_payload(&json!({
+                        "hook_event_name":"preToolUse","session_id":"s",
+                        "tool_name":"Shell","tool_input":{"command":"ls"},"message":raw}))
+                    .expect("cursor decodes")
+                }),
+            ),
+            (
+                hermes::SOURCE_NAME,
+                ReasonKind::NoWaiting,
+                Box::new(|| {
+                    hermes::decode_hermes_hook_payload(&json!({
+                        "hook_event_name":"pre_tool_call","session_id":"s","cwd":"/r",
+                        "tool_name":"bash","tool_input":{"command":"ls"},"message":raw}))
+                    .expect("hermes decodes")
+                }),
+            ),
+            (
+                // Kimi's Extend decoder declines Notification, so it lands on the
+                // SHARED capped arm — the same chokepoint CC rides.
+                kimi::SOURCE_NAME,
+                ReasonKind::Wire,
+                Box::new(|| {
+                    decode_hook_payload(json!({
+                        "hook_event_name":"Notification","session_id":"s","cwd":"/r",
+                        "message":raw,"_pixtuoid_source":"kimi"}))
+                    .expect("kimi decodes")
+                }),
+            ),
+        ];
+
+        for (src, kind, decode) in &table {
+            let evs = decode();
+            let reason = evs.iter().find_map(|e| match e {
+                AgentEvent::Waiting { reason, .. } => Some(reason.clone()),
+                _ => None,
+            });
+            match kind {
+                ReasonKind::Wire => {
+                    let reason = reason.unwrap_or_else(|| {
+                        panic!("{src}: expected a Waiting, got {evs:?}");
+                    });
+                    assert!(
+                        reason.chars().count() <= bound,
+                        "{src}: Waiting reason {} chars > cap bound {bound} — a \
+                         chokepoint bypass leaks raw content into slot state",
+                        reason.chars().count()
+                    );
+                    // '…' proves the cap FIRED — a decoder that silently dropped
+                    // the over-cap field would pass the length check vacuously.
+                    assert!(
+                        reason.ends_with('…'),
+                        "{src}: reason {reason:?} did not end with the ellipsis — cap did not fire"
+                    );
+                }
+                ReasonKind::Fixed => {
+                    let reason = reason.unwrap_or_else(|| {
+                        panic!("{src}: expected a Waiting, got {evs:?}");
+                    });
+                    assert!(
+                        !reason.contains(marker) && reason.chars().count() <= bound,
+                        "{src}: reason {reason:?} is no longer a fixed string — route \
+                         the wire value through `ellipsize` and move this row to Wire"
+                    );
+                }
+                ReasonKind::NoWaiting => assert!(
+                    reason.is_none(),
+                    "{src}: grew a Waiting wire ({reason:?}) — classify it in this table"
+                ),
+            }
+        }
+
+        // Completeness (anti-drift teeth), identical to the tool-display gate:
+        // the table must cover EXACTLY the non-daemon registered sources.
+        let covered: HashSet<&str> = table.iter().map(|(n, _, _)| *n).collect();
+        for s in registry::registered_source_names() {
+            let daemon = registry::descriptor_for(s).is_some_and(|d| d.is_daemon());
+            if !daemon {
+                assert!(
+                    covered.contains(s),
+                    "add {s} to the Waiting-reason cap table"
+                );
             }
         }
         for &c in &covered {

@@ -69,15 +69,38 @@ impl AcceptBackoff {
 /// connected-peer-uid check (`transport::peer_is_us`).
 #[cfg(unix)]
 fn ensure_owned_socket_dir(path: &Path) -> Result<()> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
-    let uid = rustix::process::getuid().as_raw();
-    let owned = std::path::PathBuf::from(format!("/tmp/pixtuoid-{uid}"));
-    if parent != owned {
+    if !is_owned_fallback(path) {
         return Ok(());
     }
-    ensure_private_dir(&owned, uid)
+    ensure_private_dir(&owned_socket_dir(), rustix::process::getuid().as_raw())
+}
+
+/// The socket file name inside [`owned_socket_dir`]. Shared with
+/// `ClaudeCodeSource::default_socket_path`'s branch 3 so the endpoint and the
+/// guard below are built from the same two pieces.
+#[cfg(unix)]
+pub(crate) const SOCKET_FILE_NAME: &str = "pixtuoid.sock";
+
+/// THE definition of the no-XDG `/tmp` fallback directory (#485). Both the
+/// socket path (`ClaudeCodeSource::default_socket_path`'s branch 3) and the
+/// ownership guard below derive from this one fn, so "is this the dir we own?"
+/// is a comparison against the same value the path was built from — a second
+/// hand-copied literal would let a change to the fallback form silently disarm
+/// the guard while every test stayed green. (The SHIM keeps its own copy in
+/// `pixtuoid-hook/src/paths.rs` — no dep edge is allowed between the two
+/// crates — pinned to this one by `tests/socket_path_parity.rs`.)
+#[cfg(unix)]
+pub(crate) fn owned_socket_dir() -> std::path::PathBuf {
+    let uid = rustix::process::getuid().as_raw();
+    std::path::PathBuf::from(format!("/tmp/pixtuoid-{uid}"))
+}
+
+/// Whether `path` is the socket endpoint inside the dir we manage — the pure
+/// decision half of [`ensure_owned_socket_dir`], so the FIRES direction is
+/// testable without touching the real `/tmp/pixtuoid-{uid}`.
+#[cfg(unix)]
+fn is_owned_fallback(path: &Path) -> bool {
+    path.parent() == Some(owned_socket_dir().as_path())
 }
 
 /// Create `dir` as a `0700` directory owned by `uid`, or — if it already exists —
@@ -420,6 +443,20 @@ mod tests {
             ensure_private_dir(&dir, my_uid().wrapping_add(1)).is_err(),
             "a dir owned by a uid other than the expected one is hostile"
         );
+    }
+
+    #[test]
+    fn is_owned_fallback_fires_for_the_dir_the_socket_path_is_built_from() {
+        // The missing POSITIVE direction (#485): the guard is a path comparison,
+        // and a second hand-copied literal disarms it with the whole suite green.
+        assert!(is_owned_fallback(
+            &owned_socket_dir().join(SOCKET_FILE_NAME)
+        ));
+        // Negative controls: a sibling dir and the flat pre-#485 form (the
+        // exact shape whose reintroduction used to silently disarm it).
+        assert!(!is_owned_fallback(Path::new("/tmp/pixtuoid.sock")));
+        let flat = owned_socket_dir().with_extension("sock");
+        assert!(!is_owned_fallback(&flat));
     }
 
     #[test]

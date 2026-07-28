@@ -64,16 +64,16 @@ fn rename_classification_and_upgradability_cover_each_provenance() {
 // clock) — see correlation.rs's test mod and the two
 // `*_at_exactly_the_*` tests in tests/reducer/liveness.rs.
 //
-// One accepted-equivalent residual remains: the SessionStart arm's
-// resurrect gate (`slot.exiting_at.is_some() && slot.parent_id.is_none()
-// && parent_id.is_none()`) survives an `&&`→`||` flip on the LAST
-// conjunct because the two parent sides cannot disagree by the time the
-// gate runs — the ledger ADOPTION rewrites a parentless event's
-// `parent_id` to the remembered parent, the #244-w2 gate drops a
-// parented start on a recently-ended child, and the orphan-enrichment
-// just above copies a surviving event link onto `slot.parent_id` — so
-// the third conjunct is defense-in-depth (kept deliberately: it is the
-// documented "gated on BOTH sides" belt), not independently observable.
+// The SessionStart arm's resurrect gate (`slot.exiting_at.is_some() &&
+// slot.parent_id.is_none() && parent_id.is_none()`) is NOT an equivalent:
+// BOTH `&&`→`||` flips are killed by
+// tests/reducer/lifecycle.rs::duplicate_root_session_start_does_not_resurrect_a_live_session
+// (verified by applying each mutant and running the suite). Either flip
+// makes a parentless start resurrect a LIVE root, and `resurrect_in_place`
+// has no exiting guard of its own — see the gate's own comment in mod.rs.
+// No accepted-equivalent residual remains here; if one ever surfaces as a
+// cargo-mutants survivor it belongs in `.cargo/mutants.toml`'s
+// `exclude_re` (mechanically re-checked), never in prose like this.
 
 /// Pin the deliberate stale-timeout DURATIONS. Every timing test correctly
 /// derives its offsets FROM these constants (hardcoded ms make leg tests

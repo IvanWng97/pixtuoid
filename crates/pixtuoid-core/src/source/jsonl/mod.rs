@@ -121,11 +121,12 @@ struct WatchCtx<'a> {
     cursors: &'a Arc<Mutex<HashMap<PathBuf, u64>>>,
     /// First-sight claims: path → claim-held. `true` = the registration pair
     /// was emitted and the claim is HELD (appends decode without
-    /// re-registering). `false` = the claim was RELEASED by the child-end
-    /// un-claim (#246): the path stays KNOWN — so `revouch_gated_files` won't
+    /// re-registering). `false` = the claim was RELEASED — by the child-end
+    /// un-claim (#246) or by a DECODED
+    /// terminator: the path stays KNOWN — so `revouch_gated_files` won't
     /// replay it however live the probe says the (still-open) rollout is —
     /// but its next append re-registers through `emit_first_sight`. Absent =
-    /// never registered, or fully retired by an exit/terminator un-claim.
+    /// never registered, or fully retired by an exit un-claim.
     seen: &'a Arc<Mutex<HashMap<PathBuf, bool>>>,
     tx: &'a TaggedSender,
     /// Recency window for the first-sight gate (a file older than this is

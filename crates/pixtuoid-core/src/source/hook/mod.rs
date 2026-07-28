@@ -12,6 +12,8 @@ use crate::AgentId;
 mod unix;
 #[cfg(unix)]
 use unix as imp;
+#[cfg(unix)]
+pub(crate) use unix::{owned_socket_dir, SOCKET_FILE_NAME};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]

@@ -906,7 +906,7 @@ mod tests {
     /// stream can't flood the warn-floor.
     #[test]
     fn unknown_namespace_breadcrumbs_but_known_namespace_events_stay_silent() {
-        // novel: a family outside the 25 known namespaces → breadcrumb the full `type`.
+        // novel: a family outside `KNOWN_NAMESPACES` → breadcrumb the full `type`.
         let novel =
             r#"{"type":"telepathy.transmit","data":{},"id":"i","timestamp":"t","parentId":null}"#;
         let logs = crate::test_capture::capture_logs(|| {
@@ -923,7 +923,9 @@ mod tests {
         // silent-real: the actual high-frequency KNOWN-namespace events the decoder
         // ignores fire per turn/token, so a KNOWN_NAMESPACES omission would flood.
         // All must stay SILENT — the case `telepathy.transmit` can't catch. `abort`
-        // is the dot-less namespace (the whole `type` string IS the family).
+        // is the dot-less namespace (the whole `type` string IS the family), and
+        // `factory.run_updated` is the whole `factory` family (ephemeral upstream,
+        // so this row is what pins its KNOWN_NAMESPACES entry).
         for kind in [
             "assistant.message_delta",
             "mcp.tools.list_changed",
@@ -931,6 +933,7 @@ mod tests {
             "session.idle",
             "user.message",
             "abort",
+            "factory.run_updated",
         ] {
             let line = format!(
                 r#"{{"type":"{kind}","data":{{}},"id":"i","timestamp":"t","parentId":null}}"#

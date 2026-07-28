@@ -347,7 +347,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 **`pixtuoid-core`** ([full entries](crates/pixtuoid-core/CLAUDE.md)):
 - CC hook payloads DO include `tool_use_id` (hook-wins dedup fires).
 - CC hook `transcript_path` points at the PARENT transcript; subagent-leak is suppressed via `active_tasks`, and liveness flows UP (`refresh_lineage`). CC's `SubagentStart`/`SubagentStop` hooks decode (`decode_cc_hook_custom`).
-- The JSONL watcher gates historical/ended transcripts on EVERY first-sight path: liveness probe first (CC pid registry / Codex open-rollout FDs), `should_seed_at_eof` fallback. Content NEVER drives lifecycle. The probe also powers ongoing liveness: the `ProofOfLife` sweep exemption, the negative vouch, and the ms-scale `exit_watch` rung.
+- The JSONL watcher gates historical/ended transcripts on EVERY first-sight path (`should_seed_at_eof`); a liveness vouch (CC pid registry / Codex+omp open FDs / grok registry) exempts the RECENCY half only — a structural end marker still gates, and `revouch_gated_files` re-checks it. Content NEVER drives lifecycle. The probe also powers ongoing liveness: the `ProofOfLife` sweep exemption, the negative vouch, and the ms-scale `exit_watch` rung.
 - A hook event for an unknown session id registers it (hooks are proof of life), normally with real `Identity`; JSONL events never synthesize.
 - Abrupt exits have no `SessionEnd` → stale-sweep cascade, guarded by the liveness-vs-readiness exemptions.
 - Subagent display names come from `attributionAgent`; the dispatch tool is **`Agent`** (the one known name — the legacy `Task` name arm was dropped in 0.12.0; a pre-rename dispatch still carries `subagent_type`, THE semantic detection signal); `Workflow` is deliberately NOT mapped.

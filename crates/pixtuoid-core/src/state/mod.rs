@@ -224,8 +224,10 @@ pub enum ActivityState {
 /// The first two carry no information worth preserving
 /// ([`SlotLabel::is_upgradable`]); the last two are real information and are
 /// never clobbered by a back-fill.
+/// `pub(crate)`: reachable only through `SlotLabel`'s private `provenance`
+/// field, so nothing outside this crate can name it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LabelProvenance {
+pub(crate) enum LabelProvenance {
     /// Monotonic `{prefix}#N` ordinal minted with no cwd — no information, upgradable.
     OrdinalGhost,
     /// Bare registry prefix from an empty-cwd deriver fallback — upgradable.
@@ -247,7 +249,7 @@ pub struct SlotLabel {
 
 impl SlotLabel {
     /// Construct a label carrying an explicit provenance.
-    pub fn new(text: impl Into<Arc<str>>, provenance: LabelProvenance) -> Self {
+    pub(crate) fn new(text: impl Into<Arc<str>>, provenance: LabelProvenance) -> Self {
         Self {
             text: text.into(),
             provenance,
@@ -255,22 +257,22 @@ impl SlotLabel {
     }
 
     /// A monotonic `{prefix}#N` ordinal label minted with no cwd (upgradable).
-    pub fn ordinal_ghost(text: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn ordinal_ghost(text: impl Into<Arc<str>>) -> Self {
         Self::new(text, LabelProvenance::OrdinalGhost)
     }
 
     /// A bare source-prefix label from an empty-cwd deriver fallback (upgradable).
-    pub fn prefix_fallback(text: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn prefix_fallback(text: impl Into<Arc<str>>) -> Self {
         Self::new(text, LabelProvenance::PrefixFallback)
     }
 
     /// A label derived from the cwd basename — real information, never clobbered.
-    pub fn cwd_derived(text: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn cwd_derived(text: impl Into<Arc<str>>) -> Self {
         Self::new(text, LabelProvenance::CwdDerived)
     }
 
     /// A label from an externally supplied display name — never clobbered.
-    pub fn renamed(text: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn renamed(text: impl Into<Arc<str>>) -> Self {
         Self::new(text, LabelProvenance::Renamed)
     }
 
@@ -279,8 +281,11 @@ impl SlotLabel {
         Arc::clone(&self.text)
     }
 
-    /// How this label was minted (see `LabelProvenance`).
-    pub fn provenance(&self) -> LabelProvenance {
+    /// How this label was minted (see `LabelProvenance`). Test-only: every
+    /// production read of the provenance goes through `is_upgradable`, which
+    /// is the one decision the field exists to make.
+    #[cfg(test)]
+    pub(crate) fn provenance(&self) -> LabelProvenance {
         self.provenance
     }
 
@@ -288,7 +293,7 @@ impl SlotLabel {
     /// only a derivation fallback (ordinal ghost / bare-prefix) carries no
     /// information; a cwd-basename- or Rename-derived label is real
     /// information and is never clobbered.
-    pub fn is_upgradable(&self) -> bool {
+    pub(crate) fn is_upgradable(&self) -> bool {
         matches!(
             self.provenance,
             LabelProvenance::OrdinalGhost | LabelProvenance::PrefixFallback
