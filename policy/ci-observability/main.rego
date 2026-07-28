@@ -284,11 +284,17 @@ pinned_npm_setup_steps(path, job_name) := [step |
 	object.get(step, "continue-on-error", false) == false
 ]
 
-# GitHub layers a step's environment workflow < job < step, so the token is
-# equally live wherever it is declared and hoisting it to the job is a valid
-# refactor. The nearest DECLARATION wins even when its value is empty, which is
-# why these arms are mutually exclusive rather than an any-of: a step-level
-# `GH_TOKEN: ""` shadows the job's token and puts zizmor back offline.
+# `run: just zizmor` and its `run: |` block-scalar twin differ only by the
+# trailing newline yq preserves — the same command either way, so matching the
+# raw string would report a rename that never happened.
+runs_zizmor(step) if trim_space(object.get(step, "run", "")) == zizmor_recipe
+
+# GitHub layers a step's environment workflow < job < step and "uses the most
+# specific variable" (workflow-syntax reference, `env`), so the token is equally
+# live wherever it is declared and hoisting it to the job is a valid refactor.
+# The nearest DECLARATION wins even when its value is empty, which is why these
+# arms are mutually exclusive rather than an any-of: a step-level `GH_TOKEN: ""`
+# shadows the job's token and puts zizmor back offline.
 effective_gh_token(_, _, step) := token if {
 	token := object.get(step, ["env", github_token_env], null)
 	token != null
@@ -305,6 +311,20 @@ effective_gh_token(workflow, job, step) := token if {
 	object.get(job, ["env", github_token_env], null) == null
 	token := object.get(workflow, ["env", github_token_env], "")
 }
+
+# One entry per LIVE `just zizmor` invocation, carrying the token GitHub would
+# actually place in that step's environment. A conditional or continue-on-error
+# step is not a live invocation — it reaches green without auditing anything.
+zizmor_invocations(path) := [{"job": job_name, "token": effective_gh_token(workflow, job, step)} |
+	workflow := documents[path]
+	some job_name, job in object.get(workflow, "jobs", {})
+	object.get(job, "if", null) == null
+	object.get(job, "continue-on-error", false) == false
+	some step in object.get(job, "steps", [])
+	runs_zizmor(step)
+	object.get(step, "if", null) == null
+	object.get(step, "continue-on-error", false) == false
+]
 
 codecov_uploads := [entry |
 	some entry in uses_entries
@@ -1175,15 +1195,26 @@ deny contains msg if {
 # ONLY place those four ever run — dropping its env would retire them
 # repository-wide while every gate stayed green. actionlint cannot express
 # "this step's env is load-bearing for that recipe's coverage".
+# Two halves, because the property rule alone retires itself: it is keyed on the
+# step it describes, so any edit that stops the match — a renamed recipe, an
+# `if:`, a continue-on-error — makes it vacuously true and the missing env
+# invisible again. The count rule is the existence half; it fires when the step
+# this policy is about stops being there to check.
 deny contains msg if {
-	workflow := documents[lint_workflow_path]
-	some job_name, job in object.get(workflow, "jobs", {})
-	some step in object.get(job, "steps", [])
-	object.get(step, "run", "") == zizmor_recipe
-	effective_gh_token(workflow, job, step) == ""
+	invocations := zizmor_invocations(lint_workflow_path)
+	count(invocations) != 1
+	msg := sprintf(
+		"%s must run `%s` in exactly one step that nothing skips or softens — no `if:` or continue-on-error on either the step or its job — found %d; restore that step, or retarget this policy's zizmor_recipe if the recipe was genuinely renamed, because zizmor's four online audits run nowhere else",
+		[lint_workflow_path, zizmor_recipe, count(invocations)],
+	)
+}
+
+deny contains msg if {
+	some invocation in zizmor_invocations(lint_workflow_path)
+	invocation.token == ""
 	msg := sprintf(
 		"%s job %q must give `%s` a non-empty %s — GitHub layers step env over job env over workflow env, so declaring it at any one of the three is enough; tokenless, zizmor drops to offline and silently skips impostor-commit, known-vulnerable-actions, ref-confusion and stale-action-refs, which run nowhere else",
-		[lint_workflow_path, job_name, zizmor_recipe, github_token_env],
+		[lint_workflow_path, invocation.job, zizmor_recipe, github_token_env],
 	)
 }
 
