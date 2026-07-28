@@ -18,10 +18,14 @@
 //! 2. The connection gate end-to-end — a real rollout dripped into a real
 //!    `run --headless` appears as a sprite iff its source is connected.
 //!
-//! Determinism: each source's `connected`/`cli_present` is a function of whether
-//! it is target-bearing (probed absent in an empty HOME → disconnected) or
-//! no-target (always present + migrate-default connected), NOT of what's installed
-//! on the test machine — SO LONG AS the environment is fully isolated. We clear the
+//! Determinism: the golden is a function of the REGISTRY, not of what's installed
+//! on the test machine — SO LONG AS the environment is fully isolated. Every row is
+//! `connected: false`, because an empty HOME has no config file and a source is
+//! connected only on an explicit `[sources]` `true` (the v0.4–0.7 "absent flag ⇒
+//! connected iff hooks installed" migrate inference was dropped in 0.12.0). So
+//! `cli_present` is the only field that varies, and it splits on registry shape:
+//! a target-bearing source probes absent in the empty HOME → `false`, while a
+//! no-target one has no target to probe → `true`. We clear the
 //! env and point HOME at an empty tempdir so every presence/hook probe sees nothing
 //! (see the e2e-isolate-home lesson). Unix-only: the Windows home-var isolation
 //! differs and can't be verified from here; the wire SHAPE is pinned cross-platform
