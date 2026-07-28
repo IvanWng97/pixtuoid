@@ -1,8 +1,8 @@
 # cargo-mutants config (see `just mutants`). Mutation testing injects bugs and
 # checks the tests catch them — the "do your assertions have teeth?" dimension
 # that line/region coverage can't see. Use the project's runner (nextest) and
-# exclude paths where a surviving mutant is NOISE, not a real gap, so the
-# advisory signal stays high.
+# exclude the paths (`exclude_globs`) and FUNCTIONS (`exclude_re`) where a
+# surviving mutant is NOISE, not a real gap, so the advisory signal stays high.
 #
 # READ THIS BEFORE ACTING ON A `pixtuoid-core` / `pixtuoid-scene` SURVIVOR.
 # `test_workspace` is deliberately left at its default, which means "only the

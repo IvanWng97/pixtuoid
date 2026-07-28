@@ -513,7 +513,8 @@ mutants *args:
     if [ -z "$listed" ]; then
         echo "error: the diff vs $base yields ZERO mutants — nothing would be tested." >&2
         echo "  Either there are no .rs changes, or every changed .rs is test code" >&2
-        echo "  or listed in .cargo/mutants.toml exclude_globs." >&2
+        echo "  or excluded by .cargo/mutants.toml (exclude_globs OR exclude_re —" >&2
+        echo "  the latter can empty a file's mutants function by function)." >&2
         echo "  Run from a branch touching mutable production Rust, or set MUTANTS_BASE." >&2
         exit 1
     fi
