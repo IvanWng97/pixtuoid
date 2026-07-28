@@ -5,7 +5,7 @@
 # bundled `claude-cli` backend coding session renders as a full-fidelity `cc·`
 # desk sprite. One headless scene, two sources, two sprites:
 #
-#   agents=[… cc·<workspace>@N …] daemons=[openclaw@18789:busy]
+#   agents=[… cc·<workspace>@N …] daemons=[openclaw@<port>:busy]
 #
 # Flow:
 #   1. headless pixtuoid binds an ISOLATED socket + watches ~/.claude/projects
@@ -65,25 +65,49 @@ done
     echo "no $PROJECTS — has Claude Code ever run on this machine?" >&2
     exit 2
 }
+# The port THIS run's gateway will bind. The assertions below deliberately match
+# the `openclaw@` prefix because the user's config need not resolve the default —
+# so the conflict guard and the cleanup reap have to resolve it the same way
+# instead of pinning the default, or on a non-default box the guard passes while a
+# gateway IS running and the reap leaks the one we started. Falls back to the ONE
+# in-repo copy of OpenClaw's default (the plugin template's DEFAULT_GATEWAY_PORT,
+# the same literal check_upstream_drift.py compares against upstream) rather than
+# a second hardcoded number. Env overrides are NOT mirrored — that would mean
+# re-implementing upstream's `parseGatewayPortEnvValue` in shell.
+PORT="$(openclaw config get gateway.port 2>/dev/null | tr -d '" ' | tail -1)"
+case "$PORT" in
+'' | *[!0-9]*)
+    PORT="$(sed -n 's/^const DEFAULT_GATEWAY_PORT = \([0-9][0-9]*\);.*/\1/p' \
+        "$REPO/crates/pixtuoid/src/install/openclaw_plugin.js")"
+    ;;
+esac
+[ -n "$PORT" ] || {
+    echo "could not resolve the gateway port (openclaw config, nor openclaw_plugin.js)" >&2
+    exit 2
+}
+
 # Don't fight an already-running gateway: its plugin uses ITS env's socket, so we
 # could not isolate. Bail rather than --force-kill the user's gateway.
-if lsof -nP -iTCP:18789 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "a gateway is already listening on :18789 — stop it first (this test starts its own)" >&2
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "a gateway is already listening on :$PORT — stop it first (this test starts its own)" >&2
     exit 2
 fi
 
 cleanup() {
     [ -n "$GWPID" ] && kill "$GWPID" 2>/dev/null
-    pkill -f 'openclaw gateway run' 2>/dev/null
     # `openclaw gateway run` execs/forks a child node that holds the port — killing
-    # the CLI wrapper alone LEAKS it. Kill whatever actually LISTENS on :18789
+    # the CLI wrapper alone LEAKS it. Kill whatever actually LISTENS on OUR port
     # (TERM, then KILL), so the user's machine isn't left with a stray gateway.
+    # Reaping by port, not by `pkill -f 'openclaw gateway run'`: that pattern kills
+    # EVERY gateway on the box, including one on another port that the guard above
+    # never checked and this script never started. Same job-pid + port-listener
+    # pair the sibling openclaw-multi-gateway-e2e.sh uses.
     local port_pids
-    port_pids="$(lsof -ti tcp:18789 -sTCP:LISTEN 2>/dev/null)"
+    port_pids="$(lsof -ti tcp:"$PORT" -sTCP:LISTEN 2>/dev/null)"
     # shellcheck disable=SC2086  # word-split is intended — one kill per listener pid
     [ -n "$port_pids" ] && kill $port_pids 2>/dev/null
     sleep 1
-    port_pids="$(lsof -ti tcp:18789 -sTCP:LISTEN 2>/dev/null)"
+    port_pids="$(lsof -ti tcp:"$PORT" -sTCP:LISTEN 2>/dev/null)"
     # shellcheck disable=SC2086  # word-split is intended — one kill per listener pid
     [ -n "$port_pids" ] && kill -9 $port_pids 2>/dev/null
     [ -n "$PIXPID" ] && kill "$PIXPID" 2>/dev/null
