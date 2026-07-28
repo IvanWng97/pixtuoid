@@ -11,15 +11,16 @@
 //! every daemon Down it drops to a slow ~1fps ambient tick (keeping the time-driven
 //! clock/weather/lightning/day-night/pet alive without the 30fps cost), never fully idle.
 //! Platform glue — codecov-ignored like `driver.rs`; the testable seams are
-//! `floating::offscreen` (render) and `floating::geometry` (the window/monitor rect math
-//! pulled out of here: off-screen-recovery overlap + the corner-resize hit-test).
+//! `floating::offscreen` (render), `floating::geometry` (the window/monitor rect math
+//! pulled out of here: off-screen-recovery overlap + the corner-resize hit-test), and
+//! `floating::cadence` (the animation throttle — both FPS constants live there).
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{DaemonLiveness, SceneState, MAX_FLOORS};
@@ -69,6 +70,9 @@ pub(crate) struct FloatingApp {
     last_caps_size: Option<(u16, u16)>,
     /// Latest cursor position (physical px) — for the corner resize hit-test on click.
     cursor: PhysicalPosition<f64>,
+    /// The animation-tick deadline — see [`super::cadence`] for why the redraw
+    /// REQUEST (not just the wait) has to be gated on it.
+    clock: super::cadence::FrameClock,
     window: Option<Rc<Window>>,
     // softbuffer's `Context` must outlive the `Surface` it spawned, so keep both.
     context: Option<softbuffer::Context<Rc<Window>>>,
@@ -77,13 +81,6 @@ pub(crate) struct FloatingApp {
 
 /// Click within this many physical px of the bottom-right corner = resize, else move.
 const RESIZE_CORNER_PX: f64 = 18.0;
-
-/// Animation tick rate WHILE agents are present — motion (walk/breathe) is time-driven.
-/// `1000 / 30 = 33ms`, the prior fixed cadence.
-const ACTIVE_FPS: u64 = 30;
-/// Slow ambient tick when the office is EMPTY — keeps the time-driven ambient layer
-/// (clock/weather/lightning/day-night/pet) moving without the 30fps cost of the active path.
-const IDLE_AMBIENT_FPS: u64 = 1;
 
 impl FloatingApp {
     #[allow(clippy::too_many_arguments)] // flat construction inputs; bundling adds no clarity
@@ -118,6 +115,7 @@ impl FloatingApp {
             floor_caps,
             last_caps_size: None,
             cursor: PhysicalPosition::new(0.0, 0.0),
+            clock: super::cadence::FrameClock::new(Instant::now()),
             window: None,
             context: None,
             surface: None,
@@ -448,15 +446,16 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             && scene
                 .daemons()
                 .all(|(_, _, d)| d.liveness == DaemonLiveness::Down);
-        let next_tick = if office_idle {
-            Duration::from_millis(1000 / IDLE_AMBIENT_FPS)
-        } else {
-            Duration::from_millis(1000 / ACTIVE_FPS)
-        };
         drop(scene);
-        event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + next_tick));
-        if let Some(window) = &self.window {
-            window.request_redraw();
+        // The redraw REQUEST rides the same deadline as the wait: requesting one
+        // unconditionally here leaves winit a pending redraw, so `WaitUntil` never
+        // sleeps and both cadences collapse to max-rate (see `super::cadence`).
+        let (paint, deadline) = self.clock.poll(Instant::now(), office_idle);
+        event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        if paint {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
     }
 }

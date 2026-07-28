@@ -421,7 +421,9 @@ src/
 │                       a 1:1 blit renders 8×12 sprites unreadably tiny; ~30fps tick WHILE agents OR a live gateway
 │                       daemon (the OpenClaw lobster — a time-driven wandering mascot in scene.daemons, Idle/Busy/
 │                       Degraded) are present, else a ~1fps IDLE_AMBIENT tick (keeps the clock/weather/pet alive
-│                       without burning CPU on an empty office — was a full 0fps freeze); restored [floating] position is validated against
+│                       without burning CPU on an empty office — was a full 0fps freeze; the tick itself lives in
+│                       cadence.rs, and the redraw REQUEST is gated on the same deadline as the wait — see below);
+│                       restored [floating] position is validated against
 │                       the live monitors (off-every-screen → OS-default placement, not unrecoverable off-screen);
 │                       left-press drag / corner resize; m/+/- audio keys (the pure half in input.rs — see
 │                       the audio/ entry); persists [floating] geometry (+ any pending volume) on close;
@@ -432,11 +434,18 @@ src/
 │                       unit-testable: window_visible_on_monitors = the off-screen-recovery AABB overlap +
 │                       empty-monitor-list guard; near_resize_corner = the drag-vs-resize hit-test),
 │                       input.rs (the PURE winit key → audio::AudioAction map; the mute/volume TRANSITION
-│                       itself is shared with the TUI in audio::apply_audio_action — see the audio/ entry).
+│                       itself is shared with the TUI in audio::apply_audio_action — see the audio/ entry),
+│                       cadence.rs (the PURE animation throttle + both FPS constants: `FrameClock::poll(now,
+│                       office_idle) -> (paint, deadline)`. `about_to_wait` runs on EVERY event-loop iteration,
+│                       so the redraw REQUEST — not just the `ControlFlow::WaitUntil` beside it — has to be gated
+│                       on the deadline: an unconditional `request_redraw()` there leaves winit a pending redraw
+│                       whenever it reaches its wait, so `WaitUntil` never sleeps and BOTH cadences collapse to
+│                       max-rate. That was the shipped behavior until it was MEASURED: 100.6% of one core with an
+│                       empty office and 100.5% with agents, vs 0.5% / 13.2% once the request is gated).
 │                       **mod.rs + window.rs are codecov-IGNORED** (winit `EventLoop`/`ApplicationHandler` +
 │                       tokio glue, the floating twin of driver.rs — need a real display); the floating crate's
 │                       TESTED surface is offscreen.rs (render seam) + geometry.rs (rect math) + input.rs
-│                       (audio keys). Visual check:
+│                       (audio keys) + cadence.rs (the throttle). Visual check:
 │                       `examples/floating_snapshot.rs` (the floating twin of the `snapshot` example).
 └── tui/                ratatui App + TuiRenderer (inherent `render` flush) — the half-block flush + widgets +
                         event loop, a thin painter over the pixtuoid-scene crate (the engine is its own crate now) — see src/tui/CLAUDE.md
