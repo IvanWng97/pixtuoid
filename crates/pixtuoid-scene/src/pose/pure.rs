@@ -401,11 +401,8 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
             }
         })
         .unwrap_or(&zones[0].0);
-    // A destination must be ROUTABLE, not merely walkable: a pixel-walkable cell
-    // whose coarse 4×4 cell fails `cell_walkable` makes `find_path` return None
-    // and `route()` fall back to the straight [from,to] line — the agent glides
-    // through furniture for the whole out-leg AND back-leg. This is the same
-    // `reaches` filter every NAMED destination already gets via `approach_point`.
+    // ROUTABLE, not merely walkable — the same `reaches` filter every NAMED
+    // destination gets via `approach_point` (scene CLAUDE.md's wander entry).
     let routable =
         |x: u16, y: u16| layout.is_walkable(x, y) && layout.reachable.reaches(Point { x, y });
     // Rejection-sampling budget: tries this many hashed cells to land on a

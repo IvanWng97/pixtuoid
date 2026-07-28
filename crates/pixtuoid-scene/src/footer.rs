@@ -311,9 +311,8 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
     // partially-frozen office (design DEATH tier).
     if let Some(warn) = inputs.source_warning {
         let w = budget as usize;
-        // The tail is clipped rather than dropped: below its own width there is
-        // nothing else worth the columns, and dropping it would leave a row with
-        // no way out of the alternate screen.
+        // Clipped, never dropped: a row with no `[q]` is a user stuck in the
+        // alternate screen.
         let quit = clip_cols(inputs.keys_alert, w);
         let avail = w.saturating_sub(cols(&quit));
         let alarm = if counts.waiting > 0 {

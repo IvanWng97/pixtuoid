@@ -567,15 +567,8 @@ pub(super) fn compute_with_seed(
             y: buf_h / 2,
         });
 
-    // What "connected" has to mean for the ROUTER, not just for a pixel flood.
-    // `unreachable_walkable_cells` is a 4-connected PIXEL BFS, but A* runs on the
-    // coarse 4×4 grid (`cell_walkable` needs ≥ `COARSE_CELL_WALKABLE_MIN` of a
-    // cell's 16 px open), so a ≤3 px channel is pixel-connected and
-    // coarse-IMPASSABLE. Ask BOTH: no pixel pocket, AND every emitted home desk
-    // still has a reachable approach cell — because a desk whose
-    // `approach_point` returns its no-valid-approach sentinel makes every leg
-    // (entry, exit, wander, snap-back) fall back to a straight line through the
-    // desk body and whatever else lies between.
+    // Connectivity at ROUTER granularity, not just the pixel flood's — a ≤3 px
+    // channel is pixel-connected and coarse-IMPASSABLE (scene CLAUDE.md, #566).
     let severed = |mask: &WalkableMask| -> bool {
         if !unreachable_walkable_cells(mask, conn_seed).is_empty() {
             return true;

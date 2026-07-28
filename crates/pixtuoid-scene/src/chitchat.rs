@@ -296,10 +296,8 @@ pub fn update_and_collect(
             .push((v.agent_id, v.anchor));
     }
 
-    // Emit in a TOTAL venue order, never `by_venue`'s: the returned Vec is painted
-    // in order, so hash order would make the z-order of two overlapping bubbles
-    // differ between runs of the same world state (the same reasoning that already
-    // seeds `ActiveChitchat` from the SORTED participant set).
+    // A TOTAL emission order, never `by_venue`'s: the Vec is painted in order, so
+    // hash order would make two overlapping bubbles z-fight between runs.
     let mut venues: Vec<(&VenueKey, &Vec<(AgentId, Point)>)> = by_venue.iter().collect();
     venues.sort_by_key(|(v, _)| match v {
         VenueKey::Room { floor_idx, room_id } => (*floor_idx, 0usize, *room_id),
