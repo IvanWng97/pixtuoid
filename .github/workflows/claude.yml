@@ -27,8 +27,10 @@ jobs:
     # GITHUB_REF to refs/pull/<n>/merge, so the ref-less checkout below lands
     # fork-authored files — including a repo-root CLAUDE.md the agent auto-loads
     # as instructions — in the workspace of the one job holding contents:write
-    # and the OAuth token. The issues/issue_comment arms check out the default
-    # branch and carry no pull_request object, so the guard is not theirs.
+    # and the OAuth token. This does NOT make the rest safe: issues/issue_comment
+    # carry no pull_request object, so the guard is not expressible there, and
+    # claude-code-action checks the PR head out ITSELF (setupBranch, tag mode) —
+    # an @claude comment on a fork PR still stages fork files here. See #799.
     if: >
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
