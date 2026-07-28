@@ -448,12 +448,16 @@ pub(crate) fn install_target(
                 std::fs::create_dir_all(dir)
                     .with_context(|| format!("creating plugin dir {}", dir.display()))?;
             }
-            // Atomic + symlink-safe (temp-in-dir → fsync → rename), NOT a plain
-            // `fs::write`: the rename REPLACES `p` rather than following a symlink
-            // planted at it, and a torn write can't leave a half-rendered plugin
-            // the gateway then fails to load. Reuses the ConfigLock write authority
-            // (each artifact is its own lock target — disjoint from the config lock
-            // held here, consistent lock order config→artifact, so no self-deadlock).
+            // Atomic (temp-in-dir → fsync → rename), NOT a plain `fs::write`: a
+            // torn write would leave a half-rendered plugin the gateway then
+            // fails to load. It is NOT symlink-REPLACING: `write_config_atomic`
+            // resolves through a symlink at `p` and renames onto the link's
+            // target (invariant #4 — its own doc says "FOLLOWS symlinks", pinned
+            // by `write_config_atomic_through_symlink_preserves_link`); only the
+            // distinct, attacker-controllable `.tmp` is `O_NOFOLLOW`-hardened.
+            // Reuses the ConfigLock write authority (each artifact is its own
+            // lock target — disjoint from the config lock held here, consistent
+            // lock order config→artifact, so no self-deadlock).
             io::write_config_atomic(&p, &c).with_context(|| format!("writing {}", p.display()))?;
         }
     }

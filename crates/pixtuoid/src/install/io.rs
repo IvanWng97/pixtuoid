@@ -102,7 +102,9 @@ pub(crate) const SHIM_LOCATE_REMEDY: &str = "install it alongside pixtuoid (`bre
 /// silently never fire from other cwds).
 pub(crate) fn default_hook_binary() -> Result<PathBuf> {
     if let Ok(p) = which::which("pixtuoid-hook") {
-        return Ok(p);
+        if path_hit_is_native(&p, std::env::consts::EXE_EXTENSION) {
+            return Ok(p);
+        }
     }
     let exe = std::env::current_exe().context(
         "could not determine the running executable's path while locating pixtuoid-hook",
@@ -117,6 +119,29 @@ pub(crate) fn default_hook_binary() -> Result<PathBuf> {
          binary at {}); {SHIM_LOCATE_REMEDY}",
         dir.display()
     ))
+}
+
+/// Whether a PATH hit is a real native executable rather than a PATHEXT shim —
+/// the ENFORCEMENT of the rule [`hook_sibling_name`] states.
+///
+/// `which` is PATHEXT-aware on Windows, so `npm i -g pixtuoid` (which
+/// materialises `pixtuoid-hook.cmd`, `.ps1` and an extensionless sh script in
+/// the global bin dir) resolves to a NON-PE before the real `pixtuoid-hook.exe`
+/// that the same install placed beside `pixtuoid.exe` — and every
+/// `EmbedAbsolute` target spawns the embedded path WITHOUT a shell, so the hook
+/// silently never fires. Rejecting the shim lets the exe-sibling arm answer.
+///
+/// `exe_extension` is a parameter (fed [`std::env::consts::EXE_EXTENSION`]) so
+/// both platforms' truth tables are testable on either host. It is `""` on Unix,
+/// which has no PATHEXT and where an extensionless binary is the normal case —
+/// the filter is inert there. The residual on Windows is an extensionless PE
+/// placed on PATH by hand: it is rejected too, and resolution falls through to
+/// the sibling (or to the `PIXTUOID_HOOK` override, which is never filtered
+/// because it is the user pointing at a specific binary).
+fn path_hit_is_native(p: &Path, exe_extension: &str) -> bool {
+    exe_extension.is_empty()
+        || p.extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case(exe_extension))
 }
 
 /// The hook binary's filename next to the running exe — `.exe`-suffixed on
@@ -435,6 +460,43 @@ pub(crate) fn resolve_symlink(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn a_windows_path_hit_must_be_a_real_pe_not_a_pathext_shim() {
+        // `which` v8 is PATHEXT-aware, so on Windows `npm i -g pixtuoid` — which
+        // materialises `pixtuoid-hook.cmd`, `.ps1` and an extensionless sh script
+        // in the global bin dir — resolves to a NON-PE before the real
+        // `pixtuoid-hook.exe` sibling that the same npm install placed next to
+        // `pixtuoid.exe`. Claude's Windows arm embeds that absolute path in EXEC
+        // form (`"args": []`), and `check_shim_binary`'s Windows `is_executable`
+        // is just `exists()` — so the hook would silently never fire with a GREEN
+        // doctor. Both truth tables run on every host (the wanted extension is a
+        // parameter), so this is not a Windows-only-CI assertion.
+        let win = |p: &str| path_hit_is_native(Path::new(p), "exe");
+        assert!(win(r"C:\Users\me\bin\pixtuoid-hook.exe"));
+        assert!(
+            win(r"C:\Users\me\bin\pixtuoid-hook.EXE"),
+            "PATHEXT is case-insensitive"
+        );
+        for shim in [
+            r"C:\Users\me\AppData\Roaming\npm\pixtuoid-hook.cmd",
+            r"C:\Users\me\AppData\Roaming\npm\pixtuoid-hook.ps1",
+            r"C:\Users\me\AppData\Roaming\npm\pixtuoid-hook.bat",
+            r"C:\Users\me\AppData\Roaming\npm\pixtuoid-hook",
+        ] {
+            assert!(
+                !path_hit_is_native(Path::new(shim), "exe"),
+                "{shim} is not a PE — exec-form spawning can't launch it"
+            );
+        }
+        // Unix has no PATHEXT: an extensionless binary IS the normal case, so the
+        // filter must be inert there (EXE_EXTENSION == "").
+        assert!(path_hit_is_native(
+            Path::new("/usr/local/bin/pixtuoid-hook"),
+            ""
+        ));
+        assert!(path_hit_is_native(Path::new("/opt/pixtuoid-hook.sh"), ""));
+    }
 
     #[cfg(unix)]
     #[test]
