@@ -888,6 +888,26 @@ fn enqueue_desk_cubicles<'a>(
     }
 }
 
+/// Nudge a CENTER-anchored sprite's position so the whole sprite lands inside
+/// the canvas.
+///
+/// Free-roaming creatures draw their destination from the WHOLE walkable mask
+/// (`creatures::walkable_target`), which reaches within a few columns of the
+/// buffer edge — and `blit_centered` spans `pos ± size/2` and clips silently, so
+/// a lobster resting there rendered sliced in half. Overhanging FURNITURE and
+/// walls is invariant #6 and stays; overhanging the CANVAS is not a thing the
+/// mask can express. Clamping HERE keeps `mascot_position`/`pet_position` pure
+/// functions of `now` + presence + seed, and keeps the hover box (`MascotFrame`
+/// / `PetFrame` carry this same point) on the pixels actually drawn.
+fn keep_sprite_on_canvas(pos: Point, w: u16, h: u16, buf_w: u16, buf_h: u16) -> Point {
+    // `min` before `max`: on a buffer narrower than the sprite the lower bound
+    // wins (sprite flush left/top) instead of `clamp`'s inverted-range panic.
+    Point {
+        x: pos.x.min(buf_w.saturating_sub(w.div_ceil(2))).max(w / 2),
+        y: pos.y.min(buf_h.saturating_sub(h.div_ceil(2))).max(h / 2),
+    }
+}
+
 /// The office pet (one per floor). An `active_pet` (mid heart-animation) is
 /// pinned in place; otherwise `pet_position` roams it around the idle desks.
 /// Returns the resolved `PetFrame` (for hit-testing) and enqueues the Pet
@@ -940,11 +960,18 @@ fn enqueue_pet<'a>(
         .map(|(pos, flip, anim, frame)| (pos, flip, anim, frame, None))
     };
     let (pos, flip, anim_name, frame_idx, pet_elapsed) = pet_data?;
-    let pet_h = ctx
+    // Fallback when a custom pack lacks the resolved pet anim: the bundled cat's
+    // size (the z-anchor's long-standing `6`), so the z-sort row and the canvas
+    // clamp stay sane — the blit itself no-ops, `paint_drawable` bails.
+    const PET_FALLBACK: Size = Size { w: 8, h: 6 };
+    let (pet_w, pet_h) = ctx
         .pack
         .animation(anim_name)
         .and_then(|a| a.frames.first())
-        .map_or(6, |f| f.height());
+        .map_or((PET_FALLBACK.w, PET_FALLBACK.h), |f| {
+            (f.width(), f.height())
+        });
+    let pos = keep_sprite_on_canvas(pos, pet_w, pet_h, ctx.layout.buf_w, ctx.layout.buf_h);
     drawables.push(Drawable {
         anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
         kind: DrawableKind::Pet {
@@ -993,6 +1020,8 @@ fn enqueue_gateway_mascots<'a>(
             .animation(anim_name)
             .and_then(|a| a.frames.first())
             .map_or((14, 12), |f| (f.width(), f.height()));
+        let pos =
+            keep_sprite_on_canvas(pos, mascot_w, mascot_h, ctx.layout.buf_w, ctx.layout.buf_h);
         let run_count = presence.in_flight_runs.len() as u32;
         let degraded = presence.display_state() == pixtuoid_core::state::DaemonState::Degraded;
         drawables.push(Drawable {

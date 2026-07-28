@@ -3623,6 +3623,106 @@ fn paint_empty_office(buf_w: u16, buf_h: u16) -> (RgbBuffer, Layout, &'static cr
     (buf, layout, theme)
 }
 
+// A free-roaming creature draws its destination from the WHOLE walkable mask
+// (`walkable_target`), which reaches within a few columns of the buffer edge —
+// and it is drawn `Anchor::Center`, so a 14-px lobster resting there was sliced
+// in half by the canvas boundary (`blit_frame` clips silently). Overhanging
+// FURNITURE and walls is invariant #6 and stays; overhanging the CANVAS is a
+// render bug. Sweeps gateway ports × wander phases because the escape is
+// destination-hash-driven — no single port/instant demonstrates it.
+#[test]
+fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
+    use pixtuoid_core::source::daemon::{apply_presence, DaemonInstanceKey, DaemonPresenceUpdate};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(192, 128, None, 0).expect("layout");
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let coffee = HashMap::new();
+    let motion = HashMap::new();
+    let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
+    let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
+
+    let mut escapes: Vec<String> = Vec::new();
+    for port in 18900..18924u32 {
+        // The pet's roam is keyed on the FLOOR seed, the mascot's on its instance
+        // id — vary both, or the pet half of the sweep rides one trajectory.
+        let floor = crate::floor::FloorMeta {
+            floor_seed: u64::from(port),
+            ..crate::floor::FloorMeta::ground()
+        };
+        let mut scene = SceneState::uniform(16);
+        let key =
+            DaemonInstanceKey::new(src, DaemonInstanceId::new(&port.to_string()).expect("id"));
+        apply_presence(
+            &mut scene,
+            &key,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            boot,
+        );
+        // Past the enter stagger + walk-in, then across several wander cycles so
+        // both the walking legs and the resting cells get sampled.
+        for step in 0..24u64 {
+            let now = boot + Duration::from_millis(6_000 + step * 1_700);
+            let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+            let mut cache = FrameCache::new();
+            let ctx = PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                now,
+                buf: &mut buf,
+                cache: &mut cache,
+                theme,
+                floor,
+                active_pet: None,
+                floor_pet: Some(&pet),
+                coffee: &coffee,
+                motion: &motion,
+                door_anim_max_ms: 0,
+                debug_walkable: false,
+            };
+            let mut drawables = Vec::new();
+            let pet_frame = enqueue_pet(&ctx, &[], &mut drawables);
+            for m in enqueue_gateway_mascots(&ctx, &mut drawables) {
+                let (w, h) = (m.w, m.h);
+                if m.pos.x < w / 2
+                    || m.pos.x + w.div_ceil(2) > layout.buf_w
+                    || m.pos.y < h / 2
+                    || m.pos.y + h.div_ceil(2) > layout.buf_h
+                {
+                    escapes.push(format!(
+                        "mascot port {port} step {step} at {:?} ({w}x{h}) escapes {}x{}",
+                        m.pos, layout.buf_w, layout.buf_h
+                    ));
+                }
+            }
+            if let Some(p) = pet_frame {
+                let (w, h) = pack
+                    .animation(p.anim)
+                    .and_then(|a| a.frames.first())
+                    .map_or((0, 0), |f| (f.width(), f.height()));
+                if p.pos.x < w / 2
+                    || p.pos.x + w.div_ceil(2) > layout.buf_w
+                    || p.pos.y < h / 2
+                    || p.pos.y + h.div_ceil(2) > layout.buf_h
+                {
+                    escapes.push(format!(
+                        "pet step {step} at {:?} ({w}x{h}) escapes {}x{}",
+                        p.pos, layout.buf_w, layout.buf_h
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        escapes.is_empty(),
+        "every roamer must render whole inside the canvas: {escapes:#?}"
+    );
+}
+
 // The pod divider is a VISIBLE partition in the aisle between two pod-mates,
 // and it exists only where a pod-mate does. Both halves were broken at once:
 // `desk.x + DESK_W + 3` landed on the desk sprite's own last column (the desk
