@@ -245,14 +245,29 @@ pub(crate) fn lock_config(path: &Path) -> Result<ConfigLock> {
     let lock_path = sibling(&target, "lock");
     let mut opts = OpenOptions::new();
     opts.create(true).read(true).write(true).truncate(false);
-    // Parity with the hook socket-lock (hook/unix.rs): a symlink pre-planted at
-    // `<target>.lock` must fail the open, not make us flock an arbitrary file.
+    // Parity with the hook socket-lock (hook/unix.rs), BOTH halves: O_NOFOLLOW so
+    // a symlink pre-planted at `<target>.lock` fails the open rather than making
+    // us flock an arbitrary file, and 0600 so a co-located user can't open+flock
+    // it and wedge every install/uninstall AND every config save (flock(2) grants
+    // an exclusive lock through a read-only descriptor, so umask-default 0644
+    // would be enough for them).
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
         opts.custom_flags(libc::O_NOFOLLOW);
     }
     let file = opts.open(&lock_path)?;
+    // The create mode does not bind on a pre-existing file, and the sidecar is
+    // deliberately never unlinked — so tighten an older version's 0644 one too.
+    // Through the open handle (fchmod), never the path: a path chmod would
+    // re-race the O_NOFOLLOW guarantee. Best-effort — a sidecar we don't own is
+    // not ours to re-mode, and the flock attempt below is the real gate.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
     file.try_lock()
         .map_err(|e| anyhow!("could not lock {}: {e}", lock_path.display()))?;
     Ok(ConfigLock { target, file })
@@ -420,6 +435,34 @@ pub(crate) fn resolve_symlink(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_config_creates_the_lock_sidecar_owner_only() {
+        // The twin of `pixtuoid-core/tests/transport/socket.rs`'s
+        // `lock_mode == 0o600` assertion, worded so the two stay visibly paired:
+        // if this regressed to a umask-default mode, another local user could
+        // open+flock `<config>.lock` and force EVERY pixtuoid connect/disconnect
+        // AND every config save (config/mod.rs's update_config takes the same
+        // guard) to fail for as long as they hold it. `flock(2)` grants an
+        // exclusive lock through a read-only descriptor, so 0644 is enough.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("settings.json");
+        std::fs::write(&target, "{}").unwrap();
+        let lock_path = sibling(&target, "lock");
+        let mode = || std::fs::metadata(&lock_path).unwrap().permissions().mode() & 0o777;
+
+        drop(lock_config(&target).unwrap());
+        assert_eq!(mode(), 0o600, "a fresh lock sidecar must be owner-only");
+
+        // The create mode does not bind on a pre-existing file, and the sidecar
+        // is DELIBERATELY never unlinked — so an upgrader's 0644 one must be
+        // tightened on the next round or the hole never closes for them.
+        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        drop(lock_config(&target).unwrap());
+        assert_eq!(mode(), 0o600, "a pre-existing lock sidecar is tightened");
+    }
 
     #[test]
     fn the_shim_locate_remedy_names_an_escape_hatch_the_cli_accepts() {

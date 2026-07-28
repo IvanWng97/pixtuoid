@@ -34,7 +34,12 @@ src/
 │                       debug|trace, or $PIXTUOID_LOG raise verbosity — plain --log-level info
 │                       is indistinguishable from the default and floors to warn); non-TUI
 │                       modes log to stderr; log_file_path is the shared path authority
-│                       (doctor dispatch + sources_cli + RunConfig.log_path read it)
+│                       (doctor dispatch + sources_cli + RunConfig.log_path read it).
+│                       `open_private_append` is the ONE opener this log AND crash.rs's
+│                       crash.log share: 0600 file under a 0700 dir on Unix (they carry
+│                       transcript paths / AgentIds / at debug the agent's own tool
+│                       commands — the settings.json rationale applies verbatim), with a
+│                       best-effort fchmod so an older version's 0644 sink is tightened
 ├── cli.rs              clap subcommands (run / floating / validate-pack / init-pack / doctor / sources / connect /
 │                       disconnect / setup / completions / man). The OLD install-hooks/uninstall-hooks CLI stays deleted
 │                       (#284 removed the interactive ORCHESTRATION — plan_targets/interactive_pick); `connect <ids>`/
@@ -405,7 +410,11 @@ src/
 │                         while holding a ConfigLock — same-process flock self-deadlocks. The
 │                         .lock file is deliberately never unlinked, and even a no-op
 │                         re-install creates it: the lock must be taken BEFORE the read
-│                         that detects "nothing changed".)
+│                         that detects "nothing changed"; it is created 0600 + O_NOFOLLOW
+│                         — BOTH halves of the hook socket-lock's parity, since flock(2)
+│                         grants an exclusive lock through a read-only fd, so a 0644
+│                         sidecar lets a co-located user wedge every install AND every
+│                         config save.)
 ├── floating/           `pixtuoid floating` — the frameless, always-on-top DESKTOP WINDOW (winit + softbuffer,
 │                       binary-only; pixtuoid-core stays window-free, invariant #1). ALL floating-only source
 │                       lives here: mod.rs (run: boots the SAME `runtime::pipeline::spawn_pipeline` spine
