@@ -317,13 +317,17 @@ pub(super) fn compute_with_seed(
     } else {
         None
     };
+    /// How far SOUTH of the floor line (`top_margin`) the elevator spawn sits, so a
+    /// character entering stands on open floor rather than on the wall apron
+    /// (`wall_band_h()..top_margin`) — the strip the straddling wall decor stamps its
+    /// ground into. Pinned by
+    /// `placement_sweep::the_spawn_threshold_stands_on_the_floor_not_the_wall_apron`.
+    const DOOR_THRESHOLD_CLEARANCE_PX: u16 = 4;
     // Spawn point on the floor right outside the elevator's centre:
-    // characters walk from here to their desk. Y is 4 px south of
-    // the wall edge so the character clears the elevator threshold
-    // before pathing.
+    // characters walk from here to their desk.
     let door_threshold = door.map(|d| Point {
         x: d.x + ELEVATOR_W / 2,
-        y: top_margin + 4,
+        y: top_margin + DOOR_THRESHOLD_CLEARANCE_PX,
     });
 
     let Point {
