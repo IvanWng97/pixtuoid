@@ -81,7 +81,7 @@ the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
 
 ## Gates
 
-CI (`.github/workflows/raycast.yml`, Linux runner): `npm ci` →
+CI (`.github/workflows/raycast.yml`, Linux runner): `npm ci` → `npm run audit` →
 the `gen:contract` freshness diff → `npx tsc --noEmit` → `npx eslint .`. Run them
 locally before "done." **`ray build` /
 `ray lint`** (manifest + icon validation, the Prettier pass) need the **macOS
@@ -89,6 +89,17 @@ Raycast app** and only run before a store publish — they are NOT in CI, so a
 green PR does not prove the manifest is publishable. See the
 [README](README.md) for `npm run {build,dev,lint}`.
 
+- **`npm ci` reports HIGH advisories here, and the "don't fix" call is CHECKED
+  rather than asserted.** `npm run audit` (`scripts/audit-adjudicated.mjs`)
+  passes only while the live advisory set EQUALS the adjudicated set in that
+  file — so a new advisory reds CI, and one that clears upstream reds it too,
+  which keeps a refusal from outliving its reason. It is a script because
+  `npm audit` has no per-advisory ignore flag (only `--audit-level`). Today's
+  one entry is the brace-expansion DoS **GHSA-mh99-v99m-4gvg**, reached solely
+  through `@oclif/core → ejs ^3 → jake ^10 → filelist ^1 → minimatch ^5`; the
+  entry carries why the override is refused (5.x made the export an object,
+  so `npm audit` goes green over code that throws) and the one upstream move
+  that clears it.
 - **A chord Raycast RESERVES is swallowed, so its Action is unreachable — and
   `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
   it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension
