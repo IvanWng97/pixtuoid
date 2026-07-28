@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diff-scoped advisory for the ast-grep comment-slop rule.
+"""Diff-scoped advisory for the ast-grep comment-slop rules.
 
 The whole-repo scan has ~5k pre-existing hits (mostly legitimate dense WHY
 comments), so a whole-repo gate is wrong. This reports ONLY hits on lines a PR
@@ -21,13 +21,13 @@ import sys
 
 
 def added_lines_by_file(base: str, worktree: bool) -> dict[str, set[int]]:
-    """Map each changed .rs/.py file → the set of its NEW-side added/changed line
+    """Map each changed .rs/.py/.pyi file → the set of its NEW-side added/changed line
     numbers (1-indexed), parsed from a zero-context diff."""
     # `base...HEAD` = the PR's own commits (merge-base range); `base` alone also
     # folds in uncommitted working-tree edits (local `--worktree` mode).
     rev = base if worktree else f"{base}...HEAD"
     diff = subprocess.run(
-        ["git", "diff", "--unified=0", "--no-color", rev, "--", "*.rs", "*.py"],
+        ["git", "diff", "--unified=0", "--no-color", rev, "--", "*.rs", "*.py", "*.pyi"],
         capture_output=True,
         text=True,
         check=True,
@@ -65,8 +65,14 @@ def main() -> int:
         print("comment-lint: ast-grep not found — run `just setup-tools` (advisory skipped)")
         return 0
 
+    # `--no-ignore hidden`: ast-grep skips dot-dirs like ripgrep, but the diff
+    # filter matches `.claude/skills/**/*.py` — without it the scan reports a
+    # clean pass on files it never opened.
     scan = subprocess.run(
-        ["ast-grep", "scan", "--json"], capture_output=True, text=True, check=True
+        ["ast-grep", "scan", "--json", "--no-ignore", "hidden"],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     hits = json.loads(scan)
 

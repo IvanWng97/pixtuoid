@@ -397,7 +397,8 @@ history:
   class (a comment describing code the SAME diff deleted — "code gone, comment
   remains"). This is a SEMANTIC judgment the mechanical gate can't make: the
   diff-scoped `just comment-lint` advisory finds structural CANDIDATES (runs of
-  3+ consecutive `//` in a fn body, on the diff's new lines only — the ~5k
+  3+ consecutive line comments in a fn body — `//` in Rust, `#` in Python — on
+  the diff's new lines only — the ~5k
   pre-existing legitimate WHY are grandfathered), but the keep / trim-to-≤2 /
   relocate-to-the-declaration-or-a-CLAUDE.md-sharp-edge call is this lens's.
   Anti-slop caveat: this repo's dense WHY-comment density is DELIBERATE — flag

@@ -481,15 +481,15 @@ mutants *args:
     fi
     cargo mutants --in-diff target/mutants.diff {{ args }}
 
-# Comment-slop advisory: flag NEW runs of 3+ consecutive `//` comments inside a
-# function body (the repo's "fn-body comments ≤2 lines" convention —
-# pr-review.prompt.md's comment-value factor). DIFF-SCOPED like `mutants`
-# (`scripts/comment-lint.py` over the ast-grep rule `.ast-grep/rules/`), so the
-# ~5k pre-existing legitimate WHY comments are grandfathered and only new code
-# is checked. ADVISORY by default (prints + exit 0); `--gate` makes it exit 1,
+# Comment-slop advisory: flag NEW runs of 3+ consecutive line comments (Rust
+# `//`, Python `#`) inside a function body (the repo's "fn-body comments ≤2
+# lines" convention — pr-review.prompt.md's comment-value factor). DIFF-SCOPED
+# like `mutants` (`scripts/comment-lint.py` over the ast-grep rules in
+# `.ast-grep/rules/`), so the ~5k pre-existing legitimate WHY comments are
+# grandfathered and only new code is checked. ADVISORY by default (prints + exit 0); `--gate` makes it exit 1,
 # `--worktree` lints uncommitted edits, `--github` emits inline PR annotations.
 # Needs ast-grep (setup-tools) + python3. Forwards args (e.g. a different base).
-[group('rust')]
+[group('meta')]
 [doc('Advisory: flag NEW 3+-consecutive-comment runs in a fn body (diff-scoped)')]
 comment-lint *args:
     python3 scripts/comment-lint.py {{ args }}
@@ -1066,6 +1066,14 @@ compare-selftest:
 [doc('Self-test the upstream-drift watcher (parsers + fetch classifier)')]
 drift-selftest:
     python3 scripts/check_upstream_drift_selftest.py
+
+# Both-directions pins for the ast-grep rules themselves: `valid:` cases must
+# stay silent, `invalid:` must fire. Snapshots skipped — the cases assert
+# fires/does-not-fire, which is the contract; snapshots would only add churn.
+[group('meta')]
+[doc('Test the ast-grep comment-slop rules (both directions)')]
+ast-grep-test:
+    ast-grep test --skip-snapshot-tests
 
 # Risk radar — show the documented review escalations for the high-risk seams
 # THIS branch touches (advisory, deterministic, no LLM). Dogfood before pushing
