@@ -10,9 +10,18 @@
 //! world — motion, poses, lighting, chitchat — with no pixel access and
 //! returns an immutable [`SimFrame`]; the paint pass (`paint_frame`)
 //! consumes `&SimFrame` and mutates only the buffer + the paint-local
-//! `FrameCache`. Everything else is private to this module except
-//! `character_anchor`, which `widgets.rs` uses for label placement and
-//! `hit_test.rs` for mouse hit-testing.
+//! `FrameCache`.
+//!
+//! `render_to_rgb_buffer` is the world-render seam every painter rides;
+//! `character_anchor` is the label/hit-test anchor AUTHORITY (the binary's
+//! `tui/hit_test/`, and every label painter indirectly via
+//! `overlay::build_overlay`). The rest of the module's public surface is the
+//! painters' construction + observation types (`PixelCtx` / `PixelPassResult` /
+//! `MascotFrame` / `SimFrame`), the weather + day/night queries the shells read
+//! (`weather_names`, `force_weather`, `precipitation_level`, `is_day_at`), and
+//! the geometry consts the binary's hit-tests pin to (`NEON_PANEL_INNER_*`,
+//! `PANTRY_COFFEE_COLS_*`) — all on the published crate's api golden, so widen
+//! it deliberately.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -718,7 +727,17 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // floor-touching row. Sort ascending and paint in order so things
     // closer to the camera (larger anchor_y) appear in front. This is
     // the painter's algorithm applied to a top-down 2D scene.
-    let mut drawables: Vec<Drawable<'_>> = Vec::new();
+
+    // A HINT, not a bound (the vec still grows): one push per cubicle / character
+    // / waypoint / decor item, so the pushes below skip the doubling ladder.
+    let mut drawables: Vec<Drawable<'_>> = Vec::with_capacity(
+        ctx.layout.home_desks.len()
+            + ctx.layout.waypoints.len()
+            + ctx.layout.plants.len()
+            + ctx.layout.pod_decor.len()
+            + ctx.layout.wall_decor.len()
+            + agents.len(),
+    );
 
     enqueue_desk_cubicles(ctx, agents, &frame.seated_agents, &mut drawables);
 
@@ -826,6 +845,12 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 /// `seated_agents` (built once before the ambient pass) gates the screen glow
 /// so it only paints for a worker actually at the desk. The DeskCubicle
 /// drawable is Copy, so this borrows nothing from the agent set.
+///
+/// A pod divider divides two pod-MATES, so `divider_x` is `Some` only where the
+/// east mate exists, and `home_desks` is the authority for that: the band clamp
+/// in `compute_pod_desks` drops a pod's second column when it wouldn't fit, so
+/// pitch/band arithmetic here would be a second, drifting copy of the emission
+/// rule. The column sits mid-aisle between the two desk SPRITES, clear of both.
 fn enqueue_desk_cubicles<'a>(
     ctx: &PaintCtx<'_>,
     agents: &[AgentSlot],
@@ -838,8 +863,13 @@ fn enqueue_desk_cubicles<'a>(
         let Some(Size { w: desk_fp_w, .. }) = desk_def.footprint else {
             continue;
         };
-        let is_last_col = desk.x + desk_fp_w + DESK_W
-            >= ctx.layout.cubicle_band.x + ctx.layout.cubicle_band.width;
+        let mate_x = desk.x + DESK_W + crate::layout::INTRA_POD_GAP_X;
+        let divider_x = ctx
+            .layout
+            .home_desks
+            .iter()
+            .any(|d| d.y == desk.y && d.x == mate_x)
+            .then(|| (desk.x + desk_fp_w + mate_x) / 2);
         let occupant = agents
             .iter()
             .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none());
@@ -863,7 +893,7 @@ fn enqueue_desk_cubicles<'a>(
             anchor_y: desk.y + desk_def.visual.h,
             kind: DrawableKind::DeskCubicle {
                 desk,
-                is_last_col,
+                divider_x,
                 has_cabinet: i % 2 == 0,
                 screen_glow,
                 has_coffee,
@@ -872,6 +902,26 @@ fn enqueue_desk_cubicles<'a>(
                 sheet_fall,
             },
         });
+    }
+}
+
+/// Nudge a CENTER-anchored sprite's position so the whole sprite lands inside
+/// the canvas.
+///
+/// Free-roaming creatures draw their destination from the WHOLE walkable mask
+/// (`creatures::walkable_target`), which reaches within a few columns of the
+/// buffer edge — and `blit_centered` spans `pos ± size/2` and clips silently, so
+/// a lobster resting there rendered sliced in half. Overhanging FURNITURE and
+/// walls is invariant #6 and stays; overhanging the CANVAS is not a thing the
+/// mask can express. Clamping HERE keeps `mascot_position`/`pet_position` pure
+/// functions of `now` + presence + seed, and keeps the hover box (`MascotFrame`
+/// / `PetFrame` carry this same point) on the pixels actually drawn.
+fn keep_sprite_on_canvas(pos: Point, w: u16, h: u16, buf_w: u16, buf_h: u16) -> Point {
+    // `min` before `max`: on a buffer narrower than the sprite the lower bound
+    // wins (sprite flush left/top) instead of `clamp`'s inverted-range panic.
+    Point {
+        x: pos.x.min(buf_w.saturating_sub(w.div_ceil(2))).max(w / 2),
+        y: pos.y.min(buf_h.saturating_sub(h.div_ceil(2))).max(h / 2),
     }
 }
 
@@ -927,11 +977,18 @@ fn enqueue_pet<'a>(
         .map(|(pos, flip, anim, frame)| (pos, flip, anim, frame, None))
     };
     let (pos, flip, anim_name, frame_idx, pet_elapsed) = pet_data?;
-    let pet_h = ctx
+    /// Fallback when a custom pack lacks the resolved pet anim: the bundled cat's
+    /// size (the z-anchor's long-standing `6`), so the z-sort row and the canvas
+    /// clamp stay sane — the blit itself no-ops, `paint_drawable` bails.
+    const PET_FALLBACK: Size = Size { w: 8, h: 6 };
+    let (pet_w, pet_h) = ctx
         .pack
         .animation(anim_name)
         .and_then(|a| a.frames.first())
-        .map_or(6, |f| f.height());
+        .map_or((PET_FALLBACK.w, PET_FALLBACK.h), |f| {
+            (f.width(), f.height())
+        });
+    let pos = keep_sprite_on_canvas(pos, pet_w, pet_h, ctx.layout.buf_w, ctx.layout.buf_h);
     drawables.push(Drawable {
         anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
         kind: DrawableKind::Pet {
@@ -980,6 +1037,8 @@ fn enqueue_gateway_mascots<'a>(
             .animation(anim_name)
             .and_then(|a| a.frames.first())
             .map_or((14, 12), |f| (f.width(), f.height()));
+        let pos =
+            keep_sprite_on_canvas(pos, mascot_w, mascot_h, ctx.layout.buf_w, ctx.layout.buf_h);
         let run_count = presence.in_flight_runs.len() as u32;
         let degraded = presence.display_state() == pixtuoid_core::state::DaemonState::Degraded;
         drawables.push(Drawable {

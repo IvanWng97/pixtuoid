@@ -89,13 +89,12 @@ pub fn build_overlay(
     rctx: &mut RouteCtx<'_>,
     hovered: Option<AgentId>,
 ) -> Vec<LabelElement> {
-    let agents: Vec<_> = scene.agents.values().cloned().collect();
     let mut label_counts: HashMap<&str, usize> = HashMap::new();
-    for agent in &agents {
+    for agent in scene.agents.values() {
         *label_counts.entry(&*agent.label).or_insert(0) += 1;
     }
     let mut out = Vec::new();
-    for agent in &agents {
+    for agent in scene.agents.values() {
         let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
             continue;
         };

@@ -30,7 +30,7 @@ mod rooms;
 // Crate-internal: the deep interface is `SceneLayout::{stand_point,approach_point}`
 // (which supply the layout-internal mask/reach/counter); the free fns stay for the
 // scene crate's own synthetic-mask unit tests. No external caller.
-pub(crate) use approach::{approach_point, stand_point};
+pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
 pub use compute::PANTRY_COUNTER_LARGE_W;
 pub(crate) use decor::repels_plants;
 pub use decor::{

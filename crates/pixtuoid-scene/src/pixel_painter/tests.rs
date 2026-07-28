@@ -3586,3 +3586,201 @@ fn character_render_names_resolve_in_the_animation_registry() {
         );
     }
 }
+
+/// Paint one empty office (no agents, no pet, no mascot) through the REAL
+/// two-phase seam, so a geometry assertion sees exactly the pixels production
+/// paints — paint ORDER included (a divider drawn UNDER the desk sprite is
+/// invisible here, which is the point).
+fn paint_empty_office(buf_w: u16, buf_h: u16) -> (RgbBuffer, Layout, &'static crate::theme::Theme) {
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(buf_w, buf_h, None, 0).expect("layout");
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let scene = SceneState::uniform(16);
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(&mut owned.stores(), &scene, &layout, &pack, &coffee, 0, now);
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    paint_frame(
+        &mut PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            now,
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            theme,
+            floor: crate::floor::FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            coffee: &coffee,
+            motion: &owned.motion,
+            door_anim_max_ms: 0,
+            debug_walkable: false,
+        },
+        &frame,
+    );
+    (buf, layout, theme)
+}
+
+// A free-roaming creature draws its destination from the WHOLE walkable mask
+// (`walkable_target`), which reaches within a few columns of the buffer edge —
+// and it is drawn `Anchor::Center`, so a 14-px lobster resting there was sliced
+// in half by the canvas boundary (`blit_frame` clips silently). Overhanging
+// FURNITURE and walls is invariant #6 and stays; overhanging the CANVAS is a
+// render bug. Sweeps gateway ports × wander phases because the escape is
+// destination-hash-driven — no single port/instant demonstrates it.
+#[test]
+fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
+    use pixtuoid_core::source::daemon::{apply_presence, DaemonInstanceKey, DaemonPresenceUpdate};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(192, 128, None, 0).expect("layout");
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let coffee = HashMap::new();
+    let motion = HashMap::new();
+    let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
+    let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
+
+    let mut escapes: Vec<String> = Vec::new();
+    for port in 18900..18924u32 {
+        // The pet's roam is keyed on the FLOOR seed, the mascot's on its instance
+        // id — vary both, or the pet half of the sweep rides one trajectory.
+        let floor = crate::floor::FloorMeta {
+            floor_seed: u64::from(port),
+            ..crate::floor::FloorMeta::ground()
+        };
+        let mut scene = SceneState::uniform(16);
+        let key = DaemonInstanceKey::new(src, DaemonInstanceId::new(port.to_string()).expect("id"));
+        apply_presence(
+            &mut scene,
+            &key,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            boot,
+        );
+        // Past the enter stagger + walk-in, then across several wander cycles so
+        // both the walking legs and the resting cells get sampled.
+        for step in 0..24u64 {
+            let now = boot + Duration::from_millis(6_000 + step * 1_700);
+            let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+            let mut cache = FrameCache::new();
+            let ctx = PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                now,
+                buf: &mut buf,
+                cache: &mut cache,
+                theme,
+                floor,
+                active_pet: None,
+                floor_pet: Some(&pet),
+                coffee: &coffee,
+                motion: &motion,
+                door_anim_max_ms: 0,
+                debug_walkable: false,
+            };
+            let mut drawables = Vec::new();
+            let pet_frame = enqueue_pet(&ctx, &[], &mut drawables);
+            for m in enqueue_gateway_mascots(&ctx, &mut drawables) {
+                let (w, h) = (m.w, m.h);
+                if m.pos.x < w / 2
+                    || m.pos.x + w.div_ceil(2) > layout.buf_w
+                    || m.pos.y < h / 2
+                    || m.pos.y + h.div_ceil(2) > layout.buf_h
+                {
+                    escapes.push(format!(
+                        "mascot port {port} step {step} at {:?} ({w}x{h}) escapes {}x{}",
+                        m.pos, layout.buf_w, layout.buf_h
+                    ));
+                }
+            }
+            if let Some(p) = pet_frame {
+                let (w, h) = pack
+                    .animation(p.anim)
+                    .and_then(|a| a.frames.first())
+                    .map_or((0, 0), |f| (f.width(), f.height()));
+                if p.pos.x < w / 2
+                    || p.pos.x + w.div_ceil(2) > layout.buf_w
+                    || p.pos.y < h / 2
+                    || p.pos.y + h.div_ceil(2) > layout.buf_h
+                {
+                    escapes.push(format!(
+                        "pet step {step} at {:?} ({w}x{h}) escapes {}x{}",
+                        p.pos, layout.buf_w, layout.buf_h
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        escapes.is_empty(),
+        "every roamer must render whole inside the canvas: {escapes:#?}"
+    );
+}
+
+// The pod divider is a VISIBLE partition in the aisle between two pod-mates,
+// and it exists only where a pod-mate does. Both halves were broken at once:
+// `desk.x + DESK_W + 3` landed on the desk sprite's own last column (the desk
+// blit three statements later erased 5 of its 6 px, leaving one orphan dot),
+// and the `is_last_col` guard mixed slot width with ground width so it never
+// fired — the rightmost desk of every row painted a divider into empty aisle.
+#[test]
+fn pod_divider_spans_the_desk_rows_between_pod_mates_and_nowhere_else() {
+    let (buf, layout, theme) = paint_empty_office(192, 128);
+    let divider = theme.office.cubicle_divider;
+    let def = crate::layout::desk_furniture_def();
+    let sprite_w = def.visual.w;
+    let mate_pitch = DESK_W + crate::layout::INTRA_POD_GAP_X;
+    assert!(
+        layout.home_desks.len() >= 4,
+        "the rig must lay out real pods, got {}",
+        layout.home_desks.len()
+    );
+    let mut checked_pairs = 0;
+    let mut checked_ends = 0;
+    for &desk in &layout.home_desks {
+        let has_mate = layout
+            .home_desks
+            .iter()
+            .any(|d| d.y == desk.y && d.x == desk.x + mate_pitch);
+        // The aisle: east of THIS desk's sprite, west of where the mate's starts.
+        let aisle: Vec<u16> = ((desk.x + sprite_w)..(desk.x + mate_pitch))
+            .filter(|&x| {
+                (0..=def.visual.h).any(|dy| buf.get(x, desk.y.saturating_sub(1) + dy) == divider)
+            })
+            .collect();
+        if has_mate {
+            checked_pairs += 1;
+            assert_eq!(
+                aisle.len(),
+                1,
+                "desk at {desk:?} should paint exactly one divider column in its aisle, \
+                 got {aisle:?}"
+            );
+            for dy in 0..=def.visual.h {
+                let py = desk.y.saturating_sub(1) + dy;
+                assert_eq!(
+                    buf.get(aisle[0], py),
+                    divider,
+                    "divider column {} must be unbroken over the desk's painted rows \
+                     (row {py} of desk {desk:?})",
+                    aisle[0]
+                );
+            }
+        } else {
+            checked_ends += 1;
+            assert!(
+                aisle.is_empty(),
+                "no divider east of a desk with no pod-mate: desk {desk:?} painted {aisle:?}"
+            );
+        }
+    }
+    assert!(
+        checked_pairs > 0 && checked_ends > 0,
+        "the rig must cover both cases (pairs={checked_pairs}, row-ends={checked_ends})"
+    );
+}

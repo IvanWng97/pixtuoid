@@ -263,6 +263,32 @@ fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
     }
 }
 
+/// How much of a weather VEIL's own colour the frame's sky brings up (0..1) —
+/// its floor is the city-light scatter that keeps fog reading as fog after dark.
+///
+/// The veils ([`skyline_haze`] behind the glass, the Fog/Overcast/Smog washes on
+/// it) are lit by the same emitter as everything else: a white-out fog is white
+/// under the sun and a dim glowing murk at midnight. They used to be ABSOLUTE
+/// daylight greys blended over an already-time-lerped `sky_row`, which flattened
+/// the composed frame's day/night contrast almost to nothing under a heavy
+/// weather (a foggy 01:00 pane at 94% of a foggy solar noon) and inverted the
+/// ordering ACROSS weathers — a foggy midnight pane rendered ~1.8x brighter than
+/// a stormy solar-noon one, so a night-lit room sat behind daylight-white
+/// windows. The day term is the emitter's OWN luminance,
+/// deliberately NOT `atmo`/`look.darkness`: those already carry the weather (the
+/// veil colour does too), and folding them in would darken a stormy noon twice.
+const NIGHT_VEIL_FLOOR: f32 = 0.35;
+
+fn veil_lum(sky: &sky::SkyState) -> f32 {
+    NIGHT_VEIL_FLOOR + (1.0 - NIGHT_VEIL_FLOOR) * sky.emitter_lum.clamp(0.0, 1.0)
+}
+
+/// A veil colour at the frame's daylight — hue preserved, luminance tracked
+/// (blending up from black by [`veil_lum`] scales all three channels).
+fn veil_lit(color: Rgb, lum: f32) -> Rgb {
+    blend_rgb(Rgb { r: 0, g: 0, b: 0 }, color, lum)
+}
+
 /// One PAINTED floor-to-ceiling window: its left edge, its centre column, and
 /// its ABSOLUTE position `idx` (counted across the whole wall — door-skipped
 /// panes still advance it, so a pane after the elevator keeps its true index).
@@ -343,21 +369,31 @@ pub(super) fn paint_floor_and_walls(
     let weather = weather_state(now);
     let tint = weather_floor_tint(weather);
 
-    for y in 0..buf_h {
+    // The noise picks one of THREE colours and the tint is fixed for the frame,
+    // so the blend has exactly three results — resolve them once, not per pixel.
+    let carpet = [
+        blend_rgb(carpet_light, tint, 0.15),
+        blend_rgb(carpet_dark, tint, 0.15),
+        blend_rgb(carpet_base, tint, 0.15),
+    ];
+    // Start BELOW the wall band: the loop right after overwrites it opaquely, so
+    // those rows were noised and blended only to be thrown away each frame.
+    let band_h = top_wall_h.min(buf_h);
+    for y in band_h..buf_h {
         for x in 0..buf_w {
             let hash = (x as u32)
                 .wrapping_mul(73)
                 .wrapping_add((y as u32).wrapping_mul(151))
                 ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
             let color = match hash % 17 {
-                0 | 1 => carpet_light,
-                2 | 3 => carpet_dark,
-                _ => carpet_base,
+                0 | 1 => carpet[0],
+                2 | 3 => carpet[1],
+                _ => carpet[2],
             };
-            buf.put(x, y, blend_rgb(color, tint, 0.15));
+            buf.put(x, y, color);
         }
     }
-    for y in 0..top_wall_h.min(buf_h) {
+    for y in 0..band_h {
         for x in 0..buf_w {
             buf.put(x, y, wall);
         }
@@ -784,11 +820,16 @@ fn paint_floor_to_ceiling_window(
         }
     }
 
+    // The frame's emitter lights the weather veils below (see `veil_lum`); it
+    // also drives the golden-hour blaze at the end of this fn.
+    let sky_now = sky::emitter(now);
+    let veil = veil_lum(&sky_now);
+
     // Skyline haze: fog/rain/storm/smog obscure the city behind the glass.
     // Blend the glass interior toward the weather haze BEFORE the streak/flash
     // effects, so rain/snow/lightning still read on top of the murk.
     if let Some((haze, alpha)) = skyline_haze(weather) {
-        wash_glass(buf, x, y, w, h, haze, alpha);
+        wash_glass(buf, x, y, w, h, veil_lit(haze, veil), alpha);
     }
 
     let elapsed_ms = epoch_ms(now);
@@ -906,11 +947,14 @@ fn paint_floor_to_ceiling_window(
             y,
             w,
             h,
-            Rgb {
-                r: 160,
-                g: 165,
-                b: 175,
-            },
+            veil_lit(
+                Rgb {
+                    r: 160,
+                    g: 165,
+                    b: 175,
+                },
+                veil,
+            ),
             0.25,
         ),
         Weather::Overcast => wash_glass(
@@ -919,11 +963,14 @@ fn paint_floor_to_ceiling_window(
             y,
             w,
             h,
-            Rgb {
-                r: 100,
-                g: 105,
-                b: 110,
-            },
+            veil_lit(
+                Rgb {
+                    r: 100,
+                    g: 105,
+                    b: 110,
+                },
+                veil,
+            ),
             0.2,
         ),
         Weather::Windy => paint_streaks(
@@ -962,18 +1009,20 @@ fn paint_floor_to_ceiling_window(
                 y,
                 w,
                 h,
-                Rgb {
-                    r: 180,
-                    g: 160,
-                    b: 110,
-                },
+                veil_lit(
+                    Rgb {
+                        r: 180,
+                        g: 160,
+                        b: 110,
+                    },
+                    veil,
+                ),
                 0.30,
             )
         }
         Weather::Clear => {}
     }
 
-    let sky_now = sky::emitter(now);
     let a = sky::atmo(weather);
     let sunset = golden_hour_blaze(&sky_now, &a);
     if sunset > 0.05 {

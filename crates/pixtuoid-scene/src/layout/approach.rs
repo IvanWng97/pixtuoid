@@ -106,6 +106,54 @@ pub(crate) fn stand_point(
 /// far from the seat centre to clear the furniture and land on the floor.
 const SEAT_APPROACH_SCAN: i32 = 14;
 
+/// The first A\*-REACHABLE walkable cell scanning `(dx, dy)` from `origin`, or
+/// `None` when that side offers none within [`SEAT_APPROACH_SCAN`].
+///
+/// Steps DEEPER through the contiguous walkable run past a coarse-rejected EDGE
+/// cell (a back-row desk's gap edge is walkable yet ReachSet-rejected, and
+/// dropping the whole side there loses a real approach). The seat's own
+/// footprint is skipped while the run has not been entered; once inside it, the
+/// first blocked pixel STOPS the scan, so it can never hop a SECOND obstacle
+/// onto a far strip — that would resurrect a cross-furniture / back-side
+/// approach (`seat_approach_is_never_behind_the_backrest_on_real_layouts`).
+///
+/// THE seat-approach scan, single-sourced: [`approach_point`]'s seat branch
+/// ROUTES agents with it and `pixel_painter::debug_overlay` DRAWS it, so the
+/// `w` overlay's green dots land exactly where the agent goes. Both the ladder
+/// and its scan bound were hand-copied into the overlay with nothing pinning
+/// the pair, so the one diagnostic a developer reaches for when approach logic
+/// is already suspect could silently disagree with the sim it explains.
+pub(crate) fn first_reachable_on_side(
+    mask: &WalkableMask,
+    reachable: &ReachSet,
+    origin: Point,
+    dx: i32,
+    dy: i32,
+) -> Option<Point> {
+    let mut entered = false;
+    for dist in 1..=SEAT_APPROACH_SCAN {
+        let cx = origin.x as i32 + dx * dist;
+        let cy = origin.y as i32 + dy * dist;
+        if cx < 0 || cy < 0 {
+            break;
+        }
+        let c = Point {
+            x: cx as u16,
+            y: cy as u16,
+        };
+        if mask.is_walkable(c.x, c.y) {
+            entered = true;
+            if reachable.reaches(c) {
+                return Some(c);
+            }
+            // walkable but coarse-unreachable → keep scanning this run.
+        } else if entered {
+            break;
+        }
+    }
+    None
+}
+
 /// Extent [`approach_point`] scans past for obstacle furniture — the VISUAL
 /// (whole sprite), so the approach cell (and the [`stand_point`] render anchor
 /// that delegates here) lands clear of everything drawn. (NOT the mask footprint,
@@ -177,39 +225,10 @@ pub(crate) fn approach_point(
             if !def.approach.allows(facing, (dx, dy)) {
                 continue; // never approach across an excluded side (the back)
             }
-            // The FIRST walkable cell off this side can be a thin EDGE whose coarse
-            // routing cell straddles the furniture (the back-row desk's gap edge
-            // between pod rows): walkable, yet ReachSet-rejected. Step DEEPER
-            // through the CONTIGUOUS walkable run for the first cell A* can actually
-            // reach, instead of dropping the whole side at that edge. The seat's own
-            // footprint is skipped while `entered` is still false; once we've
-            // entered the run, the first blocked pixel STOPS the scan (`entered`
-            // guard) so we never hop a SECOND obstacle to a far strip — that would
-            // resurrect a cross-furniture / back-side approach (Session-3 invariant
-            // `seat_approach_is_never_behind_the_backrest_on_real_layouts`).
-            let mut entered = false;
-            for dist in 1..=SEAT_APPROACH_SCAN {
-                let cx = pos.x as i32 + dx * dist;
-                let cy = pos.y as i32 + dy * dist;
-                if cx < 0 || cy < 0 {
-                    break;
-                }
-                let c = Point {
-                    x: cx as u16,
-                    y: cy as u16,
-                };
-                if mask.is_walkable(c.x, c.y) {
-                    entered = true;
-                    if reachable.reaches(c) {
-                        let d2 = squared_distance(c, origin);
-                        if allowed.is_none_or(|(b, _)| d2 < b) {
-                            allowed = Some((d2, c));
-                        }
-                        break;
-                    }
-                    // walkable but coarse-unreachable → keep scanning this run.
-                } else if entered {
-                    break;
+            if let Some(c) = first_reachable_on_side(mask, reachable, pos, dx, dy) {
+                let d2 = squared_distance(c, origin);
+                if allowed.is_none_or(|(b, _)| d2 < b) {
+                    allowed = Some((d2, c));
                 }
             }
         }
@@ -842,6 +861,42 @@ mod tests {
                 "{pod:?}/{wp:?}: pod + waypoint twins must share one Furniture row",
             );
         }
+    }
+
+    // The `entered` guard is the whole reason this scan is not a plain "first
+    // walkable cell" loop, and until it was single-sourced NOTHING tested it
+    // directly (the debug overlay carried a hand-copied twin with zero
+    // coverage). Both halves in one rig: step PAST a walkable-but-unreachable
+    // cell inside the run, and STOP at the blocked pixel that ends the run
+    // rather than hopping the second obstacle onto the far floor.
+    #[test]
+    fn the_seat_scan_steps_through_a_dead_edge_but_never_hops_a_second_obstacle() {
+        let mut m = WalkableMask::new_open(40, 40);
+        // Seat body rows 19-20, a 1-cell pocket at row 21 sealed on all four
+        // sides (walkable, unreachable), a second body rows 22-23, floor beyond.
+        m.mark_blocked(8, 19, 5, 2, 0);
+        m.mark_blocked(8, 22, 5, 2, 0);
+        m.mark_blocked(9, 21, 1, 1, 0);
+        m.mark_blocked(11, 21, 1, 1, 0);
+        let reach = ReachSet::from_mask(&m, Point { x: 2, y: 2 });
+        let seat = Point { x: 10, y: 18 };
+        assert!(m.is_walkable(10, 21), "the pocket cell is walkable");
+        assert!(
+            !reach.reaches(Point { x: 10, y: 21 }),
+            "the sealed pocket must be coarse-unreachable, or the rig proves nothing"
+        );
+        assert_eq!(
+            first_reachable_on_side(&m, &reach, seat, 0, 1),
+            None,
+            "the scan must stop at the blocked pixel ending the run, not reach the \
+             far floor past a second obstacle"
+        );
+        // Same seat, north side: open reachable floor one step out.
+        assert_eq!(
+            first_reachable_on_side(&m, &reach, seat, 0, -1),
+            Some(Point { x: 10, y: 17 }),
+            "an unobstructed side returns its first reachable cell"
+        );
     }
 
     #[test]
