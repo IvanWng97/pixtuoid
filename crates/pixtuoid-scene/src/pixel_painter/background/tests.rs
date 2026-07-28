@@ -908,8 +908,8 @@ const MAX_NIGHT_PANE_FRACTION: f32 = 0.75;
 // CONTRAST the light model produces has to survive the weather VEIL the painter
 // lays over the glass afterwards. It did not — `skyline_haze` and the
 // Fog/Overcast/Smog washes were absolute daylight-grey constants with no time
-// input, so a foggy 01:00 pane rendered 94% as bright as a foggy solar noon
-// (152.3 vs 161.9) and a night-lit room sat behind daylight-white windows.
+// input, so a foggy 01:00 pane rendered 94% as bright as a foggy solar noon and
+// a night-lit room sat behind daylight-white windows.
 #[test]
 fn no_weather_flattens_the_glass_day_night_contrast() {
     for theme in crate::theme::ALL_THEMES {

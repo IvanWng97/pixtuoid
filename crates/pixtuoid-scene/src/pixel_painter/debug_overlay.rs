@@ -230,10 +230,8 @@ mod tests {
             buf.get(couch.pos.x, couch.pos.y)
         );
 
-        // Expected cells come from the SIM's own scan (`layout::
-        // first_reachable_on_side`), so this asserts the overlay marks exactly
-        // where the router would send the agent — not merely "something green
-        // near the couch".
+        // Expected cells come from the SIM's own scan, so this asserts the overlay
+        // marks where the router routes — not "something green near the couch".
         let def = furniture_def(couch.kind.furniture());
         let found_green_approach = DIRS.iter().any(|&(dx, dy)| {
             def.approach.allows(couch.facing, (dx, dy))

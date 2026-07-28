@@ -727,10 +727,9 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // floor-touching row. Sort ascending and paint in order so things
     // closer to the camera (larger anchor_y) appear in front. This is
     // the painter's algorithm applied to a top-down 2D scene.
-    // One push per cubicle / character / waypoint appliance / decor item, plus
-    // the handful of fixed room pieces — a HINT derived from the layout's own
-    // counts (the vec still grows if a floor variant pushes more), sized so the
-    // ~100-250 pushes below don't rerun the doubling ladder every frame.
+
+    // A HINT, not a bound (the vec still grows): one push per cubicle / character
+    // / waypoint / decor item, so the pushes below skip the doubling ladder.
     let mut drawables: Vec<Drawable<'_>> = Vec::with_capacity(
         ctx.layout.home_desks.len()
             + ctx.layout.waypoints.len()
@@ -846,6 +845,12 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 /// `seated_agents` (built once before the ambient pass) gates the screen glow
 /// so it only paints for a worker actually at the desk. The DeskCubicle
 /// drawable is Copy, so this borrows nothing from the agent set.
+///
+/// A pod divider divides two pod-MATES, so `divider_x` is `Some` only where the
+/// east mate exists, and `home_desks` is the authority for that: the band clamp
+/// in `compute_pod_desks` drops a pod's second column when it wouldn't fit, so
+/// pitch/band arithmetic here would be a second, drifting copy of the emission
+/// rule. The column sits mid-aisle between the two desk SPRITES, clear of both.
 fn enqueue_desk_cubicles<'a>(
     ctx: &PaintCtx<'_>,
     agents: &[AgentSlot],
@@ -858,14 +863,6 @@ fn enqueue_desk_cubicles<'a>(
         let Some(Size { w: desk_fp_w, .. }) = desk_def.footprint else {
             continue;
         };
-        // A pod divider divides two pod-MATES, so it exists only where the east
-        // mate does — and `home_desks` is the authority for that: the band clamp
-        // in `compute_pod_desks` drops a pod's second column when it wouldn't
-        // fit, so any pitch/band arithmetic here is a second, drifting copy of
-        // the emission rule (the old `desk_fp_w + DESK_W >= band right` mixed
-        // ground width with slot width and never fired at the default layout,
-        // orphaning a divider east of every row's last desk). It sits mid-aisle
-        // between the two desk SPRITES, clear of both.
         let mate_x = desk.x + DESK_W + crate::layout::INTRA_POD_GAP_X;
         let divider_x = ctx
             .layout
@@ -980,9 +977,9 @@ fn enqueue_pet<'a>(
         .map(|(pos, flip, anim, frame)| (pos, flip, anim, frame, None))
     };
     let (pos, flip, anim_name, frame_idx, pet_elapsed) = pet_data?;
-    // Fallback when a custom pack lacks the resolved pet anim: the bundled cat's
-    // size (the z-anchor's long-standing `6`), so the z-sort row and the canvas
-    // clamp stay sane — the blit itself no-ops, `paint_drawable` bails.
+    /// Fallback when a custom pack lacks the resolved pet anim: the bundled cat's
+    /// size (the z-anchor's long-standing `6`), so the z-sort row and the canvas
+    /// clamp stay sane — the blit itself no-ops, `paint_drawable` bails.
     const PET_FALLBACK: Size = Size { w: 8, h: 6 };
     let (pet_w, pet_h) = ctx
         .pack

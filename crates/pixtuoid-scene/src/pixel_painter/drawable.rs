@@ -313,9 +313,8 @@ pub(super) fn paint_drawable(
         } => {
             let divider = theme.office.cubicle_divider;
             if let Some(div_x) = *divider_x {
-                // Spans the desk sprite's own painted rows (blitted at
-                // `desk.y - 1`, `visual.h + 1` tall) so the partition reads as
-                // tall as the workstation it divides.
+                // Spans the desk sprite's own painted rows (`desk.y - 1`,
+                // `visual.h + 1` tall) so it reads as tall as the workstation.
                 let visual_h = crate::layout::desk_furniture_def().visual.h;
                 for dy in 0..=visual_h {
                     let py = desk.y.saturating_sub(1) + dy;
@@ -483,9 +482,8 @@ pub(super) fn paint_drawable(
             let Some(frame) = frame_at(anim, *frame_idx) else {
                 return;
             };
-            // Borrow the pack's frame on the unflipped path — the old `clone()`
-            // copied a whole unmodified `Frame` every frame just to satisfy
-            // `blit_centered(&Frame, ..)`. `mirrored` outlives the borrow.
+            // Declared out here so the flipped path's temporary outlives the `if`;
+            // the unflipped path then hands over the pack's frame, not a copy.
             let mirrored;
             let final_frame = if *flip {
                 mirrored = frame.mirror_horizontal();

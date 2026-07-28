@@ -225,9 +225,6 @@ pub(crate) fn approach_point(
             if !def.approach.allows(facing, (dx, dy)) {
                 continue; // never approach across an excluded side (the back)
             }
-            // See `first_reachable_on_side` for why the scan steps deeper through
-            // the walkable run and why it stops at the first blocked pixel after
-            // entering it — both are load-bearing for the back-side invariant.
             if let Some(c) = first_reachable_on_side(mask, reachable, pos, dx, dy) {
                 let d2 = squared_distance(c, origin);
                 if allowed.is_none_or(|(b, _)| d2 < b) {
@@ -875,9 +872,8 @@ mod tests {
     #[test]
     fn the_seat_scan_steps_through_a_dead_edge_but_never_hops_a_second_obstacle() {
         let mut m = WalkableMask::new_open(40, 40);
-        // Seat body at rows 19-20, then a 1-cell pocket at row 21 sealed on all
-        // four sides (walkable, but no route reaches it), then a second body at
-        // rows 22-23, with open floor beyond.
+        // Seat body rows 19-20, a 1-cell pocket at row 21 sealed on all four
+        // sides (walkable, unreachable), a second body rows 22-23, floor beyond.
         m.mark_blocked(8, 19, 5, 2, 0);
         m.mark_blocked(8, 22, 5, 2, 0);
         m.mark_blocked(9, 21, 1, 1, 0);

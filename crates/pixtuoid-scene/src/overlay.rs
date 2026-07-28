@@ -89,9 +89,6 @@ pub fn build_overlay(
     rctx: &mut RouteCtx<'_>,
     hovered: Option<AgentId>,
 ) -> Vec<LabelElement> {
-    // Borrowed, not cloned: this runs once per painter per frame and `scene` is
-    // already a shared reference — the old `values().cloned().collect()` copied
-    // every AgentSlot (labels, cwd, tool state) just to iterate it twice.
     let mut label_counts: HashMap<&str, usize> = HashMap::new();
     for agent in scene.agents.values() {
         *label_counts.entry(&*agent.label).or_insert(0) += 1;
