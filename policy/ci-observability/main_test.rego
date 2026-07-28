@@ -334,6 +334,95 @@ test_codecov_token_forwarding_is_pinned if {
 	sprintf("%s must not declare or forward a Codecov upload token", [codecov_authority_path]) in violations
 }
 
+test_conditioned_codecov_upload_is_denied if {
+	fixture := {"documents": [{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{
+			"uses": codecov_action,
+			"if": post_test_condition,
+		}]}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Codecov step must remain unconditional", [codecov_authority_path]) in violations
+}
+
+# The authority action has its own token rule; this one covers every CALLER of
+# the wrapper, where a re-introduced token would otherwise pass unseen.
+test_wrapper_caller_forwarding_a_token_is_denied if {
+	path := ".github/workflows/extra.yml"
+	fixture := {"documents": [{
+		"path": path,
+		"contents": {"jobs": {"test": {"steps": [{
+			"uses": codecov_wrapper,
+			"with": {"token": "${{ secrets.UPLOAD_TOKEN }}"},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must not forward a Codecov upload token", [path]) in violations
+}
+
+test_retired_codecov_token_secret_is_denied if {
+	every path in {ci_workflow_path, codecov_workflow_path, codecov_authority_path} {
+		fixture := {"documents": [{
+			"path": path,
+			"contents": {"jobs": {"test": {"env": {"TOKEN": "${{ secrets.CODECOV_TOKEN }}"}}}},
+		}]}
+		violations := deny with input as fixture
+		sprintf("%s must not reference the retired CODECOV_TOKEN secret", [path]) in violations
+	}
+}
+
+codecov_warning_step(env) := {
+	"path": codecov_authority_path,
+	"contents": {"runs": {"steps": [{
+		"name": upload_warning_step_name,
+		"if": "${{ steps.upload.outcome == 'failure' }}",
+		"env": env,
+		"run": "echo warning",
+	}]}},
+}
+
+# An advisory upload failure that does not name which report/flag/type failed is
+# a warning nobody can act on, so all three env pins are separate rules.
+test_codecov_warning_step_must_identify_the_failed_upload if {
+	fixture := {"documents": [codecov_warning_step({})]}
+	violations := deny with input as fixture
+	every message in {
+		"failure step must identify inputs.file",
+		"failure step must identify inputs.flag",
+		"failure step must identify inputs.report_type",
+	} {
+		sprintf("%s %s", [codecov_authority_path, message]) in violations
+	}
+}
+
+test_codecov_warning_step_naming_every_input_is_accepted if {
+	fixture := {"documents": [codecov_warning_step({
+		"REPORT_FILE": codecov_input_file,
+		"REPORT_FLAG": codecov_input_flag,
+		"REPORT_TYPE": codecov_input_report_type,
+	})]}
+	violations := deny with input as fixture
+	every message in {
+		"failure step must identify inputs.file",
+		"failure step must identify inputs.flag",
+		"failure step must identify inputs.report_type",
+	} {
+		not sprintf("%s %s", [codecov_authority_path, message]) in violations
+	}
+}
+
+# `queue` is a release-only compatibility field carried by an actionlint ignore;
+# anywhere else it is an unrecognized key that silently serializes nothing.
+test_release_queue_field_outside_release_is_denied if {
+	fixture := {"documents": [{
+		"path": ci_workflow_path,
+		"contents": {"concurrency": {"queue": true}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must not use the release-only queue compatibility field", [ci_workflow_path]) in violations
+}
+
 test_report_presence_check_reads_inputs_file if {
 	fixture := {"documents": [{
 		"path": codecov_authority_path,
@@ -966,6 +1055,56 @@ test_codeql_health_gate_before_upload_is_accepted if {
 	}]}
 	violations := deny with input as fixture
 	not sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
+}
+
+test_codeql_init_hardcoding_a_language_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"uses": "github/codeql-action/init@v4",
+			"with": {"languages": "rust"},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s CodeQL init must consume matrix.language", [codeql_workflow_path]) in violations
+}
+
+# init snapshots the workspace, so anything staged after it is invisible to the
+# extractor while the job still reports a successful analysis.
+test_codeql_init_before_its_inputs_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"uses": "github/codeql-action/init@v4"},
+			{"uses": "actions/checkout@v7"},
+			{
+				"name": rust_setup_step_name,
+				"if": rust_matrix_condition,
+				"run": "prepare",
+			},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must check out before CodeQL init", [codeql_workflow_path]) in violations
+	sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path]) in violations
+}
+
+test_codeql_init_after_its_inputs_is_accepted if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"uses": "actions/checkout@v7"},
+			{
+				"name": rust_setup_step_name,
+				"if": rust_matrix_condition,
+				"run": "prepare",
+			},
+			{"uses": "github/codeql-action/init@v4"},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	not sprintf("%s must check out before CodeQL init", [codeql_workflow_path]) in violations
+	not sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path]) in violations
 }
 
 codeql_pull_request_message := sprintf("%s must analyze every pull request: keep on.pull_request present and unfiltered", [codeql_workflow_path])
