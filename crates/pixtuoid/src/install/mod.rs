@@ -332,7 +332,7 @@ fn resolve_hook_binary_from(
     // env seam used to pass through `locate()` verbatim and bypass it).
     let explicit = hook_path
         .map(|p| (p, "--hook-path"))
-        .or(env_hook.map(|p| (p, "PIXTUOID_HOOK")));
+        .or(env_hook.map(|p| (p, io::HOOK_OVERRIDE_ENV)));
     if let Some((p, origin)) = explicit {
         // Drive-relative input would make the cwd-join below a silent no-op
         // (see `is_drive_relative`) — the exact never-fires embed this arm
@@ -417,7 +417,7 @@ pub(crate) fn install_target(
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
-    let env_hook = io::nonempty_env("PIXTUOID_HOOK").map(PathBuf::from);
+    let env_hook = io::nonempty_env(io::HOOK_OVERRIDE_ENV).map(PathBuf::from);
     let (binary, explicit_hook) =
         resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;

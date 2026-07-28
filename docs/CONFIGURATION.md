@@ -86,6 +86,18 @@ Crashes are reported separately to `~/.cache/pixtuoid/crash.log`.
 
 Non-TUI commands (`--headless`, `validate-pack`, …) log to stderr directly.
 
+### `pixtuoid connect` says it can't locate `pixtuoid-hook`
+
+Connecting a source installs a hook that runs the small `pixtuoid-hook` shim,
+so `connect` has to find it: first on `$PATH`, then next to the `pixtuoid`
+binary itself. Every packaged install (Homebrew, npm, the release archives)
+ships both, but `cargo install pixtuoid` installs only the main binary, and a
+hand-relocated install can separate them.
+
+Either install the shim (`cargo install pixtuoid-hook`) or set
+**`$PIXTUOID_HOOK`** to an absolute path to it — that override wins over both
+lookups and is embedded into the agent CLI's config, so it must be absolute.
+
 ### Truecolor preflight
 
 The pixel-art office renders in 24-bit color. On launch, `pixtuoid run`

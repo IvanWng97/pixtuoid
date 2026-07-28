@@ -81,12 +81,25 @@ fn checked_home_join(home: Option<String>, rel: &str) -> Result<PathBuf> {
     })
 }
 
+/// The env var that overrides shim resolution — THE user-facing escape hatch,
+/// so every message that offers one names it from here rather than a copy.
+pub(crate) const HOOK_OVERRIDE_ENV: &str = "PIXTUOID_HOOK";
+
+/// The remedy sentence for "the shim isn't where we looked", shared by every
+/// site that offers one. It names `PIXTUOID_HOOK` and nothing else: the
+/// `--hook-path` flag these messages used to advertise died with the
+/// `install-hooks` CLI (#284), so clap now answers it with `unexpected
+/// argument` — an error whose only remedy was itself an error.
+pub(crate) const SHIM_LOCATE_REMEDY: &str = "install it alongside pixtuoid (`brew install \
+     pixtuoid` / `cargo install pixtuoid-hook` / `npm i -g pixtuoid`) or point \
+     PIXTUOID_HOOK at an absolute path to the shim";
+
 /// AUTO-locate `pixtuoid-hook`: PATH, then a sibling of the running exe —
-/// both arms return absolute, verified-existing paths. The `PIXTUOID_HOOK`
-/// env override is deliberately NOT read here: it is an explicit path like
-/// `--hook-path` and is handled by `resolve_hook_binary`'s absolutize-and-warn
-/// arm (returned verbatim from here, a relative value would get embedded into
-/// Codex/Reasonix configs and silently never fire from other cwds).
+/// both arms return absolute, verified-existing paths. The [`HOOK_OVERRIDE_ENV`]
+/// override is deliberately NOT read here: it is an explicit path and is handled
+/// by `resolve_hook_binary`'s absolutize-and-warn arm (returned verbatim from
+/// here, a relative value would get embedded into Codex/Reasonix configs and
+/// silently never fire from other cwds).
 pub(crate) fn default_hook_binary() -> Result<PathBuf> {
     if let Ok(p) = which::which("pixtuoid-hook") {
         return Ok(p);
@@ -99,7 +112,11 @@ pub(crate) fn default_hook_binary() -> Result<PathBuf> {
     if candidate.exists() {
         return Ok(candidate);
     }
-    Err(anyhow!("could not locate pixtuoid-hook; pass --hook-path"))
+    Err(anyhow!(
+        "could not locate pixtuoid-hook (not on PATH, and not beside the pixtuoid \
+         binary at {}); {SHIM_LOCATE_REMEDY}",
+        dir.display()
+    ))
 }
 
 /// The hook binary's filename next to the running exe — `.exe`-suffixed on
@@ -403,6 +420,23 @@ pub(crate) fn resolve_symlink(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn the_shim_locate_remedy_names_an_escape_hatch_the_cli_accepts() {
+        // The old wording said "pass --hook-path" — a flag that died with the
+        // `install-hooks` CLI (#284). Every user who hits this (a `cargo install
+        // pixtuoid` without the shim, a relocated install) was pointed at an
+        // argument clap rejects, while the working override was named nowhere
+        // user-facing.
+        use clap::Parser;
+        assert!(
+            crate::cli::Cli::try_parse_from(["pixtuoid", "connect", "codex", "--hook-path", "/x"])
+                .is_err(),
+            "if --hook-path is ever re-added, revisit this remedy wording"
+        );
+        assert!(SHIM_LOCATE_REMEDY.contains(HOOK_OVERRIDE_ENV));
+        assert!(!SHIM_LOCATE_REMEDY.contains("--hook-path"));
+    }
 
     #[test]
     fn expand_tilde_home_some_expands_leading_tilde_only() {
