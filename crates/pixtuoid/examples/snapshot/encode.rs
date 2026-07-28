@@ -23,7 +23,15 @@ use crate::{due_navigations, SnapshotArgs, CELL_H, CELL_W};
 /// has an isolated region and A* will fall back to a straight line when
 /// crossing into it. That's the root cause of any remaining
 /// character teleport the user sees.
-pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> Result<()> {
+///
+/// `floor_seed` MUST be the one the frame beside it was rendered with
+/// (`args.floor_seed`, which `draw_scene` reads back off `FloorMeta`): the
+/// five layout variants have different obstacle placements, so a report
+/// computed for another variant is a tick about an office nobody looked at.
+pub(crate) fn debug_paint_walkable_overlay(
+    term: &mut Terminal<TestBackend>,
+    floor_seed: u64,
+) -> Result<()> {
     use pixtuoid_scene::layout::SceneLayout;
 
     let size = term.size()?;
@@ -33,7 +41,7 @@ pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> 
     let buf_h = scene_h * 2;
     // `None` = the SAME fill the renderer's draw_scene passes — the overlay
     // must mirror the real layout exactly (desks stamp the walkable mask).
-    let Some(layout) = SceneLayout::compute(buf_w, buf_h, None) else {
+    let Some(layout) = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed) else {
         println!("(debug_walkable) layout too small to compute");
         return Ok(());
     };
@@ -60,7 +68,7 @@ pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> 
     }
     let disconnected = walkable_total.saturating_sub(reachable);
     println!(
-        "--- walkability report ---\n\
+        "--- walkability report (floor seed {floor_seed}) ---\n\
         total walkable pixels   : {walkable_total}\n\
         reachable from threshold: {reachable}\n\
         disconnected pixels     : {disconnected}{}",
