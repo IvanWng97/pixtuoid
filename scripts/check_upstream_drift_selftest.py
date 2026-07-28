@@ -512,6 +512,12 @@ def test_anchor_gate_fires_in_both_directions() -> None:
     """
     real = d.fetch
     try:
+        # A floor, because everything below iterates `ANCHORS`: an emptied table
+        # would run zero loop bodies and this whole test would pass VACUOUSLY
+        # while the watch swept nothing. The count only has to move when a
+        # document is added or dropped, which is exactly when a human should
+        # look at this test.
+        check(len(d.ANCHORS) >= 16, f"ANCHORS covers every swept document, got {len(d.ANCHORS)}")
         missing_samples = sorted(set(d.ANCHORS) - set(ANCHOR_SAMPLES))
         check(not missing_samples, f"every ANCHORS entry needs a sample: {missing_samples}")
 
