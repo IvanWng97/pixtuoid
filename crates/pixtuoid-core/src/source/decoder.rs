@@ -221,10 +221,26 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         None => {}
     }
 
+    // Both bails below breadcrumb (#2 self-monitoring), because these two fields
+    // are the whole hook plane's chokepoint: an upstream rename of either kills
+    // EVERY hook event of every source riding these shared arms, and a plain
+    // `warn!` lands on the default target that `doctor::parse_drift_line` cannot
+    // see — the plane would go dark behind a green doctor. Undeduped is
+    // flood-safe HERE (unlike a transcript tail): the hook plane carries only
+    // payloads we have committed to decoding, at tool-call rate, and the
+    // `unknown_event` arm at the bottom of this same match already warns per
+    // payload on the sibling VALUE axis. The documented grok cross-fire is
+    // dropped quietly ABOVE, so the residual attribution cost is a FUTURE
+    // camelCase source's mis-wire reading as `claude-code` drift — which is
+    // exactly the "OBSERVED decode error, not a silent ghost" the cross-fire
+    // guard's comment says that case should surface as.
     let event = obj
         .get("hook_event_name")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("missing hook_event_name"))?;
+        .ok_or_else(|| {
+            super::drift::missing_field(source, "hook", "hook_event_name");
+            anyhow!("missing hook_event_name")
+        })?;
 
     // `.filter(non-empty)`: an empty session_id passes `as_str` but, for Codex
     // (which keys the AgentId on session_id), would mint a phantom agent that
@@ -234,7 +250,10 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         .get("session_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("missing/empty session_id"))?
+        .ok_or_else(|| {
+            super::drift::missing_field(source, event, "session_id");
+            anyhow!("missing/empty session_id")
+        })?
         .to_string();
     // The per-session key strategy is registry data (`HookDecoding::id_key`),
     // not a name match: CC and Codex key on `session_id` (the session UUID);
@@ -1294,6 +1313,69 @@ mod tests {
         assert!(
             !known.contains("unknown_dispatch"),
             "the known dispatch name must stay breadcrumb-silent, got:\n{known}"
+        );
+    }
+
+    /// The shared hook arms' two REQUIRED-field bails are the whole hook
+    /// plane's chokepoint: an upstream rename of either field makes EVERY hook
+    /// event of every source riding those arms fail to decode. Without a
+    /// breadcrumb the only trace is a default-target `warn!` that
+    /// `doctor::parse_drift_line` (which requires the literal `pixtuoid::drift`
+    /// marker) is structurally blind to — the hook plane goes dark while
+    /// `pixtuoid doctor` reports every source healthy.
+    #[test]
+    fn the_hook_planes_required_field_bails_leave_drift_breadcrumbs() {
+        // An upstream rename looks exactly like this: the envelope is intact,
+        // the key we depend on is not.
+        let renamed_event = capture_logs(|| {
+            assert!(decode_hook_payload(json!({
+                "hookEventNameZ": "Stop",
+                "session_id": "ses-1",
+                "_pixtuoid_source": "claude-code",
+            }))
+            .is_err());
+        });
+        for needle in [
+            crate::source::drift::TARGET,
+            "missing_field",
+            "hook_event_name",
+        ] {
+            assert!(
+                renamed_event.contains(needle),
+                "missing {needle:?} in captured log:\n{renamed_event}"
+            );
+        }
+
+        let renamed_session = capture_logs(|| {
+            assert!(decode_hook_payload(json!({
+                "hook_event_name": "Stop",
+                "sessionIdZ": "ses-1",
+                "_pixtuoid_source": "claude-code",
+            }))
+            .is_err());
+        });
+        for needle in [crate::source::drift::TARGET, "missing_field", "session_id"] {
+            assert!(
+                renamed_session.contains(needle),
+                "missing {needle:?} in captured log:\n{renamed_session}"
+            );
+        }
+
+        // Flood control: the documented grok cross-fire (a camelCase envelope
+        // arriving on CC's/cursor's shim) is a KNOWN duplicate, dropped quietly
+        // before these bails — it must stay breadcrumb-silent or it would fire
+        // once per tool call of every grok session.
+        let cross_fire = capture_logs(|| {
+            assert!(decode_hook_payload(json!({
+                "hookEventName": "pre_tool_use",
+                "sessionId": "ses-1",
+                "_pixtuoid_source": "claude-code",
+            }))
+            .is_ok());
+        });
+        assert!(
+            !cross_fire.contains("missing_field"),
+            "the grok cross-fire drop must stay breadcrumb-silent, got:\n{cross_fire}"
         );
     }
 
