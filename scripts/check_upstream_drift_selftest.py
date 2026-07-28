@@ -29,6 +29,12 @@ the weekly job either alarms on junk or watches nothing). This pins:
      bucket directly, so probe health cannot be hand-worded into a claim about
      upstream. Plus the exit-2 (transient) path, which is unreachable through
      `main()` without faking the network.
+  8. One stale `read_*` parser darkens ITS source and no other. All fourteen
+     used to share one `try`, so a failure in the first row left the other
+     thirteen at `None` and `run_checks` skipped them in silence — measured, a
+     row-1 failure took the run from 25 fetched documents to 4 while the report
+     said "nothing upstream was consulted". Plus the READERS-to-`OurNames`
+     bridge, which is stringly-keyed and otherwise unpinned.
 
 Run: `python3 scripts/check_upstream_drift_selftest.py` (exit 0 = pass).
 No pytest dependency on purpose — the repo has no Python test harness.
@@ -36,27 +42,18 @@ No pytest dependency on purpose — the repo has no Python test harness.
 
 from __future__ import annotations
 
-import inspect
+import dataclasses
 import io
 import pathlib
 import re
 import sys
+import typing
 import urllib.error
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
-
-# `run_checks`'s read-our-own-source inputs, read off the live signature rather
-# than copied: a test that drives ONE source has to supply all the others, and a
-# hand-maintained list would silently rot the day a source is added. `report` is
-# keyword-only, so it is not in here.
-_OURS_PARAMS = [
-    name
-    for name, p in inspect.signature(d.run_checks).parameters.items()
-    if p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
-]
 
 
 def check(cond: bool, msg: str) -> None:
@@ -673,6 +670,109 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
     )
 
 
+def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
+    """A parser that goes stale must dark ITS source, not the rest of the file.
+
+    All fourteen `read_*` calls used to sit in ONE try. A raise partway through
+    left every later local at `None`, `run_checks` skips a `None` source in
+    silence, and the single catch-all line claimed "nothing upstream was
+    consulted" while thirteen URLs had in fact been read. Measured on reader #9
+    of 14: the report fell from 28 finding lines to 17 and Cursor, Hermes, grok
+    and Kimi vanished from it entirely — six sources dark, none of them named.
+
+    That is the fail-open this file exists to remove (#454), and the assert-a-
+    cause-you-did-not-verify shape of #793, on the reading side rather than the
+    fetching side. `main()`'s own comment already promised the opposite: "or
+    drift monitoring would silently stop with zero alarm".
+    """
+    real_fetch, real_readers = d.fetch, d.READERS
+    # Every fetched document lands on the wrong content, so each source that IS
+    # checked contributes at least one probe-health line, and every source that
+    # is checked FETCHES. A source gone dark fetches nothing and says nothing.
+    fetched: set[str] = set()
+    d.fetch = lambda u: (fetched.add(u), "unrelated body")[1]
+
+    def run() -> tuple[set[str], str]:
+        fetched.clear()
+        buf, real_stdout = io.StringIO(), sys.stdout
+        sys.stdout = buf
+        try:
+            d.main()
+        finally:
+            sys.stdout = real_stdout
+        return set(fetched), buf.getvalue()
+
+    try:
+        base_urls, _ = run()
+        check(len(base_urls) > 20, f"the baseline exercises the file, got {len(base_urls)} URLs")
+
+        # Break the FIRST row — under one shared `try` that is the worst case,
+        # because every one of the other thirteen was assigned after it. Inject
+        # into READERS, not the module attribute: the table captured the function
+        # OBJECTS at definition time, so patching `d.read_codex_events` is a
+        # silent no-op and this test would pass having injected nothing.
+        first_field, first_reader, first_what = d.READERS[0]
+        d.READERS = (
+            (first_field, _raiser(first_reader.__name__), first_what),
+            *d.READERS[1:],
+        )
+        broken_urls, out = run()
+
+        # The fault FIRED: the report names the reader, which only the new
+        # per-row probe-health line can produce.
+        check(
+            first_reader.__name__ in out,
+            f"the injected fault fired and named `{first_reader.__name__}`:\n{out}",
+        )
+        # Every LATER source is still checked. These four are declared at the far
+        # end of the table and were the measured casualties: 28 finding lines fell
+        # to 17, with Cursor, Hermes, grok and Kimi gone entirely.
+        for name in ("CURSOR_HOOKS_URL", "HERMES_HOOK_URL", "GROK_HOOK_URL", "KIMI_HOOKS_URL"):
+            check(
+                getattr(d, name) in broken_urls,
+                f"a stale reader in row 1 must not dark {name} in row 10+ "
+                f"(fetched {len(broken_urls)} of {len(base_urls)} URLs):\n{out}",
+            )
+        # ...and it must NOT claim the whole run was blind, because it was not.
+        check(
+            "Nothing upstream was checked" not in out,
+            f"a single stale reader must not claim the whole run was blind:\n{out}",
+        )
+    finally:
+        d.fetch, d.READERS = real_fetch, real_readers
+
+
+def _raiser(name: str) -> typing.Callable[[], object]:
+    """A reader that always fails, keeping `__name__` so the report can name it."""
+
+    def broken() -> object:
+        raise RuntimeError("parser stale")
+
+    broken.__name__ = name
+    return broken
+
+
+def test_every_reader_row_matches_a_field_on_our_names() -> None:
+    """The READERS table is stringly-keyed; nothing else pins it to `OurNames`.
+
+    `read_our_names` assigns by name, so a typo'd row would set an attribute
+    nobody reads and leave the real field `None` — the source silently unchecked,
+    with no probe-health line, which is the exact failure mode the test above
+    exists to prevent. Both directions: no orphan row, no unfilled field.
+    """
+    rows = {field for field, _, _ in _reader_rows()}
+    fields = {f.name for f in dataclasses.fields(d.OurNames)}
+    check(rows == fields, f"READERS rows vs OurNames fields differ: {rows ^ fields}")
+    for _, reader_name, what in _reader_rows():
+        check(callable(getattr(d, reader_name, None)), f"{reader_name} is a real reader")
+        check(bool(what.strip()), f"{reader_name} declares what it reads")
+
+
+def _reader_rows() -> list[tuple[str, str, str]]:
+    """`(field, reader function name, what it reads)` for every READERS row."""
+    return [(field, reader.__name__, what) for field, reader, what in d.READERS]
+
+
 def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
     """The #793 regression, end to end through `run_checks`, both directions.
 
@@ -708,11 +808,10 @@ def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
 
         d.fetch = stub
         report = d.Report()
-        # Named, not a wall of 14 positional `None`s: a miscount there silently
-        # drove the WRONG source and the test still passed. A wrong name here is
-        # a TypeError.
+        # One named field, not a wall of 14 positional `None`s where a miscount
+        # silently drove the WRONG source and the test still passed.
         d.run_checks(
-            **{**dict.fromkeys(_OURS_PARAMS), "codewhale_ours": {"session_start", "tool_call_before"}},
+            d.OurNames(codewhale={"session_start", "tool_call_before"}),
             report=report,
         )
         check(
@@ -1037,6 +1136,8 @@ def main() -> int:
         test_every_const_array_reader_uses_the_shared_parser,
         test_anchor_gate_fires_in_both_directions,
         test_report_is_the_only_way_to_file_a_finding,
+        test_one_stale_reader_does_not_blind_the_sources_after_it,
+        test_every_reader_row_matches_a_field_on_our_names,
         test_793_stale_pin_reads_as_probe_health_not_three_renames,
         test_every_swept_url_declares_an_anchor,
         test_report_separates_verified_change_from_probe_health,

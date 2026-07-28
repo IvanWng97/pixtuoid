@@ -1569,43 +1569,105 @@ def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
     return findings
 
 
-def run_checks(
-    codex_ours: set[str] | None,
-    codex_rollout: tuple[set[str], set[str]] | None,
-    cc_ours: set[str] | None,
-    dispatch_names: set[str] | None,
-    reasonix_ours: set[str] | None,
-    codewhale_ours: set[str] | None,
-    opencode_ours: set[str] | None,
-    copilot_ours: set[str] | None,
-    omp_ours: set[str] | None,
-    cursor_ours: set[str] | None,
-    openclaw_ours: set[str] | None,
-    hermes_ours: set[str] | None,
-    grok_ours: set[str] | None,
-    kimi_ours: set[str] | None,
-    *,
-    report: Report,
-) -> None:
+@dataclasses.dataclass
+class OurNames:
+    """What WE depend on, read from our OWN source — one field per source.
+
+    `None` means that source's reader failed, and it is load-bearing rather than
+    a default: every block in `run_checks` guards on its own field, so a stale
+    parser darkens exactly its own source and the other thirteen still run. See
+    `read_our_names` for why that isolation had to be built.
+    """
+
+    codex: set[str] | None = None
+    codex_rollout: tuple[set[str], set[str]] | None = None
+    cc: set[str] | None = None
+    dispatch_names: set[str] | None = None
+    reasonix: set[str] | None = None
+    codewhale: set[str] | None = None
+    opencode: set[str] | None = None
+    copilot: set[str] | None = None
+    omp: set[str] | None = None
+    cursor: set[str] | None = None
+    openclaw: set[str] | None = None
+    hermes: set[str] | None = None
+    grok: set[str] | None = None
+    kimi: set[str] | None = None
+
+
+# (field on OurNames, reader, the surface it reads). A table rather than
+# fourteen statements because each row needs its OWN try — see `read_our_names`.
+READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
+    ("codex", read_codex_events, "CODEX_EVENTS in install/codex.rs"),
+    ("codex_rollout", read_codex_rollout_types, "the decode arms in source/codex.rs"),
+    ("cc", read_cc_events, "EVENTS in install/claude.rs"),
+    ("dispatch_names", read_dispatch_names, "the dispatch tool names in source/decoder.rs"),
+    ("reasonix", read_reasonix_events, "REASONIX_EVENTS in install/reasonix.rs"),
+    ("codewhale", read_codewhale_events, "CODEWHALE_EVENTS in install/codewhale.rs"),
+    ("opencode", read_opencode_events, "the `match event` arms in source/opencode.rs"),
+    ("copilot", read_copilot_events, "the `match kind` arms in source/copilot.rs"),
+    ("omp", read_omp_entry_types, "the entry types in source/omp.rs"),
+    ("cursor", read_cursor_events, "CURSOR_EVENTS in install/cursor.rs"),
+    ("openclaw", read_openclaw_events, "OPENCLAW_EVENTS in install/openclaw.rs"),
+    ("hermes", read_hermes_events, "HERMES_EVENTS in install/hermes.rs"),
+    ("grok", read_grok_events, "GROK_EVENTS in install/grok.rs"),
+    ("kimi", read_kimi_events, "KIMI_EVENTS in install/kimi.rs"),
+)
+
+
+def read_our_names(report: Report) -> OurNames:
+    """Read every source's depended names, ISOLATING each reader's failure.
+
+    A failure here means the monitor itself is broken — install/codex.rs or a
+    decoder refactored away from what a parser expects. That is a LOUD probe-
+    health signal (exit 1; our own parser being stale is the textbook "the probe
+    missed"), never transient, "or drift monitoring would silently stop with zero
+    alarm".
+
+    Which is exactly what one shared `try` around all fourteen produced. A raise
+    partway through left every LATER field at `None`, `run_checks` skips a `None`
+    source in silence, and the single catch-all line said "nothing upstream was
+    consulted" while thirteen URLs had in fact been read. Measured on reader #9
+    of 14: 28 finding lines fell to 17 and Cursor, Hermes, grok and Kimi vanished
+    from the report entirely — six sources dark, not one of them named. Per-row
+    isolation makes the promise in the paragraph above true: the failure is
+    named, its source is the only casualty, and the rest of the watch still runs.
+    """
+    ours = OurNames()
+    for field, reader, what in READERS:
+        try:
+            setattr(ours, field, reader())
+        except Exception as e:  # noqa: BLE001
+            report.add_blind(
+                f"what WE depend on for `{field}`, reading {what} ({e})",
+                f"check_upstream_drift.py's {reader.__name__}",
+                f"That parser is stale (was it refactored?), so the `{field}` "
+                f"upstream checks were SKIPPED. Every OTHER source still ran.",
+                our_source=True,
+            )
+    return ours
+
+
+def run_checks(ours: OurNames, *, report: Report) -> None:
     """The upstream comparisons, filing what they find into `report`.
 
     Split from main() so an UNEXPECTED exception here (a script bug, an exotic
     network failure outside FETCH_ERRORS) can be routed to the transient bucket
     with the partial report intact — without it the interpreter exits 1 and the
     workflow files a junk drift-titled issue from an empty report. The deliberate
-    read-our-own-source LOUD path stays inside main(), before this is called, and
-    still exits 1.
+    read-our-own-source LOUD path stays in `read_our_names`, before this is
+    called, and still exits 1.
 
-    `report` is keyword-only: it is the one OUTPUT among fourteen same-typed
-    inputs, and positionally a miscount would bind it to a source slot — filing
-    every finding into a set that is then read as "what we depend on"."""
+    Every block guards on its own `ours.<field> is not None`, so one stale reader
+    costs exactly one source. `report` is keyword-only: it is the OUTPUT, and it
+    must not be confusable with the input beside it."""
     # --- Codex hook events + rollout decode vocabulary (only the FETCH is
     #     transient). protocol.rs holds BOTH the HookEventName enum (hooks) and
     #     the EventMsg enum (rollout `event_msg` types); the `response_item` types
     #     live in the sibling models.rs (ResponseItem). ------------------------
-    if codex_ours is not None or codex_rollout is not None:
+    if ours.codex is not None or ours.codex_rollout is not None:
         text = try_fetch(CODEX_PROTOCOL_URL, "Codex source", report)
-        if text is not None and codex_ours is not None:
+        if text is not None and ours.codex is not None:
             upstream = upstream_codex_hooks(text)
             if upstream is None:
                 report.add_blind(
@@ -1614,14 +1676,14 @@ def run_checks(
                     "The Codex hook-event watch was SKIPPED.",
                 )
             else:
-                for ev in sorted(codex_ours):
+                for ev in sorted(ours.codex):
                     if ev not in upstream:
                         report.add_breaking(
                             f"Codex hook `{ev}` (registered in CODEX_EVENTS) is GONE "
                             f"from upstream HookEventName — likely renamed; the "
                             f"decoder will silently drop it."
                         )
-                for ev in sorted(upstream - codex_ours - CODEX_KNOWN_OMITTED):
+                for ev in sorted(upstream - ours.codex - CODEX_KNOWN_OMITTED):
                     report.add_review(
                         f"new Codex hook `{ev}` upstream — we neither register nor "
                         f"intentionally omit it (add a decoder arm + CODEX_EVENTS, "
@@ -1632,8 +1694,8 @@ def run_checks(
         # so only a VANISHED depended type alarms (a new one is not a ping). This
         # is the ONLY backstop — the transcript decoder's `_ => vec![]` drops an
         # unknown type silently, with no `unknown_event` breadcrumb.
-        if text is not None and codex_rollout is not None:
-            event_msg_ours, _ = codex_rollout
+        if text is not None and ours.codex_rollout is not None:
+            event_msg_ours, _ = ours.codex_rollout
             up_ev = upstream_codex_enum_types(text, "EventMsg")
             if up_ev is None:
                 report.add_blind(
@@ -1656,7 +1718,7 @@ def run_checks(
         # flood, so a new outer is a REVIEW ping to add it to KNOWN_OUTERS
         # (decode it or knowingly ignore it). The reverse (a KNOWN_OUTERS member
         # gone upstream) is a benign stale silent-set entry — no breaking alarm.
-        if text is not None and codex_rollout is not None:
+        if text is not None and ours.codex_rollout is not None:
             up_outers = upstream_codex_enum_types(text, "RolloutItem")
             if up_outers is None:
                 report.add_blind(
@@ -1695,8 +1757,8 @@ def run_checks(
                             f"silently dark for codex agents)."
                         )
         # Rollout `response_item` types → the ResponseItem enum in models.rs.
-        if codex_rollout is not None:
-            _, response_item_ours = codex_rollout
+        if ours.codex_rollout is not None:
+            _, response_item_ours = ours.codex_rollout
             models = try_fetch(CODEX_MODELS_URL, "Codex models", report)
             if models is not None:
                 up_ri = upstream_codex_enum_types(models, "ResponseItem")
@@ -1731,7 +1793,7 @@ def run_checks(
                                 )
 
     # --- Reasonix hook events + payload fields (only the FETCH is transient)
-    if reasonix_ours is not None:
+    if ours.reasonix is not None:
         text = try_fetch(REASONIX_HOOK_URL, "Reasonix source", report)
         if text is not None:
             upstream = upstream_reasonix_hooks(text)
@@ -1742,14 +1804,14 @@ def run_checks(
                     "The Reasonix event AND payload-field watches were SKIPPED.",
                 )
             else:
-                for ev in sorted(reasonix_ours):
+                for ev in sorted(ours.reasonix):
                     if ev not in upstream:
                         report.add_breaking(
                             f"Reasonix hook `{ev}` (registered in REASONIX_EVENTS) is "
                             f"GONE from upstream hook.go — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                for ev in sorted(upstream - reasonix_ours - REASONIX_KNOWN_OMITTED):
+                for ev in sorted(upstream - ours.reasonix - REASONIX_KNOWN_OMITTED):
                     report.add_review(
                         f"new Reasonix hook `{ev}` upstream — we neither register nor "
                         f"intentionally omit it (add a decoder arm + REASONIX_EVENTS, "
@@ -1764,7 +1826,7 @@ def run_checks(
                         )
 
     # --- CodeWhale hook events (only the FETCH is transient) ---------------
-    if codewhale_ours is not None:
+    if ours.codewhale is not None:
         text = try_fetch(CODEWHALE_HOOK_URL, "CodeWhale source", report)
         if text is not None:
             upstream = upstream_codewhale_hooks(text)
@@ -1775,14 +1837,14 @@ def run_checks(
                     "The CodeWhale event watch was SKIPPED.",
                 )
             else:
-                for ev in sorted(codewhale_ours):
+                for ev in sorted(ours.codewhale):
                     if ev not in upstream:
                         report.add_breaking(
                             f"CodeWhale hook `{ev}` (registered in CODEWHALE_EVENTS) is "
                             f"GONE from upstream HookEvent — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                for ev in sorted(upstream - codewhale_ours - CODEWHALE_KNOWN_OMITTED):
+                for ev in sorted(upstream - ours.codewhale - CODEWHALE_KNOWN_OMITTED):
                     report.add_review(
                         f"new CodeWhale hook `{ev}` upstream — we neither register nor "
                         f"intentionally omit it (add a decoder arm + CODEWHALE_EVENTS, "
@@ -1805,7 +1867,7 @@ def run_checks(
                     )
 
     # --- opencode EventV2 types (only the FETCH is transient) --------------
-    if opencode_ours is not None:
+    if ours.opencode is not None:
         parts = [
             fetch_anchored(u, "opencode source", report)
             for u in OPENCODE_EVENT_URLS
@@ -1816,7 +1878,7 @@ def run_checks(
         readable = [p for p in parts if p is not None]
         text = "\n".join(readable) if len(readable) == len(parts) else None
         if text is not None:
-            for ev in sorted(opencode_ours - OPENCODE_TOLERATED):
+            for ev in sorted(ours.opencode - OPENCODE_TOLERATED):
                 # The type strings appear as `type: "session.created"` etc. in
                 # the EventV2.define / Schema.Literal definitions.
                 if f'"{ev}"' not in text:
@@ -1837,7 +1899,7 @@ def run_checks(
                     )
 
     # --- grok hook events + payload/transcript/registry names (FETCH transient)
-    if grok_ours is not None:
+    if ours.grok is not None:
         text = fetch_anchored(GROK_HOOK_URL, "grok hooks source", report)
         if text is not None:
             upstream = upstream_grok_hooks(text)
@@ -1849,14 +1911,14 @@ def run_checks(
                     "The grok event watch was SKIPPED.",
                 )
             else:
-                for ev in sorted(grok_ours):
+                for ev in sorted(ours.grok):
                     if ev not in upstream:
                         report.add_breaking(
                             f"grok hook `{ev}` (registered in GROK_EVENTS) is GONE from "
                             f"upstream event.rs — likely renamed; the registered key "
                             f"stops matching and that event silently never fires."
                         )
-                for ev in sorted(upstream - grok_ours - GROK_KNOWN_OMITTED):
+                for ev in sorted(upstream - ours.grok - GROK_KNOWN_OMITTED):
                     report.add_review(
                         f"new grok hook `{ev}` upstream — we neither register nor "
                         f"intentionally omit it (add a decoder arm + GROK_EVENTS, or "
@@ -1946,7 +2008,7 @@ def run_checks(
             )
 
     # --- Copilot event types (only the FETCH is transient) -----------------
-    if copilot_ours is not None:
+    if ours.copilot is not None:
         text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", report)
         # The `SessionEvent` union is this document's ANCHOR — it is the
         # declaration that owns every envelope `type` and, transitively, every
@@ -1980,7 +2042,7 @@ def run_checks(
                     "The Copilot event watch was SKIPPED.",
                 )
             else:
-                for ev in sorted(copilot_ours):
+                for ev in sorted(ours.copilot):
                     if ev not in upstream:
                         report.add_breaking(
                             f"Copilot event `{ev}` (decoded in source/copilot.rs) is GONE "
@@ -2023,14 +2085,14 @@ def run_checks(
                     )
 
     # --- omp session-entry types + wire names (only the FETCH is transient) --
-    if omp_ours is not None:
+    if ours.omp is not None:
         text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
         if text is not None:
             # Entry `type` discriminators are QUOTED TS literal types
             # (`type: "message"`); the names are generic English words, so a
             # bare \b match would stay green on prose/comment uses after an
             # upstream rename — quote-anchored on purpose.
-            for name in sorted(omp_ours):
+            for name in sorted(ours.omp):
                 if f'"{name}"' not in text:
                     report.add_breaking(
                         f"omp entry type `{name}` (decoded in source/omp.rs) is GONE "
@@ -2108,10 +2170,10 @@ def run_checks(
                     )
 
     # --- Cursor hook events (only the FETCH is transient) ------------------
-    if cursor_ours is not None:
+    if ours.cursor is not None:
         text = fetch_anchored(CURSOR_HOOKS_URL, "Cursor hooks doc", report)
         if text is not None:
-            for ev in sorted(cursor_ours):
+            for ev in sorted(ours.cursor):
                 # Word-boundary token match (the docs render the names inline /
                 # in tables, not as quoted literals). ONE-DIRECTIONAL: a depended
                 # event missing from the page is breaking; a new upstream event
@@ -2124,10 +2186,10 @@ def run_checks(
                     )
 
     # --- OpenClaw gateway hook events (only the FETCH is transient) ---------
-    if openclaw_ours is not None:
+    if ours.openclaw is not None:
         text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", report)
         if text is not None:
-            for ev in sorted(openclaw_ours):
+            for ev in sorted(ours.openclaw):
                 # The union lists each hook as a quoted string literal
                 # (`| "before_agent_run"` / `"before_agent_run",`). ONE-DIRECTIONAL:
                 # a registered event missing upstream is breaking; new upstream
@@ -2161,7 +2223,7 @@ def run_checks(
     # --- OpenClaw default gateway port (the plugin's copied fallback) --------
     text = try_fetch(OPENCLAW_PATHS_URL, "OpenClaw config/paths", report)
     if text is not None:
-        ours = openclaw_plugin_default_port()
+        our_port = openclaw_plugin_default_port()
         m = re.search(r"DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", text)
         if m is None:
             report.add_blind(
@@ -2169,7 +2231,7 @@ def run_checks(
                 "src/config/paths.ts",
                 "The plugin's fallback-port comparison was SKIPPED.",
             )
-        elif ours is None:
+        elif our_port is None:
             report.add_blind(
                 "our own `DEFAULT_GATEWAY_PORT` copy",
                 "install/openclaw_plugin.js",
@@ -2177,19 +2239,19 @@ def run_checks(
                 "and was SKIPPED (did OUR const get renamed?).",
                 our_source=True,
             )
-        elif m.group(1) != ours:
+        elif m.group(1) != our_port:
             report.add_breaking(
                 f"OpenClaw's DEFAULT_GATEWAY_PORT is now {m.group(1)} but "
-                f"openclaw_plugin.js still falls back to {ours} — a gateway on the new "
+                f"openclaw_plugin.js still falls back to {our_port} — a gateway on the new "
                 f"default would be stamped with the stale port (a phantom second mascot "
                 f"until its TTL sweeps it)."
             )
 
     # --- Hermes shell-hook events + payload fields (only the FETCH is transient)
-    if hermes_ours is not None:
+    if ours.hermes is not None:
         text = fetch_anchored(HERMES_HOOK_URL, "Hermes hooks", report)
         if text is not None:
-            for ev in sorted(hermes_ours):
+            for ev in sorted(ours.hermes):
                 # `_DEFAULT_PAYLOADS` lists each event as a quoted dict key
                 # (`"on_session_start":`). ONE-DIRECTIONAL: a registered event
                 # missing upstream is breaking; new upstream events are ignored
@@ -2215,10 +2277,10 @@ def run_checks(
                     )
 
     # --- Kimi hook events (only the FETCH is transient) --------------------
-    if kimi_ours is not None:
+    if ours.kimi is not None:
         text = fetch_anchored(KIMI_HOOKS_URL, "Kimi hooks doc", report)
         if text is not None:
-            for ev in sorted(kimi_ours):
+            for ev in sorted(ours.kimi):
                 # Word-boundary token match (the doc renders each PascalCase name
                 # inline / in a summary table, not as a quoted literal). Mirrors
                 # the Cursor check. ONE-DIRECTIONAL: a depended event missing from
@@ -2233,15 +2295,15 @@ def run_checks(
                     )
 
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
-    if dispatch_names is not None:
+    if ours.dispatch_names is not None:
         tools = fetch_anchored(CC_TOOLS_URL, "CC tools-reference", report)
         if tools is not None:
             # At least one name we'd detect by-name must still be the documented
             # dispatch tool. (Losing a legacy name like `Task` is fine.)
-            present = [n for n in dispatch_names if re.search(rf"`{re.escape(n)}`", tools)]
+            present = [n for n in ours.dispatch_names if re.search(rf"`{re.escape(n)}`", tools)]
             if not present:
                 report.add_breaking(
-                    f"None of our known dispatch tool names {sorted(dispatch_names)} "
+                    f"None of our known dispatch tool names {sorted(ours.dispatch_names)} "
                     f"appear in CC tools-reference — the subagent tool was likely "
                     f"renamed again. Update make_tool_detail's known names. (Semantic "
                     f"subagent_type detection still works, but the name fallback is "
@@ -2256,7 +2318,7 @@ def run_checks(
     # CC_LIFECYCLE_SURFACE_MARKERS).
     hooks_doc = fetch_anchored(CC_HOOKS_URL, "CC hooks doc", report)
     if hooks_doc is not None:
-        if cc_ours is not None:
+        if ours.cc is not None:
             upstream = upstream_cc_hook_events(hooks_doc)
             if upstream is None:
                 report.add_blind(
@@ -2265,14 +2327,14 @@ def run_checks(
                     "The CC event watch was SKIPPED.",
                 )
             else:
-                for ev in sorted(cc_ours):
+                for ev in sorted(ours.cc):
                     if ev not in upstream:
                         report.add_breaking(
                             f"CC hook `{ev}` (registered in install/claude.rs "
                             f"EVENTS) is GONE from hooks.md — likely renamed; "
                             f"the decoder will silently drop it."
                         )
-                for ev in sorted(upstream - cc_ours - CC_KNOWN_OMITTED):
+                for ev in sorted(upstream - ours.cc - CC_KNOWN_OMITTED):
                     report.add_review(
                         f"new CC hook `{ev}` upstream — we neither register nor "
                         f"intentionally omit it (add a decoder arm + "
@@ -2287,68 +2349,10 @@ def run_checks(
 def main() -> int:
     report = Report()
 
-    # Read what WE depend on from our OWN source first. A failure here means the
-    # monitor itself is broken (decoder.rs / install/codex.rs refactored away from
-    # what the parsers expect) — that is a LOUD PROBE-HEALTH signal (still exit 1;
-    # our own parsers being stale is the textbook case of "the probe missed"),
-    # never a transient one, or drift monitoring would silently stop with zero alarm.
-    codex_ours = None
-    codex_rollout = None
-    cc_ours = None
-    dispatch_names = None
-    reasonix_ours = None
-    codewhale_ours = None
-    opencode_ours = None
-    copilot_ours = None
-    omp_ours = None
-    cursor_ours = None
-    openclaw_ours = None
-    hermes_ours = None
-    grok_ours = None
-    kimi_ours = None
-    try:
-        codex_ours = read_codex_events()
-        codex_rollout = read_codex_rollout_types()
-        cc_ours = read_cc_events()
-        dispatch_names = read_dispatch_names()
-        reasonix_ours = read_reasonix_events()
-        codewhale_ours = read_codewhale_events()
-        opencode_ours = read_opencode_events()
-        copilot_ours = read_copilot_events()
-        omp_ours = read_omp_entry_types()
-        cursor_ours = read_cursor_events()
-        openclaw_ours = read_openclaw_events()
-        hermes_ours = read_hermes_events()
-        grok_ours = read_grok_events()
-        kimi_ours = read_kimi_events()
-    except Exception as e:  # noqa: BLE001
-        report.add_blind(
-            f"what WE depend on, reading our own source ({e})",
-            "check_upstream_drift.py's parsers",
-            "The parsers are stale (decoder.rs / install refactored?) and the "
-            "monitor is blind until the script is fixed. Nothing upstream was "
-            "checked.",
-            our_source=True,
-        )
+    ours = read_our_names(report)
 
     try:
-        run_checks(
-            codex_ours,
-            codex_rollout,
-            cc_ours,
-            dispatch_names,
-            reasonix_ours,
-            codewhale_ours,
-            opencode_ours,
-            copilot_ours,
-            omp_ours,
-            cursor_ours,
-            openclaw_ours,
-            hermes_ours,
-            grok_ours,
-            kimi_ours,
-            report=report,
-        )
+        run_checks(ours, report=report)
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         report.add_error(
