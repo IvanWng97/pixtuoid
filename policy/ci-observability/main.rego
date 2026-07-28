@@ -23,6 +23,9 @@ actionlint_config_path := ".github/actionlint.yaml"
 actionlint_claude_wif_ignore := "input \"anthropic_(federation_rule_id|organization_id|service_account_id)\" is not defined in action \"anthropics/claude-code-action@v1\""
 actionlint_release_queue_ignore := "unexpected key \"queue\" for \"concurrency\" section"
 zizmor_config_path := ".github/zizmor.yml"
+dependabot_config_path := ".github/dependabot.yml"
+composite_action_root := ".github/actions"
+github_actions_ecosystem := "github-actions"
 cache_cleanup_workflow_path := ".github/workflows/cache-cleanup.yml"
 claude_action := "anthropics/claude-code-action@v1"
 json_schema_flag := "--json-schema"
@@ -35,7 +38,18 @@ claude_manual_commands := {
 	claude_security_workflow_path: "/security-review",
 }
 
-claude_automatic_condition := `(github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch)`
+claude_tag_workflow_path := ".github/workflows/claude.yml"
+claude_same_repo_head_condition := "github.event.pull_request.head.repo.full_name == github.repository"
+
+# The events whose GITHUB_REF is refs/pull/<n>/merge, so a ref-less checkout
+# stages fork-authored files; issues/issue_comment get the default branch.
+claude_pull_request_event_names := {"pull_request_review", "pull_request_review_comment"}
+
+claude_automatic_condition := sprintf(
+	`(github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && %s && github.event.pull_request.base.ref == github.event.repository.default_branch)`,
+	[claude_same_repo_head_condition],
+)
+
 claude_trusted_association_condition := `contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)`
 pr_resolution_step_name := "Resolve pull request"
 claude_model_step_name := "Run read-only Claude review"
@@ -145,6 +159,41 @@ entries_using(action) := [entry |
 	some entry in uses_entries
 	action_matches(entry.uses, action)
 ]
+
+# `.github/actions/upload-codecov/action.yml` -> `/.github/actions/upload-codecov`,
+# the leading-slash directory form a Dependabot `directories` entry matches.
+dependabot_directory(path) := directory if {
+	segments := split(path, "/")
+	directory := sprintf("/%s", [concat("/", array.slice(segments, 0, count(segments) - 1))])
+}
+
+# Both spellings are legitimate: `directories` (one entry for all composites)
+# and the singular `directory` (the pre-2024 one-entry-per-composite workaround).
+# They are NOT interchangeable — GitHub's options reference: "The `directories`
+# key supports globbing and the wildcard character `*`. These features are not
+# supported by the `directory` key." So copying the glob into the singular key
+# resolves nothing upstream, and must not read as coverage here.
+declared_actions_directory_globs contains directory if {
+	some update in object.get(documents[dependabot_config_path], "updates", [])
+	object.get(update, "package-ecosystem", "") == github_actions_ecosystem
+	some directory in object.get(update, "directories", [])
+}
+
+declared_actions_directory_literals contains directory if {
+	some update in object.get(documents[dependabot_config_path], "updates", [])
+	object.get(update, "package-ecosystem", "") == github_actions_ecosystem
+	directory := object.get(update, "directory", "")
+	directory != ""
+}
+
+dependabot_covers(directory) if {
+	some declared in declared_actions_directory_globs
+	glob.match(declared, ["/"], directory)
+}
+
+dependabot_covers(directory) if {
+	directory in declared_actions_directory_literals
+}
 
 codecov_action_reference(value) if {
 	parts := split(value, "@")
@@ -304,6 +353,43 @@ rust_health_steps := [entry |
 claude_trigger_workflow_paths := {
 	claude_review_workflow_path,
 	claude_security_workflow_path,
+}
+
+# Identified by the action it runs, not by its job NAME: keying on the literal
+# name `claude` let a rename retire the head guard below in silence.
+claude_tag_jobs := [job |
+	some job in object.get(documents[claude_tag_workflow_path], "jobs", {})
+	some step in object.get(job, "steps", [])
+	action_matches(object.get(step, "uses", ""), claude_action)
+]
+
+claude_tag_condition := normalized_claude_condition(object.get(claude_tag_jobs[0], "if", ""))
+
+claude_tag_arms(event) := [arm |
+	some arm in split(claude_tag_condition, " || ")
+	contains(arm, sprintf("github.event_name == '%s'", [event]))
+]
+
+# `on:` takes a mapping (each event carrying `types:`) OR a bare sequence of
+# event names; both reach the job, so both count as a trigger.
+claude_tag_triggers_event(event) if {
+	object.get(documents, [claude_tag_workflow_path, "on", event], "missing") != "missing"
+}
+
+claude_tag_triggers_event(event) if {
+	some declared in object.get(documents[claude_tag_workflow_path], "on", [])
+	declared == event
+}
+
+# Guarded means the event is REACHABLE only through guarded arms: at least one
+# arm names it (none at all = a missing condition, which gates nothing) and
+# every arm that names it carries the head check.
+claude_tag_event_is_guarded(event) if {
+	arms := claude_tag_arms(event)
+	count(arms) > 0
+	every arm in arms {
+		contains(arm, claude_same_repo_head_condition)
+	}
 }
 
 claude_reusable := object.get(documents, claude_reusable_workflow_path, {})
@@ -570,6 +656,27 @@ deny contains msg if {
 	count(claude_caller_jobs(path)) == 1
 	not claude_caller_condition_is_trusted(path)
 	msg := sprintf("%s must preserve the trusted automatic and manual review guards", [path])
+}
+
+# claude.yml is the only contents:write Claude job and it checks out without a
+# ref, so on these events an unguarded arm stages fork-authored files — a
+# repo-root CLAUDE.md among them — as the agent's own instructions. Keyed off
+# the `on:` trigger set, not the `if:` arms — a condition that never mentions
+# the event is a SKIPPED job, but a MISSING condition is an ungated one, and
+# deleting the whole `if:` block is the cheapest way to lose the guard.
+deny contains msg if {
+	some event in claude_pull_request_event_names
+	claude_tag_triggers_event(event)
+	not claude_tag_event_is_guarded(event)
+	msg := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
+}
+
+# The existence half: the guard above resolves the job through its action step,
+# so a workflow where no job runs the action leaves nothing to check.
+deny contains msg if {
+	_ := documents[claude_tag_workflow_path]
+	count(claude_tag_jobs) != 1
+	msg := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
 }
 
 deny contains msg if {
@@ -1020,14 +1127,33 @@ deny contains msg if {
 	msg := sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path])
 }
 
+# The actions ignore rule below suppresses patch and minor, so MAJOR is the only
+# class that ever opens a PR — and zizmor accepts a symbolic ref regardless of
+# age. Dependabot is therefore the sole mechanism that reports a major bump, and
+# `directory: /` searches only `.github/workflows` plus a root `action.yml`: a
+# pin extracted into a composite silently leaves coverage, which is what
+# #784/#785 did to four of them. Keyed off the pins that EXIST, so a composite
+# holding nothing but sibling `./` references needs no entry.
+deny contains msg if {
+	some entry in uses_entries
+	startswith(entry.path, sprintf("%s/", [composite_action_root]))
+	not startswith(entry.uses, "./")
+	directory := dependabot_directory(entry.path)
+	not dependabot_covers(directory)
+	msg := sprintf("%s must list a github-actions directory covering %s: %s is otherwise invisible to Dependabot", [dependabot_config_path, directory, entry.uses])
+}
+
 deny contains msg if {
 	object.get(codeql, ["on", "push", "branches"], null) != ["main"]
 	msg := sprintf("%s must run on pushes to main", [codeql_workflow_path])
 }
 
+# Only a bare `pull_request:` analyzes EVERY pull request; any filter (types,
+# branches, paths) lets some PR merge unanalyzed, so the pin is exact-null. The
+# path form keeps the rule defined — and firing — when `on:` itself is gone.
 deny contains msg if {
-	object.get(codeql.on, "pull_request", "missing") != null
-	msg := sprintf("%s must run on pull requests", [codeql_workflow_path])
+	object.get(codeql, ["on", "pull_request"], "missing") != null
+	msg := sprintf("%s must analyze every pull request: keep on.pull_request present and unfiltered", [codeql_workflow_path])
 }
 
 deny contains msg if {

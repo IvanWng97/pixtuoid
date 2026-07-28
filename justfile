@@ -149,8 +149,9 @@ ci-observability:
     ((${#files[@]})) || { echo "error: no GitHub Actions YAML files found" >&2; exit 1; }
     [[ -s .github/actionlint.yaml ]] || { echo "error: .github/actionlint.yaml is missing or empty" >&2; exit 1; }
     [[ -s .github/zizmor.yml ]] || { echo "error: .github/zizmor.yml is missing or empty" >&2; exit 1; }
+    [[ -s .github/dependabot.yml ]] || { echo "error: .github/dependabot.yml is missing or empty" >&2; exit 1; }
     [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
-    files+=(.github/actionlint.yaml .github/zizmor.yml site/package.json)
+    files+=(.github/actionlint.yaml .github/zizmor.yml .github/dependabot.yml site/package.json)
     combined="$(mktemp)"
     policy_test_results="$(mktemp)"
     trap 'rm -f "$combined" "$policy_test_results"' EXIT
@@ -161,9 +162,11 @@ ci-observability:
     # (an unused argument shipped here undetected); the coverage threshold is a
     # RATCHET on #789 — an uncovered rule head means "the body was never true",
     # i.e. no test makes that rule fire, which is how two vacuous rules reached
-    # main. Raise the number as rules gain tests; never lower it.
+    # main. Raise the number as rules gain tests; never lower it. Every deny head
+    # now fires in a test, so the uncovered remainder is helper lines — a COUNT
+    # here would rot on the next rule, so don't reintroduce one.
     opa check --strict policy/ci-observability
-    opa test --coverage --threshold 95 policy/ci-observability >/dev/null
+    opa test --coverage --threshold 97 policy/ci-observability >/dev/null
     if ! conftest verify --policy policy/ci-observability --output json >"$policy_test_results"; then
         yq -P '.' "$policy_test_results" >&2
         exit 1

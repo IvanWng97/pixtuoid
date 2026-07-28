@@ -173,9 +173,12 @@ given change/tree, say so, don't skip it.
   the group set, whereupon the membership rule instructed the maintainer to
   REMOVE a group from the ONLY required status check protecting main — a
   confident wrong instruction carrying a gate's authority, worse than silence.
-  Mutation testing proves only the first direction; `deny_coverage_test.sh`
-  mechanically enforces that a deny message is asserted somewhere, and the
-  legitimate-variant half stays this factor's job; **the message is half the
+  Mutation testing proves only the first direction; the policy layer's
+  `opa test --coverage` ratchet (inside `just ci-observability`) is an
+  AGGREGATE line-coverage floor, not a per-rule assertion requirement — it is
+  what surfaced the Conftest `deny` heads whose bodies had never once been true
+  (#789), but a brand-new untested rule barely moves the number and still
+  passes, so BOTH directions stay this factor's job; **the message is half the
   rule** — a deny/error/panic string is the ONLY part of a check a future
   maintainer reads, so it must name the actual requirement and the remedy, not a
   plausible-sounding neighbour: #788's OIDC rule denied with "only the tests call

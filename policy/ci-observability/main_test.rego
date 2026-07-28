@@ -334,6 +334,95 @@ test_codecov_token_forwarding_is_pinned if {
 	sprintf("%s must not declare or forward a Codecov upload token", [codecov_authority_path]) in violations
 }
 
+test_conditioned_codecov_upload_is_denied if {
+	fixture := {"documents": [{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{
+			"uses": codecov_action,
+			"if": post_test_condition,
+		}]}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s Codecov step must remain unconditional", [codecov_authority_path]) in violations
+}
+
+# The authority action has its own token rule; this one covers every CALLER of
+# the wrapper, where a re-introduced token would otherwise pass unseen.
+test_wrapper_caller_forwarding_a_token_is_denied if {
+	path := ".github/workflows/extra.yml"
+	fixture := {"documents": [{
+		"path": path,
+		"contents": {"jobs": {"test": {"steps": [{
+			"uses": codecov_wrapper,
+			"with": {"token": "${{ secrets.UPLOAD_TOKEN }}"},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must not forward a Codecov upload token", [path]) in violations
+}
+
+test_retired_codecov_token_secret_is_denied if {
+	every path in {ci_workflow_path, codecov_workflow_path, codecov_authority_path} {
+		fixture := {"documents": [{
+			"path": path,
+			"contents": {"jobs": {"test": {"env": {"TOKEN": "${{ secrets.CODECOV_TOKEN }}"}}}},
+		}]}
+		violations := deny with input as fixture
+		sprintf("%s must not reference the retired CODECOV_TOKEN secret", [path]) in violations
+	}
+}
+
+codecov_warning_step(env) := {
+	"path": codecov_authority_path,
+	"contents": {"runs": {"steps": [{
+		"name": upload_warning_step_name,
+		"if": "${{ steps.upload.outcome == 'failure' }}",
+		"env": env,
+		"run": "echo warning",
+	}]}},
+}
+
+# An advisory upload failure that does not name which report/flag/type failed is
+# a warning nobody can act on, so all three env pins are separate rules.
+test_codecov_warning_step_must_identify_the_failed_upload if {
+	fixture := {"documents": [codecov_warning_step({})]}
+	violations := deny with input as fixture
+	every message in {
+		"failure step must identify inputs.file",
+		"failure step must identify inputs.flag",
+		"failure step must identify inputs.report_type",
+	} {
+		sprintf("%s %s", [codecov_authority_path, message]) in violations
+	}
+}
+
+test_codecov_warning_step_naming_every_input_is_accepted if {
+	fixture := {"documents": [codecov_warning_step({
+		"REPORT_FILE": codecov_input_file,
+		"REPORT_FLAG": codecov_input_flag,
+		"REPORT_TYPE": codecov_input_report_type,
+	})]}
+	violations := deny with input as fixture
+	every message in {
+		"failure step must identify inputs.file",
+		"failure step must identify inputs.flag",
+		"failure step must identify inputs.report_type",
+	} {
+		not sprintf("%s %s", [codecov_authority_path, message]) in violations
+	}
+}
+
+# `queue` is a release-only compatibility field carried by an actionlint ignore;
+# anywhere else it is an unrecognized key that silently serializes nothing.
+test_release_queue_field_outside_release_is_denied if {
+	fixture := {"documents": [{
+		"path": ci_workflow_path,
+		"contents": {"concurrency": {"queue": true}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must not use the release-only queue compatibility field", [ci_workflow_path]) in violations
+}
+
 test_report_presence_check_reads_inputs_file if {
 	fixture := {"documents": [{
 		"path": codecov_authority_path,
@@ -968,6 +1057,210 @@ test_codeql_health_gate_before_upload_is_accepted if {
 	not sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
 }
 
+claude_tag_head_guard_message(event) := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
+
+claude_tag_single_job_message := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
+
+claude_tag_triggers := {
+	"issues": {"types": ["opened"]},
+	"issue_comment": {"types": ["created"]},
+	"pull_request_review": {"types": ["submitted"]},
+	"pull_request_review_comment": {"types": ["created"]},
+}
+
+claude_tag_workflow(job_name, job) := {"documents": [{
+	"path": claude_tag_workflow_path,
+	"contents": {
+		"on": claude_tag_triggers,
+		"jobs": {job_name: job},
+	},
+}]}
+
+claude_tag_condition_text(review_arm_suffix) := sprintf(
+	"(github.event_name == 'issues' && trusted) || (github.event_name == 'issue_comment' && trusted) || (github.event_name == 'pull_request_review'%s && trusted) || (github.event_name == 'pull_request_review_comment'%s && trusted)",
+	[review_arm_suffix, review_arm_suffix],
+)
+
+claude_tag_fixture(review_arm_suffix) := claude_tag_workflow("claude", {
+	"if": claude_tag_condition_text(review_arm_suffix),
+	"steps": [{"uses": claude_action}],
+})
+
+test_claude_tag_pull_request_arms_without_the_head_guard_are_denied if {
+	violations := deny with input as claude_tag_fixture("")
+	every event in claude_pull_request_event_names {
+		claude_tag_head_guard_message(event) in violations
+	}
+}
+
+# The worst shape, and the one an arm-keyed rule missed: with no condition at
+# all every arm is present-and-ungated, not absent.
+test_claude_tag_job_without_a_condition_is_denied if {
+	violations := deny with input as claude_tag_workflow("claude", {"steps": [{"uses": claude_action}]})
+	every event in claude_pull_request_event_names {
+		claude_tag_head_guard_message(event) in violations
+	}
+}
+
+# The sequence spelling of `on:` reaches the job just as the mapping does.
+test_claude_tag_sequence_trigger_form_is_denied if {
+	fixture := {"documents": [{
+		"path": claude_tag_workflow_path,
+		"contents": {
+			"on": ["issues", "pull_request_review", "pull_request_review_comment"],
+			"jobs": {"claude": {"steps": [{"uses": claude_action}]}},
+		},
+	}]}
+	violations := deny with input as fixture
+	every event in claude_pull_request_event_names {
+		claude_tag_head_guard_message(event) in violations
+	}
+}
+
+# Renaming the job away from `claude` used to silence the guard entirely.
+test_claude_tag_renamed_job_is_still_guarded if {
+	violations := deny with input as claude_tag_workflow("respond", {
+		"if": claude_tag_condition_text(""),
+		"steps": [{"uses": claude_action}],
+	})
+	every event in claude_pull_request_event_names {
+		claude_tag_head_guard_message(event) in violations
+	}
+	not claude_tag_single_job_message in violations
+}
+
+test_claude_tag_workflow_without_the_action_is_denied if {
+	violations := deny with input as claude_tag_workflow("claude", {"steps": [{"uses": "actions/checkout@v7"}]})
+	claude_tag_single_job_message in violations
+}
+
+# The issues/issue_comment arms carry no pull_request object, so demanding the
+# guard of them would deny a workflow that is not exposed in the first place.
+test_claude_tag_guarded_pull_request_arms_are_accepted if {
+	violations := deny with input as claude_tag_fixture(sprintf(" && %s", [claude_same_repo_head_condition]))
+	every event in claude_pull_request_event_names {
+		not claude_tag_head_guard_message(event) in violations
+	}
+	not claude_tag_single_job_message in violations
+}
+
+# Dropping BOTH the arm and its `on:` entry retires the exposure, so the rule
+# keyed off `on:` must stay silent — the guard tracks reachability, not arms.
+test_claude_tag_dropping_a_pull_request_trigger_is_accepted if {
+	fixture := {"documents": [{
+		"path": claude_tag_workflow_path,
+		"contents": {
+			"on": {"issues": {"types": ["opened"]}},
+			"jobs": {"claude": {
+				"if": "(github.event_name == 'issues' && trusted)",
+				"steps": [{"uses": claude_action}],
+			}},
+		},
+	}]}
+	violations := deny with input as fixture
+	every violation in violations {
+		not contains(violation, "arm must require")
+	}
+}
+
+test_codeql_init_hardcoding_a_language_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"uses": "github/codeql-action/init@v4",
+			"with": {"languages": "rust"},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s CodeQL init must consume matrix.language", [codeql_workflow_path]) in violations
+}
+
+# init snapshots the workspace, so anything staged after it is invisible to the
+# extractor while the job still reports a successful analysis.
+test_codeql_init_before_its_inputs_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"uses": "github/codeql-action/init@v4"},
+			{"uses": "actions/checkout@v7"},
+			{
+				"name": rust_setup_step_name,
+				"if": rust_matrix_condition,
+				"run": "prepare",
+			},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must check out before CodeQL init", [codeql_workflow_path]) in violations
+	sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path]) in violations
+}
+
+test_codeql_init_after_its_inputs_is_accepted if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"uses": "actions/checkout@v7"},
+			{
+				"name": rust_setup_step_name,
+				"if": rust_matrix_condition,
+				"run": "prepare",
+			},
+			{"uses": "github/codeql-action/init@v4"},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	not sprintf("%s must check out before CodeQL init", [codeql_workflow_path]) in violations
+	not sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path]) in violations
+}
+
+codeql_pull_request_message := sprintf("%s must analyze every pull request: keep on.pull_request present and unfiltered", [codeql_workflow_path])
+
+test_codeql_dropping_the_pull_request_trigger_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"on": {"push": {"branches": ["main"]}}},
+	}]}
+	violations := deny with input as fixture
+	codeql_pull_request_message in violations
+}
+
+# A filtered trigger still "runs on pull requests", so the old wording accused
+# the maintainer of the opposite of what they did.
+test_codeql_filtered_pull_request_trigger_is_denied if {
+	every trigger in {
+		{"types": ["opened", "synchronize", "reopened"]},
+		{"branches": ["main"]},
+		{"paths-ignore": ["docs/**"]},
+	} {
+		fixture := {"documents": [{
+			"path": codeql_workflow_path,
+			"contents": {"on": {"pull_request": trigger}},
+		}]}
+		violations := deny with input as fixture
+		codeql_pull_request_message in violations
+	}
+}
+
+test_bare_codeql_pull_request_trigger_is_accepted if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"on": {"pull_request": null}},
+	}]}
+	violations := deny with input as fixture
+	not codeql_pull_request_message in violations
+}
+
+# Reaching through `codeql.on` made the whole rule undefined — silently green —
+# when the trigger block itself was gone, the one shape that disables every arm.
+test_codeql_losing_its_trigger_block_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": []}}},
+	}]}
+	violations := deny with input as fixture
+	codeql_pull_request_message in violations
+}
+
 # Dependabot pins a floating major to an exact release. That is a STRICTER pin
 # and must not be rejected — #786 failed with "must analyze with CodeQL v4
 # exactly once" against a step that was v4.37.1.
@@ -1021,4 +1314,104 @@ test_lighthouse_rules_tolerate_an_exact_upload_artifact_pin if {
 			not contains(violation, message)
 		}
 	}
+}
+
+composite_pin_fixture(dependabot_contents) := {"documents": [
+	{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{"uses": codecov_action}]}},
+	},
+	{"path": dependabot_config_path, "contents": dependabot_contents},
+]}
+
+uncovered_composite_message := sprintf(
+	"%s must list a github-actions directory covering /%s/upload-codecov: %s is otherwise invisible to Dependabot",
+	[dependabot_config_path, composite_action_root, codecov_action],
+)
+
+# #784/#785 moved four third-party pins into composites; `directory: /` searches
+# only `.github/workflows` and a root `action.yml`, so all four left coverage.
+test_composite_pin_outside_dependabot_coverage_is_rejected if {
+	fixture := composite_pin_fixture({"updates": [{
+		"package-ecosystem": "github-actions",
+		"directory": "/",
+	}]})
+	violations := deny with input as fixture
+	uncovered_composite_message in violations
+}
+
+test_missing_dependabot_config_leaves_composite_pins_uncovered if {
+	fixture := {"documents": [{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{"uses": codecov_action}]}},
+	}]}
+	violations := deny with input as fixture
+	uncovered_composite_message in violations
+}
+
+# Copying the glob into the SINGULAR key is the likeliest way to get this wrong,
+# and GitHub does not glob `directory` — Dependabot would resolve nothing.
+test_globbed_singular_directory_does_not_cover_the_pin if {
+	fixture := composite_pin_fixture({"updates": [{
+		"package-ecosystem": "github-actions",
+		"directory": "/.github/actions/*",
+	}]})
+	violations := deny with input as fixture
+	uncovered_composite_message in violations
+}
+
+# The glob form dependabot-core#6704 confirms works must stay silent.
+test_composite_directory_glob_covers_the_pin if {
+	fixture := composite_pin_fixture({"updates": [{
+		"package-ecosystem": "github-actions",
+		"directories": ["/", "/.github/actions/*"],
+	}]})
+	violations := deny with input as fixture
+	not uncovered_composite_message in violations
+}
+
+# So must the upstream one-entry-per-composite workaround, which predates
+# `directories` and uses the singular key.
+test_per_composite_directory_entry_covers_the_pin if {
+	fixture := composite_pin_fixture({"updates": [
+		{"package-ecosystem": "github-actions", "directory": "/"},
+		{
+			"package-ecosystem": "github-actions",
+			"directory": "/.github/actions/upload-codecov",
+		},
+	]})
+	violations := deny with input as fixture
+	not uncovered_composite_message in violations
+}
+
+# A composite that only calls sibling actions has nothing for Dependabot to
+# bump, so an uncovered directory is not a finding.
+test_local_composite_reference_needs_no_dependabot_coverage if {
+	fixture := {"documents": [
+		{
+			"path": ".github/actions/packaging-build/action.yml",
+			"contents": {"runs": {"steps": [{"uses": codecov_wrapper}]}},
+		},
+		{
+			"path": dependabot_config_path,
+			"contents": {"updates": [{
+				"package-ecosystem": "github-actions",
+				"directory": "/",
+			}]},
+		},
+	]}
+	violations := deny with input as fixture
+	every violation in violations {
+		not contains(violation, "invisible to Dependabot")
+	}
+}
+
+# A non-actions ecosystem's directory list must not launder the coverage.
+test_other_ecosystem_directories_do_not_cover_composites if {
+	fixture := composite_pin_fixture({"updates": [
+		{"package-ecosystem": "github-actions", "directory": "/"},
+		{"package-ecosystem": "npm", "directories": ["/.github/actions/*"]},
+	]})
+	violations := deny with input as fixture
+	uncovered_composite_message in violations
 }

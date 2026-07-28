@@ -1,6 +1,14 @@
 version: 2
 updates:
   - package-ecosystem: cargo
+    # A RED cargo run does not mean the lane stopped: dependabot-core updates one
+    # package at a time, so a release that needs a LOCKSTEP SIBLING bump
+    # (serde -> serde_core/serde_derive; toml/toml_edit -> toml_writer) leaves the
+    # regenerated lock unchanged and `cargo/file_updater/lockfile_updater.rb:76`
+    # raises `unknown_error`. The group loop skips that dependency and still opens
+    # the PR for the rest — #624 and #761 were both cut from red runs. The remedy
+    # is a human `cargo update -p <crate>`; the advisory axis is covered
+    # independently by audit.yml's daily `cargo-deny check advisories`.
     directory: /
     schedule:
       interval: weekly
@@ -20,7 +28,15 @@ updates:
       default-days: 7
 
   - package-ecosystem: github-actions
-    directory: /
+    # `directory: /` searches ONLY `.github/workflows` plus a root `action.yml`,
+    # so every third-party pin that #784/#785 moved into a composite left
+    # Dependabot's map. The second entry is the form dependabot-core#6704
+    # confirms works — `/.github/actions/*`, not `/.github/actions/*/action.yml`,
+    # which silently degrades back to workflows-only. `policy/ci-observability`
+    # denies a composite pin no declared directory covers.
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
     groups:

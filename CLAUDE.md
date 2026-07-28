@@ -202,12 +202,24 @@ the repository deliberately requires a symbolic ref or SHA (not SHA-only),
 every checkout drops persisted credentials, and accepted analyzer findings use
 exact inline suppressions with their reason instead of disabled audit classes.
 Dependabot applies a seven-day update cooldown across every configured
-ecosystem.
+ecosystem, and its `github-actions` entry lists `/.github/actions/*` beside `/`
+— `directory: /` searches only `.github/workflows` plus a root `action.yml`, so
+a third-party pin extracted into a composite would leave update coverage
+entirely; the policy denies a composite pin no declared directory covers.
 The two automatic Claude reviewers are thin trigger policies over
 `claude-readonly-review.yml`: the model job checks out only the trusted default
 branch, receives the exact PR diff as inert data, has read-only GitHub/tools,
 and emits schema-bound JSON; a separate no-checkout publisher revalidates the PR
-head before writing the review comment. Anthropic WIF is preferred when its
+head before writing the review comment. The human-triggered `@claude` workflow
+(`claude.yml`, the only `contents: write` Claude job) checks out without a ref,
+so its two `pull_request_review*` arms — the events whose `GITHUB_REF` is the PR
+merge ref — additionally require the head to live in this repository, and the
+policy keys that requirement off the workflow's `on:` triggers rather than its
+surviving `if:` arms (a condition that never names an event SKIPS the job; a
+missing condition gates nothing). The `issues`/`issue_comment` arms carry no
+`pull_request` object, so the same guard is not expressible there — and
+claude-code-action checks the PR head out itself, which keeps `issue_comment`
+exposed on fork PRs (#799). Anthropic WIF is preferred when its
 repository variables are configured, with the existing OAuth secret as a
 compatibility fallback. Codecov uploads likewise use job-scoped GitHub OIDC
 (fork PRs remain Codecov's tokenless path), never a repository upload token.
