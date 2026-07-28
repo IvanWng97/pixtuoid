@@ -1045,7 +1045,14 @@ mod tests {
         // is how one of them shipped raw, so the strip lives at the mint point —
         // asserted on `read_log`'s OWN return value, not on either presenter.
         let dir = tempfile::tempdir().unwrap();
-        let hostile = dir.path().join("l\u{1b}]0;PWNED\u{7}\u{202e}og");
+        // Windows forbids codepoints 1-31 in a filename (Microsoft's "Naming Files,
+        // Paths, and Namespaces"), so the Cc half of the vector cannot exist in a
+        // path there; U+202E is unreserved and still reaches the terminal.
+        let hostile = if cfg!(windows) {
+            dir.path().join("l\u{202e}og")
+        } else {
+            dir.path().join("l\u{1b}]0;PWNED\u{7}\u{202e}og")
+        };
         std::fs::create_dir(&hostile).unwrap(); // a directory never reads as NotFound
         let (_, warning) = read_log(&hostile);
         let warning = warning.expect("an unreadable log must be reported");
