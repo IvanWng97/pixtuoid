@@ -461,18 +461,32 @@ pub fn setup_terminal() -> Result<Term> {
     })
 }
 
-pub fn teardown_terminal(term: &mut Term) -> Result<()> {
+/// The mode half of the teardown, over an injected writer + raw-mode disabler so
+/// the unwind ORDER and its error policy are unit-testable without a real TTY.
+/// Every step runs even when an earlier one fails, and the FIRST error is
+/// returned: a `?` after the escape-sequence write would skip `disable_raw`
+/// exactly when it is needed most and strand the user's shell echo-less.
+fn unwind_terminal_modes<W: std::io::Write>(
+    out: &mut W,
+    disable_raw: impl FnOnce() -> std::io::Result<()>,
+) -> Result<()> {
     // DisableMouseCapture must run while raw mode is still ON: on Windows it
     // restores the input mode snapshotted at Enable time (which was raw-era),
     // so running it after disable_raw_mode re-raws the console and leaves
     // the user's shell echo-less. Raw mode goes off LAST.
-    execute!(
-        term.backend_mut(),
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    )?;
-    disable_raw_mode()?;
-    term.show_cursor()?;
+    let seq = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
+    let raw = disable_raw();
+    seq?;
+    raw?;
+    Ok(())
+}
+
+pub fn teardown_terminal(term: &mut Term) -> Result<()> {
+    let modes = unwind_terminal_modes(term.backend_mut(), disable_raw_mode);
+    // Unconditional: a failed mode restore must not ALSO leave the cursor hidden.
+    let cursor = term.show_cursor();
+    modes?;
+    cursor?;
     Ok(())
 }
 
@@ -1084,6 +1098,53 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // before the process exits. Covers every path above — q / Ctrl-C / terminate
     // / error / the `?` on teardown — because a local's Drop runs on all of them.
     result
+}
+
+#[cfg(test)]
+mod teardown_tests {
+    use super::unwind_terminal_modes;
+    use std::cell::Cell;
+
+    /// A writer whose every `write` fails — the "terminal went away mid-quit"
+    /// case (SIGHUP, closed pty) the teardown must still unwind through.
+    struct FailingWriter;
+    impl std::io::Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("terminal gone"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("terminal gone"))
+        }
+    }
+
+    #[test]
+    fn raw_mode_is_disabled_even_when_the_escape_write_fails() {
+        let disabled = Cell::new(false);
+        let err = unwind_terminal_modes(&mut FailingWriter, || {
+            disabled.set(true);
+            Ok(())
+        })
+        .expect_err("the write failure still propagates");
+        assert!(
+            disabled.get(),
+            "raw mode must be disabled even when the escape-sequence write failed \
+             — a `?` there strands the user's shell echo-less: {err:#}"
+        );
+    }
+
+    #[test]
+    fn the_escape_write_error_outranks_a_later_raw_mode_error() {
+        // Both steps fail: the FIRST error is the one reported, and the second
+        // step still ran (pinned by the test above).
+        let err = unwind_terminal_modes(&mut FailingWriter, || {
+            Err(std::io::Error::other("raw mode gone"))
+        })
+        .expect_err("both steps failed");
+        assert!(
+            err.to_string().contains("terminal gone"),
+            "the first failure is reported, got: {err:#}"
+        );
+    }
 }
 
 #[cfg(test)]
