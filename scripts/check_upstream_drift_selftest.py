@@ -689,6 +689,38 @@ def test_every_swept_url_declares_an_anchor() -> None:
         url = eval(f"d.{name}")  # noqa: S307 (module constants matched by the regex above)
         check(url in d.ANCHORS, f"{name} is swept but declares no ANCHORS entry")
 
+    # The OTHER spelling. Asserting only the `fetch_anchored` population leaves
+    # `try_fetch` as an unguarded way to add a presence sweep — which is how the
+    # design lens built its repro.
+    #
+    # Enumerating the *_URL CONSTANTS rather than the call sites, deliberately:
+    # a call-site regex has to keep up with how the fetch is spelled, and the
+    # first version of this very check missed `try_fetch(url, label, …)` in the
+    # ACP loop — the same loop-variable blindness it exists to catch. Every URL
+    # the module declares must be classified exactly once: anchored, or
+    # justified-unanchored with the reason written down.
+    urls: set[str] = set()
+    for name in dir(d):
+        if not (name.endswith("_URL") or name.endswith("_URLS")):
+            continue
+        value = getattr(d, name)
+        urls |= {value} if isinstance(value, str) else set(value)
+    classified = set(d.ANCHORS) | set(d.UNANCHORED_BY_DESIGN)
+    check(
+        not (urls - classified),
+        f"every fetched URL is anchored or justified in UNANCHORED_BY_DESIGN; "
+        f"unclassified: {sorted(urls - classified)}",
+    )
+    check(
+        not (classified - urls),
+        f"no classification for a URL the module no longer declares: "
+        f"{sorted(classified - urls)}",
+    )
+    check(
+        not (set(d.ANCHORS) & set(d.UNANCHORED_BY_DESIGN)),
+        "a document is either anchored or justified-unanchored, never both",
+    )
+
 
 def test_report_separates_verified_change_from_probe_health() -> None:
     """The two dispositions must not share a heading — that WAS the bug.

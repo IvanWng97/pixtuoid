@@ -674,6 +674,24 @@ ANCHORS: dict[str, Anchor] = {
 }
 
 
+# The other half of the ANCHORS population: documents fetched with plain
+# `try_fetch`, where a PARSER is the identity proof (it returns None on the wrong
+# content, and the caller files probe health). Written down so the selftest can
+# assert this set equals the live `try_fetch` call sites — otherwise "every swept
+# document is anchored" is only enforced for the `fetch_anchored` spelling, and
+# the next unanchored sweep just uses the other one.
+UNANCHORED_BY_DESIGN: dict[str, str] = {
+    CODEX_PROTOCOL_URL: "parser-gated: _enum_body / codex_turn_context_fields return None",
+    CODEX_MODELS_URL: "parser-gated: _enum_body(ResponseItem) returns None",
+    REASONIX_HOOK_URL: "parser-gated: upstream_reasonix_hooks returns None (gates the field sweep)",
+    CODEWHALE_HOOK_URL: "parser-gated: upstream_codewhale_hooks -> _enum_body returns None",
+    COPILOT_SCHEMA_URL: "parser-gated: the SessionEvent anyOf union gates all three sweeps",
+    OPENCLAW_PATHS_URL: "value comparison: both sides are read, no presence sweep",
+    ACP_V1_SCHEMA_URL: "parser-gated: upstream_acp_session_update_tags returns None",
+    ACP_V1_SCHEMA_UNSTABLE_URL: "parser-gated: same",
+}
+
+
 def probe_failed(
     what: str, where: str, consequence: str, *, our_source: bool = False
 ) -> str:
@@ -969,10 +987,8 @@ def read_dispatch_names() -> set[str]:
 
 
 def upstream_codex_hooks(text: str) -> set[str] | None:
-    # Brace-BALANCED body (`_enum_body`), not `(.*?)\}`: the non-greedy form stops
-    # at the FIRST `}`, so one struct variant (`Foo { bar: T }`) would truncate the
-    # enum and silently report every variant after it as GONE. Same class as the
-    # grok `\n\}` terminator that assumed a column-0 closing brace (#793).
+    """The Codex `HookEventName` variants. Reads the body through `_enum_body`
+    (see there for why guessing where an enum ends is what broke #793)."""
     body = _enum_body(text, "HookEventName")
     if body is None:
         return None
@@ -1030,10 +1046,17 @@ def _enum_body(text: str, enum_name: str) -> str | None:
 
 
 def _strip_nested(s: str) -> str:
-    """Remove line/doc comments then iteratively strip innermost `(…)`/`{…}`
-    (tuple params, struct-variant bodies, AND attr parens) so only top-level
-    variant idents survive — else a CamelCase field/param TYPE reads as a variant."""
-    s = re.sub(r"//[^\n]*", "", s)
+    """Iteratively strip innermost `(…)`/`{…}` (tuple params, struct-variant
+    bodies, AND attr parens) so only top-level variant idents survive — else a
+    CamelCase field/param TYPE reads as a variant.
+
+    PRECONDITION: comments are already gone — every caller receives an
+    `_enum_body` result, which strips them with `strip_rust_comments`. This used
+    to re-strip with a naive `//[^\\n]*`, which is not merely redundant: that
+    pattern eats to end-of-line from a `//` inside a STRING LITERAL, so one
+    `rename = "http://…"` attr would silently delete every variant after it on
+    that line. Two lexers, one un-doing the other's guarantee.
+    """
     prev = None
     while prev != s:
         prev = s
@@ -1401,13 +1424,14 @@ def upstream_copilot_field_names(text: str) -> set[str] | None:
 
 
 def upstream_codewhale_hooks(text: str) -> set[str] | None:
-    # The TUI shell-command hook enum `pub enum HookEvent { SessionStart, ... }`
-    # in crates/tui/src/hooks/config.rs (NOT the app-server `codewhale-hooks` sink enum
-    # in crates/hooks). serde `rename_all = "snake_case"`, so convert each
-    # CamelCase variant to the wire name we register. Variant lines are bare
-    # `Identifier,` — doc comments (`///`) start with `/` and are skipped.
-    # Brace-BALANCED body — see upstream_codex_hooks: `(.*?)\}` truncates at the
-    # first struct variant, dropping every variant after it into a phantom "GONE".
+    """The CodeWhale TUI shell-command hook wire names.
+
+    Reads `pub enum HookEvent` in `crates/tui/src/hooks/config.rs` — NOT the
+    app-server `codewhale-hooks` sink enum in `crates/hooks`, a different
+    mechanism sharing no configuration. serde `rename_all = "snake_case"`, so
+    each CamelCase variant converts to the name we register. Body via
+    `_enum_body` (see there on why the end of an enum is not guessable).
+    """
     body = _enum_body(text, "HookEvent")
     if body is None:
         return None
