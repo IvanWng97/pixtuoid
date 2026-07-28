@@ -3654,8 +3654,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             ..crate::floor::FloorMeta::ground()
         };
         let mut scene = SceneState::uniform(16);
-        let key =
-            DaemonInstanceKey::new(src, DaemonInstanceId::new(&port.to_string()).expect("id"));
+        let key = DaemonInstanceKey::new(src, DaemonInstanceId::new(port.to_string()).expect("id"));
         apply_presence(
             &mut scene,
             &key,

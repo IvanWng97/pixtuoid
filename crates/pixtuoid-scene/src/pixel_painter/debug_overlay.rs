@@ -84,35 +84,13 @@ fn paint_mask(buf: &mut RgbBuffer, layout: &Layout) {
     }
 }
 
-/// First A*-REACHABLE walkable cell scanning `(dx, dy)` from `origin`, stepping
-/// DEEPER through the contiguous walkable run past any coarse-rejected EDGE cell
-/// (e.g. a back-row desk's gap edge). Mirrors `core::approach_point`'s seat scan
-/// so the green dots land exactly where the agent actually routes; the `entered`
-/// guard stops at the first blocked pixel so it never hops a second obstacle.
-/// `None` if the side has no reachable cell. ONE scan for both the waypoint seats
-/// and the home desks below.
+/// The seat-approach scan, borrowed from the sim's own authority
+/// (`layout::first_reachable_on_side`) rather than mirrored here — this overlay
+/// is a VIEW over the router's decisions, so a second copy of the ladder (or of
+/// its scan bound) could make the green dots disagree with where agents route.
+/// ONE scan for both the waypoint seats and the home desks below.
 fn first_reachable_on_side(layout: &Layout, origin: Point, dx: i32, dy: i32) -> Option<Point> {
-    let mut entered = false;
-    for dist in 1..=SEAT_APPROACH_SCAN {
-        let cx = origin.x as i32 + dx * dist;
-        let cy = origin.y as i32 + dy * dist;
-        if cx < 0 || cy < 0 {
-            break;
-        }
-        let c = Point {
-            x: cx as u16,
-            y: cy as u16,
-        };
-        if layout.is_walkable(c.x, c.y) {
-            entered = true;
-            if layout.reachable.reaches(c) {
-                return Some(c);
-            }
-        } else if entered {
-            break;
-        }
-    }
-    None
+    crate::layout::first_reachable_on_side(&layout.walkable, &layout.reachable, origin, dx, dy)
 }
 
 fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
@@ -194,10 +172,6 @@ fn paint_routes(buf: &mut RgbBuffer, scene: &SceneState, motion: &HashMap<AgentI
     }
 }
 
-/// Scan this far from a seat centre to clear the (wide) furniture body and land
-/// on the first floor cell — mirrors `approach.rs::SEAT_APPROACH_SCAN`.
-const SEAT_APPROACH_SCAN: i32 = 14;
-
 /// Integer Bresenham line between two pixel points.
 fn line(buf: &mut RgbBuffer, a: Point, b: Point, c: Rgb) {
     let (mut x0, mut y0) = (a.x as i32, a.y as i32);
@@ -256,32 +230,16 @@ mod tests {
             buf.get(couch.pos.x, couch.pos.y)
         );
 
+        // Expected cells come from the SIM's own scan (`layout::
+        // first_reachable_on_side`), so this asserts the overlay marks exactly
+        // where the router would send the agent — not merely "something green
+        // near the couch".
         let def = furniture_def(couch.kind.furniture());
-        let mut found_green_approach = false;
-        for (dx, dy) in DIRS {
-            if !def.approach.allows(couch.facing, (dx, dy)) {
-                continue;
-            }
-            for dist in 1..=SEAT_APPROACH_SCAN {
-                let (cx, cy) = (
-                    couch.pos.x as i32 + dx * dist,
-                    couch.pos.y as i32 + dy * dist,
-                );
-                if cx < 0 || cy < 0 {
-                    break;
-                }
-                let c = Point {
-                    x: cx as u16,
-                    y: cy as u16,
-                };
-                if l.is_walkable(c.x, c.y) {
-                    if l.reachable.reaches(c) && greenish(buf.get(c.x, c.y)) {
-                        found_green_approach = true;
-                    }
-                    break;
-                }
-            }
-        }
+        let found_green_approach = DIRS.iter().any(|&(dx, dy)| {
+            def.approach.allows(couch.facing, (dx, dy))
+                && first_reachable_on_side(&l, couch.pos, dx, dy)
+                    .is_some_and(|c| greenish(buf.get(c.x, c.y)))
+        });
         assert!(
             found_green_approach,
             "at least one allowed, reachable approach cell must be tinted toward APPROACH (green)"
@@ -312,28 +270,11 @@ mod tests {
         // Scan from the CHAIR (== production `desk_approach_cell`), not the desk
         // corner — that is what makes every allowed side reachable.
         let def = furniture_def(Furniture::Desk);
-        let mut found_green_approach = false;
-        for (dx, dy) in DIRS {
-            if !def.approach.allows(Facing::South, (dx, dy)) {
-                continue;
-            }
-            for dist in 1..=SEAT_APPROACH_SCAN {
-                let (cx, cy) = (chair.x as i32 + dx * dist, chair.y as i32 + dy * dist);
-                if cx < 0 || cy < 0 {
-                    break;
-                }
-                let c = Point {
-                    x: cx as u16,
-                    y: cy as u16,
-                };
-                if l.is_walkable(c.x, c.y) {
-                    if l.reachable.reaches(c) && greenish(buf.get(c.x, c.y)) {
-                        found_green_approach = true;
-                    }
-                    break;
-                }
-            }
-        }
+        let found_green_approach = DIRS.iter().any(|&(dx, dy)| {
+            def.approach.allows(Facing::South, (dx, dy))
+                && first_reachable_on_side(&l, chair, dx, dy)
+                    .is_some_and(|c| greenish(buf.get(c.x, c.y)))
+        });
         assert!(
             found_green_approach,
             "at least one allowed, reachable desk approach cell must be tinted green"
