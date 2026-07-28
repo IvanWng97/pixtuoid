@@ -35,9 +35,16 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIX="$REPO/target/release/pixtuoid"
-SOCK="${TMPDIR:-/tmp}/pixtuoid-openclaw-cc-e2e.sock"
 PROJECTS="$HOME/.claude/projects"
 CFGDIR="$(mktemp -d)"
+# The socket lives inside a PRIVATE 0700 dir, never as a fixed name in the shared
+# temp dir: a fixed name makes two concurrent runs bind/`rm` each other's socket,
+# and on a shared /tmp it is pre-plantable by another user (nothing downstream
+# polices it — `ensure_owned_socket_dir` in hook/unix.rs deliberately leaves an
+# explicit PIXTUOID_SOCKET path alone). Same shape as replay-fixture.sh and the
+# sibling openclaw-multi-gateway-e2e.sh.
+SOCKDIR="$(mktemp -d)"
+SOCK="$SOCKDIR/pixtuoid.sock"
 PIXLOG="$(mktemp)"
 GWLOG="$(mktemp)"
 AGENTLOG="$(mktemp)"
@@ -80,11 +87,10 @@ cleanup() {
     # shellcheck disable=SC2086  # word-split is intended — one kill per listener pid
     [ -n "$port_pids" ] && kill -9 $port_pids 2>/dev/null
     [ -n "$PIXPID" ] && kill "$PIXPID" 2>/dev/null
-    rm -f "$SOCK" "$PIXLOG" "$GWLOG" "$AGENTLOG"
-    rm -rf "$CFGDIR"
+    rm -f "$PIXLOG" "$GWLOG" "$AGENTLOG"
+    rm -rf "$CFGDIR" "$SOCKDIR"
 }
 trap cleanup EXIT
-rm -f "$SOCK"
 
 # The backend's `cc·` label is the openclaw agent WORKSPACE's cwd basename (the
 # claude-cli backend runs there → its transcript keys on that cwd). Naming the
