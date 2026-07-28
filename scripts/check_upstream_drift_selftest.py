@@ -734,11 +734,28 @@ def test_enum_body_survives_struct_variants_and_indentation() -> None:
         f"a variant AFTER a struct variant survives (no first-`}}` truncation): {got}",
     )
 
-    indented = "mod outer {\n    pub enum HookEventName {\n        PreToolUse,\n    }\n}\n"
+    # The OVER-capture direction: an indented enum's own `}` is not at column 0,
+    # so the old `\n\}` form ran past it to the next top-level brace and swallowed
+    # the following `impl` block. `upstream_codex_hooks` scrapes every CamelCase
+    # word, so those idents became phantom variants — and a phantom is worse than
+    # a miss, because it makes a real rename look present. Measured on grok's real
+    # event.rs the over-capture was 2324 chars.
+    indented = (
+        "mod outer {\n"
+        "    pub enum HookEventName {\n"
+        "        PreToolUse,\n"
+        "    }\n"
+        "\n"
+        "    impl HookEventName {\n"
+        "        fn f(&self) -> PhantomVariant { PhantomVariant }\n"
+        "    }\n"
+        "}\n"
+    )
     got = d.upstream_codex_hooks(indented)
+    check(got is not None and "PreToolUse" in got, f"the real variant is found: {got}")
     check(
-        got is not None and "PreToolUse" in got,
-        f"an INDENTED enum still parses (no column-0 assumption): {got}",
+        got is not None and "PhantomVariant" not in got,
+        f"the body STOPS at the enum's own brace — no spill into the impl: {got}",
     )
 
     # A brace inside a comment must not unbalance the count...

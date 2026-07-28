@@ -954,15 +954,24 @@ def _snake_case(camel: str) -> str:
 def _enum_body(text: str, enum_name: str) -> str | None:
     """The brace-balanced body of `enum <enum_name> { … }`.
 
-    THE enum-body reader for every Rust surface we watch — the ad-hoc
-    `(.*?)\\}` / `(.*?)\\n\\}` regexes it replaced each carried a positional
-    assumption that a harmless upstream refactor breaks: the non-greedy form
-    stops at the FIRST `}` (one struct variant truncates the enum and every
-    variant after it reads as GONE), and the `\\n\\}` form additionally demands
-    a column-0 closing brace, so an indented/nested enum never matches at all
-    (#793: grok's enum moved inside a macro and all 15 variants read as
-    "upstream moved it"). Balancing counts braces instead of guessing where
-    the body ends.
+    THE enum-body reader for every Rust surface we watch. The ad-hoc regexes it
+    replaced each guessed where the body ENDS, and both guesses break on a
+    harmless upstream refactor:
+
+    * `(.*?)\\}` stops at the FIRST `}`, so a single struct variant
+      (`ToolCallBefore { name: String }`) truncates the enum and every variant
+      after it reads as GONE — a phantom rename per variant.
+    * `(.*?)\\n\\}` instead demands a column-0 closing brace, so an INDENTED
+      enum does not stop at its own brace; it runs on to the next top-level one,
+      over-capturing whatever lies between. Measured against grok's real
+      event.rs: 2324 characters, spilling into the following `impl` block —
+      whose CamelCase idents a variant scrape then admits as variants.
+
+    Balancing counts braces instead. NOT what fixed grok in #793, to be clear:
+    there the enum is macro-GENERATED, so its declaration holds `$variant`
+    placeholders and no amount of balancing recovers the names —
+    `upstream_grok_hooks` falls through to the `hook_events!` invocation table
+    for that. This removes a separate latent defect living on the same code.
 
     Comments are stripped FIRST because they are scanned for braces otherwise:
     a `// see Foo { bar }` doc line inside the enum would unbalance the count.
