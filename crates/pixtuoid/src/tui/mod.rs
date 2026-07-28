@@ -222,20 +222,30 @@ fn disconnect_source(
     }
 }
 
-/// Reflect the onboarding apply's outcomes into the LIVE connected-set.
+/// Reflect the onboarding apply's outcomes into the LIVE connected-set, and hand
+/// BACK one presentable line per failure.
+///
 /// `choices` and `outcomes` are index-aligned (`apply_choices` maps each choice
 /// in order). `NoOp` means "already in the DESIRED state — nothing written"
 /// (`sources::ChangeOutcome`), so it sets the gate to the desired flag rather
 /// than hardcoding it closed: a NoOp for a CHECKED row must leave the gate OPEN
 /// (an already-connected source the user just confirmed must not have its live
-/// agents evicted). A failed connect must NOT go live, and leaves a trace on
-/// the warn-floor log (doctor + the footer nudge read it).
+/// agents evicted). A failed connect must NOT go live.
+///
+/// The RETURN is the surfacing half. The warn-floor log is not a user surface —
+/// in TUI mode the alternate screen owns the terminal, and nothing in-session can
+/// read the line back (`doctor::scan_log_for_source` matches `pixtuoid::drift`
+/// breadcrumbs only, and `build_rows` computes its health verdict for CONNECTED
+/// rows, which a rolled-back one is not). Every sibling `Failed` presenter shows
+/// its message; the caller puts these on the Sources panel — see
+/// [`surface_onboarding_failures`].
 fn reflect_onboarding_outcomes(
     connected: &crate::runtime::ConnectedSources,
     choices: &[(&'static str, bool)],
     outcomes: &[(String, crate::sources::ChangeOutcome)],
-) {
+) -> Vec<String> {
     use crate::sources::ChangeOutcome;
+    let mut failures = Vec::new();
     for ((_, want), (id, oc)) in choices.iter().zip(outcomes) {
         match oc {
             ChangeOutcome::Connected => connected.set(id, true),
@@ -244,9 +254,32 @@ fn reflect_onboarding_outcomes(
             ChangeOutcome::Failed(e) => {
                 connected.set(id, false);
                 tracing::warn!("onboarding: {id} failed to connect: {e}");
+                let name =
+                    crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
+                failures.push(format!("{name}: connect failed \u{2014} {e}"));
             }
         }
     }
+    failures
+}
+
+/// Put an onboarding apply's failures where the user is actually looking: open
+/// the Sources panel and seed its result line — the SAME surface and wording its
+/// own `t` toggle renders, so the retry is one keystroke away. Nothing else can
+/// tell them: `warn_broken_installs` ran before the TUI, the footer nudge reads
+/// drift breadcrumbs only, and the rolled-back row's detail line reads the benign
+/// "press t to connect" with no reason attached.
+fn surface_onboarding_failures(
+    ui: &mut ui_state::UiState,
+    connected: &crate::runtime::ConnectedSources,
+    failures: Vec<String>,
+) {
+    if failures.is_empty() {
+        return;
+    }
+    let rows = connection::build_rows(&connected.snapshot(), &ui.read_conn_log());
+    ui.open_connection(rows);
+    ui.connection.last_result = Some(failures.join("  \u{b7}  "));
 }
 
 fn is_quit_chord(code: KeyCode, mods: KeyModifiers) -> bool {
@@ -927,8 +960,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 // Reflect each into the LIVE connected-set off its
                                 // ACTUAL outcome (a failed connect must NOT go live;
                                 // a NoOp keeps the DESIRED state) — see the helper.
-                                reflect_onboarding_outcomes(&connected, &choices, &outcomes);
+                                let failed =
+                                    reflect_onboarding_outcomes(&connected, &choices, &outcomes);
                                 ui.close_onboarding();
+                                surface_onboarding_failures(&mut ui, &connected, failed);
                             }
                             KeyAction::OnboardingSkip => {
                                 // Skip = mark onboarding done WITHOUT changing any
@@ -957,9 +992,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 // in-process gate must open THIS session too, else
                                 // their office stays empty until the next restart
                                 // re-seeds the gate from the (now true) flags. Also
-                                // logs any persist failure (its Failed arm).
-                                reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
+                                // reports any persist failure (its Failed arm).
+                                let failed =
+                                    reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
                                 ui.close_onboarding();
+                                surface_onboarding_failures(&mut ui, &connected, failed);
                             }
                         }
                     }
@@ -1999,6 +2036,81 @@ mod dispatch_tests {
         assert!(
             !connected.is_connected("cursor"),
             "a failed connect must NOT go live"
+        );
+    }
+
+    /// A failed onboarding connect is the ONE `ChangeOutcome::Failed` presenter
+    /// that used to drop its message: the CLI prints the row and exits non-zero,
+    /// the Sources panel renders it in the result line, onboarding only
+    /// `tracing::warn!`d it into a file the alternate screen hides. Reflect must
+    /// hand the reason BACK so the loop can put it on a real surface.
+    #[test]
+    fn a_failed_onboarding_connect_reports_the_reason_to_the_caller() {
+        use crate::sources::ChangeOutcome;
+        let connected = crate::runtime::ConnectedSources::default();
+        let choices: Vec<(&'static str, bool)> = vec![("cursor", true), ("antigravity", true)];
+        let outcomes = vec![
+            (
+                "cursor".to_string(),
+                ChangeOutcome::Failed("settings is valid JSON but not an object".into()),
+            ),
+            ("antigravity".to_string(), ChangeOutcome::Connected),
+        ];
+        let failures = super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
+        assert_eq!(
+            failures.len(),
+            1,
+            "only the failed row reports: {failures:?}"
+        );
+        let line = &failures[0];
+        assert!(
+            line.contains("settings is valid JSON but not an object"),
+            "the REASON must survive — it is the whole point: {line}"
+        );
+        let display_name = crate::install::target::by_source("cursor")
+            .expect("cursor is a target-bearing source")
+            .display_name;
+        assert!(
+            line.contains(display_name),
+            "the row must be named the way every other surface names it: {line}"
+        );
+        assert!(
+            line.contains("connect failed"),
+            "reuse the Sources panel's own wording: {line}"
+        );
+    }
+
+    /// The failure line has to land on a surface the user is looking at: the
+    /// Sources panel, opened on the failed row with the reason in its result
+    /// line (the `t` retry one keystroke away).
+    #[test]
+    fn onboarding_failures_open_the_sources_panel_with_the_reason() {
+        let connected = crate::runtime::ConnectedSources::default();
+        let mut ui = crate::tui::ui_state::UiState::new(
+            pixtuoid_scene::theme::ALL_THEMES[0],
+            crate::tui::welcome::WelcomeUi::from_detected(&[]),
+            false,
+            std::path::PathBuf::from("/tmp/sock"),
+            None,
+        );
+        assert!(!ui.modal().connection_open, "panel starts closed");
+
+        super::surface_onboarding_failures(&mut ui, &connected, Vec::new());
+        assert!(
+            !ui.modal().connection_open,
+            "a clean apply must not pop the panel"
+        );
+
+        super::surface_onboarding_failures(
+            &mut ui,
+            &connected,
+            vec!["Cursor: connect failed \u{2014} boom".to_string()],
+        );
+        assert!(ui.modal().connection_open, "a failure opens the panel");
+        assert_eq!(
+            ui.connection.last_result.as_deref(),
+            Some("Cursor: connect failed \u{2014} boom"),
+            "the reason rides the panel's own result line"
         );
     }
 
