@@ -278,7 +278,16 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   dial. `--led` itself is a HARDWARE hue (global.css: "HARDWARE components …
   are `.hw-panel` … dark `--screen` ground"); the dial is the one place it is
   used with no `--screen` under it, hence its own token rather than a fourth
-  bare `--led` site.
+  bare `--led` site. Text on the page's OPAQUE DOM plates is a third population
+  with a third sweep, "opaque-plate text clears WCAG AA in every theme" — and
+  that one runs **dracula** too. Dracula is visitor-reachable (`?theme=dracula`
+  via `VALID_THEMES`, plus `Base.astro`'s keydown egg) but nothing measured it:
+  the office sweep is day+night on purpose (dracula's `--bg` darkens the same
+  way night's does, so it piggybacks) and Lighthouse only ever scores the
+  default theme. Its own palette steps much further from `--bg` to `--surface-2`
+  than day/night do, which is why its `--fg-muted` and upstream Dracula Purple
+  needed their own tuning against its own plates rather than inheriting the
+  assumption that "dark theme ⇒ fine".
   Pinned by `smoke.spec.ts` ("crisp AA captions
   overlay the live office" — incl. the 3-span split with a colored prefix —
   + the reduced-motion hide twin). This layer is part

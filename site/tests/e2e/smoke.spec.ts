@@ -1940,6 +1940,81 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
   }
 });
 
+test('opaque-plate text clears WCAG AA in every theme (day + night + dracula)', async ({
+  page,
+}) => {
+  // The sweep above grades text painted over the office CANVAS. This one grades
+  // the page's opaque DOM plates — the terminal chrome bar (--surface-2), the
+  // stage OSD chips / caption / sky ticks and the docs pager (--surface), and
+  // the inline code chip inside a prose link (the accent hue on --surface-2).
+  // DRACULA is the point: it is visitor-reachable (`?theme=dracula`, validated
+  // by VALID_THEMES, plus Base.astro's keydown egg) but it is the one theme
+  // NOTHING measured — the office sweep runs day+night by design (dracula's
+  // --bg darkens the same way night's does) and Lighthouse only ever scores the
+  // default theme, so dracula's own --fg-muted/--coral had never been checked
+  // against dracula's own plates.
+  const PLATE_SURFACES: Record<string, string[]> = {
+    './': ['.terminal__title', '.osd__chip', '.stage__caption', '.vibing__ticks span'],
+    './404': ['.terminal__title'],
+    './architecture': ['.prose :not(pre) > code', '.prose a > code', '.docs__pager-dir'],
+  };
+  // Every plate here is an opaque DOM background, so the ground is the first
+  // fully-opaque ancestor with the translucent layers below it composited back
+  // down — no canvas sampling (that is the office sweep's job).
+  const effectiveBg = async (selector: string, nth: number): Promise<[number, number, number]> => {
+    const chain = await page.evaluate(
+      ([sel, i]) => {
+        const out: string[] = [];
+        let node: Element | null = document.querySelectorAll(sel)[i as number];
+        while (node) {
+          const bg = getComputedStyle(node).backgroundColor;
+          out.push(bg);
+          if (!/,\s*0(\.\d+)?\)\s*$/.test(bg) && !/\/\s*0(\.\d+)?\)/.test(bg)) break;
+          node = node.parentElement;
+        }
+        return out;
+      },
+      [selector, nth] as const
+    );
+    const layers = chain.map(parseRgb).filter(([, , , a]) => a > 0);
+    let ground: [number, number, number] = [255, 255, 255];
+    for (let i = layers.length - 1; i >= 0; i--) ground = compositeOver(layers[i], ground);
+    return ground;
+  };
+
+  for (const theme of ['day', 'night', 'dracula'] as const) {
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('pix-booted', '1');
+      localStorage.setItem('pix-theme', t);
+    }, theme);
+    let swept = 0;
+    for (const [route, selectors] of Object.entries(PLATE_SURFACES)) {
+      await page.goto(route);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      for (const selector of selectors) {
+        const count = await page.locator(selector).count();
+        expect(count, `${theme} ${route}: no ${selector} to sweep`).toBeGreaterThan(0);
+        for (let i = 0; i < count; i++) {
+          const ink = await page
+            .locator(selector)
+            .nth(i)
+            .evaluate((el) => getComputedStyle(el).color);
+          const ratio = contrastRatio(
+            parseRgb(ink).slice(0, 3) as [number, number, number],
+            await effectiveBg(selector, i)
+          );
+          expect(
+            ratio,
+            `${theme} ${route} ${selector}[${i}]: WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`
+          ).toBeGreaterThanOrEqual(4.5);
+          swept++;
+        }
+      }
+    }
+    expect(swept, `${theme}: swept nothing`).toBeGreaterThan(0);
+  }
+});
+
 test('hero badge row: one chip per registered source, matching the tools-table row count', async ({
   page,
 }) => {

@@ -58,14 +58,13 @@
      --bg per theme. Near-opaque (not the old 90%/72%) so the office pixels
      underneath stop showing through as mud — the crisp terminal-panel idiom
      (`.text-scrim` below) reads as an intentional card, not a translucent
-     smudge. Worst case (scrimmed --fg-muted subcopy over the hero's darkest
-     office pixel, dimmer capped at data-lit-max 0.74), measured via computed
-     styles in a real render, not estimated: day 4.88:1 (was ~4.76:1 at the
-     old 90%, the pinned e2e's floor is 4.5:1), night 7.50:1 (~unchanged —
-     already far past the floor), dracula 4.74:1 (was ~4.85:1 at the old
-     72% — a denser scrim leans slightly on the underlying --screen pixel
-     less, which happens to cost dracula's light-on-dark pairing a hair of
-     margin; still clears AA with the same headroom day's old 90% had). */
+     smudge. Worst case (the scrimmed --fg-muted `.install__note`, over the
+     office pixel + this section's dimmer), measured via computed styles in a
+     real render, not estimated: day 5.18:1, night 7.35:1, dracula 7.23:1 —
+     floor 4.5:1. Which office pixel is the worst one FLIPS with the theme: for
+     day's dark-on-light pairing it is the DARKEST underlying pixel, for
+     night/dracula's light-on-dark pairing the BRIGHTEST, so both extremes get
+     measured rather than assuming day's. */
   --scrim: rgba(244, 238, 226, 0.95);
 
   /* Semantic tokens — DAY (warm cream) */
@@ -74,7 +73,10 @@
   --surface: #fdf9ef;
   --surface-2: #ece1cd;
   --fg: var(--ink);
-  --fg-muted: #6f6453;
+  /* Tuned against --surface-2, the TIGHTEST opaque plate muted text lands on
+     (the terminal chrome bar) — not --bg: the old #6f6453 cleared the page at
+     5.02:1 but only reached 4.476:1 on the bar. 4.69:1 there, 5.25:1 on --bg. */
+  --fg-muted: #6c614f;
   --border: color-mix(in srgb, var(--ink) 12%, transparent);
   --border-strong: color-mix(in srgb, var(--ink) 20%, transparent);
   --shadow: 0 1px 2px rgba(36, 28, 20, 0.05), 0 8px 24px rgba(36, 28, 20, 0.09);
@@ -824,7 +826,14 @@ code {
   --surface: #343746;
   --surface-2: #44475a;
   --fg: #f8f8f2;
-  --fg-muted: #8b92bd;
+  /* Dracula's own palette steps much further from --bg (#282a36) to --surface-2
+     (#44475a, upstream "Current Line") than day/night do, so the muted ink has
+     to climb to match: the old #8b92bd measured 3.03:1 on the terminal bar and
+     3.90:1 on --surface (the OSD chips, the stage caption, the sky ticks, the
+     docs pager). 4.75:1 / 6.13:1 here. Lightening the INK, not darkening the
+     plate — no ink clears 4.5:1 on #44475a from below #8b92bd's luminance, and
+     the plate hexes are upstream Dracula. */
+  --fg-muted: #b2b9e0;
   --border: color-mix(in srgb, #f8f8f2 13%, transparent);
   --border-strong: color-mix(in srgb, #f8f8f2 24%, transparent);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.45);
@@ -936,6 +945,16 @@ code {
 :root[data-theme='night'] .prose a,
 :root[data-theme='dracula'] .prose a {
   color: var(--coral);
+}
+/* An inline code chip inside a prose LINK wears the link's accent hue on the
+   chip's --surface-2 plate. Dracula's accent is upstream Dracula Purple
+   (#bd93f9) and its --surface-2 is upstream Current Line (#44475a) — a pairing
+   that measures 3.79:1, and both hexes are palette fidelity, not ours to
+   retune. Dropping this one chip to the calmer --surface plate buys 4.89:1.
+   Day (4.65:1) and night (5.30:1) already clear the floor on --surface-2, so
+   they keep the shared chip shade. */
+:root[data-theme='dracula'] .prose a > code {
+  background: var(--surface);
 }
 .prose ul {
   padding-left: 1.3rem;
