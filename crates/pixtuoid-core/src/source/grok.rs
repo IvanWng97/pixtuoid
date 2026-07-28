@@ -314,6 +314,19 @@ fn child_key(obj: &serde_json::Map<String, Value>) -> Option<String> {
         .map(String::from)
 }
 
+/// The TRANSCRIPT lane's twin of [`child_key`]: upstream writes the same id
+/// under `child_session_id` on the xAI subagent lines, with `subagent_id` as
+/// the older spelling. Shared by both subagent arms so the non-empty guard
+/// cannot be applied to one and forgotten on the other — an `""` here mints a
+/// phantom `""`-keyed child parented to the real session, which the hook lane
+/// already refuses.
+fn transcript_child_key(update: &serde_json::Map<String, Value>) -> Option<&str> {
+    ["child_session_id", "subagent_id"]
+        .into_iter()
+        .find_map(|k| update.get(k).and_then(|s| s.as_str()))
+        .filter(|s| !s.is_empty())
+}
+
 fn subagent_child_id(obj: &serde_json::Map<String, Value>, event: &str) -> Result<AgentId> {
     match child_key(obj) {
         Some(id) => Ok(AgentId::from_parts(SOURCE_NAME, &id)),
@@ -443,9 +456,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
         // implementation-specific marker) — NOT ACP vocabulary, stays fully bespoke.
         "_x.ai/session/update" => match tag {
             "subagent_spawned" => {
-                let Some(child_key) =
-                    str_field("child_session_id").or_else(|| str_field("subagent_id"))
-                else {
+                let Some(child_key) = transcript_child_key(update) else {
                     crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
                     return Ok(vec![]);
                 };
@@ -472,9 +483,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                 Ok(evs)
             }
             "subagent_finished" => {
-                let Some(child_key) =
-                    str_field("child_session_id").or_else(|| str_field("subagent_id"))
-                else {
+                let Some(child_key) = transcript_child_key(update) else {
                     crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
                     return Ok(vec![]);
                 };
@@ -1336,6 +1345,28 @@ mod tests {
         }
         assert!(matches!(&evs[1], AgentEvent::Rename { label, .. }
             if label == "Investigate the bug"));
+    }
+
+    #[test]
+    fn transcript_subagent_arms_reject_an_empty_child_id_like_the_hook_twin() {
+        // The three carriers coalesce on ONE key
+        // (`child_session_id == subagent_id == the hook sessionId`), so an
+        // empty id must be refused identically on both lanes — the hook's
+        // `child_key` already filters it. Minting `AgentId::from_parts(grok,
+        // "")` instead registers a phantom ""-keyed child parented to the real
+        // session, holding a desk until the unknown-cwd reap.
+        for tag in ["subagent_spawned", "subagent_finished"] {
+            for id_field in ["child_session_id", "subagent_id"] {
+                let evs = decode_line(xai_line(json!({
+                    "sessionUpdate": tag,
+                    id_field: "",
+                })));
+                assert!(
+                    evs.is_empty(),
+                    "{tag} with an empty {id_field} must decode to nothing, got {evs:?}"
+                );
+            }
+        }
     }
 
     #[test]
