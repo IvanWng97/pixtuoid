@@ -21,10 +21,20 @@ pub mod version;
 
 /// Strip ASCII/Unicode control characters from an untrusted string before it
 /// reaches a terminal sink (the headless `println!` summary, the `doctor`
-/// stdout report, the Sources-panel path). Untrusted wire values (agent labels,
-/// sampled CLI output, config paths) can carry control bytes that would
-/// reposition the cursor or inject escapes; one chokepoint so the policy can't
-/// drift across its call sites (R0615-06).
+/// stdout report, the Sources-panel path, the `connect`/`disconnect` outcome
+/// rows, the pre-altscreen config warnings). Untrusted wire values (agent
+/// labels, sampled CLI output, config paths, another CLI's config content) can
+/// carry control bytes that would reposition the cursor or inject escapes; one
+/// chokepoint so the policy can't drift across its call sites (R0615-06).
+///
+/// The non-TUI `tracing` stream is a SIXTH terminal sink, but it cannot be
+/// covered here: the subscriber emits its own SGR for level coloring, so a
+/// sink-side filter could not tell our escapes from an injected one. Its
+/// untrusted values are made safe where they ENTER instead — by
+/// `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of this
+/// predicate (core can't expose a `pub(crate)` item to the binary — the
+/// documented `nonempty` ↔ `platform::nonempty` situation). Keep the two in
+/// step: both must strip Cc AND the Cf bidi controls below.
 pub(crate) fn strip_control_chars(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control() && !is_bidi_control(*c))

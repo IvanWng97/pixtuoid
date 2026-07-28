@@ -450,7 +450,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
             // decoder claimed) — upstream added or renamed one. Surfaced before
             // the bail so the self-diagnosis layer can see it.
             super::drift::unknown_event(source, other);
-            bail!("unsupported hook_event_name: {other}")
+            bail!("unsupported hook_event_name: {}", display_safe(other))
         }
     }
 }
@@ -566,6 +566,41 @@ pub(crate) const MAX_DECODED_FIELD_CHARS: usize = 80;
 /// Waiting-reason / Rename-label caps (CC + Reasonix) so the sites can't
 /// drift apart. Budget: the `…` is EXCLUDED, so a clipped result is
 /// `max_chars + 1` chars — unlike `widgets::truncate`, which counts it (N).
+/// Make an untrusted wire value safe to DISPLAY: strip control characters, then
+/// cap at [`MAX_DECODED_FIELD_CHARS`].
+///
+/// The strip covers ASCII/Unicode Cc **and** the Cf bidi controls — `char::is_control`
+/// is Cc-only, and the "Trojan Source" class (CVE-2021-42574) rides exactly that gap,
+/// where a value renders differently from its bytes. Applied where a wire value leaves
+/// the decoder for a HUMAN sink that is NOT a cell buffer: the [`super::drift`]
+/// breadcrumbs and the unsupported-event `bail!`s. Both reach a real terminal in every
+/// non-TUI mode, whose `tracing` stream writes to raw stderr — the one sink in the
+/// project that no cell-clipping or presenter sanitize covers.
+///
+/// The binary keeps `pixtuoid::strip_control_chars` with the SAME predicate: it cannot
+/// reach a `pub(crate)` core item (the documented `nonempty` ↔ `platform::nonempty`
+/// situation), so the two are per-crate copies — keep them in step.
+pub(crate) fn display_safe(s: &str) -> String {
+    let stripped: String = s
+        .chars()
+        .filter(|c| !c.is_control() && !is_bidi_control(*c))
+        .collect();
+    ellipsize(&stripped, MAX_DECODED_FIELD_CHARS)
+}
+
+/// The Unicode Bidi_Control characters (LRE/RLE/PDF/LRO/RLO, LRI/RLI/FSI/PDI,
+/// LRM/RLM/ALM) — category Cf, so `char::is_control` (Cc only) misses them while
+/// they REORDER displayed text in a terminal.
+fn is_bidi_control(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}'                    // ALM
+            | '\u{200E}'..='\u{200F}' // LRM, RLM
+            | '\u{202A}'..='\u{202E}' // LRE, RLE, PDF, LRO, RLO
+            | '\u{2066}'..='\u{2069}' // LRI, RLI, FSI, PDI
+    )
+}
+
 pub(crate) fn ellipsize(s: &str, max_chars: usize) -> String {
     let mut out: String = s.chars().take(max_chars).collect();
     if s.chars().count() > max_chars {

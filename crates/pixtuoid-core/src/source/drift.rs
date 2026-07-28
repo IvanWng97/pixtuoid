@@ -28,18 +28,23 @@
 //! choice is irreducible, so the principle is codified HERE and applied inline.
 //!
 //! `source` is a static registry source name (safe). The free-form values
-//! (`name`/`field`/`tool`/`detail`) are untrusted wire content — every consumer
-//! sanitizes (the headless path's `sanitize_line`, the footer's cell buffer).
+//! (`name`/`field`/`tool`/`detail`) are untrusted wire content, so they are made
+//! display-safe HERE, at emission — control-stripped and capped by
+//! [`crate::source::decoder::display_safe`]. Per-consumer sanitizing was not
+//! enough: the non-TUI `tracing` stream writes to RAW stderr, which no cell
+//! buffer clips and no presenter sanitizes, and it is on by default at `warn`.
 
 /// The `tracing` target every drift breadcrumb shares. Consumers (the log scan
 /// in `pixtuoid doctor`, the future counting Layer, the footer) key on it.
 pub const TARGET: &str = "pixtuoid::drift";
 
+use crate::source::decoder::display_safe;
+
 /// A hook event / transcript event we don't handle (and which isn't a registered
 /// custom event) — upstream likely added or renamed it. Emitted just before the
 /// shared decoder `bail!`s; for a renamed event WE depend on, this is the signal.
 pub fn unknown_event(source: &str, name: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = "unknown_event", name = %name);
+    tracing::warn!(target: TARGET, source = %source, kind = "unknown_event", name = %display_safe(name));
 }
 
 /// A REQUIRED field of an event we DO handle is absent — upstream likely renamed
@@ -48,20 +53,20 @@ pub fn unknown_event(source: &str, name: &str) {
 /// Call ONLY on events we've committed to decoding (not on type-discriminator
 /// reads, where a missing value just means "a line we ignore" — that would flood).
 pub fn missing_field(source: &str, event: &str, field: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = "missing_field", event = %event, field = %field);
+    tracing::warn!(target: TARGET, source = %source, kind = "missing_field", event = %display_safe(event), field = %display_safe(field));
 }
 
 /// The subagent-dispatch tool ran under a name we don't recognise — semantic
 /// `subagent_type` detection still handled it, but upstream renamed the tool
 /// (the Task→Agent class). Surfaces the new name so the known set / docs update.
 pub fn unknown_dispatch(source: &str, tool: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = "unknown_dispatch", tool = %tool);
+    tracing::warn!(target: TARGET, source = %source, kind = "unknown_dispatch", tool = %display_safe(tool));
 }
 
 /// A consumed upstream data SHAPE drifted — a registry/transcript field that
 /// still parses but lost a key we read (#247). `detail` carries the specifics.
 pub fn shape_drift(source: &str, detail: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = "shape_drift", detail = %detail);
+    tracing::warn!(target: TARGET, source = %source, kind = "shape_drift", detail = %display_safe(detail));
 }
 
 #[cfg(test)]
@@ -73,6 +78,37 @@ mod tests {
     // distinctive value — that contract is what the log scan (`pixtuoid doctor`)
     // and the future counting Layer key on. Loose `contains` so the field-quoting
     // style of the fmt formatter can't make the test brittle.
+    #[test]
+    fn breadcrumb_values_are_display_safe_and_capped() {
+        // `pixtuoid run --headless` routes tracing to RAW stderr, so this IS a
+        // terminal sink and these values are pure untrusted wire content (a
+        // transcript's own top-level `type`, a tool name). Strip Cc AND the Cf
+        // bidi overrides — `char::is_control` is Cc-only, and Trojan Source
+        // (CVE-2021-42574) rode exactly that gap — and cap the length: a
+        // legitimate wire line can be ~1 MiB.
+        let out = capture(|| {
+            unknown_event("codex", "ev\u{1b}]0;PWNED\u{7}il\u{202e}Z");
+            unknown_dispatch("claude-code", "De\u{1b}[31mlegateZ");
+            missing_field("copilot", "to\u{1b}olZ", "na\u{202e}meZ");
+            shape_drift("claude-code", &"x".repeat(1000));
+        });
+        for bad in ['\u{1b}', '\u{7}', '\u{202e}'] {
+            assert!(
+                !out.contains(bad),
+                "U+{:04X} reached the terminal sink:\n{out}",
+                bad as u32
+            );
+        }
+        // Stays silent on the readable remainder — sanitizing is not dropping.
+        for needle in ["ev]0;PWNEDilZ", "De[31mlegateZ", "toolZ", "nameZ"] {
+            assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+        }
+        assert!(
+            !out.contains(&"x".repeat(200)),
+            "an uncapped value became an uncapped log line:\n{out}"
+        );
+    }
+
     #[test]
     fn breadcrumbs_emit_the_structured_drift_target_and_fields() {
         let out = capture(|| {

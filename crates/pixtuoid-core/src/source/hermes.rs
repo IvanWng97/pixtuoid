@@ -177,7 +177,10 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!("unsupported hermes hook event: {other}")
+            bail!(
+                "unsupported hermes hook event: {}",
+                crate::source::decoder::display_safe(other)
+            )
         }
     }
 }
