@@ -41,8 +41,9 @@ generated — eslint/prettier-ignored, never hand-edit them. This is
 (The `source_status_json_shape` / `outcome_row_json_shape` byte tests still pin
 the exact wire JSON; `OutcomeRow` is `{id, outcome, message?}` — a bare machine
 token plus an optional failure-detail field, split from the old folded
-`failed: <msg>` form BEFORE store publication — see the sharp edge below and
-the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
+`failed: <msg>` form back when this in-repo copy was the only consumer — see
+the sharp edge below and the wire-shape sharp edge in
+`crates/pixtuoid/CLAUDE.md`.)
 
 ## Sharp edges (don't be surprised by these)
 
@@ -73,11 +74,16 @@ the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
   emitted only by `pixtuoid sources set` (the declarative reconcile this
   extension never invokes). Failure detail rides in the optional `message`
   field (present exactly when `outcome === "failed"`) — match tokens exactly,
-  no prefix-stripping. This clean split landed while the in-repo extension was
-  the ONLY consumer (it ships atomically with the binary; NOT yet on the
-  Raycast store). **After store publication, installed copies parse the wire
-  independently of the binary's version — any further wire change needs a
-  version handshake, not a flag-day edit.**
+  no prefix-stripping. This clean split was made ASSUMING the in-repo extension
+  was the ONLY consumer. **It was not** — the last `ray publish` marker
+  (`__raycast_latest_publish_ext/pixtuoid__` → b870d8ba, 2026-06-19) PREDATES
+  the split (e21ec7f0, 2026-07-02), so the break shipped to the store: what
+  users have installed still prefix-strips `failed: <msg>` and renders a bare
+  `failed` toast with the real reason dropped. A republish clears that; the
+  parse in `src/` is already correct. **Treat the wire as PUBLISHED from here
+  on** (`raycast.com/IvanWng97/pixtuoid`) — installed copies parse it
+  independently of the binary's version, so any further wire change needs a
+  version handshake, not a flag-day edit.
 
 ## Gates
 

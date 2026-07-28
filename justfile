@@ -132,6 +132,19 @@ actionlint-composites:
 # audit catalog; .github/zizmor.yml records the repository's deliberate
 # ref-or-SHA pin policy and every accepted finding is suppressed at its exact
 # source location with a WHY.
+# The operating MODE is env-derived, not chosen here, and the asymmetry is
+# deliberate: tokenless it runs OFFLINE (it says so on stderr) and skips the
+# four audits that need the GitHub API — impostor-commit,
+# known-vulnerable-actions, ref-confusion, stale-action-refs (typosquat-uses
+# still runs, at reduced confidence). ci-lint.yml's hygiene job passes
+# GH_TOKEN, so those DO gate in CI, and a ci-observability rule pins that step
+# so the online half cannot be dropped silently. Same call as `links`
+# (--offline) and `deny` (advisories deferred to audit.yml): a check whose
+# verdict depends on the network and an upstream feed must not redden a push of
+# unchanged code. Do NOT auto-export `gh auth token` to close the gap — it puts
+# a real token on the wire on every pre-push run and makes the local gate
+# depend on gh auth + API rate limits, the exact flakiness those two siblings
+# were written to avoid.
 [group('rust')]
 [doc('Audit GitHub automation security with zizmor')]
 zizmor:
@@ -243,11 +256,18 @@ arch:
     # painters + audio gateway own those. The
     # crate boundary already makes this a COMPILER fact; this pins it at the dep-tree
     # level too (a transitive pull-in via a feature would slip past the boundary).
+    # `--target all` + `--all-features` are LOAD-BEARING, not thoroughness: cargo
+    # tree defaults to the runner's own triple under default features, so a
+    # `[target.'cfg(windows)'.dependencies] crossterm` in pixtuoid-core resolved
+    # green on macOS AND on the ubuntu CI runner — invariant #1 broken on Windows
+    # behind a passing gate, and `just check-windows` compiles it happily because
+    # the dep is legitimate for that target. `--target all` is metadata-only (it
+    # installs nothing), and both crates' feature sets are one flag wide.
     for crate in pixtuoid-core pixtuoid-scene; do
         # Capture first so a cargo-tree ERROR (e.g. a crate rename) kills the
         # recipe via set -e, instead of reading as "no match" inside the if —
         # which would print the green line without having checked anything.
-        deps="$(cargo tree -p "$crate" --edges normal --prefix none)"
+        deps="$(cargo tree -p "$crate" --edges normal --prefix none --target all --all-features)"
         if grep -qE '^(ratatui|crossterm|winit|softbuffer|rodio|cpal)' <<<"$deps"; then
             echo "ARCH VIOLATION: $crate depends on a terminal/window crate (CLAUDE.md invariant #1)"; exit 1
         fi
@@ -313,9 +333,23 @@ hack:
     cargo hack --feature-powerset --no-dev-deps check --workspace
 
 # Cross-lint the workspace for Windows (clippy subsumes check; no linking).
+# Same toolchain gotcha as `api-surface` and `wasm-build`, and it bites HARDER
+# here because the compiler's own advice is wrong: a Homebrew cargo ahead of the
+# rustup proxy on PATH ships only the host std, so the cross-lint dies on E0463
+# "can't find crate for `core`" while suggesting `rustup target add
+# x86_64-pc-windows-msvc` for a target rustup already has. Prepending the proxy
+# (a no-op on CI, where it is already first) fixes it; the explicit preflight
+# then owns the genuinely-missing case with an accurate message. This is the
+# documented way to pre-verify a path-string change against `windows-test`,
+# which local preflight is otherwise blind to — so it has to actually run.
 [group('rust')]
 [doc('Cross-lint the workspace for x86_64-pc-windows-msvc via clippy (no linking; ubuntu runner suffices)')]
 check-windows:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    rustup target list --toolchain stable --installed | grep -q x86_64-pc-windows-msvc \
+        || { echo "needs the target: rustup target add x86_64-pc-windows-msvc" >&2; exit 1; }
     cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 
 # Verify the workspace builds on the DECLARED MSRV (rust-version in Cargo.toml).
@@ -479,7 +513,8 @@ mutants *args:
     if [ -z "$listed" ]; then
         echo "error: the diff vs $base yields ZERO mutants — nothing would be tested." >&2
         echo "  Either there are no .rs changes, or every changed .rs is test code" >&2
-        echo "  or listed in .cargo/mutants.toml exclude_globs." >&2
+        echo "  or excluded by .cargo/mutants.toml (exclude_globs OR exclude_re —" >&2
+        echo "  the latter can empty a file's mutants function by function)." >&2
         echo "  Run from a branch touching mutable production Rust, or set MUTANTS_BASE." >&2
         exit 1
     fi
@@ -781,6 +816,7 @@ gen-wasm: gen-wasm-tools wasm-build
 # Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
 # a lazy-load behind the poster, so a silent size regression (a dep pulling in
 # formatting machinery, an accidental debug build) fails loudly — 1 MiB raw ≈
+# ~350-400 KB gzipped over the wire, which is where the cap comes from.
 # The artifact is ~900 KB (the recipe prints the exact figure and the headroom
 # left against the cap — read it there rather than trusting this line). Pair (#424): the
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
@@ -788,8 +824,18 @@ gen-wasm: gen-wasm-tools wasm-build
 # so every committed file must match gen-wasm's sha256 manifest AND every file
 # must be covered by it. Byte-exact rebuild-match is deliberately NOT checked
 # in CI — wasm output drifts across rustc versions, and CI installs latest
-# stable (local `just gen-wasm` + review is the freshness authority, like the
-# committed demo media).
+# stable, so local `just gen-wasm` + review is the freshness authority. Note
+# what that does and does NOT resemble in the committed demo media: the
+# clips/gif are presence-only for this same non-determinism reason, but the
+# STILLS are re-rendered and pixel-diffed at threshold 0 by gen-check, so media
+# staleness IS mechanically gated and wasm staleness is not. Nothing here reads
+# a scene/core/web source, so a merge that skips `just gen-wasm` ships a stale
+# hero with every gate green; the compensating control is the merge-gate brief
+# (.github/prompts/pr-review.prompt.md, "a scene change stales the wasm"), not
+# this recipe. Input-hash stamping was considered and rejected: most commits
+# under crates/pixtuoid-{core,scene}/src are `native`-gated code the wasm never
+# links, so the gate would demand a ~1 MB binary regen on changes that provably
+# cannot alter it.
 [group('gen')]
 [doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]
 gen-wasm-check:

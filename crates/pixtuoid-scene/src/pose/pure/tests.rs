@@ -813,30 +813,42 @@ fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
 // pick_aimless_dest fallback walkability (#24)
 // ---------------------------------------------------------------------------
 
+/// The corridor midline hosts furniture footprints (vending / printer / water
+/// cooler / trash), so the post-probe fallback point can be blocked. Forcing the
+/// fallback needs a mask with one small open pocket at the corridor's east end,
+/// so the seeds whose weighted zone ISN'T the corridor spend all 32 probes in a
+/// fully blocked zone. The pocket is sized past the coarse router's
+/// `cell_walkable` floor, because a lone walkable pixel is an island `find_path`
+/// would refuse and the agent would teleport to.
 #[test]
 fn aimless_fallback_scans_the_midline_for_a_walkable_cell() {
-    // The corridor midline hosts furniture footprints (vending / printer /
-    // water cooler / trash), so the post-probe fallback point can be blocked.
-    // Force the fallback (only ONE walkable pixel in the whole mask — the 32
-    // zone probes virtually never hit it) and require a walkable result.
     let mut l = layout();
     let c = l.corridor.unwrap_or(l.cubicle_aisle);
     let mid_y = c.y + c.height / 2;
+    const POCKET_PX: u16 = 12;
     let open = Point {
-        x: c.x + c.width - 2,
+        x: c.x + c.width - POCKET_PX / 2,
         y: mid_y,
     };
     let mut mask = pixtuoid_core::walkable::WalkableMask::new_open(l.buf_w, l.buf_h);
     mask.mark_blocked(0, 0, l.buf_w, l.buf_h, 0);
-    mask.mark_walkable(open.x, open.y, 1, 1);
+    mask.mark_walkable(
+        open.x - POCKET_PX / 2,
+        open.y - POCKET_PX / 2,
+        POCKET_PX,
+        POCKET_PX,
+    );
+    // `reachable` is DERIVED from `walkable` in a real layout — rebuild it, or the
+    // routability filter reads a ReachSet describing a different office.
+    l.reachable = crate::layout::ReachSet::from_mask(&mask, open);
     l.walkable = mask;
 
     let desk = l.home_desks[0];
     for seed in 0..16u64 {
         let p = pick_aimless_dest(&l, seed, desk);
         assert!(
-            l.is_walkable(p.x, p.y),
-            "seed {seed}: fallback returned a blocked cell {p:?}"
+            l.is_walkable(p.x, p.y) && l.reachable.reaches(p),
+            "seed {seed}: fallback returned an unroutable cell {p:?}"
         );
         assert_eq!(
             p,

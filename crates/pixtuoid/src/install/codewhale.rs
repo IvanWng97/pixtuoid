@@ -25,7 +25,8 @@
 //!   `pixtuoid-hook` + `source/codewhale.rs`). `hook_command` returns the BASE
 //!   command; `merge_install` appends the per-event suffix.
 //! - **`enabled = true`.** CodeWhale gates ALL hooks on `[hooks].enabled`
-//!   (default true, `hooks.rs::default_enabled`). We set it explicitly so a
+//!   (default true, `hooks.rs::default_enabled` @0.8.59 — since split to
+//!   `hooks/config.rs`, same body). We set it explicitly so a
 //!   user who had previously disabled hooks still gets the visualizer —
 //!   connecting CodeWhale is an explicit opt-in (the silent-non-fire trap is worse
 //!   than re-enabling; cf. Reasonix's project-scope trust gate).
@@ -174,7 +175,8 @@ pub(crate) fn detect_installed() -> bool {
 
 /// The BASE hook command (no `--event` — `merge_install` appends the per-event
 /// suffix). CodeWhale runs the `command` under a shell — `sh -c` on Unix,
-/// `cmd /C` on Windows (verified `hooks.rs::build_shell_command` @0.8.59), the
+/// `cmd /C` on Windows (verified `hooks.rs::build_shell_command` @0.8.59 — since
+/// split to `hooks/executor.rs`, same body), the
 /// same contract as Codex/Reasonix, so the OS forms mirror them exactly:
 /// - **Unix**: env-prefix `PIXTUOID_SOURCE=codewhale '<abs-path>'`.
 /// - **Windows**: BARE `<abs-path> --source codewhale` (the source rides the

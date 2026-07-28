@@ -119,17 +119,26 @@ fn vertical_wall_is_impassable_except_through_the_door() {
     );
 }
 
+/// Teleport guard (#22): a waypoint A\* can't reach on the coarse 4×4 grid makes
+/// an idle agent SNAP/teleport there — `find_path` returns None and `route()`
+/// falls back to a straight `[from,to]` line. The core connectivity sweep only
+/// checks full-PIXEL BFS from the door; this checks COARSE-grid reachability of
+/// EVERY emitted wander destination (meeting seats, pantry, couch, AND the
+/// pod-aisle decor — phone booth / standing desk / vending / printer, which also
+/// pins the `INTER_POD_AISLE_X` width: narrow the aisle and the decor
+/// disconnects the grid here). Across seeds × sizes incl. the 96×70 floor. It
+/// caught the narrow-meeting-room teleport (now gated).
+///
+/// This list stays narrow ON PURPOSE. The blocked furniture CENTRE is a PROXY
+/// for the destination, and at 41x160 / 240x160 (production floors 4 and 6) a
+/// vending machine's own coarse cell is under the `cell_walkable` floor while
+/// its APPROACH — the cell the router is actually aimed at — routes fine from
+/// every desk and from the door. The wide axis lives on the real contract
+/// instead: `placement_sweep::every_wander_destination_is_routable_from_its_desk`
+/// sweeps that suite's own size axis over `approach_point`. Widen THAT one, not
+/// this proxy.
 #[test]
 fn every_wander_waypoint_is_routable_on_the_coarse_grid() {
-    // Teleport guard (#22): a waypoint A* can't reach on the coarse 4×4 grid
-    // makes an idle agent SNAP/teleport there — find_path returns None and
-    // route() falls back to a straight [from,to] line. The core connectivity
-    // sweep only checks full-PIXEL BFS from the door; this checks COARSE-grid
-    // reachability of EVERY emitted wander destination (meeting seats, pantry,
-    // couch, AND the pod-aisle decor — phone booth / standing desk / vending /
-    // printer, which also pins the INTER_POD_AISLE_X width: narrow the aisle
-    // and the decor disconnects the grid here). Across seeds × sizes incl. the
-    // 96×70 floor. It caught the narrow-meeting-room teleport (now gated).
     use crate::layout::TEST_DEFAULT_DESKS;
     let overlay = OccupancyOverlay::new();
     let sizes = [
@@ -246,6 +255,72 @@ fn reachset_never_claims_an_unroutable_cell() {
                     x += 8;
                 }
                 y += 8;
+            }
+        }
+    }
+}
+
+/// The AIMLESS wander branch is the one destination producer that never
+/// consulted `ReachSet`: every NAMED destination goes through `approach_point`,
+/// whose obstacle and seat branches both require `reaches(c)`.
+/// `pick_aimless_dest` accepted the first `is_walkable` hit, so it could hand A\*
+/// a goal in a coarse-unroutable pocket — `find_path` returns None and `route()`
+/// yields the straight `[from,to]` fallback, walking the agent through furniture
+/// for the whole out-leg AND back-leg.
+///
+/// Swept over the PRODUCTION floor seeds (not raw 0..5) because that is what
+/// ships. `pick_aimless_dest` is a pure function of (layout, seed), so ONE desk
+/// per layout covers the destination axis; the second desk only varies the
+/// origin. `max_desks: None` is deliberate — that is production, and capping the
+/// desk count hides the very floors that fail.
+#[test]
+fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
+    use crate::floor::floor_seed;
+    use crate::layout::desk_walk_anchor;
+    use crate::pose::{aimless_wander_seed, desk_leg_endpoint, pick_aimless_dest};
+    use pixtuoid_core::state::MAX_FLOORS;
+    use pixtuoid_core::AgentId;
+
+    let overlay = OccupancyOverlay::new();
+    for (w, h) in [
+        (96u16, 70u16),
+        (120, 96),
+        (160, 120),
+        (192, 158),
+        (240, 160),
+    ] {
+        for floor in 0..MAX_FLOORS {
+            let Some(l) = Layout::compute_with_seed(w, h, None, floor_seed(floor)) else {
+                continue;
+            };
+            let origins: Vec<Point> = [l.home_desks.first(), l.home_desks.last()]
+                .into_iter()
+                .flatten()
+                .map(|&desk| (desk, desk_leg_endpoint(desk, &l).0))
+                .map(|(_, origin)| origin)
+                .collect();
+            for &desk in [l.home_desks.first(), l.home_desks.last()]
+                .into_iter()
+                .flatten()
+            {
+                for agent in 0..32u32 {
+                    let id = AgentId::from_parts("probe", &format!("agent-{agent}"));
+                    for cycle in 0..8u64 {
+                        let seed = aimless_wander_seed(id, cycle);
+                        let dest = pick_aimless_dest(&l, seed, desk);
+                        if dest == desk_walk_anchor(desk) {
+                            continue; // documented last resort: the agent's own seat
+                        }
+                        for &origin in &origins {
+                            assert!(
+                                find_path(&l.walkable, &overlay, None, origin, dest).is_some(),
+                                "{w}x{h} floor {floor}: aimless dest {dest:?} unroutable from \
+                                 desk approach {origin:?} — the leg degrades to a straight line \
+                                 through furniture",
+                            );
+                        }
+                    }
+                }
             }
         }
     }

@@ -340,10 +340,13 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 206,
             b: 106,
         },
+        // Tokyo Night teal #73daca (the palette's spare accent, and the same
+        // teal family catppuccin's `default` already uses). Was the blue
+        // #7dcfff, byte-identical to `read`.
         default: Rgb {
-            r: 125,
-            g: 207,
-            b: 255,
+            r: 115,
+            g: 218,
+            b: 202,
         },
     },
     ui: UiColors {

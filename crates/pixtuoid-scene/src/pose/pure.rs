@@ -401,6 +401,10 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
             }
         })
         .unwrap_or(&zones[0].0);
+    // ROUTABLE, not merely walkable — the same `reaches` filter every NAMED
+    // destination gets via `approach_point` (scene CLAUDE.md's wander entry).
+    let routable =
+        |x: u16, y: u16| layout.is_walkable(x, y) && layout.reachable.reaches(Point { x, y });
     // Rejection-sampling budget: tries this many hashed cells to land on a
     // walkable one before falling back to the zone origin.
     const AIMLESS_SAMPLE_ATTEMPTS: u64 = 32;
@@ -410,7 +414,7 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
             .wrapping_mul(0xc6a4_a793_5bd1_e995);
         let x = zone.x + (h as u16) % zone.width.max(1);
         let y = zone.y + ((h >> 16) as u16) % zone.height.max(1);
-        if layout.is_walkable(x, y) {
+        if routable(x, y) {
             return Point { x, y };
         }
     }
@@ -428,11 +432,11 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
     let in_band = |x: u16| x >= c.x && x < c.x.saturating_add(c.width);
     for d in 0..c.width {
         let east = base_x.saturating_add(d);
-        if in_band(east) && layout.is_walkable(east, mid_y) {
+        if in_band(east) && routable(east, mid_y) {
             return Point { x: east, y: mid_y };
         }
         let west = base_x.saturating_sub(d);
-        if in_band(west) && layout.is_walkable(west, mid_y) {
+        if in_band(west) && routable(west, mid_y) {
             return Point { x: west, y: mid_y };
         }
     }

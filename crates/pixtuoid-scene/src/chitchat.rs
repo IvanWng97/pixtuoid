@@ -296,8 +296,16 @@ pub fn update_and_collect(
             .push((v.agent_id, v.anchor));
     }
 
+    // A TOTAL emission order, never `by_venue`'s: the Vec is painted in order, so
+    // hash order would make two overlapping bubbles z-fight between runs.
+    let mut venues: Vec<(&VenueKey, &Vec<(AgentId, Point)>)> = by_venue.iter().collect();
+    venues.sort_by_key(|(v, _)| match v {
+        VenueKey::Room { floor_idx, room_id } => (*floor_idx, 0usize, *room_id),
+        VenueKey::Waypoint { floor_idx, wp_idx } => (*floor_idx, 1usize, *wp_idx),
+    });
+
     let mut bubbles = Vec::new();
-    for (venue, agents) in &by_venue {
+    for (venue, agents) in venues {
         if agents.len() < 2 {
             continue;
         }
@@ -351,6 +359,36 @@ mod tests {
                 y: 20,
             },
             room_id,
+        }
+    }
+
+    // The bubble Vec is painted in order, so its order IS a z-order for the same
+    // world state. `by_venue` is a HashMap and std seeds a fresh `RandomState`
+    // per instance, so two calls in ONE process can iterate identical contents in
+    // different orders; 32 rounds makes a 3-venue permutation impossible to pass
+    // by luck.
+    #[test]
+    fn bubbles_are_emitted_in_a_deterministic_venue_order() {
+        let now = base_time();
+        let visitors = [
+            vis(9, "/i", None),
+            vis(9, "/j", None),
+            vis(1, "/a", None),
+            vis(1, "/b", None),
+            vis(5, "/e", None),
+            vis(5, "/f", None),
+        ];
+        for round in 0..32 {
+            let mut state = HashMap::new();
+            let anchors: Vec<u16> = update_and_collect(&mut state, 0, &visitors, now)
+                .iter()
+                .map(|b| b.anchor.x)
+                .collect();
+            assert_eq!(
+                anchors,
+                vec![14, 30, 46],
+                "round {round}: bubbles must emit in venue order (wp 1, 5, 9)"
+            );
         }
     }
 

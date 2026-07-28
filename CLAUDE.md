@@ -55,7 +55,7 @@ an ASCII office. Rust workspace of five crates. User-facing overview:
 ```
 crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web} (+ standalone pixtuoid-hook)
 ├── pixtuoid-core/   headless lib — no terminal deps (ratatui/crossterm forbidden)
-│                    source/ state/ sprite/ render/ grid.rs walkable.rs (walkable STAYS here:
+│                    source/ state/ sprite/ grid.rs id.rs walkable.rs platform.rs (walkable STAYS here:
 │                    its ops are an inherent `impl Grid<bool>`, orphan-rule-pinned to Grid's crate)
 │                    `native` (default) feature gates the async source runtime (tokio/notify,
 │                    hook/jsonl/manager/probes, the Source-trait seam source/native.rs + each
@@ -164,8 +164,17 @@ just build --release --example snapshot
 A PR that **intentionally** changes the office's look must run `just gen`
 and commit the regenerated `docs/images/` (incl. the `reference-*.png` CI
 baselines) plus `site/public/demos/` in the same change, or the smoke job's
-`just gen-check` pixel-diff goes red. Full iteration loop + sprite pitfalls:
-`.claude/skills/beautify-decoration/SKILL.md`.
+`just gen-check` pixel-diff goes red. **`just gen` is `gen-icons gen-media
+gen-readme` — it deliberately does NOT include `gen-wasm`** (that one needs
+rustup's wasm32 std + `wasm-bindgen-cli` + `wasm-opt`, which `gen`'s Python/Node
+tools don't), so a `pixtuoid-scene` or `pixtuoid-web` change must ALSO run `just
+gen-wasm` and commit all of `site/public/wasm/`. Nothing catches a skip:
+`gen-wasm-check` verifies only that the committed files match their own
+`manifest.sha256` (a stale set is perfectly self-consistent), and the poster the
+site crossfades OUT of — `site/public/demos/hero-wide.png`, a `wasm-still` job —
+is built NATIVELY from source by `gen-media`, so it tracks the change while the
+committed wasm the live hero actually runs does not. Full iteration loop + sprite
+pitfalls: `.claude/skills/beautify-decoration/SKILL.md`.
 
 ### Preflight, hooks, release
 

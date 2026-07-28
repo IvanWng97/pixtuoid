@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OutcomeRow",
-  "description": "One row of the `--json` batch envelope `pixtuoid connect|disconnect|sources set`\nprint — the SECOND stable wire contract the Raycast extension parses (alongside\n`SourceStatus`), with the same treatment: a committed JSON Schema\n(`integrations/raycast/contract/outcome-row.schema.json`, golden-tested below)\nthe extension's TS type is generated from (`gen:contract`). The wire shape is\n`{id, outcome, message?}` — a bare machine token plus an optional human-detail\nfield, split from the older folded `failed: <msg>` string BEFORE the\nextension's store publication (the in-repo extension ships atomically with\nthe binary, so no installed consumer parsed the old form). Once the extension\nis store-published, changing this shape needs a version handshake — see the\nsharp edge in `crates/pixtuoid/CLAUDE.md`. Pinned by\n`outcome_row_json_shape_is_the_raycast_contract` + the envelope test in\n`sources_cli.rs`.",
+  "description": "One row of the `--json` batch envelope `pixtuoid connect|disconnect|sources set`\nprint — the SECOND stable wire contract the Raycast extension parses (alongside\n`SourceStatus`), with the same treatment: a committed JSON Schema\n(`integrations/raycast/contract/outcome-row.schema.json`, golden-tested below)\nthe extension's TS type is generated from (`gen:contract`). The wire shape is\n`{id, outcome, message?}` — a bare machine token plus an optional human-detail\nfield, split from the older folded `failed: <msg>` string on the ASSUMPTION\nthat the in-repo extension, which ships atomically with the binary, was the\nonly consumer. It was not: the last `ray publish` marker PREDATES the split,\nso the break reached the store. Treat this wire as PUBLISHED — installed\ncopies parse it independently of the binary's version, and a further shape\nchange needs a version handshake, never another flag-day edit;\nsee the sharp edge in `crates/pixtuoid/CLAUDE.md`. Pinned by\n`outcome_row_json_shape_is_the_raycast_contract` + the envelope test in\n`sources_cli.rs`.",
   "type": "object",
   "properties": {
     "id": {
@@ -27,7 +27,7 @@
   ],
   "$defs": {
     "WireOutcome": {
-      "description": "The wire-facing outcome token — a CLOSED set, published in the JSON schema\nas an `enum` so the generated Raycast type is a string-literal UNION (a\nconsumer typo like `\"conected\"` is a `tsc` error, not a runtime miss).\nChosen over a bare `string` in the pre-store-publication free window: the\nstronger contract costs nothing now; loosening later is additive.",
+      "description": "The wire-facing outcome token — a CLOSED set, published in the JSON schema\nas an `enum` so the generated Raycast type is a string-literal UNION (a\nconsumer typo like `\"conected\"` is a `tsc` error, not a runtime miss).\nWidening the set is additive for the PRODUCER only — an installed store\ncopy still won't match a new token, so it is a wire change under the\n`OutcomeRow` handshake rule below, not a free extension.",
       "type": "string",
       "enum": [
         "connected",
