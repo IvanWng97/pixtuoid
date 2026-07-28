@@ -1225,8 +1225,7 @@ test_codeql_dropping_the_pull_request_trigger_is_denied if {
 }
 
 # A filtered trigger still "runs on pull requests", so the old wording accused
-# the maintainer of the opposite of what they did. The requirement is that NO
-# pull request can skip analysis, which only a bare `pull_request:` guarantees.
+# the maintainer of the opposite of what they did.
 test_codeql_filtered_pull_request_trigger_is_denied if {
 	every trigger in {
 		{"types": ["opened", "synchronize", "reopened"]},
