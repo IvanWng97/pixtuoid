@@ -320,9 +320,23 @@ hack:
     cargo hack --feature-powerset --no-dev-deps check --workspace
 
 # Cross-lint the workspace for Windows (clippy subsumes check; no linking).
+# Same toolchain gotcha as `api-surface` and `wasm-build`, and it bites HARDER
+# here because the compiler's own advice is wrong: a Homebrew cargo ahead of the
+# rustup proxy on PATH ships only the host std, so the cross-lint dies on E0463
+# "can't find crate for `core`" while suggesting `rustup target add
+# x86_64-pc-windows-msvc` for a target rustup already has. Prepending the proxy
+# (a no-op on CI, where it is already first) fixes it; the explicit preflight
+# then owns the genuinely-missing case with an accurate message. This is the
+# documented way to pre-verify a path-string change against `windows-test`,
+# which local preflight is otherwise blind to — so it has to actually run.
 [group('rust')]
 [doc('Cross-lint the workspace for x86_64-pc-windows-msvc via clippy (no linking; ubuntu runner suffices)')]
 check-windows:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    rustup target list --toolchain stable --installed | grep -q x86_64-pc-windows-msvc \
+        || { echo "needs the target: rustup target add x86_64-pc-windows-msvc" >&2; exit 1; }
     cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 
 # Verify the workspace builds on the DECLARED MSRV (rust-version in Cargo.toml).
