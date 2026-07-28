@@ -138,7 +138,7 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
         }
     }
     // Home desks: the chair (`desk_walk_anchor` == `seated_foot_cell(Desk)`) is
-    // the SEAT the sprite settles onto (magenta, inside the blocked footprint),
+    // the SEAT the sprite settles onto (magenta, inside the desk's blocked band),
     // and A* now routes to an APPROACH POINT off an allowed N/E/W side (green) —
     // the SAME split as the seats. Mirror `desk_approach_cell`'s per-side scan
     // from the CHAIR (not the top-left corner) so every allowed+reachable side
@@ -246,7 +246,8 @@ mod tests {
 
     /// The home desk joined the unified approach model: its chair
     /// (`desk_walk_anchor` == `seated_foot_cell(Desk)`) is the SEAT (magenta,
-    /// inside the blocked footprint) and A* routes to an APPROACH POINT off an
+    /// inside the desk's blocked band — the `OBSTACLE_PAD_PX` routing pad, not
+    /// the shallow `DESK_FOOT_H` footprint) and A* routes to an APPROACH POINT off an
     /// allowed N/E/W side (green). The `w` overlay must show them distinct — the
     /// same split as the seats — so a viewer can confirm the entry walks AROUND
     /// to a side, not through the desk front.
