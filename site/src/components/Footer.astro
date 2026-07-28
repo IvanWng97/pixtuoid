@@ -48,7 +48,11 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
   }
   /* The line floats over the released dimmer (office fully lit) at page end,
      so it rides the same --screen chip as every other over-office caption —
-     theme-independent inks, never --fg-muted (invisible on the day office). */
+     theme-independent inks, never --fg-muted (invisible on the day office).
+     --chip-ink is the ink for EVERYTHING in the line, `.footer__sep` included:
+     the dimmer --chip-dim wants an OPAQUE --screen (5.34:1), and --chip-bg is
+     only 82% of it over the office, which drops --chip-dim to 4.13:1 in day
+     (9.69:1 inherited). The dots' de-emphasis is the "·" glyph itself. */
   .footer__line {
     display: flex;
     flex-wrap: wrap;
@@ -79,10 +83,6 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
     width: 16px;
     image-rendering: pixelated;
   }
-  /* The separators inherit `.footer__line`'s --chip-ink rather than carrying
-     --chip-dim: the dim tone wants an OPAQUE --screen (5.34:1), and this line's
-     --chip-bg is 82% of it over the page-end office, which drops --chip-dim to
-     4.13:1 in day (9.69:1 inherited). Their de-emphasis is the "·" glyph. */
   /* Groups a "·" with the item it introduces into ONE flex item, so
      flex-wrap can only break BETWEEN groups — never leave a separator
      stranded alone at the start of a wrapped line (#U8: a bare .footer__sep
@@ -116,8 +116,9 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
      a colour-mix toward white rather than Nav's deep→full token swap. Rests on
      --chip-accent, NOT --coral: this line's whole point is theme-independent ink
      on the --screen chip (see .footer__line above), and the theme token broke
-     that — it measured 3.70:1 in day and 4.26:1 in night against the chip, the
-     one node Lighthouse's colour-contrast audit failed. Mixing toward white only
+     that — it measured 3.70:1 in day and 4.26:1 in night against the chip, one
+     of the two nodes Lighthouse's colour-contrast audit failed (`.nav__version`
+     was the other, on the doc routes). Mixing toward white only
      GAINS contrast (AA-safe). Keep this rest rule AFTER `.footer__line a:hover`:
      on a pre-color-mix engine the hover value drops and the two tie at equal
      specificity, so source order is what holds the fallback at the accent (no

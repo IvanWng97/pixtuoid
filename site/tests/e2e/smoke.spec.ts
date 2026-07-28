@@ -209,16 +209,12 @@ async function paintedContrast(page: Page, selector: string, nth = 0): Promise<n
     [selector, nth] as const
   );
   const inkRgb = parseRgb(ink).slice(0, 3) as [number, number, number];
-  // An ancestor's `opacity` fades ITS OWN background and everything inside it,
-  // never an ancestor's — so the group factor accumulates from the ROOT DOWN,
-  // and the ink carries the whole chain's product.
+  // `opacity` fades a node's OWN background and everything inside it, never an
+  // ancestor's — so a layer's group factor is the product from the ROOT down.
   const inkAlpha = chain.reduce((p, c) => p * c.opacity, 1);
-  const groupAt = chain.map((_, k) =>
-    chain.slice(k).reduce((p, c) => p * c.opacity, 1)
-  ) as number[];
-  // An opaque plate anywhere in the chain makes whatever is under the page
-  // immaterial — only a chain that stays translucent all the way out needs the
-  // office sampled (and only that case pays its scroll + settle).
+  const groupAt = chain.map((_, k) => chain.slice(k).reduce((p, c) => p * c.opacity, 1));
+  // An opaque plate makes whatever is under the page immaterial, so only a
+  // chain translucent all the way out pays for the office sample's scroll.
   const plated = chain.some((c, k) => !c.isPageRoot && parseRgb(c.bg)[3] * groupAt[k] >= 1);
   const grounds = plated ? null : await officeGrounds(page, selector, nth);
   const seeds: [number, number, number][] = grounds ?? [[255, 255, 255]];
