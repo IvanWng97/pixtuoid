@@ -744,8 +744,10 @@ class Report:
         across five false-positive drift lines. Verified drift says what upstream
         did; this says what we failed to read, and points at the pin rather than
         the decoder. Taking the three FACTS (what, where, consequence) instead of
-        a finished string is why: a caller cannot hand-word a probe-health line
-        that asserts the cause this bucket exists to withhold.
+        a finished string is why: the disclaimer and the repin action are composed
+        HERE, so no probe-health line can ship without them. (The caller's three
+        facts are still its own prose — the guarantee is that the withholding
+        language always accompanies them, not that they are cause-free.)
 
         `our_source=True` for a failure to read OUR OWN source — the plugin template, this
         script's parsers. Nothing upstream is even consulted on those paths, so the
@@ -830,8 +832,10 @@ class Report:
 
         `blind` is actionable — the watch is DARK for that source until someone
         repins — so it exits 1 and files an issue, even though the report above
-        no longer calls it drift. Dropping it from this condition left the whole
-        suite green while a report saying the watch was dark exited 0.
+        no longer calls it drift. Drop it from this condition and a report saying
+        the watch is dark exits 0: both `exit == '1'` steps in upstream-drift.yml
+        skip and the WEEKLY RUN goes green — #454's fail-open. Pinned by the
+        selftest's blind-only exit-1 checks.
         """
         if self.breaking or self.review or self.blind:
             return 1
@@ -1551,6 +1555,7 @@ def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
     # function so the selftest can exercise the DETECTION (not just the
     # parsers): depended markers alarm on VANISH, surface markers on
     # APPEARANCE.
+    # NOT `review`: the selftest bans a bucket-named local outside `Report`.
     findings: list[str] = []
     for marker, what in sorted(CC_DEPENDED_DOC_MARKERS.items()):
         if marker not in hooks_doc:
@@ -1571,12 +1576,17 @@ def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
 
 @dataclasses.dataclass
 class OurNames:
-    """What WE depend on, read from our OWN source — one field per source.
+    """What WE depend on, read from our OWN source — one field per READER.
 
-    `None` means that source's reader failed, and it is load-bearing rather than
-    a default: every block in `run_checks` guards on its own field, so a stale
-    parser darkens exactly its own source and the other thirteen still run. See
-    `read_our_names` for why that isolation had to be built.
+    Not one per source: a source's event watch and its transcript-tail flood
+    guard read different constants through different parsers, so they get
+    separate fields (18 fields, 12 sources — codex and copilot each have both,
+    and ACP is a cross-vendor wire standard owned by no single source).
+
+    `None` means that reader failed, and it is load-bearing rather than a
+    default: every consuming block in `run_checks` guards on its own field, so a
+    stale parser darkens exactly what it fed and the other seventeen still run.
+    See `read_our_names` for why that isolation had to be built.
     """
 
     codex: set[str] | None = None
@@ -1593,10 +1603,22 @@ class OurNames:
     hermes: set[str] | None = None
     grok: set[str] | None = None
     kimi: set[str] | None = None
+    # The flood guards: the KNOWN_* sets a decoder breadcrumbs an unknown member
+    # against. Separate fields, not folded into the source above them, because a
+    # source's event watch and its flood guard read DIFFERENT constants and fail
+    # independently — one going stale must not dark the other.
+    codex_rollout_outers: set[str] | None = None
+    copilot_namespaces: set[str] | None = None
+    omp_known_types: set[str] | None = None
+    acp_tags: set[str] | None = None
 
 
-# (field on OurNames, reader, the surface it reads). A table rather than
-# fourteen statements because each row needs its OWN try — see `read_our_names`.
+# (field on OurNames, reader, the surface it reads). A table rather than a run of
+# statements because each row needs its OWN try — see `read_our_names`.
+# Rows hold function OBJECTS, captured at import: reassigning the module
+# attribute (`d.read_codex_events = ...`) is a SILENT no-op, so a test injecting a
+# stale reader must replace the ROW. Objects over name strings deliberately — a
+# name would not survive a rename and would break find-references.
 READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
     ("codex", read_codex_events, "CODEX_EVENTS in install/codex.rs"),
     ("codex_rollout", read_codex_rollout_types, "the decode arms in source/codex.rs"),
@@ -1612,26 +1634,35 @@ READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
     ("hermes", read_hermes_events, "HERMES_EVENTS in install/hermes.rs"),
     ("grok", read_grok_events, "GROK_EVENTS in install/grok.rs"),
     ("kimi", read_kimi_events, "KIMI_EVENTS in install/kimi.rs"),
+    ("codex_rollout_outers", read_codex_rollout_outers, "KNOWN_OUTERS in source/codex.rs"),
+    ("copilot_namespaces", read_copilot_namespaces, "KNOWN_NAMESPACES in source/copilot.rs"),
+    ("omp_known_types", read_omp_known_types, "KNOWN_ENTRY_TYPES in source/omp.rs"),
+    ("acp_tags", read_acp_tags, "KNOWN_ACP_TAGS in source/acp.rs"),
 )
 
 
 def read_our_names(report: Report) -> OurNames:
-    """Read every source's depended names, ISOLATING each reader's failure.
+    """Read every depended name from our own source, ISOLATING each reader.
 
     A failure here means the monitor itself is broken — install/codex.rs or a
     decoder refactored away from what a parser expects. That is a LOUD probe-
     health signal (exit 1; our own parser being stale is the textbook "the probe
-    missed"), never transient, "or drift monitoring would silently stop with zero
-    alarm".
+    missed"), never transient, or drift monitoring would silently stop with zero
+    alarm.
 
-    Which is exactly what one shared `try` around all fourteen produced. A raise
+    Which is exactly what one shared `try` around the whole run produced. A raise
     partway through left every LATER field at `None`, `run_checks` skips a `None`
-    source in silence, and the single catch-all line said "nothing upstream was
-    consulted" while thirteen URLs had in fact been read. Measured on reader #9
-    of 14: 28 finding lines fell to 17 and Cursor, Hermes, grok and Kimi vanished
-    from the report entirely — six sources dark, not one of them named. Per-row
-    isolation makes the promise in the paragraph above true: the failure is
-    named, its source is the only casualty, and the rest of the watch still runs.
+    field in silence, and the single catch-all line said "nothing upstream was
+    consulted" while thirteen URLs had in fact been read. Measured on the 9th of
+    the then-14 readers: 28 finding lines fell to 17 and Cursor, Hermes, grok and
+    Kimi vanished from the report entirely — six sources dark, not one named.
+
+    The four flood-guard readers were WORSE before they joined this table: they
+    were called inline in `run_checks`, so a raise unwound to `main()`'s
+    catch-all and filed as TRANSIENT — exit 2, which the workflow reports as a
+    warning on an otherwise-green run. `read_acp_tags` alone took 25 fetched
+    documents to 10. Per-row isolation makes the promise above true for all of
+    them: the failure is named, only what it fed goes dark, and the watch runs on.
     """
     ours = OurNames()
     for field, reader, what in READERS:
@@ -1659,8 +1690,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     called, and still exits 1.
 
     Every block guards on its own `ours.<field> is not None`, so one stale reader
-    costs exactly one source. `report` is keyword-only: it is the OUTPUT, and it
-    must not be confusable with the input beside it."""
+    costs exactly what it fed. No `read_*` may be called from here: an inline read
+    unwinds to that catch-all and is filed TRANSIENT — a warning on a green run —
+    which is strictly worse than the probe-health line `read_our_names` files.
+    Pinned by the selftest's `test_no_reader_is_called_outside_the_readers_table`."""
     # --- Codex hook events + rollout decode vocabulary (only the FETCH is
     #     transient). protocol.rs holds BOTH the HookEventName enum (hooks) and
     #     the EventMsg enum (rollout `event_msg` types); the `response_item` types
@@ -1726,9 +1759,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "protocol.rs",
                     "The rollout OUTER flood guard was SKIPPED.",
                 )
-            else:
-                known_outers = read_codex_rollout_outers()
-                for t in sorted(up_outers - known_outers):
+            elif ours.codex_rollout_outers is not None:
+                for t in sorted(up_outers - ours.codex_rollout_outers):
                     report.add_review(
                         f"new Codex rollout OUTER `{t}` upstream (`RolloutItem`) not "
                         f"in KNOWN_OUTERS (source/codex.rs) — the transcript tail will "
@@ -1980,7 +2012,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     # pins features=["unstable"], so its surface is the UNION of v1 stable + unstable;
     # we fetch both. Review-class, never breaking — the reverse (a KNOWN_ACP_TAGS
     # member gone upstream) is a benign stale entry.
-    known_acp = read_acp_tags()
     up_acp: set[str] = set()
     acp_parsed = False
     for url, label in (
@@ -1999,8 +2030,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             else:
                 up_acp |= tags
                 acp_parsed = True
-    if acp_parsed:
-        for tag in sorted(up_acp - known_acp):
+    if acp_parsed and ours.acp_tags is not None:
+        for tag in sorted(up_acp - ours.acp_tags):
             report.add_review(
                 f"new ACP v1 `sessionUpdate` tag `{tag}` upstream not in KNOWN_ACP_TAGS "
                 f"(source/acp.rs) — the ACP tag tier will breadcrumb EVERY line of it "
@@ -2075,9 +2106,9 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             # KNOWN_NAMESPACES (decode it or knowingly ignore it). The reverse (a
             # KNOWN_NAMESPACES member gone upstream) is a benign stale entry.
             # `up_ns` is the anchor parsed above — reused, not re-derived.
-            known_ns = read_copilot_namespaces()
-            for ns in sorted(up_ns - known_ns):
-                report.add_review(
+            if ours.copilot_namespaces is not None:
+                for ns in sorted(up_ns - ours.copilot_namespaces):
+                    report.add_review(
                         f"new Copilot event NAMESPACE `{ns}` upstream (`SessionEvent`) "
                         f"not in KNOWN_NAMESPACES (source/copilot.rs) — the transcript "
                         f"tail will breadcrumb EVERY line of it (drift flood); add it "
@@ -2120,9 +2151,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "session-entries.ts",
                     "The omp entry-type flood guard was SKIPPED.",
                 )
-            else:
-                known_types = read_omp_known_types()
-                for t in sorted(up_types - known_types):
+            elif ours.omp_known_types is not None:
+                for t in sorted(up_types - ours.omp_known_types):
                     report.add_review(
                         f"new omp entry TYPE `{t}` upstream (session-entries.ts) not "
                         f"in KNOWN_ENTRY_TYPES (source/omp.rs) — the transcript tail "
