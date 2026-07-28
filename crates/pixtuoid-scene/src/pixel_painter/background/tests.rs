@@ -876,52 +876,81 @@ fn pane(theme: &'static crate::theme::Theme, hour: u32, w: Weather) -> f32 {
     )
 }
 
-/// Local midnight — the night arc's own apex, so the brightest instant of a
-/// night — and solar noon, its daytime counterpart.
+/// Local midnight — the moon arc's apex hour, and the instant
+/// `fog_still_glows_over_the_midnight_sky` reads. It is NOT the brightest
+/// RENDERED night pane (the pre-dawn twilight tint reads brighter on every
+/// theme), which is why the two ordering pins below sweep [`night_hours`]
+/// rather than sampling this one.
 const NIGHT_HOUR: u32 = 0;
+/// Solar noon — the daytime reference the pane orderings measure against.
 const NOON_HOUR: u32 = 12;
 
-// The rendered twin of `solar_noon_outshines_the_brightest_night`: the model's
-// day-over-night ordering has to survive the weather VEIL the painter lays over
-// the glass afterwards. It did not — `skyline_haze` and the Fog/Overcast/Smog
-// washes were absolute daylight-grey constants with no time input, so the
-// heaviest weathers BRIGHTENED the pane after dark and a night-lit room sat
-// behind daylight-white windows.
+/// Every whole hour at which the sky shows the MOON, straight off
+/// [`sky::hour_is_day`] — the ONE day/night boundary, so this sweep can't drift
+/// from a second hand-written hour list.
+fn night_hours() -> impl Iterator<Item = u32> {
+    (0..24u32).filter(|h| !sky::hour_is_day(*h as f32))
+}
+
+/// The most of its OWN solar-noon brightness a pane may still show at any night
+/// hour. A bare `night < noon` has NO teeth against the veil defect: the
+/// absolute-grey veils left each weather's night pane just barely under its own
+/// noon pane, so `night < noon` held everywhere pre-fix. Measured over the whole
+/// night band × `ALL_THEMES`, the five VEILED weathers ran 0.865..0.956 (worst:
+/// cyberpunk Fog at 01:00) — the rendered day/night cycle had collapsed to a few
+/// percent while the ordering still technically held. Emitter-lit veils bring
+/// the worst case to 0.655 (dracula Rain, 01:00), and the three UNVEILED
+/// weathers (Clear/Snow/Windy) are unchanged either way at 0.44..0.65. This
+/// floor sits in the gap between those two populations.
+const MAX_NIGHT_PANE_FRACTION: f32 = 0.75;
+
+// The rendered twin of `solar_noon_outshines_the_brightest_night`: the day/night
+// CONTRAST the light model produces has to survive the weather VEIL the painter
+// lays over the glass afterwards. It did not — `skyline_haze` and the
+// Fog/Overcast/Smog washes were absolute daylight-grey constants with no time
+// input, so a foggy 01:00 pane rendered 94% as bright as a foggy solar noon
+// (152.3 vs 161.9) and a night-lit room sat behind daylight-white windows.
 #[test]
-fn every_weather_darkens_the_glass_from_solar_noon_to_midnight() {
+fn no_weather_flattens_the_glass_day_night_contrast() {
     for theme in crate::theme::ALL_THEMES {
         for w in Weather::ALL {
-            let (noon, night) = (pane(theme, NOON_HOUR, w), pane(theme, NIGHT_HOUR, w));
-            assert!(
-                night < noon,
-                "{}/{:?}: a full-moon midnight pane must be darker than the solar-noon \
-                 pane (night={night:.1} noon={noon:.1})",
-                theme.name,
-                w
-            );
+            let noon = pane(theme, NOON_HOUR, w);
+            for hour in night_hours() {
+                let night = pane(theme, hour, w);
+                assert!(
+                    night <= noon * MAX_NIGHT_PANE_FRACTION,
+                    "{}/{:?}: the {hour:02}:00 pane must stay under {MAX_NIGHT_PANE_FRACTION} \
+                     of its own solar-noon pane (night={night:.1} noon={noon:.1} ratio={:.3})",
+                    theme.name,
+                    w,
+                    night / noon
+                );
+            }
         }
     }
 }
 
 // The cross-weather half of the same defect, and the finding's headline
-// measurement: a foggy 3 AM pane out-shone a CLEAR solar noon one. Note the
-// reference is clear noon, not the DIMMEST noon: how bright a snowy/stormy noon
-// pane renders is a theme-palette choice (cyberpunk's day sky is deliberately
-// dark), so "the dimmest noon of any weather" is not a property of the light
-// model and is not asserted here.
+// measurement: a foggy small-hours pane out-shone a CLEAR solar noon one. Note
+// the reference is clear noon, not the DIMMEST noon: how bright a snowy/stormy
+// noon pane renders is a theme-palette choice (cyberpunk's day sky is
+// deliberately dark), so "the dimmest noon of any weather" is not a property of
+// the light model and is not asserted here.
 #[test]
-fn no_midnight_pane_outshines_the_clear_solar_noon_pane() {
+fn no_night_pane_outshines_the_clear_solar_noon_pane() {
     for theme in crate::theme::ALL_THEMES {
         let clear_noon = pane(theme, NOON_HOUR, Weather::Clear);
         for w in Weather::ALL {
-            let night = pane(theme, NIGHT_HOUR, w);
-            assert!(
-                night < clear_noon,
-                "{}/{:?}: a full-moon midnight pane ({night:.1}) must stay below the \
-                 clear solar-noon pane ({clear_noon:.1})",
-                theme.name,
-                w
-            );
+            for hour in night_hours() {
+                let night = pane(theme, hour, w);
+                assert!(
+                    night < clear_noon,
+                    "{}/{:?}: the {hour:02}:00 pane ({night:.1}) must stay below the \
+                     clear solar-noon pane ({clear_noon:.1})",
+                    theme.name,
+                    w
+                );
+            }
         }
     }
 }

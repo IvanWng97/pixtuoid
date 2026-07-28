@@ -269,10 +269,12 @@ fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
 /// The veils ([`skyline_haze`] behind the glass, the Fog/Overcast/Smog washes on
 /// it) are lit by the same emitter as everything else: a white-out fog is white
 /// under the sun and a dim glowing murk at midnight. They used to be ABSOLUTE
-/// daylight greys blended over an already-time-lerped `sky_row`, which inverted
-/// the day-over-night ordering in the composed frame — a foggy midnight pane
-/// rendered ~1.8x brighter than a stormy solar-noon one, so a night-lit room sat
-/// behind daylight-white windows. The day term is the emitter's OWN luminance,
+/// daylight greys blended over an already-time-lerped `sky_row`, which flattened
+/// the composed frame's day/night contrast almost to nothing under a heavy
+/// weather (a foggy 01:00 pane at 94% of a foggy solar noon) and inverted the
+/// ordering ACROSS weathers — a foggy midnight pane rendered ~1.8x brighter than
+/// a stormy solar-noon one, so a night-lit room sat behind daylight-white
+/// windows. The day term is the emitter's OWN luminance,
 /// deliberately NOT `atmo`/`look.darkness`: those already carry the weather (the
 /// veil colour does too), and folding them in would darken a stormy noon twice.
 const NIGHT_VEIL_FLOOR: f32 = 0.35;
