@@ -134,6 +134,33 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
     );
 }
 
+// Regression: the overlays were centered in the FULL terminal rect, so a panel
+// whose natural height exceeds the terminal clamps to it and overwrites the
+// footer row — the one persistent affordance, and the only place a first-run
+// user reads `[q]uit`. Overlays own the SCENE rect; the footer row is never
+// theirs to take.
+#[test]
+fn a_full_height_modal_never_covers_the_footer_row() {
+    let scene = scene_with(vec![idle("/fh/0.jsonl", 0, t0())], 16);
+    // 32x31 is the office layout's exact minimum, and the real release notes
+    // wrap past 31 rows there — the size the popup swallowed the footer at.
+    let mut r = build(32, 31, vec![]);
+    r.set_version_popup(true, t0());
+    let t = t0() + Duration::from_millis(400); // fully scaled in
+    r.render(&scene, &pack(), t).expect("render");
+    let text = frame_text(r.frame_buffer());
+    let last_row = text.lines().last().unwrap_or_default().to_string();
+    assert!(
+        text.contains("Enter to close"),
+        "the popup must be on screen for this to test anything; frame was:\n{text}"
+    );
+    assert!(
+        last_row.contains("[q]uit"),
+        "the footer must survive a full-height modal, got last row {last_row:?};\
+         \nframe was:\n{text}"
+    );
+}
+
 // Regression: per-agent MotionState was evicted only on the CURRENT floor, so an
 // agent that exited while a different floor was visible leaked its walk-path Vec
 // on its own (non-current) floor until that floor was next navigated to. The

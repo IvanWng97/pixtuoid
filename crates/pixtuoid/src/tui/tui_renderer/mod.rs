@@ -726,7 +726,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     onboarding: &onboarding,
                 },
                 now,
-                actual_full,
+                actual_scene,
                 theme,
             );
         })?;
