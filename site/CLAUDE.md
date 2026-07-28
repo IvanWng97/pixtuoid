@@ -276,12 +276,20 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   its sweep is `smoke.spec.ts`'s "bare hero text clears WCAG AA at the real
   office composite": it scrolls each selector on screen, reads the office
   canvas under its box, composites the live dimmer and grades the element's
-  real ink. **SHARP EDGE — that sweep only measures anything for an element
+  real ink. **SHARP EDGE — an office grade only means anything for an element
   that is ON SCREEN**: the canvas is a viewport-fixed backdrop with a tiny
   buffer, so an unscrolled below-fold selector indexes past it and
   `getImageData` returns zeroed pixels — the sweep then silently grades
-  "dimmer over black" instead of the office, which is how the studio dial's
-  `--led` accents passed while rendering at 1.13:1. Day and night pull the ink
+  "dimmer over black" instead of the office. `officeGrounds` therefore both
+  scrolls the element in first AND asserts the read landed on painted canvas,
+  so that failure is now a loud one rather than a wrong number. (It is NOT what
+  hid the studio dial's `--led` accents — two independent holes were fused into
+  one story here once, so: those accents were never in the selector list at
+  all, scoped away by the rest row's `:not([aria-pressed='true'])`, and the
+  zeroed-pixel grade would have failed them anyway. Measured by restoring the
+  raw `--led` on the pressed number: 1.02:1 against "dimmer over black", ~1.15:1
+  against the real day composite — both an order of magnitude under the floor,
+  so no scroll fix would have caught what was never swept.) Day and night pull the ink
   in OPPOSITE directions (day's dimmer lightens the composite toward `--paper`,
   night's darkens it toward `--bg`), so any hue that lands here needs a
   theme-aware token measured against the REAL composite — `--office-ink` /
@@ -289,13 +297,35 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   dial. `--led` itself is a HARDWARE hue (global.css: "HARDWARE components …
   are `.hw-panel` … dark `--screen` ground"); the dial is the one place it is
   used with no `--screen` under it, hence its own token rather than a fourth
-  bare `--led` site. Text on the page's OPAQUE DOM plates is a third population
-  with a third sweep, "opaque-plate text clears WCAG AA in every theme" — and
-  that one runs **dracula** too. Dracula is visitor-reachable (`?theme=dracula`
+  bare `--led` site. Its `--led-glow` text-shadow deliberately stays the
+  theme-independent lime: a shadow the GLYPH paints is decoration, not the
+  ground it is graded against (WCAG 1.4.3 and axe both read ink vs
+  background), and at 0.55 alpha over day's light composite it leaves no lit
+  ring — in a 3× render of the day dial the most green-biased pixel in the row
+  IS the glyph. Measured worst case against the real office composite: 5.28:1
+  for the pressed number, 5.55:1 for `live`.
+  Text on the page's DOM plates is swept by "plate and chip
+  text clears WCAG AA in every theme" — and that one runs **dracula** too.
+  There are FOUR populations, not three: bare-over-office (above); the OPAQUE
+  plates (terminal chrome bar, stage OSD chips / caption / sky ticks, docs
+  pager, prose code chips); the TRANSLUCENT `--screen` chips, whose ground is
+  the office seen THROUGH the chip (the footer line, the nav version tag) — the
+  population the plate sweep's own introducing change had just repaired
+  (`.footer__coffee`) and still left unpinned, with `.nav__version` sitting at
+  2.34:1; and the docs callout window (its own sweep, below §6).
+  `paintedContrast` grades all four the same way — composite every ancestor
+  background down, seed the ground from the office canvas when no ancestor
+  plate is opaque, and **FOLD ancestor `opacity` into the ink**: an
+  `opacity: .7` group shows 30% of its ground through the glyph, so a raw
+  `getComputedStyle().color` read reports a ratio nobody sees (`.vibing__ticks`
+  graded 5.77:1 while rendering 3.06:1 until the fold landed). The corollary,
+  which `.boot__hint` had already reached: on any of these surfaces
+  de-emphasis comes from SIZE, never from a sub-AA ink or an `opacity`
+  multiplier. Dracula is visitor-reachable (`?theme=dracula`
   via `VALID_THEMES`, plus `Base.astro`'s keydown egg) but nothing measured it:
   the office sweep is day+night on purpose (dracula's `--bg` darkens the same
   way night's does, so it piggybacks) and Lighthouse only ever scores the
-  default theme. Its own palette steps much further from `--bg` to `--surface-2`
+  pinned theme. Its own palette steps much further from `--bg` to `--surface-2`
   than day/night do, which is why its `--fg-muted` and upstream Dracula Purple
   needed their own tuning against its own plates rather than inheriting the
   assumption that "dark theme ⇒ fine".

@@ -79,9 +79,10 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
     width: 16px;
     image-rendering: pixelated;
   }
-  .footer__sep {
-    color: var(--chip-dim);
-  }
+  /* The separators inherit `.footer__line`'s --chip-ink rather than carrying
+     --chip-dim: the dim tone wants an OPAQUE --screen (5.34:1), and this line's
+     --chip-bg is 82% of it over the page-end office, which drops --chip-dim to
+     4.13:1 in day (9.69:1 inherited). Their de-emphasis is the "·" glyph. */
   /* Groups a "·" with the item it introduces into ONE flex item, so
      flex-wrap can only break BETWEEN groups — never leave a separator
      stranded alone at the start of a wrapped line (#U8: a bare .footer__sep
