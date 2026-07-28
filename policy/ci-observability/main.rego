@@ -28,6 +28,7 @@ composite_action_root := ".github/actions"
 github_actions_ecosystem := "github-actions"
 lint_workflow_path := ".github/workflows/ci-lint.yml"
 zizmor_recipe := "just zizmor"
+github_token_env := "GH_TOKEN"
 cache_cleanup_workflow_path := ".github/workflows/cache-cleanup.yml"
 claude_action := "anthropics/claude-code-action@v1"
 json_schema_flag := "--json-schema"
@@ -282,6 +283,28 @@ pinned_npm_setup_steps(path, job_name) := [step |
 	object.get(step, "if", null) == null
 	object.get(step, "continue-on-error", false) == false
 ]
+
+# GitHub layers a step's environment workflow < job < step, so the token is
+# equally live wherever it is declared and hoisting it to the job is a valid
+# refactor. The nearest DECLARATION wins even when its value is empty, which is
+# why these arms are mutually exclusive rather than an any-of: a step-level
+# `GH_TOKEN: ""` shadows the job's token and puts zizmor back offline.
+effective_gh_token(_, _, step) := token if {
+	token := object.get(step, ["env", github_token_env], null)
+	token != null
+}
+
+effective_gh_token(_, job, step) := token if {
+	object.get(step, ["env", github_token_env], null) == null
+	token := object.get(job, ["env", github_token_env], null)
+	token != null
+}
+
+effective_gh_token(workflow, job, step) := token if {
+	object.get(step, ["env", github_token_env], null) == null
+	object.get(job, ["env", github_token_env], null) == null
+	token := object.get(workflow, ["env", github_token_env], "")
+}
 
 codecov_uploads := [entry |
 	some entry in uses_entries
@@ -1153,13 +1176,14 @@ deny contains msg if {
 # repository-wide while every gate stayed green. actionlint cannot express
 # "this step's env is load-bearing for that recipe's coverage".
 deny contains msg if {
-	some job_name, job in object.get(documents[lint_workflow_path], "jobs", {})
+	workflow := documents[lint_workflow_path]
+	some job_name, job in object.get(workflow, "jobs", {})
 	some step in object.get(job, "steps", [])
 	object.get(step, "run", "") == zizmor_recipe
-	object.get(object.get(step, "env", {}), "GH_TOKEN", "") == ""
+	effective_gh_token(workflow, job, step) == ""
 	msg := sprintf(
-		"%s job %q must pass GH_TOKEN to `%s` — its four online audits run nowhere else",
-		[lint_workflow_path, job_name, zizmor_recipe],
+		"%s job %q must give `%s` a non-empty %s — GitHub layers step env over job env over workflow env, so declaring it at any one of the three is enough; tokenless, zizmor drops to offline and silently skips impostor-commit, known-vulnerable-actions, ref-confusion and stale-action-refs, which run nowhere else",
+		[lint_workflow_path, job_name, zizmor_recipe, github_token_env],
 	)
 }
 

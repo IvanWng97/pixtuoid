@@ -545,30 +545,60 @@ test_zizmor_pin_policy_cannot_be_tightened_or_disabled_silently if {
 	sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path]) in violations
 }
 
+zizmor_fixture(contents) := {"documents": [{"path": lint_workflow_path, "contents": contents}]}
+
 zizmor_token_message(job_name) := sprintf(
-	"%s job %q must pass GH_TOKEN to `%s` — its four online audits run nowhere else",
-	[lint_workflow_path, job_name, zizmor_recipe],
+	"%s job %q must give `%s` a non-empty %s — GitHub layers step env over job env over workflow env, so declaring it at any one of the three is enough; tokenless, zizmor drops to offline and silently skips impostor-commit, known-vulnerable-actions, ref-confusion and stale-action-refs, which run nowhere else",
+	[lint_workflow_path, job_name, zizmor_recipe, github_token_env],
 )
 
 test_zizmor_online_audits_cannot_be_retired_by_dropping_the_token if {
-	fixture := {"documents": [{
-		"path": lint_workflow_path,
-		"contents": {"jobs": {"hygiene": {"steps": [{"run": "just zizmor"}]}}},
-	}]}
+	fixture := zizmor_fixture({"jobs": {"hygiene": {"steps": [{"run": "just zizmor"}]}}})
 	violations := deny with input as fixture
 	zizmor_token_message("hygiene") in violations
 }
 
 test_zizmor_step_carrying_the_token_is_silent if {
-	fixture := {"documents": [{
-		"path": lint_workflow_path,
-		"contents": {"jobs": {"hygiene": {"steps": [{
-			"run": "just zizmor",
-			"env": {"GH_TOKEN": "${{ github.token }}"},
-		}]}}},
-	}]}
+	fixture := zizmor_fixture({"jobs": {"hygiene": {"steps": [{
+		"run": "just zizmor",
+		"env": {"GH_TOKEN": "${{ github.token }}"},
+	}]}}})
 	violations := deny with input as fixture
 	not zizmor_token_message("hygiene") in violations
+}
+
+# The legitimate variant nobody writes a test for: hoisting the token to the job
+# once a second step in that job needs it changes nothing about what zizmor
+# sees, so a rule that denies it would order the maintainer to undo a valid
+# refactor while wearing a required gate's authority.
+test_zizmor_step_inheriting_a_job_level_token_is_silent if {
+	fixture := zizmor_fixture({"jobs": {"hygiene": {
+		"env": {"GH_TOKEN": "${{ github.token }}"},
+		"steps": [{"run": "just zizmor"}],
+	}}})
+	violations := deny with input as fixture
+	not zizmor_token_message("hygiene") in violations
+}
+
+test_zizmor_step_inheriting_a_workflow_level_token_is_silent if {
+	fixture := zizmor_fixture({
+		"env": {"GH_TOKEN": "${{ github.token }}"},
+		"jobs": {"hygiene": {"steps": [{"run": "just zizmor"}]}},
+	})
+	violations := deny with input as fixture
+	not zizmor_token_message("hygiene") in violations
+}
+
+# The nearest DECLARATION wins even when it is empty, so accepting inheritance
+# must not degrade into "a token exists somewhere": a step-level blank shadows
+# the job's token and puts zizmor back offline.
+test_zizmor_step_blanking_an_inherited_token_still_fires if {
+	fixture := zizmor_fixture({"jobs": {"hygiene": {
+		"env": {"GH_TOKEN": "${{ github.token }}"},
+		"steps": [{"run": "just zizmor", "env": {"GH_TOKEN": ""}}],
+	}}})
+	violations := deny with input as fixture
+	zizmor_token_message("hygiene") in violations
 }
 
 test_cache_cleanup_cannot_execute_pull_request_code if {
