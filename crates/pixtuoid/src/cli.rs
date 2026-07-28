@@ -20,9 +20,22 @@ pub struct Cli {
     #[arg(long, global = true, value_enum, default_value = "info")]
     pub log_level: LogLevel,
 
-    /// Color theme: normal, cyberpunk, dracula, tokyo-night, catppuccin, gruvbox.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help = theme_help())]
     pub theme: Option<String>,
+}
+
+/// `--theme`'s help text, DERIVED from the `ALL_THEMES` registry rather than
+/// hand-copied: this clap tree is what `--help`, the generated shell completions
+/// AND the packaged man page all render from, so a stale enumeration would ship
+/// into three surfaces at once with nothing to catch it. The flag stays an
+/// untyped `Option<String>` on purpose — `config::resolve_theme` is the ONE place
+/// a theme name is validated.
+fn theme_help() -> String {
+    let names: Vec<&str> = pixtuoid_scene::theme::ALL_THEMES
+        .iter()
+        .map(|t| t.name)
+        .collect();
+    format!("Color theme: {}.", names.join(", "))
 }
 
 /// The source-input flags shared VERBATIM by `run` and `floating` (the two
@@ -128,19 +141,22 @@ pub enum Cmd {
     /// `pixtuoid completions zsh > ~/.zfunc/_pixtuoid`. Package managers install
     /// these automatically; this command lets `cargo install` / `npm` users do it
     /// themselves for any shell.
-    ///
-    /// homebrew-core contract: their `install` block calls
-    /// `generate_completions_from_executable(bin/"pixtuoid", "completions")`, so
-    /// renaming this subcommand breaks their BUILD (not just a test) on the next
-    /// autobump. Same for `Man` below.
+    // A `///` here would be SHIPPED PRODUCT COPY (clap renders it as this
+    // subcommand's long help), so the maintainer note stays a `//`.
+    // homebrew-core contract: their `install` block calls
+    // `generate_completions_from_executable(bin/"pixtuoid", "completions")`, so
+    // renaming this subcommand breaks their BUILD (not just a test) on the next
+    // autobump. The same applies to `Man`, which carries its own note.
     Completions {
         /// Target shell.
         shell: clap_complete::Shell,
     },
     /// Print the roff man page to stdout (`pixtuoid man > pixtuoid.1`). A
     /// packaging interface — generated from the same clap definitions as `--help`.
-    /// homebrew-core's `install` captures this via `Utils.safe_popen_read` — see
-    /// the contract note on `Completions`.
+    // `hide = true` drops this from the PARENT listing, not from `pixtuoid man
+    // --help`, so this note is a `//` for the same reason `Completions`' is.
+    // homebrew-core's `install` captures this via `Utils.safe_popen_read` — see
+    // the contract note on `Completions`.
     #[command(hide = true)]
     Man,
 }
@@ -412,6 +428,57 @@ mod tests {
         ));
         // A bogus shell is a hard parse error (typed ValueEnum), not a runtime bail.
         assert!(Cli::try_parse_from(["pixtuoid", "completions", "nonsense"]).is_err());
+    }
+
+    /// `--theme`'s help must be DERIVED from `ALL_THEMES`, never a hand-copied
+    /// enumeration: `cli.rs` is the tree `completions` and `man` render from, so a
+    /// stale copy ships into installed shell completions and the packaged man page.
+    #[test]
+    fn theme_help_names_every_registered_theme() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        let help = cmd
+            .get_arguments()
+            .find(|a| a.get_id() == "theme")
+            .and_then(|a| a.get_help())
+            .map(ToString::to_string)
+            .expect("--theme carries help text");
+        for t in pixtuoid_scene::theme::ALL_THEMES {
+            assert!(
+                help.contains(t.name),
+                "--theme help omits the registered theme {:?} — it must read the \
+                 ALL_THEMES authority, not a copy",
+                t.name
+            );
+        }
+    }
+
+    /// A `///` on a clap variant is not a code comment — it is SHIPPED PRODUCT
+    /// COPY (clap renders it as that subcommand's long help). Maintainer-only
+    /// notes belong on `//`, on hidden variants too: `hide = true` drops a
+    /// subcommand from the PARENT listing, never from its own `--help`.
+    #[test]
+    fn packaging_subcommand_help_carries_no_maintainer_only_prose() {
+        use clap::CommandFactory;
+        let mut cmd = Cli::command();
+        for name in ["completions", "man"] {
+            let help = cmd
+                .find_subcommand_mut(name)
+                .expect("subcommand exists")
+                .render_long_help()
+                .to_string()
+                .to_lowercase();
+            for marker in [
+                "homebrew",
+                "autobump",
+                "generate_completions_from_executable",
+            ] {
+                assert!(
+                    !help.contains(marker),
+                    "`pixtuoid {name} --help` leaks the maintainer note {marker:?} to end users"
+                );
+            }
+        }
     }
 
     /// The packaging guard (ripgrep's zsh-coverage check analogue): a clap-derive
