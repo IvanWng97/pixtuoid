@@ -59,11 +59,16 @@ ignore:
   - "docs/"
   - "*.md"
   # Not coverable headlessly - exercising these needs a real TTY / OS / display.
-  # `.cargo/mutants.toml` also excludes the painter/glue files below (no headless
-  # test kills their mutants) but NOT crash/logging/sources_cli (pure helpers are
-  # unit-tested), and it additionally excludes some pixtuoid-core probe files not
-  # ignored here - so the two lists OVERLAP, neither is a subset. Keep the shared
-  # painter/glue entries in sync.
+  # `.cargo/mutants.toml` excludes MOST of the painter/glue files below (no
+  # headless test kills their mutants) but NOT crash/logging/sources_cli (pure
+  # helpers are unit-tested), and it additionally excludes some pixtuoid-core
+  # probe files not ignored here - so the two lists OVERLAP, neither is a subset.
+  # It also deliberately MUTATES the unit-tested decision layers inside
+  # tui/mod.rs + runtime/driver.rs, which stay WHOLLY ignored here: both are
+  # line-uncoverable in bulk, and per-function mutants see that split where
+  # per-line coverage cannot - so that file excludes their glue by FUNCTION
+  # (exclude_re) rather than by file, and records how far the measurements
+  # actually reach. Keep the shared entries in sync.
   - "crates/pixtuoid/src/main.rs"               # binary entry: arg-parse + dispatch + terminal preflights
   - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (was main.rs; its pure helpers stay unit-tested)
   - "crates/pixtuoid/src/logging.rs"            # global tracing-subscriber init (once per process; was main.rs; pure helpers unit-tested)

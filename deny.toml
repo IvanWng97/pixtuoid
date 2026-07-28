@@ -1,15 +1,26 @@
 [advisories]
-# Each ignore is Linux-only build-graph exposure with no untrusted input;
-# issue #440 owns removal when upstream releases (full dependency-path
-# traces there; the winit-0.31 route is #441).
+# An `ignore` entry whose advisory no longer matches any crate is dead config,
+# and cargo-deny only warns on it — a shipped upstream fix would leave the entry
+# rotting behind a green run. Config, not a CLI flag, so EVERY consumer of
+# `check advisories` enforces it, not just whichever caller remembered to pass
+# `-D advisory-not-detected`. The key needs cargo-deny 0.20.2, which is what
+# cargo-deny-action@v2.1.1's Dockerfile pins — re-check that pin before bumping
+# the action, since an older cargo-deny rejects the whole file over it.
+unused-ignored-advisory = "deny"
+# Issue #440 tracks dropping this ignore, but there is no upstream release to
+# wait for: RUSTSEC-2026-0192 is `informational = "unmaintained"` with
+# `patched = []`. It clears only when ab_glyph moves off ttf-parser (the
+# advisory points at skrifa) or when we drop ab_glyph.
 ignore = [
-    # quick-xml 0.39 pair, reachable only via wayland-scanner (build-time
-    # codegen over vendored Wayland protocol XML — never attacker input).
-    # Fix needs wayland-rs to release against quick-xml >=0.41.
-    "RUSTSEC-2026-0194",
-    "RUSTSEC-2026-0195",
-    # ttf-parser declared unmaintained; only via sctk-adwaita (Linux Wayland
-    # CSD titlebar text, local system fonts). Upstream is migrating to skrifa.
+    # ttf-parser is unmaintained. It enters the graph by TWO routes, not one:
+    # our OWN direct `ab_glyph` dep (crates/pixtuoid, rasterizing in
+    # src/aa_text.rs) carries it on macOS and Windows as well, and
+    # `sctk-adwaita <- winit` adds the Linux Wayland CSD titlebar. So winit or
+    # sctk-adwaita moving off ab_glyph would NOT clear this row. Neither route
+    # takes attacker input: aa_text parses the one `include_bytes!`-compiled
+    # Monaspace Neon face, and sctk-adwaita parses the local system font fc-match
+    # resolves (or its embedded Cantarell fallback) — on a titlebar our floating
+    # window disables anyway (`with_decorations(false)`).
     "RUSTSEC-2026-0192",
 ]
 
