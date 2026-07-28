@@ -7,17 +7,20 @@ ADDED or CHANGED vs its base — the new-slop signal — and is ADVISORY: it pri
 findings and always exits 0 unless `--gate` is passed. Mirrors the diff-scoping
 `just mutants --in-diff` already uses.
 
-Usage: comment-lint.py [BASE_REF] [--gate] [--worktree]
+Usage: comment-lint.py [BASE_REF] [--gate] [--worktree] [--selftest]
   BASE_REF     git ref to diff against (default: origin/main)
   --gate       exit 1 if any new-code hit is found (default: advisory, exit 0)
   --worktree   diff the WORKING TREE vs BASE (lint uncommitted changes) instead
                of the committed BASE...HEAD range (the default, for CI/PRs)
+  --selftest   pin this driver's pathspec + hidden-dir scan on a throwaway repo
 """
 import json
+import pathlib
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 def added_lines_by_file(base: str, worktree: bool) -> dict[str, set[int]]:
@@ -46,7 +49,86 @@ def added_lines_by_file(base: str, worktree: bool) -> dict[str, set[int]]:
     return added
 
 
+
+def scan_hits(cwd: str | None = None) -> list[dict]:
+    """Every rule's hits for the tree at `cwd`.
+
+    `--no-ignore hidden`: ast-grep skips dot-dirs like ripgrep, but the diff
+    filter matches `.claude/skills/**/*.py` — without it the scan reports a clean
+    pass on files it never opened. Pinned by `--selftest`.
+    """
+    out = subprocess.run(
+        ["ast-grep", "scan", "--json", "--no-ignore", "hidden"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=cwd,
+    ).stdout
+    return json.loads(out)
+
+
+def selftest() -> int:
+    """Pin this DRIVER's two behaviors: which files it diffs, and which it scans.
+
+    The ast-grep RULES have their own fires/does-not-fire pins (`just
+    ast-grep-test`); this covers the Python half of the pathspec and the
+    hidden-dir scan flag, which live here and had no coverage. Both are
+    regressions a refactor could make silently — the hidden-dir case shipped as a
+    clean pass over six unread files before it was caught in review.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    fails: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = pathlib.Path(tmp) / "repo"
+        (repo / ".claude" / "skills").mkdir(parents=True)
+        (repo / "src").mkdir()
+        # The rules travel with the fixture; ast-grep resolves them from cwd.
+        shutil.copytree(root / ".ast-grep", repo / ".ast-grep")
+        shutil.copy(root / "sgconfig.yml", repo / "sgconfig.yml")
+        run3 = "def f():\n    # one\n    # two\n    # three\n    return 1\n"
+        (repo / "src" / "plain.py").write_text(run3)
+        (repo / ".claude" / "skills" / "hidden.py").write_text(run3)
+        (repo / "src" / "keep.rs").write_text(
+            "fn f() -> u8 {\n    // one\n    // two\n    // three\n    1\n}\n"
+        )
+        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run([*git, "init", "-q", "-b", "main"], cwd=repo, check=True)
+        subprocess.run([*git, "add", "-A"], cwd=repo, check=True)
+        subprocess.run([*git, "commit", "-qm", "fixture"], cwd=repo, check=True)
+
+        scanned = {h["file"] for h in scan_hits(cwd=str(repo))}
+        for path, why in (
+            ("src/plain.py", "a .py in the tree is scanned"),
+            (".claude/skills/hidden.py", "a .py under a DOT-DIR is scanned (--no-ignore hidden)"),
+            ("src/keep.rs", "Rust coverage is unchanged"),
+        ):
+            if path not in scanned:
+                fails.append(f"{why}: {path} missing from {sorted(scanned)}")
+
+        # The pathspec half: the same extensions must survive `git diff`.
+        diff = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=A",
+             "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "HEAD",
+             "--", "*.rs", "*.py", "*.pyi"],
+            cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.split()
+        for path in ("src/plain.py", ".claude/skills/hidden.py", "src/keep.rs"):
+            if path not in diff:
+                fails.append(f"the pathspec drops {path}: {diff}")
+
+    if fails:
+        print("comment-lint selftest FAILED:")
+        for f in fails:
+            print(f"  - {f}")
+        return 1
+    print("comment-lint selftest: all checks passed")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv[1:]:
+        return selftest()
+
     flags = {"--gate", "--worktree", "--github"}
     args = [a for a in sys.argv[1:] if a not in flags]
     gate = "--gate" in sys.argv[1:]
@@ -65,16 +147,7 @@ def main() -> int:
         print("comment-lint: ast-grep not found — run `just setup-tools` (advisory skipped)")
         return 0
 
-    # `--no-ignore hidden`: ast-grep skips dot-dirs like ripgrep, but the diff
-    # filter matches `.claude/skills/**/*.py` — without it the scan reports a
-    # clean pass on files it never opened.
-    scan = subprocess.run(
-        ["ast-grep", "scan", "--json", "--no-ignore", "hidden"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    hits = json.loads(scan)
+    hits = scan_hits()
 
     new_hits = []
     for h in hits:

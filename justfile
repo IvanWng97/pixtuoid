@@ -1077,6 +1077,14 @@ drift-selftest:
 ast-grep-test:
     ast-grep test --skip-snapshot-tests
 
+# The DRIVER's own half: which files it diffs, and which it scans. The rules
+# have `ast-grep-test`; this pins the pathspec + the hidden-dir flag, on a
+# throwaway repo. Invoked by the `comment-lint` CI job alongside the rule tests.
+[group('meta')]
+[doc('Self-test the comment-lint driver (pathspec + hidden-dir scan)')]
+comment-lint-selftest:
+    python3 scripts/comment-lint.py --selftest
+
 # Risk radar — show the documented review escalations for the high-risk seams
 # THIS branch touches (advisory, deterministic, no LLM). Dogfood before pushing
 # so you know what a reviewer must check; the `risk radar` PR workflow posts the
