@@ -346,10 +346,14 @@ pub static GRUVBOX: Theme = Theme {
             g: 187,
             b: 38,
         },
+        // Gruvbox bright yellow #fabd2f. Was the blue #83a598, byte-identical to
+        // `edit`; the palette's other spare accents are already green-family
+        // (read is aqua, grep is the yellow-green), so yellow is the one pick
+        // that reads apart from all five.
         default: Rgb {
-            r: 131,
-            g: 165,
-            b: 152,
+            r: 250,
+            g: 189,
+            b: 47,
         },
     },
     ui: UiColors {
