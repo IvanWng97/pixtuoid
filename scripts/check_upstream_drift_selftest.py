@@ -29,15 +29,11 @@ the weekly job either alarms on junk or watches nothing). This pins:
      bucket directly, so probe health cannot be hand-worded into a claim about
      upstream. Plus the exit-2 (transient) path, which is unreachable through
      `main()` without faking the network.
-  8. One stale `read_*` parser darkens ITS OWN checks and no others. They used
-     to share one `try`, so a failure in the first row left the rest at `None`
-     and `run_checks` skipped them in silence — measured, a row-1 failure took
-     the run from 25 fetched documents to 4 while the report said "nothing
-     upstream was consulted". Three guards: the isolation itself, the
-     READERS-to-`OurNames` bridge (stringly-keyed, and a MISPAIRED row feeds one
-     source's names to another's sweep), and the ban on calling a `read_*`
-     inline in `run_checks`, where a raise lands in the TRANSIENT bucket — exit
-     2, a warning on a green run — instead of probe health.
+  8. One stale `read_*` parser darkens ITS OWN checks and no others, via three
+     guards: the per-reader isolation, the READERS-to-`OurNames` bridge (a
+     mispaired row feeds one source's names to another's sweep), and the ban on
+     calling a `read_*` inline in `run_checks` (a raise there lands in the
+     TRANSIENT bucket — a warning on a green run — instead of probe health).
 
 Run: `python3 scripts/check_upstream_drift_selftest.py` (exit 0 = pass).
 No pytest dependency on purpose — the repo has no Python test harness.
@@ -152,10 +148,7 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     # set, so it rides its own check: both halves non-empty + snake_case, and the
     # known task_started / function_call present (a decoder refactor that drops
     # the ("event_msg"|"response_item", …) arms would empty these → RuntimeError).
-    # Every READERS row must have a floor case above, or a reader can silently
-    # return `set()` and its whole watch passes VACUOUSLY. `read_grok_events` was
-    # the one row with no case: emptying it survived the entire suite. The
-    # membership assert is the N-of-N guard, so the next row added cannot miss.
+    # N-of-N: a row with no floor case can return `set()` and pass vacuously.
     floored = {r.__name__ for r, _, _ in cases} | {"read_codex_rollout_types"}
     unfloored = sorted({r.__name__ for _, r, _ in d.READERS} - floored)
     check(not unfloored, f"a READERS reader has no non-empty floor case: {unfloored}")
@@ -597,14 +590,8 @@ def test_anchor_gate_fires_in_both_directions() -> None:
 def test_report_is_the_only_way_to_file_a_finding() -> None:
     """`Report` owns the buckets, their wording, their order, and the exit code.
 
-    Two things this pins that nothing else can. First, the exit-2 path: an
-    errors-ONLY report is the transient case the workflow must NOT alarm on, and
-    it was reachable through `main()` only by faking a network stack. Second —
-    the teeth for folding `probe_failed` into `add_blind` — no module code may
-    `.append` to a bucket directly. Every one of the 20 probe-health sites used
-    to spell `blind.append(probe_failed(…))`, an invariant a reviewer had to
-    hold; a hand-worded line was one `blind.append("…")` away from claiming
-    upstream causation the script never verified, which IS #793.
+    Pins the exit-2 path (unreachable through `main()` without faking a network)
+    and the rule that no module code may `.append` to a bucket directly.
     """
     empty = d.Report()
     check(empty.exit_code() == 0, f"an empty report exits 0, got {empty.exit_code()}")
@@ -667,12 +654,7 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
     check(both.exit_code() == 1, f"actionable outranks transient, got {both.exit_code()}")
 
     # The structural half: a bucket is appended to ONLY from inside `Report`.
-    # An AST walk, NOT a source regex. A regex over raw text also fires on a WHY
-    # comment or docstring that merely QUOTES the old `blind.append(...)` spelling
-    # — and then instructs the reader to rename a variable that does not exist,
-    # which is a confident wrong instruction carrying a gate's authority. This
-    # module is exactly where that bites: `rust_const_str_array` exists because a
-    # comment-blind scrape fired for real here.
+    # An AST walk, not a regex: a regex also fires on prose QUOTING the spelling.
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
     tree = ast.parse(src)
     report_cls = next(
@@ -711,21 +693,8 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
 def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
     """A parser that goes stale must dark ITS source, not the rest of the file.
 
-    The `read_*` calls used to sit in ONE try. A raise partway through left every
-    later local at `None`, `run_checks` skips a `None` source in silence, and the
-    single catch-all line claimed "nothing upstream was consulted" while thirteen
-    URLs had in fact been read. A middle reader (#9 of the then-14) took the
-    report from 28 finding lines to 17, with Cursor, Hermes, grok and Kimi gone
-    entirely — six sources dark, none of them named.
-
-    This test injects ROW 1, the worst case: pre-refactor that took 25 fetched
-    documents to 4 and 28 finding lines to 5, because all thirteen others were
-    assigned after it.
-
-    That is the fail-open this file exists to remove (#454), and the assert-a-
-    cause-you-did-not-verify shape of #793, on the reading side rather than the
-    fetching side. The promise `main()` used to carry, now stated by
-    `read_our_names`: or drift monitoring would silently stop with zero alarm.
+    Injects row 1 — under the one shared `try` this replaced, that was the worst
+    case, because every other reader was assigned after it (#454, #793).
     """
     real_fetch, real_readers = d.fetch, d.READERS
     # Every fetched document lands on the wrong content, so each source that IS
@@ -764,13 +733,7 @@ def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
             first_reader.__name__ in out,
             f"the injected fault fired and named `{first_reader.__name__}`:\n{out}",
         )
-        # …and carries `our_source=True`. Dropping that kwarg at the production
-        # call site is otherwise INVISIBLE — the `our_source` wording is pinned
-        # only by a direct unit call — and it would tell a maintainer to
-        # "Re-verify upstream by hand … do NOT change a decoder on this alone"
-        # about a failure to read OUR OWN install/*.rs, asserting a cause the
-        # script never consulted. That is the inversion `add_blind`'s docstring
-        # forbids, in the one direction the rest of the suite cannot see.
+        # …carrying `our_source=True`: dropping that kwarg is otherwise invisible.
         own = [ln for ln in out.splitlines() if first_reader.__name__ in ln]
         check(
             len(own) == 1
@@ -810,18 +773,9 @@ def _raiser(name: str) -> typing.Callable[[], object]:
 def test_every_reader_row_matches_a_field_on_our_names() -> None:
     """The READERS table is stringly-keyed; nothing else pins it to `OurNames`.
 
-    `read_our_names` assigns by name, so a typo'd row would set an attribute
-    nobody reads and leave the real field `None` — the source silently unchecked,
-    with no probe-health line, which is the exact failure mode the test above
-    exists to prevent. No orphan row, no unfilled field.
-
-    The set comparison alone does NOT cover a row whose field and reader are
-    both valid but MISPAIRED, because swapping two rows leaves the set intact.
-    That failure is worse than a typo: pairing `cursor` with `read_kimi_events`
-    hands Cursor's one-directional presence sweep Kimi's 8 PascalCase names —
-    disjoint from Cursor's 6 camelCase ones — so it reports up to 8 VERIFIED
-    renames under "decoder will silently drop events". Phantom drift from a
-    green watcher is precisely #793. Hence the pairing check below.
+    A typo'd row leaves its field `None` — the source silently unchecked. A
+    MISPAIRED row is worse and survives the set comparison: it feeds one source's
+    names to another's sweep, which reports them all as renames (#793).
     """
     rows = {field for field, _, _ in _reader_rows()}
     fields = {f.name for f in dataclasses.fields(d.OurNames)}
@@ -832,10 +786,7 @@ def test_every_reader_row_matches_a_field_on_our_names() -> None:
         f"probe-health line. Mismatched: {rows ^ fields}. Add the missing row or "
         f"field, or drop the orphan.",
     )
-    # Every field must default to None, not to an empty container. `is not None`
-    # is what every consumer guards on, so a truthy-empty default would sail past
-    # the guard and let a one-directional sweep pass VACUOUSLY over nothing —
-    # the failed reader reporting "no drift" instead of probe health.
+    # None, not an empty container: a truthy-empty default sails past `is not None`.
     fresh = d.OurNames()
     non_none = sorted(f.name for f in dataclasses.fields(fresh) if getattr(fresh, f.name) is not None)
     check(not non_none, f"OurNames fields must default to None, got set: {non_none}")
@@ -854,22 +805,11 @@ def test_every_reader_row_matches_a_field_on_our_names() -> None:
 def test_no_reader_is_called_outside_the_readers_table() -> None:
     """An inline `read_*()` in `run_checks` fails WORSE than the bug this fixes.
 
-    Four flood-guard readers (`read_acp_tags`, `read_copilot_namespaces`,
-    `read_omp_known_types`, `read_codex_rollout_outers`) were called inline, so a
-    raise unwound past every remaining check to `main()`'s catch-all and was filed
-    TRANSIENT — exit 2, which upstream-drift.yml reports as a `::warning::` on an
-    otherwise-GREEN run. `read_acp_tags` alone took 25 fetched documents to 10.
-    That is a worse disposition than the shared-`try` bug, which at least exit 1'd.
-
-    The set comparison against `OurNames` cannot see this: an inline reader has no
-    row and no field, so nothing is missing — it is simply absent. Hence a source
-    scan. The next source to add a flood guard is the one this catches.
-
-    Scoped to the `read_*` naming convention, which is what `READERS` rows hold.
-    `openclaw_plugin_default_port` is deliberately NOT in scope and stays inline:
-    it catches its own `OSError` and returns `None`, and its caller already files
-    the `our_source=True` probe-health line, so it is isolated by construction
-    rather than by the table.
+    Its raise unwinds to `main()`'s catch-all and is filed TRANSIENT — exit 2, a
+    warning on a GREEN run — instead of probe health. The `OurNames` comparison
+    cannot see it: an inline reader has no row and no field, it is simply absent.
+    `openclaw_plugin_default_port` is out of scope by design — it catches its own
+    OSError and its caller files the probe-health line.
     """
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
     tree = ast.parse(src)
@@ -884,10 +824,7 @@ def test_no_reader_is_called_outside_the_readers_table() -> None:
     fn = next(
         n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_checks"
     )
-    # ANY `read_*` call, tabled or not. Excluding the tabled ones would make this
-    # vacuous in the case that actually regresses: every reader is tabled now, so
-    # a re-inlined call is by definition a call to a TABLED reader, and reading it
-    # inline re-opens the transient path even though the row still exists.
+    # ANY `read_*`, tabled or not — a re-inlined call is by definition tabled.
     stray = sorted({
         f"{n.func.id}:{n.lineno}"
         for n in ast.walk(fn)

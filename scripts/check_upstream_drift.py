@@ -696,24 +696,16 @@ UNANCHORED_BY_DESIGN: dict[str, str] = {
 
 @dataclasses.dataclass
 class Report:
-    """Every finding the watch can make, plus what the set of them implies.
+    """The four finding buckets, their rendering, and the exit code they imply.
 
-    Four buckets, because they call for four different actions. `breaking` is a
-    VERIFIED upstream change: we read the surface that OWNS a name and the name
-    is gone — fix the decoder. `review` is a new upstream surface to adopt or
-    knowingly ignore. `blind` is probe health: a lookup missed, so all we know is
-    that OUR probe failed — repin, and verify by hand before touching anything.
-    `errors` is transient. Collapsing `blind` into `breaking` is what made #793
-    report five phantom renames as "decoder will silently drop events".
+    One bucket per DISPOSITION, because each calls for a different action:
+    `breaking` = verified upstream change, fix the decoder; `review` = a new
+    surface to adopt or ignore; `blind` = probe health, repin and verify by hand;
+    `errors` = transient. Collapsing `blind` into `breaking` is what made #793
+    report five phantom renames.
 
-    They live in one type because they are one thing: each carries exactly one
-    disposition, they render in a fixed order, and the exit code is a function of
-    all four. As four parallel lists the render order and the exit rule sat in
-    `main()`, far from the ~70 sites that file findings, and every fetch helper
-    had to thread the pair it happened to need.
-
-    `add_blind` takes probe-health's THREE FACTS rather than a finished line, so
-    the disclaiming wording cannot be bypassed — see its docstring.
+    One type because the render order and the exit code are functions of all
+    four. File through `add_*` only — pinned by the selftest.
     """
 
     breaking: list[str] = dataclasses.field(default_factory=list)
@@ -736,24 +728,16 @@ class Report:
     def add_blind(
         self, what: str, where: str, consequence: str, *, our_source: bool = False
     ) -> None:
-        """A lookup missed. One wording, composed here rather than by the caller.
+        """A lookup missed. Takes the three FACTS, not a finished line.
 
-        The distinction this enforces is the whole point of the `blind` bucket:
-        all the script knows when a lookup misses is that ITS OWN PROBE missed.
-        "Upstream moved it" is a guess, and #793 shipped that guess as fact
-        across five false-positive drift lines. Verified drift says what upstream
-        did; this says what we failed to read, and points at the pin rather than
-        the decoder. Taking the three FACTS (what, where, consequence) instead of
-        a finished string is why: the disclaimer and the repin action are composed
-        HERE, so no probe-health line can ship without them. (The caller's three
-        facts are still its own prose — the guarantee is that the withholding
-        language always accompanies them, not that they are cause-free.)
+        All the script knows is that ITS OWN probe missed; "upstream moved it" is
+        a guess. Composing the wording here means the disclaimer and the repin
+        action are always appended, so no probe-health line can ship asserting a
+        cause nobody verified.
 
-        `our_source=True` for a failure to read OUR OWN source — the plugin template, this
-        script's parsers. Nothing upstream is even consulted on those paths, so the
-        default's "upstream may have moved it … re-verify upstream by hand" would be
-        the wrong cause AND the wrong action. A change whose thesis is "don't assert
-        a cause you didn't verify" must not assert one in the other direction.
+        `our_source=True` when the unreadable thing is OURS (a parser, the plugin
+        template). Nothing upstream is consulted there, so the default's
+        "re-verify upstream by hand" would be the wrong cause AND action.
         """
         if our_source:
             cause = "Our own parser or constant is stale; nothing upstream was consulted."
@@ -1578,15 +1562,8 @@ def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
 class OurNames:
     """What WE depend on, read from our OWN source — one field per READER.
 
-    Not one per source: a source's event watch and its transcript-tail flood
-    guard read different constants through different parsers, so they get
-    separate fields (18 fields, 12 sources — codex and copilot each have both,
-    and ACP is a cross-vendor wire standard owned by no single source).
-
-    `None` means that reader failed, and it is load-bearing rather than a
-    default: every consuming block in `run_checks` guards on its own field, so a
-    stale parser darkens exactly what it fed and the other seventeen still run.
-    See `read_our_names` for why that isolation had to be built.
+    `None` means that reader failed; every consumer guards on `is not None`, so a
+    stale parser darkens exactly what it fed and nothing else.
     """
 
     codex: set[str] | None = None
@@ -1603,22 +1580,14 @@ class OurNames:
     hermes: set[str] | None = None
     grok: set[str] | None = None
     kimi: set[str] | None = None
-    # The flood guards: the KNOWN_* sets a decoder breadcrumbs an unknown member
-    # against. Separate fields, not folded into the source above them, because a
-    # source's event watch and its flood guard read DIFFERENT constants and fail
-    # independently — one going stale must not dark the other.
     codex_rollout_outers: set[str] | None = None
     copilot_namespaces: set[str] | None = None
     omp_known_types: set[str] | None = None
     acp_tags: set[str] | None = None
 
 
-# (field on OurNames, reader, the surface it reads). A table rather than a run of
-# statements because each row needs its OWN try — see `read_our_names`.
-# Rows hold function OBJECTS, captured at import: reassigning the module
-# attribute (`d.read_codex_events = ...`) is a SILENT no-op, so a test injecting a
-# stale reader must replace the ROW. Objects over name strings deliberately — a
-# name would not survive a rename and would break find-references.
+# Rows hold function OBJECTS captured at import, so reassigning the module
+# attribute is a silent no-op: a test injecting a stale reader must replace the ROW.
 READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
     ("codex", read_codex_events, "CODEX_EVENTS in install/codex.rs"),
     ("codex_rollout", read_codex_rollout_types, "the decode arms in source/codex.rs"),
@@ -1644,25 +1613,9 @@ READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
 def read_our_names(report: Report) -> OurNames:
     """Read every depended name from our own source, ISOLATING each reader.
 
-    A failure here means the monitor itself is broken — install/codex.rs or a
-    decoder refactored away from what a parser expects. That is a LOUD probe-
-    health signal (exit 1; our own parser being stale is the textbook "the probe
-    missed"), never transient, or drift monitoring would silently stop with zero
-    alarm.
-
-    Which is exactly what one shared `try` around the whole run produced. A raise
-    partway through left every LATER field at `None`, `run_checks` skips a `None`
-    field in silence, and the single catch-all line said "nothing upstream was
-    consulted" while thirteen URLs had in fact been read. Measured on the 9th of
-    the then-14 readers: 28 finding lines fell to 17 and Cursor, Hermes, grok and
-    Kimi vanished from the report entirely — six sources dark, not one named.
-
-    The four flood-guard readers were WORSE before they joined this table: they
-    were called inline in `run_checks`, so a raise unwound to `main()`'s
-    catch-all and filed as TRANSIENT — exit 2, which the workflow reports as a
-    warning on an otherwise-green run. `read_acp_tags` alone took 25 fetched
-    documents to 10. Per-row isolation makes the promise above true for all of
-    them: the failure is named, only what it fed goes dark, and the watch runs on.
+    A stale parser here means the MONITOR is broken, so it is loud probe health
+    (exit 1), never transient. Per-row `try` because one shared one let the first
+    failure leave every later field `None`, which `run_checks` skips in silence.
     """
     ours = OurNames()
     for field, reader, what in READERS:

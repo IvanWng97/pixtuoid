@@ -113,15 +113,6 @@ jobs:
       - run: just ci-observability
       - run: just json-schemas
       - run: just links
-      # The drift watcher's selftest runs HERE, not only in upstream-drift.yml,
-      # because only this job reaches `ci-gate` — the sole required context. There
-      # it turned the check table red without blocking a merge, and a watcher that
-      # cannot block is advisory (#454: it was dead for weeks behind this very
-      # selftest). Running it unconditionally also retires the path-filter hole
-      # that list could never close: `source/acp.rs` holds KNOWN_ACP_TAGS and was
-      # absent from it, so an acp.rs-only PR got no selftest at all. Pure Python,
-      # no deps, no network, ~0.2s — the weekly workflow keeps its own copy as the
-      # guard before the live check trusts the parsers.
       - run: just drift-selftest
 
   msrv:
