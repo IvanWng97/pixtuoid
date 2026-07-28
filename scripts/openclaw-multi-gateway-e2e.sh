@@ -150,18 +150,28 @@ while read -r port; do
 done < <(printf '%s\n' "${PORTS[@]}" | LC_ALL=C sort)
 expect_line "daemons=[$want]" "${#PORTS[@]} gateways render ${#PORTS[@]} independent mascots"
 
-echo "[2] kill the FIRST gateway (${PORTS[0]}) — only its own mascot walks out"
-# `$!` is the process that holds the port and stamps `_pid` into every envelope, so
-# this exercises the INSTANT abrupt-down rung (ExitWatch on the gateway pid), not a
-# timeout. That the assertion below can pass at all is the proof: `expect_line` gives
-# up after ~36s while the silence path (`PresenceTtl::DEFAULT.presence_ttl_ms`) is
-# FIVE MINUTES, so a regression that lost the pid rung could not sneak through here.
-kill "${GW_PIDS[0]}" 2>/dev/null
-GW_PIDS[0]=""
-expect_line "openclaw@${PORTS[0]}:down" "the killed gateway goes down (instant pid rung)"
-for port in "${PORTS[@]:1}"; do
-    expect_line "openclaw@$port:idle" "sibling $port is untouched"
-done
+# Step [1] is a hard PRECONDITION for step [2], not just another assertion.
+# `expect_line` matches a substring of the LATEST line, so a gateway that has not
+# announced yet satisfies "sibling $port is untouched" on its FIRST-EVER announce —
+# which, after a step-[1] timeout, lands AFTER the kill. Observed: one slow start
+# printed `1 FAIL / 4 PASS` where three of those PASSes were vacuous, reading as
+# "instance-local death mostly works" when the precondition never held.
+if [ "$FAILED" != 0 ]; then
+    echo "  SKIP [2] — not every gateway announced; the instance-local assertions would be vacuous" >&2
+else
+    echo "[2] kill the FIRST gateway (${PORTS[0]}) — only its own mascot walks out"
+    # `$!` is the process that holds the port and stamps `_pid` into every envelope, so
+    # this exercises the INSTANT abrupt-down rung (ExitWatch on the gateway pid), not a
+    # timeout. That the assertion below can pass at all is the proof: `expect_line` gives
+    # up after ~36s while the silence path (`PresenceTtl::DEFAULT.presence_ttl_ms`) is
+    # FIVE MINUTES, so a regression that lost the pid rung could not sneak through here.
+    kill "${GW_PIDS[0]}" 2>/dev/null
+    GW_PIDS[0]=""
+    expect_line "openclaw@${PORTS[0]}:down" "the killed gateway goes down (instant pid rung)"
+    for port in "${PORTS[@]:1}"; do
+        expect_line "openclaw@$port:idle" "sibling $port is untouched"
+    done
+fi
 
 echo "--- the lobster timeline (headless):"
 grep 'daemons=' "$OUT" | sed 's/^/    /'
