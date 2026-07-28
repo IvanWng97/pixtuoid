@@ -29,6 +29,16 @@ pub(super) const MAX_PENDING_BYTES: u64 = 1 << 20;
 /// the gate here (rather than only in the old `initial_seed_walk`) is the #85
 /// fix: the post-startup rescan used to bypass it and resurrect a missed
 /// ended/stale session as a phantom live sprite.
+///
+/// `probe_live` (the liveness vouch) exempts only the RECENCY half: mtime is a
+/// PROXY for liveness that a long-idle/delegating session falsifies, so ground
+/// truth about the owning process must win over it. It does NOT exempt the
+/// terminator half — a structural end marker is the SOURCE's own first-hand
+/// report that the session is over, which no vouch outranks (grok's leader
+/// vouch is mtime-derived and outlives the session it vouches for; omp's fd
+/// vouch fires for any bun tool merely READING an old transcript). The
+/// oversized arm below already makes exactly this call with its unconditional
+/// `ended_in_skip`.
 /// The path form EVERY id derivation runs on: the same `normalize_path_key`
 /// fold the per-line decoders receive (`transcript_path_str` below), so the
 /// first-sight / session-end / park lanes and the decoder lane mint ONE id
@@ -47,6 +57,7 @@ async fn should_seed_at_eof(
     window: Duration,
     path: &Path,
     check_ended: SessionEndChecker,
+    probe_live: bool,
 ) -> bool {
     let recent = meta
         .modified()
@@ -57,8 +68,10 @@ async fn should_seed_at_eof(
             mtime.elapsed().unwrap_or(Duration::ZERO) <= window
         })
         .unwrap_or(false);
-    // Historical → seed EOF. Recent-but-ended → seed EOF. Recent & live → read.
-    !recent || check_session_ended(path, check_ended).await
+    // Historical AND unvouched → seed EOF. Ended → seed EOF. Otherwise read.
+    // The `||` short-circuit keeps the tail read off the historical-unvouched
+    // path, exactly as before.
+    (!recent && !probe_live) || check_session_ended(path, check_ended).await
 }
 
 pub(super) async fn scan_root(
@@ -174,21 +187,22 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // here first, so a historical or already-ended session is seeded at EOF
     // instead of resurrected with a phantom SessionStart. (A later write makes it
     // `known` with cursor < len, so the documented revive-on-append still fires.)
-    // The liveness probe pre-empts the gate: mtime is only a liveness PROXY,
-    // and a long-idle / delegating / stuck-in-a-long-tool-call session writes
-    // nothing for hours — when the probe has ground truth that the owning
-    // process is alive, the file is read from the top (a > MAX_PENDING_BYTES
-    // body falls into the oversized first-sight registration below). The
-    // bypass deliberately skips the gate's ended tail-scan too, which is safe
-    // only because NEITHER probe user persists a structural end marker today:
-    // CC (sessions-registry probe) writes none — `cc_session_ended` matches
-    // only legacy/structural shapes — and Codex (FD probe) ships the
-    // constant-false `codex_session_ended`. There is nothing to scan for; if
-    // the upstream drift watch fires (either CLI starts writing one),
-    // admission needs an ended-check before bypassing.
+    // The liveness probe pre-empts the gate's RECENCY half only: mtime is a
+    // liveness PROXY, and a long-idle / delegating / stuck-in-a-long-tool-call
+    // session writes nothing for hours — when the probe has ground truth that
+    // the owning process is alive, the file is read from the top (a >
+    // MAX_PENDING_BYTES body falls into the oversized first-sight registration
+    // below). The terminator half stays unconditional — see
+    // `should_seed_at_eof`.
     if !known
-        && !probe_admits(path, decoders, ctx).await
-        && should_seed_at_eof(&meta, window, path, check_ended).await
+        && should_seed_at_eof(
+            &meta,
+            window,
+            path,
+            check_ended,
+            probe_admits(path, decoders, ctx).await,
+        )
+        .await
     {
         cursors.lock().await.insert(path.to_path_buf(), file_len);
         return;
@@ -399,7 +413,12 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         // the whole chunk is forwarded (the terminator precedes any re-claim),
         // and in-pass emit_first_sight idempotence is unaffected: this pass's
         // claim already happened above; the NEXT pass re-emits the pair.
-        seen.lock().await.remove(path);
+        // RELEASED (`false`), not removed — the #246 idiom: `emit_first_sight`
+        // treats `Some(false)` exactly like an absent entry, so the revive is
+        // byte-identical, while `revouch_gated_files` (which keys on
+        // `contains_key`) can no longer reset a still-vouched path's cursor to
+        // 0 and replay the whole transcript once per scan pass.
+        seen.lock().await.insert(path.to_path_buf(), false);
     }
 }
 
@@ -538,7 +557,7 @@ async fn read_tail(path: &Path, bytes: u64) -> Option<Vec<u8>> {
 }
 
 /// Read the tail of a file and delegate to the source-specific checker.
-async fn check_session_ended(path: &Path, checker: SessionEndChecker) -> bool {
+pub(super) async fn check_session_ended(path: &Path, checker: SessionEndChecker) -> bool {
     const TAIL_BYTES: u64 = 8192;
     match read_tail(path, TAIL_BYTES).await {
         Some(buf) => checker(&buf),

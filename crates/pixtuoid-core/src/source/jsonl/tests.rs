@@ -716,9 +716,11 @@ async fn session_end_unclaims_seen_so_a_later_append_re_registers() {
             .any(|(_, e)| matches!(e, AgentEvent::SessionEnd { .. })),
         "the structural end must decode to SessionEnd, got {events:?}"
     );
-    assert!(
-        !seen.lock().await.contains_key(&path),
-        "SessionEnd must un-claim `seen` so a revival can re-register"
+    assert_eq!(
+        seen.lock().await.get(&path),
+        Some(&false),
+        "SessionEnd must RELEASE `seen` (not remove it) so a revival can \
+         re-register while the re-vouch sweep still skips the path"
     );
 
     // Pass 3: the session resumes (normal lines again) — a SECOND
@@ -1095,6 +1097,85 @@ async fn released_claim_is_not_revouched_into_a_full_replay() {
     assert!(
         events.is_empty(),
         "a re-vouch sweep over a RELEASED claim must not replay/re-register, got {events:?}"
+    );
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(file_len),
+        "the released path's cursor must stay parked at EOF (no reset-to-0 replay)"
+    );
+}
+
+/// The DECODED-terminator un-claim is the fourth retire-a-claim site, and it
+/// must release (`false`) like the child-end one rather than remove: a source
+/// whose `SessionEndChecker` cannot see its own terminator (codex and
+/// antigravity ship constant-false checkers) leaves the id in the probe's
+/// admission set, so a removed claim would hand the path straight back to
+/// `revouch_gated_files` for a full replay on the next scan pass.
+#[tokio::test]
+async fn decoded_terminator_release_is_not_revouched_into_a_full_replay() {
+    fn never_ended(_tail: &[u8]) -> bool {
+        false
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rollout.jsonl");
+    std::fs::write(
+        &path,
+        "{\"type\":\"assistant\"}\n{\"type\":\"system\",\"subtype\":\"session_end\"}\n",
+    )
+    .unwrap();
+    let file_len = std::fs::metadata(&path).unwrap().len();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let id = default_id_from_path(&path);
+
+    let events = walk_once_with(
+        &path,
+        Duration::from_secs(3600),
+        t_decode_lifecycle,
+        never_ended,
+        &cursors,
+        &seen,
+    )
+    .await;
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionEnd { .. })),
+        "the decoded terminator must be forwarded, got {events:?}"
+    );
+    assert_eq!(
+        seen.lock().await.get(&path),
+        Some(&false),
+        "the claim must be RELEASED (false), not removed — removal is exactly \
+         what exposes the path to the re-vouch replay below"
+    );
+
+    // The next scan pass runs while the probe still vouches the id.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(64);
+    let source: Arc<str> = Arc::from("test");
+    let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::from([id])));
+    let decoders = SourceDecoders {
+        decode_line: t_decode_lifecycle,
+        derive_label: t_label,
+        check_ended: never_ended,
+        id_derive: default_id_from_path,
+        path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
+    };
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+    let mut health = FailureLatch::default();
+    scan_root(dir.path(), decoders, &ctx, &mut health).await;
+    let events = drain_events(&mut rx);
+    assert!(
+        events.is_empty(),
+        "a re-vouch sweep over an ENDED, released path must not replay it, got {events:?}"
     );
     assert_eq!(
         cursors.lock().await.get(&path).copied(),
@@ -1702,15 +1783,119 @@ async fn scan_pass_re_vouches_a_transiently_gated_live_file() {
     );
 }
 
+/// The ≤`MAX_PENDING_BYTES` twin of the oversized test below. The probe
+/// bypass exempts only the RECENCY half of the first-sight gate: a
+/// structural terminator is the source's own ground truth, which a
+/// liveness vouch (an mtime-independent PROXY for "the owning process is
+/// alive") must not outrank — grok's leader vouch outlives the session it
+/// vouches for, and omp's fd vouch fires for any bun tool merely READING
+/// an old transcript.
+#[tokio::test]
+async fn probe_live_ended_first_sight_stays_unregistered() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
+    tokio::fs::write(
+        &path,
+        "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n\
+         {\"type\":\"system\",\"subtype\":\"session_end\"}\n",
+    )
+    .await
+    .unwrap();
+    let file_len = tokio::fs::metadata(&path).await.unwrap().len();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    // Recent mtime, so ONLY the ended half of the gate can fire.
+    let events = walk_once_live(
+        &path,
+        Duration::from_secs(3600),
+        &[LIVE_UUID],
+        &cursors,
+        &seen,
+    )
+    .await;
+    assert!(
+        events.is_empty(),
+        "an ENDED probe-admitted first sight must emit nothing, got {events:?}"
+    );
+    assert!(
+        !seen.lock().await.contains_key(&path),
+        "an ENDED probe-admitted first sight must not claim/register"
+    );
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(file_len),
+        "the ended transcript must be parked at EOF"
+    );
+}
+
+/// The loop half of the pair above: `revouch_gated_files` re-asks the probe
+/// about every EOF-parked unclaimed file, so without its own ended check it
+/// would reset the cursor to 0 and hand the very file the first-sight gate
+/// just parked straight back to the replaying walk — once per scan pass, for
+/// as long as the vouch lasts.
+#[tokio::test]
+async fn revouch_does_not_replay_a_probe_vouched_ended_transcript() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
+    tokio::fs::write(
+        &path,
+        "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n\
+         {\"type\":\"system\",\"subtype\":\"session_end\"}\n",
+    )
+    .await
+    .unwrap();
+    let file_len = tokio::fs::metadata(&path).await.unwrap().len();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let live: Arc<Mutex<HashSet<String>>> =
+        Arc::new(Mutex::new(HashSet::from([LIVE_UUID.to_string()])));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+    let source: Arc<str> = Arc::from("test");
+    let decoders = SourceDecoders {
+        decode_line: t_decode,
+        derive_label: t_label,
+        check_ended: t_ended,
+        id_derive: crate::source::claude_code::cc_id_from_path,
+        path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
+    };
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+
+    let mut health = FailureLatch::default();
+    scan_root(dir.path(), decoders, &ctx, &mut health).await;
+    assert!(
+        drain_events(&mut rx).is_empty(),
+        "the first pass must park the ended transcript silently"
+    );
+    // Second pass, probe still vouching: the sweep must leave it parked.
+    scan_root(dir.path(), decoders, &ctx, &mut health).await;
+    let events = drain_events(&mut rx);
+    assert!(
+        events.is_empty(),
+        "a re-vouched ENDED transcript must not be replayed, got {events:?}"
+    );
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(file_len),
+        "the ended transcript's cursor must stay parked at EOF (no reset-to-0 replay)"
+    );
+}
+
 #[tokio::test]
 async fn probe_live_oversized_ended_first_sight_stays_unregistered() {
-    // M1: the probe bypasses the first-sight gate — INCLUDING its ended
-    // tail-scan — so a probe-admitted !known >1MiB ENDED transcript
-    // reaches the oversized branch. Its ended check used to be gated on
-    // `known` (assuming should_seed_at_eof had already filtered !known
-    // ended files, which the probe bypass breaks): the terminator was
-    // never emitted AND the #204 path registered a ghost for a session
-    // that is over.
+    // M1: a probe-admitted !known >1MiB ENDED transcript must never reach
+    // the #204 registration. The first-sight gate's terminator half is
+    // unconditional, so it parks here; the oversized branch's own
+    // `ended_in_skip` is the twin guard for a KNOWN file whose span ends
+    // mid-skip (`known_oversized_tail_emits_session_end_if_the_skipped_span_ended`).
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
     let mut full = String::from("{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n");
@@ -1731,17 +1916,13 @@ async fn probe_live_oversized_ended_first_sight_stays_unregistered() {
     )
     .await;
     assert!(
-        !events
-            .iter()
-            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
-        "an ended oversized probe-admitted first sight must not register a ghost, got {events:?}"
+        events.is_empty(),
+        "an ended oversized probe-admitted first sight must not register a ghost \
+         (and its terminator is a reducer no-op for the unknown id it parks), got {events:?}"
     );
-    let expected = AgentId::from_parts("test", LIVE_UUID);
     assert!(
-        events.iter().any(
-            |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id, as_child: false } if *agent_id == expected)
-        ),
-        "the buried terminator must still emit SessionEnd (a reducer no-op for an unknown id), got {events:?}"
+        !seen.lock().await.contains_key(&path),
+        "an ended oversized probe-admitted first sight must not claim/register"
     );
     assert_eq!(
         cursors.lock().await.get(&path).copied(),

@@ -10,7 +10,7 @@ use crate::source::exit_watch::ExitWatch;
 use crate::source::{fd_probe, AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
-use super::walk::{park_if_truncated_below_cursor, walk_jsonl};
+use super::walk::{check_session_ended, park_if_truncated_below_cursor, walk_jsonl};
 use super::{SourceDecoders, WatchCtx};
 
 /// One healthy liveness-probe observation: which agent processes are verified
@@ -533,9 +533,10 @@ pub(super) async fn refresh_probe_snapshot(
 /// #204 head-read registration branch).
 ///
 /// Cannot loop: a re-vouched file that registers claims `seen` and drops out
-/// of the candidate set; one whose replay turns out ENDED is re-parked at EOF
-/// unregistered (the oversized branch's ended skip) — it re-enters at most
-/// once per scan pass, and only while the probe actively (mis)vouches for it.
+/// of the candidate set; an ENDED one is refused here (the terminator check
+/// below, the twin of the first-sight gate's — a vouch exempts only RECENCY,
+/// never a structural end marker) and a terminator decoded mid-replay
+/// RELEASES the claim rather than removing it, so neither re-enters.
 /// Locking is sequential short locks on the sibling maps, never nested — the
 /// watcher is a single task, so a snapshot race is theoretical.
 pub(super) async fn revouch_gated_files(decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
@@ -578,6 +579,13 @@ pub(super) async fn revouch_gated_files(decoders: SourceDecoders, ctx: &WatchCtx
             continue;
         }
         if !probe_admits(&path, decoders, ctx).await {
+            continue;
+        }
+        // Last, so the bounded tail read costs only the handful of vouched
+        // candidates: resetting an ENDED transcript's cursor would undo the
+        // first-sight gate's own terminator decision and replay the whole dead
+        // session once per scan pass, for as long as the vouch lasts.
+        if check_session_ended(&path, decoders.check_ended).await {
             continue;
         }
         ctx.cursors.lock().await.insert(path, 0);
