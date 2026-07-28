@@ -261,6 +261,24 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   dark text-shadow) by design — raw label/badge hues are deliberately not
   WCAG-gated against the office pixels (the idle/exiting grays never were;
   the flat chips elsewhere on the page are the raw-contrast surfaces).
+  **The DOM chrome that sits bare over the office is the opposite case**, and
+  its sweep is `smoke.spec.ts`'s "bare hero text clears WCAG AA at the real
+  office composite": it scrolls each selector on screen, reads the office
+  canvas under its box, composites the live dimmer and grades the element's
+  real ink. **SHARP EDGE — that sweep only measures anything for an element
+  that is ON SCREEN**: the canvas is a viewport-fixed backdrop with a tiny
+  buffer, so an unscrolled below-fold selector indexes past it and
+  `getImageData` returns zeroed pixels — the sweep then silently grades
+  "dimmer over black" instead of the office, which is how the studio dial's
+  `--led` accents passed while rendering at 1.13:1. Day and night pull the ink
+  in OPPOSITE directions (day's dimmer lightens the composite toward `--paper`,
+  night's darkens it toward `--bg`), so any hue that lands here needs a
+  theme-aware token measured against the REAL composite — `--office-ink` /
+  `--office-ink-accent` for body/eyebrow copy, `--led-ink` for the 5F studio
+  dial. `--led` itself is a HARDWARE hue (global.css: "HARDWARE components …
+  are `.hw-panel` … dark `--screen` ground"); the dial is the one place it is
+  used with no `--screen` under it, hence its own token rather than a fourth
+  bare `--led` site.
   Pinned by `smoke.spec.ts` ("crisp AA captions
   overlay the live office" — incl. the 3-span split with a colored prefix —
   + the reduced-motion hide twin). This layer is part

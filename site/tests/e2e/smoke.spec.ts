@@ -1817,8 +1817,20 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
   // the true worst case can be either extreme depending on theme), composites
   // each with the live dimmer, and checks both against the element's real
   // computed ink color.
+  // Settle window after scrolling a selector on screen: the dimmer controller
+  // is IntersectionObserver-driven, so its target opacity lands a frame or two
+  // after the scroll (the canvas itself is under the dimmer, so any painted
+  // frame is a valid sample).
+  const SCROLL_SETTLE_MS = 300;
+  // The office canvas is a VIEWPORT-fixed backdrop (a small buffer stretched
+  // over the viewport), so an element's canvas coordinates are only real once it
+  // is on screen — unscrolled, every below-fold selector indexed past the buffer
+  // and getImageData handed back zeroed pixels, i.e. the sweep graded them
+  // against "dimmer over black" instead of the office it claims to measure.
   async function worstCaseRatio(selector: string): Promise<{ ratio: number; theme: string }> {
     const theme = await page.evaluate(() => document.documentElement.dataset.theme || 'day');
+    await page.locator(selector).first().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(SCROLL_SETTLE_MS);
     const measured = await page.evaluate((sel) => {
       const canvas = document.getElementById('office-live') as HTMLCanvasElement;
       const el = document.querySelector(sel)!;
@@ -1907,6 +1919,12 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
       // over the office too (were --fg-muted, sub-AA — audit finding A1).
       ".dial__ch:not([aria-pressed='true'])",
       '.dial__desc',
+      // …and so are the dial's two LED accents. The `:not()` above deliberately
+      // scoped the rest row, but the PRESSED row overrides its number's colour
+      // and `live` is the only marker for the one interactive demo — both were
+      // bare `--led`, an on-`--screen` hardware hue with no screen under it.
+      ".dial__ch[aria-pressed='true'] .dial__num",
+      '.dial__live',
       '#how .eyebrow',
       '#tools .section-head .lead',
       '#install .section-head .lead',
