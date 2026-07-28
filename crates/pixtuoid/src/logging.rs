@@ -237,14 +237,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_fresh_diagnostic_sink_is_created_owner_only() {
-        // The runtime log and the crash log are the LEAST protected artifacts
-        // pixtuoid creates, and the most revealing: warn-floor records already
-        // carry full transcript paths (a CC project dir encodes the project cwd
-        // verbatim) and AgentIds that for CodeWhale/Reasonix ARE the workspace
-        // cwd; at debug the decoded `ToolDetail` carries the agent's own shell
-        // commands and edited file paths. The same crate pays a temp-rename
-        // dance to create settings.json 0600 for less.
-        //
         // Drives `create_owner_only_append`, NOT `open_private_append`: the
         // latter's follow-up fchmod would repair a dropped create mode, so the
         // race-free half would be pinned by nothing.

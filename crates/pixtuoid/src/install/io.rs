@@ -606,12 +606,8 @@ mod tests {
     #[test]
     fn a_fresh_lock_sidecar_is_created_owner_only() {
         // The twin of `pixtuoid-core/tests/transport/socket.rs`'s
-        // `lock_mode == 0o600` assertion, worded so the two stay visibly paired:
-        // if this regressed to a umask-default mode, another local user could
-        // open+flock `<config>.lock` and force EVERY pixtuoid connect/disconnect
-        // AND every config save (config/mod.rs's update_config takes the same
-        // guard) to fail for as long as they hold it. `flock(2)` grants an
-        // exclusive lock through a read-only descriptor, so 0644 is enough.
+        // `lock_mode == 0o600` assertion, worded so the two stay visibly paired;
+        // the wedge it closes is on `open_lock_sidecar`'s doc.
         //
         // Drives `open_lock_sidecar`, NOT `lock_config`: the latter's follow-up
         // fchmod would repair a dropped create mode, leaving the race-free half

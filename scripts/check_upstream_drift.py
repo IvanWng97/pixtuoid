@@ -637,7 +637,7 @@ class Anchor(typing.NamedTuple):
 # on that report would have renamed three WORKING env vars.
 #
 # Choosing one, in descending strength — take the strongest available, because
-# THIS comment is what picks anchor #17:
+# THIS comment is what picks the next anchor:
 #   1. The DECLARATION that owns the checked names, so an upstream move takes
 #      both and the sweep cannot run against a document missing them.
 #   2. Failing that, a declaration co-located with them in the same file — this
@@ -656,8 +656,8 @@ ANCHORS: dict[str, Anchor] = {
     HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName", "the `PluginHookName` union"),
     # `SessionUpdate` owns the checked xAI variants; `SessionNotification` (the
-    # obvious pick) sits 13KB earlier and does NOT — moving the enum out would
-    # leave it satisfied while every variant read as renamed.
+    # obvious pick) sits earlier in the file and does NOT — moving the enum out
+    # would leave it satisfied while every variant read as renamed.
     GROK_NOTIFICATION_URL: Anchor(r"pub enum SessionUpdate", "the `SessionUpdate` enum"),
     # The const IDENT owns the checked VALUE `"session_exit"`; a value rename
     # keeps the identifier, so the anchor holds and the check still fires.
