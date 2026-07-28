@@ -116,7 +116,8 @@ flowchart TB
 **Walking the pipeline (real symbols):**
 
 1. **Ingest.** Claude Code fires a hook → the **`pixtuoid-hook`** shim
-   (`enrich_payload` stamps `_pixtuoid_source`, a 200 ms write timeout, exit 0) →
+   (`enrich_payload` stamps `_pixtuoid_source`, a 200 ms watchdog-bounded send,
+   exit 0) →
    `HookSocketListener` on a Unix socket (a named pipe on Windows) →
    **`decode_hook_payload`** turns the JSON into one or more `AgentEvent`s —
    tool/permission payloads are preceded by an `Identity` event the reducer uses
@@ -190,8 +191,9 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
 - **`pixtuoid-core` has no terminal dependencies.** Anything terminal-specific
   lives in a thin painter over the engine's render seam (`render_floor` /
   `render_to_rgb_buffer`), never in the core or the scene engine.
-- **The hook shim must never block the agent** — always exit 0, 200 ms write
-  timeout.
+- **The hook shim must never block the agent** — always exit 0, and the 200 ms
+  send bound is enforced by a watchdog thread that hard-exits the process, on
+  both platforms.
 - **Subagent supervision is a scope tree** (`state/scope.rs`): exit cascades
   *down* (a parent's `SessionEnd` reaps its subtree), liveness flows *up* (a
   working subagent keeps its ancestors fresh), and permission-blocked subagents
