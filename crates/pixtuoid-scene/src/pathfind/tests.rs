@@ -130,6 +130,15 @@ fn every_wander_waypoint_is_routable_on_the_coarse_grid() {
     // printer, which also pins the INTER_POD_AISLE_X width: narrow the aisle
     // and the decor disconnects the grid here). Across seeds × sizes incl. the
     // 96×70 floor. It caught the narrow-meeting-room teleport (now gated).
+    //
+    // This list stays narrow ON PURPOSE. The blocked furniture CENTRE is a PROXY
+    // for the destination, and at 41x160 / 240x160 (production floors 4 and 6) a
+    // vending machine's own coarse cell is under the `cell_walkable` floor while
+    // its APPROACH — the cell the router is actually aimed at — routes fine from
+    // every desk and from the door. The wide axis lives on the real contract
+    // instead: `placement_sweep::every_wander_destination_is_routable_from_the_door`
+    // sweeps `SWEEP_SIZES` x production floor seeds over `approach_point`. Widen
+    // THAT one, not this proxy.
     use crate::layout::TEST_DEFAULT_DESKS;
     let overlay = OccupancyOverlay::new();
     let sizes = [

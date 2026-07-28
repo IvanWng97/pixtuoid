@@ -525,6 +525,6 @@ impl SceneLayout {
 }
 
 #[cfg(test)]
-mod placement_sweep;
+pub(crate) mod placement_sweep;
 #[cfg(test)]
 mod tests;

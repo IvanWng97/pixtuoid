@@ -567,6 +567,34 @@ pub(super) fn compute_with_seed(
             y: buf_h / 2,
         });
 
+    // What "connected" has to mean for the ROUTER, not just for a pixel flood.
+    // `unreachable_walkable_cells` is a 4-connected PIXEL BFS, but A* runs on the
+    // coarse 4×4 grid (`cell_walkable` needs ≥ `COARSE_CELL_WALKABLE_MIN` of a
+    // cell's 16 px open), so a ≤3 px channel is pixel-connected and
+    // coarse-IMPASSABLE. Ask BOTH: no pixel pocket, AND every emitted home desk
+    // still has a reachable approach cell — because a desk whose
+    // `approach_point` returns its no-valid-approach sentinel makes every leg
+    // (entry, exit, wander, snap-back) fall back to a straight line through the
+    // desk body and whatever else lies between.
+    let severed = |mask: &WalkableMask| -> bool {
+        if !unreachable_walkable_cells(mask, conn_seed).is_empty() {
+            return true;
+        }
+        let reach = ReachSet::from_mask(mask, conn_seed);
+        home_desks.iter().any(|&d| {
+            let chair = desk_walk_anchor(d);
+            approach_point(
+                Furniture::Desk,
+                chair,
+                Facing::South,
+                pantry_counter_size,
+                mask,
+                chair,
+                &reach,
+            ) == chair
+        })
+    };
+
     let mut walkable = build_mask(&plants, &wall_decor);
     // Connectivity guard (#566 CLASS B): a scatter plant can settle onto the
     // aisle floor and plug the SOLE inter-pod drain at a single-pod-column band,
@@ -578,7 +606,7 @@ pub(super) fn compute_with_seed(
     // — and compute is resize/floor-change-gated (not per-frame), sub-ms even at
     // the hero ceiling, so the O(w·h) cost on an obviously-connected wide floor is
     // an accepted trade for never shipping a pocket.
-    if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
+    if severed(&walkable) {
         // The seal-causer is a scatter plant that `settle_plant` RELOCATED off its
         // authored corridor-edge row (aisle.y − 4) DOWN onto an obstacle's row —
         // into the aisle floor itself, where its footprint plugs the drain. The
@@ -594,20 +622,21 @@ pub(super) fn compute_with_seed(
         // (the bookshelf/screen sit up in the already-blocked north band), so
         // drop THAT before the drastic clear-all-plants — plants here are usually
         // innocent, and losing a whiteboard beats losing every plant.
-        if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
+        if severed(&walkable) {
             wall_decor.retain(|d| d.kind != WallDecor::Whiteboard);
             walkable = build_mask(&plants, &wall_decor);
         }
         // Last resort — decor may NEVER disconnect the office: if a pocket somehow
         // survives (a non-aisle plant), drop every remaining scatter plant.
-        if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
+        if severed(&walkable) {
             plants.clear();
             walkable = build_mask(&plants, &wall_decor);
         }
         debug_assert!(
-            unreachable_walkable_cells(&walkable, conn_seed).is_empty(),
-            "#566 connectivity guard: a pocket survived dropping every scatter plant \
-             AND the free-standing whiteboard — a new NON-decor seal cause needs its own fix"
+            !severed(&walkable),
+            "#566 connectivity guard: a pocket (or a coarse-unroutable home desk) survived \
+             dropping every scatter plant AND the free-standing whiteboard — a new NON-decor \
+             seal cause needs its own fix"
         );
     }
 

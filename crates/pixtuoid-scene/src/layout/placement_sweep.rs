@@ -30,7 +30,12 @@ use super::*;
 /// hero buffers (desktop 231×130 and the 64px portrait floor — the most-seen
 /// layouts since #568), and a spread up to a wide-corridor floor so the
 /// appliance kinds appear.
-const SWEEP_SIZES: &[(u16, u16)] = &[
+///
+/// `pub(crate)`: THE size authority for the router's routability guards too
+/// (`pathfind::tests`), so the placement axis and the routability axis can't
+/// disagree — they did, and the 32-41 px band was swept for placement while
+/// never being swept for routability.
+pub(crate) const SWEEP_SIZES: &[(u16, u16)] = &[
     (34, 60),
     (36, 100),
     (38, 120),
@@ -684,6 +689,84 @@ fn walkable_is_one_connected_region() {
     // ONE pixel-BFS (the strongest connectivity truth), swept across the full
     // grid — retires the two hand-rolled BFS copies that each swept a slice.
     sweep(assert_walkable_connected);
+}
+
+#[test]
+fn every_wander_destination_is_routable_from_the_door() {
+    // THE routability guard on the shared size axis: every destination the wander
+    // can actually hand out — `approach_point` on an allowed, reachable side —
+    // must be find_path-routable, or the leg degrades to a straight line through
+    // furniture. `pathfind::tests`'s waypoint guard asserts the blocked furniture
+    // CENTRE (a proxy) on its own narrower list; this one asserts what production
+    // routes to, across every size the placement suite already sweeps. A `wp.pos`
+    // sentinel is the documented "no valid approach" answer — `resolve_wander_target`
+    // ambles that cycle instead — so it is not a destination and is skipped.
+    use crate::pathfind::find_path;
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    sweep(|w, h, seed, l| {
+        let Some(door) = l.door_threshold else {
+            panic!("{w}x{h} seed {seed}: layout has no door threshold");
+        };
+        for &desk in &l.home_desks {
+            for wp in &l.waypoints {
+                let a = super::approach_point(
+                    wp.kind.furniture(),
+                    wp.pos,
+                    wp.facing,
+                    l.pantry_counter_size(),
+                    &l.walkable,
+                    desk,
+                    &l.reachable,
+                );
+                if a == wp.pos {
+                    continue;
+                }
+                assert!(
+                    find_path(&l.walkable, &overlay, None, door, a).is_some(),
+                    "{w}x{h} seed {seed}: {:?} approach {a:?} (desk {desk:?}) unroutable                      from the door {door:?}",
+                    wp.kind
+                );
+            }
+        }
+    });
+}
+
+#[test]
+fn every_home_desk_approach_is_routable_from_the_door() {
+    // The COARSE twin of `walkable_is_one_connected_region`. That one is a
+    // 4-connected PIXEL flood, but the router runs on the 4×4 grid
+    // (`cell_walkable` needs ≥ `COARSE_CELL_WALKABLE_MIN` of 16 px open), so a
+    // ≤3px channel is pixel-connected and coarse-IMPASSABLE — the office reads
+    // as ONE region at pixel granularity and TWO at router granularity. When
+    // that happened, `desk_approach_cell` returned its no-valid-approach
+    // sentinel and every leg for the desks on the severed side degraded to a
+    // straight `door→chair` line through the desk body and the pantry wall
+    // (measured: 286 of 13,770 narrow layouts, widths 32-39 × heights 116-148
+    // and 192-220, production floors 4 and 6, up to 3 of 6 desks each).
+    //
+    // Lives HERE and not in `pathfind::tests` on purpose: this is the suite that
+    // owns `SWEEP_SIZES`, and the 32-41 px band the failure lives in was swept
+    // for PLACEMENT while no routability test ever visited it.
+    use crate::pathfind::find_path;
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    sweep(|w, h, seed, l| {
+        let Some(door) = l.door_threshold else {
+            panic!("{w}x{h} seed {seed}: layout has no door threshold");
+        };
+        for (i, &desk) in l.home_desks.iter().enumerate() {
+            let approach = crate::pose::desk_approach_cell(desk, l).unwrap_or_else(|| {
+                panic!(
+                    "{w}x{h} seed {seed}: home desk {i} at {desk:?} has NO reachable approach \
+                     side — every leg to it falls back to a straight line through the desk"
+                )
+            });
+            assert!(
+                find_path(&l.walkable, &overlay, None, door, approach).is_some(),
+                "{w}x{h} seed {seed}: home desk {i} at {desk:?} has approach {approach:?} \
+                 unroutable from the door {door:?} — the coarse grid is severed"
+            );
+        }
+    });
 }
 
 #[test]
