@@ -748,11 +748,9 @@ def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
         base_urls, _ = run()
         check(len(base_urls) > 20, f"the baseline exercises the file, got {len(base_urls)} URLs")
 
-        # Break the FIRST row — under one shared `try` that is the worst case,
-        # because every one of the other thirteen was assigned after it. Inject
-        # into READERS, not the module attribute: the table captured the function
-        # OBJECTS at definition time, so patching `d.read_codex_events` is a
-        # silent no-op and this test would pass having injected nothing.
+        # Break the FIRST row: under one shared `try` that is the worst case,
+        # because every other reader was assigned after it. Inject into the ROW,
+        # never `d.read_codex_events` — see the WHY on the READERS declaration.
         first_field, first_reader, first_what = d.READERS[0]
         d.READERS = (
             (first_field, _raiser(first_reader.__name__), first_what),
