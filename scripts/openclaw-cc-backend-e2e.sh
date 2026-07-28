@@ -95,13 +95,15 @@ fi
 
 cleanup() {
     [ -n "$GWPID" ] && kill "$GWPID" 2>/dev/null
-    # `openclaw gateway run` execs/forks a child node that holds the port — killing
-    # the CLI wrapper alone LEAKS it. Kill whatever actually LISTENS on OUR port
-    # (TERM, then KILL), so the user's machine isn't left with a stray gateway.
-    # Reaping by port, not by `pkill -f 'openclaw gateway run'`: that pattern kills
-    # EVERY gateway on the box, including one on another port that the guard above
-    # never checked and this script never started. Same job-pid + port-listener
-    # pair the sibling openclaw-multi-gateway-e2e.sh uses.
+    # Belt-and-braces port reap (TERM, then KILL). `$!` IS the listener on openclaw
+    # 2026.7.1 (verified: the job pid holds the port, comm `openclaw-gateway`, no
+    # children), so the kill above is normally enough — this catches a version that
+    # daemonises instead, or a gateway that outlived a failed kill, so the user's
+    # machine isn't left with a stray gateway. Scoped to OUR resolved port, never
+    # `pkill -f 'openclaw gateway run'`: that pattern matches nothing today (the
+    # gateway rewrites its process title) and, if upstream ever stopped, would kill
+    # EVERY gateway on the box — including one this script never started. Same
+    # job-pid + port-listener pair the sibling openclaw-multi-gateway-e2e.sh uses.
     local port_pids
     port_pids="$(lsof -ti tcp:"$PORT" -sTCP:LISTEN 2>/dev/null)"
     # shellcheck disable=SC2086  # word-split is intended — one kill per listener pid
