@@ -535,14 +535,24 @@ one audit.** `color-contrast` weighs 7 of the accessibility category's 195
 points, so a TOTAL contrast failure costs 3.6% against a `minScore: 0.9` floor:
 the landing page really did score 0.93 with `color-contrast` at 0 and a hard AA
 failure in the footer, green. `lighthouserc.json` therefore asserts
-`"color-contrast": ["error", { "minScore": 1 }]` alongside the category — a
-category score is a budget, not a contract, so anything that must NEVER regress
-needs its own per-audit assertion. Second surprise: Lighthouse does **not** run
-a fixed theme. `Base.astro`'s init picks night off the 7/19 wall clock, so which
-palette gets audited depends on what time CI runs — every theme a visitor can
-land in has to clear the audit, not just day. (The per-theme WCAG sweeps live in
-`smoke.spec.ts`, which drives day/night/dracula explicitly; Lighthouse is the
-rendered-DOM axe backstop, not the theme matrix.)
+`"color-contrast": ["error", { "minScore": 1, "aggregationMethod":
+"pessimistic" }]` alongside the category — a category score is a budget, not a
+contract, so anything that must NEVER regress needs its own per-audit
+assertion, and a CONTRACT audit needs every run to clear it. The
+`aggregationMethod` is not decoration: LHCI defaults to `optimistic`
+(`@lhci/utils/src/assertions.js`), which for a `minScore` assertion takes
+`Math.max` over the three runs — so ONE passing run would green a binary 0/1
+axe audit. Second surprise: Lighthouse does **not** pick a theme of its own.
+`Base.astro`'s init falls back to night off the 7/19 wall clock, so an
+unqualified URL audits whatever palette the runner's clock happens to hold —
+half of all CI runs on one palette, half on the other, and a hard per-audit
+assertion on top of that is a coin flip. The collect URLs therefore carry
+`?theme=day` (the `Base.astro` override, ahead of storage/clock/system): ONE
+deterministic palette, the default one, and the one whose light ground the
+`--screen`-chip inks are hardest on. **Lighthouse is the rendered-DOM axe
+backstop on the pinned theme, not the theme matrix** — the theme matrix is
+`smoke.spec.ts`, which drives day/night/dracula explicitly; adding a
+theme-dependent surface means adding it THERE, not doubling the collect list.
 `src/styles/fonts.css` uses Fontsource's own WOFF2 assets
 with `font-display: optional`, while `Base.astro` preloads the regular faces.
 Do not replace those declarations with Fontsource's default `swap` CSS: an
