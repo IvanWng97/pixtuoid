@@ -838,8 +838,21 @@ fn enqueue_desk_cubicles<'a>(
         let Some(Size { w: desk_fp_w, .. }) = desk_def.footprint else {
             continue;
         };
-        let is_last_col = desk.x + desk_fp_w + DESK_W
-            >= ctx.layout.cubicle_band.x + ctx.layout.cubicle_band.width;
+        // A pod divider divides two pod-MATES, so it exists only where the east
+        // mate does — and `home_desks` is the authority for that: the band clamp
+        // in `compute_pod_desks` drops a pod's second column when it wouldn't
+        // fit, so any pitch/band arithmetic here is a second, drifting copy of
+        // the emission rule (the old `desk_fp_w + DESK_W >= band right` mixed
+        // ground width with slot width and never fired at the default layout,
+        // orphaning a divider east of every row's last desk). It sits mid-aisle
+        // between the two desk SPRITES, clear of both.
+        let mate_x = desk.x + DESK_W + crate::layout::INTRA_POD_GAP_X;
+        let divider_x = ctx
+            .layout
+            .home_desks
+            .iter()
+            .any(|d| d.y == desk.y && d.x == mate_x)
+            .then(|| (desk.x + desk_fp_w + mate_x) / 2);
         let occupant = agents
             .iter()
             .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none());
@@ -863,7 +876,7 @@ fn enqueue_desk_cubicles<'a>(
             anchor_y: desk.y + desk_def.visual.h,
             kind: DrawableKind::DeskCubicle {
                 desk,
-                is_last_col,
+                divider_x,
                 has_cabinet: i % 2 == 0,
                 screen_glow,
                 has_coffee,

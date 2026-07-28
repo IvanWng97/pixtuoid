@@ -3586,3 +3586,102 @@ fn character_render_names_resolve_in_the_animation_registry() {
         );
     }
 }
+
+/// Paint one empty office (no agents, no pet, no mascot) through the REAL
+/// two-phase seam, so a geometry assertion sees exactly the pixels production
+/// paints — paint ORDER included (a divider drawn UNDER the desk sprite is
+/// invisible here, which is the point).
+fn paint_empty_office(buf_w: u16, buf_h: u16) -> (RgbBuffer, Layout, &'static crate::theme::Theme) {
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(buf_w, buf_h, None, 0).expect("layout");
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let scene = SceneState::uniform(16);
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(&mut owned.stores(), &scene, &layout, &pack, &coffee, 0, now);
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    paint_frame(
+        &mut PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            now,
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            theme,
+            floor: crate::floor::FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            coffee: &coffee,
+            motion: &owned.motion,
+            door_anim_max_ms: 0,
+            debug_walkable: false,
+        },
+        &frame,
+    );
+    (buf, layout, theme)
+}
+
+// The pod divider is a VISIBLE partition in the aisle between two pod-mates,
+// and it exists only where a pod-mate does. Both halves were broken at once:
+// `desk.x + DESK_W + 3` landed on the desk sprite's own last column (the desk
+// blit three statements later erased 5 of its 6 px, leaving one orphan dot),
+// and the `is_last_col` guard mixed slot width with ground width so it never
+// fired — the rightmost desk of every row painted a divider into empty aisle.
+#[test]
+fn pod_divider_spans_the_desk_rows_between_pod_mates_and_nowhere_else() {
+    let (buf, layout, theme) = paint_empty_office(192, 128);
+    let divider = theme.office.cubicle_divider;
+    let def = crate::layout::desk_furniture_def();
+    let sprite_w = def.visual.w;
+    let mate_pitch = DESK_W + crate::layout::INTRA_POD_GAP_X;
+    assert!(
+        layout.home_desks.len() >= 4,
+        "the rig must lay out real pods, got {}",
+        layout.home_desks.len()
+    );
+    let mut checked_pairs = 0;
+    let mut checked_ends = 0;
+    for &desk in &layout.home_desks {
+        let has_mate = layout
+            .home_desks
+            .iter()
+            .any(|d| d.y == desk.y && d.x == desk.x + mate_pitch);
+        // The aisle: east of THIS desk's sprite, west of where the mate's starts.
+        let aisle: Vec<u16> = ((desk.x + sprite_w)..(desk.x + mate_pitch))
+            .filter(|&x| {
+                (0..=def.visual.h).any(|dy| buf.get(x, desk.y.saturating_sub(1) + dy) == divider)
+            })
+            .collect();
+        if has_mate {
+            checked_pairs += 1;
+            assert_eq!(
+                aisle.len(),
+                1,
+                "desk at {desk:?} should paint exactly one divider column in its aisle, \
+                 got {aisle:?}"
+            );
+            for dy in 0..=def.visual.h {
+                let py = desk.y.saturating_sub(1) + dy;
+                assert_eq!(
+                    buf.get(aisle[0], py),
+                    divider,
+                    "divider column {} must be unbroken over the desk's painted rows \
+                     (row {py} of desk {desk:?})",
+                    aisle[0]
+                );
+            }
+        } else {
+            checked_ends += 1;
+            assert!(
+                aisle.is_empty(),
+                "no divider east of a desk with no pod-mate: desk {desk:?} painted {aisle:?}"
+            );
+        }
+    }
+    assert!(
+        checked_pairs > 0 && checked_ends > 0,
+        "the rig must cover both cases (pairs={checked_pairs}, row-ends={checked_ends})"
+    );
+}

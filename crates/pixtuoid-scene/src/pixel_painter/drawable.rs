@@ -34,7 +34,7 @@ use super::furniture::{
 };
 use super::paint_character_at;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Point, Size, DESK_H, DESK_W};
+use crate::layout::{Point, Size};
 use crate::pet::PetKind;
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
@@ -68,7 +68,11 @@ pub(super) enum DrawableKind<'a> {
     /// the desk's bottom-edge row.
     DeskCubicle {
         desk: Point,
-        is_last_col: bool,
+        /// Buffer column of this cubicle's pod divider, or `None` when the desk
+        /// has no east pod-mate to be divided FROM (the row's last desk, or a
+        /// pod whose second column the band clamp dropped). Resolved at enqueue
+        /// from the layout — the paint side owns no desk-grid arithmetic.
+        divider_x: Option<u16>,
         has_cabinet: bool,
         screen_glow: Option<Rgb>,
         has_coffee: bool,
@@ -299,7 +303,7 @@ pub(super) fn paint_drawable(
     match &d.kind {
         DrawableKind::DeskCubicle {
             desk,
-            is_last_col,
+            divider_x,
             has_cabinet,
             screen_glow,
             has_coffee,
@@ -308,9 +312,12 @@ pub(super) fn paint_drawable(
             sheet_fall,
         } => {
             let divider = theme.office.cubicle_divider;
-            if !is_last_col {
-                let div_x = desk.x + DESK_W + 3;
-                for dy in 0..(DESK_H + 1) {
+            if let Some(div_x) = *divider_x {
+                // Spans the desk sprite's own painted rows (blitted at
+                // `desk.y - 1`, `visual.h + 1` tall) so the partition reads as
+                // tall as the workstation it divides.
+                let visual_h = crate::layout::desk_furniture_def().visual.h;
+                for dy in 0..=visual_h {
                     let py = desk.y.saturating_sub(1) + dy;
                     if div_x < buf.width() && py < buf.height() {
                         buf.put(div_x, py, divider);
@@ -667,6 +674,7 @@ const STACK_PX_PER_TIER: u16 = 2;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::DESK_W;
 
     #[test]
     fn steam_anchor_sits_within_the_coffee_machine_columns() {
@@ -711,7 +719,7 @@ mod tests {
                     .h,
             kind: DrawableKind::DeskCubicle {
                 desk,
-                is_last_col: true,
+                divider_x: None,
                 has_cabinet: false,
                 screen_glow: None,
                 has_coffee: false,
@@ -865,7 +873,7 @@ mod tests {
                     .h,
             kind: DrawableKind::DeskCubicle {
                 desk,
-                is_last_col: true,
+                divider_x: None,
                 has_cabinet: true,
                 screen_glow: None,
                 has_coffee: false,
