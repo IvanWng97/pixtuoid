@@ -40,22 +40,21 @@ fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
         .expect("render must not panic on a multi-byte session_id");
 }
 
-// Regression: render() set last_popup_scale unconditionally, even on an
-// Ok(None) (footer-only) frame where compute_with_seed fails at a
-// small-but-not-tiny size — leaving a stale popup-click hit-box the mouse
-// handler would honor though nothing was painted.
+// The version popup is painted on the footer-only frame too (its Enter-dismiss
+// handler is live at every size), and its click rect derives from the terminal
+// BOUNDS, not the office layout — so the painted scale must be the clickable one
+// here exactly as on a full frame. (The older invariant zeroed the hit-box on
+// this path because nothing was painted; painting it is the fix.)
 #[test]
-fn no_layout_frame_zeroes_the_popup_hit_box() {
+fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
     // 100x16 → scene_rect 100x15 passes render()'s 20x12 gate, but buf_h=30 is
     // below compute_with_seed's office minimum → draw_scene returns Ok(None).
     let scene = scene_with(vec![idle("/nl/0.jsonl", 0, t0())], 16);
     let mut r = build(100, 16, vec![]);
     r.set_version_popup(true, t0());
     let t = t0() + Duration::from_millis(150); // mid-entrance ⇒ scale > 0
-    assert!(
-        r.version_popup_scale(t) > 0.0,
-        "the popup is animating this frame"
-    );
+    let painted = r.version_popup_scale(t);
+    assert!(painted > 0.0, "the popup is animating this frame");
     r.render(&scene, &pack(), t).expect("render");
     assert!(
         r.cached_layout().is_none(),
@@ -63,8 +62,75 @@ fn no_layout_frame_zeroes_the_popup_hit_box() {
     );
     assert_eq!(
         r.last_popup_scale(),
-        0.0,
-        "a footer-only frame paints no popup → no stale hit-box"
+        painted,
+        "the hit-box scale must equal the scale the painter used"
+    );
+    assert!(
+        frame_text(r.frame_buffer()).contains("What's new"),
+        "the popup must actually paint on the footer-only frame"
+    );
+}
+
+// Regression: below the office layout's minimum (60 buffer rows ⇒ 31 terminal
+// rows, so the classic 80x24 is inside it) draw_scene took the footer-only path
+// and painted NO overlay — while every modal's key handler stayed live. A
+// first-run user at 80x24 pressed `?`/`s`/Tab and something toggled invisibly.
+#[test]
+fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
+    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    let scene = scene_with(vec![idle("/tiny/0.jsonl", 0, t0())], 16);
+
+    // Help — the `?` overlay.
+    let mut r = build(80, 24, vec![]);
+    r.set_help_open(true);
+    r.render(&scene, &pack(), t0()).expect("render");
+    assert!(
+        r.cached_layout().is_none(),
+        "80x24 is below the office layout minimum — this IS the footer-only path"
+    );
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("Keyboard"),
+        "the help overlay must paint on the footer-only frame; frame was:\n{text}"
+    );
+
+    // Onboarding — the first-run overlay, top of the modal precedence chain.
+    let mut r = build(80, 24, vec![]);
+    r.set_onboarding_frame(OnboardingFrame {
+        open: true,
+        rows: vec![WelcomeRow {
+            source_id: "codex",
+            label_prefix: "cx",
+            display_name: "Codex".into(),
+            checked: true,
+        }],
+        selected: 0,
+        elapsed_ms: 100_000,
+        dim: 0.4,
+    });
+    r.render(&scene, &pack(), t0()).expect("render");
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("Welcome to pixtuoid"),
+        "the onboarding overlay must paint on the footer-only frame; frame was:\n{text}"
+    );
+
+    // Sources panel — reachable by `s` at any size.
+    let mut r = build(80, 24, vec![]);
+    r.set_connection_frame_parts(
+        true,
+        Vec::new(),
+        Vec::new(),
+        0,
+        None,
+        None,
+        "socket  /tmp/p.sock".into(),
+    );
+    r.render(&scene, &pack(), t0()).expect("render");
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("Sources"),
+        "the Sources panel must paint on the footer-only frame; frame was:\n{text}"
     );
 }
 
