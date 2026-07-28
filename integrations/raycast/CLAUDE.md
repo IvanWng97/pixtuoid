@@ -74,17 +74,16 @@ the sharp edge below and the wire-shape sharp edge in
   emitted only by `pixtuoid sources set` (the declarative reconcile this
   extension never invokes). Failure detail rides in the optional `message`
   field (present exactly when `outcome === "failed"`) — match tokens exactly,
-  no prefix-stripping. This clean split landed while the in-repo extension was
-  the ONLY consumer (it shipped atomically with the binary, before it reached
-  the Raycast store). **It is now PUBLISHED
-  (`raycast.com/IvanWng97/pixtuoid`), so installed copies parse the wire
-  independently of the binary's version — any further wire change needs a
-  version handshake, not a flag-day edit.** The store copy is ALSO already
-  behind: the last `ray publish` marker (`__raycast_latest_publish_ext/pixtuoid__`
-  → b870d8ba) predates the split, so what users have installed still
-  prefix-strips `failed: <msg>` and renders a bare `failed` toast with the real
-  reason dropped. A republish clears that; the parse in `src/` is already
-  correct.
+  no prefix-stripping. This clean split was made ASSUMING the in-repo extension
+  was the ONLY consumer. **It was not** — the last `ray publish` marker
+  (`__raycast_latest_publish_ext/pixtuoid__` → b870d8ba, 2026-06-19) PREDATES
+  the split (e21ec7f0, 2026-07-02), so the break shipped to the store: what
+  users have installed still prefix-strips `failed: <msg>` and renders a bare
+  `failed` toast with the real reason dropped. A republish clears that; the
+  parse in `src/` is already correct. **Treat the wire as PUBLISHED from here
+  on** (`raycast.com/IvanWng97/pixtuoid`) — installed copies parse it
+  independently of the binary's version, so any further wire change needs a
+  version handshake, not a flag-day edit.
 
 ## Gates
 
