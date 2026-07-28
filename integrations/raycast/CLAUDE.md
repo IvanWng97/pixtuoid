@@ -81,9 +81,18 @@ the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
 
 ## Gates
 
-CI (`.github/workflows/raycast.yml`, Linux runner): `npm ci` → `npx tsc
---noEmit` → `npx eslint .`. Run those two locally before "done." **`ray build` /
+CI (`.github/workflows/raycast.yml`, Linux runner): `npm ci` →
+the `gen:contract` freshness diff → `npx tsc --noEmit` → `npx eslint .`. Run them
+locally before "done." **`ray build` /
 `ray lint`** (manifest + icon validation, the Prettier pass) need the **macOS
 Raycast app** and only run before a store publish — they are NOT in CI, so a
 green PR does not prove the manifest is publishable. See the
 [README](README.md) for `npm run {build,dev,lint}`.
+
+- **A chord Raycast RESERVES is swallowed, so its Action is unreachable — and
+  `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
+  it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension
+  Preferences` action bound to `⌘,` (Raycast's own `OpenPreferences`) shipped
+  dead. Nothing else sees it: `tsc` types the chord fine and `ray lint` is not in
+  CI. Its sibling `@raycast/prefer-common-shortcut` stays a warning — style
+  advice a routine version bump could turn into a surprise red.
