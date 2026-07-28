@@ -1221,10 +1221,12 @@ impl FloorGeometry {
         }
     }
     /// Resolved mid-column percent AFTER the Dense-degrade (a too-short Dense
-    /// widens to the Standard 28% column).
+    /// widens to the Standard column). Reads the Standard row rather than
+    /// repeating its percent, so retuning that row can't leave a degraded Dense
+    /// floor on the old column.
     fn mid_x_pct(self) -> u16 {
         if self.variant == FloorVariant::Dense && !self.has_dual_meeting {
-            28
+            FloorVariant::Standard.mid_x_pct()
         } else {
             self.variant.mid_x_pct()
         }
@@ -1657,4 +1659,35 @@ pub(super) fn compute_waypoints(
             y: couch_y,
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FloorGeometry, FloorVariant};
+
+    // The Dense-degrade accessor must READ the Standard column percent, not keep
+    // a second copy of it: `mid_x_pct`'s own doc says the degraded floor "widens
+    // to the Standard column", so retuning `FloorVariant::Standard` has to move
+    // the degraded Dense floor with it.
+    #[test]
+    fn a_degraded_dense_floor_reads_the_standard_column_percent() {
+        let degraded = FloorGeometry {
+            variant: FloorVariant::Dense,
+            has_dual_meeting: false,
+        };
+        assert_eq!(
+            degraded.mid_x_pct(),
+            FloorVariant::Standard.mid_x_pct(),
+            "a too-short Dense floor degrades to the Standard geometry"
+        );
+        let dual = FloorGeometry {
+            variant: FloorVariant::Dense,
+            has_dual_meeting: true,
+        };
+        assert_eq!(
+            dual.mid_x_pct(),
+            FloorVariant::Dense.mid_x_pct(),
+            "a Dense floor that KEEPS both meeting rooms keeps its own column"
+        );
+    }
 }
