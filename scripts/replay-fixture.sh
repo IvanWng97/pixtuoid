@@ -21,8 +21,7 @@ delay="${2:-3}"
 # The WORKING TREE's binary, never a bare `pixtuoid` off PATH: this script is
 # cited as a verification step, and a maintainer normally has a RELEASED pixtuoid
 # installed — so a PATH default replays the last release and prints PASS with none
-# of the change under test in it. The sibling e2e scripts hard-wire
-# $REPO/target/release for the same reason; PIXTUOID_BIN stays the escape hatch.
+# of the change under test in it.
 bin="${PIXTUOID_BIN:-$repo/target/release/pixtuoid}"
 
 [ -f "$fixture" ] || {

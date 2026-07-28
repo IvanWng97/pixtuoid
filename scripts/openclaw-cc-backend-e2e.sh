@@ -41,8 +41,7 @@ CFGDIR="$(mktemp -d)"
 # temp dir: a fixed name makes two concurrent runs bind/`rm` each other's socket,
 # and on a shared /tmp it is pre-plantable by another user (nothing downstream
 # polices it — `ensure_owned_socket_dir` in hook/unix.rs deliberately leaves an
-# explicit PIXTUOID_SOCKET path alone). Same shape as replay-fixture.sh and the
-# sibling openclaw-multi-gateway-e2e.sh.
+# explicit PIXTUOID_SOCKET path alone).
 SOCKDIR="$(mktemp -d)"
 SOCK="$SOCKDIR/pixtuoid.sock"
 PIXLOG="$(mktemp)"
@@ -93,17 +92,13 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     exit 2
 fi
 
+# Reaps the gateway by job pid AND by listening port: `$!` is the listener on
+# openclaw 2026.7.1, so the pid kill normally suffices, but a version that
+# daemonises — or a kill that failed — would leak the port. The port reap is
+# scoped to OUR resolved port, never `pkill -f 'openclaw gateway run'`, which
+# would kill a gateway this script never started.
 cleanup() {
     [ -n "$GWPID" ] && kill "$GWPID" 2>/dev/null
-    # Belt-and-braces port reap (TERM, then KILL). `$!` IS the listener on openclaw
-    # 2026.7.1 (verified: the job pid holds the port, comm `openclaw-gateway`, no
-    # children), so the kill above is normally enough — this catches a version that
-    # daemonises instead, or a gateway that outlived a failed kill, so the user's
-    # machine isn't left with a stray gateway. Scoped to OUR resolved port, never
-    # `pkill -f 'openclaw gateway run'`: that pattern matches nothing today (the
-    # gateway rewrites its process title) and, if upstream ever stopped, would kill
-    # EVERY gateway on the box — including one this script never started. Same
-    # job-pid + port-listener pair the sibling openclaw-multi-gateway-e2e.sh uses.
     local port_pids
     port_pids="$(lsof -ti tcp:"$PORT" -sTCP:LISTEN 2>/dev/null)"
     # shellcheck disable=SC2086  # word-split is intended — one kill per listener pid

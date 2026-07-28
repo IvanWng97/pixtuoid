@@ -33,8 +33,7 @@ CFGDIR="$(mktemp -d)"
 # temp dir: a fixed name makes two concurrent runs bind/`rm` each other's socket,
 # and on a shared /tmp it is pre-plantable by another user (nothing downstream
 # polices it — `ensure_owned_socket_dir` in hook/unix.rs deliberately leaves an
-# explicit PIXTUOID_SOCKET path alone). Same shape as replay-fixture.sh and the
-# sibling openclaw-multi-gateway-e2e.sh.
+# explicit PIXTUOID_SOCKET path alone).
 SOCKDIR="$(mktemp -d)"
 SOCK="$SOCKDIR/pixtuoid.sock"
 PIXPID=""

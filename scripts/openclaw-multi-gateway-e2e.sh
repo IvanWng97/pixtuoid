@@ -153,9 +153,7 @@ expect_line "daemons=[$want]" "${#PORTS[@]} gateways render ${#PORTS[@]} indepen
 # Step [1] is a hard PRECONDITION for step [2], not just another assertion.
 # `expect_line` matches a substring of the LATEST line, so a gateway that has not
 # announced yet satisfies "sibling $port is untouched" on its FIRST-EVER announce —
-# which, after a step-[1] timeout, lands AFTER the kill. Observed: one slow start
-# printed `1 FAIL / 4 PASS` where three of those PASSes were vacuous, reading as
-# "instance-local death mostly works" when the precondition never held.
+# which, after a step-[1] timeout, lands AFTER the kill.
 if [ "$FAILED" != 0 ]; then
     echo "  SKIP [2] — not every gateway announced; the instance-local assertions would be vacuous" >&2
 else
