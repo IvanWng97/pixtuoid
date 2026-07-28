@@ -282,6 +282,13 @@ fn cols(s: &str) -> usize {
     s.chars().count()
 }
 
+/// Clip `s` to at most `budget` columns. Used where a run must not overrun the
+/// model's budget contract and an ellipsis would read as content rather than
+/// chrome (the keybind tail below its own width).
+fn clip_cols(s: &str, budget: usize) -> String {
+    s.chars().take(budget).collect()
+}
+
 /// Assemble the footer for one frame — the deep builder that owns the entire
 /// tier/priority policy. `budget` is the caller's column budget (terminal cells
 /// for the TUI, `win_w / advance` for floating). Returns the chosen tier already
@@ -304,8 +311,11 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
     // partially-frozen office (design DEATH tier).
     if let Some(warn) = inputs.source_warning {
         let w = budget as usize;
-        let quit = inputs.keys_alert;
-        let avail = w.saturating_sub(cols(quit));
+        // The tail is clipped rather than dropped: below its own width there is
+        // nothing else worth the columns, and dropping it would leave a row with
+        // no way out of the alternate screen.
+        let quit = clip_cols(inputs.keys_alert, w);
+        let avail = w.saturating_sub(cols(&quit));
         let alarm = if counts.waiting > 0 {
             format!(" · \u{25b2}{} need you", counts.waiting)
         } else {
@@ -323,19 +333,23 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
                 let mut body: String = warn.chars().take(body_budget.saturating_sub(1)).collect();
                 body.push('\u{2026}');
                 format!("{prefix}{body}{alarm}{suffix}")
+            } else if avail == 0 {
+                // The tail already ate the whole row — not even the ellipsis fits.
+                String::new()
             } else {
                 // Too narrow even for the pinned alarm — truncate the whole line.
-                let mut t: String = full.chars().take(avail.saturating_sub(1)).collect();
-                t.push('\u{2026}');
-                t
+                format!("{}\u{2026}", clip_cols(&full, avail - 1))
             }
         };
-        let pad = w.saturating_sub(cols(&text) + cols(quit));
-        let mut out = vec![FooterSegment::new(text, FooterTone::Warning)];
+        let pad = w.saturating_sub(cols(&text) + cols(&quit));
+        let mut out = Vec::new();
+        if !text.is_empty() {
+            out.push(FooterSegment::new(text, FooterTone::Warning));
+        }
         if pad > 0 {
             out.push(FooterSegment::new(" ".repeat(pad), FooterTone::Neutral));
         }
-        out.push(FooterSegment::new(quit.to_string(), FooterTone::Neutral));
+        out.push(FooterSegment::new(quit, FooterTone::Neutral));
         return FooterModel { segments: out };
     }
 
@@ -380,12 +394,13 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
     // An empty office reads as a bare count on every tier (the board owns the
     // friendly "— office empty —").
     if counts.total == 0 {
-        return finish_tier(
-            vec![FooterSegment::new(
+        return fit_tiers(
+            [vec![FooterSegment::new(
                 format!(" {count_str} "),
                 FooterTone::Neutral,
-            )],
+            )]],
             &quit,
+            inputs.keys_alert,
             budget,
         );
     }
@@ -471,15 +486,36 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
         )]
     };
 
-    for tier in [seg_full, seg_medium, seg_min] {
+    fit_tiers(
+        [seg_full, seg_medium, seg_min],
+        &quit,
+        inputs.keys_alert,
+        budget,
+    )
+}
+
+/// Right-flush the widest tier that fits `budget`, else fall to the keys-only
+/// rung. THE single exit for every stats path, so the model's "baked to
+/// `budget`" contract can't have a hole. The fallback degrades the TAIL — full
+/// hints, then the alert tail whole, then a clip — rather than clipping the hint
+/// tail mid-token and losing `[q]uit` with it.
+fn fit_tiers(
+    tiers: impl IntoIterator<Item = Vec<FooterSegment>>,
+    quit: &str,
+    keys_alert: &str,
+    budget: u16,
+) -> FooterModel {
+    for tier in tiers {
         let stats_len: usize = tier.iter().map(|s| cols(&s.text)).sum();
-        if stats_len + cols(&quit) <= budget as usize {
-            return finish_tier(tier, &quit, budget);
+        if stats_len + cols(quit) <= budget as usize {
+            return finish_tier(tier, quit, budget);
         }
     }
-    FooterModel {
-        segments: vec![FooterSegment::new(quit, FooterTone::Neutral)],
-    }
+    let tail = [quit, keys_alert]
+        .into_iter()
+        .find(|t| cols(t) <= budget as usize)
+        .map_or_else(|| clip_cols(keys_alert, budget as usize), str::to_string);
+    finish_tier(Vec::new(), &tail, budget)
 }
 
 /// Right-flush a chosen stats tier: pad the gap between it and the fixed keybind
@@ -662,6 +698,79 @@ mod tests {
         assert!(
             !line.contains('\u{25cf}'),
             "no rungs in an empty office: {line}"
+        );
+    }
+
+    // The model's "already right-flushed to `budget`" contract must be TOTAL —
+    // every path, every width. Both painters happen to clip an overrun, so a
+    // violation is invisible until a third painter trusts the doc. 20 is the
+    // repo's own MIN_SCENE_WIDTH and the footer-only frame exists to serve
+    // terminals at or below it, so these are not hypothetical widths.
+    #[test]
+    fn every_footer_path_is_exactly_budget_wide() {
+        let mut busy = SceneState::uniform(16);
+        let slot = waiting_slot("/p/wait.jsonl");
+        busy.agents.insert(slot.agent_id, slot);
+        let pf = crate::board::per_floor_counts(&busy);
+        let tools = footer_tool_tally(&busy);
+        let empty = SceneState::uniform(16);
+        let pf_empty = crate::board::per_floor_counts(&empty);
+        for w in 0..=64u16 {
+            for (label, model) in [
+                (
+                    "stats",
+                    build_footer(&inputs(&busy, &pf, &tools, false, None, None), w),
+                ),
+                (
+                    "empty",
+                    build_footer(&inputs(&empty, &pf_empty, &[], false, None, None), w),
+                ),
+                (
+                    "death",
+                    build_footer(
+                        &inputs(&busy, &pf, &[], false, None, Some("transport died")),
+                        w,
+                    ),
+                ),
+            ] {
+                let got: usize = model.segments.iter().map(|s| cols(&s.text)).sum();
+                assert_eq!(
+                    got,
+                    w as usize,
+                    "{label} tier at budget {w}: {:?}",
+                    model.text()
+                );
+            }
+        }
+    }
+
+    // The keys-only rung is a tier like any other: right-flushed, and it degrades
+    // by dropping a WHOLE keybind tail rather than clipping mid-token — `[q]uit`
+    // is the one hint a user stuck in the alternate screen most needs.
+    #[test]
+    fn the_keys_only_rung_degrades_by_tail_not_by_clipping() {
+        let mut scene = SceneState::uniform(16);
+        let slot = active_slot("/p/a.jsonl", "Edit x", ToolKind::Edit);
+        scene.agents.insert(slot.agent_id, slot);
+        let pf = crate::board::per_floor_counts(&scene);
+        // Wide enough for the full hint tail, one column too narrow for the
+        // minimal stats tier — so the fallback rung is what renders.
+        let wide = build_footer(&inputs(&scene, &pf, &[], false, None, None), 34).text();
+        assert_eq!(cols(&wide), 34, "right-flushed: {wide:?}");
+        assert!(
+            wide.ends_with(KEYS_STATS),
+            "keeps the full hint tail: {wide:?}"
+        );
+        // Below the hint tail's own width the ALERT tail takes over, whole.
+        let narrow = build_footer(&inputs(&scene, &pf, &[], false, None, None), 20).text();
+        assert_eq!(cols(&narrow), 20, "right-flushed: {narrow:?}");
+        assert!(
+            narrow.ends_with(KEYS_ALERT),
+            "quit survives whole: {narrow:?}"
+        );
+        assert!(
+            !narrow.contains("[t]"),
+            "no dangling half-token: {narrow:?}"
         );
     }
 }

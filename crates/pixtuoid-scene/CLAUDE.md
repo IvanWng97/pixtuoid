@@ -201,7 +201,10 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   status line. PURE build_footer(&FooterInputs, budget) → FooterModel{segments} owns the
 │                   WHOLE tier ladder (death-tier preempt with the ▲N alarm pinned through truncation →
 │                   full/medium/minimal width-fit → the ♩/floor/keys suffix), emitting toned FooterSegments
-│                   already right-flushed to budget. RungKind (the relocated binary StateKind vocab:
+│                   already right-flushed to budget. The budget contract is TOTAL — EVERY path exits through
+│                   fit_tiers/finish_tier, including the keys-only rung (which degrades the TAIL: full hints →
+│                   keys_alert whole → clip, never a mid-token clip that loses [q]uit) and the death tier below
+│                   its own tail width — so a painter never has to clip. RungKind (the relocated binary StateKind vocab:
 │                   glyph●◐○◌/letter/word/ALL/count — re-exported to the binary AS StateKind so tooltip/
 │                   dashboard are byte-unchanged) + FooterTone{Neutral/Rung/Tool/Gateway/Warning}; carries
 │                   TONE not a color (like board/overlay), footer_tone_rgb(tone, theme) HERE is the ONE
