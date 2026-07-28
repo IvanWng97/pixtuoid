@@ -290,6 +290,55 @@ fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
     }
 }
 
+/// The per-floor desk-capacity sweep, memoized on its own inputs.
+///
+/// `floor_capacity` runs a FULL `Layout::compute_with_seed` — walkable-mask
+/// stamp + coarse BFS, quadratic in buffer area — and keeps only
+/// `home_desks.len()`; the event loop ran `MAX_FLOORS` of them every frame and
+/// discarded every byte. Measured at 1.6 ms/frame for a 192×80 terminal
+/// (0.4 ms at 100×40) in release, many times the world render it sits next to.
+/// The result is a pure function of `(buf_w, buf_h, desk_cap)`, and the
+/// publish is a monotone `fetch_max`, so a repeat with identical inputs could
+/// only rewrite the same values — a steady frame skips the whole sweep.
+///
+/// Factored out of the `run_tui` loop (codecov-excluded, undriveable headlessly)
+/// so the memo is unit-testable, mirroring `toggle_intent` / `dispatch_key`.
+struct FloorCapacitySweep {
+    last: Option<(u16, u16, Option<usize>)>,
+}
+
+impl FloorCapacitySweep {
+    fn new() -> Self {
+        Self { last: None }
+    }
+
+    /// Publish each floor's auto-computed capacity into `caps`. Returns whether
+    /// it actually recomputed (`false` = served from the memo).
+    fn publish(
+        &mut self,
+        buf_w: u16,
+        buf_h: u16,
+        desk_cap: Option<usize>,
+        caps: &[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS],
+    ) -> bool {
+        if self.last == Some((buf_w, buf_h, desk_cap)) {
+            return false;
+        }
+        self.last = Some((buf_w, buf_h, desk_cap));
+        for (floor_idx, cap_slot) in caps.iter().enumerate() {
+            let seed = pixtuoid_scene::floor::floor_seed(floor_idx);
+            let mut capacity = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);
+            if let Some(cap) = desk_cap {
+                capacity = capacity.min(cap);
+            }
+            if capacity > 0 {
+                cap_slot.fetch_max(capacity, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        true
+    }
+}
+
 /// Pure key-dispatch: resolve a key press to a `KeyAction` given the current
 /// modal + floor state. Modal precedence (highest first): onboarding > help >
 /// version popup > connection > dashboard > theme picker > normal scene (the
@@ -609,6 +658,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // effects (see ui_state.rs).
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
     let mut last_layout_sig: Option<(u16, u16)> = None;
+    let mut cap_sweep = FloorCapacitySweep::new();
 
     // Render/event-loop tick (~30fps).
     const FRAME_TICK_MS: u64 = 33;
@@ -685,22 +735,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             // cumulative offsets that would remap agents on floor 1+ to
             // wrong desk positions. On terminal shrink, agents beyond the
             // layout's capacity become invisible but stay alive; they
-            // reappear when the terminal grows back.
+            // reappear when the terminal grows back. Memoized on its own
+            // inputs — see `FloorCapacitySweep`.
             if let Some(layout) = renderer.cached_layout() {
-                use pixtuoid_core::state::MAX_FLOORS;
-                let buf_w = layout.buf_w;
-                let buf_h = layout.buf_h;
-                for floor_idx in 0..MAX_FLOORS {
-                    let seed = pixtuoid_scene::floor::floor_seed(floor_idx);
-                    let mut capacity = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);
-                    if let Some(cap) = desk_cap {
-                        capacity = capacity.min(cap);
-                    }
-                    if capacity > 0 {
-                        floor_caps[floor_idx]
-                            .fetch_max(capacity, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
+                cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
             }
 
             let start = Instant::now();
@@ -1098,6 +1136,75 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // before the process exits. Covers every path above — q / Ctrl-C / terminate
     // / error / the `?` on teardown — because a local's Drop runs on all of them.
     result
+}
+
+#[cfg(test)]
+mod capacity_sweep_tests {
+    use super::FloorCapacitySweep;
+    use pixtuoid_core::state::MAX_FLOORS;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn caps() -> [AtomicUsize; MAX_FLOORS] {
+        std::array::from_fn(|_| AtomicUsize::new(0))
+    }
+
+    // A 192x80 terminal (buf 192x158). One sweep is 10 full
+    // `Layout::compute_with_seed` runs — 1.6 ms in release — so a steady frame
+    // must not repeat it.
+    const W: u16 = 192;
+    const H: u16 = 158;
+
+    #[test]
+    fn a_repeat_frame_serves_the_memo_instead_of_recomputing() {
+        let caps = caps();
+        let mut sweep = FloorCapacitySweep::new();
+        assert!(sweep.publish(W, H, None, &caps), "first frame computes");
+        let published: Vec<usize> = caps.iter().map(|c| c.load(Ordering::Relaxed)).collect();
+        assert!(
+            !sweep.publish(W, H, None, &caps),
+            "an unchanged frame must skip the whole 10-floor layout sweep"
+        );
+        let after: Vec<usize> = caps.iter().map(|c| c.load(Ordering::Relaxed)).collect();
+        assert_eq!(
+            published, after,
+            "the memo hit must publish the same values"
+        );
+    }
+
+    #[test]
+    fn a_resize_or_a_new_cap_recomputes() {
+        let caps = caps();
+        let mut sweep = FloorCapacitySweep::new();
+        sweep.publish(W, H, None, &caps);
+        assert!(sweep.publish(W, H - 2, None, &caps), "a resize recomputes");
+        assert!(
+            sweep.publish(W, H - 2, Some(4), &caps),
+            "a different desk cap recomputes"
+        );
+    }
+
+    #[test]
+    fn published_capacities_are_the_per_floor_auto_capacity_clamped_by_the_cap() {
+        let caps = caps();
+        let mut sweep = FloorCapacitySweep::new();
+        sweep.publish(W, H, None, &caps);
+        for (i, slot) in caps.iter().enumerate() {
+            let want =
+                pixtuoid_scene::floor::floor_capacity(W, H, pixtuoid_scene::floor::floor_seed(i));
+            assert_eq!(slot.load(Ordering::Relaxed), want, "floor {i}");
+            assert!(want > 0, "floor {i} must seat someone at 192x80");
+        }
+        let capped: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
+        let mut sweep = FloorCapacitySweep::new();
+        sweep.publish(W, H, Some(3), &capped);
+        for (i, slot) in capped.iter().enumerate() {
+            assert_eq!(
+                slot.load(Ordering::Relaxed),
+                3,
+                "floor {i} clamped to the cap"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
