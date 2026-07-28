@@ -248,7 +248,8 @@ fn resurrect_in_place_folds_the_active_span_into_active_ms() {
 
 // The resurrect-in-place arm is gated to ROOT agents on BOTH sides (slot AND
 // event parent_id None) so a late duplicate SessionStart can't un-exit a
-// b1-cascaded subagent — reducer.rs is the SOLE site that clears exiting_at.
+// b1-cascaded subagent — `state/reducer/mod.rs` is the SOLE site that clears
+// exiting_at.
 // Pin the negative: a SessionStart on an EXITING subagent leaves it exiting.
 #[test]
 fn session_start_on_exiting_subagent_does_not_resurrect() {

@@ -1035,9 +1035,9 @@ fn stale_sweep_cascades_to_children() {
 // When BOTH parent and child are independently stale, both enter sweep_stale's
 // pass-1 `stale` vec. The parent's pass-2 cascade marks the child exiting; the
 // child's own pass-2 iteration then hits the `exiting_at.is_some() -> continue`
-// write-once guard (reducer.rs) instead of re-stamping / re-logging it. The
-// existing cascade tests heartbeat the descendant so it is NEVER in `stale`, so
-// they don't exercise this branch — this test drops the heartbeat.
+// write-once guard (`state/reducer/mod.rs`) instead of re-stamping / re-logging
+// it. The existing cascade tests heartbeat the descendant so it is NEVER in
+// `stale`, so they don't exercise this branch — this test drops the heartbeat.
 #[test]
 fn stale_sweep_already_cascaded_child_is_skipped_in_pass_two() {
     use pixtuoid_core::state::reducer::STALE_IDLE_TIMEOUT;
