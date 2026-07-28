@@ -614,9 +614,8 @@ mod tests {
         let scene = SceneState::new([4, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         let frames = ui.build_frames(SystemTime::now(), &scene, &[]);
         assert!(!frames.onboarding.open, "the card itself is gone");
-        // …and it RESUMES the open ramp rather than restarting at the floor:
-        // closed immediately, the office had barely dimmed, so the first close
-        // frame must still be near full brightness.
+        // Closed immediately, so the open ramp had barely dimmed — the first
+        // close frame must still be near full brightness.
         assert!(
             frames.onboarding.dim > 0.9,
             "an instantly-skipped overlay must not snap the office to the dim \

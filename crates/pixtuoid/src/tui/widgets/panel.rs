@@ -499,9 +499,9 @@ mod tests {
 
     /// The clamp keeps the card BODY off the footer row — but the silhouette is
     /// offset a row further DOWN, so a card ending one row short still dropped its
-    /// band onto the live `[q]uit` text (`fg` only, bg left lit: a ~5.2:1 → ~1.55:1
-    /// contrast fall, invisible to any substring assertion). Covers BOTH card kinds
-    /// — the hover tooltips anchor inside `scene_rect` and sit at the same edge.
+    /// band onto the live `[q]uit` text (`fg` only, bg left lit — invisible to any
+    /// substring assertion). Covers BOTH card kinds — the hover tooltips anchor
+    /// inside `scene_rect` and sit at the same edge.
     #[test]
     fn a_card_at_the_scene_floor_casts_no_shadow_onto_the_footer_row() {
         use ratatui::style::Color;

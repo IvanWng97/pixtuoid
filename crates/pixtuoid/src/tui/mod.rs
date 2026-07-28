@@ -370,11 +370,10 @@ fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
 /// `floor_capacity` runs a FULL `Layout::compute_with_seed` — walkable-mask
 /// stamp + coarse BFS, quadratic in buffer area — and keeps only
 /// `home_desks.len()`; the event loop ran `MAX_FLOORS` of them every frame and
-/// discarded every byte. Measured at 1.6 ms/frame for a 192×80 terminal
-/// (0.4 ms at 100×40) in release, many times the world render it sits next to.
-/// The result is a pure function of `(buf_w, buf_h, desk_cap)`, and the
-/// publish is a monotone `fetch_max`, so a repeat with identical inputs could
-/// only rewrite the same values — a steady frame skips the whole sweep.
+/// discarded every byte. The result is a pure function of
+/// `(buf_w, buf_h, desk_cap)`, and the publish is a monotone `fetch_max`, so a
+/// repeat with identical inputs could only rewrite the same values — a steady
+/// frame skips the whole sweep.
 ///
 /// Factored out of the `run_tui` loop (codecov-excluded, undriveable headlessly)
 /// so the memo is unit-testable, mirroring `toggle_intent` / `dispatch_key`.
@@ -1228,8 +1227,7 @@ mod capacity_sweep_tests {
     }
 
     // A 192x80 terminal (buf 192x158). One sweep is 10 full
-    // `Layout::compute_with_seed` runs — 1.6 ms in release — so a steady frame
-    // must not repeat it.
+    // `Layout::compute_with_seed` runs, so a steady frame must not repeat it.
     const W: u16 = 192;
     const H: u16 = 158;
 
