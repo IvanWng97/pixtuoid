@@ -702,7 +702,8 @@ class Report:
     `breaking` = verified upstream change, fix the decoder; `review` = a new
     surface to adopt or ignore; `blind` = probe health, repin and verify by hand;
     `errors` = transient. Collapsing `blind` into `breaking` is what made #793
-    report five phantom renames. File through `add_*` only — pinned by the
+    report five phantom renames. One type because the render order and the exit
+    code are functions of all four. File through `add_*` only — pinned by the
     selftest.
     """
 

@@ -97,8 +97,7 @@ given change/tree, say so, don't skip it.
   `Furniture::Desk` footprint `unwrap_or(Size{DESK_W,DESK_H})` both dead (the
   const table is always `Some`) AND WRONG (`decor.rs` is `DESK_W+4`, so a
   hypothetical None mis-placed the sprite), plus the `(7,4)` table footprint
-  re-hardcoded inline in two more painters — read the authority (`if let
-  Some(..) =
+  re-hardcoded inline in two more painters — read the authority (`if let Some(..) =
   furniture_def(x).footprint`), never re-copy its fallback. The test is "can the
   trigger fire, and does the arm duplicate/contradict an authority", NOT "does it
   look defensive": load-bearing defense STAYS (documented sharp edges, liveness
@@ -131,8 +130,7 @@ given change/tree, say so, don't skip it.
   rule vs the real upstream shape; a new source with no drift-watch row;
   install-path resolvers are an upstream surface too, not just decoders — and an
   AUDIT sweeps EVERY registered source, not just a changed one: each source's
-  decoder vs its live upstream wire shape + a PRESENT, ALIVE
-  `check_upstream_drift`
+  decoder vs its live upstream wire shape + a PRESENT, ALIVE `check_upstream_drift`
   row, since the watch itself fail-open behind its own self-test false-greened two
   sources through the wrong decoders for weeks, #454);
   version-lockstep (Cargo.toml versions, MSRV, the "N sites must stay in sync"
@@ -150,15 +148,9 @@ given change/tree, say so, don't skip it.
   diff that a reader could infer from the code is the smell. Even a LEGITIMATE WHY
   must be right-sized + right-placed: **fn-body comments ≤2 lines**, a longer
   rationale relocated onto the DECLARATION it explains (a `const`/fn/module doc
-  can carry a ≈25-word rationale) or a `CLAUDE.md` sharp edge, and any
-  present-tense
+  can carry a ≈25-word rationale) or a `CLAUDE.md` sharp edge, and any present-tense
   code-state assertion moved into a test — the comment keeps only `pinned by
-  <test>`. A ≥3-line `//` run wedged inside a fn body is the flag); and
-  comment-vs-ITSELF — one WHY restated from several angles repeats no code, so
-  neither this factor nor comment-rot can see it: apply CLAUDE.md's comment
-  test #2 (delete every sentence after the first) and report `N sentences, M
-  ideas`, where an IDEA is a sentence that survives that deletion;
-  manifest-bridge (a
+  <test>`. A ≥3-line `//` run wedged inside a fn body is the flag); and comment-vs-ITSELF — apply CLAUDE.md's comment test #2 and report `N sentences, M ideas` with the cut; manifest-bridge (a
   `site/src/*.json` / generated schema vs its Rust source of truth).
 - **(D) Quality + tooling** — test-coverage gaps (changed/existing code with no
   exercising test); mutation-teeth (assertions that survive the mutation — and a
@@ -168,8 +160,7 @@ given change/tree, say so, don't skip it.
   code comment; arc #2's mutation run found 2 live reducer survivors masked by
   exactly such comments — one citing a "residuals note in tests" that didn't
   exist, one whose "this kills the mutant" assertion couldn't distinguish the
-  branches [`duplicate_root_session_start_..._resurrect` +
-  `parent_waiting_..._ends_a_tool` fixed both]);
+  branches [`duplicate_root_session_start_..._resurrect` + `parent_waiting_..._ends_a_tool` fixed both]);
   isolation & flakiness (real-state writes, wall-clock/order nondeterminism,
   `TEST_ENV_LOCK`, snapshot determinism); CI/build (gate coverage, path-filter
   holes, toolchain skew); **gate rules need BOTH directions** — a new check
@@ -358,8 +349,7 @@ Judge as a demanding critic:
    same demotion fixes: a bare `pub` fn/type whose only callers are IN-CRATE, in
    a `pub` module tree (the path is pub-reachable, so `unreachable_pub` stays
    silent) — demote to `pub(crate)` even with no orchestrator involved (the
-  `verify_target`-vs-`has_hooks` least-privilege slip, whole-codebase audit
-  round 2).
+   `verify_target`-vs-`has_hooks` least-privilege slip, whole-codebase audit round 2).
 
 [the five hard requirements]
 Your final message is the report.
@@ -403,26 +393,24 @@ history:
   AGAINST the code it describes (not the diff in isolation), on five
   Family-C axes: **accuracy** (does it match what the code actually does?),
   **value** (a non-obvious WHY, never narration of the WHAT — the comment-value
-  factor), **comment-rot** (now FALSE about the code), the **vestigial**
+  factor), **comment-rot** (now FALSE about the code), and the **vestigial**
   class (a comment describing code the SAME diff deleted — "code gone, comment
-  remains"), and **REDUNDANCY-WITHIN** (below). This is a SEMANTIC judgment
-  the mechanical gate can't make: the
+  remains"), and **REDUNDANCY-WITHIN** (below). This is a SEMANTIC judgment the mechanical gate can't make: the
   diff-scoped `just comment-lint` advisory finds structural CANDIDATES (runs of
   3+ consecutive line comments in a fn body — `//` in Rust, `#` in Python — on
   the diff's new lines only — the ~5k
   pre-existing legitimate WHY are grandfathered), but the keep / trim-to-≤2 /
   relocate-to-the-declaration-or-a-CLAUDE.md-sharp-edge call is this lens's.
-  **Redundancy-within is the axis this lens kept missing**: the other four compare
-  the comment to the CODE, and a restatement repeats no code, so nothing else can
-  flag it. Apply CLAUDE.md's comment test #2 verbatim — do not paraphrase it here,
-  the two copies already drifted once — and report `N sentences, M ideas` with the
-  proposed cut. The finding is REPETITION, not length: "too long" sends the author
-  to trim a legitimate WHY instead of the duplicates.
+  **Redundancy-within is the axis this lens kept missing**: the other four
+  compare the comment to the CODE, and a restatement repeats no code, so
+  nothing else can flag it. Apply CLAUDE.md's comment test #2 verbatim — do
+  not paraphrase it here, these two copies drifted once already. The finding
+  is REPETITION, not length: "too long" sends the author to trim a legitimate
+  WHY instead of the duplicates.
 
   Anti-slop caveat: this repo's dense WHY-comment density is DELIBERATE — flag
   only genuine slop (restated WHAT, stale, vestigial, restated-ITSELF), never a
-  legitimate WHY that happens to run long because it carries that much.
-  (Claude Code: the `comment-analyzer` agent is the
+  legitimate WHY that happens to run long. (Claude Code: the `comment-analyzer` agent is the
   ready implementation.)
 - **Interactive TUI flow changed** (onboarding, panel actions, popup gating,
   keybind dispatch) → add a UX / user-journey lens that WALKS each user path
@@ -451,8 +439,7 @@ history:
   columns, popup copy — even a text-only diff) → render the COMPOSED frame
   before the verdict (the snapshot example with the relevant flag). A
   string-equality unit test is blind to the painter's framing: #308's
-  `footer_warning` embedded its own ⚠ while the footer painter (`footer.rs`)
-  owns the glyph —
+  `footer_warning` embedded its own ⚠ while the footer painter (`footer.rs`) owns the glyph —
   its test asserted the string WITH the glyph, both review rounds passed it, and
   live rendered `⚠ ⚠` (caught post-merge only via `snapshot --drift-warning`,
   R0615-22); #315's new 2-col health flag shifted data rows but not the static
