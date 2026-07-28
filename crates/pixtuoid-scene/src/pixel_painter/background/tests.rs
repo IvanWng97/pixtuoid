@@ -296,6 +296,21 @@ fn render_office_on(
     buf_w: u16,
     top_wall_h: u16,
 ) -> RgbBuffer {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    render_office_themed(day, hour, weather, theme, buf_w, top_wall_h)
+}
+
+/// [`render_office_on`] with the theme as a parameter — the weather/light
+/// invariants hold per THEME (each ships its own night-sky + glass colours), so
+/// their pins sweep `ALL_THEMES` rather than trusting `normal` to be worst-case.
+fn render_office_themed(
+    day: u32,
+    hour: u32,
+    weather: Weather,
+    theme: &'static crate::theme::Theme,
+    buf_w: u16,
+    top_wall_h: u16,
+) -> RgbBuffer {
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
@@ -304,7 +319,6 @@ fn render_office_on(
     }
     let _reset = Reset;
     set_weather_override(Some(weather));
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
     let now = at_local(2026, 1, day, hour, 0);
     let look = time_of_day_look(now, theme);
     let buf_h = top_wall_h + 4;
@@ -807,4 +821,134 @@ fn window_columns_tiles_from_the_start_and_keeps_absolute_idx_across_a_skip() {
         kept.iter().any(|w| w.idx == 2),
         "the pane after the door keeps idx 2"
     );
+}
+
+/// Mean channel value over every PAINTED window pane's glass interior — what a
+/// viewer actually reads as "how bright is the window". The day-over-night
+/// invariant is asserted on THIS, not on `time_of_day_look().darkness`: the
+/// weather veils (`skyline_haze` + the Fog/Overcast/Smog washes) are painted
+/// onto the glass AFTER the light model has produced `sky_row`, so a
+/// `darkness`-only assertion is structurally blind to them.
+fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
+    let window_y: u16 = 1;
+    let window_h: u16 = top_wall_h.saturating_sub(2).max(8);
+    let mut sum = 0.0f64;
+    let mut n = 0u32;
+    for w in window_columns(buf.width(), None) {
+        for y in (window_y + 1)..(window_y + window_h).saturating_sub(1) {
+            for x in (w.x_left + 1)..(w.x_left + WINDOW_W).saturating_sub(1) {
+                if x < buf.width() && y < buf.height() {
+                    let p = buf.get(x, y);
+                    sum += f64::from(p.r) + f64::from(p.g) + f64::from(p.b);
+                    n += 3;
+                }
+            }
+        }
+    }
+    assert!(n > 0, "the rig must sample real glass");
+    (sum / f64::from(n)) as f32
+}
+
+/// The brightest night January 2026 can offer — the sky guard's own
+/// methodology (`solar_noon_outshines_the_brightest_night` picks the fullest
+/// moon), transposed onto the rendered pane.
+fn fullest_moon_day() -> u32 {
+    (1..=31u32)
+        .max_by(|&a, &b| {
+            let phase = |d: u32| sky::moon_phase(at_local(2026, 1, d, 0, 0));
+            phase(a)
+                .partial_cmp(&phase(b))
+                .expect("moon_phase is never NaN")
+        })
+        .expect("January has days")
+}
+
+/// The pane-luminance rig every weather/time invariant below shares: the
+/// glass mean at the FULLEST moon of January 2026 (the brightest night the
+/// year offers — `solar_noon_outshines_the_brightest_night`'s own worst case),
+/// for one theme × hour × weather.
+fn pane(theme: &'static crate::theme::Theme, hour: u32, w: Weather) -> f32 {
+    const BUF_W: u16 = 120;
+    const TOP_WALL_H: u16 = 26;
+    glass_mean_luminance(
+        &render_office_themed(fullest_moon_day(), hour, w, theme, BUF_W, TOP_WALL_H),
+        TOP_WALL_H,
+    )
+}
+
+/// Local midnight — the night arc's own apex, so the brightest instant of a
+/// night — and solar noon, its daytime counterpart.
+const NIGHT_HOUR: u32 = 0;
+const NOON_HOUR: u32 = 12;
+
+// The rendered twin of `solar_noon_outshines_the_brightest_night`: the model's
+// day-over-night ordering has to survive the weather VEIL the painter lays over
+// the glass afterwards. It did not — `skyline_haze` and the Fog/Overcast/Smog
+// washes were absolute daylight-grey constants with no time input, so the
+// heaviest weathers BRIGHTENED the pane after dark and a night-lit room sat
+// behind daylight-white windows.
+#[test]
+fn every_weather_darkens_the_glass_from_solar_noon_to_midnight() {
+    for theme in crate::theme::ALL_THEMES {
+        for w in Weather::ALL {
+            let (noon, night) = (pane(theme, NOON_HOUR, w), pane(theme, NIGHT_HOUR, w));
+            assert!(
+                night < noon,
+                "{}/{:?}: a full-moon midnight pane must be darker than the solar-noon \
+                 pane (night={night:.1} noon={noon:.1})",
+                theme.name,
+                w
+            );
+        }
+    }
+}
+
+// The cross-weather half of the same defect, and the finding's headline
+// measurement: a foggy 3 AM pane out-shone a CLEAR solar noon one. Note the
+// reference is clear noon, not the DIMMEST noon: how bright a snowy/stormy noon
+// pane renders is a theme-palette choice (cyberpunk's day sky is deliberately
+// dark), so "the dimmest noon of any weather" is not a property of the light
+// model and is not asserted here.
+#[test]
+fn no_midnight_pane_outshines_the_clear_solar_noon_pane() {
+    for theme in crate::theme::ALL_THEMES {
+        let clear_noon = pane(theme, NOON_HOUR, Weather::Clear);
+        for w in Weather::ALL {
+            let night = pane(theme, NIGHT_HOUR, w);
+            assert!(
+                night < clear_noon,
+                "{}/{:?}: a full-moon midnight pane ({night:.1}) must stay below the \
+                 clear solar-noon pane ({clear_noon:.1})",
+                theme.name,
+                w
+            );
+        }
+    }
+}
+
+// The counter-pin: night-adapting the veil must not ERASE it. Fog after dark is
+// still a lit murk (city light scattering in the cloud) — brighter than a clear
+// night, just no longer brighter than the day. A veil scaled to zero at night,
+// or deleted outright, passes the two tests above and fails this one.
+#[test]
+fn fog_still_glows_over_the_midnight_sky() {
+    // Measured margin is 1.5x (normal) .. 2.2x (cyberpunk); this floor pins
+    // "still clearly a fog" without pinning the exact tuning.
+    const FOG_NIGHT_GLOW_MIN: f32 = 1.25;
+    for theme in crate::theme::ALL_THEMES {
+        let clear = pane(theme, NIGHT_HOUR, Weather::Clear);
+        let fog = pane(theme, NIGHT_HOUR, Weather::Fog);
+        assert!(
+            fog > clear * FOG_NIGHT_GLOW_MIN,
+            "{}: fog must still read as a lit murk at midnight (fog={fog:.1} \
+             vs clear={clear:.1})",
+            theme.name
+        );
+        let smog = pane(theme, NIGHT_HOUR, Weather::Smog);
+        assert!(
+            smog > clear,
+            "{}: smog must still veil the midnight sky (smog={smog:.1} vs clear={clear:.1})",
+            theme.name
+        );
+    }
 }
