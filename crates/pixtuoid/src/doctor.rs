@@ -702,6 +702,31 @@ pub(crate) fn focus_section(
     out
 }
 
+/// Read the warn-floor log for a drift scan, separating "there is no log yet"
+/// from "the log could not be read". Returns the text (empty on either failure)
+/// plus a warning line for the SECOND case only.
+///
+/// A missing log is the ordinary no-TUI-run-yet state and genuinely means "no
+/// drift recorded". Every other error class — permission denied, an I/O error,
+/// a path that isn't a file — means the drift counts are UNKNOWN, and folding
+/// that into the same silent empty string made `doctor` positively assert
+/// `✓ no decode drift` (and `sources --json` return `health: null`) off an input
+/// it never read. One authority so both readers answer identically — `pub`
+/// because `sources_cli` (bin crate) is the second reader.
+pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
+    match std::fs::read_to_string(path) {
+        Ok(s) => (s, None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
+        Err(e) => (
+            String::new(),
+            Some(format!(
+                "log unreadable: {} ({e}) — the decode-drift counts below are not meaningful",
+                path.display()
+            )),
+        ),
+    }
+}
+
 /// Run the diagnosis: read config + install-state + the log, probe installed CLI
 /// versions, print a per-source health table. Read-only. `log_path` is injected
 /// by `main` (it owns the log-path resolution, which lives in the bin, not lib).
@@ -718,7 +743,7 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     // semantic — it can lag a just-made in-TUI toggle until that toggle persists,
     // which it always does (persist-first; see `connect_source`/`disconnect_source`).
     let connected = crate::config::resolve_connected(&cfg);
-    let log = std::fs::read_to_string(log_path).unwrap_or_default();
+    let (log, log_warning) = read_log(log_path);
 
     let mut out = String::from("pixtuoid doctor — source health\n");
     out.push_str(&format!("log: {}\n", log_path.display()));
@@ -764,6 +789,12 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     // silently swallow it. Sanitized: a warning can interpolate config content.
     for w in &warnings {
         out.push_str(&format!("⚠ config: {}\n", sanitize(w)));
+    }
+    // Same rule for the report's OTHER primary input: an unreadable log must not
+    // read as "no drift". Sanitized identically — the io::Error Display carries a
+    // path.
+    if let Some(w) = &log_warning {
+        out.push_str(&format!("⚠ {}\n", sanitize(w)));
     }
     out.push('\n');
 
@@ -972,6 +1003,34 @@ mod tests {
         assert!(out.contains("config:"), "{out}");
         assert!(out.contains("terminal: TERM="), "{out}");
         assert!(out.contains("sources \u{b7}"), "{out}");
+    }
+
+    #[test]
+    fn an_unreadable_log_is_reported_but_a_missing_one_is_not() {
+        // The one tool whose job is to explain "connected but no sprite" used to
+        // fail OPEN on its own primary input: every read error became an empty
+        // string, so `✓ no decode drift` was asserted off a file never read.
+        // A genuinely MISSING log stays the silent no-TUI-run-yet case.
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_log(&dir.path().join("nope")), (String::new(), None));
+
+        let f = dir.path().join("log");
+        std::fs::write(&f, "hello").unwrap();
+        assert_eq!(read_log(&f), ("hello".to_string(), None));
+
+        // A directory reads as IsADirectory / PermissionDenied — never NotFound,
+        // on any platform and any uid (a chmod-000 file would not bind as root).
+        let (text, warning) = read_log(dir.path());
+        assert!(text.is_empty());
+        let warning = warning.expect("an unreadable log must be reported");
+        assert!(
+            warning.contains("log unreadable") && warning.contains("not meaningful"),
+            "got: {warning}"
+        );
+
+        // And the report SURFACES it (the config-warning half already did).
+        let out = run(dir.path()).unwrap();
+        assert!(out.contains("⚠ log unreadable"), "{out}");
     }
 
     #[test]

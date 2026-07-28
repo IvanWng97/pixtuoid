@@ -115,6 +115,10 @@ src/
 │                       `pixtuoid::drift` breadcrumbs). Pure scan_log_for_source/format_doctor_row/
 │                       parse_version/version_status (tested; scan vs REAL fmt output); sanitizes
 │                       untrusted sampled names (R0615-06). verified_version lives on SourceDescriptor.
+│                       `read_log` is the ONE log-read authority both readers share (doctor's
+│                       report + sources_cli's `health`): a MISSING log is the ordinary
+│                       no-run-yet "no drift", every other error class returns a warning so
+│                       an unreadable log can't read as a clean bill of health.
 │                       drifted_sources/footer_warning (also pure, tested) feed the LIVE footer nudge —
 │                       run_tui throttle-scans the same log (≤15s) → ⚠ decode drift footer (see tui guide).
 │                       **THE unified source-HEALTH module** (#309 health-consolidation): `SourceDiagnostics`
