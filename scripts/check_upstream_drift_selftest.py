@@ -825,7 +825,20 @@ def test_every_reader_row_matches_a_field_on_our_names() -> None:
     """
     rows = {field for field, _, _ in _reader_rows()}
     fields = {f.name for f in dataclasses.fields(d.OurNames)}
-    check(rows == fields, f"READERS rows vs OurNames fields differ: {rows ^ fields}")
+    check(
+        rows == fields,
+        f"every READERS row must name an OurNames field and every field must be "
+        f"filled by a row — otherwise the source is silently unchecked with no "
+        f"probe-health line. Mismatched: {rows ^ fields}. Add the missing row or "
+        f"field, or drop the orphan.",
+    )
+    # Every field must default to None, not to an empty container. `is not None`
+    # is what every consumer guards on, so a truthy-empty default would sail past
+    # the guard and let a one-directional sweep pass VACUOUSLY over nothing —
+    # the failed reader reporting "no drift" instead of probe health.
+    fresh = d.OurNames()
+    non_none = sorted(f.name for f in dataclasses.fields(fresh) if getattr(fresh, f.name) is not None)
+    check(not non_none, f"OurNames fields must default to None, got set: {non_none}")
     for field, reader_name, what in _reader_rows():
         check(callable(getattr(d, reader_name, None)), f"{reader_name} is a real reader")
         check(bool(what.strip()), f"{reader_name} declares what it reads")
