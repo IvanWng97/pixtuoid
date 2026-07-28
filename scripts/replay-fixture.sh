@@ -12,20 +12,26 @@
 # Usage:  scripts/replay-fixture.sh <rollout.jsonl> [delay_secs]
 #   e.g.  scripts/replay-fixture.sh \
 #           crates/pixtuoid-core/tests/sources/fixtures/codex/permission-flow/rollout-*.jsonl
-#   PIXTUOID_BIN overrides the binary (default: `pixtuoid` on PATH).
+#   PIXTUOID_BIN overrides the binary (default: this tree's target/release build).
 set -euo pipefail
 
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture="${1:?usage: replay-fixture.sh <rollout.jsonl> [delay_secs]}"
 delay="${2:-3}"
-bin="${PIXTUOID_BIN:-pixtuoid}"
+# The WORKING TREE's binary, never a bare `pixtuoid` off PATH: this script is
+# cited as a verification step, and a maintainer normally has a RELEASED pixtuoid
+# installed — so a PATH default replays the last release and prints PASS with none
+# of the change under test in it. The sibling e2e scripts hard-wire
+# $REPO/target/release for the same reason; PIXTUOID_BIN stays the escape hatch.
+bin="${PIXTUOID_BIN:-$repo/target/release/pixtuoid}"
 
 [ -f "$fixture" ] || {
     echo "no such fixture: $fixture" >&2
     exit 1
 }
 command -v "$bin" >/dev/null 2>&1 || {
-    echo "binary not found: $bin (set PIXTUOID_BIN)" >&2
-    exit 1
+    echo "binary not found: $bin — run: just build --release (or set PIXTUOID_BIN)" >&2
+    exit 2
 }
 
 root="$(mktemp -d)"
