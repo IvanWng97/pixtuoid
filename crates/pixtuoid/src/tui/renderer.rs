@@ -224,7 +224,7 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     term.draw(|f| {
         let actual = f.area();
         paint_footer(f, scene, stats, actual, theme, floor_info, source_warning);
-        paint_overlays(f, overlays, now, scene_rect(actual), theme);
+        paint_overlays(f, overlays, now, actual, theme);
     })?;
     Ok(())
 }
@@ -453,7 +453,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 }
             }
         }
-        paint_overlays(f, &overlays, now, actual_scene, theme);
+        paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
     Ok(Some(layout))
 }
@@ -461,14 +461,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 /// The modal-overlay dispatch shared by `draw_scene` (normal path) and
 /// `TuiRenderer::render_transition` (the floor-slide path): theme picker → dashboard →
 /// Sources panel → version popup → help, each gated by its own state and drawn
-/// at the same `bounds`. Centralized so the three draw paths can't drift in
+/// at the same `bounds` (the full terminal area — a modal is centered over the
+/// whole frame, and `PanelGeometry` keeps it off the footer row itself via
+/// `RESERVED_FOOTER_ROWS`). Centralized so the three draw paths can't drift in
 /// ordering or args.
-///
-/// `bounds` is the SCENE rect, never the full terminal: a panel taller than the
-/// terminal clamps to `bounds` (`PanelGeometry::compute`), so centering in the
-/// full area let it take the footer row — the one persistent affordance, and the
-/// only place a first-run user reads `[q]uit`. Any click-target caller must
-/// resolve the same rect (`scene_rect`), or paint and click drift apart.
 pub(super) fn paint_overlays(
     f: &mut ratatui::Frame<'_>,
     ov: &OverlayFrame<'_>,

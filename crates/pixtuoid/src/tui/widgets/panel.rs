@@ -27,6 +27,15 @@ const PANEL_PAD_Y: u16 = 1;
 const PANEL_MIN_W: u16 = 4;
 const PANEL_MIN_H: u16 = 3;
 
+/// Rows at the bottom of `bounds` a panel may never occupy: the footer, painted
+/// by every draw path and the one persistent affordance (`[q]uit`, `[?]help`).
+/// Without it a panel taller than the terminal clamps to `bounds.height` and
+/// paints straight over it — the version popup did exactly that at 32×31, where
+/// the wrapped release notes outgrow the frame. Reserved HERE rather than by
+/// shrinking each caller's `bounds`, because centering in a shorter box would
+/// also move every panel that already fits.
+const RESERVED_FOOTER_ROWS: u16 = 1;
+
 /// Inner content `Rect` of a borderless panel: `outer` inset by `PANEL_PAD_*`
 /// with the title row (when present) dropped. Raw-area fallback when `outer` is
 /// too small to inset — the historical `borderless_panel` behavior. Extracted so
@@ -63,7 +72,8 @@ pub(crate) struct PanelGeometry {
 
 impl PanelGeometry {
     /// `content_rows` is the content BELOW the title; the title row is added here.
-    /// Envelope = `(content + 2·PANEL_PAD)` clamped to `bounds`, THEN ·`scale`
+    /// Envelope = `(content + 2·PANEL_PAD)` clamped to `bounds` less
+    /// `RESERVED_FOOTER_ROWS`, THEN ·`scale`
     /// (rounded), centered off the SCALED dims, THEN the `<PANEL_MIN → None` guard
     /// (subsumes the 5 per-caller `<4||<3` guards AND version_popup's `.max(2)`
     /// floor + `scale<=0.01` return). `scale` is clamped to `0.0..=1.0`.
@@ -79,7 +89,7 @@ impl PanelGeometry {
         let full_h = content_rows
             .saturating_add(title.is_some() as u16)
             .saturating_add(2 * PANEL_PAD_Y)
-            .min(bounds.height);
+            .min(bounds.height.saturating_sub(RESERVED_FOOTER_ROWS));
         let w = (full_w as f32 * scale).round() as u16;
         let h = (full_h as f32 * scale).round() as u16;
         if w < PANEL_MIN_W || h < PANEL_MIN_H {
@@ -507,6 +517,34 @@ mod tests {
             PanelGeometry::compute(Rect::new(0, 0, 100, 2), 20, 5, Some("t"), 1.0)
                 .outer()
                 .is_none()
+        );
+    }
+
+    /// A panel taller than its bounds clamps — and used to clamp right over the
+    /// footer, the one persistent `[q]uit` affordance. It must stop one row
+    /// short, WITHOUT moving a panel that already fits (that shift would redraw
+    /// every committed modal still).
+    #[test]
+    fn a_too_tall_panel_stops_one_row_short_of_the_footer() {
+        let b = Rect::new(0, 0, 40, 20);
+        let tall = PanelGeometry::compute(b, 30, 100, Some("t"), 1.0)
+            .outer()
+            .expect("renders");
+        assert_eq!(
+            tall.bottom(),
+            b.bottom() - RESERVED_FOOTER_ROWS,
+            "a clamped panel must leave the footer row free, got {tall:?}"
+        );
+        // A panel that FITS keeps its exact centering — the reserve only bites
+        // the clamp, never the common case.
+        let fits = PanelGeometry::compute(b, 30, 5, Some("t"), 1.0)
+            .outer()
+            .expect("renders");
+        assert_eq!(
+            fits.y,
+            (b.height - fits.height) / 2,
+            "a fitting panel stays centered in the FULL height — centering it in \
+             a footer-shortened box would move every committed modal still"
         );
     }
 

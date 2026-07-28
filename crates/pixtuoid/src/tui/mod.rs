@@ -1024,15 +1024,12 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         // the click geometry matches what was actually painted.
                         if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
                             if let Ok((cols, rows)) = crossterm::terminal::size() {
-                                // The SCENE rect, matching what `paint_overlays`
-                                // centered the popup in — the full area would put
-                                // the click a row off on half the terminal heights.
-                                let bounds = renderer::scene_rect(ratatui::layout::Rect {
+                                let bounds = ratatui::layout::Rect {
                                     x: 0,
                                     y: 0,
                                     width: cols,
                                     height: rows,
-                                });
+                                };
                                 let notes =
                                     crate::version::release_notes(env!("CARGO_PKG_VERSION"))
                                         .unwrap_or(&[]);
