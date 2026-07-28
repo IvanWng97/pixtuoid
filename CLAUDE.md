@@ -55,7 +55,7 @@ an ASCII office. Rust workspace of five crates. User-facing overview:
 ```
 crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web} (+ standalone pixtuoid-hook)
 ├── pixtuoid-core/   headless lib — no terminal deps (ratatui/crossterm forbidden)
-│                    source/ state/ sprite/ render/ grid.rs walkable.rs (walkable STAYS here:
+│                    source/ state/ sprite/ grid.rs id.rs walkable.rs platform.rs (walkable STAYS here:
 │                    its ops are an inherent `impl Grid<bool>`, orphan-rule-pinned to Grid's crate)
 │                    `native` (default) feature gates the async source runtime (tokio/notify,
 │                    hook/jsonl/manager/probes, the Source-trait seam source/native.rs + each

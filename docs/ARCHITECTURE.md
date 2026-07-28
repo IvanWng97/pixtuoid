@@ -163,8 +163,10 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
 - **The `Source` trait is the only seam for adding a transcript-bearing agent
   CLI** (Codex, Copilot CLI, Antigravity, …). Per-source format knowledge lives in that source's
   own decoder functions (injected into `JsonlWatcher` as fn pointers), not in a
-  shared decoder. Hook-only CLIs (Reasonix, opencode, Cursor CLI,
-  CodeWhale, Hermes — no watchable transcript) are the documented exception: no
+  shared decoder. Hook-only CLIs (Reasonix, opencode, Cursor CLI, CodeWhale,
+  Hermes, Kimi Code CLI — none exposes a transcript pixtuoid watches; for
+  Kimi and Cursor CLI one DOES exist but is deliberately unwatched, see
+  `crates/pixtuoid-core/CLAUDE.md`) are the documented exception: no
   `Source` impl and no runtime wiring; their registry rows set
   `transcript: None` and supply a custom hook decoder, and each ships an
   install `Target` instead (bound via the in-TUI Sources panel).

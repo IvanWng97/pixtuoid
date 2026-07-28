@@ -12,11 +12,13 @@
  * (`integrations/raycast/contract/outcome-row.schema.json`, golden-tested below)
  * the extension's TS type is generated from (`gen:contract`). The wire shape is
  * `{id, outcome, message?}` — a bare machine token plus an optional human-detail
- * field, split from the older folded `failed: <msg>` string BEFORE the
- * extension's store publication (the in-repo extension ships atomically with
- * the binary, so no installed consumer parsed the old form). Once the extension
- * is store-published, changing this shape needs a version handshake — see the
- * sharp edge in `crates/pixtuoid/CLAUDE.md`. Pinned by
+ * field, split from the older folded `failed: <msg>` string on the ASSUMPTION
+ * that the in-repo extension, which ships atomically with the binary, was the
+ * only consumer. It was not: the last `ray publish` marker PREDATES the split,
+ * so the break reached the store. Treat this wire as PUBLISHED — installed
+ * copies parse it independently of the binary's version, and a further shape
+ * change needs a version handshake, never another flag-day edit;
+ * see the sharp edge in `crates/pixtuoid/CLAUDE.md`. Pinned by
  * `outcome_row_json_shape_is_the_raycast_contract` + the envelope test in
  * `sources_cli.rs`.
  */
