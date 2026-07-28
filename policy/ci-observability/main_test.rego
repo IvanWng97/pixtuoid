@@ -1102,6 +1102,21 @@ test_claude_tag_job_without_a_condition_is_denied if {
 	}
 }
 
+# The sequence spelling of `on:` reaches the job just as the mapping does.
+test_claude_tag_sequence_trigger_form_is_denied if {
+	fixture := {"documents": [{
+		"path": claude_tag_workflow_path,
+		"contents": {
+			"on": ["issues", "pull_request_review", "pull_request_review_comment"],
+			"jobs": {"claude": {"steps": [{"uses": claude_action}]}},
+		},
+	}]}
+	violations := deny with input as fixture
+	every event in claude_pull_request_event_names {
+		claude_tag_head_guard_message(event) in violations
+	}
+}
+
 # Renaming the job away from `claude` used to silence the guard entirely.
 test_claude_tag_renamed_job_is_still_guarded if {
 	violations := deny with input as claude_tag_workflow("respond", {

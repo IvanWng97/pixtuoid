@@ -370,6 +370,17 @@ claude_tag_arms(event) := [arm |
 	contains(arm, sprintf("github.event_name == '%s'", [event]))
 ]
 
+# `on:` takes a mapping (each event carrying `types:`) OR a bare sequence of
+# event names; both reach the job, so both count as a trigger.
+claude_tag_triggers_event(event) if {
+	object.get(documents, [claude_tag_workflow_path, "on", event], "missing") != "missing"
+}
+
+claude_tag_triggers_event(event) if {
+	some declared in object.get(documents[claude_tag_workflow_path], "on", [])
+	declared == event
+}
+
 # Guarded means the event is REACHABLE only through guarded arms: at least one
 # arm names it (none at all = a missing condition, which gates nothing) and
 # every arm that names it carries the head check.
@@ -655,7 +666,7 @@ deny contains msg if {
 # deleting the whole `if:` block is the cheapest way to lose the guard.
 deny contains msg if {
 	some event in claude_pull_request_event_names
-	object.get(documents, [claude_tag_workflow_path, "on", event], "absent") != "absent"
+	claude_tag_triggers_event(event)
 	not claude_tag_event_is_guarded(event)
 	msg := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
 }
