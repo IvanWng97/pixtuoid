@@ -23,6 +23,9 @@ actionlint_config_path := ".github/actionlint.yaml"
 actionlint_claude_wif_ignore := "input \"anthropic_(federation_rule_id|organization_id|service_account_id)\" is not defined in action \"anthropics/claude-code-action@v1\""
 actionlint_release_queue_ignore := "unexpected key \"queue\" for \"concurrency\" section"
 zizmor_config_path := ".github/zizmor.yml"
+dependabot_config_path := ".github/dependabot.yml"
+composite_action_root := ".github/actions"
+github_actions_ecosystem := "github-actions"
 cache_cleanup_workflow_path := ".github/workflows/cache-cleanup.yml"
 claude_action := "anthropics/claude-code-action@v1"
 json_schema_flag := "--json-schema"
@@ -156,6 +159,34 @@ entries_using(action) := [entry |
 	some entry in uses_entries
 	action_matches(entry.uses, action)
 ]
+
+# `.github/actions/upload-codecov/action.yml` -> `/.github/actions/upload-codecov`,
+# the leading-slash directory form a Dependabot `directories` entry matches.
+dependabot_directory(path) := directory if {
+	segments := split(path, "/")
+	directory := sprintf("/%s", [concat("/", array.slice(segments, 0, count(segments) - 1))])
+}
+
+# Both spellings are legitimate: `directories` (globbable, one entry for all
+# composites) and the singular `directory` (the pre-2024 one-entry-per-composite
+# workaround). A `directories` entry is a glob, so match it as one.
+declared_actions_directories contains directory if {
+	some update in object.get(documents[dependabot_config_path], "updates", [])
+	object.get(update, "package-ecosystem", "") == github_actions_ecosystem
+	some directory in object.get(update, "directories", [])
+}
+
+declared_actions_directories contains directory if {
+	some update in object.get(documents[dependabot_config_path], "updates", [])
+	object.get(update, "package-ecosystem", "") == github_actions_ecosystem
+	directory := object.get(update, "directory", "")
+	directory != ""
+}
+
+dependabot_covers(directory) if {
+	some declared in declared_actions_directories
+	glob.match(declared, ["/"], directory)
+}
 
 codecov_action_reference(value) if {
 	parts := split(value, "@")
@@ -1043,6 +1074,22 @@ deny contains msg if {
 	config := documents[zizmor_config_path]
 	object.get(config, "rules", {}) != expected_zizmor_rules
 	msg := sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path])
+}
+
+# The actions ignore rule below suppresses patch and minor, so MAJOR is the only
+# class that ever opens a PR — and zizmor accepts a symbolic ref regardless of
+# age. Dependabot is therefore the sole mechanism that reports a major bump, and
+# `directory: /` searches only `.github/workflows` plus a root `action.yml`: a
+# pin extracted into a composite silently leaves coverage, which is what
+# #784/#785 did to four of them. Keyed off the pins that EXIST, so a composite
+# holding nothing but sibling `./` references needs no entry.
+deny contains msg if {
+	some entry in uses_entries
+	startswith(entry.path, sprintf("%s/", [composite_action_root]))
+	not startswith(entry.uses, "./")
+	directory := dependabot_directory(entry.path)
+	not dependabot_covers(directory)
+	msg := sprintf("%s must list a github-actions directory covering %s: %s is otherwise invisible to Dependabot", [dependabot_config_path, directory, entry.uses])
 }
 
 deny contains msg if {

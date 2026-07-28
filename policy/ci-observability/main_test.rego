@@ -1239,3 +1239,92 @@ test_lighthouse_rules_tolerate_an_exact_upload_artifact_pin if {
 		}
 	}
 }
+
+composite_pin_fixture(dependabot_contents) := {"documents": [
+	{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{"uses": codecov_action}]}},
+	},
+	{"path": dependabot_config_path, "contents": dependabot_contents},
+]}
+
+uncovered_composite_message := sprintf(
+	"%s must list a github-actions directory covering /%s/upload-codecov: %s is otherwise invisible to Dependabot",
+	[dependabot_config_path, composite_action_root, codecov_action],
+)
+
+# #784/#785 moved four third-party pins into composites; `directory: /` searches
+# only `.github/workflows` and a root `action.yml`, so all four left coverage.
+test_composite_pin_outside_dependabot_coverage_is_rejected if {
+	fixture := composite_pin_fixture({"updates": [{
+		"package-ecosystem": "github-actions",
+		"directory": "/",
+	}]})
+	violations := deny with input as fixture
+	uncovered_composite_message in violations
+}
+
+test_missing_dependabot_config_leaves_composite_pins_uncovered if {
+	fixture := {"documents": [{
+		"path": codecov_authority_path,
+		"contents": {"runs": {"steps": [{"uses": codecov_action}]}},
+	}]}
+	violations := deny with input as fixture
+	uncovered_composite_message in violations
+}
+
+# The glob form dependabot-core#6704 confirms works must stay silent.
+test_composite_directory_glob_covers_the_pin if {
+	fixture := composite_pin_fixture({"updates": [{
+		"package-ecosystem": "github-actions",
+		"directories": ["/", "/.github/actions/*"],
+	}]})
+	violations := deny with input as fixture
+	not uncovered_composite_message in violations
+}
+
+# So must the upstream one-entry-per-composite workaround, which predates
+# `directories` and uses the singular key.
+test_per_composite_directory_entry_covers_the_pin if {
+	fixture := composite_pin_fixture({"updates": [
+		{"package-ecosystem": "github-actions", "directory": "/"},
+		{
+			"package-ecosystem": "github-actions",
+			"directory": "/.github/actions/upload-codecov",
+		},
+	]})
+	violations := deny with input as fixture
+	not uncovered_composite_message in violations
+}
+
+# A composite that only calls sibling actions has nothing for Dependabot to
+# bump, so an uncovered directory is not a finding.
+test_local_composite_reference_needs_no_dependabot_coverage if {
+	fixture := {"documents": [
+		{
+			"path": ".github/actions/packaging-build/action.yml",
+			"contents": {"runs": {"steps": [{"uses": codecov_wrapper}]}},
+		},
+		{
+			"path": dependabot_config_path,
+			"contents": {"updates": [{
+				"package-ecosystem": "github-actions",
+				"directory": "/",
+			}]},
+		},
+	]}
+	violations := deny with input as fixture
+	every violation in violations {
+		not contains(violation, "invisible to Dependabot")
+	}
+}
+
+# A non-actions ecosystem's directory list must not launder the coverage.
+test_other_ecosystem_directories_do_not_cover_composites if {
+	fixture := composite_pin_fixture({"updates": [
+		{"package-ecosystem": "github-actions", "directory": "/"},
+		{"package-ecosystem": "npm", "directories": ["/.github/actions/*"]},
+	]})
+	violations := deny with input as fixture
+	uncovered_composite_message in violations
+}

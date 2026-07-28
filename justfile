@@ -149,8 +149,9 @@ ci-observability:
     ((${#files[@]})) || { echo "error: no GitHub Actions YAML files found" >&2; exit 1; }
     [[ -s .github/actionlint.yaml ]] || { echo "error: .github/actionlint.yaml is missing or empty" >&2; exit 1; }
     [[ -s .github/zizmor.yml ]] || { echo "error: .github/zizmor.yml is missing or empty" >&2; exit 1; }
+    [[ -s .github/dependabot.yml ]] || { echo "error: .github/dependabot.yml is missing or empty" >&2; exit 1; }
     [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
-    files+=(.github/actionlint.yaml .github/zizmor.yml site/package.json)
+    files+=(.github/actionlint.yaml .github/zizmor.yml .github/dependabot.yml site/package.json)
     combined="$(mktemp)"
     policy_test_results="$(mktemp)"
     trap 'rm -f "$combined" "$policy_test_results"' EXIT

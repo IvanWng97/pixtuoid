@@ -20,7 +20,15 @@ updates:
       default-days: 7
 
   - package-ecosystem: github-actions
-    directory: /
+    # `directory: /` searches ONLY `.github/workflows` plus a root `action.yml`,
+    # so every third-party pin that #784/#785 moved into a composite left
+    # Dependabot's map. The second entry is the form dependabot-core#6704
+    # confirms works — `/.github/actions/*`, not `/.github/actions/*/action.yml`,
+    # which silently degrades back to workflows-only. `policy/ci-observability`
+    # denies a composite pin no declared directory covers.
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
     groups:
