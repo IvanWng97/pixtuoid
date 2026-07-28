@@ -1049,7 +1049,18 @@ mod tests {
         // drive the REAL thread body against a recording sink via the
         // channel, then drop the sender — the loop must exit cleanly
         let (tx, rx) = mpsc::sync_channel(8);
-        let recorder = Arc::new(std::sync::Mutex::new(sink::NullSink::default()));
+        // The recorder rides a `(Mutex, Condvar)` pair so the frame-1 barrier
+        // below can BLOCK on the sink's own progress instead of polling a
+        // wall clock: an in-test deadline is the one flakiness knob
+        // `.config/nextest.toml` is structurally powerless over (an `assert!`
+        // on `Instant::now()` can't be relaxed by `slow-timeout`), and a trip
+        // here also fails cargo-mutants' unmutated BASELINE, which then tests
+        // zero mutants. Synthesis is MEASURED at >10s debug on M-series, so
+        // this barrier is genuinely machine-speed-bound.
+        let recorder = Arc::new((
+            std::sync::Mutex::new(sink::NullSink::default()),
+            std::sync::Condvar::new(),
+        ));
         // `.1` flips when the device (the `Box<dyn AudioSink>` run_loop owns) is
         // DROPPED — i.e. when run_loop returns on Disconnect. In production that
         // Drop is the RodioSink closing the OS device; the recorder is a SEPARATE
@@ -1057,21 +1068,29 @@ mod tests {
         // this flag can. Guards the exact teardown quit relies on against a future
         // run_loop refactor that moved or `mem::forget`-ed the device out.
         struct Probe(
-            Arc<std::sync::Mutex<sink::NullSink>>,
+            Arc<(std::sync::Mutex<sink::NullSink>, std::sync::Condvar)>,
             Arc<std::sync::atomic::AtomicBool>,
         );
+        impl Probe {
+            /// Record, then wake anyone waiting on the sink's progress.
+            fn record(&self, f: impl FnOnce(&mut sink::NullSink)) {
+                let (lock, progress) = &*self.0;
+                f(&mut lock.lock().unwrap());
+                progress.notify_all();
+            }
+        }
         impl AudioSink for Probe {
             fn start_loop(&mut self, stem: LoopStem, s: Arc<Vec<f32>>) {
-                self.0.lock().unwrap().start_loop(stem, s);
+                self.record(|r| r.start_loop(stem, s));
             }
             fn swap_loop(&mut self, stem: LoopStem, s: Arc<Vec<f32>>) {
-                self.0.lock().unwrap().swap_loop(stem, s);
+                self.record(|r| r.swap_loop(stem, s));
             }
             fn set_loop_gain(&mut self, stem: LoopStem, g: f32) {
-                self.0.lock().unwrap().set_loop_gain(stem, g);
+                self.record(|r| r.set_loop_gain(stem, g));
             }
             fn play_once(&mut self, s: Arc<Vec<f32>>, g: f32) {
-                self.0.lock().unwrap().play_once(s, g);
+                self.record(|r| r.play_once(s, g));
             }
         }
         impl Drop for Probe {
@@ -1094,16 +1113,17 @@ mod tests {
             track: Default::default(),
         })
         .unwrap();
-        // wait until the loop has processed frame 1 (the bank build delays
-        // it by seconds) so the mute below deterministically lands BETWEEN
-        // the frames, not before both
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-        while recorder.lock().unwrap().one_shots < 2 {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "frame 1 was never processed"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(5));
+        // Wait until the loop has processed frame 1 (the bank build delays it
+        // by seconds) so the mute below deterministically lands BETWEEN the
+        // frames, not before both. UNBOUNDED on purpose — the only way this
+        // never wakes is run_loop failing to play frame 1's one-shots at all,
+        // which nextest's `terminate-after` reports as this named test hanging.
+        {
+            let (lock, progress) = &*recorder;
+            let mut rec = lock.lock().unwrap();
+            while rec.one_shots < 2 {
+                rec = progress.wait(rec).unwrap();
+            }
         }
         // mute flips the ATOMIC (not a droppable channel message): the
         // second frame's events must play at gain 0 → uncounted (the
@@ -1125,7 +1145,7 @@ mod tests {
              re-strand audio on quit (the bug shutdown()'s join exists to force)"
         );
 
-        let rec = recorder.lock().unwrap();
+        let rec = recorder.0.lock().unwrap();
         for stem in LoopStem::ALL {
             assert!(
                 rec.loops_started.contains(&stem),
