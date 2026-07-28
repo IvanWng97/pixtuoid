@@ -162,8 +162,9 @@ ci-observability:
     # (an unused argument shipped here undetected); the coverage threshold is a
     # RATCHET on #789 — an uncovered rule head means "the body was never true",
     # i.e. no test makes that rule fire, which is how two vacuous rules reached
-    # main. Raise the number as rules gain tests; never lower it. Every one of
-    # the 103 deny heads now fires in a test, so the remainder is helper lines.
+    # main. Raise the number as rules gain tests; never lower it. Every deny head
+    # now fires in a test, so the uncovered remainder is helper lines — a COUNT
+    # here would rot on the next rule, so don't reintroduce one.
     opa check --strict policy/ci-observability
     opa test --coverage --threshold 97 policy/ci-observability >/dev/null
     if ! conftest verify --policy policy/ci-observability --output json >"$policy_test_results"; then
