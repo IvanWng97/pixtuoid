@@ -207,7 +207,12 @@ The two automatic Claude reviewers are thin trigger policies over
 `claude-readonly-review.yml`: the model job checks out only the trusted default
 branch, receives the exact PR diff as inert data, has read-only GitHub/tools,
 and emits schema-bound JSON; a separate no-checkout publisher revalidates the PR
-head before writing the review comment. Anthropic WIF is preferred when its
+head before writing the review comment. The human-triggered `@claude` workflow
+(`claude.yml`, the only `contents: write` Claude job) checks out without a ref,
+so its two `pull_request_review*` arms — the events whose `GITHUB_REF` is the PR
+merge ref — additionally require the head to live in this repository; the
+`issues`/`issue_comment` arms get the default branch and carry no such guard.
+Anthropic WIF is preferred when its
 repository variables are configured, with the existing OAuth secret as a
 compatibility fallback. Codecov uploads likewise use job-scoped GitHub OIDC
 (fork PRs remain Codecov's tokenless path), never a repository upload token.

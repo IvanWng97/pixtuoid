@@ -23,11 +23,17 @@ jobs:
     # this is the only contents:write job — fail CLOSED at the yaml layer too,
     # independent of the floating action tag. Each of the four event shapes needs
     # its OWN author_association field, or the owner's own trigger gets blocked.
+    # The two pull_request_review* arms need a SECOND guard: those events set
+    # GITHUB_REF to refs/pull/<n>/merge, so the ref-less checkout below lands
+    # fork-authored files — including a repo-root CLAUDE.md the agent auto-loads
+    # as instructions — in the workspace of the one job holding contents:write
+    # and the OAuth token. The issues/issue_comment arms check out the default
+    # branch and carry no pull_request object, so the guard is not theirs.
     if: >
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
+      (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.review.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:

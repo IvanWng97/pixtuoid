@@ -35,7 +35,18 @@ claude_manual_commands := {
 	claude_security_workflow_path: "/security-review",
 }
 
-claude_automatic_condition := `(github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch)`
+claude_tag_workflow_path := ".github/workflows/claude.yml"
+claude_same_repo_head_condition := "github.event.pull_request.head.repo.full_name == github.repository"
+
+# The events whose GITHUB_REF is refs/pull/<n>/merge, so a ref-less checkout
+# stages fork-authored files; issues/issue_comment get the default branch.
+claude_pull_request_event_names := {"pull_request_review", "pull_request_review_comment"}
+
+claude_automatic_condition := sprintf(
+	`(github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && %s && github.event.pull_request.base.ref == github.event.repository.default_branch)`,
+	[claude_same_repo_head_condition],
+)
+
 claude_trusted_association_condition := `contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)`
 pr_resolution_step_name := "Resolve pull request"
 claude_model_step_name := "Run read-only Claude review"
@@ -306,6 +317,8 @@ claude_trigger_workflow_paths := {
 	claude_security_workflow_path,
 }
 
+claude_tag_job := object.get(documents, [claude_tag_workflow_path, "jobs", "claude"], {})
+
 claude_reusable := object.get(documents, claude_reusable_workflow_path, {})
 claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
 claude_analyze_job := object.get(claude_reusable_jobs, "analyze", {})
@@ -570,6 +583,18 @@ deny contains msg if {
 	count(claude_caller_jobs(path)) == 1
 	not claude_caller_condition_is_trusted(path)
 	msg := sprintf("%s must preserve the trusted automatic and manual review guards", [path])
+}
+
+# claude.yml is the only contents:write Claude job and it checks out without a
+# ref, so on these events an unguarded arm stages fork-authored files — a
+# repo-root CLAUDE.md among them — as the agent's own instructions. Keyed off
+# the arms that EXIST: an absent arm cannot be triggered, so it is not exposure.
+deny contains msg if {
+	some event in claude_pull_request_event_names
+	some arm in split(normalized_claude_condition(object.get(claude_tag_job, "if", "")), " || ")
+	contains(arm, sprintf("github.event_name == '%s'", [event]))
+	not contains(arm, claude_same_repo_head_condition)
+	msg := sprintf("%s %s arm must require the pull request head to live in this repository", [claude_tag_workflow_path, event])
 }
 
 deny contains msg if {

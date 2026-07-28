@@ -1057,6 +1057,35 @@ test_codeql_health_gate_before_upload_is_accepted if {
 	not sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
 }
 
+claude_tag_head_guard_message(event) := sprintf("%s %s arm must require the pull request head to live in this repository", [claude_tag_workflow_path, event])
+
+claude_tag_fixture(review_arm_suffix) := {"documents": [{
+	"path": claude_tag_workflow_path,
+	"contents": {"jobs": {"claude": {"if": sprintf(
+		"(github.event_name == 'issues' && trusted) || (github.event_name == 'issue_comment' && trusted) || (github.event_name == 'pull_request_review'%s && trusted) || (github.event_name == 'pull_request_review_comment'%s && trusted)",
+		[review_arm_suffix, review_arm_suffix],
+	)}}},
+}]}
+
+test_claude_tag_pull_request_arms_without_the_head_guard_are_denied if {
+	violations := deny with input as claude_tag_fixture("")
+	every event in claude_pull_request_event_names {
+		claude_tag_head_guard_message(event) in violations
+	}
+}
+
+# The issues/issue_comment arms carry no pull_request object, so demanding the
+# guard of them would deny a workflow that is not exposed in the first place.
+test_claude_tag_guarded_pull_request_arms_are_accepted if {
+	violations := deny with input as claude_tag_fixture(sprintf(" && %s", [claude_same_repo_head_condition]))
+	every event in claude_pull_request_event_names {
+		not claude_tag_head_guard_message(event) in violations
+	}
+	every violation in violations {
+		not contains(violation, "arm must require the pull request head")
+	}
+}
+
 test_codeql_init_hardcoding_a_language_is_denied if {
 	fixture := {"documents": [{
 		"path": codeql_workflow_path,
