@@ -21,6 +21,19 @@ use super::{SessionEndChecker, SourceDecoders, WatchCtx};
 /// const instead of a drifting second copy of the literal.
 pub(super) const MAX_PENDING_BYTES: u64 = 1 << 20;
 
+/// The path form EVERY id derivation runs on: the same `normalize_path_key`
+/// fold the per-line decoders receive (`transcript_path_str` below), so the
+/// first-sight / session-end / park lanes and the decoder lane mint ONE id
+/// per file on Windows. CC/Codex are invariant to the fold (lowercase-hex
+/// ids — pinned by `cc_id_from_path_is_stable_across_path_separators` and
+/// its codex twin) and antigravity's default deriver folds internally; omp's
+/// case-carrying stem chains (`…T…Z_<uuid>/Alpha`) are why the fold must
+/// live HERE at the seam, not inside each deriver — a pure deriver keeps the
+/// fixture-fed conformance goldens platform-invariant. Identity on Unix.
+pub(super) fn id_path(path: &Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(crate::id::normalize_path_key(&path.to_string_lossy()))
+}
+
 /// First-sight decision, shared by EVERY path that can be the first to see a
 /// file (the initial seed, the 250ms rescan, the 60s poll, a notify event):
 /// seed the cursor at EOF — suppressing SessionStart — when the session is
@@ -39,19 +52,6 @@ pub(super) const MAX_PENDING_BYTES: u64 = 1 << 20;
 /// vouch fires for any bun tool merely READING an old transcript). The
 /// oversized arm below already makes exactly this call with its unconditional
 /// `ended_in_skip`.
-/// The path form EVERY id derivation runs on: the same `normalize_path_key`
-/// fold the per-line decoders receive (`transcript_path_str` below), so the
-/// first-sight / session-end / park lanes and the decoder lane mint ONE id
-/// per file on Windows. CC/Codex are invariant to the fold (lowercase-hex
-/// ids — pinned by `cc_id_from_path_is_stable_across_path_separators` and
-/// its codex twin) and antigravity's default deriver folds internally; omp's
-/// case-carrying stem chains (`…T…Z_<uuid>/Alpha`) are why the fold must
-/// live HERE at the seam, not inside each deriver — a pure deriver keeps the
-/// fixture-fed conformance goldens platform-invariant. Identity on Unix.
-pub(super) fn id_path(path: &Path) -> std::path::PathBuf {
-    std::path::PathBuf::from(crate::id::normalize_path_key(&path.to_string_lossy()))
-}
-
 async fn should_seed_at_eof(
     meta: &std::fs::Metadata,
     window: Duration,
@@ -236,13 +236,13 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         // `SessionEnd`; content never counts). Without a tail-scan here the
         // terminator is lost and the slot reaps only via the slow stale-sweep.
         // Checked UNCONDITIONALLY (one bounded 8 KB tail read on a branch
-        // already doing head I/O): a KNOWN file's span can end mid-skip, and a
-        // !known file lands here too — the liveness probe bypasses the
-        // first-sight gate (should_seed_at_eof) INCLUDING its ended tail-scan,
-        // so a probe-admitted ENDED transcript must be caught here or the
-        // #204 registration below would mint a ghost for a session that is
-        // over. (Codex/Antigravity check_ended no-op.) Scan reads the file
-        // tail and is independent of the cursor, so compute it before seeding.
+        // already doing head I/O) because a KNOWN file's span can end mid-skip.
+        // A !known file can no longer arrive here ENDED: the first-sight gate's
+        // terminator half is unconditional (see `should_seed_at_eof` — a
+        // liveness vouch exempts RECENCY only), so it parks above and never
+        // reaches the #204 registration. (Codex/Antigravity check_ended no-op.)
+        // Scan reads the file tail and is independent of the cursor, so compute
+        // it before seeding.
         let ended_in_skip = check_session_ended(path, check_ended).await;
         // Seed the cursor to EOF FIRST — before the awaited head-read +
         // registration below — so a concurrent walk_jsonl on this path (250ms
