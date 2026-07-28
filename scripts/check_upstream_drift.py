@@ -723,11 +723,26 @@ def fetch_anchored(
     would have run is SKIPPED and reported as probe health instead of drift —
     the #793 class, made unrepresentable rather than merely fixed once.
 
-    KeyErrors when a caller sweeps a URL with no declared anchor, on purpose:
-    a new unanchored fetch site must fail in development, not ship a check that
-    reports phantom renames the first time upstream reorganizes a file.
+    An undeclared URL is reported, never swept. It cannot raise: `run_checks` is
+    wrapped in `except Exception` that routes bugs to the TRANSIENT bucket
+    (exit 2, warn-only) to avoid filing junk issues — so a bare `KeyError` here
+    would degrade "someone added an unproven sweep" into a green-ish warning,
+    which is the fail-open shape this whole change exists to remove. The
+    selftest's `test_every_swept_url_declares_an_anchor` is the development-time
+    gate; this is the runtime backstop, and it is deliberately loud.
     """
-    anchor = ANCHORS[url]
+    anchor = ANCHORS.get(url)
+    if anchor is None:
+        blind.append(
+            probe_failed(
+                f"{label}: no ANCHORS entry declares what proves this document's identity",
+                url,
+                "It was NOT swept — an unproven document cannot distinguish an "
+                "upstream rename from a stale pin. Add its anchor to ANCHORS "
+                "(and a sample to the selftest's ANCHOR_SAMPLES).",
+            )
+        )
+        return None
     text = try_fetch(url, label, blind, errors)
     if text is None:
         return None

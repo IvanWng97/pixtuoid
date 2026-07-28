@@ -150,7 +150,7 @@ const KNOWN_NAMESPACES: &[&str] = &[
 
 /// The copilot event NAMESPACE — the family prefix before the first `.`
 /// (`tool.execution_start` → `tool`), or the whole string when there is no dot
-/// (`abort`). The flood-safe breadcrumb keys on THIS (25 low-cardinality
+/// (`abort`). The flood-safe breadcrumb keys on THIS (26 low-cardinality
 /// families), not the full `type` (100+ high-cardinality events).
 fn copilot_namespace(kind: &str) -> &str {
     kind.split_once('.').map_or(kind, |(prefix, _)| prefix)

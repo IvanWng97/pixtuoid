@@ -633,6 +633,26 @@ def test_every_swept_url_declares_an_anchor() -> None:
     against the sweep site being added and never exercised offline — the same
     N-1-of-N mechanical guard as the shared-parser test above.
     """
+    # An undeclared URL must be REPORTED, never raise. `run_checks` is wrapped in
+    # `except Exception` that routes bugs to the TRANSIENT bucket (exit 2,
+    # warn-only), so a bare KeyError would turn "someone shipped an unproven
+    # sweep" into a green-ish warning — the fail-open shape (#454) this change
+    # exists to remove.
+    real = d.fetch
+    try:
+        d.fetch = lambda _u: "irrelevant body"
+        blind: list[str] = []
+        errors: list[str] = []
+        out = d.fetch_anchored("https://example.invalid/undeclared", "New", blind, errors)
+        check(out is None, "an undeclared URL is not swept")
+        check(len(blind) == 1 and not errors, f"undeclared -> blind, not transient: {blind}")
+        check(
+            "ANCHORS" in (blind[0] if blind else ""),
+            f"the line names the fix (add an ANCHORS entry): {blind!r}",
+        )
+    finally:
+        d.fetch = real
+
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
     swept = set(re.findall(r"fetch_anchored\(\s*([A-Z_]+(?:\[\d\])?)\s*,", src))
     declared = {
