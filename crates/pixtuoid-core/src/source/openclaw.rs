@@ -119,6 +119,11 @@ fn gateway_instance(obj: &serde_json::Map<String, Value>, event: &str) -> Result
         .and_then(|n| u16::try_from(n).ok())
         .and_then(NonZeroU16::new)
         .ok_or_else(|| {
+            // The decode error is logged by the hook loop at the `warn` floor,
+            // i.e. RAW stderr in every non-TUI mode. `serde_json`'s Display
+            // escapes Cc but NOT the Cf bidi overrides (nor DEL), so this
+            // hostile-sender value needs the same treatment as the `bail!`s.
+            let raw = crate::source::decoder::display_safe(&raw.to_string());
             anyhow!("openclaw {GATEWAY_PORT_FIELD} must be a port in 1..=65535, got {raw}")
         })?;
     instance_id(port.to_string())
@@ -563,6 +568,24 @@ mod tests {
                 "gatewayPort {bad} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn a_rejected_gateway_port_is_display_safe_in_the_error() {
+        // The hook loop logs this Err at the `warn` floor = RAW stderr in every
+        // non-TUI mode. `serde_json`'s Display escapes Cc but NOT DEL or the Cf
+        // bidi overrides (CVE-2021-42574), so the value needs the same
+        // `display_safe` the unsupported-event `bail!`s already take.
+        let bad = json!("18\u{202e}78\u{7f}9");
+        let v = json!({"type": "gateway_start", "gatewayPort": bad, "_pid": 5});
+        let msg = decode_openclaw_hook_payload(&v)
+            .expect_err("an unusable port is rejected")
+            .to_string();
+        assert!(
+            !msg.contains(['\u{202e}', '\u{7f}']),
+            "a hostile gatewayPort reached the terminal sink: {msg:?}"
+        );
+        assert!(msg.contains("must be a port in 1..=65535"), "got: {msg}");
     }
 
     #[test]

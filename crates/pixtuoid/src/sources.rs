@@ -275,9 +275,12 @@ fn connect_target(
                     // The write path just succeeded, so this is rare — but a
                     // silently-failed restore leaves flag=true with no hooks
                     // (the shown-but-broken class), so it must leave a trace.
+                    // The error chain can carry a `toml_edit` parse failure, i.e.
+                    // raw config content, and `connect` writes tracing to RAW
+                    // stderr — strip like every other terminal egress.
                     tracing::warn!(
                         source = sid,
-                        error = %format!("{re:#}"),
+                        error = %crate::strip_control_chars(&format!("{re:#}")),
                         "connect rollback failed to restore the prior [sources] flag"
                     );
                 }

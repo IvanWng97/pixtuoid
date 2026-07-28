@@ -713,16 +713,22 @@ pub(crate) fn focus_section(
 /// `✓ no decode drift` (and `sources --json` return `health: null`) off an input
 /// it never read. One authority so both readers answer identically — `pub`
 /// because `sources_cli` (bin crate) is the second reader.
+///
+/// The warning is `sanitize`d where it is MINTED, not per presenter: the path it
+/// interpolates comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`, and the two readers
+/// print it to different terminals (`doctor`'s stdout report, `sources_cli`'s
+/// `tracing` warn to raw stderr) — sanitizing per reader is exactly how the
+/// escape reached one of them.
 pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     match std::fs::read_to_string(path) {
         Ok(s) => (s, None),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
         Err(e) => (
             String::new(),
-            Some(format!(
+            Some(sanitize(&format!(
                 "log unreadable: {} ({e}) — the decode-drift counts below are not meaningful",
                 path.display()
-            )),
+            ))),
         ),
     }
 }
@@ -895,9 +901,7 @@ fn health_summary(n: usize, broken: &[String], any_drift: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::sync::{Arc, Mutex};
-    use tracing_subscriber::fmt::MakeWriter;
+    use crate::test_capture::capture;
 
     #[test]
     fn health_summary_one_broken_uses_the_singular_verb() {
@@ -1034,6 +1038,25 @@ mod tests {
     }
 
     #[test]
+    fn the_unreadable_log_warning_is_stripped_where_it_is_minted() {
+        // The path comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`, and the warning has
+        // TWO presenters with different sinks: `doctor`'s stdout report and
+        // `sources_cli`'s `tracing::warn!` to raw stderr. Sanitizing per presenter
+        // is how one of them shipped raw, so the strip lives at the mint point —
+        // asserted on `read_log`'s OWN return value, not on either presenter.
+        let dir = tempfile::tempdir().unwrap();
+        let hostile = dir.path().join("l\u{1b}]0;PWNED\u{7}\u{202e}og");
+        std::fs::create_dir(&hostile).unwrap(); // a directory never reads as NotFound
+        let (_, warning) = read_log(&hostile);
+        let warning = warning.expect("an unreadable log must be reported");
+        assert!(
+            !warning.contains(['\u{1b}', '\u{7}', '\u{202e}']),
+            "the minted warning carries a live OSC / Trojan-Source override: {warning:?}"
+        );
+        assert!(warning.contains("log unreadable"), "got: {warning}");
+    }
+
+    #[test]
     fn version_probe_is_gated_on_evidence_the_user_runs_that_cli() {
         // Explicitly connected → probe, even before the CLI has written anything.
         assert!(may_probe_version(true, Some(false)));
@@ -1097,39 +1120,6 @@ mod tests {
             "doctor spawned `opencode --version` in a pristine HOME where opencode \
              is undetected — the probe must be gated on evidence the user runs it"
         );
-    }
-
-    #[derive(Clone, Default)]
-    struct Buf(Arc<Mutex<Vec<u8>>>);
-    impl Write for Buf {
-        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(b);
-            Ok(b.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    impl MakeWriter<'_> for Buf {
-        type Writer = Buf;
-        fn make_writer(&self) -> Buf {
-            self.clone()
-        }
-    }
-
-    // Capture through the SAME subscriber shape main.rs's file log uses
-    // (fmt + ansi off + default timestamp), so the scanner is validated against
-    // the REAL line format, not an assumed one.
-    fn capture(f: impl FnOnce()) -> String {
-        let buf = Buf::default();
-        let sub = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_max_level(tracing::Level::TRACE)
-            .with_writer(buf.clone())
-            .finish();
-        tracing::subscriber::with_default(sub, f);
-        let bytes = buf.0.lock().unwrap().clone();
-        String::from_utf8(bytes).unwrap()
     }
 
     #[test]
