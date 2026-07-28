@@ -406,7 +406,6 @@ pub(crate) fn mascot_position(
 ) -> Option<(Point, &'static str, usize)> {
     let elevator = mascot_elevator(layout)?;
     let home = mascot_home(layout)?;
-    // Anchor a resolved point: the sprite rect must land inside the buffer.
     let anchor = |pos: Point, anim: &'static str, frame_idx: usize| {
         (
             clamp_sprite_inside(pos, sprite_extent(pack, anim), layout),

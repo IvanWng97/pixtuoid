@@ -813,15 +813,15 @@ fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
 // pick_aimless_dest fallback walkability (#24)
 // ---------------------------------------------------------------------------
 
+/// The corridor midline hosts furniture footprints (vending / printer / water
+/// cooler / trash), so the post-probe fallback point can be blocked. Forcing the
+/// fallback needs a mask with one small open pocket at the corridor's east end,
+/// so the seeds whose weighted zone ISN'T the corridor spend all 32 probes in a
+/// fully blocked zone. The pocket is sized past the coarse router's
+/// `cell_walkable` floor, because a lone walkable pixel is an island `find_path`
+/// would refuse and the agent would teleport to.
 #[test]
 fn aimless_fallback_scans_the_midline_for_a_walkable_cell() {
-    // The corridor midline hosts furniture footprints (vending / printer /
-    // water cooler / trash), so the post-probe fallback point can be blocked.
-    // Force the fallback (one small open pocket at the corridor's east end; the
-    // 80% of seeds whose weighted zone ISN'T the corridor have 32 probes into a
-    // fully blocked zone) and require a ROUTABLE result — the pocket is sized
-    // past the coarse router's `cell_walkable` floor, because a lone walkable
-    // pixel is an island `find_path` would refuse and the agent would teleport to.
     let mut l = layout();
     let c = l.corridor.unwrap_or(l.cubicle_aisle);
     let mid_y = c.y + c.height / 2;

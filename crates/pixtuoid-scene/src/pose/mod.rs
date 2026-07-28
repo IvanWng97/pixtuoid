@@ -122,9 +122,9 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// the chair row is covered by `mask.rs`'s `OBSTACLE_PAD_PX` routing pad. Either
 /// way it is blocked, so targeting it directly made A\* fall back to a straight
 /// `door→chair` line THROUGH the desk body (the "walk through the table" bug).
-/// Tuning that pad is therefore what would change this. `None` only in a degenerate layout
-/// where every allowed side is walled off — the caller then falls back to the
-/// old direct target. The chair is the SETTLE endpoint, appended after this.
+/// `None` only in a degenerate layout where every allowed side is walled off —
+/// the caller then falls back to the old direct target. The chair is the SETTLE
+/// endpoint, appended after this.
 ///
 /// Scans from the CHAIR, not the desk's top-left origin: the footprint is
 /// anchored top-left, so a scan from the corner is lopsided and can't clear the

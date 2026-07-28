@@ -509,11 +509,11 @@ mod tests {
     // each ship such a guard; this is the missing sibling.
     #[test]
     fn tool_glow_hues_are_distinct_for_every_theme() {
-        // Lower than `MIN_SOURCE_HUE_DIST` (60) on purpose: six glow roles share
-        // ONE palette's accent range, and the tightest legitimate pair across the
-        // bundled themes is catppuccin's edit-vs-read at 54. 30 still fails loudly
-        // on the near-collisions this caught — three themes had aliased `default`
-        // onto another tool's EXACT rgb (distance 0).
+        /// Lower than `MIN_SOURCE_HUE_DIST` (60) on purpose: six glow roles share
+        /// ONE palette's accent range, and the tightest legitimate pair across the
+        /// bundled themes is catppuccin's edit-vs-read at 54. It still fails loudly
+        /// on the near-collisions this caught — an aliased `default` sitting on
+        /// another tool's EXACT rgb (distance 0).
         const MIN_TOOL_GLOW_DIST: u32 = 30;
         for t in ALL_THEMES {
             // Destructured with NO `..`: a seventh glow role must join the guard

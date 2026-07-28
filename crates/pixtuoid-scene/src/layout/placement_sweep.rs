@@ -724,12 +724,11 @@ fn walkable_is_one_connected_region() {
 /// A one-sided bound against an INDEPENDENT authority, deliberately not
 /// `assert_eq!(dt.y, top_margin + DOOR_THRESHOLD_CLEARANCE_PX)` — restating the
 /// formula would pin nothing. Walkability is NOT the discriminator here and a
-/// routability sweep is blind to it: measured over these 264 layouts with the
-/// spawn moved 8 px north (`top_margin - 4`), `is_walkable(dt)` stayed true at
-/// 264/264 (the wall band's blocked rows END at `wall_band_h()`), every routing
-/// assertion still passed (both `find_path` and `ReachSet::from_mask` SNAP a
-/// displaced seed back into the component), and only this floor-line bound
-/// failed — at 264/264.
+/// routability sweep is blind to it: with the spawn moved north of the floor
+/// line, `is_walkable(dt)` stays true at every layout in this sweep (the wall
+/// band's blocked rows END at `wall_band_h()`) and every routing assertion still
+/// passes (both `find_path` and `ReachSet::from_mask` SNAP a displaced seed back
+/// into the component) — only this floor-line bound fails.
 fn assert_spawn_stands_on_open_floor(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     let Some(dt) = l.door_threshold else {
         panic!("{w}x{h} seed {seed}: layout has no door threshold");
@@ -806,9 +805,9 @@ fn every_wander_destination_is_routable_from_its_desk() {
 /// pixel granularity and TWO at router granularity. When that happened,
 /// `desk_approach_cell` returned its no-valid-approach sentinel and every leg
 /// for the desks on the severed side degraded to a straight `door→chair` line
-/// through the desk body and the pantry wall (measured: 286 of 13,770 narrow
-/// layouts, widths 32-39 × heights 116-148 and 192-220, production floors 4 and
-/// 6, up to 3 of 6 desks each).
+/// through the desk body and the pantry wall (measured on narrow tall layouts,
+/// widths 32-39, production floors 4 and 6 — the census is in the scene
+/// CLAUDE.md sharp edge).
 ///
 /// A free fn, not a closure, because THREE sweeps need it at different
 /// resolutions: the placement seed axis, the production floor seeds, and the
@@ -834,11 +833,11 @@ fn assert_home_desk_approaches_are_routable(w: u16, h: u16, seed: u64, l: &Scene
     }
 }
 
+/// Lives HERE and not in `pathfind::tests` on purpose: this is the suite that
+/// owns `SWEEP_SIZES`, and the 32-41 px band the failure lives in was swept for
+/// PLACEMENT while no routability test ever visited it.
 #[test]
 fn every_home_desk_approach_is_routable_from_the_door() {
-    // Lives HERE and not in `pathfind::tests` on purpose: this is the suite that
-    // owns `SWEEP_SIZES`, and the 32-41 px band the failure lives in was swept
-    // for PLACEMENT while no routability test ever visited it.
     sweep(assert_home_desk_approaches_are_routable);
     // The reported population (production floors 4 and 6) lives on the FLOOR
     // seeds, which `SWEEP_SEEDS` shares only seed 0 with.
