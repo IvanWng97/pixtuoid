@@ -44,33 +44,52 @@ export function inlineScriptHashes(html) {
   return hashes;
 }
 
+// The whole CSP element, not just its content attribute: it is RELOCATED as well
+// as rewritten. Astro renders the attributes in this fixed order (renderElement
+// in astro/dist/runtime/server/render/head.js).
+const CSP_META_RE = /<meta http-equiv="content-security-policy" content="([^"]*)"\s*\/?>/i;
+
+// Where the policy is re-anchored. A `<meta http-equiv>` CSP governs only the
+// content that FOLLOWS it, and Astro emits it at the head-injection point —
+// after whatever `<script>`/`<style>` the layout wrote above that point, which
+// therefore ran unpoliced. The charset declaration is preferred over the `<head>`
+// open tag so `<meta charset>` stays inside the first 1024 bytes the encoding
+// sniffer reads; the policy is ~1-3 KB of hashes and would push it out.
+const CHARSET_RE = /<meta[^>]*\scharset\s*=[^>]*>/i;
+const HEAD_OPEN_RE = /<head\b[^>]*>/i;
+
 /**
- * Rewrite the CSP <meta>: re-derive script-src's inline-script hashes from the
- * built HTML and strip ALL style-src hashes so the configured 'unsafe-inline'
- * stays honored (one present hash disables it for the whole directive).
+ * Rewrite the CSP <meta> and hoist it above every script and style it governs:
+ * re-derive script-src's inline-script hashes from the built HTML, strip ALL
+ * style-src hashes so the configured 'unsafe-inline' stays honored (one present
+ * hash disables it for the whole directive), then re-emit the element directly
+ * after the charset declaration.
  * @param {string} html
  * @returns {string | null} the rewritten html, or null if no CSP <meta> exists
+ * @throws if a CSP <meta> exists but the document has no charset/<head> anchor
  */
 export function rewriteCspMeta(html) {
+  const found = html.match(CSP_META_RE);
+  if (!found || found.index === undefined) return null;
   const hashes = inlineScriptHashes(html);
-  let rewrote = false;
-  const updated = html.replace(
-    /(<meta http-equiv="content-security-policy" content=")([^"]*)(")/i,
-    (_, pre, /** @type {string} */ content, post) => {
-      rewrote = true;
-      const out = content
-        .split(';')
-        .map((d) => {
-          const toks = d.trim().split(/\s+/).filter(Boolean);
-          if (toks[0] !== 'script-src' && toks[0] !== 'style-src') return d.trim();
-          const resources = toks.slice(1).filter((t) => !HASH.test(t));
-          const add = toks[0] === 'script-src' ? [...hashes] : [];
-          return [toks[0], ...resources, ...add].join(' ');
-        })
-        .filter(Boolean)
-        .join('; ');
-      return pre + out + post;
-    }
-  );
-  return rewrote ? updated : null;
+  const directives = found[1]
+    .split(';')
+    .map((d) => {
+      const toks = d.trim().split(/\s+/).filter(Boolean);
+      if (toks[0] !== 'script-src' && toks[0] !== 'style-src') return d.trim();
+      const resources = toks.slice(1).filter((t) => !HASH.test(t));
+      const add = toks[0] === 'script-src' ? [...hashes] : [];
+      return [toks[0], ...resources, ...add].join(' ');
+    })
+    .filter(Boolean)
+    .join('; ');
+
+  const stripped = html.slice(0, found.index) + html.slice(found.index + found[0].length);
+  const anchor = stripped.match(CHARSET_RE) ?? stripped.match(HEAD_OPEN_RE);
+  if (!anchor || anchor.index === undefined) {
+    throw new Error('csp-hashes: no charset/<head> anchor to hoist the CSP <meta> to');
+  }
+  const at = anchor.index + anchor[0].length;
+  const meta = `<meta http-equiv="content-security-policy" content="${directives}">`;
+  return stripped.slice(0, at) + meta + stripped.slice(at);
 }
