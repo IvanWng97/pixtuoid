@@ -1055,8 +1055,8 @@ mod tests {
         // `.config/nextest.toml` is structurally powerless over (an `assert!`
         // on `Instant::now()` can't be relaxed by `slow-timeout`), and a trip
         // here also fails cargo-mutants' unmutated BASELINE, which then tests
-        // zero mutants. Synthesis is MEASURED at >10s debug on M-series, so
-        // this barrier is genuinely machine-speed-bound.
+        // zero mutants. The wait is genuinely machine-speed-bound: the synth
+        // bank build dominates it.
         let recorder = Arc::new((
             std::sync::Mutex::new(sink::NullSink::default()),
             std::sync::Condvar::new(),
