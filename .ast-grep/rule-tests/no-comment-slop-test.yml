@@ -1,0 +1,28 @@
+id: no-comment-slop
+valid:
+  - |
+    //! a module doc run
+    //! is not a fn body
+    //! so it is fine
+    fn f() -> u8 { 1 }
+  - |
+    fn f() -> u8 {
+        // two lines is
+        // the allowed maximum
+        1
+    }
+  - |
+    fn f() -> u8 {
+        /// a doc comment run
+        /// is excluded by the regex
+        /// even inside a fn
+        1
+    }
+invalid:
+  - |
+    fn f() -> u8 {
+        // one
+        // two
+        // three
+        1
+    }

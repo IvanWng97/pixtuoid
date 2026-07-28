@@ -1,0 +1,51 @@
+id: no-comment-slop-py
+valid:
+  - |
+    # a module-level run
+    # is not in a fn body
+    # so it is fine
+    x = 1
+  - |
+    class C:
+        # a top-level class body
+        # is not a fn body
+        # so it is fine
+        x = 1
+  - |
+    def f():
+        # two lines is
+        # the allowed maximum
+        return 1
+  - |
+    def f():
+        """A docstring
+        spanning
+        several lines."""
+        return 1
+  - |
+    def f():
+        # why a
+        a = 1
+        # why b
+        b = 2
+        # why c
+        return a + b
+  - |
+    def f():
+        a = 1  # trailing
+        b = 2  # trailing
+        c = 3  # trailing
+        return a + b + c
+invalid:
+  - |
+    def f():
+        # one
+        # two
+        # three
+        return 1
+  - |
+    async def g():
+        # one
+        # two
+        # three
+        return 1
