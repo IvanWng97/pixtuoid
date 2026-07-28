@@ -282,6 +282,7 @@ lint:
     run ci-obs  just ci-observability     & pids+=($!)
     run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
+    run drift   just drift-selftest       & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 

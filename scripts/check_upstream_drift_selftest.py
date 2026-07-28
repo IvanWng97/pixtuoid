@@ -25,6 +25,15 @@ the weekly job either alarms on junk or watches nothing). This pins:
      probe-health line (self-reporting, which is why that is acceptable).
   6. The report keeps the two dispositions under separate headings, so a
      "we could not verify" line can never be read as "upstream changed".
+  7. `Report` is the ONLY way to file a finding — no module code appends to a
+     bucket directly, so probe health cannot be hand-worded into a claim about
+     upstream. Plus the exit-2 (transient) path, which is unreachable through
+     `main()` without faking the network.
+  8. One stale `read_*` parser darkens ITS OWN checks and no others, via three
+     guards: the per-reader isolation, the READERS-to-`OurNames` bridge (a
+     mispaired row feeds one source's names to another's sweep), and the ban on
+     calling a `read_*` inline in `run_checks` (a raise there lands in the
+     TRANSIENT bucket — a warning on a green run — instead of probe health).
 
 Run: `python3 scripts/check_upstream_drift_selftest.py` (exit 0 = pass).
 No pytest dependency on purpose — the repo has no Python test harness.
@@ -32,16 +41,22 @@ No pytest dependency on purpose — the repo has no Python test harness.
 
 from __future__ import annotations
 
+import ast
+import dataclasses
 import io
 import pathlib
 import re
 import sys
+import typing
 import urllib.error
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
+
+# The suffixes a READERS reader may add to its OurNames field name.
+READER_NAME_SUFFIXES = {"", "_events", "_types", "_entry_types"}
 
 
 def check(cond: bool, msg: str) -> None:
@@ -62,31 +77,39 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
         # wrong place.
         for code in (404, 410, 451):
             d.fetch = lambda _u, c=code: (_ for _ in ()).throw(_http_error(c))
-            bl: list[str] = []
-            er: list[str] = []
-            out = d.try_fetch("https://x/y", "T", bl, er)
+            r = d.Report()
+            out = d.try_fetch("https://x/y", "T", r)
             check(out is None, f"{code}: returns None")
-            check(len(bl) == 1 and not er, f"{code}: -> blind (got blind={bl} errors={er})")
-            check(str(code) in (bl[0] if bl else ""), f"{code}: message names the status")
+            check(
+                len(r.blind) == 1 and not r.errors,
+                f"{code}: -> blind (got blind={r.blind} errors={r.errors})",
+            )
+            check(str(code) in (r.blind[0] if r.blind else ""), f"{code}: message names the status")
 
         # Transient HTTP (server/throttle) → errors, NOT probe health.
         for code in (500, 502, 503, 429, 403):
             d.fetch = lambda _u, c=code: (_ for _ in ()).throw(_http_error(c))
-            bl, er = [], []
-            d.try_fetch("https://x/y", "T", bl, er)
-            check(not bl and len(er) == 1, f"{code}: -> transient (got blind={bl} errors={er})")
+            r = d.Report()
+            d.try_fetch("https://x/y", "T", r)
+            check(
+                not r.blind and len(r.errors) == 1,
+                f"{code}: -> transient (got blind={r.blind} errors={r.errors})",
+            )
 
         # Network-layer failure → transient.
         d.fetch = lambda _u: (_ for _ in ()).throw(urllib.error.URLError("conn refused"))
-        bl, er = [], []
-        d.try_fetch("https://x/y", "T", bl, er)
-        check(not bl and len(er) == 1, f"URLError -> transient (got blind={bl} errors={er})")
+        r = d.Report()
+        d.try_fetch("https://x/y", "T", r)
+        check(
+            not r.blind and len(r.errors) == 1,
+            f"URLError -> transient (got blind={r.blind} errors={r.errors})",
+        )
 
         # Success → returns the body, no buckets touched.
         d.fetch = lambda _u: "BODY"
-        bl, er = [], []
-        out = d.try_fetch("https://x/y", "T", bl, er)
-        check(out == "BODY" and not bl and not er, "success returns body, no buckets")
+        r = d.Report()
+        out = d.try_fetch("https://x/y", "T", r)
+        check(out == "BODY" and not r.blind and not r.errors, "success returns body, no buckets")
     finally:
         d.fetch = real
 
@@ -115,6 +138,7 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
         (d.read_cursor_events, r"^[a-zA-Z]\w+$", 2),
         (d.read_hermes_events, r"^[a-z][a-z_]*$", 2),
         (d.read_kimi_events, r"^[A-Za-z]\w+$", 2),
+        (d.read_grok_events, r"^[A-Z]\w+$", 2),
     ]
     for reader, shape, floor in cases:
         name = reader.__name__
@@ -127,6 +151,11 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     # set, so it rides its own check: both halves non-empty + snake_case, and the
     # known task_started / function_call present (a decoder refactor that drops
     # the ("event_msg"|"response_item", …) arms would empty these → RuntimeError).
+    # N-of-N: a row with no floor case can return `set()` and pass vacuously.
+    floored = {r.__name__ for r, _, _ in cases} | {"read_codex_rollout_types"}
+    unfloored = sorted({r.__name__ for _, r, _ in d.READERS} - floored)
+    check(not unfloored, f"a READERS reader has no non-empty floor case: {unfloored}")
+
     ev, ri = d.read_codex_rollout_types()
     check(len(ev) >= 2 and len(ri) >= 2, f"read_codex_rollout_types non-empty: ev={ev!r} ri={ri!r}")
     check("task_started" in ev, f"codex event_msg has task_started: {ev!r}")
@@ -534,32 +563,375 @@ def test_anchor_gate_fires_in_both_directions() -> None:
             # (a) anchor ABSENT (a refactor moved the declaration away) -> the
             #     document is not swept at all, and the finding is probe health.
             d.fetch = lambda u, _s=served: (_s.append(u), _UNANCHORED)[1]
-            blind: list[str] = []
-            errors: list[str] = []
-            out = d.fetch_anchored(url, "T", blind, errors)
+            r = d.Report()
+            out = d.fetch_anchored(url, "T", r)
             check(served == [url], f"{anchor.owns}: the stubbed fetch actually ran")
             check(out is None, f"{anchor.owns}: no anchor -> the sweep is skipped")
-            check(len(blind) == 1 and not errors, f"{anchor.owns}: -> blind, got {blind}")
+            check(len(r.blind) == 1 and not r.errors, f"{anchor.owns}: -> blind, got {r.blind}")
             # Indexing is guarded, not assumed: a regressed gate leaves `blind`
             # empty and this test must REPORT that, not abort the suite before
             # the #793 regression test below ever runs.
             check(
-                "NOT evidence that upstream changed" in (blind[0] if blind else ""),
-                f"{anchor.owns}: the line disclaims upstream causation, got {blind!r}",
+                "NOT evidence that upstream changed" in (r.blind[0] if r.blind else ""),
+                f"{anchor.owns}: the line disclaims upstream causation, got {r.blind!r}",
             )
 
             # (b) anchor PRESENT -> the body comes back so the caller's presence
             #     sweep can run and report a REAL rename.
             sample = ANCHOR_SAMPLES.get(url, "")
             d.fetch = lambda _u, _s=sample: _s
-            blind, errors = [], []
-            out = d.fetch_anchored(url, "T", blind, errors)
+            r = d.Report()
+            out = d.fetch_anchored(url, "T", r)
             check(
-                out == sample and not blind and not errors,
-                f"{anchor.owns}: anchor present -> body returned, got blind={blind}",
+                out == sample and not r.blind and not r.errors,
+                f"{anchor.owns}: anchor present -> body returned, got blind={r.blind}",
             )
     finally:
         d.fetch = real
+
+
+def test_report_is_the_only_way_to_file_a_finding() -> None:
+    """`Report` owns the buckets, their wording, their order, and the exit code.
+
+    Pins the exit-2 path (unreachable through `main()` without faking a network)
+    and the rule that no module code may `.append` to a bucket directly.
+    """
+    empty = d.Report()
+    check(empty.exit_code() == 0, f"an empty report exits 0, got {empty.exit_code()}")
+    check("✅ No drift" in empty.render(), f"an empty report says so:\n{empty.render()}")
+
+    # Each adder files under its own name.
+    r = d.Report()
+    r.add_breaking("B-LINE")
+    r.add_review("R-LINE")
+    r.add_error("E-LINE")
+    r.add_blind("WHAT", "WHERE", "CONSEQUENCE")
+    check(r.breaking == ["B-LINE"], f"add_breaking -> breaking, got {r.breaking}")
+    check(r.review == ["R-LINE"], f"add_review -> review, got {r.review}")
+    check(r.errors == ["E-LINE"], f"add_error -> errors, got {r.errors}")
+    check(len(r.blind) == 1, f"add_blind -> blind, got {r.blind}")
+
+    # `add_blind` words the line; the caller cannot assert a cause it never read.
+    line = r.blind[0] if r.blind else ""
+    check(
+        all(p in line for p in ("WHAT", "WHERE", "CONSEQUENCE")),
+        f"add_blind keeps the caller's three facts: {line!r}",
+    )
+    check(
+        "NOT evidence that upstream changed" in line and "do NOT change a decoder" in line,
+        f"the default wording disclaims upstream causation: {line!r}",
+    )
+    ours = d.Report()
+    ours.add_blind("WHAT", "WHERE", "CONSEQUENCE", our_source=True)
+    our_line = ours.blind[0] if ours.blind else ""
+    check(
+        "nothing upstream was consulted" in our_line.lower()
+        and "Fix the script" in our_line,
+        f"our_source=True blames the script, not upstream: {our_line!r}",
+    )
+
+    # Render order is the disposition order, most-actionable first.
+    out = r.render()
+    offsets = [out.find(x) for x in ("B-LINE", "R-LINE", "WHAT", "E-LINE")]
+    check(
+        all(x >= 0 for x in offsets) and offsets == sorted(offsets),
+        f"every bucket renders, in disposition order (offsets {offsets}):\n{out}",
+    )
+
+    # The exit code is a function of all four buckets, so it lives with them.
+    # errors-ONLY is exit 2 (transient, do not alarm) — the one case `main()`
+    # could not reach without faking the network.
+    for adder, want in (("add_breaking", 1), ("add_review", 1), ("add_error", 2)):
+        one = d.Report()
+        getattr(one, adder)("LINE")
+        check(
+            one.exit_code() == want,
+            f"a {adder}-only report exits {want}, got {one.exit_code()}",
+        )
+    blind_only = d.Report()
+    blind_only.add_blind("w", "where", "c")
+    check(blind_only.exit_code() == 1, f"a blind-only report exits 1, got {blind_only.exit_code()}")
+    both = d.Report()
+    both.add_error("E")
+    both.add_blind("w", "where", "c")
+    check(both.exit_code() == 1, f"actionable outranks transient, got {both.exit_code()}")
+
+    # The structural half: a bucket is appended to ONLY from inside `Report`.
+    # An AST walk, not a regex: a regex also fires on prose QUOTING the spelling.
+    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
+    tree = ast.parse(src)
+    report_cls = next(
+        (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Report"), None
+    )
+    check(report_cls is not None, "the module defines a top-level `class Report`")
+    inside = {id(n) for n in ast.walk(report_cls)} if report_cls else set()
+    buckets = {"breaking", "review", "blind", "errors"}
+    stray = []
+    for node in ast.walk(tree):
+        if id(node) in inside:
+            continue
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr != "append":
+            continue
+        target = node.func.value
+        # `blind.append(...)` — a bare bucket-named binding; and
+        # `report.blind.append(...)` / `self.blind.append(...)` — reaching past
+        # the adders into a Report's list.
+        name = (
+            target.id if isinstance(target, ast.Name)
+            else target.attr if isinstance(target, ast.Attribute)
+            else None
+        )
+        if name in buckets:
+            stray.append(f"{name}.append at check_upstream_drift.py:{node.lineno}")
+    check(
+        not stray,
+        f"a finding must be filed through `report.add_*`, never appended to a "
+        f"bucket — and no local list outside `Report` may borrow a bucket's name "
+        f"(call it `findings`): {stray}",
+    )
+
+
+def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
+    """A parser that goes stale must dark ITS source, not the rest of the file.
+
+    Injects row 1 — under the one shared `try` this replaced, that was the worst
+    case, because every other reader was assigned after it (#454, #793).
+    """
+    real_fetch, real_readers = d.fetch, d.READERS
+    # Every fetched document lands on the wrong content, so each source that IS
+    # checked contributes at least one probe-health line, and every source that
+    # is checked FETCHES. A source gone dark fetches nothing and says nothing.
+    fetched: set[str] = set()
+    d.fetch = lambda u: (fetched.add(u), "unrelated body")[1]
+
+    def run() -> tuple[set[str], str]:
+        fetched.clear()
+        buf, real_stdout = io.StringIO(), sys.stdout
+        sys.stdout = buf
+        try:
+            d.main()
+        finally:
+            sys.stdout = real_stdout
+        return set(fetched), buf.getvalue()
+
+    try:
+        base_urls, _ = run()
+        check(len(base_urls) > 20, f"the baseline exercises the file, got {len(base_urls)} URLs")
+
+        # Break the FIRST row: under one shared `try` that is the worst case,
+        # because every other reader was assigned after it. Inject into the ROW,
+        # never `d.read_codex_events` — see the WHY on the READERS declaration.
+        first_field, first_reader, first_what = d.READERS[0]
+        d.READERS = (
+            (first_field, _raiser(first_reader.__name__), first_what),
+            *d.READERS[1:],
+        )
+        broken_urls, out = run()
+
+        # The fault FIRED: the report names the reader, which only the new
+        # per-row probe-health line can produce.
+        check(
+            first_reader.__name__ in out,
+            f"the injected fault fired and named `{first_reader.__name__}`:\n{out}",
+        )
+        # …carrying `our_source=True`: dropping that kwarg is otherwise invisible.
+        own = [ln for ln in out.splitlines() if first_reader.__name__ in ln]
+        check(
+            len(own) == 1
+            and "Fix the script" in own[0]
+            and "Re-verify upstream by hand" not in own[0],
+            f"the stale OWN-source line blames the script, not upstream: {own}",
+        )
+        # Every LATER source is still checked. These four sit at the far end of
+        # the table: under one shared `try` a row-1 failure took the run from 25
+        # fetched documents to 4 and 28 finding lines to 5, with Cursor, Hermes,
+        # grok and Kimi gone entirely.
+        for name in ("CURSOR_HOOKS_URL", "HERMES_HOOK_URL", "GROK_HOOK_URL", "KIMI_HOOKS_URL"):
+            check(
+                getattr(d, name) in broken_urls,
+                f"a stale reader in row 1 must not dark {name} in row 10+ "
+                f"(fetched {len(broken_urls)} of {len(base_urls)} URLs):\n{out}",
+            )
+        # ...and it must NOT claim the whole run was blind, because it was not.
+        check(
+            "Nothing upstream was checked" not in out,
+            f"a single stale reader must not claim the whole run was blind:\n{out}",
+        )
+    finally:
+        d.fetch, d.READERS = real_fetch, real_readers
+
+
+def _raiser(name: str) -> typing.Callable[[], object]:
+    """A reader that always fails, keeping `__name__` so the report can name it."""
+
+    def broken() -> object:
+        raise RuntimeError("parser stale")
+
+    broken.__name__ = name
+    return broken
+
+
+def test_a_stale_flood_guard_skips_its_check_instead_of_flooding() -> None:
+    """A failed reader must SKIP its check, never run it against an empty set.
+
+    The flood guards are one-directional: they report every upstream name NOT in
+    our KNOWN_* set, so `up - set()` reports the whole upstream surface as new.
+    Reverting a consumer guard to `else` + `or set()` floods `review` from one
+    stale parser — with every producing-side gate still green, because they all
+    sit upstream of the comparison. This is the only gate reaching the consumer.
+
+    The upstream PARSER is stubbed, not just `fetch`: an unparseable body takes
+    the `is None` probe-health branch and never reaches the guard, which is how
+    the first version of this test passed against a reverted guard.
+    """
+    real_fetch, real_readers = d.fetch, d.READERS
+    parsers = ("upstream_omp_entry_types", "upstream_acp_session_update_tags")
+    real_parsers = {n: getattr(d, n) for n in parsers}
+    # Carries omp's ANCHORS pattern: without it `fetch_anchored` files probe
+    # health and the omp guard is never reached (acp rides plain `try_fetch`).
+    d.fetch = lambda _u: "unrelated body\nexport type SessionEntry = never;\n"
+    # Each returns a set the KNOWN_* comparison can actually run against.
+    d.upstream_omp_entry_types = lambda _t: {"phantom_entry_type"}
+    d.upstream_acp_session_update_tags = lambda _t: {"phantom_acp_tag"}
+    try:
+        # Assert on the INJECTED upstream token, not the KNOWN_* name — the
+        # probe-health line quotes KNOWN_* too, so matching that flags a clean run.
+        for field, reader_name, phantom_name in (
+            ("omp_known_types", "read_omp_known_types", "phantom_entry_type"),
+            ("acp_tags", "read_acp_tags", "phantom_acp_tag"),
+        ):
+            d.READERS = tuple(
+                (f, (_raiser(r.__name__) if f == field else r), w) for f, r, w in real_readers
+            )
+            buf, real_stdout = io.StringIO(), sys.stdout
+            sys.stdout = buf
+            try:
+                d.main()
+            finally:
+                sys.stdout = real_stdout
+            out = buf.getvalue()
+            phantom = [ln for ln in out.splitlines() if phantom_name in ln]
+            check(
+                not phantom,
+                f"a stale `{field}` must SKIP its guard, not compare against an "
+                f"empty set: {phantom[:2]}",
+            )
+            named = [ln for ln in out.splitlines() if reader_name in ln]
+            check(len(named) == 1, f"a stale `{field}` files ONE probe-health line: {named}")
+    finally:
+        d.fetch, d.READERS = real_fetch, real_readers
+        for n, fn in real_parsers.items():
+            setattr(d, n, fn)
+
+
+def test_every_reader_row_matches_a_field_on_our_names() -> None:
+    """The READERS table is stringly-keyed; nothing else pins it to `OurNames`.
+
+    A typo'd row leaves its field `None` — the source silently unchecked. A
+    MISPAIRED row is worse and survives the set comparison: it feeds one source's
+    names to another's sweep, which reports them all as renames (#793).
+    """
+    rows = {field for field, _, _ in _reader_rows()}
+    fields = {f.name for f in dataclasses.fields(d.OurNames)}
+    check(
+        rows == fields,
+        f"every READERS row must name an OurNames field and every field must be "
+        f"filled by a row — otherwise the source is silently unchecked with no "
+        f"probe-health line. Mismatched: {rows ^ fields}. Add the missing row or "
+        f"field, or drop the orphan.",
+    )
+    # None, not an empty container: a truthy-empty default sails past `is not None`.
+    fresh = d.OurNames()
+    non_none = sorted(f.name for f in dataclasses.fields(fresh) if getattr(fresh, f.name) is not None)
+    check(not non_none, f"OurNames fields must default to None, got set: {non_none}")
+    for field, reader_name, what in _reader_rows():
+        check(callable(getattr(d, reader_name, None)), f"{reader_name} is a real reader")
+        check(bool(what.strip()), f"{reader_name} declares what it reads")
+        # `field in reader_name` is too weak: every flood-guard field is a
+        # SUFFIX-EXTENSION of a source field, so the likeliest mispair —
+        # ("copilot", read_copilot_namespaces) — is the one a substring test
+        # cannot see. Require the reader's stem to START with the field and the
+        # remainder to be a known suffix.
+        stem = reader_name.removeprefix("read_")
+        suffix = stem[len(field):] if stem.startswith(field) else None
+        check(
+            suffix in READER_NAME_SUFFIXES,
+            f"READERS pairs field `{field}` with `{reader_name}`: the reader's "
+            f"name must be `read_{field}` plus one of {sorted(READER_NAME_SUFFIXES)}. "
+            f"A mispaired row feeds one source's names to another source's sweep, "
+            f"which reports them all as renames. Fix the pairing, or name the "
+            f"field after its reader.",
+        )
+
+
+def test_no_reader_is_called_outside_the_readers_table() -> None:
+    """An inline `read_*()` in `run_checks` fails WORSE than the bug this fixes.
+
+    Its raise unwinds to `main()`'s catch-all and is filed TRANSIENT — exit 2, a
+    warning on a GREEN run — instead of probe health. The `OurNames` comparison
+    cannot see it: an inline reader has no row and no field, it is simply absent.
+    `openclaw_plugin_default_port` is out of scope by design — it catches its own
+    OSError and its caller files the probe-health line.
+    """
+    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
+    tree = ast.parse(src)
+    tabled = {row.elts[1].id for row in next(
+        n.value for n in tree.body
+        if isinstance(n, ast.AnnAssign) and getattr(n.target, "id", "") == "READERS"
+    ).elts}
+    check(
+        tabled == {name for _, name, _ in _reader_rows()},
+        "the READERS AST scan agrees with the runtime table",
+    )
+    # Whole module, not just `run_checks`: a `read_*` inside a HELPER that
+    # run_checks calls unwinds to the same catch-all. Exempt `read_our_names`
+    # (the sanctioned caller) and the readers themselves (they compose).
+    exempt = {"read_our_names"}
+    scan_roots = [
+        n for n in tree.body
+        if isinstance(n, ast.FunctionDef)
+        and n.name not in exempt
+        and not n.name.startswith("read_")
+    ]
+    # ANY `read_*`, tabled or not — a re-inlined call is by definition tabled.
+    stray = sorted({
+        f"{n.func.id}:{n.lineno}"
+        for root in scan_roots
+        for n in ast.walk(root)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id.startswith("read_")
+        and n.func.id not in exempt
+    })
+    check(
+        not stray,
+        f"a `read_*` is called inline instead of being consumed from `ours`, so "
+        f"its failure lands in the TRANSIENT bucket (exit 2, a warning on a green "
+        f"run) instead of probe health: {stray}. Read it from the OurNames field "
+        f"its READERS row fills, and guard on `is not None`.",
+    )
+    # Name-independent twin: the check above keys on the `read_*` convention, and
+    # the precondition "an own-source reader not named read_*" has already
+    # occurred once (`openclaw_plugin_default_port`). A direct `REPO` read inside
+    # run_checks is the form a rename cannot slip past.
+    run_checks = next(
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_checks"
+    )
+    repo_reads = sorted(
+        {n.lineno for n in ast.walk(run_checks) if isinstance(n, ast.Name) and n.id == "REPO"}
+    )
+    check(
+        not repo_reads,
+        f"run_checks reads a repo file directly at line(s) {repo_reads} — route it "
+        f"through a READERS row so its failure is isolated probe health.",
+    )
+
+
+def _reader_rows() -> list[tuple[str, str, str]]:
+    """`(field, reader function name, what it reads)` for every READERS row."""
+    return [(field, reader.__name__, what) for field, reader, what in d.READERS]
 
 
 def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
@@ -596,22 +968,19 @@ def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
             raise urllib.error.URLError("not stubbed")  # -> transient, ignored below
 
         d.fetch = stub
-        breaking: list[str] = []
-        review: list[str] = []
-        blind: list[str] = []
-        errors: list[str] = []
+        report = d.Report()
+        # One named field, not a wall of 14 positional `None`s where a miscount
+        # silently drove the WRONG source and the test still passed.
         d.run_checks(
-            None, None, None, None, None,
-            {"session_start", "tool_call_before"},  # codewhale_ours
-            None, None, None, None, None, None, None, None,
-            breaking, review, blind, errors,
+            d.OurNames(codewhale={"session_start", "tool_call_before"}),
+            report=report,
         )
         check(
             d.CODEWHALE_EXECUTOR_URL in served,
             "the executor fetch actually ran (the injected fault fired)",
         )
         cw = lambda xs: [x for x in xs if "DEEPSEEK" in x or "CodeWhale" in x]  # noqa: E731
-        return cw(breaking), cw(blind), served
+        return cw(report.breaking), cw(report.blind), served
 
     # (a) THE BUG: the pin lands on the facade. Zero drift claims, one probe-health
     #     line — the report must not name a single env var as renamed.
@@ -656,14 +1025,16 @@ def test_every_swept_url_declares_an_anchor() -> None:
     real = d.fetch
     try:
         d.fetch = lambda _u: "irrelevant body"
-        blind: list[str] = []
-        errors: list[str] = []
-        out = d.fetch_anchored("https://example.invalid/undeclared", "New", blind, errors)
+        r = d.Report()
+        out = d.fetch_anchored("https://example.invalid/undeclared", "New", r)
         check(out is None, "an undeclared URL is not swept")
-        check(len(blind) == 1 and not errors, f"undeclared -> blind, not transient: {blind}")
         check(
-            "ANCHORS" in (blind[0] if blind else ""),
-            f"the line names the fix (add an ANCHORS entry): {blind!r}",
+            len(r.blind) == 1 and not r.errors,
+            f"undeclared -> blind, not transient: {r.blind}",
+        )
+        check(
+            "ANCHORS" in (r.blind[0] if r.blind else ""),
+            f"the line names the fix (add an ANCHORS entry): {r.blind!r}",
         )
     finally:
         d.fetch = real
@@ -732,9 +1103,9 @@ def test_report_separates_verified_change_from_probe_health() -> None:
     """
     real_run, real_read = d.run_checks, d.read_codex_events
     try:
-        def fake(*a: object, **k: object) -> None:
-            a[-4].append("VERIFIED-CHANGE-LINE")  # type: ignore[union-attr]
-            a[-2].append("PROBE-HEALTH-LINE")  # type: ignore[union-attr]
+        def fake(*a: object, report: d.Report, **k: object) -> None:
+            report.add_breaking("VERIFIED-CHANGE-LINE")
+            report.add_blind("PROBE-HEALTH-LINE", "somewhere", "Checks were SKIPPED.")
 
         d.run_checks = fake
         buf = io.StringIO()
@@ -775,8 +1146,8 @@ def test_report_separates_verified_change_from_probe_health() -> None:
         # If it regressed, a report saying the watch is DARK would exit 0, both
         # `exit == '1'` workflow steps would skip, and the weekly run would go
         # green — #454's fail-open, in the file that exists because of #454.
-        def blind_only(*a: object, **k: object) -> None:
-            a[-2].append("PROBE-HEALTH-ONLY")  # type: ignore[union-attr]
+        def blind_only(*a: object, report: d.Report, **k: object) -> None:
+            report.add_blind("PROBE-HEALTH-ONLY", "somewhere", "Checks were SKIPPED.")
 
         d.run_checks = blind_only
         buf = io.StringIO()
@@ -876,16 +1247,18 @@ def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
     """
     real = d.run_checks
     cases = [
-        ("breaking", -4, "Upstream CLI wire-format drift detected"),
-        ("review", -3, "New upstream events to review"),
-        ("blind", -2, "Upstream drift watch could not verify — repin needed"),
-        ("clean", None, "Upstream wire-format watch: no drift"),
+        ("breaking", "Upstream CLI wire-format drift detected"),
+        ("review", "New upstream events to review"),
+        ("blind", "Upstream drift watch could not verify — repin needed"),
+        ("clean", "Upstream wire-format watch: no drift"),
     ]
     try:
-        for name, slot, want in cases:
-            def fake(*a: object, _s: int | None = slot, **k: object) -> None:
-                if _s is not None:
-                    a[_s].append("LINE")  # type: ignore[union-attr]
+        for name, want in cases:
+            def fake(*a: object, report: d.Report, _n: str = name, **k: object) -> None:
+                if _n == "blind":
+                    report.add_blind("LINE", "somewhere", "Checks were SKIPPED.")
+                elif _n != "clean":
+                    getattr(report, f"add_{_n}")("LINE")
 
             d.run_checks = fake
             buf = io.StringIO()
@@ -923,6 +1296,11 @@ def main() -> int:
         test_block_scrape_is_bounded_to_the_decoder,
         test_every_const_array_reader_uses_the_shared_parser,
         test_anchor_gate_fires_in_both_directions,
+        test_report_is_the_only_way_to_file_a_finding,
+        test_one_stale_reader_does_not_blind_the_sources_after_it,
+        test_every_reader_row_matches_a_field_on_our_names,
+        test_a_stale_flood_guard_skips_its_check_instead_of_flooding,
+        test_no_reader_is_called_outside_the_readers_table,
         test_793_stale_pin_reads_as_probe_health_not_three_renames,
         test_every_swept_url_declares_an_anchor,
         test_report_separates_verified_change_from_probe_health,
