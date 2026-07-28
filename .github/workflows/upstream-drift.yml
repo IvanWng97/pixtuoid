@@ -76,21 +76,21 @@ jobs:
           set -euo pipefail
           gh label create upstream-drift --color FBCA04 \
             --description "Upstream CLI wire-format drift" 2>/dev/null || true
-          # The title is the first thing a reader acts on, so it must not claim
-          # drift for a report that only says our probe missed. #793 titled five
-          # phantom renames "drift detected" and the body led with "decoder will
-          # silently drop events"; acting on it would have renamed three working
-          # env vars. Verified change wins when several classes are present.
-          if grep -q 'Verified upstream change' drift-report.md; then
-            title="Upstream CLI wire-format drift detected"
-          elif grep -q 'New upstream events to review' drift-report.md; then
-            title="New upstream events to review"
-          else
-            title="Upstream drift watch could not verify — repin needed"
-          fi
+          # The checker owns the title and emits it as the report's H1; we read
+          # it back rather than re-deriving it here. A grep for the section
+          # headings would be an unpinned second copy of strings that live in
+          # check_upstream_drift.py, and rewording one there would silently
+          # title a confirmed rename "could not verify" — #793 inverted.
+          title=$(head -1 drift-report.md | sed 's/^# //')
           num=$(gh issue list --label upstream-drift --state open \
             --json number --jq '.[0].number // empty')
           if [ -n "$num" ]; then
+            # Retitle on the dedup path too. The title now carries the
+            # DISPOSITION, so leaving week 1's on a thread that week 2 turned
+            # into confirmed drift makes the issue list actively mis-signal —
+            # the failure this whole change is about. Weekly churn on one
+            # long-lived thread is the cheaper cost.
+            gh issue edit "$num" --title "$title"
             gh issue comment "$num" --body-file drift-report.md
           else
             gh issue create \

@@ -13,10 +13,16 @@ the weekly job either alarms on junk or watches nothing). This pins:
      directions — depended markers on VANISH, surface markers on APPEARANCE
      (the #541 burn-tier watches ship with teeth, not just parsers).
   5. The anchor gate, in BOTH directions, for EVERY document in `ANCHORS`: a
-     pure upstream refactor must yield probe health, and a real rename must
-     still yield drift. The second direction is the one that had no test and is
-     exactly what #793 escaped through — the watcher reported three working
-     CodeWhale env vars as renamed because a stale pin still fetched 200.
+     pure upstream refactor yields probe health, and an intact anchor still
+     hands the body to the caller's sweep. That a real rename STILL yields drift
+     is proven end-to-end for CodeWhale (`test_793_…`), the #793 source. The
+     refactor direction is the one that had no test and is exactly what #793
+     escaped through — the watcher reported three working CodeWhale env vars as
+     renamed because a stale pin still fetched 200.
+     NB the samples are hand-written to satisfy their patterns, so this pair
+     proves the GATE works — never that any anchor is CORRECT against the live
+     document. A typo'd anchor passes here and shows up as a permanent weekly
+     probe-health line (self-reporting, which is why that is acceptable).
   6. The report keeps the two dispositions under separate headings, so a
      "we could not verify" line can never be read as "upstream changed".
 
@@ -61,7 +67,7 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
             out = d.try_fetch("https://x/y", "T", bl, er)
             check(out is None, f"{code}: returns None")
             check(len(bl) == 1 and not er, f"{code}: -> blind (got blind={bl} errors={er})")
-            check(str(code) in bl[0], f"{code}: message names the status")
+            check(str(code) in (bl[0] if bl else ""), f"{code}: message names the status")
 
         # Transient HTTP (server/throttle) → errors, NOT probe health.
         for code in (500, 502, 503, 429, 403):
@@ -479,18 +485,19 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.OPENCODE_EVENT_URLS[0]: "\nexport const Event = {\n  Created,\n}",
     d.OPENCODE_EVENT_URLS[1]: "\nexport const Event = {\n  Asked,\n}",
     d.GROK_HOOK_URL: "pub struct HookEventEnvelope {\n    pub cwd: String,\n}",
-    d.GROK_NOTIFICATION_URL: "pub struct SessionNotification {\n    pub event_name: String,\n}",
+    d.GROK_NOTIFICATION_URL: "pub enum SessionUpdate {\n    SubagentSpawned,\n}",
     d.GROK_ACTIVE_SESSIONS_URL: "pub struct ActiveSession {\n    pub pid: u32,\n}",
     d.OMP_SESSION_ENTRIES_URL: "export type SessionEntry = MessageEntry | CustomEntry;",
-    d.OMP_EXIT_DIAG_URL: "export interface SessionExitData {\n\treason: string;\n}",
+    d.OMP_EXIT_DIAG_URL: 'export const SESSION_EXIT_CUSTOM_TYPE = "session_exit";',
     d.OMP_AI_TYPES_URL: "export type Message = UserMessage | AssistantMessage;",
-    d.OMP_ASK_URL: "export const askToolRenderer = {};",
+    d.OMP_ASK_URL: "export class AskTool extends Tool {}",
     d.CURSOR_HOOKS_URL: '"hook_event_name": "beforeShellExecution"',
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "gateway_start"',
     d.HERMES_HOOK_URL: "_DEFAULT_PAYLOADS = {\n    'on_session_start': {},\n}",
     d.HERMES_SHELL_HOOK_URL: "def _serialize_payload(event: str) -> str:",
     d.KIMI_HOOKS_URL: '"hook_event_name": "PreToolUse"',
     d.CC_TOOLS_URL: "\n# Tools reference\n",
+    d.CC_HOOKS_URL: "\n# Hooks reference\n",
 }
 
 # A document that satisfies NO anchor — the "upstream reorganized this file"
@@ -517,7 +524,7 @@ def test_anchor_gate_fires_in_both_directions() -> None:
         # while the watch swept nothing. The count only has to move when a
         # document is added or dropped, which is exactly when a human should
         # look at this test.
-        check(len(d.ANCHORS) >= 16, f"ANCHORS covers every swept document, got {len(d.ANCHORS)}")
+        check(len(d.ANCHORS) >= 17, f"ANCHORS covers every swept document, got {len(d.ANCHORS)}")
         missing_samples = sorted(set(d.ANCHORS) - set(ANCHOR_SAMPLES))
         check(not missing_samples, f"every ANCHORS entry needs a sample: {missing_samples}")
 
@@ -635,9 +642,11 @@ def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
 def test_every_swept_url_declares_an_anchor() -> None:
     """A presence sweep may not run on an unproven document.
 
-    `fetch_anchored` KeyErrors on an undeclared URL, so this is belt-and-braces
-    against the sweep site being added and never exercised offline — the same
-    N-1-of-N mechanical guard as the shared-parser test above.
+    An undeclared URL is REPORTED, not raised (see `fetch_anchored`) — this is
+    the static half: every swept URL must appear in `ANCHORS`. The regex below
+    resolves the loop form too (`fetch_anchored(u, …)` over a URL tuple), which
+    an earlier `[A-Z_]+`-only version missed — the copy-ready shape for the next
+    multi-file source, and the one call site the N-of-N guard could not see.
     """
     # An undeclared URL must be REPORTED, never raise. `run_checks` is wrapped in
     # `except Exception` that routes bugs to the TRANSIENT bucket (exit 2,
@@ -660,7 +669,16 @@ def test_every_swept_url_declares_an_anchor() -> None:
         d.fetch = real
 
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
-    swept = set(re.findall(r"fetch_anchored\(\s*([A-Z_]+(?:\[\d\])?)\s*,", src))
+    swept = set(re.findall(r"fetch_anchored\(\s*(\w+(?:\[\d\])?)\s*,", src))
+    # A lowercase first arg is a loop variable; resolve it to the tuple it
+    # iterates so OPENCODE_EVENT_URLS-style sources are covered too.
+    for loop_var in {n for n in swept if not n[0].isupper()}:
+        swept.discard(loop_var)
+        swept |= {
+            f"{m}[{i}]"
+            for m in re.findall(rf"for {loop_var} in ([A-Z_]+)", src)
+            for i in range(len(getattr(d, m)))
+        }
     declared = {
         name
         for name in swept
@@ -715,6 +733,31 @@ def test_report_separates_verified_change_from_probe_health() -> None:
         check(
             "do NOT change a decoder" in out,
             "the probe-health section says what NOT to do",
+        )
+
+        # A blind-ONLY report must still exit 1. This is the single load-bearing
+        # behavioural claim of the disposition split, and the case above cannot
+        # test it: injecting a breaking line too means `breaking` carries the
+        # exit code and `blind`'s contribution is never exercised. Deleting
+        # `or blind` from main() left the whole suite green until this existed.
+        # If it regressed, a report saying the watch is DARK would exit 0, both
+        # `exit == '1'` workflow steps would skip, and the weekly run would go
+        # green — #454's fail-open, in the file that exists because of #454.
+        def blind_only(*a: object, **k: object) -> None:
+            a[-2].append("PROBE-HEALTH-ONLY")  # type: ignore[union-attr]
+
+        d.run_checks = blind_only
+        buf = io.StringIO()
+        real_stdout, sys.stdout = sys.stdout, buf
+        try:
+            code = d.main()
+        finally:
+            sys.stdout = real_stdout
+        check(code == 1, f"a blind-ONLY report is actionable and exits 1, got {code}")
+        check(
+            "Probe could NOT verify" in buf.getvalue()
+            and "Verified upstream change" not in buf.getvalue(),
+            "a blind-only report renders ONLY the probe-health section",
         )
     finally:
         d.run_checks, d.read_codex_events = real_run, real_read
@@ -789,6 +832,54 @@ def test_enum_body_survives_struct_variants_and_indentation() -> None:
     )
 
 
+def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
+    """The H1 is a CROSS-FILE contract with upstream-drift.yml.
+
+    The workflow titles the GitHub issue with `head -1 | sed 's/^# //'` instead
+    of keeping its own copy of these strings, so this pins both halves: the
+    per-disposition text here, and the fact that the YAML still reads it that
+    way. #793's title said "drift detected" for a report whose five drift lines
+    were every one of them false positives — with the title carrying the
+    disposition, a wrong one mis-signals the issue list itself.
+    """
+    real = d.run_checks
+    cases = [
+        ("breaking", -4, "Upstream CLI wire-format drift detected"),
+        ("review", -3, "New upstream events to review"),
+        ("blind", -2, "Upstream drift watch could not verify — repin needed"),
+        ("clean", None, "Upstream wire-format watch: no drift"),
+    ]
+    try:
+        for name, slot, want in cases:
+            def fake(*a: object, _s: int | None = slot, **k: object) -> None:
+                if _s is not None:
+                    a[_s].append("LINE")  # type: ignore[union-attr]
+
+            d.run_checks = fake
+            buf = io.StringIO()
+            real_stdout, sys.stdout = sys.stdout, buf
+            try:
+                d.main()
+            finally:
+                sys.stdout = real_stdout
+            got = buf.getvalue().splitlines()[0]
+            check(got == f"# {want}", f"{name}: H1 is {want!r}, got {got!r}")
+    finally:
+        d.run_checks = real
+
+    # The consumer half: if the workflow stops reading the H1 (or goes back to
+    # grepping the section headings) this contract is silently one-way again.
+    wf = (pathlib.Path(__file__).parents[1] / ".github/workflows/upstream-drift.yml").read_text()
+    check(
+        "head -1 drift-report.md" in wf and "s/^# //" in wf,
+        "upstream-drift.yml still titles the issue from the report's H1",
+    )
+    check(
+        "Verified upstream change" not in wf and "could not verify — repin" not in wf,
+        "upstream-drift.yml keeps NO second copy of the report's strings",
+    )
+
+
 def main() -> int:
     for t in (
         test_try_fetch_classifies_permanent_vs_transient,
@@ -804,6 +895,7 @@ def main() -> int:
         test_every_swept_url_declares_an_anchor,
         test_report_separates_verified_change_from_probe_health,
         test_enum_body_survives_struct_variants_and_indentation,
+        test_report_h1_is_the_issue_title_and_carries_the_disposition,
     ):
         t()
     if FAILS:
