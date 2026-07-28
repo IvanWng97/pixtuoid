@@ -76,13 +76,25 @@ jobs:
           set -euo pipefail
           gh label create upstream-drift --color FBCA04 \
             --description "Upstream CLI wire-format drift" 2>/dev/null || true
+          # The title is the first thing a reader acts on, so it must not claim
+          # drift for a report that only says our probe missed. #793 titled five
+          # phantom renames "drift detected" and the body led with "decoder will
+          # silently drop events"; acting on it would have renamed three working
+          # env vars. Verified change wins when several classes are present.
+          if grep -q 'Verified upstream change' drift-report.md; then
+            title="Upstream CLI wire-format drift detected"
+          elif grep -q 'New upstream events to review' drift-report.md; then
+            title="New upstream events to review"
+          else
+            title="Upstream drift watch could not verify — repin needed"
+          fi
           num=$(gh issue list --label upstream-drift --state open \
             --json number --jq '.[0].number // empty')
           if [ -n "$num" ]; then
             gh issue comment "$num" --body-file drift-report.md
           else
             gh issue create \
-              --title "Upstream CLI wire-format drift detected" \
+              --title "$title" \
               --label upstream-drift \
               --body-file drift-report.md
           fi
@@ -91,12 +103,17 @@ jobs:
         if: steps.check.outputs.exit == '2'
         run: echo "::warning::upstream-drift could not verify (transient network/HTTP); see report above."
 
-      - name: Fail the run on confirmed drift
+      # Probe-health findings fail the run too, deliberately: a watch that cannot
+      # see its upstream is dark, and a dark watch that stays green is the #454
+      # fail-open class. The REPORT distinguishes them; the exit code only asks
+      # for a human.
+      - name: Fail the run on any actionable finding
         if: steps.check.outputs.exit == '1'
         run: exit 1
 
       - name: Fail on an unexpected checker exit
-        # exit 0 = no drift; 1 = confirmed drift (issue + fail above); 2 =
+        # exit 0 = no findings; 1 = actionable — verified drift, a review ping, or
+        # probe health (issue + fail above); 2 =
         # transient fetch trouble (warn-only by design). ANY other code — 127
         # (python missing), 137 (OOM-kill), a crash before the classifier ran —
         # previously fell through GREEN: a dead watcher reading as healthy.
