@@ -132,6 +132,19 @@ actionlint-composites:
 # audit catalog; .github/zizmor.yml records the repository's deliberate
 # ref-or-SHA pin policy and every accepted finding is suppressed at its exact
 # source location with a WHY.
+# The operating MODE is env-derived, not chosen here, and the asymmetry is
+# deliberate: tokenless it runs OFFLINE (it says so on stderr) and skips the
+# four audits that need the GitHub API — impostor-commit,
+# known-vulnerable-actions, ref-confusion, stale-action-refs (typosquat-uses
+# still runs, at reduced confidence). ci-lint.yml's hygiene job passes
+# GH_TOKEN, so those DO gate in CI, and a ci-observability rule pins that step
+# so the online half cannot be dropped silently. Same call as `links`
+# (--offline) and `deny` (advisories deferred to audit.yml): a check whose
+# verdict depends on the network and an upstream feed must not redden a push of
+# unchanged code. Do NOT auto-export `gh auth token` to close the gap — it puts
+# a real token on the wire on every pre-push run and makes the local gate
+# depend on gh auth + API rate limits, the exact flakiness those two siblings
+# were written to avoid.
 [group('rust')]
 [doc('Audit GitHub automation security with zizmor')]
 zizmor:

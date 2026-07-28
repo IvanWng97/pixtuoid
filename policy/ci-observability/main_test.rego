@@ -545,6 +545,32 @@ test_zizmor_pin_policy_cannot_be_tightened_or_disabled_silently if {
 	sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path]) in violations
 }
 
+zizmor_token_message(job_name) := sprintf(
+	"%s job %q must pass GH_TOKEN to `%s` — its four online audits run nowhere else",
+	[lint_workflow_path, job_name, zizmor_recipe],
+)
+
+test_zizmor_online_audits_cannot_be_retired_by_dropping_the_token if {
+	fixture := {"documents": [{
+		"path": lint_workflow_path,
+		"contents": {"jobs": {"hygiene": {"steps": [{"run": "just zizmor"}]}}},
+	}]}
+	violations := deny with input as fixture
+	zizmor_token_message("hygiene") in violations
+}
+
+test_zizmor_step_carrying_the_token_is_silent if {
+	fixture := {"documents": [{
+		"path": lint_workflow_path,
+		"contents": {"jobs": {"hygiene": {"steps": [{
+			"run": "just zizmor",
+			"env": {"GH_TOKEN": "${{ github.token }}"},
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	not zizmor_token_message("hygiene") in violations
+}
+
 test_cache_cleanup_cannot_execute_pull_request_code if {
 	fixture := {"documents": [{
 		"path": cache_cleanup_workflow_path,

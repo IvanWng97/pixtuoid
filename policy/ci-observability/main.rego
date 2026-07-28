@@ -26,6 +26,8 @@ zizmor_config_path := ".github/zizmor.yml"
 dependabot_config_path := ".github/dependabot.yml"
 composite_action_root := ".github/actions"
 github_actions_ecosystem := "github-actions"
+lint_workflow_path := ".github/workflows/ci-lint.yml"
+zizmor_recipe := "just zizmor"
 cache_cleanup_workflow_path := ".github/workflows/cache-cleanup.yml"
 claude_action := "anthropics/claude-code-action@v1"
 json_schema_flag := "--json-schema"
@@ -1141,6 +1143,24 @@ deny contains msg if {
 	directory := dependabot_directory(entry.path)
 	not dependabot_covers(directory)
 	msg := sprintf("%s must list a github-actions directory covering %s: %s is otherwise invisible to Dependabot", [dependabot_config_path, directory, entry.uses])
+}
+
+# zizmor picks its operating mode from ambient env, not from the recipe: with no
+# token it runs OFFLINE and silently skips impostor-commit,
+# known-vulnerable-actions, ref-confusion and stale-action-refs. The local gate
+# is tokenless on purpose (see the justfile recipe's WHY), so this step is the
+# ONLY place those four ever run — dropping its env would retire them
+# repository-wide while every gate stayed green. actionlint cannot express
+# "this step's env is load-bearing for that recipe's coverage".
+deny contains msg if {
+	some job_name, job in object.get(documents[lint_workflow_path], "jobs", {})
+	some step in object.get(job, "steps", [])
+	object.get(step, "run", "") == zizmor_recipe
+	object.get(object.get(step, "env", {}), "GH_TOKEN", "") == ""
+	msg := sprintf(
+		"%s job %q must pass GH_TOKEN to `%s` — its four online audits run nowhere else",
+		[lint_workflow_path, job_name, zizmor_recipe],
+	)
 }
 
 deny contains msg if {
