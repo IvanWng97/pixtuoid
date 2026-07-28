@@ -134,11 +134,17 @@ impl OutcomeRow {
     /// Map one applied outcome to its wire row: the bare token plus the
     /// optional human message — the ONE outcome→row authority, so the two
     /// emitting surfaces (`run_change` / `run_sources_set`) can't drift.
+    ///
+    /// The message is control-char-stripped HERE, where the untrusted value
+    /// enters the row (the `verify::display_safe` discipline): it folds another
+    /// CLI's config content verbatim — a failed `connect codex` carries
+    /// `toml::de::Error`'s Display, which embeds the RAW offending source line —
+    /// and `sources_cli::text_line` prints it to a real terminal (R0615-06).
     pub fn new(id: String, outcome: &ChangeOutcome) -> Self {
         OutcomeRow {
             id,
             outcome: outcome.wire_outcome(),
-            message: outcome.message().map(str::to_string),
+            message: outcome.message().map(crate::strip_control_chars),
         }
     }
 }
@@ -983,6 +989,30 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&failed).unwrap(),
             r#"{"id":"cursor","outcome":"failed","message":"boom"}"#
+        );
+    }
+
+    #[test]
+    fn outcome_row_message_is_control_char_stripped_at_the_authority() {
+        // `message` carries another CLI's config content verbatim: a failed
+        // `connect codex` folds `toml::de::Error`'s Display, which embeds the RAW
+        // offending source line, and `sources_cli::text_line` prints that row to a
+        // real terminal. Sanitize where the untrusted value ENTERS the row (the
+        // `verify::display_safe` discipline) so no present or future presenter can
+        // reopen the hole (R0615-06).
+        let row = OutcomeRow::new(
+            "codex".into(),
+            &ChangeOutcome::Failed("bad\u{1b}]0;PWNED\u{7}key\u{202e}txet".into()),
+        );
+        assert_eq!(row.message.as_deref(), Some("bad]0;PWNEDkeytxet"));
+
+        // Stays silent on ordinary text: an untouched message is byte-identical.
+        let clean = "processing /home/u/.codex/config.toml: not valid TOML";
+        assert_eq!(
+            OutcomeRow::new("codex".into(), &ChangeOutcome::Failed(clean.into()))
+                .message
+                .as_deref(),
+            Some(clean)
         );
     }
 

@@ -132,6 +132,35 @@ fn load_malformed_collects_reset_warning() {
 }
 
 #[test]
+fn collected_warnings_are_control_char_stripped() {
+    // `toml::de::Error`'s Display embeds the RAW offending source line, and every
+    // consumer of this Vec is a real terminal (`main`'s pre-altscreen `eprintln!`,
+    // the `doctor` report). A crafted config.toml — reachable via a repo-scoped
+    // direnv `XDG_CONFIG_HOME` — would otherwise inject a live OSC sequence.
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("config.toml");
+    std::fs::write(
+        &p,
+        "theme = \"normal\"\nbad\u{1b}]0;PWNED\u{7}\u{202e}key =\n",
+    )
+    .unwrap();
+    let mut w = Vec::new();
+    load(&p, &mut w);
+    assert_eq!(w.len(), 1);
+    assert!(
+        !w[0].contains(['\u{1b}', '\u{7}', '\u{202e}']),
+        "a warning that interpolates config content must carry no ANSI/OSC or \
+         Trojan-Source bidi bytes: {:?}",
+        w[0]
+    );
+    // Stays silent on ordinary content: the reset warning still reads normally.
+    assert!(
+        w[0].contains("malformed config") && w[0].contains("ALL settings reset"),
+        "got: {w:?}"
+    );
+}
+
+#[test]
 fn resolve_theme_collects_unknown_config_theme_warning() {
     let cfg = AppConfig {
         theme: Some("not-a-theme".into()),
