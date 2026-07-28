@@ -123,6 +123,13 @@ const KNOWN_NAMESPACES: &[&str] = &[
     "elicitation",
     "exit_plan_mode",
     "external_tool",
+    // `factory.run_updated` only — an ephemeral (`ephemeral: true`, never
+    // persisted to the on-disk event log) invalidation ping for a changed
+    // factory run, so the transcript tail should never even see it. Listed as a
+    // KNOWINGLY IGNORED family rather than decoded: it carries no lifecycle we
+    // render, and leaving it out would breadcrumb every line of it if upstream
+    // ever does persist one.
+    "factory",
     "hook",
     "mcp",
     "mcp_app",
@@ -143,7 +150,7 @@ const KNOWN_NAMESPACES: &[&str] = &[
 
 /// The copilot event NAMESPACE — the family prefix before the first `.`
 /// (`tool.execution_start` → `tool`), or the whole string when there is no dot
-/// (`abort`). The flood-safe breadcrumb keys on THIS (25 low-cardinality
+/// (`abort`). The flood-safe breadcrumb keys on THIS (26 low-cardinality
 /// families), not the full `type` (100+ high-cardinality events).
 fn copilot_namespace(kind: &str) -> &str {
     kind.split_once('.').map_or(kind, |(prefix, _)| prefix)

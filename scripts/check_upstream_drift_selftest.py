@@ -12,6 +12,19 @@ the weekly job either alarms on junk or watches nothing). This pins:
   4. The CC doc-marker DETECTION (`cc_doc_marker_findings`) fires in BOTH
      directions — depended markers on VANISH, surface markers on APPEARANCE
      (the #541 burn-tier watches ship with teeth, not just parsers).
+  5. The anchor gate, in BOTH directions, for EVERY document in `ANCHORS`: a
+     pure upstream refactor yields probe health, and an intact anchor still
+     hands the body to the caller's sweep. That a real rename STILL yields drift
+     is proven end-to-end for CodeWhale (`test_793_…`), the #793 source. The
+     refactor direction is the one that had no test and is exactly what #793
+     escaped through — the watcher reported three working CodeWhale env vars as
+     renamed because a stale pin still fetched 200.
+     NB the samples are hand-written to satisfy their patterns, so this pair
+     proves the GATE works — never that any anchor is CORRECT against the live
+     document. A typo'd anchor passes here and shows up as a permanent weekly
+     probe-health line (self-reporting, which is why that is acceptable).
+  6. The report keeps the two dispositions under separate headings, so a
+     "we could not verify" line can never be read as "upstream changed".
 
 Run: `python3 scripts/check_upstream_drift_selftest.py` (exit 0 = pass).
 No pytest dependency on purpose — the repo has no Python test harness.
@@ -43,34 +56,37 @@ def _http_error(code: int) -> urllib.error.HTTPError:
 def test_try_fetch_classifies_permanent_vs_transient() -> None:
     real = d.fetch
     try:
-        # Permanent HTTP → breaking (the URL moved; watch blind).
+        # Permanent HTTP → PROBE HEALTH (our pin is wrong, so the watch is dark
+        # for this source). Deliberately not `breaking`: a 404 says nothing about
+        # whether upstream renamed anything, only that we are looking in the
+        # wrong place.
         for code in (404, 410, 451):
             d.fetch = lambda _u, c=code: (_ for _ in ()).throw(_http_error(c))
-            br: list[str] = []
+            bl: list[str] = []
             er: list[str] = []
-            out = d.try_fetch("https://x/y", "T", br, er)
+            out = d.try_fetch("https://x/y", "T", bl, er)
             check(out is None, f"{code}: returns None")
-            check(len(br) == 1 and not er, f"{code}: -> breaking (got breaking={br} errors={er})")
-            check(str(code) in br[0], f"{code}: message names the status")
+            check(len(bl) == 1 and not er, f"{code}: -> blind (got blind={bl} errors={er})")
+            check(str(code) in (bl[0] if bl else ""), f"{code}: message names the status")
 
-        # Transient HTTP (server/throttle) → errors, NOT breaking.
+        # Transient HTTP (server/throttle) → errors, NOT probe health.
         for code in (500, 502, 503, 429, 403):
             d.fetch = lambda _u, c=code: (_ for _ in ()).throw(_http_error(c))
-            br, er = [], []
-            d.try_fetch("https://x/y", "T", br, er)
-            check(not br and len(er) == 1, f"{code}: -> transient (got breaking={br} errors={er})")
+            bl, er = [], []
+            d.try_fetch("https://x/y", "T", bl, er)
+            check(not bl and len(er) == 1, f"{code}: -> transient (got blind={bl} errors={er})")
 
         # Network-layer failure → transient.
         d.fetch = lambda _u: (_ for _ in ()).throw(urllib.error.URLError("conn refused"))
-        br, er = [], []
-        d.try_fetch("https://x/y", "T", br, er)
-        check(not br and len(er) == 1, f"URLError -> transient (got breaking={br} errors={er})")
+        bl, er = [], []
+        d.try_fetch("https://x/y", "T", bl, er)
+        check(not bl and len(er) == 1, f"URLError -> transient (got blind={bl} errors={er})")
 
         # Success → returns the body, no buckets touched.
         d.fetch = lambda _u: "BODY"
-        br, er = [], []
-        out = d.try_fetch("https://x/y", "T", br, er)
-        check(out == "BODY" and not br and not er, "success returns body, no buckets")
+        bl, er = [], []
+        out = d.try_fetch("https://x/y", "T", bl, er)
+        check(out == "BODY" and not bl and not er, "success returns body, no buckets")
     finally:
         d.fetch = real
 
@@ -223,6 +239,49 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     up = d.upstream_codewhale_hooks(codewhale_rs)
     check(up is not None and {"session_start", "pre_tool_use"} <= up, f"codewhale enum parse: {up}")
     check(d.upstream_codewhale_hooks("no enum here") is None, "codewhale none -> None")
+
+    # grok HookEventName — BOTH declaration shapes, because upstream moved from a
+    # plain enum to a `hook_events!` macro TABLE and the enum-only regex then read
+    # empty, reporting the 15 unchanged variants as "not found at the pinned path"
+    # (#793). The macro-def arm is the trap: its body carries a literal
+    # `pub enum HookEventName {` with `$variant` placeholders and no real variants,
+    # so a parser must fall THROUGH it to the invocation rather than stop there.
+    grok_plain = "pub enum HookEventName {\n    SessionStart,\n    PreToolUse,\n}"
+    up = d.upstream_grok_hooks(grok_plain)
+    check(up is not None and {"SessionStart", "PreToolUse"} <= up, f"grok plain enum parse: {up}")
+    grok_macro = (
+        "macro_rules! hook_events {\n"
+        "    ($($variant:ident { display: $d:literal, }),* $(,)?) => {\n"
+        "        pub enum HookEventName {\n"
+        "            $($variant),*\n"
+        "        }\n"
+        "    };\n"
+        "}\n"
+        "\n"
+        "hook_events! {\n"
+        "    SessionStart {\n"
+        '        display: "session_start",\n'
+        '        aliases: ["SessionStart", "session_start"],\n'
+        "        traits: (Observe, Tested, true),\n"
+        "    },\n"
+        "    /// A doc comment on a row must not be read as a variant.\n"
+        "    SubagentEnd {\n"
+        '        display: "subagent_stop",\n'
+        '        aliases: ["SubagentEnd"],\n'
+        "        traits: (Stop, Tested, true),\n"
+        "    },\n"
+        "}\n"
+    )
+    up = d.upstream_grok_hooks(grok_macro)
+    check(
+        up is not None and up == {"SessionStart", "SubagentEnd"},
+        f"grok macro-table parse (exact, no alias/trait leakage): {up}",
+    )
+    # A macro DEFINITION with no invocation must read None (a real "it moved"),
+    # never the placeholder-only enum body.
+    grok_def_only = grok_macro.split("hook_events! {")[0]
+    check(d.upstream_grok_hooks(grok_def_only) is None, "grok macro def without invocation -> None")
+    check(d.upstream_grok_hooks("no enum here") is None, "grok none -> None")
 
     # Codex EventMsg / ResponseItem: #[serde(tag="type", rename_all="snake_case")]
     # enums. snake_case(variant) + explicit rename/alias, with nested tuple/struct
@@ -417,6 +476,442 @@ def test_every_const_array_reader_uses_the_shared_parser() -> None:
     )
 
 
+# One snippet per anchored document that MUST satisfy its anchor. Test data, and
+# a record of the shape each anchor expects. A new ANCHORS entry with no sample
+# here fails `test_anchor_gate_fires_in_both_directions` — the N-of-N tooth, so
+# the sweep below can't quietly cover 15 of 16 documents.
+ANCHOR_SAMPLES: dict[str, str] = {
+    d.CODEWHALE_EXECUTOR_URL: "pub fn to_env_vars(&self) -> HashMap<String, String> {",
+    d.OPENCODE_EVENT_URLS[0]: "\nexport const Event = {\n  Created,\n}",
+    d.OPENCODE_EVENT_URLS[1]: "\nexport const Event = {\n  Asked,\n}",
+    d.GROK_HOOK_URL: "pub struct HookEventEnvelope {\n    pub cwd: String,\n}",
+    d.GROK_NOTIFICATION_URL: "pub enum SessionUpdate {\n    SubagentSpawned,\n}",
+    d.GROK_ACTIVE_SESSIONS_URL: "pub struct ActiveSession {\n    pub pid: u32,\n}",
+    d.OMP_SESSION_ENTRIES_URL: "export type SessionEntry = MessageEntry | CustomEntry;",
+    d.OMP_EXIT_DIAG_URL: 'export const SESSION_EXIT_CUSTOM_TYPE = "session_exit";',
+    d.OMP_AI_TYPES_URL: "export type Message = UserMessage | AssistantMessage;",
+    d.OMP_ASK_URL: "export class AskTool extends Tool {}",
+    d.CURSOR_HOOKS_URL: '"hook_event_name": "beforeShellExecution"',
+    d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "gateway_start"',
+    d.HERMES_HOOK_URL: "_DEFAULT_PAYLOADS = {\n    'on_session_start': {},\n}",
+    d.HERMES_SHELL_HOOK_URL: "def _serialize_payload(event: str) -> str:",
+    d.KIMI_HOOKS_URL: '"hook_event_name": "PreToolUse"',
+    d.CC_TOOLS_URL: "\n# Tools reference\n",
+    d.CC_HOOKS_URL: "\n# Hooks reference\n",
+}
+
+# A document that satisfies NO anchor — the "upstream reorganized this file"
+# stand-in. Deliberately prose-shaped: a re-export facade or a restructured docs
+# page is exactly this, content that fetches fine and owns nothing.
+_UNANCHORED = "mod config;\nmod executor;\npub use config::*;\n"
+
+
+def test_anchor_gate_fires_in_both_directions() -> None:
+    """Every anchored document, both ways.
+
+    The direction nobody writes is the second one, and it is precisely what #793
+    needed: a PURE UPSTREAM REFACTOR must produce probe-health, never drift. The
+    watcher reported three working CodeWhale env vars as renamed because the
+    stale pin still returned 200 and an unanchored sweep read the facade's
+    silence as absence.
+
+    Table-driven over `ANCHORS` itself so the pair cannot cover N-1 of N.
+    """
+    real = d.fetch
+    try:
+        # A floor, because everything below iterates `ANCHORS`: an emptied table
+        # would run zero loop bodies and this whole test would pass VACUOUSLY
+        # while the watch swept nothing. The count only has to move when a
+        # document is added or dropped, which is exactly when a human should
+        # look at this test.
+        check(len(d.ANCHORS) >= 17, f"ANCHORS covers every swept document, got {len(d.ANCHORS)}")
+        missing_samples = sorted(set(d.ANCHORS) - set(ANCHOR_SAMPLES))
+        check(not missing_samples, f"every ANCHORS entry needs a sample: {missing_samples}")
+
+        for url, anchor in sorted(d.ANCHORS.items()):
+            served: list[str] = []
+
+            # (a) anchor ABSENT (a refactor moved the declaration away) -> the
+            #     document is not swept at all, and the finding is probe health.
+            d.fetch = lambda u, _s=served: (_s.append(u), _UNANCHORED)[1]
+            blind: list[str] = []
+            errors: list[str] = []
+            out = d.fetch_anchored(url, "T", blind, errors)
+            check(served == [url], f"{anchor.owns}: the stubbed fetch actually ran")
+            check(out is None, f"{anchor.owns}: no anchor -> the sweep is skipped")
+            check(len(blind) == 1 and not errors, f"{anchor.owns}: -> blind, got {blind}")
+            # Indexing is guarded, not assumed: a regressed gate leaves `blind`
+            # empty and this test must REPORT that, not abort the suite before
+            # the #793 regression test below ever runs.
+            check(
+                "NOT evidence that upstream changed" in (blind[0] if blind else ""),
+                f"{anchor.owns}: the line disclaims upstream causation, got {blind!r}",
+            )
+
+            # (b) anchor PRESENT -> the body comes back so the caller's presence
+            #     sweep can run and report a REAL rename.
+            sample = ANCHOR_SAMPLES.get(url, "")
+            d.fetch = lambda _u, _s=sample: _s
+            blind, errors = [], []
+            out = d.fetch_anchored(url, "T", blind, errors)
+            check(
+                out == sample and not blind and not errors,
+                f"{anchor.owns}: anchor present -> body returned, got blind={blind}",
+            )
+    finally:
+        d.fetch = real
+
+
+def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
+    """The #793 regression, end to end through `run_checks`, both directions.
+
+    CodeWhale split `crates/tui/src/hooks.rs` into a module directory. The old
+    path kept returning 200 as a `mod`/`pub use` facade, so the fetch succeeded
+    and all three `DEEPSEEK_*` names were absent — reported as three upstream
+    renames under "decoder will silently drop events". Acting on it would have
+    renamed three working env vars.
+    """
+    real = d.fetch
+    config_rs = "pub enum HookEvent {\n    SessionStart,\n    ToolCallBefore,\n}"
+    facade = "mod config;\nmod executor;\npub use config::HookEvent;\n"
+    executor = (
+        "impl HookContext {\n"
+        "    pub fn to_env_vars(&self) -> HashMap<String, String> {\n"
+        '        env.insert("DEEPSEEK_WORKSPACE".to_string(), ws);\n'
+        '        env.insert("DEEPSEEK_TOOL_NAME".to_string(), name);\n'
+        '        env.insert("DEEPSEEK_TOOL_ARGS".to_string(), args);\n'
+        "    }\n"
+        "}\n"
+    )
+
+    def drive(executor_body: str) -> tuple[list[str], list[str], list[str]]:
+        served: list[str] = []
+
+        def stub(url: str) -> str:
+            served.append(url)
+            if url == d.CODEWHALE_HOOK_URL:
+                return config_rs
+            if url == d.CODEWHALE_EXECUTOR_URL:
+                return executor_body
+            raise urllib.error.URLError("not stubbed")  # -> transient, ignored below
+
+        d.fetch = stub
+        breaking: list[str] = []
+        review: list[str] = []
+        blind: list[str] = []
+        errors: list[str] = []
+        d.run_checks(
+            None, None, None, None, None,
+            {"session_start", "tool_call_before"},  # codewhale_ours
+            None, None, None, None, None, None, None, None,
+            breaking, review, blind, errors,
+        )
+        check(
+            d.CODEWHALE_EXECUTOR_URL in served,
+            "the executor fetch actually ran (the injected fault fired)",
+        )
+        cw = lambda xs: [x for x in xs if "DEEPSEEK" in x or "CodeWhale" in x]  # noqa: E731
+        return cw(breaking), cw(blind), served
+
+    # (a) THE BUG: the pin lands on the facade. Zero drift claims, one probe-health
+    #     line — the report must not name a single env var as renamed.
+    br, bl, _ = drive(facade)
+    check(not br, f"a stale pin must claim NO upstream change, got {br}")
+    check(len(bl) == 1, f"a stale pin is one probe-health line, got {bl}")
+    # Guarded index: a regressed anchor gate leaves `bl` empty, and that must
+    # fail as a message rather than abort the rest of the suite.
+    check(
+        all(v not in "".join(bl) for v in ("DEEPSEEK_WORKSPACE", "DEEPSEEK_TOOL_NAME")),
+        f"the probe-health line must not name env vars as renamed: {bl!r}",
+    )
+
+    # (b) The check still has teeth: same anchor, one env var genuinely removed.
+    br, bl, _ = drive(executor.replace('        env.insert("DEEPSEEK_WORKSPACE".to_string(), ws);\n', ""))
+    check(
+        len(br) == 1 and "DEEPSEEK_WORKSPACE" in br[0],
+        f"a REAL rename must still be breaking drift, got breaking={br} blind={bl}",
+    )
+    check(not bl, f"a readable document produces no probe-health noise, got {bl}")
+
+    # (c) The unchanged upstream is silent in both buckets.
+    br, bl, _ = drive(executor)
+    check(not br and not bl, f"unchanged upstream -> silence, got breaking={br} blind={bl}")
+    d.fetch = real
+
+
+def test_every_swept_url_declares_an_anchor() -> None:
+    """A presence sweep may not run on an unproven document.
+
+    An undeclared URL is REPORTED, not raised (see `fetch_anchored`) — this is
+    the static half: every swept URL must appear in `ANCHORS`. The regex below
+    resolves the loop form too (`fetch_anchored(u, …)` over a URL tuple), which
+    an earlier `[A-Z_]+`-only version missed — the copy-ready shape for the next
+    multi-file source, and the one call site the N-of-N guard could not see.
+    """
+    # An undeclared URL must be REPORTED, never raise. `run_checks` is wrapped in
+    # `except Exception` that routes bugs to the TRANSIENT bucket (exit 2,
+    # warn-only), so a bare KeyError would turn "someone shipped an unproven
+    # sweep" into a green-ish warning — the fail-open shape (#454) this change
+    # exists to remove.
+    real = d.fetch
+    try:
+        d.fetch = lambda _u: "irrelevant body"
+        blind: list[str] = []
+        errors: list[str] = []
+        out = d.fetch_anchored("https://example.invalid/undeclared", "New", blind, errors)
+        check(out is None, "an undeclared URL is not swept")
+        check(len(blind) == 1 and not errors, f"undeclared -> blind, not transient: {blind}")
+        check(
+            "ANCHORS" in (blind[0] if blind else ""),
+            f"the line names the fix (add an ANCHORS entry): {blind!r}",
+        )
+    finally:
+        d.fetch = real
+
+    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
+    swept = set(re.findall(r"fetch_anchored\(\s*(\w+(?:\[\d\])?)\s*,", src))
+    # A lowercase first arg is a loop variable; resolve it to the tuple it
+    # iterates so OPENCODE_EVENT_URLS-style sources are covered too.
+    for loop_var in {n for n in swept if not n[0].isupper()}:
+        swept.discard(loop_var)
+        swept |= {
+            f"{m}[{i}]"
+            for m in re.findall(rf"for {loop_var} in ([A-Z_]+)", src)
+            for i in range(len(getattr(d, m)))
+        }
+    declared = {
+        name
+        for name in swept
+        if (base := name.split("[")[0]) and hasattr(d, base)
+    }
+    check(swept == declared, f"a swept URL is not a module constant: {swept - declared}")
+    for name in sorted(swept):
+        url = eval(f"d.{name}")  # noqa: S307 (module constants matched by the regex above)
+        check(url in d.ANCHORS, f"{name} is swept but declares no ANCHORS entry")
+
+    # The OTHER spelling. Asserting only the `fetch_anchored` population leaves
+    # `try_fetch` as an unguarded way to add a presence sweep — which is how the
+    # design lens built its repro.
+    #
+    # Enumerating the *_URL CONSTANTS rather than the call sites, deliberately:
+    # a call-site regex has to keep up with how the fetch is spelled, and the
+    # first version of this very check missed `try_fetch(url, label, …)` in the
+    # ACP loop — the same loop-variable blindness it exists to catch. Every URL
+    # the module declares must be classified exactly once: anchored, or
+    # justified-unanchored with the reason written down.
+    urls: set[str] = set()
+    for name in dir(d):
+        if not (name.endswith("_URL") or name.endswith("_URLS")):
+            continue
+        value = getattr(d, name)
+        urls |= {value} if isinstance(value, str) else set(value)
+    classified = set(d.ANCHORS) | set(d.UNANCHORED_BY_DESIGN)
+    check(
+        not (urls - classified),
+        f"every fetched URL is anchored or justified in UNANCHORED_BY_DESIGN; "
+        f"unclassified: {sorted(urls - classified)}",
+    )
+    check(
+        not (classified - urls),
+        f"no classification for a URL the module no longer declares: "
+        f"{sorted(classified - urls)}",
+    )
+    check(
+        not (set(d.ANCHORS) & set(d.UNANCHORED_BY_DESIGN)),
+        "a document is either anchored or justified-unanchored, never both",
+    )
+
+
+def test_report_separates_verified_change_from_probe_health() -> None:
+    """The two dispositions must not share a heading — that WAS the bug.
+
+    #793's report filed "our probe missed" under "Breaking drift — decoder will
+    silently drop events", which is a claim about upstream the script never had
+    evidence for. The heading is the instruction; a reader who trusts it edits a
+    decoder.
+    """
+    real_run, real_read = d.run_checks, d.read_codex_events
+    try:
+        def fake(*a: object, **k: object) -> None:
+            a[-4].append("VERIFIED-CHANGE-LINE")  # type: ignore[union-attr]
+            a[-2].append("PROBE-HEALTH-LINE")  # type: ignore[union-attr]
+
+        d.run_checks = fake
+        buf = io.StringIO()
+        real_stdout, sys.stdout = sys.stdout, buf
+        try:
+            code = d.main()
+        finally:
+            sys.stdout = real_stdout
+        out = buf.getvalue()
+
+        check(code == 1, f"either bucket is actionable, exit 1 (got {code})")
+        verified_hd = "## ⛔ Verified upstream change"
+        probe_hd = "## 🩺 Probe could NOT verify"
+        check(verified_hd in out and probe_hd in out, f"both headings present:\n{out}")
+        # The probe-health line must sit UNDER the probe heading, not the drift
+        # one. `find` (not `index`) so a missing heading REPORTS rather than
+        # raising -1-free: -1 breaks the ordering chain and fails cleanly.
+        order = [
+            out.find(verified_hd),
+            out.find("VERIFIED-CHANGE-LINE"),
+            out.find(probe_hd),
+            out.find("PROBE-HEALTH-LINE"),
+        ]
+        check(
+            all(x >= 0 for x in order) and order == sorted(order),
+            f"each line filed under its own heading (offsets {order}):\n{out}",
+        )
+        check(
+            "do NOT change a decoder" in out,
+            "the probe-health section says what NOT to do",
+        )
+
+        # A blind-ONLY report must still exit 1. This is the single load-bearing
+        # behavioural claim of the disposition split, and the case above cannot
+        # test it: injecting a breaking line too means `breaking` carries the
+        # exit code and `blind`'s contribution is never exercised. Deleting
+        # `or blind` from main() left the whole suite green until this existed.
+        # If it regressed, a report saying the watch is DARK would exit 0, both
+        # `exit == '1'` workflow steps would skip, and the weekly run would go
+        # green — #454's fail-open, in the file that exists because of #454.
+        def blind_only(*a: object, **k: object) -> None:
+            a[-2].append("PROBE-HEALTH-ONLY")  # type: ignore[union-attr]
+
+        d.run_checks = blind_only
+        buf = io.StringIO()
+        real_stdout, sys.stdout = sys.stdout, buf
+        try:
+            code = d.main()
+        finally:
+            sys.stdout = real_stdout
+        check(code == 1, f"a blind-ONLY report is actionable and exits 1, got {code}")
+        check(
+            "Probe could NOT verify" in buf.getvalue()
+            and "Verified upstream change" not in buf.getvalue(),
+            "a blind-only report renders ONLY the probe-health section",
+        )
+    finally:
+        d.run_checks, d.read_codex_events = real_run, real_read
+
+
+def test_enum_body_survives_struct_variants_and_indentation() -> None:
+    """The two positional assumptions `_enum_body` replaced, both directions.
+
+    `(.*?)\\}` stopped at the first `}` (a struct variant truncated the enum);
+    `(.*?)\\n\\}` additionally demanded a column-0 closing brace, so grok's enum
+    reading as "moved upstream" was really just indentation (#793).
+    """
+    struct_variant = (
+        "pub enum HookEvent {\n"
+        "    SessionStart,\n"
+        "    ToolCallBefore { name: String, args: Value },\n"
+        "    SessionEnd,\n"
+        "}\n"
+    )
+    got = d.upstream_codewhale_hooks(struct_variant)
+    check(
+        got is not None and "session_end" in got,
+        f"a variant AFTER a struct variant survives (no first-`}}` truncation): {got}",
+    )
+
+    # The OVER-capture direction: an indented enum's own `}` is not at column 0,
+    # so the old `\n\}` form ran past it to the next top-level brace and swallowed
+    # the following `impl` block. `upstream_codex_hooks` scrapes every CamelCase
+    # word, so those idents became phantom variants — and a phantom is worse than
+    # a miss, because it makes a real rename look present. Measured on grok's real
+    # event.rs the over-capture was 2324 chars.
+    indented = (
+        "mod outer {\n"
+        "    pub enum HookEventName {\n"
+        "        PreToolUse,\n"
+        "    }\n"
+        "\n"
+        "    impl HookEventName {\n"
+        "        fn f(&self) -> PhantomVariant { PhantomVariant }\n"
+        "    }\n"
+        "}\n"
+    )
+    got = d.upstream_codex_hooks(indented)
+    check(got is not None and "PreToolUse" in got, f"the real variant is found: {got}")
+    check(
+        got is not None and "PhantomVariant" not in got,
+        f"the body STOPS at the enum's own brace — no spill into the impl: {got}",
+    )
+
+    # A brace inside a comment must not unbalance the count...
+    commented = (
+        "pub enum HookEvent {\n"
+        "    /// Fires like `Foo { bar }` does.\n"
+        "    SessionStart,\n"
+        "    SessionEnd,\n"
+        "}\n"
+    )
+    got = d.upstream_codewhale_hooks(commented)
+    check(
+        got is not None and {"session_start", "session_end"} <= got,
+        f"a brace in a comment does not truncate the body: {got}",
+    )
+
+    # ...and a genuinely absent enum still reads None, never an empty set (which
+    # would report every registered event as GONE).
+    check(d.upstream_codewhale_hooks("struct Other {}") is None, "absent enum -> None")
+    check(d.upstream_codex_hooks("struct Other {}") is None, "absent enum -> None")
+    # A prefix name must not bind to a longer enum.
+    check(
+        d.upstream_codewhale_hooks("pub enum HookEventName {\n    PreToolUse,\n}") is None,
+        "`HookEvent` must not match `enum HookEventName`",
+    )
+
+
+def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
+    """The H1 is a CROSS-FILE contract with upstream-drift.yml.
+
+    The workflow titles the GitHub issue with `head -1 | sed 's/^# //'` instead
+    of keeping its own copy of these strings, so this pins both halves: the
+    per-disposition text here, and the fact that the YAML still reads it that
+    way. #793's title said "drift detected" for a report whose five drift lines
+    were every one of them false positives — with the title carrying the
+    disposition, a wrong one mis-signals the issue list itself.
+    """
+    real = d.run_checks
+    cases = [
+        ("breaking", -4, "Upstream CLI wire-format drift detected"),
+        ("review", -3, "New upstream events to review"),
+        ("blind", -2, "Upstream drift watch could not verify — repin needed"),
+        ("clean", None, "Upstream wire-format watch: no drift"),
+    ]
+    try:
+        for name, slot, want in cases:
+            def fake(*a: object, _s: int | None = slot, **k: object) -> None:
+                if _s is not None:
+                    a[_s].append("LINE")  # type: ignore[union-attr]
+
+            d.run_checks = fake
+            buf = io.StringIO()
+            real_stdout, sys.stdout = sys.stdout, buf
+            try:
+                d.main()
+            finally:
+                sys.stdout = real_stdout
+            got = buf.getvalue().splitlines()[0]
+            check(got == f"# {want}", f"{name}: H1 is {want!r}, got {got!r}")
+    finally:
+        d.run_checks = real
+
+    # The consumer half: if the workflow stops reading the H1 (or goes back to
+    # grepping the section headings) this contract is silently one-way again.
+    wf = (pathlib.Path(__file__).parents[1] / ".github/workflows/upstream-drift.yml").read_text()
+    check(
+        "head -1 drift-report.md" in wf and "s/^# //" in wf,
+        "upstream-drift.yml still titles the issue from the report's H1",
+    )
+    check(
+        "Verified upstream change" not in wf and "could not verify — repin" not in wf,
+        "upstream-drift.yml keeps NO second copy of the report's strings",
+    )
+
+
 def main() -> int:
     for t in (
         test_try_fetch_classifies_permanent_vs_transient,
@@ -427,6 +922,12 @@ def main() -> int:
         test_parser_never_drops_a_real_event,
         test_block_scrape_is_bounded_to_the_decoder,
         test_every_const_array_reader_uses_the_shared_parser,
+        test_anchor_gate_fires_in_both_directions,
+        test_793_stale_pin_reads_as_probe_health_not_three_renames,
+        test_every_swept_url_declares_an_anchor,
+        test_report_separates_verified_change_from_probe_health,
+        test_enum_body_survives_struct_variants_and_indentation,
+        test_report_h1_is_the_issue_title_and_carries_the_disposition,
     ):
         t()
     if FAILS:

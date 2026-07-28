@@ -61,6 +61,23 @@ debug = "line-tables-only"
 # Dependencies never need debuginfo for our own backtraces.
 debug = false
 
+[profile.dev.package.pixtuoid-scene]
+# The audio DSP (radix-2 FFT + per-sample synthesis over ~2^21-point buffers) is
+# the one genuinely compute-bound thing in the workspace, and `test` inherits
+# `dev` — so the synth fingerprint tests were paying ~6x for unoptimized
+# butterflies and sin loops, NOT for doing too much work (#795: the whole
+# pixtuoid-scene suite 87s -> 15s, `day_take_stems…` 72s -> 12s, at +3.5s of
+# one-time codegen). Debug assertions stay ON. This cannot perturb the ratified
+# spectral pins, because none of them asserts bit equality: the fingerprints
+# compare centroid within ±20% and band-energy shares within ±0.10 (drums ±0.15,
+# fresh noise per build), and the sample checks are `is_finite() && abs() <= 1.0`
+# — tolerances orders of magnitude wider than any codegen-level float difference.
+# (rustc also has no fast-math on stable; reassociation / FMA contraction are
+# opt-in per operation via `f32::algebraic_*`. That is a second reason, not the
+# load-bearing one — the tolerances are.) Verified by running the pins at both
+# opt-levels, not by reading.
+opt-level = 2
+
 # Opt-in full debuginfo for an actual debugger session (the third stanza of the
 # official Cargo build-performance recipe): `cargo build --profile debugging`.
 [profile.debugging]

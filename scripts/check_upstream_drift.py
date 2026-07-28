@@ -32,7 +32,8 @@ and compares against the live upstream:
                           esengine/DeepSeek-Reasonix internal/hook/hook.go
   * CodeWhale hooks    -> `CODEWHALE_EVENTS` in crates/pixtuoid/src/install/codewhale.rs
                           vs the snake_case `HookEvent` enum in
-                          Hmbown/CodeWhale crates/tui/src/hooks.rs
+                          Hmbown/CodeWhale crates/tui/src/hooks/config.rs (the
+                          DEEPSEEK_* env vars ride its sibling hooks/executor.rs)
   * grok hooks/wire    -> `GROK_EVENTS` in crates/pixtuoid/src/install/grok.rs
                           vs the `HookEventName` enum + envelope/payload serde in
                           xai-org/grok-build xai-grok-hooks/src/event.rs, PLUS the
@@ -81,11 +82,31 @@ keys (agent/shell_hooks.py). Cursor + CC (closed binaries, docs-prose only) and
 Antigravity (no fetchable schema) CANNOT be field-watched — the in-code drift
 breadcrumbs (defense #2: drift::missing_field/unknown_event) are the limit there.
 
+Findings carry a DISPOSITION, because "upstream changed" and "our probe missed"
+need different work and only one of them is a statement about upstream:
+
+  * VERIFIED CHANGE (`breaking`) — the surface that OWNS the name was read
+    successfully and the name is gone. Fix the decoder.
+  * REVIEW (`review`) — a new upstream event/type/namespace to adopt or
+    knowingly ignore.
+  * PROBE HEALTH (`blind`) — a lookup missed: a 404, an absent anchor, a parser
+    that found nothing. All the script knows is that ITS OWN PROBE failed, so
+    the affected checks are SKIPPED rather than reported as renames. Repin and
+    verify by hand.
+  * TRANSIENT (`errors`) — network/HTTP trouble; retry later.
+
+Keeping those apart is not cosmetic. #793 filed five phantom renames under
+"decoder will silently drop events": CodeWhale had split `crates/tui/src/hooks.rs`
+into a module directory, the stale pin still returned 200 as a `mod`/`pub use`
+facade, and the unanchored sweep read the facade's silence as three env-var
+renames. Following that report would have renamed three WORKING env vars. Every
+document swept for name-presence therefore declares an ANCHOR (see `ANCHORS`)
+proving it is still the document that owns those names — no anchor, no sweep.
+
 Exit codes:
-  0  no drift
-  1  actionable drift (a name we depend on vanished, or a new upstream Codex
-     or CC hook event we neither register nor intentionally omit) -> open a
-     tracking issue
+  0  no findings
+  1  actionable (verified drift, a review ping, OR probe health — all three need
+     a human) -> open a tracking issue
   2  could not check (network/HTTP error) -> transient, do NOT alarm
 
 See crates/pixtuoid-core/CLAUDE.md "Keeping the decode mapping current".
@@ -99,6 +120,7 @@ import pathlib
 import re
 import sys
 import traceback
+import typing
 import urllib.error
 import urllib.request
 
@@ -107,13 +129,13 @@ import urllib.request
 # subclasses it), but the READ phase inside fetch() raises raw
 # socket.timeout / ConnectionResetError (OSError subclasses, NOT URLError)
 # and http.client.IncompleteRead (HTTPException) — left uncaught they exit 1
-# and the workflow files a junk "confirmed drift" issue from an empty report.
+# and the workflow files a junk drift-titled issue from an empty report.
 # URLError is itself an OSError subclass; kept explicit to document intent.
 FETCH_ERRORS = (urllib.error.URLError, OSError, http.client.HTTPException)
 
 # A permanent HTTP status means the URL itself is wrong/gone — our pinned
 # upstream path moved, so the watch is BLIND for that source until fixed. This is
-# BREAKING, never transient. Everything else (403/429 throttling behind a CDN,
+# PROBE HEALTH (our pin is wrong), never transient. Everything else (403/429 throttling behind a CDN,
 # 5xx server hiccups, connect/read timeouts) is genuinely retry-later. The trap
 # this guards: `HTTPError` subclasses `URLError` ⊂ FETCH_ERRORS, so a 404 used to
 # fall into the transient bucket and the weekly job stayed green while silently
@@ -254,9 +276,18 @@ REASONIX_KNOWN_OMITTED = {
 # reason, #302).
 REASONIX_PAYLOAD_FIELDS = {"event", "cwd", "toolName", "toolArgs", "subject", "message"}
 
+# CodeWhale split `crates/tui/src/hooks.rs` into a module DIRECTORY (#793): the
+# old path still 200s as the module root, but it is now a `mod`/`pub use` shim,
+# so both depended surfaces read empty there — the enum moved to `hooks/config.rs`
+# and `HookContext::to_env_vars` to `hooks/executor.rs`. They are two files now,
+# hence two URLs; neither surface's CONTENT changed.
 CODEWHALE_HOOK_URL = (
     "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
-    "crates/tui/src/hooks.rs"
+    "crates/tui/src/hooks/config.rs"
+)
+CODEWHALE_EXECUTOR_URL = (
+    "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
+    "crates/tui/src/hooks/executor.rs"
 )
 
 # CodeWhale hook events we DELIBERATELY do not register (snake_case wire names):
@@ -274,7 +305,8 @@ CODEWHALE_KNOWN_OMITTED = {
 # env vars into the cwd-keyed `{cwd, tool, tool_args}` envelope the decoder reads
 # (source/codewhale.rs). The envelope FIELD names are our own shim contract (they
 # can't drift), but the DEEPSEEK_* names are CodeWhale's — set by
-# `HookContext::to_env_vars` in the SAME hooks.rs the event check fetches. WORKSPACE
+# `HookContext::to_env_vars` in hooks/executor.rs (its own fetch since the
+# hooks.rs -> hooks/ split; it used to share the event check's file). WORKSPACE
 # is load-bearing: it becomes the envelope `cwd` = the AgentId KEY, so a rename →
 # the shim reads None → empty cwd → the decoder drops EVERY session (no sprite).
 # (DEEPSEEK_SESSION_ID is deliberately NOT read — proven inconsistent — so it's
@@ -581,6 +613,117 @@ OMP_ASK_URL = (
 OMP_ASK_FIELDS = {"questions", "question"}
 
 
+class Anchor(typing.NamedTuple):
+    """The declaration that OWNS the names we check a fetched document for."""
+
+    pattern: str
+    """Regex matching that declaration in the document."""
+    owns: str
+    """Human name of the declaration, for the probe-health message."""
+
+
+# Every document we sweep for "is this name still present upstream?" declares the
+# anchor that proves it is STILL the document owning those names.
+#
+# WHY this exists (#793): absence is only evidence of an upstream RENAME if the
+# document still contains the declaration that owns the name. Drop that premise
+# and a stale pin reads as mass drift. CodeWhale split `crates/tui/src/hooks.rs`
+# into a module directory; the old path kept returning 200 as a `mod`/`pub use`
+# facade, so `try_fetch` was satisfied and every depended `DEEPSEEK_*` name was
+# missing from it. The watcher reported all three as upstream renames and filed
+# an issue saying the decoder was broken. Nothing upstream had changed — acting
+# on that report would have renamed three WORKING env vars.
+#
+# Choosing one, in descending strength — take the strongest available, because
+# THIS comment is what picks anchor #17:
+#   1. The DECLARATION that owns the checked names, so an upstream move takes
+#      both and the sweep cannot run against a document missing them.
+#   2. Failing that, a declaration co-located with them in the same file — this
+#      proves file IDENTITY, which is weaker: "declaration X moved out while Y
+#      stayed" satisfies the anchor and still reports phantom renames. Rows
+#      marked `identity` below are that weaker grade; they are not upgradeable
+#      without a parser, and a docs PAGE (cursor/kimi/CC) can only ever be this.
+#   3. Never one of the checked names itself — that is circular and makes the
+#      check vacuous (a rename would take the anchor too, so it could never fire).
+# Every pattern below was verified against the live document when it was added.
+ANCHORS: dict[str, Anchor] = {
+    # owner-grade: each anchor is the declaration the checked names live inside.
+    CODEWHALE_EXECUTOR_URL: Anchor(r"fn to_env_vars", "`HookContext::to_env_vars`"),
+    GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
+    HERMES_HOOK_URL: Anchor(r"_DEFAULT_PAYLOADS", "`_DEFAULT_PAYLOADS`"),
+    HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
+    OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName", "the `PluginHookName` union"),
+    # `SessionUpdate` owns the checked xAI variants; `SessionNotification` (the
+    # obvious pick) sits 13KB earlier and does NOT — moving the enum out would
+    # leave it satisfied while every variant read as renamed.
+    GROK_NOTIFICATION_URL: Anchor(r"pub enum SessionUpdate", "the `SessionUpdate` enum"),
+    # The const IDENT owns the checked VALUE `"session_exit"`; a value rename
+    # keeps the identifier, so the anchor holds and the check still fires.
+    OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
+    OMP_ASK_URL: Anchor(r"export class AskTool", "the `AskTool` class"),
+    # identity-grade: co-located, not owning. A union head or page title.
+    OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
+    OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
+    GROK_HOOK_URL: Anchor(r"pub struct HookEventEnvelope", "`HookEventEnvelope`"),
+    OMP_SESSION_ENTRIES_URL: Anchor(r"export type SessionEntry", "the `SessionEntry` union"),
+    OMP_AI_TYPES_URL: Anchor(r"export type Message =", "the `Message` union"),
+    CURSOR_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),
+    KIMI_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),
+    CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
+    CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
+}
+
+
+# The other half of the ANCHORS population: documents fetched with plain
+# `try_fetch`, where a PARSER is the identity proof (it returns None on the wrong
+# content, and the caller files probe health). Written down so the selftest can
+# assert this set equals the live `try_fetch` call sites — otherwise "every swept
+# document is anchored" is only enforced for the `fetch_anchored` spelling, and
+# the next unanchored sweep just uses the other one.
+UNANCHORED_BY_DESIGN: dict[str, str] = {
+    CODEX_PROTOCOL_URL: "parser-gated: _enum_body / codex_turn_context_fields return None",
+    CODEX_MODELS_URL: "parser-gated: _enum_body(ResponseItem) returns None",
+    REASONIX_HOOK_URL: "parser-gated: upstream_reasonix_hooks returns None (gates the field sweep)",
+    CODEWHALE_HOOK_URL: "parser-gated: upstream_codewhale_hooks -> _enum_body returns None",
+    COPILOT_SCHEMA_URL: "parser-gated: the SessionEvent anyOf union gates all three sweeps",
+    OPENCLAW_PATHS_URL: "value comparison: both sides are read, no presence sweep",
+    ACP_V1_SCHEMA_URL: "parser-gated: upstream_acp_session_update_tags returns None",
+    ACP_V1_SCHEMA_UNSTABLE_URL: "parser-gated: same",
+}
+
+
+def probe_failed(
+    what: str, where: str, consequence: str, *, our_source: bool = False
+) -> str:
+    """One wording for every probe-health line.
+
+    The distinction this enforces is the whole point of the `blind` bucket: all
+    the script knows when a lookup misses is that ITS OWN PROBE missed. "Upstream
+    moved it" is a guess, and #793 shipped that guess as fact across five
+    false-positive drift lines. Verified drift says what upstream did; this says
+    what we failed to read, and points at the pin rather than the decoder.
+
+    `our_source=True` for a failure to read OUR OWN source — the plugin template, this
+    script's parsers. Nothing upstream is even consulted on those paths, so the
+    default's "upstream may have moved it … re-verify upstream by hand" would be
+    the wrong cause AND the wrong action. A change whose thesis is "don't assert
+    a cause you didn't verify" must not assert one in the other direction.
+    """
+    if our_source:
+        cause = "Our own parser or constant is stale; nothing upstream was consulted."
+        action = "Fix the script — this says nothing about upstream."
+    else:
+        cause = (
+            "Upstream may have moved or reshaped it, or our pin/parser may be "
+            "stale; this is NOT evidence that upstream changed."
+        )
+        action = (
+            "Re-verify upstream by hand, then repin — do NOT change a decoder "
+            "on this alone."
+        )
+    return f"could not verify {what} at {where} — {cause} {consequence} {action}"
+
+
 def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
     with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (trusted hosts)
@@ -588,25 +731,28 @@ def fetch(url: str) -> str:
 
 
 def try_fetch(
-    url: str, label: str, breaking: list[str], errors: list[str]
+    url: str, label: str, blind: list[str], errors: list[str]
 ) -> str | None:
     """Fetch `url`, classifying failures so a PERMANENT upstream move is loud.
 
     A `PERMANENT_HTTP_STATUS` (404/410/451) means our pinned URL is wrong/gone →
-    `breaking` (the watch is blind for this source until the `*_URL` constant is
-    fixed). 403/429/5xx + connect/read timeouts → `errors` (transient). Returns
-    the body, or None on any failure (the caller skips that source's checks).
-    Centralizes the try/except every fetch site repeated, AND fixes the
+    `blind` (probe health: the watch cannot see this source until the `*_URL`
+    constant is fixed — a fact about OUR pin, not about upstream's wire format).
+    403/429/5xx + connect/read timeouts → `errors` (transient). Returns the body,
+    or None on any failure (the caller skips that source's checks). Centralizes
+    the try/except every fetch site repeated, AND fixes the
     `HTTPError ⊂ URLError ⊂ FETCH_ERRORS` swallow that bucketed 404 as transient.
     """
     try:
         return fetch(url)
     except urllib.error.HTTPError as e:
         if e.code in PERMANENT_HTTP_STATUS:
-            breaking.append(
-                f"{label}: HTTP {e.code} at {url} — the upstream URL moved or was "
-                f"removed; drift-watch is BLIND for this source until the *_URL "
-                f"constant / parser is updated."
+            blind.append(
+                probe_failed(
+                    f"{label}",
+                    f"{url} (HTTP {e.code})",
+                    "Every check for this source was SKIPPED.",
+                )
             )
         else:
             errors.append(f"{label}: transient HTTP {e.code} at {url}: {e}")
@@ -614,6 +760,56 @@ def try_fetch(
     except FETCH_ERRORS as e:
         errors.append(f"{label}: fetch failed (transient?): {e}")
         return None
+
+
+def fetch_anchored(
+    url: str, label: str, blind: list[str], errors: list[str]
+) -> str | None:
+    """`try_fetch` plus the identity proof required before sweeping a document.
+
+    Returns the body only when the document still contains its `ANCHORS` entry.
+    A missing anchor means the fetch succeeded but landed on the wrong content
+    (a re-export facade, a restructured page), so every presence check that
+    would have run is SKIPPED and reported as probe health instead of drift —
+    the #793 class, made unrepresentable rather than merely fixed once.
+
+    An undeclared URL is reported, never swept. It cannot raise: `run_checks` is
+    wrapped in `except Exception` that routes bugs to the TRANSIENT bucket
+    (exit 2, warn-only) to avoid filing junk issues — so a bare `KeyError` here
+    would degrade "someone added an unproven sweep" into a green-ish warning,
+    which is the fail-open shape this whole change exists to remove. The
+    selftest's `test_every_swept_url_declares_an_anchor` is the development-time
+    gate; this is the runtime backstop, and it is deliberately loud.
+    """
+    anchor = ANCHORS.get(url)
+    if anchor is None:
+        blind.append(
+            probe_failed(
+                f"{label}: no ANCHORS entry declares what proves this document's identity",
+                url,
+                "It was NOT swept — an unproven document cannot distinguish an "
+                "upstream rename from a stale pin. Add its anchor to ANCHORS "
+                "(and a sample to the selftest's ANCHOR_SAMPLES).",
+            )
+        )
+        return None
+    text = try_fetch(url, label, blind, errors)
+    if text is None:
+        return None
+    if not re.search(anchor.pattern, text):
+        blind.append(
+            probe_failed(
+                f"{label}: the document no longer contains {anchor.owns}",
+                url,
+                "It still fetches, so the probe landed on the wrong content — "
+                "most likely a stale pin (a moved declaration, or a re-export "
+                "facade left at the old path) rather than an upstream rename. "
+                "Every presence check riding this document was SKIPPED, NOT "
+                "reported as drift.",
+            )
+        )
+        return None
+    return text
 
 
 def rust_const_str_array(rel_path: str, const_name: str) -> set[str]:
@@ -625,7 +821,7 @@ def rust_const_str_array(rel_path: str, const_name: str) -> set[str]:
     real: a WHY comment added inside CODEX_EVENTS mentioned the SessionEnd
     payload's `reason const "other"`, the watcher read `other` as a REGISTERED
     hook event, found no such variant upstream, and reported a phantom
-    "⛔ Breaking drift — decoder will silently drop events" that auto-filed an
+    "⛔ Breaking drift" heading of the day, auto-filing an
     issue and failed the run. A watcher that cries wolf gets its real alarms
     ignored, so every event reader shares this one parser.
     """
@@ -791,11 +987,13 @@ def read_dispatch_names() -> set[str]:
 
 
 def upstream_codex_hooks(text: str) -> set[str] | None:
-    m = re.search(r"enum HookEventName\s*\{(.*?)\}", text, re.S)
-    if not m:
+    """The Codex `HookEventName` variants. Reads the body through `_enum_body`
+    (see there for why guessing where an enum ends is what broke #793)."""
+    body = _enum_body(text, "HookEventName")
+    if body is None:
         return None
     # variant identifiers (drop comments/attrs by keeping CamelCase words)
-    return set(re.findall(r"\b([A-Z][A-Za-z]+)\b", m.group(1)))
+    return set(re.findall(r"\b([A-Z][A-Za-z]+)\b", body)) or None
 
 
 def _snake_case(camel: str) -> str:
@@ -803,9 +1001,35 @@ def _snake_case(camel: str) -> str:
 
 
 def _enum_body(text: str, enum_name: str) -> str | None:
-    """The brace-balanced body of `enum <enum_name> { … }` (the `?` non-greedy
-    regexes elsewhere stop at the FIRST `}`, which a struct-variant body would
-    truncate — so balance explicitly)."""
+    """The brace-balanced body of `enum <enum_name> { … }`.
+
+    THE enum-body reader for every Rust surface we watch. The ad-hoc regexes it
+    replaced each guessed where the body ENDS, and both guesses break on a
+    harmless upstream refactor:
+
+    * `(.*?)\\}` stops at the FIRST `}`, so a single struct variant
+      (`ToolCallBefore { name: String }`) truncates the enum and every variant
+      after it reads as GONE — a phantom rename per variant.
+    * `(.*?)\\n\\}` instead demands a column-0 closing brace, so an INDENTED
+      enum does not stop at its own brace; it runs on to the next top-level one,
+      over-capturing whatever lies between. Measured against grok's real
+      event.rs: 2324 characters, spilling into the following `impl` block —
+      whose CamelCase idents a variant scrape then admits as variants.
+
+    Balancing counts braces instead. NOT what fixed grok in #793, to be clear:
+    there the enum is macro-GENERATED, so its declaration holds `$variant`
+    placeholders and no amount of balancing recovers the names —
+    `upstream_grok_hooks` falls through to the `hook_events!` invocation table
+    for that. This removes a separate latent defect living on the same code.
+
+    Comments are stripped FIRST because they are scanned for braces otherwise:
+    a `// see Foo { bar }` doc line inside the enum would unbalance the count.
+    `strip_rust_comments` preserves string literals, so `rename = "…"` attrs
+    that callers read out of the returned body survive.
+    """
+    text = strip_rust_comments(text)
+    # `\\s*\\{` (not `\\b`) so a prefix name can't match a longer enum:
+    # `HookEvent` must not bind to `enum HookEventName {`.
     m = re.search(rf"enum\s+{enum_name}\s*\{{", text)
     if not m:
         return None
@@ -822,10 +1046,17 @@ def _enum_body(text: str, enum_name: str) -> str | None:
 
 
 def _strip_nested(s: str) -> str:
-    """Remove line/doc comments then iteratively strip innermost `(…)`/`{…}`
-    (tuple params, struct-variant bodies, AND attr parens) so only top-level
-    variant idents survive — else a CamelCase field/param TYPE reads as a variant."""
-    s = re.sub(r"//[^\n]*", "", s)
+    """Iteratively strip innermost `(…)`/`{…}` (tuple params, struct-variant
+    bodies, AND attr parens) so only top-level variant idents survive — else a
+    CamelCase field/param TYPE reads as a variant.
+
+    PRECONDITION: comments are already gone — every caller receives an
+    `_enum_body` result, which strips them with `strip_rust_comments`. This used
+    to re-strip with a naive `//[^\\n]*`, which is not merely redundant: that
+    pattern eats to end-of-line from a `//` inside a STRING LITERAL, so one
+    `rename = "http://…"` attr would silently delete every variant after it on
+    that line. Two lexers, one un-doing the other's guarantee.
+    """
     prev = None
     while prev != s:
         prev = s
@@ -841,12 +1072,13 @@ def upstream_codex_enum_types(text: str, enum_name: str) -> set[str] | None:
     `alias="…"` literal. This over-includes (a renamed variant keeps its
     snake_case form too), which is HARMLESS: the check is one-directional — it
     only confirms a DEPENDED type is still present, never that a name is absent.
-    Returns None if the enum can't be located (→ a loud "upstream moved it")."""
+    Returns None if the enum can't be located (→ probe health: the caller files a
+    `blind` line and SKIPS the check, rather than claiming upstream moved it)."""
     body = _enum_body(text, enum_name)
     if body is None:
         return None
     # rename/alias literals must be read BEFORE `_strip_nested` eats the attr parens.
-    names = set(re.findall(r'(?:rename|alias)\s*=\s*"([^"]+)"', re.sub(r"//[^\n]*", "", body)))
+    names = set(re.findall(r'(?:rename|alias)\s*=\s*"([^"]+)"', body))
     names.update(_snake_case(v) for v in re.findall(r"\b([A-Z][A-Za-z0-9]*)\b", _strip_nested(body)))
     return names or None
 
@@ -1032,11 +1264,30 @@ def read_kimi_events() -> set[str]:
 
 def upstream_grok_hooks(text: str) -> set[str] | None:
     """The HookEventName enum variants (bare Rust idents — registration keys
-    accept the PascalCase spelling, so these ARE the names we register)."""
+    accept the PascalCase spelling, so these ARE the names we register).
+
+    TWO declaration shapes, tried in order. Upstream originally wrote a plain
+    `pub enum HookEventName { … }`; it now GENERATES that enum from a
+    `hook_events! { … }` macro table (one row per event, carrying the event's
+    display name, deserialize aliases and trait triple). The plain-enum regex
+    still matches the macro DEFINITION's body — but that body holds `$variant`
+    placeholders, not variants, so it reads empty and the whole 15-variant set
+    looked "not found at the pinned path" (#793). Hence the fall-THROUGH: an
+    empty plain-enum parse is not an answer, it's a signal to read the table.
+    """
     m = re.search(r"pub enum HookEventName \{(.*?)\n\}", text, re.S)
-    if not m:
+    if m:
+        found = set(re.findall(r"(?m)^\s*([A-Z]\w+),", m.group(1)))
+        if found:
+            return found
+    # Comments first: `rust_block_after` measures braces, and a doc comment on a
+    # row would otherwise read as a variant (upstream annotates Stop/SubagentEnd).
+    block = rust_block_after(strip_rust_comments(text), r"(?m)^\s*hook_events!\s*")
+    if block is None:
         return None
-    found = set(re.findall(r"(?m)^\s*([A-Z]\w+),", m.group(1)))
+    # Row headers only (`Variant {`) — the row BODY is `key: value` lines whose
+    # aliases/traits carry CamelCase tokens (Observe/Tested) we must not admit.
+    found = set(re.findall(r"(?m)^\s*([A-Z]\w+)\s*\{", block))
     return found or None
 
 
@@ -1045,7 +1296,7 @@ def upstream_acp_session_update_tags(text: str) -> set[str] | None:
     `sessionUpdate` `const` of each member of the `$defs.SessionUpdate` closed
     `oneOf` union (members carry the const INLINE; a `$ref` member is resolved).
     Returns None if the schema won't parse or the union is absent (→ the caller
-    alarms breaking, the ACP tag flood guard is blind)."""
+    files probe health and SKIPS the check; the ACP tag flood guard is blind)."""
     try:
         root = json.loads(text)
     except json.JSONDecodeError:
@@ -1113,7 +1364,7 @@ def upstream_copilot_namespaces(text: str) -> set[str] | None:
     type-tags (`audio`/`text`/`image`/`file`/…) that share the `type.const` shape
     but are never a top-level envelope `type`, inflating the set with ~30 phantom
     families. Returns None if the schema won't parse or the union is absent (→ the
-    caller alarms breaking, the namespace flood guard is blind)."""
+    caller files probe health and SKIPS every Copilot check)."""
     try:
         defs = json.loads(text).get("definitions", {})
     except (json.JSONDecodeError, AttributeError):
@@ -1136,7 +1387,7 @@ def upstream_omp_entry_types(text: str) -> set[str] | None:
     session-entries.ts. Two forms: direct `type: "literal"` discriminators, and
     `type: typeof CONST` refs whose value is a `CONST = "literal"` binding (the
     `title` / `title_change` slots). Returns None if neither form is found (→ the
-    caller alarms breaking, the entry-type flood guard is blind)."""
+    caller files probe health and SKIPS the check; the entry-type flood guard is blind)."""
     literals = set(re.findall(r'type:\s*"(\w+)"', text))
     for const_name in re.findall(r"type:\s*typeof\s+(\w+)", text):
         m = re.search(rf'{re.escape(const_name)}\s*=\s*"(\w+)"', text)
@@ -1150,7 +1401,7 @@ def upstream_copilot_field_names(text: str) -> set[str] | None:
     session-events schema — the envelope fields (agentId/sessionId) AND the
     nested `data.properties` fields (toolCallId/toolName/arguments/…). Used
     one-directional: a field the decoder READS that is absent from the whole
-    schema is a rename. Returns None if the JSON won't parse (→ loud breaking)."""
+    schema is a rename. Returns None if the JSON won't parse (→ probe health, not a drift claim)."""
     try:
         root = json.loads(text)
     except json.JSONDecodeError:
@@ -1173,16 +1424,19 @@ def upstream_copilot_field_names(text: str) -> set[str] | None:
 
 
 def upstream_codewhale_hooks(text: str) -> set[str] | None:
-    # The TUI shell-command hook enum `pub enum HookEvent { SessionStart, ... }`
-    # in crates/tui/src/hooks.rs (NOT the app-server `codewhale-hooks` sink enum
-    # in crates/hooks). serde `rename_all = "snake_case"`, so convert each
-    # CamelCase variant to the wire name we register. Variant lines are bare
-    # `Identifier,` — doc comments (`///`) start with `/` and are skipped.
-    m = re.search(r"pub enum HookEvent\s*\{(.*?)\}", text, re.S)
-    if not m:
+    """The CodeWhale TUI shell-command hook wire names.
+
+    Reads `pub enum HookEvent` in `crates/tui/src/hooks/config.rs` — NOT the
+    app-server `codewhale-hooks` sink enum in `crates/hooks`, a different
+    mechanism sharing no configuration. serde `rename_all = "snake_case"`, so
+    each CamelCase variant converts to the name we register. Body via
+    `_enum_body` (see there on why the end of an enum is not guessable).
+    """
+    body = _enum_body(text, "HookEvent")
+    if body is None:
         return None
-    variants = re.findall(r"^\s*([A-Z][A-Za-z0-9]+)\s*,", m.group(1), re.M)
-    snake = {re.sub(r"(?<!^)(?=[A-Z])", "_", v).lower() for v in variants}
+    variants = re.findall(r"^\s*([A-Z][A-Za-z0-9]+)\s*,", body, re.M)
+    snake = {_snake_case(v) for v in variants}
     return snake or None
 
 
@@ -1226,27 +1480,38 @@ def run_checks(
     kimi_ours: set[str] | None,
     breaking: list[str],
     review: list[str],
+    blind: list[str],
     errors: list[str],
 ) -> None:
     """The upstream comparisons. Split from main() so an UNEXPECTED exception
     here (a script bug, an exotic network failure outside FETCH_ERRORS) can be
     routed to the transient bucket with the partial report intact — without it
-    the interpreter exits 1 and the workflow files a junk "confirmed drift"
+    the interpreter exits 1 and the workflow files a junk drift-titled
     issue from an empty report. The deliberate read-our-own-source LOUD path
-    stays inside main(), before this is called, and still exits 1."""
+    stays inside main(), before this is called, and still exits 1.
+
+    Four buckets, because they call for four different actions. `breaking` is a
+    VERIFIED upstream change: we read the surface that owns a name and the name
+    is gone — fix the decoder. `blind` is probe health: a lookup missed, so all
+    we know is that OUR probe failed — repin, and verify by hand before touching
+    anything. `review` is a new upstream surface. `errors` is transient.
+    Collapsing `blind` into `breaking` is what made #793 report five phantom
+    renames as "decoder will silently drop events"."""
     # --- Codex hook events + rollout decode vocabulary (only the FETCH is
     #     transient). protocol.rs holds BOTH the HookEventName enum (hooks) and
     #     the EventMsg enum (rollout `event_msg` types); the `response_item` types
     #     live in the sibling models.rs (ResponseItem). ------------------------
     if codex_ours is not None or codex_rollout is not None:
-        text = try_fetch(CODEX_PROTOCOL_URL, "Codex source", breaking, errors)
+        text = try_fetch(CODEX_PROTOCOL_URL, "Codex source", blind, errors)
         if text is not None and codex_ours is not None:
             upstream = upstream_codex_hooks(text)
             if upstream is None:
-                breaking.append(
-                    "Codex `HookEventName` enum not found at the pinned path "
-                    "(codex-rs/protocol/src/protocol.rs) — upstream moved it; "
-                    "update CODEX_PROTOCOL_URL / the parser."
+                blind.append(
+                    probe_failed(
+                        "the Codex `HookEventName` enum",
+                        "codex-rs/protocol/src/protocol.rs",
+                        "The Codex hook-event watch was SKIPPED.",
+                    )
                 )
             else:
                 for ev in sorted(codex_ours):
@@ -1271,9 +1536,12 @@ def run_checks(
             event_msg_ours, _ = codex_rollout
             up_ev = upstream_codex_enum_types(text, "EventMsg")
             if up_ev is None:
-                breaking.append(
-                    "Codex `EventMsg` enum not found in protocol.rs — upstream "
-                    "moved it; update the parser."
+                blind.append(
+                    probe_failed(
+                        "the Codex `EventMsg` enum",
+                        "protocol.rs",
+                        "The rollout event_msg watch was SKIPPED.",
+                    )
                 )
             else:
                 for t in sorted(event_msg_ours):
@@ -1293,9 +1561,12 @@ def run_checks(
         if text is not None and codex_rollout is not None:
             up_outers = upstream_codex_enum_types(text, "RolloutItem")
             if up_outers is None:
-                breaking.append(
-                    "Codex `RolloutItem` enum not found in protocol.rs — upstream "
-                    "moved it; update the parser (the rollout OUTER flood guard is blind)."
+                blind.append(
+                    probe_failed(
+                        "the Codex `RolloutItem` enum",
+                        "protocol.rs",
+                        "The rollout OUTER flood guard was SKIPPED.",
+                    )
                 )
             else:
                 known_outers = read_codex_rollout_outers()
@@ -1313,10 +1584,12 @@ def run_checks(
         if text is not None:
             tc_fields = codex_turn_context_fields(text)
             if tc_fields is None:
-                breaking.append(
-                    "Codex `TurnContextItem` struct not found in protocol.rs — "
-                    "upstream moved it; update the parser (burn-tier model/effort "
-                    "watch is blind)."
+                blind.append(
+                    probe_failed(
+                        "the Codex `TurnContextItem` struct",
+                        "protocol.rs",
+                        "The burn-tier model/effort watch was SKIPPED.",
+                    )
                 )
             else:
                 for f in ("model", "effort"):
@@ -1330,13 +1603,16 @@ def run_checks(
         # Rollout `response_item` types → the ResponseItem enum in models.rs.
         if codex_rollout is not None:
             _, response_item_ours = codex_rollout
-            models = try_fetch(CODEX_MODELS_URL, "Codex models", breaking, errors)
+            models = try_fetch(CODEX_MODELS_URL, "Codex models", blind, errors)
             if models is not None:
                 up_ri = upstream_codex_enum_types(models, "ResponseItem")
                 if up_ri is None:
-                    breaking.append(
-                        "Codex `ResponseItem` enum not found in models.rs — "
-                        "upstream moved it; update CODEX_MODELS_URL / the parser."
+                    blind.append(
+                        probe_failed(
+                            "the Codex `ResponseItem` enum",
+                            "models.rs",
+                            "The rollout response_item watch was SKIPPED.",
+                        )
                     )
                 else:
                     for t in sorted(response_item_ours):
@@ -1364,14 +1640,16 @@ def run_checks(
 
     # --- Reasonix hook events + payload fields (only the FETCH is transient)
     if reasonix_ours is not None:
-        text = try_fetch(REASONIX_HOOK_URL, "Reasonix source", breaking, errors)
+        text = try_fetch(REASONIX_HOOK_URL, "Reasonix source", blind, errors)
         if text is not None:
             upstream = upstream_reasonix_hooks(text)
             if upstream is None:
-                breaking.append(
-                    "Reasonix `Event` consts not found at the pinned path "
-                    "(internal/hook/hook.go) — upstream moved it; update "
-                    "REASONIX_HOOK_URL / the parser."
+                blind.append(
+                    probe_failed(
+                        "the Reasonix `Event` consts",
+                        "internal/hook/hook.go",
+                        "The Reasonix event AND payload-field watches were SKIPPED.",
+                    )
                 )
             else:
                 for ev in sorted(reasonix_ours):
@@ -1397,14 +1675,16 @@ def run_checks(
 
     # --- CodeWhale hook events (only the FETCH is transient) ---------------
     if codewhale_ours is not None:
-        text = try_fetch(CODEWHALE_HOOK_URL, "CodeWhale source", breaking, errors)
+        text = try_fetch(CODEWHALE_HOOK_URL, "CodeWhale source", blind, errors)
         if text is not None:
             upstream = upstream_codewhale_hooks(text)
             if upstream is None:
-                breaking.append(
-                    "CodeWhale `pub enum HookEvent` not found at the pinned path "
-                    "(crates/tui/src/hooks.rs) — upstream moved it; update "
-                    "CODEWHALE_HOOK_URL / the parser."
+                blind.append(
+                    probe_failed(
+                        "the CodeWhale `pub enum HookEvent`",
+                        "crates/tui/src/hooks/config.rs",
+                        "The CodeWhale event watch was SKIPPED.",
+                    )
                 )
             else:
                 for ev in sorted(codewhale_ours):
@@ -1420,28 +1700,33 @@ def run_checks(
                         f"intentionally omit it (add a decoder arm + CODEWHALE_EVENTS, "
                         f"or add it to CODEWHALE_KNOWN_OMITTED)."
                     )
-            # Env-mode identity fields: the DEEPSEEK_* names CodeWhale sets in
-            # `HookContext::to_env_vars` (same hooks.rs). ONE-DIRECTIONAL.
+        # Env-mode identity fields: the DEEPSEEK_* names CodeWhale sets in
+        # `HookContext::to_env_vars`, a SEPARATE file from the enum since the
+        # hooks.rs -> hooks/ split. ONE-DIRECTIONAL. Its own fetch, so a failure
+        # to read the executor can't be mistaken for every env var vanishing.
+        exec_text = fetch_anchored(CODEWHALE_EXECUTOR_URL, "CodeWhale executor", blind, errors)
+        if exec_text is not None:
             for field in sorted(CODEWHALE_ENV_FIELDS):
-                if f'"{field}"' not in text:
+                if f'"{field}"' not in exec_text:
                     breaking.append(
                         f"CodeWhale env var `{field}` (folded by the shim's env-mode "
                         f"into the {{cwd,tool,tool_args}} envelope) is GONE from "
-                        f"hooks.rs `to_env_vars` — renamed; the shim reads None, the "
-                        f"envelope omits its field, and the cwd-keyed decoder drops "
-                        f"the event (empty cwd = no sprite / no activity)."
+                        f"hooks/executor.rs `to_env_vars` — renamed; the shim reads "
+                        f"None, the envelope omits its field, and the cwd-keyed "
+                        f"decoder drops the event (empty cwd = no sprite / no activity)."
                     )
 
     # --- opencode EventV2 types (only the FETCH is transient) --------------
     if opencode_ours is not None:
         parts = [
-            try_fetch(u, "opencode source", breaking, errors)
+            fetch_anchored(u, "opencode source", blind, errors)
             for u in OPENCODE_EVENT_URLS
         ]
-        # If ANY url failed, skip the check — a partial concat would
-        # false-positive a depended type as "GONE" just because it lived in the
-        # half we couldn't fetch. (try_fetch already classified each failure.)
-        text = "\n".join(parts) if all(p is not None for p in parts) else None
+        # If ANY url failed OR lost its anchor, skip the check — a partial concat
+        # would false-positive a depended type as "GONE" just because it lived in
+        # the half we couldn't read. (fetch_anchored already classified each.)
+        readable = [p for p in parts if p is not None]
+        text = "\n".join(readable) if len(readable) == len(parts) else None
         if text is not None:
             for ev in sorted(opencode_ours - OPENCODE_TOLERATED):
                 # The type strings appear as `type: "session.created"` etc. in
@@ -1465,14 +1750,17 @@ def run_checks(
 
     # --- grok hook events + payload/transcript/registry names (FETCH transient)
     if grok_ours is not None:
-        text = try_fetch(GROK_HOOK_URL, "grok hooks source", breaking, errors)
+        text = fetch_anchored(GROK_HOOK_URL, "grok hooks source", blind, errors)
         if text is not None:
             upstream = upstream_grok_hooks(text)
             if upstream is None:
-                breaking.append(
-                    "grok `pub enum HookEventName` not found at the pinned path "
-                    "(xai-grok-hooks/src/event.rs) — upstream moved it; update "
-                    "GROK_HOOK_URL / the parser."
+                blind.append(
+                    probe_failed(
+                        "the grok `HookEventName` variants (plain enum or "
+                        "`hook_events!` table)",
+                        "xai-grok-hooks/src/event.rs",
+                        "The grok event watch was SKIPPED.",
+                    )
                 )
             else:
                 for ev in sorted(grok_ours):
@@ -1509,7 +1797,7 @@ def run_checks(
                         f"the decoder's fallback reads None (Waiting reason / child "
                         f"label degrade)."
                     )
-        text = try_fetch(GROK_NOTIFICATION_URL, "grok notification source", breaking, errors)
+        text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", blind, errors)
         if text is not None:
             for variant in sorted(GROK_XAI_VARIANTS):
                 if not re.search(rf"(?m)^\s*{variant}\b", text):
@@ -1526,7 +1814,7 @@ def run_checks(
                         f"extensions/notification.rs — renamed; decode_grok_line reads "
                         f"None (child un-keyed / model dropped / end marker missed)."
                     )
-        text = try_fetch(GROK_ACTIVE_SESSIONS_URL, "grok active-sessions source", breaking, errors)
+        text = fetch_anchored(GROK_ACTIVE_SESSIONS_URL, "grok active-sessions source", blind, errors)
         if text is not None:
             for ident in sorted(GROK_ACTIVE_SESSION_FIELDS):
                 if not re.search(rf"(?m)^\s*(pub )?{ident}:", text):
@@ -1551,14 +1839,16 @@ def run_checks(
         (ACP_V1_SCHEMA_URL, "ACP v1 schema"),
         (ACP_V1_SCHEMA_UNSTABLE_URL, "ACP v1 unstable schema"),
     ):
-        text = try_fetch(url, label, breaking, errors)
+        text = try_fetch(url, label, blind, errors)
         if text is not None:
             tags = upstream_acp_session_update_tags(text)
             if tags is None:
-                breaking.append(
-                    f"ACP `SessionUpdate` oneOf not found in {label} — upstream "
-                    "restructured the schema; update upstream_acp_session_update_tags / "
-                    "the ACP_V1_SCHEMA* URLs (the ACP tag flood guard is blind)."
+                blind.append(
+                    probe_failed(
+                        "the ACP `SessionUpdate` oneOf union",
+                        label,
+                        "The ACP tag flood guard was SKIPPED.",
+                    )
                 )
             else:
                 up_acp |= tags
@@ -1573,14 +1863,41 @@ def run_checks(
 
     # --- Copilot event types (only the FETCH is transient) -----------------
     if copilot_ours is not None:
-        text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", breaking, errors)
-        if text is not None:
+        text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", blind, errors)
+        # The `SessionEvent` union is this document's ANCHOR — it is the
+        # declaration that owns every envelope `type` and, transitively, every
+        # `data.properties` key we check. It gets the same no-anchor-no-sweep
+        # treatment as `fetch_anchored`'s documents, just expressed structurally
+        # because the proof is a JSON shape rather than a regex.
+        #
+        # It is NOT enough that the JSON parses: `upstream_copilot_field_names`
+        # unions every `properties` key at ANY depth, so a restructured schema
+        # with ONE unrelated `properties` object satisfies its `is None` guard
+        # and reports all 12 depended fields as verified renames — 13 phantom
+        # "decoder will silently drop events" lines, the #793 shape exactly.
+        # Not hypothetical: `@github/copilot` already became a loader stub once
+        # (#406), and COPILOT_SCHEMA_URL is deliberately UNPINNED (it follows
+        # unpkg's redirect to latest), so the shape can change under us.
+        up_ns = upstream_copilot_namespaces(text) if text is not None else None
+        if text is not None and up_ns is None:
+            blind.append(
+                probe_failed(
+                    "the Copilot `SessionEvent` anyOf union",
+                    COPILOT_SCHEMA_URL,
+                    "EVERY Copilot check (event types, payload fields, the "
+                    "namespace flood guard) was SKIPPED — an unproven schema "
+                    "cannot tell a rename from a restructure.",
+                )
+            )
+        if text is not None and up_ns is not None:
             upstream = upstream_copilot_events(text)
             if upstream is None:
-                breaking.append(
-                    "Copilot session-events schema has no parseable `type` consts "
-                    "(definitions empty / shape changed) — upstream restructured the "
-                    "schema; update COPILOT_SCHEMA_URL / upstream_copilot_events."
+                blind.append(
+                    probe_failed(
+                        "any parseable `type` const in the Copilot session-events schema",
+                        COPILOT_SCHEMA_URL,
+                        "The Copilot event watch was SKIPPED.",
+                    )
                 )
             else:
                 for ev in sorted(copilot_ours):
@@ -1595,9 +1912,12 @@ def run_checks(
             # + nested data.*). ONE-DIRECTIONAL (a depended field vanishing alarms).
             fields_up = upstream_copilot_field_names(text)
             if fields_up is None:
-                breaking.append(
-                    "Copilot schema won't parse for field names — upstream "
-                    "restructured it; update upstream_copilot_field_names."
+                blind.append(
+                    probe_failed(
+                        "the Copilot schema `properties` keys",
+                        COPILOT_SCHEMA_URL,
+                        "The Copilot payload-field watch was SKIPPED.",
+                    )
                 )
             else:
                 for field in sorted(COPILOT_PAYLOAD_FIELDS):
@@ -1614,17 +1934,10 @@ def run_checks(
             # warn-floor flood, so a new namespace is a REVIEW ping to add it to
             # KNOWN_NAMESPACES (decode it or knowingly ignore it). The reverse (a
             # KNOWN_NAMESPACES member gone upstream) is a benign stale entry.
-            up_ns = upstream_copilot_namespaces(text)
-            if up_ns is None:
-                breaking.append(
-                    "Copilot `SessionEvent` anyOf union not found in the schema — "
-                    "upstream restructured it; update upstream_copilot_namespaces "
-                    "(the namespace flood guard is blind)."
-                )
-            else:
-                known_ns = read_copilot_namespaces()
-                for ns in sorted(up_ns - known_ns):
-                    review.append(
+            # `up_ns` is the anchor parsed above — reused, not re-derived.
+            known_ns = read_copilot_namespaces()
+            for ns in sorted(up_ns - known_ns):
+                review.append(
                         f"new Copilot event NAMESPACE `{ns}` upstream (`SessionEvent`) "
                         f"not in KNOWN_NAMESPACES (source/copilot.rs) — the transcript "
                         f"tail will breadcrumb EVERY line of it (drift flood); add it "
@@ -1633,7 +1946,7 @@ def run_checks(
 
     # --- omp session-entry types + wire names (only the FETCH is transient) --
     if omp_ours is not None:
-        text = try_fetch(OMP_SESSION_ENTRIES_URL, "omp session-entries", breaking, errors)
+        text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", blind, errors)
         if text is not None:
             # Entry `type` discriminators are QUOTED TS literal types
             # (`type: "message"`); the names are generic English words, so a
@@ -1662,10 +1975,12 @@ def run_checks(
             # (decode it or knowingly ignore it).
             up_types = upstream_omp_entry_types(text)
             if up_types is None:
-                breaking.append(
-                    "omp `RawFileEntry` `type` literals not found in "
-                    "session-entries.ts — upstream restructured it; update "
-                    "upstream_omp_entry_types (the entry-type flood guard is blind)."
+                blind.append(
+                    probe_failed(
+                        "the omp entry-`type` literals",
+                        "session-entries.ts",
+                        "The omp entry-type flood guard was SKIPPED.",
+                    )
                 )
             else:
                 known_types = read_omp_known_types()
@@ -1676,7 +1991,7 @@ def run_checks(
                         f"will breadcrumb EVERY line of it (drift flood); add it to "
                         f"KNOWN_ENTRY_TYPES (decode it, or knowingly ignore it)."
                     )
-        diag = try_fetch(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", breaking, errors)
+        diag = fetch_anchored(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", blind, errors)
         if diag is not None and '"session_exit"' not in diag:
             breaking.append(
                 "omp customType `session_exit` (the clean-teardown marker the "
@@ -1684,7 +1999,7 @@ def run_checks(
                 "exit-diagnostics.ts — renamed; finished sessions resurrect at "
                 "first sight and never SessionEnd."
             )
-        ai = try_fetch(OMP_AI_TYPES_URL, "omp pi-ai types", breaking, errors)
+        ai = fetch_anchored(OMP_AI_TYPES_URL, "omp pi-ai types", blind, errors)
         if ai is not None:
             for name in sorted(OMP_MESSAGE_LITERALS):
                 if f'"{name}"' not in ai:
@@ -1700,7 +2015,7 @@ def run_checks(
                         f"GONE from pi-ai types.ts property keys — renamed; tool "
                         f"rounds lose their key/target."
                     )
-        ask = try_fetch(OMP_ASK_URL, "omp ask tool", breaking, errors)
+        ask = fetch_anchored(OMP_ASK_URL, "omp ask tool", blind, errors)
         if ask is not None:
             if '"ask"' not in ask:
                 breaking.append(
@@ -1718,7 +2033,7 @@ def run_checks(
 
     # --- Cursor hook events (only the FETCH is transient) ------------------
     if cursor_ours is not None:
-        text = try_fetch(CURSOR_HOOKS_URL, "Cursor hooks doc", breaking, errors)
+        text = fetch_anchored(CURSOR_HOOKS_URL, "Cursor hooks doc", blind, errors)
         if text is not None:
             for ev in sorted(cursor_ours):
                 # Word-boundary token match (the docs render the names inline /
@@ -1734,7 +2049,7 @@ def run_checks(
 
     # --- OpenClaw gateway hook events (only the FETCH is transient) ---------
     if openclaw_ours is not None:
-        text = try_fetch(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", breaking, errors)
+        text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", blind, errors)
         if text is not None:
             for ev in sorted(openclaw_ours):
                 # The union lists each hook as a quoted string literal
@@ -1768,19 +2083,27 @@ def run_checks(
                     )
 
     # --- OpenClaw default gateway port (the plugin's copied fallback) --------
-    text = try_fetch(OPENCLAW_PATHS_URL, "OpenClaw config/paths", breaking, errors)
+    text = try_fetch(OPENCLAW_PATHS_URL, "OpenClaw config/paths", blind, errors)
     if text is not None:
         ours = openclaw_plugin_default_port()
         m = re.search(r"DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", text)
         if m is None:
-            breaking.append(
-                "OpenClaw's `DEFAULT_GATEWAY_PORT` is GONE from src/config/paths.ts — the "
-                "plugin's fallback port can no longer be verified against upstream."
+            blind.append(
+                probe_failed(
+                    "OpenClaw's `DEFAULT_GATEWAY_PORT`",
+                    "src/config/paths.ts",
+                    "The plugin's fallback-port comparison was SKIPPED.",
+                )
             )
         elif ours is None:
-            breaking.append(
-                "could not read DEFAULT_GATEWAY_PORT from openclaw_plugin.js — the "
-                "upstream-port watch has nothing to compare (did the const get renamed?)."
+            blind.append(
+                probe_failed(
+                    "our own `DEFAULT_GATEWAY_PORT` copy",
+                    "install/openclaw_plugin.js",
+                    "The upstream-port comparison had nothing to compare against "
+                    "and was SKIPPED (did OUR const get renamed?).",
+                    our_source=True,
+                )
             )
         elif m.group(1) != ours:
             breaking.append(
@@ -1792,7 +2115,7 @@ def run_checks(
 
     # --- Hermes shell-hook events + payload fields (only the FETCH is transient)
     if hermes_ours is not None:
-        text = try_fetch(HERMES_HOOK_URL, "Hermes hooks", breaking, errors)
+        text = fetch_anchored(HERMES_HOOK_URL, "Hermes hooks", blind, errors)
         if text is not None:
             for ev in sorted(hermes_ours):
                 # `_DEFAULT_PAYLOADS` lists each event as a quoted dict key
@@ -1808,7 +2131,7 @@ def run_checks(
                     )
         # Payload FIELD names — assembled by _serialize_payload in the SEPARATE
         # agent/shell_hooks.py (a second fetch). ONE-DIRECTIONAL.
-        shell = try_fetch(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", breaking, errors)
+        shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", blind, errors)
         if shell is not None:
             for field in sorted(HERMES_PAYLOAD_FIELDS):
                 if f'"{field}"' not in shell:
@@ -1821,7 +2144,7 @@ def run_checks(
 
     # --- Kimi hook events (only the FETCH is transient) --------------------
     if kimi_ours is not None:
-        text = try_fetch(KIMI_HOOKS_URL, "Kimi hooks doc", breaking, errors)
+        text = fetch_anchored(KIMI_HOOKS_URL, "Kimi hooks doc", blind, errors)
         if text is not None:
             for ev in sorted(kimi_ours):
                 # Word-boundary token match (the doc renders each PascalCase name
@@ -1839,7 +2162,7 @@ def run_checks(
 
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:
-        tools = try_fetch(CC_TOOLS_URL, "CC tools-reference", breaking, errors)
+        tools = fetch_anchored(CC_TOOLS_URL, "CC tools-reference", blind, errors)
         if tools is not None:
             # At least one name we'd detect by-name must still be the documented
             # dispatch tool. (Losing a legacy name like `Task` is fine.)
@@ -1859,15 +2182,17 @@ def run_checks(
     # lifecycle-marker scan is unconditional (nothing to read from our source
     # first — we depend on those surfaces' ABSENCE; see
     # CC_LIFECYCLE_SURFACE_MARKERS).
-    hooks_doc = try_fetch(CC_HOOKS_URL, "CC hooks doc", breaking, errors)
+    hooks_doc = fetch_anchored(CC_HOOKS_URL, "CC hooks doc", blind, errors)
     if hooks_doc is not None:
         if cc_ours is not None:
             upstream = upstream_cc_hook_events(hooks_doc)
             if upstream is None:
-                breaking.append(
-                    "CC hook-event summary table not found in hooks.md — the "
-                    "docs were restructured; update upstream_cc_hook_events' "
-                    "parser."
+                blind.append(
+                    probe_failed(
+                        "the CC hook-event summary table",
+                        "hooks.md",
+                        "The CC event watch was SKIPPED.",
+                    )
                 )
             else:
                 for ev in sorted(cc_ours):
@@ -1891,12 +2216,14 @@ def run_checks(
 def main() -> int:
     breaking: list[str] = []
     review: list[str] = []
+    blind: list[str] = []
     errors: list[str] = []
 
     # Read what WE depend on from our OWN source first. A failure here means the
     # monitor itself is broken (decoder.rs / install/codex.rs refactored away from
-    # what the parsers expect) — that is a LOUD breaking signal, never a transient
-    # one, or drift monitoring would silently stop with zero alarm.
+    # what the parsers expect) — that is a LOUD PROBE-HEALTH signal (still exit 1;
+    # our own parsers being stale is the textbook case of "the probe missed"),
+    # never a transient one, or drift monitoring would silently stop with zero alarm.
     codex_ours = None
     codex_rollout = None
     cc_ours = None
@@ -1927,10 +2254,15 @@ def main() -> int:
         grok_ours = read_grok_events()
         kimi_ours = read_kimi_events()
     except Exception as e:  # noqa: BLE001
-        breaking.append(
-            f"drift-watch cannot read our own source ({e}) — the parsers in "
-            f"check_upstream_drift.py are stale (decoder.rs / install refactored?). "
-            f"The monitor is blind until the script is fixed."
+        blind.append(
+            probe_failed(
+                f"what WE depend on, reading our own source ({e})",
+                "check_upstream_drift.py's parsers",
+                "The parsers are stale (decoder.rs / install refactored?) and the "
+                "monitor is blind until the script is fixed. Nothing upstream was "
+                "checked.",
+                our_source=True,
+            )
         )
 
     try:
@@ -1951,6 +2283,7 @@ def main() -> int:
             kimi_ours,
             breaking,
             review,
+            blind,
             errors,
         )
     except Exception as e:  # noqa: BLE001
@@ -1962,24 +2295,57 @@ def main() -> int:
         )
 
     # --- report ------------------------------------------------------------
-    out = ["# pixtuoid upstream wire-format drift report", ""]
+    # The H1 IS the GitHub issue title (upstream-drift.yml reads it back rather
+    # than keeping a second, unpinned copy of these strings).
+    title = (
+        "Upstream CLI wire-format drift detected"
+        if breaking
+        else "New upstream events to review"
+        if review
+        else "Upstream drift watch could not verify — repin needed"
+        if blind
+        else "Upstream wire-format watch: no drift"
+    )
+    out = [f"# {title}", ""]
     if breaking:
-        out.append("## ⛔ Breaking drift — decoder will silently drop events")
+        out.append("## ⛔ Verified upstream change — decoder will silently drop events")
+        out.append("")
+        out.append(
+            "Each line was read off the upstream surface that OWNS the name: the "
+            "declaration is present and the name is gone. Fix the decoder."
+        )
+        out.append("")
         out += [f"- {b}" for b in breaking]
         out.append("")
     if review:
         out.append("## 🔎 New upstream events to review")
         out += [f"- {r}" for r in review]
         out.append("")
+    if blind:
+        out.append("## 🩺 Probe could NOT verify — this is not evidence of upstream change")
+        out.append("")
+        out.append(
+            "A lookup missed, so all the watcher knows is that **its own probe "
+            "failed**. A stale pin, a moved declaration, or a refactor that left a "
+            "re-export facade at the old path all land here, and every check "
+            "riding the affected surface was SKIPPED rather than reported as "
+            "drift. **Verify upstream by hand and repin — do NOT change a decoder "
+            "on these lines alone** (#793 did, against three working env vars)."
+        )
+        out.append("")
+        out += [f"- {b}" for b in blind]
+        out.append("")
     if errors:
         out.append("## ⚠️ Could not verify (transient network/HTTP — not drift)")
         out += [f"- {e}" for e in errors]
         out.append("")
-    if not (breaking or review or errors):
+    if not (breaking or review or blind or errors):
         out.append("✅ No drift. Every name we depend on is present upstream.")
     print("\n".join(out))
 
-    if breaking or review:
+    # `blind` is actionable (the watch is dark until repinned) so it keeps
+    # exit 1 and files an issue — but the report above no longer calls it drift.
+    if breaking or review or blind:
         return 1
     if errors:
         return 2

@@ -76,13 +76,25 @@ jobs:
           set -euo pipefail
           gh label create upstream-drift --color FBCA04 \
             --description "Upstream CLI wire-format drift" 2>/dev/null || true
+          # The checker owns the title and emits it as the report's H1; we read
+          # it back rather than re-deriving it here. A grep for the section
+          # headings would be an unpinned second copy of strings that live in
+          # check_upstream_drift.py, and rewording one there would silently
+          # title a confirmed rename "could not verify" — #793 inverted.
+          title=$(head -1 drift-report.md | sed 's/^# //')
           num=$(gh issue list --label upstream-drift --state open \
             --json number --jq '.[0].number // empty')
           if [ -n "$num" ]; then
+            # Retitle on the dedup path too. The title now carries the
+            # DISPOSITION, so leaving week 1's on a thread that week 2 turned
+            # into confirmed drift makes the issue list actively mis-signal —
+            # the failure this whole change is about. Weekly churn on one
+            # long-lived thread is the cheaper cost.
+            gh issue edit "$num" --title "$title"
             gh issue comment "$num" --body-file drift-report.md
           else
             gh issue create \
-              --title "Upstream CLI wire-format drift detected" \
+              --title "$title" \
               --label upstream-drift \
               --body-file drift-report.md
           fi
@@ -91,12 +103,17 @@ jobs:
         if: steps.check.outputs.exit == '2'
         run: echo "::warning::upstream-drift could not verify (transient network/HTTP); see report above."
 
-      - name: Fail the run on confirmed drift
+      # Probe-health findings fail the run too, deliberately: a watch that cannot
+      # see its upstream is dark, and a dark watch that stays green is the #454
+      # fail-open class. The REPORT distinguishes them; the exit code only asks
+      # for a human.
+      - name: Fail the run on any actionable finding
         if: steps.check.outputs.exit == '1'
         run: exit 1
 
       - name: Fail on an unexpected checker exit
-        # exit 0 = no drift; 1 = confirmed drift (issue + fail above); 2 =
+        # exit 0 = no findings; 1 = actionable — verified drift, a review ping, or
+        # probe health (issue + fail above); 2 =
         # transient fetch trouble (warn-only by design). ANY other code — 127
         # (python missing), 137 (OOM-kill), a crash before the classifier ran —
         # previously fell through GREEN: a dead watcher reading as healthy.
