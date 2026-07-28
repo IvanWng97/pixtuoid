@@ -55,6 +55,9 @@ import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
 
+# The suffixes a READERS reader may add to its OurNames field name.
+READER_NAME_SUFFIXES = {"", "_events", "_types", "_entry_types"}
+
 
 def check(cond: bool, msg: str) -> None:
     if not cond:
@@ -770,6 +773,59 @@ def _raiser(name: str) -> typing.Callable[[], object]:
     return broken
 
 
+def test_a_stale_flood_guard_skips_its_check_instead_of_flooding() -> None:
+    """A failed reader must SKIP its check, never run it against an empty set.
+
+    The flood guards are one-directional: they report every upstream name NOT in
+    our KNOWN_* set, so `up - set()` reports the whole upstream surface as new.
+    Reverting a consumer guard to `else` + `or set()` floods `review` from one
+    stale parser — with every producing-side gate still green, because they all
+    sit upstream of the comparison. This is the only gate reaching the consumer.
+
+    The upstream PARSER is stubbed, not just `fetch`: an unparseable body takes
+    the `is None` probe-health branch and never reaches the guard, which is how
+    the first version of this test passed against a reverted guard.
+    """
+    real_fetch, real_readers = d.fetch, d.READERS
+    parsers = ("upstream_omp_entry_types", "upstream_acp_session_update_tags")
+    real_parsers = {n: getattr(d, n) for n in parsers}
+    # Carries omp's ANCHORS pattern: without it `fetch_anchored` files probe
+    # health and the omp guard is never reached (acp rides plain `try_fetch`).
+    d.fetch = lambda _u: "unrelated body\nexport type SessionEntry = never;\n"
+    # Each returns a set the KNOWN_* comparison can actually run against.
+    d.upstream_omp_entry_types = lambda _t: {"phantom_entry_type"}
+    d.upstream_acp_session_update_tags = lambda _t: {"phantom_acp_tag"}
+    try:
+        # Assert on the INJECTED upstream token, not the KNOWN_* name — the
+        # probe-health line quotes KNOWN_* too, so matching that flags a clean run.
+        for field, reader_name, phantom_name in (
+            ("omp_known_types", "read_omp_known_types", "phantom_entry_type"),
+            ("acp_tags", "read_acp_tags", "phantom_acp_tag"),
+        ):
+            d.READERS = tuple(
+                (f, (_raiser(r.__name__) if f == field else r), w) for f, r, w in real_readers
+            )
+            buf, real_stdout = io.StringIO(), sys.stdout
+            sys.stdout = buf
+            try:
+                d.main()
+            finally:
+                sys.stdout = real_stdout
+            out = buf.getvalue()
+            phantom = [ln for ln in out.splitlines() if phantom_name in ln]
+            check(
+                not phantom,
+                f"a stale `{field}` must SKIP its guard, not compare against an "
+                f"empty set: {phantom[:2]}",
+            )
+            named = [ln for ln in out.splitlines() if reader_name in ln]
+            check(len(named) == 1, f"a stale `{field}` files ONE probe-health line: {named}")
+    finally:
+        d.fetch, d.READERS = real_fetch, real_readers
+        for n, fn in real_parsers.items():
+            setattr(d, n, fn)
+
+
 def test_every_reader_row_matches_a_field_on_our_names() -> None:
     """The READERS table is stringly-keyed; nothing else pins it to `OurNames`.
 
@@ -793,12 +849,20 @@ def test_every_reader_row_matches_a_field_on_our_names() -> None:
     for field, reader_name, what in _reader_rows():
         check(callable(getattr(d, reader_name, None)), f"{reader_name} is a real reader")
         check(bool(what.strip()), f"{reader_name} declares what it reads")
+        # `field in reader_name` is too weak: every flood-guard field is a
+        # SUFFIX-EXTENSION of a source field, so the likeliest mispair —
+        # ("copilot", read_copilot_namespaces) — is the one a substring test
+        # cannot see. Require the reader's stem to START with the field and the
+        # remainder to be a known suffix.
+        stem = reader_name.removeprefix("read_")
+        suffix = stem[len(field):] if stem.startswith(field) else None
         check(
-            field in reader_name,
-            f"READERS pairs field `{field}` with `{reader_name}`, whose name does "
-            f"not contain it — a mispaired row feeds one source's names to another "
-            f"source's sweep. Fix the pairing, or if the rename is deliberate, name "
-            f"the field after its reader.",
+            suffix in READER_NAME_SUFFIXES,
+            f"READERS pairs field `{field}` with `{reader_name}`: the reader's "
+            f"name must be `read_{field}` plus one of {sorted(READER_NAME_SUFFIXES)}. "
+            f"A mispaired row feeds one source's names to another source's sweep, "
+            f"which reports them all as renames. Fix the pairing, or name the "
+            f"field after its reader.",
         )
 
 
@@ -821,23 +885,47 @@ def test_no_reader_is_called_outside_the_readers_table() -> None:
         tabled == {name for _, name, _ in _reader_rows()},
         "the READERS AST scan agrees with the runtime table",
     )
-    fn = next(
-        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_checks"
-    )
+    # Whole module, not just `run_checks`: a `read_*` inside a HELPER that
+    # run_checks calls unwinds to the same catch-all. Exempt `read_our_names`
+    # (the sanctioned caller) and the readers themselves (they compose).
+    exempt = {"read_our_names"}
+    scan_roots = [
+        n for n in tree.body
+        if isinstance(n, ast.FunctionDef)
+        and n.name not in exempt
+        and not n.name.startswith("read_")
+    ]
     # ANY `read_*`, tabled or not — a re-inlined call is by definition tabled.
     stray = sorted({
         f"{n.func.id}:{n.lineno}"
-        for n in ast.walk(fn)
+        for root in scan_roots
+        for n in ast.walk(root)
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Name)
         and n.func.id.startswith("read_")
+        and n.func.id not in exempt
     })
     check(
         not stray,
-        f"a `read_*` is called inline in run_checks instead of being consumed from "
-        f"`ours`, so its failure lands in the TRANSIENT bucket (exit 2, a warning "
-        f"on a green run) instead of probe health: {stray}. Read it from the "
-        f"OurNames field its READERS row fills, and guard on `is not None`.",
+        f"a `read_*` is called inline instead of being consumed from `ours`, so "
+        f"its failure lands in the TRANSIENT bucket (exit 2, a warning on a green "
+        f"run) instead of probe health: {stray}. Read it from the OurNames field "
+        f"its READERS row fills, and guard on `is not None`.",
+    )
+    # Name-independent twin: the check above keys on the `read_*` convention, and
+    # the precondition "an own-source reader not named read_*" has already
+    # occurred once (`openclaw_plugin_default_port`). A direct `REPO` read inside
+    # run_checks is the form a rename cannot slip past.
+    run_checks = next(
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_checks"
+    )
+    repo_reads = sorted(
+        {n.lineno for n in ast.walk(run_checks) if isinstance(n, ast.Name) and n.id == "REPO"}
+    )
+    check(
+        not repo_reads,
+        f"run_checks reads a repo file directly at line(s) {repo_reads} — route it "
+        f"through a READERS row so its failure is isolated probe health.",
     )
 
 
@@ -1211,6 +1299,7 @@ def main() -> int:
         test_report_is_the_only_way_to_file_a_finding,
         test_one_stale_reader_does_not_blind_the_sources_after_it,
         test_every_reader_row_matches_a_field_on_our_names,
+        test_a_stale_flood_guard_skips_its_check_instead_of_flooding,
         test_no_reader_is_called_outside_the_readers_table,
         test_793_stale_pin_reads_as_probe_health_not_three_renames,
         test_every_swept_url_declares_an_anchor,

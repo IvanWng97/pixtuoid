@@ -11,33 +11,6 @@ on:
   schedule:
     - cron: "0 9 * * 1" # Mondays 09:00 UTC
   workflow_dispatch:
-  # On PRs that touch the watcher itself, run ONLY the selftest (the live network
-  # check + issue-filing stay schedule/dispatch-only — a flaky upstream fetch must
-  # never gate a PR). A parser/classifier regression IS caught here.
-  pull_request:
-    paths:
-      - "scripts/check_upstream_drift*.py"
-      - ".github/workflows/upstream-drift.yml"
-      # The parsers read the wire constants out of these Rust sources, so a
-      # rename/drop here (like the 0.12.0 `Task`->`Agent` dispatch-arm removal,
-      # which quietly broke the self-test) must trip the selftest at PR time —
-      # otherwise the break first surfaces in the weekly scheduled run.
-      - "crates/pixtuoid-core/src/source/decoder.rs"
-      - "crates/pixtuoid-core/src/source/opencode.rs"
-      - "crates/pixtuoid-core/src/source/copilot.rs"
-      - "crates/pixtuoid-core/src/source/omp.rs"
-      # codex.rs: the drift parser reads its rollout `("event_msg"|"response_item", …)`
-      # decode arms (checked vs upstream EventMsg/ResponseItem), so a refactor of
-      # those arms must trip the selftest here, not only weekly.
-      - "crates/pixtuoid-core/src/source/codex.rs"
-      - "crates/pixtuoid/src/install/*.rs"
-      # openclaw_plugin.js: the watch reads the plugin's OWN copy of upstream's
-      # DEFAULT_GATEWAY_PORT out of this template (it can't be imported from a
-      # plugin living in OpenClaw's state dir). Renaming that const would leave the
-      # port check comparing nothing — which the selftest's own port tooth now
-      # catches, and this path is what makes it run at PR time instead of weekly.
-      - "crates/pixtuoid/src/install/openclaw_plugin.js"
-
 permissions:
   contents: read
   issues: write
@@ -53,15 +26,14 @@ jobs:
           persist-credentials: false
       - uses: extractions/setup-just@v4
 
-      # Always runs (incl. PRs): a parser/classifier regression = silent monitor
-      # death, so guard it before the live check trusts the parsers. Through the
-      # justfile recipe (repo rule: CI calls the same recipes as local dev).
+      # Guards the parsers before the live check trusts them. PR-time coverage is
+      # ci-lint.yml's required `hygiene` job (unconditional, no path list); this
+      # copy exists because ci-lint does not run on the cron.
       - name: Self-test the watcher
         run: just drift-selftest
 
       - name: Check upstream drift
         id: check
-        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set +e
@@ -117,7 +89,7 @@ jobs:
         # transient fetch trouble (warn-only by design). ANY other code — 127
         # (python missing), 137 (OOM-kill), a crash before the classifier ran —
         # previously fell through GREEN: a dead watcher reading as healthy.
-        if: github.event_name != 'pull_request' && !contains(fromJSON('["0","1","2"]'), steps.check.outputs.exit)
+        if: ${{ !contains(fromJSON('["0","1","2"]'), steps.check.outputs.exit) }}
         env:
           CODE: ${{ steps.check.outputs.exit }}
         run: |

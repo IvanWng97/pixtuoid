@@ -1586,8 +1586,10 @@ class OurNames:
     acp_tags: set[str] | None = None
 
 
-# Rows hold function OBJECTS captured at import, so reassigning the module
-# attribute is a silent no-op: a test injecting a stale reader must replace the ROW.
+# (OurNames field name, reader, the surface it reads — the wording of its
+# probe-health line). A table rather than one statement per reader because each
+# row needs its OWN `try`; rows hold function OBJECTS captured at import, so a
+# test injecting a stale reader must replace the ROW, not the module attribute.
 READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
     ("codex", read_codex_events, "CODEX_EVENTS in install/codex.rs"),
     ("codex_rollout", read_codex_rollout_types, "the decode arms in source/codex.rs"),
