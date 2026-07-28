@@ -44,15 +44,27 @@ exclude_globs = [
     # NOT excluded, though codecov.yml ignores both: `tui/mod.rs` and
     # `runtime/driver.rs` are line-uncoverable in BULK while still carrying a
     # unit-tested pure decision layer, and per-FUNCTION mutants see that split
-    # where per-LINE coverage cannot. Measured, not assumed: 22 mutants across
-    # tui/mod.rs's `dispatch_key`/`toggle_intent`/`is_quit_chord`/
-    # `should_dispatch_key` = 19 caught, 1 unviable, and the only 2 missed are
-    # in `run_tui` itself; driver.rs's `build_source_set` mutant is caught by
-    # the registry-drift test written to close that gap. Excluding the files
-    # hid ~132 and ~9 mutants respectively — an exclusion that hides a killable
-    # mutant is worse than a noisy row (the same call as the `mascot_position`
-    # pair below). `run_tui`'s own ~44 mutants stay as documented known noise;
-    # `just mutants` is --in-diff, so they only surface when you edit `run_tui`.
+    # where per-LINE coverage cannot. Their untestable glue is pinned by
+    # FUNCTION in `exclude_re` below rather than hidden by file, so the decision
+    # layers stay in scope. The evidence behind that, and its exact limits:
+    # - tui/mod.rs carries 135 mutants (`cargo mutants --list --no-config
+    #   --package pixtuoid --file crates/pixtuoid/src/tui/mod.rs`), 72 of them in
+    #   `dispatch_key` alone. Exactly 22 have ever been RUN — those matching
+    #   `-F 'toggle_intent|is_quit_chord|should_dispatch_key'` — scoring 19
+    #   caught, 1 unviable, 2 missed (the `should_dispatch_key` match guards at
+    #   700:38, inside `run_tui`, now excluded by function). 14 of those 22 are
+    #   `is_quit_chord` guards INSIDE `dispatch_key`, so the run covered 22 of
+    #   the 78 mutants those four fns carry — NOT all of them. The other 113 are
+    #   UNMEASURED: a survivor there is unknown, not known noise, so measure it
+    #   before dismissing it.
+    # - driver.rs carries 9 mutants and none has been run under mutation. The 6
+    #   naming fns with zero test call sites are excluded below; the 3 left in
+    #   are the ones a test can reach (`build_source_set` x2 via the
+    #   registry-drift test, `headless_loop_with_signal` via the two signal-arm
+    #   tests).
+    # File-level exclusion was still the wrong tool: it hid all 135 and all 9,
+    # killable ones included, and an exclusion that hides a killable mutant is
+    # worse than a noisy row (the same call as the `mascot_position` pair below).
     # Timing / FFI liveness probes: their tests assert wall-clock + OS behavior and
     # flake under mutation load — a "survivor" here is a flaked test, not a missing
     # assertion (this repo is flake-averse; #352-#354).
@@ -121,4 +133,17 @@ exclude_re = [
     # single_pod_band + the boundary scan), so only the unobservable culprit-vs-
     # blanket distinction survives — an equivalent mutant within reach today.
     'compute\.rs.*plant_ground_in_bounds',
+    #
+    # A SECOND class, deliberately kept apart from the equivalent mutants above:
+    # untestable GLUE inside two files that are otherwise mutated. These are the
+    # function-granular replacement for the `tui/mod.rs` + `runtime/driver.rs`
+    # file exclusions dropped from `exclude_globs`, which is what lets the pure
+    # decision layers in the same files stay in scope. Every fn named here has
+    # ZERO test call sites — production callers only — so nothing exists that
+    # could kill a mutant in it. That is a call-graph fact (`--list` plus a grep
+    # for each name), NOT a claim that a mutation run scored them; re-derive both
+    # before adding a name, and delete a name the moment a test reaches it.
+    'tui/mod\.rs.*(run_tui|focus_clicked_agent|setup_terminal|teardown_terminal|resolve_version_popup)',
+    'runtime/driver\.rs.*replace (run|run_async|headless_loop|compute_boot_capacities) ->',
+    'runtime/driver\.rs.*replace reducer_task with',
 ]
