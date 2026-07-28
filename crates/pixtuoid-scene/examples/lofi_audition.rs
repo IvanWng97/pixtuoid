@@ -6,7 +6,8 @@
 //!
 //! Usage:
 //!   cargo run --release -p pixtuoid-scene --example lofi_audition -- \
-//!     [--mood day|night] [--seeds N] [--start S] [--out DIR]
+//!     [--mood day|night] [--seeds N] [--start S] [--out DIR] \
+//!     [--solo pad|sparkle|keys|drums|texture]
 
 use std::fs::File;
 use std::io::{BufWriter, Write as _};
@@ -28,6 +29,17 @@ const SOAK_SECS: f32 = 90.0;
 /// Every take renders at ONE loudness (playlist consistency — the mix
 /// audit measured 1.6 LU spread under peak normalization).
 const TARGET_RMS_DBFS: f32 = -16.0;
+
+/// The soloable lanes in `gen_beds` order — the ONE spelling `--solo` accepts,
+/// the usage line advertises, and the error message lists.
+const SOLO_LANES: [&str; 5] = ["pad", "sparkle", "keys", "drums", "texture"];
+
+/// A usage error: `run`'s caller turns it into `ExitCode::FAILURE` + a message.
+/// This example IS the generator's blind-audition gate, so an unusable argument
+/// must never render a DIFFERENT take than the one asked for.
+fn usage_error(msg: String) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, msg)
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -59,13 +71,22 @@ fn run() -> std::io::Result<()> {
             "--out" => out = args.next().map(PathBuf::from).unwrap_or(out),
             // fast voice/lane iteration: hear one stem alone
             "--solo" => {
-                solo = args.next().as_deref().and_then(|v| {
-                    ["pad", "sparkle", "keys", "drums", "texture"]
-                        .iter()
-                        .position(|&l| l == v)
-                })
+                let v = args.next().unwrap_or_default();
+                match SOLO_LANES.iter().position(|&l| l == v) {
+                    Some(i) => solo = Some(i),
+                    None => {
+                        return Err(usage_error(format!(
+                            "unknown --solo lane {v:?}; valid: {}",
+                            SOLO_LANES.join("|")
+                        )))
+                    }
+                }
             }
-            _ => {}
+            other => {
+                return Err(usage_error(format!(
+                    "unknown argument {other:?}; valid: --mood --seeds --start --out --solo"
+                )))
+            }
         }
     }
     std::fs::create_dir_all(&out)?;
