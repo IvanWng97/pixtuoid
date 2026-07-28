@@ -184,7 +184,10 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!("unsupported cursor hook event: {other}")
+            bail!(
+                "unsupported cursor hook event: {}",
+                crate::source::decoder::display_safe(other)
+            )
         }
     }
 }

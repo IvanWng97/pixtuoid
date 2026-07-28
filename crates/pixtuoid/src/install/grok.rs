@@ -154,7 +154,8 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
         anyhow::bail!(
             "the hook binary path {path:?} contains '$' — grok env-expands hook command \
              strings at load time, so this path cannot be installed faithfully; move the \
-             shim or pass --hook-path"
+             shim, or point {} at a '$'-free absolute path",
+            crate::install::io::HOOK_OVERRIDE_ENV
         );
     }
     if !needs_shell_route(path) {
@@ -407,7 +408,19 @@ mod tests {
         // grok env-expands $VAR in command strings at LOAD time — quoting
         // can't protect a `$`-carrying path, so installing it would be the
         // silent installed-but-no-sprite class. Loud install error instead.
-        assert!(hook_command(Path::new("/opt/$weird/pixtuoid-hook"), false).is_err());
+        let err = hook_command(Path::new("/opt/$weird/pixtuoid-hook"), false)
+            .expect_err("a $-carrying path must be refused");
+        let msg = format!("{err:#}");
+        // The remedy must be one the user can actually take: `--hook-path` died
+        // with the install-hooks CLI (#284) and clap now rejects it outright.
+        assert!(
+            !msg.contains("--hook-path"),
+            "the bail names a flag the CLI rejects: {msg}"
+        );
+        assert!(
+            msg.contains(crate::install::io::HOOK_OVERRIDE_ENV),
+            "the bail must name the escape hatch that works: {msg}"
+        );
     }
 
     #[test]

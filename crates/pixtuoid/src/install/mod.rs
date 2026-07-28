@@ -16,7 +16,7 @@ pub(crate) mod kimi;
 // config-write authority (invariant #4), which must never be cross-crate
 // reachable — only its three env filters (below) are re-exported.
 pub(crate) mod io;
-pub use io::{nonempty, nonempty_abs_env, nonempty_env};
+pub use io::{nonempty, nonempty_abs_env, nonempty_env, owner_only_create, tighten_to_owner_only};
 pub(crate) mod merge;
 pub(crate) mod openclaw;
 pub(crate) mod opencode;
@@ -332,7 +332,7 @@ fn resolve_hook_binary_from(
     // env seam used to pass through `locate()` verbatim and bypass it).
     let explicit = hook_path
         .map(|p| (p, "--hook-path"))
-        .or(env_hook.map(|p| (p, "PIXTUOID_HOOK")));
+        .or(env_hook.map(|p| (p, io::HOOK_OVERRIDE_ENV)));
     if let Some((p, origin)) = explicit {
         // Drive-relative input would make the cwd-join below a silent no-op
         // (see `is_drive_relative`) — the exact never-fires embed this arm
@@ -359,11 +359,12 @@ fn resolve_hook_binary_from(
             p
         };
         if !p.exists() {
-            // tracing, not println!: install runs under the TUI alt-screen
-            // (the Sources panel), where a stdout write corrupts the frame.
+            // tracing, not println!: install runs under the TUI alt-screen, where a
+            // stdout write corrupts the frame. Stripped: `connect`/`setup` route
+            // tracing to RAW stderr and `p` is a PIXTUOID_HOOK value.
             tracing::warn!(
                 "{origin} {} does not exist yet; the hook will fail until it does",
-                p.display()
+                crate::strip_control_chars(&p.display().to_string())
             );
         }
         return Ok((p, true));
@@ -417,7 +418,7 @@ pub(crate) fn install_target(
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
-    let env_hook = io::nonempty_env("PIXTUOID_HOOK").map(PathBuf::from);
+    let env_hook = io::nonempty_env(io::HOOK_OVERRIDE_ENV).map(PathBuf::from);
     let (binary, explicit_hook) =
         resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;
@@ -448,12 +449,16 @@ pub(crate) fn install_target(
                 std::fs::create_dir_all(dir)
                     .with_context(|| format!("creating plugin dir {}", dir.display()))?;
             }
-            // Atomic + symlink-safe (temp-in-dir → fsync → rename), NOT a plain
-            // `fs::write`: the rename REPLACES `p` rather than following a symlink
-            // planted at it, and a torn write can't leave a half-rendered plugin
-            // the gateway then fails to load. Reuses the ConfigLock write authority
-            // (each artifact is its own lock target — disjoint from the config lock
-            // held here, consistent lock order config→artifact, so no self-deadlock).
+            // Atomic (temp-in-dir → fsync → rename), NOT a plain `fs::write`: a
+            // torn write would leave a half-rendered plugin the gateway then
+            // fails to load. It is NOT symlink-REPLACING: `write_config_atomic`
+            // resolves through a symlink at `p` and renames onto the link's
+            // target (invariant #4 — its own doc says "FOLLOWS symlinks", pinned
+            // by `write_config_atomic_through_symlink_preserves_link`); only the
+            // distinct, attacker-controllable `.tmp` is `O_NOFOLLOW`-hardened.
+            // Reuses the ConfigLock write authority (each artifact is its own
+            // lock target — disjoint from the config lock held here, consistent
+            // lock order config→artifact, so no self-deadlock).
             io::write_config_atomic(&p, &c).with_context(|| format!("writing {}", p.display()))?;
         }
     }

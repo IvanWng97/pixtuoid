@@ -53,7 +53,14 @@ pub(crate) fn run_setup(yes: bool) -> Result<()> {
 /// `pixtuoid sources [--json]` — print every source's connection state. Read-only.
 pub(crate) fn run_sources_list(json: bool) -> Result<()> {
     let cfg = config::config_path();
-    let log = std::fs::read_to_string(log_file_path()).unwrap_or_default();
+    // Same NotFound-vs-everything-else split `doctor` makes: an unreadable log
+    // leaves `health` under-reported, so say so instead of returning a silent
+    // clean bill. It rides tracing (stderr in every non-TUI mode) rather than
+    // stdout — `--json` stdout is the frozen Raycast array.
+    let (log, log_warning) = pixtuoid::doctor::read_log(&log_file_path());
+    if let Some(w) = log_warning {
+        tracing::warn!("{w}");
+    }
     let rows = sources::status(&cfg, &log);
     if json {
         println!("{}", serde_json::to_string_pretty(&rows)?);

@@ -131,6 +131,95 @@ fn load_malformed_collects_reset_warning() {
     );
 }
 
+/// The injected bytes every config-warning egress test crafts: a live OSC
+/// title-set (`ESC ] 0 ; … BEL`) plus a Trojan-Source RLO (CVE-2021-42574).
+const HOSTILE_BYTES: [char; 3] = ['\u{1b}', '\u{7}', '\u{202e}'];
+
+#[test]
+fn config_warnings_are_control_char_stripped_on_both_sinks() {
+    // `toml::de::Error`'s Display embeds the RAW offending source line, and BOTH
+    // of a warning's sinks are real terminals: the Vec (`main`'s pre-altscreen
+    // `eprintln!`, the `doctor` report) AND `tracing`, which writes to raw stderr
+    // in every non-TUI mode (`doctor`, `run --headless`, `connect`). A crafted
+    // config.toml — reachable via a repo-scoped direnv `XDG_CONFIG_HOME` — would
+    // otherwise inject a live OSC sequence. The Vec half was stripped first and
+    // the `tracing` twin was not, so assert the SINK, not just the Vec.
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("config.toml");
+    std::fs::write(
+        &p,
+        "theme = \"normal\"\nbad\u{1b}]0;PWNED\u{7}\u{202e}key =\n",
+    )
+    .unwrap();
+    let mut w = Vec::new();
+    let logged = crate::test_capture::capture(|| {
+        load(&p, &mut w);
+    });
+    assert_eq!(w.len(), 1);
+    for sink in [&w[0], &logged] {
+        assert!(
+            !sink.contains(HOSTILE_BYTES),
+            "a warning that interpolates config content must carry no ANSI/OSC or \
+             Trojan-Source bidi bytes: {sink:?}"
+        );
+    }
+    // Stays silent on ordinary content: the reset warning still reads normally,
+    // and the log carries the same sentence the user sees.
+    assert!(
+        w[0].contains("malformed config") && w[0].contains("ALL settings reset"),
+        "got: {w:?}"
+    );
+    assert!(
+        logged.contains("malformed config") && logged.contains("ALL settings reset"),
+        "the log must still carry the warning, not just drop it: {logged:?}"
+    );
+}
+
+#[test]
+fn every_config_resolver_warning_reaches_tracing_stripped() {
+    // The leak was a SIBLING-SET miss (one warning site sanitized, its adjacent
+    // twin not), so sweep every resolver that mints a warning from
+    // user-controlled content — not just `load`'s.
+    let hostile: String = HOSTILE_BYTES.iter().collect();
+    let cases: Vec<(&str, AppConfig)> = vec![
+        (
+            "unknown theme",
+            AppConfig {
+                theme: Some(format!("no{hostile}pe")),
+                ..Default::default()
+            },
+        ),
+        (
+            "unknown pet `kind`",
+            AppConfig {
+                pets: Some(vec![PetEntry {
+                    kind: Some(format!("no{hostile}pe")),
+                    name: None,
+                }]),
+                ..Default::default()
+            },
+        ),
+    ];
+    for (fragment, cfg) in cases {
+        let mut w = Vec::new();
+        let logged = crate::test_capture::capture(|| {
+            let _ = resolve_theme(&cfg, None, &mut w);
+            let _ = resolve_pets(&cfg, &mut w);
+        });
+        assert!(!w.is_empty(), "{fragment}: expected a collected warning");
+        for sink in w.iter().chain(std::iter::once(&logged)) {
+            assert!(
+                !sink.contains(HOSTILE_BYTES),
+                "{fragment}: hostile bytes reached a terminal sink: {sink:?}"
+            );
+        }
+        assert!(
+            logged.contains(fragment),
+            "{fragment}: the log must still carry the warning: {logged:?}"
+        );
+    }
+}
+
 #[test]
 fn resolve_theme_collects_unknown_config_theme_warning() {
     let cfg = AppConfig {

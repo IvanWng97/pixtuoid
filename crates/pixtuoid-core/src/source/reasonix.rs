@@ -227,7 +227,10 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!("unsupported reasonix hook event: {other}")
+            bail!(
+                "unsupported reasonix hook event: {}",
+                crate::source::decoder::display_safe(other)
+            )
         }
     }
 }

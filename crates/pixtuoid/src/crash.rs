@@ -3,7 +3,6 @@
 //! pre-filled GitHub issue URL. Binary-crate module (lifted out of `main.rs`);
 //! `main()` installs it first thing.
 
-use std::fs::OpenOptions;
 use std::path::PathBuf;
 
 pub(crate) fn install_crash_hook() {
@@ -33,14 +32,9 @@ pub(crate) fn install_crash_hook() {
         report.push_str(&bt_str);
         report.push('\n');
 
-        if let Some(parent) = crash_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(mut f) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&crash_path)
-        {
+        // Owner-only, through the SAME opener the runtime log uses: a backtrace
+        // carries the same project paths and agent ids (see `open_private_append`).
+        if let Ok(mut f) = crate::logging::open_private_append(&crash_path) {
             use std::io::Write;
             let _ = f.write_all(report.as_bytes());
         }

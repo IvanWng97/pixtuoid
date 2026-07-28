@@ -299,7 +299,10 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!("unsupported grok hook event: {other}")
+            bail!(
+                "unsupported grok hook event: {}",
+                crate::source::decoder::display_safe(other)
+            )
         }
     }
 }

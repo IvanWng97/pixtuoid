@@ -207,34 +207,57 @@ pub fn config_path() -> PathBuf {
     PathBuf::from(".config/pixtuoid/config.toml")
 }
 
+/// Report ONE user-facing config warning to BOTH of its sinks from a single
+/// control-char-stripped string (R0615-06).
+///
+/// Every consumer is a real terminal: the `warnings` Vec reaches `main`'s
+/// pre-altscreen `eprintln!` and the `doctor` report, and `tracing` writes to
+/// RAW stderr in every non-TUI mode (`doctor`, `run --headless`,
+/// `connect`/`disconnect`/`setup`) at a `warn` floor. These lines interpolate
+/// config CONTENT — a `toml::de::Error` Display embeds the raw offending source
+/// line — so an ANSI/OSC escape or a Trojan-Source bidi override would render
+/// live on either.
+///
+/// ONE emission point, not one per sink: the two were separately worded and
+/// separately sanitized, and the `tracing` half was the one left raw.
+fn warn_user(warnings: &mut Vec<String>, line: String) {
+    let line = crate::strip_control_chars(&line);
+    tracing::warn!("{line}");
+    warnings.push(line);
+}
+
 /// Load the config, never crashing: unreadable/malformed files fall back to
-/// defaults. Each fallback is reported twice on purpose (#87): a
-/// `tracing::warn!` for the log file, and a line pushed onto `warnings` so
-/// `main` can print it to stderr BEFORE the alternate screen swallows it —
-/// the resolvers stay layer-clean (no printing here; the caller picks the
-/// sink). Callers that have no user to warn (the save path's internal
-/// reload, the in-TUI version re-load) pass a throwaway Vec.
+/// defaults. Each fallback is reported twice on purpose (#87): to the log file
+/// via `tracing`, and onto `warnings` so `main` can print it to stderr BEFORE
+/// the alternate screen swallows it — the resolvers stay layer-clean (no
+/// printing here; the caller picks the sink), and `warn_user` emits both from
+/// one sanitized string. Callers that have no user to warn (the save path's
+/// internal reload, the in-TUI version re-load) pass a throwaway Vec.
 pub fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AppConfig::default(),
         Err(e) => {
-            tracing::warn!(path = %path.display(), %e, "cannot read config — using defaults");
-            warnings.push(format!(
-                "cannot read config {} ({e}) — using defaults",
-                path.display()
-            ));
+            warn_user(
+                warnings,
+                format!(
+                    "cannot read config {} ({e}) — using defaults",
+                    path.display()
+                ),
+            );
             return AppConfig::default();
         }
     };
     match toml::from_str(&contents) {
         Ok(cfg) => cfg,
         Err(e) => {
-            tracing::warn!(path = %path.display(), %e, "malformed config — using defaults");
-            warnings.push(format!(
-                "malformed config {} — ALL settings reset to defaults ({e})",
-                path.display()
-            ));
+            warn_user(
+                warnings,
+                format!(
+                    "malformed config {} — ALL settings reset to defaults ({e})",
+                    path.display()
+                ),
+            );
             AppConfig::default()
         }
     }
@@ -405,8 +428,8 @@ pub fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String
 pub fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) -> Option<usize> {
     match config.max_desks {
         Some(0) => {
-            tracing::warn!("max-desks = 0 in config would hide every agent — ignoring");
-            warnings.push(
+            warn_user(
+                warnings,
                 "max-desks = 0 in config would hide every agent — ignoring it \
                  (the --max-desks flag or auto-computed capacity applies)"
                     .into(),
@@ -433,10 +456,10 @@ pub fn resolve_theme(
     let config_theme = config.theme.as_deref().and_then(|t| {
         let theme = theme_by_name(t);
         if theme.is_none() {
-            tracing::warn!(theme = %t, "unknown theme in config — ignoring");
-            warnings.push(format!(
-                "unknown theme {t:?} in config — ignoring (falling back to the default)"
-            ));
+            warn_user(
+                warnings,
+                format!("unknown theme {t:?} in config — ignoring (falling back to the default)"),
+            );
         }
         theme
     });
@@ -467,14 +490,13 @@ pub fn resolve_pets(
             let mut out = Vec::with_capacity(entries.len());
             for entry in entries {
                 let Some(kind) = entry.kind.as_deref().and_then(PetKind::from_config_name) else {
-                    tracing::warn!(
-                        pet = ?entry.kind,
-                        "missing or unknown pet `kind` in [[pets]] config — skipping"
+                    warn_user(
+                        warnings,
+                        format!(
+                            "missing or unknown pet `kind` {:?} in [[pets]] config — skipping that pet",
+                            entry.kind.as_deref().unwrap_or("<missing>")
+                        ),
                     );
-                    warnings.push(format!(
-                        "missing or unknown pet `kind` {:?} in [[pets]] config — skipping that pet",
-                        entry.kind.as_deref().unwrap_or("<missing>")
-                    ));
                     continue;
                 };
                 let name = entry
@@ -487,9 +509,10 @@ pub fn resolve_pets(
                 out.push(Pet { kind, name });
             }
             if out.is_empty() && !entries.is_empty() {
-                tracing::warn!("all [[pets]] entries had unknown kinds — no pets will appear");
-                warnings
-                    .push("all [[pets]] entries had unknown kinds — no pets will appear".into());
+                warn_user(
+                    warnings,
+                    "all [[pets]] entries had unknown kinds — no pets will appear".into(),
+                );
             }
             out
         }

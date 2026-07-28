@@ -14,7 +14,11 @@
 //! `<cli> --version` subprocess probes (stdin nulled so they can't block; argv
 //! from the static registry, never user input). It never writes config
 //! (re-connecting hooks stays the Sources panel's job) and never spawns the
-//! TUI. The untrusted wire values (event/tool names) it samples are
+//! TUI. The PROBED CLI is not read-only about its own state, though — several
+//! bootstrap their state dir on any invocation — so the probe is gated by
+//! `may_probe_version` on evidence the user already runs that CLI; see the
+//! `doctor`-probe sharp edge in `crates/pixtuoid/CLAUDE.md`. The untrusted wire
+//! values (event/tool names) it samples are
 //! `sanitize`d before display (R0615-06) — `doctor` is the third consumer of
 //! those breadcrumbs and must hold the same line as the headless path + footer.
 
@@ -544,6 +548,23 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
     first_sanitized_line(&output.stdout).or_else(|| first_sanitized_line(&output.stderr))
 }
 
+/// Whether `doctor` may spawn this source's `<cli> --version` probe: only with
+/// evidence the user already runs that CLI — it is either CONNECTED, or its
+/// install target probed PRESENT. `cli_detected` is `None` for a transcript-only
+/// source (no install target, so nothing to detect).
+///
+/// `--version` is not side-effect-free on the other side: several agent CLIs
+/// bootstrap their own state dir on ANY invocation, and those dirs are exactly
+/// what `presence_probe` / `detect_installed` key on — so an unconditional probe
+/// MANUFACTURED the presence it was diagnosing (`cli_present` false→true), and
+/// the natural `doctor` → `setup --yes` order then installed hooks into CLIs
+/// `setup --yes` alone had just declined to touch. Gating on presence removes
+/// the observer effect by construction: a CLI that has already written its own
+/// state cannot be perturbed into existence by one more `--version`.
+fn may_probe_version(connected: bool, cli_detected: Option<bool>) -> bool {
+    connected || cli_detected.unwrap_or(false)
+}
+
 /// The desktop activation backend focus-jump would use on THIS host — the
 /// per-OS half of the #526 focus diagnostic. Linux detection is the pure
 /// [`linux_activation_backend`] over the env markers `focus/linux.rs` keys on.
@@ -692,6 +713,37 @@ pub(crate) fn focus_section(
     out
 }
 
+/// Read the warn-floor log for a drift scan, separating "there is no log yet"
+/// from "the log could not be read". Returns the text (empty on either failure)
+/// plus a warning line for the SECOND case only.
+///
+/// A missing log is the ordinary no-TUI-run-yet state and genuinely means "no
+/// drift recorded". Every other error class — permission denied, an I/O error,
+/// a path that isn't a file — means the drift counts are UNKNOWN, and folding
+/// that into the same silent empty string made `doctor` positively assert
+/// `✓ no decode drift` (and `sources --json` return `health: null`) off an input
+/// it never read. One authority so both readers answer identically — `pub`
+/// because `sources_cli` (bin crate) is the second reader.
+///
+/// The warning is `sanitize`d where it is MINTED, not per presenter: the path it
+/// interpolates comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`, and the two readers
+/// print it to different terminals (`doctor`'s stdout report, `sources_cli`'s
+/// `tracing` warn to raw stderr) — sanitizing per reader is exactly how the
+/// escape reached one of them.
+pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
+    match std::fs::read_to_string(path) {
+        Ok(s) => (s, None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
+        Err(e) => (
+            String::new(),
+            Some(sanitize(&format!(
+                "log unreadable: {} ({e}) — the decode-drift counts below are not meaningful",
+                path.display()
+            ))),
+        ),
+    }
+}
+
 /// Run the diagnosis: read config + install-state + the log, probe installed CLI
 /// versions, print a per-source health table. Read-only. `log_path` is injected
 /// by `main` (it owns the log-path resolution, which lives in the bin, not lib).
@@ -708,7 +760,7 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     // semantic — it can lag a just-made in-TUI toggle until that toggle persists,
     // which it always does (persist-first; see `connect_source`/`disconnect_source`).
     let connected = crate::config::resolve_connected(&cfg);
-    let log = std::fs::read_to_string(log_path).unwrap_or_default();
+    let (log, log_warning) = read_log(log_path);
 
     let mut out = String::from("pixtuoid doctor — source health\n");
     out.push_str(&format!("log: {}\n", log_path.display()));
@@ -755,6 +807,12 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     for w in &warnings {
         out.push_str(&format!("⚠ config: {}\n", sanitize(w)));
     }
+    // Same rule for the report's OTHER primary input: an unreadable log must not
+    // read as "no drift". Sanitized identically — the io::Error Display carries a
+    // path.
+    if let Some(w) = &log_warning {
+        out.push_str(&format!("⚠ {}\n", sanitize(w)));
+    }
     out.push('\n');
 
     let mut any_drift = false;
@@ -769,13 +827,17 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
         // Sources panel + boot preflight read, so the report can't drift apart
         // from the live surfaces.
         let diag = diagnose(src, &log, None);
+        let is_connected = connected.contains(src);
+        let cli_detected = target.map(crate::install::target::is_present);
         let row = DoctorSourceRow {
             prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
             source_id: src,
-            connected: connected.contains(src),
+            connected: is_connected,
             has_target: target.is_some(),
             hooks_installed,
-            installed_version: desc.and_then(|d| d.version_probe).and_then(probe_version),
+            installed_version: may_probe_version(is_connected, cli_detected)
+                .then(|| desc.and_then(|d| d.version_probe).and_then(probe_version))
+                .flatten(),
             verified_version: desc.map(|d| d.verified_version).unwrap_or("unknown"),
             diag,
         };
@@ -850,9 +912,7 @@ fn health_summary(n: usize, broken: &[String], any_drift: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::sync::{Arc, Mutex};
-    use tracing_subscriber::fmt::MakeWriter;
+    use crate::test_capture::capture;
 
     #[test]
     fn health_summary_one_broken_uses_the_singular_verb() {
@@ -979,37 +1039,124 @@ mod tests {
         assert!(out.contains("sources \u{b7}"), "{out}");
     }
 
-    #[derive(Clone, Default)]
-    struct Buf(Arc<Mutex<Vec<u8>>>);
-    impl Write for Buf {
-        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(b);
-            Ok(b.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    impl MakeWriter<'_> for Buf {
-        type Writer = Buf;
-        fn make_writer(&self) -> Buf {
-            self.clone()
-        }
+    #[test]
+    fn an_unreadable_log_is_reported_but_a_missing_one_is_not() {
+        // The one tool whose job is to explain "connected but no sprite" used to
+        // fail OPEN on its own primary input: every read error became an empty
+        // string, so `✓ no decode drift` was asserted off a file never read.
+        // A genuinely MISSING log stays the silent no-TUI-run-yet case.
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_log(&dir.path().join("nope")), (String::new(), None));
+
+        let f = dir.path().join("log");
+        std::fs::write(&f, "hello").unwrap();
+        assert_eq!(read_log(&f), ("hello".to_string(), None));
+
+        // A directory reads as IsADirectory / PermissionDenied — never NotFound,
+        // on any platform and any uid (a chmod-000 file would not bind as root).
+        let (text, warning) = read_log(dir.path());
+        assert!(text.is_empty());
+        let warning = warning.expect("an unreadable log must be reported");
+        assert!(
+            warning.contains("log unreadable") && warning.contains("not meaningful"),
+            "got: {warning}"
+        );
+
+        // And the report SURFACES it (the config-warning half already did).
+        let out = run(dir.path()).unwrap();
+        assert!(out.contains("⚠ log unreadable"), "{out}");
     }
 
-    // Capture through the SAME subscriber shape main.rs's file log uses
-    // (fmt + ansi off + default timestamp), so the scanner is validated against
-    // the REAL line format, not an assumed one.
-    fn capture(f: impl FnOnce()) -> String {
-        let buf = Buf::default();
-        let sub = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_max_level(tracing::Level::TRACE)
-            .with_writer(buf.clone())
-            .finish();
-        tracing::subscriber::with_default(sub, f);
-        let bytes = buf.0.lock().unwrap().clone();
-        String::from_utf8(bytes).unwrap()
+    #[test]
+    fn the_unreadable_log_warning_is_stripped_where_it_is_minted() {
+        // The path comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`, and the warning has
+        // TWO presenters with different sinks: `doctor`'s stdout report and
+        // `sources_cli`'s `tracing::warn!` to raw stderr. Sanitizing per presenter
+        // is how one of them shipped raw, so the strip lives at the mint point —
+        // asserted on `read_log`'s OWN return value, not on either presenter.
+        let dir = tempfile::tempdir().unwrap();
+        // Windows forbids codepoints 1-31 in a filename (Microsoft's "Naming Files,
+        // Paths, and Namespaces"), so the Cc half of the vector cannot exist in a
+        // path there; U+202E is unreserved and still reaches the terminal.
+        let hostile = if cfg!(windows) {
+            dir.path().join("l\u{202e}og")
+        } else {
+            dir.path().join("l\u{1b}]0;PWNED\u{7}\u{202e}og")
+        };
+        std::fs::create_dir(&hostile).unwrap(); // a directory never reads as NotFound
+        let (_, warning) = read_log(&hostile);
+        let warning = warning.expect("an unreadable log must be reported");
+        assert!(
+            !warning.contains(['\u{1b}', '\u{7}', '\u{202e}']),
+            "the minted warning carries a live OSC / Trojan-Source override: {warning:?}"
+        );
+        assert!(warning.contains("log unreadable"), "got: {warning}");
+    }
+
+    #[test]
+    fn version_probe_is_gated_on_evidence_the_user_runs_that_cli() {
+        // Explicitly connected → probe, even before the CLI has written anything.
+        assert!(may_probe_version(true, Some(false)));
+        assert!(may_probe_version(true, None));
+        // Already initialised on disk → probing can't bootstrap what exists.
+        assert!(may_probe_version(false, Some(true)));
+        // No evidence at all → never spawn. Both the target-bearing "probed
+        // absent" case and the transcript-only "nothing to probe" case.
+        assert!(!may_probe_version(false, Some(false)));
+        assert!(!may_probe_version(false, None));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_never_spawns_a_version_probe_for_a_cli_it_has_no_evidence_of() {
+        // `<cli> --version` is NOT side-effect-free: several agent CLIs bootstrap
+        // their own state dir on ANY invocation, and those dirs are exactly what
+        // `presence_probe`/`detect_installed` key on. An unconditional probe
+        // therefore flipped `cli_present` false→true, so the natural
+        // troubleshooting order `doctor` → `setup --yes` installed hooks into CLIs
+        // that `setup --yes` alone had just declined to touch.
+        use std::os::unix::fs::PermissionsExt;
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let (home, bin) = (dir.path().join("home"), dir.path().join("bin"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        // A stand-in for the real CLI: spawning it AT ALL leaves this trace.
+        let marker = dir.path().join("spawned");
+        let fake = bin.join("opencode");
+        std::fs::write(
+            &fake,
+            format!("#!/bin/sh\n: > '{}'\necho 1.0.0\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
+            ["HOME", "XDG_CONFIG_HOME", "PATH", "OPENCODE_CONFIG_DIR"]
+                .iter()
+                .map(|k| (*k, std::env::var_os(k)))
+                .collect();
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+        std::env::remove_var("OPENCODE_CONFIG_DIR");
+        std::env::set_var("PATH", &bin);
+        let out = run(std::path::Path::new("/nonexistent-pixtuoid-doctor-log"));
+        let spawned = marker.exists();
+        for (k, v) in saved {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+
+        out.expect("the report still builds");
+        assert!(
+            !spawned,
+            "doctor spawned `opencode --version` in a pristine HOME where opencode \
+             is undetected — the probe must be gated on evidence the user runs it"
+        );
     }
 
     #[test]
