@@ -203,8 +203,23 @@ mod tests {
     /// The escape the alternate screen is left with. Asserted as a literal
     /// rather than re-executing the command into a second buffer, which would
     /// only prove `execute!` is deterministic.
+    ///
+    /// Unix-only, and so is EVERY test below that reads it — the gate is a
+    /// property of crossterm, not of either test. crossterm 0.29 dispatches on a
+    /// PROCESS-GLOBAL flag rather than on the writer: `queue` and `execute_fmt`
+    /// both `return command.execute_winapi()` when `ansi_support::supports_ansi()`
+    /// is false, and that flag is `enable_vt_processing().is_ok() || TERM is set
+    /// and != "dumb"`. Under `windows-test` nextest runs each test binary with a
+    /// PIPED stdout and no console, and windows-latest/pwsh sets no `TERM`, so
+    /// the flag is false and the sequences go to the real console — no writer,
+    /// in-memory or piped, ever sees a byte to assert on.
+    #[cfg(unix)]
     const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
 
+    /// That the restore reaches the writer it was HANDED (the generic seam),
+    /// as opposed to a stream of its own choosing. Unix-only for the crossterm
+    /// dispatch reason on `LEAVE_ALT_SCREEN` above.
+    #[cfg(unix)]
     #[test]
     fn the_restore_writes_the_leave_sequence_into_the_writer_it_is_given() {
         let mut buf: Vec<u8> = Vec::new();
@@ -221,9 +236,8 @@ mod tests {
     /// choice is from outside: re-exec this test binary with the child marker,
     /// let a real panic fire the hook, and read the two pipes apart.
     ///
-    /// Unix-only: on Windows `execute!` falls back to WinAPI console calls when
-    /// the writer is not VT-capable, so a piped stdout carries no bytes to
-    /// assert on — and the defect itself is the Unix fd-redirection case.
+    /// Unix-only for the same crossterm dispatch reason as `LEAVE_ALT_SCREEN`
+    /// above — and the defect itself is the Unix fd-redirection case.
     #[cfg(unix)]
     #[test]
     fn the_hook_restores_on_stdout_and_keeps_the_report_on_stderr() {
