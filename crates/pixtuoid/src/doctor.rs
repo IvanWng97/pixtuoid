@@ -555,10 +555,10 @@ fn activation_backend() -> String {
     #[cfg(target_os = "linux")]
     {
         linux_activation_backend(
-            std::env::var_os(crate::focus::SWAY_ENV).is_some(),
-            std::env::var_os(crate::focus::HYPRLAND_ENV).is_some(),
-            std::env::var_os("WAYLAND_DISPLAY").is_some(),
-            std::env::var_os("DISPLAY").is_some(),
+            marker_set(std::env::var(crate::focus::SWAY_ENV).ok()),
+            marker_set(std::env::var(crate::focus::HYPRLAND_ENV).ok()),
+            marker_set(std::env::var("WAYLAND_DISPLAY").ok()),
+            marker_set(std::env::var("DISPLAY").ok()),
         )
         .to_string()
     }
@@ -570,6 +570,17 @@ fn activation_backend() -> String {
     {
         "none — focus-jump is unsupported on this OS".to_string()
     }
+}
+
+/// Is a compositor/display env marker actually SET? EMPTY (or whitespace-only)
+/// counts as UNSET — the workspace `install::io::nonempty` rule (#172), NOT bare
+/// presence. A leftover `WAYLAND_DISPLAY=`/`SWAYSOCK=` (systemd user units and
+/// non-forwarded ssh sessions leave them routinely) would otherwise print a
+/// confidently wrong verdict at a user whose X11 EWMH channel works fine.
+/// `focus::linux::detect_channel` keys the live channel on the SAME rule.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn marker_set(value: Option<String>) -> bool {
+    crate::install::io::nonempty(value).is_some()
 }
 
 /// Pure so every arm is unit-tested on any host: mirrors `focus/linux.rs`'s
@@ -892,6 +903,25 @@ mod tests {
         assert!(linux_activation_backend(false, false, true, true).contains("✗ Wayland"));
         assert!(linux_activation_backend(false, false, false, true).contains("EWMH"));
         assert!(linux_activation_backend(false, false, false, false).contains("✗ none"));
+    }
+
+    #[test]
+    fn an_exported_but_blank_compositor_marker_is_not_a_running_compositor() {
+        assert!(!marker_set(None));
+        assert!(!marker_set(Some(String::new())), "SWAYSOCK= is a leftover");
+        assert!(!marker_set(Some("  \t ".to_string())));
+        assert!(marker_set(Some("/run/user/1000/sway-ipc.sock".to_string())));
+        // The whole point: on an X11 host, blank sway/wayland markers must not
+        // outrank a real $DISPLAY. Bare `var_os(..).is_some()` reported sway.
+        assert_eq!(
+            linux_activation_backend(
+                marker_set(Some(String::new())),
+                marker_set(None),
+                marker_set(Some(String::new())),
+                marker_set(Some(":0".to_string())),
+            ),
+            "X11 EWMH ($DISPLAY) ✓"
+        );
     }
 
     #[test]

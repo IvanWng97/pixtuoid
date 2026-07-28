@@ -169,7 +169,7 @@ pub fn office_scale(win_h: u32) -> u32 {
     (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
 }
 
-/// The window→office-buffer projection for a `win_w`×`win_h` px window: the
+/// The window→office-buffer projection for a `win_w`×`win_h` PHYSICAL-px window: the
 /// integer `office_scale` plus the downscaled buffer dims (`window / scale`,
 /// clamped non-zero, NO footer row). The ONE place this geometry lives — shared
 /// by `window::redraw` (which needs `scale` for the upscale blit and the buffer
@@ -183,15 +183,29 @@ pub(crate) fn window_buffer_geometry(win_w: u32, win_h: u32) -> (u32, u16, u16) 
     (scale, buf_w, buf_h)
 }
 
-/// Per-floor boot desk-capacities for the FLOATING window. Uses the SAME
+/// Per-floor boot desk-capacities for the FLOATING window, from a PHYSICAL-px
+/// window size. Uses the SAME
 /// `window_buffer_geometry` the first redraw's `window::sync_floor_caps` does —
-/// the office buffer is `window / office_scale` with NO footer row — so the boot
-/// seed and the first redraw AGREE. The TUI's `runtime::boot_capacities_for`
+/// the office buffer is `window / office_scale` with NO footer row. The TUI's
+/// `runtime::boot_capacities_for`
 /// instead subtracts a footer row AND ignores the window upscale, so reusing it
 /// here OVER-seeds: in the sub-frame boot race before the first redraw, a
 /// `SessionStart` could land at a `desk_index` the smaller real layout lacks
 /// (immutable → invisible-but-alive until a resize). A floor whose layout rejects
 /// the size falls back to `FALLBACK_DESKS`, matching the TUI boot helper.
+///
+/// KNOWN RESIDUAL — see the boot-seed sharp edge in `crates/pixtuoid/CLAUDE.md`.
+/// The only caller, `floating::run`, has just the
+/// `[floating]` config size, which is LOGICAL — so on a HiDPI display the seed is
+/// still computed for a window the redraw will not measure (default 360×240
+/// logical seeds floor 0 at 70; at 2× the real 720×480 buffer holds 30). It
+/// cannot be fixed here: winit 0.30 exposes `primary_monitor` only on
+/// `ActiveEventLoop`, which does not exist until `run_app` is already driving the
+/// window, and no conservative logical-side seed is sound either — `office_scale`
+/// ROUNDS, so the buffer for one logical size is not monotone in the scale factor
+/// (360×240 logical yields buffers 360×240 / 225×150 / 315×210 / 240×160 at
+/// 1×/1.25×/1.75×/2×). The sound fix is to seed the pipeline from the real
+/// `window.inner_size()` in `resumed`, which means moving `spawn_pipeline` there.
 pub(crate) fn boot_capacities_for_window(
     win_w: u32,
     win_h: u32,

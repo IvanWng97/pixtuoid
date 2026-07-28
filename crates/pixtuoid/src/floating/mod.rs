@@ -8,6 +8,7 @@
 //! `softbuffer` window instead of half-block terminal cells. `pixtuoid-core` stays
 //! window-free (invariant #1) — all windowing lives here.
 
+mod cadence;
 mod geometry;
 mod input;
 pub mod offscreen;
