@@ -1057,21 +1057,66 @@ test_codeql_health_gate_before_upload_is_accepted if {
 	not sprintf("%s must verify Rust extraction health before uploading the SARIF", [codeql_workflow_path]) in violations
 }
 
-claude_tag_head_guard_message(event) := sprintf("%s %s arm must require the pull request head to live in this repository", [claude_tag_workflow_path, event])
+claude_tag_head_guard_message(event) := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
 
-claude_tag_fixture(review_arm_suffix) := {"documents": [{
+claude_tag_single_job_message := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
+
+claude_tag_triggers := {
+	"issues": {"types": ["opened"]},
+	"issue_comment": {"types": ["created"]},
+	"pull_request_review": {"types": ["submitted"]},
+	"pull_request_review_comment": {"types": ["created"]},
+}
+
+claude_tag_workflow(job_name, job) := {"documents": [{
 	"path": claude_tag_workflow_path,
-	"contents": {"jobs": {"claude": {"if": sprintf(
-		"(github.event_name == 'issues' && trusted) || (github.event_name == 'issue_comment' && trusted) || (github.event_name == 'pull_request_review'%s && trusted) || (github.event_name == 'pull_request_review_comment'%s && trusted)",
-		[review_arm_suffix, review_arm_suffix],
-	)}}},
+	"contents": {
+		"on": claude_tag_triggers,
+		"jobs": {job_name: job},
+	},
 }]}
+
+claude_tag_condition_text(review_arm_suffix) := sprintf(
+	"(github.event_name == 'issues' && trusted) || (github.event_name == 'issue_comment' && trusted) || (github.event_name == 'pull_request_review'%s && trusted) || (github.event_name == 'pull_request_review_comment'%s && trusted)",
+	[review_arm_suffix, review_arm_suffix],
+)
+
+claude_tag_fixture(review_arm_suffix) := claude_tag_workflow("claude", {
+	"if": claude_tag_condition_text(review_arm_suffix),
+	"steps": [{"uses": claude_action}],
+})
 
 test_claude_tag_pull_request_arms_without_the_head_guard_are_denied if {
 	violations := deny with input as claude_tag_fixture("")
 	every event in claude_pull_request_event_names {
 		claude_tag_head_guard_message(event) in violations
 	}
+}
+
+# The worst shape, and the one an arm-keyed rule missed: with no condition at
+# all every arm is present-and-ungated, not absent.
+test_claude_tag_job_without_a_condition_is_denied if {
+	violations := deny with input as claude_tag_workflow("claude", {"steps": [{"uses": claude_action}]})
+	every event in claude_pull_request_event_names {
+		claude_tag_head_guard_message(event) in violations
+	}
+}
+
+# Renaming the job away from `claude` used to silence the guard entirely.
+test_claude_tag_renamed_job_is_still_guarded if {
+	violations := deny with input as claude_tag_workflow("respond", {
+		"if": claude_tag_condition_text(""),
+		"steps": [{"uses": claude_action}],
+	})
+	every event in claude_pull_request_event_names {
+		claude_tag_head_guard_message(event) in violations
+	}
+	not claude_tag_single_job_message in violations
+}
+
+test_claude_tag_workflow_without_the_action_is_denied if {
+	violations := deny with input as claude_tag_workflow("claude", {"steps": [{"uses": "actions/checkout@v7"}]})
+	claude_tag_single_job_message in violations
 }
 
 # The issues/issue_comment arms carry no pull_request object, so demanding the
@@ -1081,8 +1126,25 @@ test_claude_tag_guarded_pull_request_arms_are_accepted if {
 	every event in claude_pull_request_event_names {
 		not claude_tag_head_guard_message(event) in violations
 	}
+	not claude_tag_single_job_message in violations
+}
+
+# Dropping BOTH the arm and its `on:` entry retires the exposure, so the rule
+# keyed off `on:` must stay silent — the guard tracks reachability, not arms.
+test_claude_tag_dropping_a_pull_request_trigger_is_accepted if {
+	fixture := {"documents": [{
+		"path": claude_tag_workflow_path,
+		"contents": {
+			"on": {"issues": {"types": ["opened"]}},
+			"jobs": {"claude": {
+				"if": "(github.event_name == 'issues' && trusted)",
+				"steps": [{"uses": claude_action}],
+			}},
+		},
+	}]}
+	violations := deny with input as fixture
 	every violation in violations {
-		not contains(violation, "arm must require the pull request head")
+		not contains(violation, "arm must require")
 	}
 }
 
@@ -1269,6 +1331,17 @@ test_missing_dependabot_config_leaves_composite_pins_uncovered if {
 		"path": codecov_authority_path,
 		"contents": {"runs": {"steps": [{"uses": codecov_action}]}},
 	}]}
+	violations := deny with input as fixture
+	uncovered_composite_message in violations
+}
+
+# Copying the glob into the SINGULAR key is the likeliest way to get this wrong,
+# and GitHub does not glob `directory` — Dependabot would resolve nothing.
+test_globbed_singular_directory_does_not_cover_the_pin if {
+	fixture := composite_pin_fixture({"updates": [{
+		"package-ecosystem": "github-actions",
+		"directory": "/.github/actions/*",
+	}]})
 	violations := deny with input as fixture
 	uncovered_composite_message in violations
 }

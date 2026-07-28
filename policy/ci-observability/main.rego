@@ -167,16 +167,19 @@ dependabot_directory(path) := directory if {
 	directory := sprintf("/%s", [concat("/", array.slice(segments, 0, count(segments) - 1))])
 }
 
-# Both spellings are legitimate: `directories` (globbable, one entry for all
-# composites) and the singular `directory` (the pre-2024 one-entry-per-composite
-# workaround). A `directories` entry is a glob, so match it as one.
-declared_actions_directories contains directory if {
+# Both spellings are legitimate: `directories` (one entry for all composites)
+# and the singular `directory` (the pre-2024 one-entry-per-composite workaround).
+# They are NOT interchangeable — GitHub's options reference: "The `directories`
+# key supports globbing and the wildcard character `*`. These features are not
+# supported by the `directory` key." So copying the glob into the singular key
+# resolves nothing upstream, and must not read as coverage here.
+declared_actions_directory_globs contains directory if {
 	some update in object.get(documents[dependabot_config_path], "updates", [])
 	object.get(update, "package-ecosystem", "") == github_actions_ecosystem
 	some directory in object.get(update, "directories", [])
 }
 
-declared_actions_directories contains directory if {
+declared_actions_directory_literals contains directory if {
 	some update in object.get(documents[dependabot_config_path], "updates", [])
 	object.get(update, "package-ecosystem", "") == github_actions_ecosystem
 	directory := object.get(update, "directory", "")
@@ -184,8 +187,12 @@ declared_actions_directories contains directory if {
 }
 
 dependabot_covers(directory) if {
-	some declared in declared_actions_directories
+	some declared in declared_actions_directory_globs
 	glob.match(declared, ["/"], directory)
+}
+
+dependabot_covers(directory) if {
+	directory in declared_actions_directory_literals
 }
 
 codecov_action_reference(value) if {
@@ -348,7 +355,31 @@ claude_trigger_workflow_paths := {
 	claude_security_workflow_path,
 }
 
-claude_tag_job := object.get(documents, [claude_tag_workflow_path, "jobs", "claude"], {})
+# Identified by the action it runs, not by its job NAME: keying on the literal
+# name `claude` let a rename retire the head guard below in silence.
+claude_tag_jobs := [job |
+	some job in object.get(documents[claude_tag_workflow_path], "jobs", {})
+	some step in object.get(job, "steps", [])
+	action_matches(object.get(step, "uses", ""), claude_action)
+]
+
+claude_tag_condition := normalized_claude_condition(object.get(claude_tag_jobs[0], "if", ""))
+
+claude_tag_arms(event) := [arm |
+	some arm in split(claude_tag_condition, " || ")
+	contains(arm, sprintf("github.event_name == '%s'", [event]))
+]
+
+# Guarded means the event is REACHABLE only through guarded arms: at least one
+# arm names it (none at all = a missing condition, which gates nothing) and
+# every arm that names it carries the head check.
+claude_tag_event_is_guarded(event) if {
+	arms := claude_tag_arms(event)
+	count(arms) > 0
+	every arm in arms {
+		contains(arm, claude_same_repo_head_condition)
+	}
+}
 
 claude_reusable := object.get(documents, claude_reusable_workflow_path, {})
 claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
@@ -619,13 +650,22 @@ deny contains msg if {
 # claude.yml is the only contents:write Claude job and it checks out without a
 # ref, so on these events an unguarded arm stages fork-authored files — a
 # repo-root CLAUDE.md among them — as the agent's own instructions. Keyed off
-# the arms that EXIST: an absent arm cannot be triggered, so it is not exposure.
+# the `on:` trigger set, not the `if:` arms — a condition that never mentions
+# the event is a SKIPPED job, but a MISSING condition is an ungated one, and
+# deleting the whole `if:` block is the cheapest way to lose the guard.
 deny contains msg if {
 	some event in claude_pull_request_event_names
-	some arm in split(normalized_claude_condition(object.get(claude_tag_job, "if", "")), " || ")
-	contains(arm, sprintf("github.event_name == '%s'", [event]))
-	not contains(arm, claude_same_repo_head_condition)
-	msg := sprintf("%s %s arm must require the pull request head to live in this repository", [claude_tag_workflow_path, event])
+	object.get(documents, [claude_tag_workflow_path, "on", event], "absent") != "absent"
+	not claude_tag_event_is_guarded(event)
+	msg := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
+}
+
+# The existence half: the guard above resolves the job through its action step,
+# so a workflow where no job runs the action leaves nothing to check.
+deny contains msg if {
+	_ := documents[claude_tag_workflow_path]
+	count(claude_tag_jobs) != 1
+	msg := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
 }
 
 deny contains msg if {
