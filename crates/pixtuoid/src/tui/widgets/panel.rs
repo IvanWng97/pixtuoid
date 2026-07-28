@@ -581,9 +581,8 @@ mod tests {
         let tall = PanelGeometry::compute(b, 30, 100, Some("t"), 1.0)
             .outer()
             .expect("renders");
-        // Asserted against the FOOTER's own authority, not against the constant
-        // under test: `bottom() == b.bottom() - RESERVED_FOOTER_ROWS` restates the
-        // mechanism and would survive that constant being zero.
+        // Asserted against the FOOTER's own authority: `== b.bottom() -
+        // RESERVED_FOOTER_ROWS` restates the constant under test and can't fail.
         let footer_row = b.bottom() - crate::tui::renderer::FOOTER_ROWS;
         assert!(
             tall.bottom() <= footer_row,

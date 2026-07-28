@@ -160,14 +160,8 @@ fn a_full_height_modal_never_covers_the_footer_row() {
          \nframe was:\n{text}"
     );
 
-    // TEETH, in cells rather than in a substring: the glyphs surviving is not the
-    // same as the footer being READABLE. `cast_drop_shadow` offsets the card's
-    // silhouette one row DOWN, and its bottom band dims `fg` only — so a panel
-    // that stops exactly one row short still repaints the footer's own text at
-    // SHADOW_FACTOR while leaving its bg lit (measured: the brightest `[q]uit`
-    // pixel fell 140 → 58 luminance, ~5.2:1 → ~1.55:1 contrast). Compare the
-    // footer row against the same frame with no modal open: byte-identical or the
-    // reserve is too small.
+    // TEETH in cells, not a substring: surviving glyphs are not a READABLE footer,
+    // and the shadow's bottom band dims `fg` only (see the every-frame sharp edge).
     let mut plain = build(32, 31, vec![]);
     plain.render(&scene, &pack(), t).expect("render");
     let (lit, dimmed) = (plain.frame_buffer(), r.frame_buffer());
