@@ -373,6 +373,13 @@ fn apply_one(cfg: &Path, sid: &'static str, action: Action) -> ChangeOutcome {
     }
 }
 
+/// The marker a folded hook-removal failure carries into [`ChangeOutcome::Failed`]
+/// — the `sources set` wire token AND the tag a presenter reads back to tell the
+/// fold apart from a real failure (the disconnect itself SUCCEEDED; only the hook
+/// removal didn't). One definition so the writer here and the onboarding reader
+/// (`tui::reflect_onboarding_outcomes`) cannot drift.
+pub(crate) const HOOK_REMOVAL_FAILED_PREFIX: &str = "hooks not removed: ";
+
 /// Map a SUCCESSFUL `disconnect`'s [`DisconnectOutcome`] to the CLI
 /// [`ChangeOutcome`]. Split out of `apply_one` so the load-bearing fold is
 /// teeth-testable apart from the real install FS path: a folded hook-removal
@@ -381,7 +388,7 @@ fn apply_one(cfg: &Path, sid: &'static str, action: Action) -> ChangeOutcome {
 fn map_disconnect_outcome(o: DisconnectOutcome) -> ChangeOutcome {
     match o {
         DisconnectOutcome::HookRemovalFailed(e) => {
-            ChangeOutcome::Failed(format!("hooks not removed: {e}"))
+            ChangeOutcome::Failed(format!("{HOOK_REMOVAL_FAILED_PREFIX}{e}"))
         }
         DisconnectOutcome::FlagOnly | DisconnectOutcome::Uninstalled(_) => {
             ChangeOutcome::Disconnected

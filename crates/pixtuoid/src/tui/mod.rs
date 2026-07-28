@@ -222,8 +222,18 @@ fn disconnect_source(
     }
 }
 
+/// One presentable onboarding failure: the source it belongs to (so the panel can
+/// put the selection — and thus the offered `t` retry — on the row that actually
+/// failed) plus the line the user reads. The two always travel together; a bare
+/// line can't be routed to a row.
+#[derive(Debug)]
+struct OnboardingFailure {
+    source_id: String,
+    line: String,
+}
+
 /// Reflect the onboarding apply's outcomes into the LIVE connected-set, and hand
-/// BACK one presentable line per failure.
+/// BACK one presentable failure per failed row.
 ///
 /// `choices` and `outcomes` are index-aligned (`apply_choices` maps each choice
 /// in order). `NoOp` means "already in the DESIRED state — nothing written"
@@ -231,6 +241,17 @@ fn disconnect_source(
 /// than hardcoding it closed: a NoOp for a CHECKED row must leave the gate OPEN
 /// (an already-connected source the user just confirmed must not have its live
 /// agents evicted). A failed connect must NOT go live.
+///
+/// The wording BRANCHES on `want`, because `Failed` covers both directions:
+/// `apply_choices` maps an UNCHECKED row to a Disconnect, and `freeze_for_skip`
+/// makes that the common case — on a genuine first run every detected source
+/// freezes to `false`, so Esc issues a Disconnect for each one. Calling those
+/// "connect failed" named the wrong operation for a user who connected nothing.
+/// A hook-removal failure is a third case again: `map_disconnect_outcome` folds
+/// it into `Failed` on an OTHERWISE SUCCESSFUL disconnect (the flag IS persisted
+/// false), so it reads as the panel's "disconnected, but hook removal failed".
+/// All three strings are the panel's own — see [`connect_source`] /
+/// [`disconnect_source`].
 ///
 /// The RETURN is the surfacing half. The warn-floor log is not a user surface —
 /// in TUI mode the alternate screen owns the terminal, and nothing in-session can
@@ -243,7 +264,7 @@ fn reflect_onboarding_outcomes(
     connected: &crate::runtime::ConnectedSources,
     choices: &[(&'static str, bool)],
     outcomes: &[(String, crate::sources::ChangeOutcome)],
-) -> Vec<String> {
+) -> Vec<OnboardingFailure> {
     use crate::sources::ChangeOutcome;
     let mut failures = Vec::new();
     for ((_, want), (id, oc)) in choices.iter().zip(outcomes) {
@@ -253,10 +274,20 @@ fn reflect_onboarding_outcomes(
             ChangeOutcome::NoOp => connected.set(id, *want),
             ChangeOutcome::Failed(e) => {
                 connected.set(id, false);
-                tracing::warn!("onboarding: {id} failed to connect: {e}");
+                let verb = if *want { "connect" } else { "disconnect" };
+                tracing::warn!("onboarding: {id} failed to {verb}: {e}");
                 let name =
                     crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
-                failures.push(format!("{name}: connect failed \u{2014} {e}"));
+                let line = match e.strip_prefix(crate::sources::HOOK_REMOVAL_FAILED_PREFIX) {
+                    Some(reason) => {
+                        format!("{name}: disconnected, but hook removal failed \u{2014} {reason}")
+                    }
+                    None => format!("{name}: {verb} failed \u{2014} {e}"),
+                };
+                failures.push(OnboardingFailure {
+                    source_id: id.clone(),
+                    line,
+                });
             }
         }
     }
@@ -264,22 +295,33 @@ fn reflect_onboarding_outcomes(
 }
 
 /// Put an onboarding apply's failures where the user is actually looking: open
-/// the Sources panel and seed its result line — the SAME surface and wording its
-/// own `t` toggle renders, so the retry is one keystroke away. Nothing else can
-/// tell them: `warn_broken_installs` ran before the TUI, the footer nudge reads
-/// drift breadcrumbs only, and the rolled-back row's detail line reads the benign
-/// "press t to connect" with no reason attached.
+/// the Sources panel ON the first failed row and seed its result line — the SAME
+/// surface and wording its own `t` toggle renders, so the retry is one keystroke
+/// away on the right source. (Without the explicit selection `open_connection`
+/// keeps the PREVIOUS index — 0 on a fresh `UiState` — so the offered `t` would
+/// act on whatever sorts first.) Nothing else can tell them: `warn_broken_installs`
+/// ran before the TUI, the footer nudge reads drift breadcrumbs only, and the
+/// rolled-back row's detail line reads the benign "press t to connect" with no
+/// reason attached.
 fn surface_onboarding_failures(
     ui: &mut ui_state::UiState,
     connected: &crate::runtime::ConnectedSources,
-    failures: Vec<String>,
+    failures: Vec<OnboardingFailure>,
 ) {
-    if failures.is_empty() {
+    let Some(first) = failures.first() else {
         return;
-    }
+    };
+    let first_id = first.source_id.clone();
     let rows = connection::build_rows(&connected.snapshot(), &ui.read_conn_log());
     ui.open_connection(rows);
-    ui.connection.last_result = Some(failures.join("  \u{b7}  "));
+    ui.select_connection_source(&first_id);
+    ui.connection.last_result = Some(
+        failures
+            .into_iter()
+            .map(|f| f.line)
+            .collect::<Vec<_>>()
+            .join("  \u{b7}  "),
+    );
 }
 
 fn is_quit_chord(code: KeyCode, mods: KeyModifiers) -> bool {
@@ -2062,7 +2104,7 @@ mod dispatch_tests {
             1,
             "only the failed row reports: {failures:?}"
         );
-        let line = &failures[0];
+        let line = &failures[0].line;
         assert!(
             line.contains("settings is valid JSON but not an object"),
             "the REASON must survive — it is the whole point: {line}"
@@ -2074,17 +2116,74 @@ mod dispatch_tests {
             line.contains(display_name),
             "the row must be named the way every other surface names it: {line}"
         );
+        // `starts_with`, not `contains`: "disconnect failed" CONTAINS
+        // "connect failed", so the loose form passes for the opposite operation.
         assert!(
-            line.contains("connect failed"),
+            line.starts_with(&format!("{display_name}: connect failed")),
             "reuse the Sources panel's own wording: {line}"
+        );
+        assert_eq!(
+            failures[0].source_id, "cursor",
+            "the failure carries the row it belongs to, so the panel can select it"
+        );
+    }
+
+    /// `Failed` is NOT connect-only: `apply_choices` maps an unchecked row to a
+    /// Disconnect, and on a genuine first run `freeze_for_skip` makes that EVERY
+    /// detected source — so Esc, which connects nothing, was reporting
+    /// "connect failed". The third string is the fold: `map_disconnect_outcome`
+    /// turns a hook-removal failure on an OTHERWISE SUCCESSFUL disconnect into
+    /// `Failed`, which the panel words differently again.
+    #[test]
+    fn an_onboarding_failure_names_the_operation_that_actually_failed() {
+        use crate::sources::ChangeOutcome;
+        let connected = crate::runtime::ConnectedSources::default();
+        let choices: Vec<(&'static str, bool)> = vec![("cursor", false), ("openclaw", false)];
+        let outcomes = vec![
+            (
+                "cursor".to_string(),
+                ChangeOutcome::Failed("config is not writable".into()),
+            ),
+            (
+                "openclaw".to_string(),
+                ChangeOutcome::Failed(format!(
+                    "{}openclaw.json is JSON5, not strict JSON",
+                    crate::sources::HOOK_REMOVAL_FAILED_PREFIX
+                )),
+            ),
+        ];
+        let failures = super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
+        assert_eq!(failures.len(), 2, "both rows report: {failures:?}");
+
+        let cursor_name = crate::install::target::by_source("cursor")
+            .expect("cursor is a target-bearing source")
+            .display_name;
+        let unchecked = &failures[0].line;
+        assert!(
+            unchecked.starts_with(&format!("{cursor_name}: disconnect failed")),
+            "an unchecked row's failure is a DISCONNECT failure: {unchecked}"
+        );
+
+        // The fold is a SUCCESSFUL disconnect with a residual, so it reads like
+        // the panel's own third string — never "failed to disconnect".
+        let folded = &failures[1].line;
+        assert!(
+            folded.contains("disconnected, but hook removal failed")
+                && folded.contains("openclaw.json is JSON5, not strict JSON"),
+            "a folded hook-removal failure keeps the panel's wording: {folded}"
+        );
+        assert!(
+            !folded.contains(crate::sources::HOOK_REMOVAL_FAILED_PREFIX),
+            "the machine token is stripped once the wording carries it: {folded}"
         );
     }
 
     /// The failure line has to land on a surface the user is looking at: the
-    /// Sources panel, opened on the failed row with the reason in its result
-    /// line (the `t` retry one keystroke away).
+    /// Sources panel, opened ON the failed row with the reason in its result
+    /// line (so the `t` retry is one keystroke away on the RIGHT source —
+    /// `open_connection` alone keeps the previous index, 0 on a fresh UiState).
     #[test]
-    fn onboarding_failures_open_the_sources_panel_with_the_reason() {
+    fn onboarding_failures_open_the_sources_panel_on_the_failed_row() {
         let connected = crate::runtime::ConnectedSources::default();
         let mut ui = crate::tui::ui_state::UiState::new(
             pixtuoid_scene::theme::ALL_THEMES[0],
@@ -2104,13 +2203,25 @@ mod dispatch_tests {
         super::surface_onboarding_failures(
             &mut ui,
             &connected,
-            vec!["Cursor: connect failed \u{2014} boom".to_string()],
+            vec![super::OnboardingFailure {
+                source_id: "cursor".into(),
+                line: "Cursor: connect failed \u{2014} boom".into(),
+            }],
         );
         assert!(ui.modal().connection_open, "a failure opens the panel");
         assert_eq!(
             ui.connection.last_result.as_deref(),
             Some("Cursor: connect failed \u{2014} boom"),
             "the reason rides the panel's own result line"
+        );
+        let selected = ui.connection.rows[ui.connection.selected].source_id;
+        assert_eq!(
+            selected, "cursor",
+            "the panel must open ON the failed row — `t` acts on the SELECTED one"
+        );
+        assert_ne!(
+            ui.connection.selected, 0,
+            "cursor is not the first registry row, so this could not pass by default"
         );
     }
 

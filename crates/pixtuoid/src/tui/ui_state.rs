@@ -354,6 +354,23 @@ impl UiState {
         self.connection.last_result = None;
     }
 
+    /// Park the selection on `source_id`'s row, leaving it where it is when the
+    /// panel has no such row. `open_connection` deliberately CARRIES the previous
+    /// index (0 on a fresh `UiState`), so a caller that opens the panel about ONE
+    /// source — the onboarding failure surfacing — has to say which; otherwise the
+    /// `t` it offers acts on an unrelated row. Unlike `connection_move` this keeps
+    /// `last_result` (the reason the panel was opened at all).
+    pub(crate) fn select_connection_source(&mut self, source_id: &str) {
+        if let Some(idx) = self
+            .connection
+            .rows
+            .iter()
+            .position(|r| r.source_id == source_id)
+        {
+            self.connection.selected = idx;
+        }
+    }
+
     pub(crate) fn connection_move(&mut self, delta: i32) {
         self.connection.selected =
             connection::move_selection(&self.connection.rows, self.connection.selected, delta);
