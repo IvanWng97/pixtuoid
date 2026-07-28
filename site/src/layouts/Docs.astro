@@ -309,6 +309,16 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     border: 0;
     color: var(--chip-ink);
   }
+  /* global.css's `.prose p, .prose li {color: var(--fg)}` matches these
+     elements DIRECTLY, and a direct match always beats the --chip-ink their
+     .callout__body ancestor hands down — which pinned day's body copy to
+     dark ink on the dark --screen (1.16:1). Reclaim inheritance at (0,2,1),
+     the same beats-by-weight-not-source-order lift the a/code rules below
+     use; `inherit` keeps ONE definition of the window's ink. */
+  .docs :global(.callout__body p),
+  .docs :global(.callout__body li) {
+    color: inherit;
+  }
   .docs :global(.callout__body a) {
     color: var(--chip-bright);
   }

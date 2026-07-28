@@ -78,7 +78,18 @@ terminal-window callout via [`config/rehype-callouts.mjs`](config/rehype-callout
 processor AFTER `rehypeRepoLinks` (order matters: it walks the final tree).
 Note its smartypants quirk: Astro's remark-smartypants has already turned a
 straight `'` into a curly U+2019 by the time the transform runs, so the
-imperative-warning sniff normalizes back before matching. Elsewhere in the
+imperative-warning sniff normalizes back before matching. **SHARP EDGE — the
+callout window is a `--screen` panel dropped inside `.prose`, so every
+`.prose <tag>` colour rule is a cascade trap**: a rule that matches the tag
+DIRECTLY (`.prose p`, `.prose li`, `.prose a`, `.prose :not(pre) > code`)
+always beats the `--chip-ink` the `.callout__body` blockquote hands DOWN —
+inheritance loses to any match, whatever the specificity. `Docs.astro`
+therefore reclaims each of them at `.docs :global(.callout__body <tag>)`
+(0,2,1), winning by WEIGHT not source order. `p`/`li` were missed when `a`
+and `code` were first noticed, which shipped day's body copy as `--fg` ink on
+the near-black screen (1.16:1, three published pages) until the smoke suite's
+callout AA sweep pinned it. Add a `.prose` colour rule ⇒ add its callout
+twin, and let that sweep prove it. Elsewhere in the
 same arc: `src/faq.json` is a NEW single-sourced content manifest (the pantry
 chitchat FAQ copy, every answer citing a repo contract, e.g. the hook-shim
 200ms/exit-0 invariant); the lobby tenant-directory board restyle kept

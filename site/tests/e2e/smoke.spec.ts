@@ -2214,6 +2214,69 @@ test('pantry chitchat bubble text clears WCAG AA against its own dark ground (da
   }
 });
 
+test('docs callout body copy clears WCAG AA against the callout screen (day + night + dracula)', async ({
+  page,
+}) => {
+  // A markdown callout is a terminal window on the theme-independent --screen,
+  // so ALL of its ink must come from the chip palette. `.prose p`/`.prose li`
+  // match the callout's own <p>/<li> DIRECTLY, and a direct match always beats
+  // the --chip-ink the .callout__body blockquote hands DOWN — the sibling `a`
+  // and `code` overrides exist for exactly that reason. This sweeps every
+  // text-bearing tag markdown can put in the window (not just the two that
+  // were noticed), across every doc route and every theme, so the next
+  // .prose rule to land can't silently re-darken the body copy.
+  const TEXT_TAGS = 'p, li, strong, em, a, code';
+  for (const theme of ['day', 'night', 'dracula'] as const) {
+    await page.addInitScript((t) => localStorage.setItem('pix-theme', t), theme);
+    await page.goto('./config');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    // the doc routes come off the rendered sidebar (itself stamped from the one
+    // DOCS manifest) so a new/renamed doc joins the sweep without an edit here
+    const routes = await page.evaluate(() =>
+      [...document.querySelectorAll('.docs__sidebar .docs__list:not(.docs__list--building) a')].map(
+        (a) => (a as HTMLAnchorElement).getAttribute('href')!
+      )
+    );
+    expect(routes.length, `${theme}: no doc routes in the sidebar`).toBeGreaterThan(0);
+
+    let swept = 0;
+    for (const route of routes) {
+      await page.goto(`.${route}`);
+      const rows = await page.evaluate((tags) => {
+        const transparent = (c: string) => /,\s*0\)\s*$/.test(c);
+        return [...document.querySelectorAll('.callout__body')].flatMap((body) => {
+          const screen = getComputedStyle(body.closest('.callout')!).backgroundColor;
+          return [...body.querySelectorAll(tags)].map((el) => {
+            const cs = getComputedStyle(el);
+            return {
+              tag: el.tagName.toLowerCase(),
+              color: cs.color,
+              bg: transparent(cs.backgroundColor) ? screen : cs.backgroundColor,
+              text: (el.textContent || '').trim().slice(0, 48),
+            };
+          });
+        });
+      }, TEXT_TAGS);
+      for (const { tag, color, bg, text } of rows) {
+        const ratio = contrastRatio(
+          parseRgb(color).slice(0, 3) as [number, number, number],
+          parseRgb(bg).slice(0, 3) as [number, number, number]
+        );
+        expect(
+          ratio,
+          `${theme} ${route} <${tag}> "${text}": WCAG AA floor is 4.5:1; ${color} on ${bg} measured ${ratio.toFixed(2)}:1`
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+      swept += rows.length;
+    }
+    // teeth: a docs tree that stopped emitting callouts would pass vacuously
+    expect(
+      swept,
+      `${theme}: no .callout__body text swept across ${routes.length} doc routes`
+    ).toBeGreaterThan(0);
+  }
+});
+
 test('the statusline feed ellipsizes on the wrapping text span, not the flex row', async ({
   page,
 }) => {
