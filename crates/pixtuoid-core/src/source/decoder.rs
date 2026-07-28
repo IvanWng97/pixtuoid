@@ -29,10 +29,6 @@ pub type LineDecoder = fn(&str, &str, Value) -> Result<Vec<AgentEvent>>;
 /// the session with a foreign, identity-bearing cwd).
 pub type CwdExtractor = fn(&Value) -> Option<PathBuf>;
 
-/// The shared/default [`CwdExtractor`]: a TOP-LEVEL `cwd` string. CC writes it
-/// on every transcript line (and Antigravity's row points here too — its steps
-/// carry no cwd field, so the shape simply never matches and the label falls
-/// back); also the fallback for sources with no registry row (test harnesses).
 /// Narrow a raw JSON integer to a valid POSIX pid: in `i32` range AND strictly
 /// positive. The `> 0` reject is load-bearing — `kill(0)`/`kill(-n)` target
 /// process GROUPS, and a bogus/zero `_pid` would otherwise synthesize a phantom
@@ -45,6 +41,10 @@ pub(crate) fn checked_pid(raw: i64) -> Option<i32> {
     i32::try_from(raw).ok().filter(|&p| p > 0)
 }
 
+/// The shared/default [`CwdExtractor`]: a TOP-LEVEL `cwd` string. CC writes it
+/// on every transcript line (and Antigravity's row points here too — its steps
+/// carry no cwd field, so the shape simply never matches and the label falls
+/// back); also the fallback for sources with no registry row (test harnesses).
 pub(crate) fn extract_top_level_cwd(v: &Value) -> Option<PathBuf> {
     v.get("cwd").and_then(Value::as_str).map(PathBuf::from)
 }

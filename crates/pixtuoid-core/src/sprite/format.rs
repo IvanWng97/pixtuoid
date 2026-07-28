@@ -452,8 +452,10 @@ pub struct ValidationReport {
     pub missing_required: Vec<String>,
     /// Optional animation names absent from the pack — reported, not an error.
     pub missing_optional: Vec<String>,
-    /// `(name, have, need)` for each animation with fewer frames than its
-    /// multi-frame minimum (e.g. `typing` needs 2).
+    /// `(name, need, have)` for each animation with fewer frames than its
+    /// multi-frame minimum (e.g. `typing` needs 2) — the REQUIRED count first,
+    /// matching what the producer pushes and both `validate-pack` consumers
+    /// destructure.
     pub insufficient_frames: Vec<(String, usize, usize)>,
     /// Animation names present in the pack but in none of the known registries.
     pub unknown: Vec<String>,
@@ -555,6 +557,11 @@ mod validation_floor_tests {
             "empty seated must report (seated, 1, 0); got {:?}",
             report.insufficient_frames
         );
+        // Name the positions so the field's documented element ORDER stays
+        // pinned by a reviewable assertion, not by an anonymous `(_, 1, 0)`
+        // that reads the same either way round.
+        let (name, need, have) = &report.insufficient_frames[0];
+        assert_eq!((name.as_str(), *need, *have), ("seated", 1, 0));
         assert!(report.has_errors());
         // Not double-counted as missing — the entry exists.
         assert!(!report.missing_required.contains(&"seated".to_string()));

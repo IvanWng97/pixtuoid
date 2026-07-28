@@ -288,7 +288,6 @@ impl Reducer {
             .retain(|id, _| scene.agents.contains_key(id));
     }
 
-    /// Gracefully evict every live agent of `source_id` — mark each exiting and
     /// Reconcile the scene toward the `connected` set: mark exiting every
     /// non-exiting slot whose source is NOT connected, then cascade to its subtree
     /// (exactly as the `SessionEnd` arm does per agent), so the existing EXIT-walk
