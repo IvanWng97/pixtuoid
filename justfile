@@ -1016,7 +1016,7 @@ setup-tools:
     # in a workflow `run:` block passes `just lint` green locally). brew on macOS;
     # elsewhere point at the install docs rather than silently leaving `just lint`
     # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
-    # ast-grep backs the `comment-lint` advisory (structural Rust lint rules in
+    # ast-grep backs the `comment-lint` advisory (structural Rust + Python rules in
     # .ast-grep/rules/); shfmt/actionlint/shellcheck/zizmor back workflow
     # linting, while yq + jq + Conftest/OPA evaluate repository-specific policy.
     for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest opa regal check-jsonschema; do

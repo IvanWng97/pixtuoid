@@ -21,13 +21,13 @@ import sys
 
 
 def added_lines_by_file(base: str, worktree: bool) -> dict[str, set[int]]:
-    """Map each changed .rs file → the set of its NEW-side added/changed line
+    """Map each changed .rs/.py file → the set of its NEW-side added/changed line
     numbers (1-indexed), parsed from a zero-context diff."""
     # `base...HEAD` = the PR's own commits (merge-base range); `base` alone also
     # folds in uncommitted working-tree edits (local `--worktree` mode).
     rev = base if worktree else f"{base}...HEAD"
     diff = subprocess.run(
-        ["git", "diff", "--unified=0", "--no-color", rev, "--", "*.rs"],
+        ["git", "diff", "--unified=0", "--no-color", rev, "--", "*.rs", "*.py"],
         capture_output=True,
         text=True,
         check=True,
@@ -55,7 +55,7 @@ def main() -> int:
 
     added = added_lines_by_file(base, worktree)
     if not any(added.values()):
-        print("comment-lint: no added/changed Rust lines vs", base)
+        print("comment-lint: no added/changed Rust or Python lines vs", base)
         return 0
 
     # Fail SOFT if ast-grep isn't installed — this is an advisory (it's excluded

@@ -1,0 +1,23 @@
+# The Python twin of no-comment-slop.yml — same convention, same advisory
+# status. Python was invisible to `just comment-lint` (it diffed `*.rs` only),
+# which is how a 9-line block landed on a one-line step in a `scripts/` file.
+#
+# Simpler than the Rust rule: Python has no doc-comment syntax, so a docstring
+# is a string EXPRESSION, not a comment, and is excluded without a regex. Only
+# runs inside a `function_definition` count — module and class-level `#` blocks
+# are fine. ADVISORY only, diff-scoped; pre-existing runs are grandfathered.
+id: no-comment-slop-py
+language: Python
+severity: warning
+message: "3+ consecutive comment lines in a function body — trim to a WHY (≤2 lines), or move the rationale to the docstring / a CLAUDE.md sharp edge. A fact a test could pin belongs in the test."
+rule:
+  kind: comment
+  inside:
+    kind: function_definition
+    stopBy: end
+  follows:
+    kind: comment
+    stopBy: neighbor
+    follows:
+      kind: comment
+      stopBy: neighbor
