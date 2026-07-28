@@ -30,6 +30,16 @@ use super::*;
 /// hero buffers (desktop 231×130 and the 64px portrait floor — the most-seen
 /// layouts since #568), and a spread up to a wide-corridor floor so the
 /// appliance kinds appear.
+///
+/// Module-private on purpose: the routability guards that need this axis live
+/// HERE (`every_home_desk_approach_is_routable_from_the_door`,
+/// `every_wander_destination_is_routable_from_its_desk`) precisely so the
+/// placement axis and the routability axis can't disagree — they did, and the
+/// 32-41 px band was swept for placement while never being swept for
+/// routability. `pathfind::tests` keeps its own deliberately NARROWER lists (a
+/// blocked-centre proxy, and the aimless-destination sweep over production floor
+/// seeds); widening this const's visibility for them would only re-open the
+/// two-axes split.
 const SWEEP_SIZES: &[(u16, u16)] = &[
     (34, 60),
     (36, 100),
@@ -61,14 +71,17 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
 /// the coverage silently shrinking).
 const SWEEP_SEEDS: std::ops::Range<u64> = 0..12;
 
-/// Run `f` over every layout in the sweep. Production fill (`max_desks: None`)
+/// Run `f` over `SWEEP_SIZES` × `seeds`. Production fill (`max_desks: None`)
 /// so the desk grid is at its densest — the strictest placement case. A `None`
 /// layout is asserted to be a legitimate refusal (below the documented
 /// minimum), never silently skipped: the silent `continue` in the old sweeps
 /// let small-size regressions hide.
-fn sweep(mut f: impl FnMut(u16, u16, u64, &SceneLayout)) {
+fn sweep_over(
+    seeds: impl Iterator<Item = u64> + Clone,
+    mut f: impl FnMut(u16, u16, u64, &SceneLayout),
+) {
     for &(w, h) in SWEEP_SIZES {
-        for seed in SWEEP_SEEDS {
+        for seed in seeds.clone() {
             match SceneLayout::compute_with_seed(w, h, None, seed) {
                 Some(l) => f(w, h, seed, &l),
                 None => assert!(
@@ -81,6 +94,23 @@ fn sweep(mut f: impl FnMut(u16, u16, u64, &SceneLayout)) {
             }
         }
     }
+}
+
+/// The placement axis: `SWEEP_SIZES` × [`SWEEP_SEEDS`].
+fn sweep(f: impl FnMut(u16, u16, u64, &SceneLayout)) {
+    sweep_over(SWEEP_SEEDS, f);
+}
+
+/// The PRODUCTION axis: `SWEEP_SIZES` × the seeds a running app actually lays
+/// out (`floor::floor_seed(0..MAX_FLOORS)`). Disjoint from [`SWEEP_SEEDS`] but
+/// for seed 0 — the Fibonacci-hashed floor seeds are ~1e19-scale — so a guard
+/// swept on `SWEEP_SEEDS` alone never visits a floor a user sees, and the #566
+/// severed-desk population was measured on production floors 4 and 6.
+fn sweep_production_floors(f: impl FnMut(u16, u16, u64, &SceneLayout)) {
+    sweep_over(
+        (0..crate::floor::MAX_FLOORS).map(crate::floor::floor_seed),
+        f,
+    );
 }
 
 /// Which Bounds a piece's rect must stay inside (the per-kind container map —
@@ -686,6 +716,134 @@ fn walkable_is_one_connected_region() {
     sweep(assert_walkable_connected);
 }
 
+/// The elevator spawn must land on OPEN FLOOR — at or south of `top_margin`,
+/// the layout's own floor line — never on the carpet apron
+/// (`wall_band_h()..top_margin`), which is where the straddling wall decor
+/// (bookshelf, meeting screen) stamps its ground strip (`Container::WallApron`).
+///
+/// A one-sided bound against an INDEPENDENT authority, deliberately not
+/// `assert_eq!(dt.y, top_margin + DOOR_THRESHOLD_CLEARANCE_PX)` — restating the
+/// formula would pin nothing. Walkability is NOT the discriminator here and a
+/// routability sweep is blind to it: with the spawn moved north of the floor
+/// line, `is_walkable(dt)` stays true at every layout in this sweep (the wall
+/// band's blocked rows END at `wall_band_h()`) and every routing assertion still
+/// passes (both `find_path` and `ReachSet::from_mask` SNAP a displaced seed back
+/// into the component) — only this floor-line bound fails.
+fn assert_spawn_stands_on_open_floor(w: u16, h: u16, seed: u64, l: &SceneLayout) {
+    let Some(dt) = l.door_threshold else {
+        panic!("{w}x{h} seed {seed}: layout has no door threshold");
+    };
+    assert!(
+        dt.y >= l.top_margin,
+        "{w}x{h} seed {seed}: spawn {dt:?} sits on the wall apron (rows {}..{}) \
+         instead of open floor — an entering character starts inside the strip \
+         the straddling wall decor stamps its ground into",
+        l.wall_band_h(),
+        l.top_margin
+    );
+}
+
+#[test]
+fn the_spawn_threshold_stands_on_the_floor_not_the_wall_apron() {
+    sweep(assert_spawn_stands_on_open_floor);
+    sweep_production_floors(assert_spawn_stands_on_open_floor);
+}
+
+/// THE routability guard on the shared size axis: every destination the wander
+/// can actually hand out — `approach_point` on an allowed, reachable side — must
+/// be `find_path`-routable from the leg's real ORIGIN, or the leg degrades to a
+/// straight line through furniture. `pathfind::tests`'s waypoint guard asserts
+/// the blocked furniture CENTRE (a proxy) on its own narrower list; this one
+/// asserts what production routes, across every size the placement suite sweeps.
+///
+/// Routes from `pose::desk_leg_endpoint(desk, l).0` — the desk-side endpoint the
+/// production wander-out leg actually starts at — NOT from the door. Routing
+/// from the door made a desk an origin-free bystander, so a desk stranded on the
+/// severed side of a coarse cut never appeared as a route START and the whole
+/// #566 class passed straight through (measured: with the coarse half of
+/// `severed` disabled this test stayed green while its home-desk sibling reded).
+/// The `(origin, approach)` pair is deduped because the desk loop otherwise
+/// re-routes the same pair once per desk sharing an approach cell.
+#[test]
+fn every_wander_destination_is_routable_from_its_desk() {
+    use crate::pathfind::find_path;
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    sweep(|w, h, seed, l| {
+        let mut seen: std::collections::HashSet<(Point, Point)> = std::collections::HashSet::new();
+        for &desk in &l.home_desks {
+            let (origin, _) = crate::pose::desk_leg_endpoint(desk, l);
+            for wp in &l.waypoints {
+                let a = super::approach_point(
+                    wp.kind.furniture(),
+                    wp.pos,
+                    wp.facing,
+                    l.pantry_counter_size(),
+                    &l.walkable,
+                    desk,
+                    &l.reachable,
+                );
+                // A `wp.pos` sentinel is the documented "no valid approach"
+                // answer — `resolve_wander_target` ambles that cycle instead.
+                if a == wp.pos || !seen.insert((origin, a)) {
+                    continue;
+                }
+                assert!(
+                    find_path(&l.walkable, &overlay, None, origin, a).is_some(),
+                    "{w}x{h} seed {seed}: {:?} approach {a:?} unroutable from desk \
+                     {desk:?}'s leg origin {origin:?}",
+                    wp.kind
+                );
+            }
+        }
+    });
+}
+
+/// The COARSE twin of [`assert_walkable_connected`]. That one is a 4-connected
+/// PIXEL flood, but the router runs on the 4×4 grid (`cell_walkable` needs ≥
+/// `COARSE_CELL_WALKABLE_MIN` of 16 px open), so a ≤3px channel is
+/// pixel-connected and coarse-IMPASSABLE — the office reads as ONE region at
+/// pixel granularity and TWO at router granularity. When that happened,
+/// `desk_approach_cell` returned its no-valid-approach sentinel and every leg
+/// for the desks on the severed side degraded to a straight `door→chair` line
+/// through the desk body and the pantry wall (measured on narrow tall layouts,
+/// widths 32-39, production floors 4 and 6 — the census is in the scene
+/// CLAUDE.md sharp edge).
+///
+/// A free fn, not a closure, because THREE sweeps need it at different
+/// resolutions: the placement seed axis, the production floor seeds, and the
+/// step-1 `NARROW_BAND` width scan its pixel twin already had.
+fn assert_home_desk_approaches_are_routable(w: u16, h: u16, seed: u64, l: &SceneLayout) {
+    use crate::pathfind::find_path;
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let Some(door) = l.door_threshold else {
+        panic!("{w}x{h} seed {seed}: layout has no door threshold");
+    };
+    for (i, &desk) in l.home_desks.iter().enumerate() {
+        let approach = crate::pose::desk_approach_cell(desk, l).unwrap_or_else(|| {
+            panic!(
+                "{w}x{h} seed {seed}: home desk {i} at {desk:?} has NO reachable approach \
+                 side — every leg to it falls back to a straight line through the desk"
+            )
+        });
+        assert!(
+            find_path(&l.walkable, &overlay, None, door, approach).is_some(),
+            "{w}x{h} seed {seed}: home desk {i} at {desk:?} has approach {approach:?} \
+             unroutable from the door {door:?} — the coarse grid is severed"
+        );
+    }
+}
+
+/// Lives HERE and not in `pathfind::tests` on purpose: this is the suite that
+/// owns `SWEEP_SIZES`, and the 32-41 px band the failure lives in was swept for
+/// PLACEMENT while no routability test ever visited it.
+#[test]
+fn every_home_desk_approach_is_routable_from_the_door() {
+    sweep(assert_home_desk_approaches_are_routable);
+    // The reported population (production floors 4 and 6) lives on the FLOOR
+    // seeds, which `SWEEP_SEEDS` shares only seed 0 with.
+    sweep_production_floors(assert_home_desk_approaches_are_routable);
+}
+
 #[test]
 fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
     // A divider crossed by an E-W wall is TWO vertical segments (upper room's
@@ -739,17 +897,23 @@ fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
 /// must be swept too — the discrete grid's nearest points are 64 and 96.
 const NARROW_BAND: std::ops::RangeInclusive<u16> = 32..=76;
 
+/// Step-1 width sweep across the degradation band — the discrete `SWEEP_SIZES`
+/// grid can't cover every width, so a pocket at a skipped width (39/59/…)
+/// shipped silently before #566. Heights span the tall floors where the
+/// aisle-seal manifests; all 12 seeds reach every `FloorVariant`.
+///
+/// BOTH connectivity predicates run here, at the same width resolution: with the
+/// coarse half of `severed` disabled, desks with no reachable approach appear at
+/// widths {32,33,34,35,37,38,39}, and only 34 and 38 are in `SWEEP_SIZES` — five
+/// of the seven would regress silently on the sparse grid alone.
 #[test]
 fn narrow_band_connectivity_boundary_scan() {
-    // Step-1 width sweep across the degradation band — the discrete SWEEP_SIZES
-    // grid can't cover every width, so a pocket at a skipped width (39/59/…)
-    // shipped silently before #566. Heights span the tall floors where the
-    // aisle-seal manifests; all 12 seeds reach every FloorVariant.
     for w in NARROW_BAND {
         for &h in &[80u16, 100, 120, 160] {
             for seed in SWEEP_SEEDS {
                 if let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) {
                     assert_walkable_connected(w, h, seed, &l);
+                    assert_home_desk_approaches_are_routable(w, h, seed, &l);
                 }
             }
         }
