@@ -74,16 +74,8 @@ pub(crate) fn cascade_exit(
     visited.insert(root);
     let mut frontier = vec![root];
     while let Some(parent) = frontier.pop() {
-        // EVERY child is enqueued, including an already-exiting one: "already
-        // exiting" only implies "subtree already handled" if the subtree was
-        // fully populated at that earlier cascade, and a descendant registered
-        // afterwards would otherwise escape every later cascade. `visited`
-        // alone bounds the walk. The stamp goes through the write-once
-        // `fsm::mark_exiting` — the same call the root branch above makes —
-        // because without the filter a raw `Some(now)` would RE-stamp an
-        // exiting node, resetting its walkout animation and pushing its
-        // `sweep_exited` GC out by another grace window on each ancestor
-        // cascade.
+        // Unfiltered by design (see the fn doc): the write-once `mark_exiting` stops
+        // an ancestor cascade RE-stamping an exiting node's walkout + GC clock.
         let children: Vec<AgentId> = scene
             .agents
             .values()
@@ -420,15 +412,8 @@ mod tests {
 
     #[test]
     fn cascade_exit_reaches_a_descendant_added_under_an_already_exiting_node() {
-        // "Already exiting" meant "subtree already handled", which only holds
-        // if the subtree was fully populated at the earlier cascade. A
-        // descendant registered AFTER an intermediate node started exiting was
-        // filtered out of `children`, so it was never enqueued and its own
-        // subtree was never visited — it survived every later cascade with a
-        // dangling parent_id, contradicting scope.rs's one invariant (a
-        // subagent's lifetime is contained in its parent's) and the
-        // `sweep_exited` doc's "cascade_exit reaps the subtree alongside the
-        // parent".
+        // Pruning the walk at an already-exiting node would strand this
+        // grandchild past every later cascade (see `cascade_exit`).
         let root = AgentId::from_transcript_path("/p/root.jsonl");
         let mid = AgentId::from_transcript_path("/p/mid.jsonl");
         let leaf = AgentId::from_transcript_path("/p/leaf.jsonl");

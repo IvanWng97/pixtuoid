@@ -69,8 +69,7 @@ async fn should_seed_at_eof(
         })
         .unwrap_or(false);
     // Historical AND unvouched → seed EOF. Ended → seed EOF. Otherwise read.
-    // The `||` short-circuit keeps the tail read off the historical-unvouched
-    // path, exactly as before.
+    // `||` short-circuits, so the tail read stays off the historical path.
     (!recent && !probe_live) || check_session_ended(path, check_ended).await
 }
 
@@ -187,13 +186,8 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // here first, so a historical or already-ended session is seeded at EOF
     // instead of resurrected with a phantom SessionStart. (A later write makes it
     // `known` with cursor < len, so the documented revive-on-append still fires.)
-    // The liveness probe pre-empts the gate's RECENCY half only: mtime is a
-    // liveness PROXY, and a long-idle / delegating / stuck-in-a-long-tool-call
-    // session writes nothing for hours — when the probe has ground truth that
-    // the owning process is alive, the file is read from the top (a >
-    // MAX_PENDING_BYTES body falls into the oversized first-sight registration
-    // below). The terminator half stays unconditional — see
-    // `should_seed_at_eof`.
+    // The liveness probe pre-empts the gate's RECENCY half only; the terminator
+    // half stays unconditional — see `should_seed_at_eof`.
     if !known
         && should_seed_at_eof(
             &meta,

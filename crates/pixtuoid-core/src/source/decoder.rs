@@ -221,19 +221,8 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         None => {}
     }
 
-    // Both bails below breadcrumb (#2 self-monitoring), because these two fields
-    // are the whole hook plane's chokepoint: an upstream rename of either kills
-    // EVERY hook event of every source riding these shared arms, and a plain
-    // `warn!` lands on the default target that `doctor::parse_drift_line` cannot
-    // see — the plane would go dark behind a green doctor. Undeduped is
-    // flood-safe HERE (unlike a transcript tail): the hook plane carries only
-    // payloads we have committed to decoding, at tool-call rate, and the
-    // `unknown_event` arm at the bottom of this same match already warns per
-    // payload on the sibling VALUE axis. The documented grok cross-fire is
-    // dropped quietly ABOVE, so the residual attribution cost is a FUTURE
-    // camelCase source's mis-wire reading as `claude-code` drift — which is
-    // exactly the "OBSERVED decode error, not a silent ghost" the cross-fire
-    // guard's comment says that case should surface as.
+    // Both bails below breadcrumb, undeduped — the two fields are the whole
+    // hook plane's chokepoint (the crate guide's drift defense #2).
     let event = obj
         .get("hook_event_name")
         .and_then(|s| s.as_str())
@@ -1643,7 +1632,7 @@ mod tests {
     // egressed UNBOUNDED by the headless summary (`runtime/mod.rs` wraps it in
     // `sanitize_line`, which strips Cc/Cf but does not truncate). Every producer
     // is correct today; what was missing is the registry-driven completeness
-    // assert, so a 13th source shipping `reason: raw_msg.to_string()` passed
+    // assert, so a NEW source shipping `reason: raw_msg.to_string()` passed
     // every gate.
     #[test]
     fn every_agent_decoder_caps_its_waiting_reason() {

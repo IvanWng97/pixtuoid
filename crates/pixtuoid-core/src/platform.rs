@@ -193,10 +193,8 @@ fn resolve_home(
 /// unset and `None` when nothing resolves. Both `resolve_home` (String, with
 /// a host fallback) and [`user_home_opt`] (the `Option` shape the installer
 /// calls) derive from this — pure, so the Windows arm is unit-testable on any
-/// host. `pub(crate)`: its in-module `#[cfg(test)] mod tests` sees it, and the
-/// two public shapes above are the cross-crate API. It was briefly `pub` for a
-/// `pixtuoid` install/io test adapter that has since been deleted; re-promote
-/// only alongside a named cross-crate caller.
+/// host. Those two public shapes are the whole cross-crate API, so re-promote
+/// this one only alongside a named out-of-crate caller.
 pub(crate) fn resolve_user_home_opt(
     windows: bool,
     userprofile: Option<String>,

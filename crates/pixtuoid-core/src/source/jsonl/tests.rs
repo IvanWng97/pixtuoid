@@ -1889,13 +1889,13 @@ async fn revouch_does_not_replay_a_probe_vouched_ended_transcript() {
     );
 }
 
+/// M1: a probe-admitted !known >1MiB ENDED transcript must never reach the #204
+/// registration. The first-sight gate's terminator half is unconditional, so it
+/// parks here; the oversized branch's own `ended_in_skip` is the twin guard for a
+/// KNOWN file whose span ends mid-skip
+/// (`known_oversized_tail_emits_session_end_if_the_skipped_span_ended`).
 #[tokio::test]
 async fn probe_live_oversized_ended_first_sight_stays_unregistered() {
-    // M1: a probe-admitted !known >1MiB ENDED transcript must never reach
-    // the #204 registration. The first-sight gate's terminator half is
-    // unconditional, so it parks here; the oversized branch's own
-    // `ended_in_skip` is the twin guard for a KNOWN file whose span ends
-    // mid-skip (`known_oversized_tail_emits_session_end_if_the_skipped_span_ended`).
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
     let mut full = String::from("{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n");

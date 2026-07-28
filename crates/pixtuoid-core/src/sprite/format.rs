@@ -557,9 +557,8 @@ mod validation_floor_tests {
             "empty seated must report (seated, 1, 0); got {:?}",
             report.insufficient_frames
         );
-        // Name the positions so the field's documented element ORDER stays
-        // pinned by a reviewable assertion, not by an anonymous `(_, 1, 0)`
-        // that reads the same either way round.
+        // Name the positions: an anonymous `(_, 1, 0)` reads the same either way
+        // round, so it cannot pin the field's documented element ORDER.
         let (name, need, have) = &report.insufficient_frames[0];
         assert_eq!((name.as_str(), *need, *have), ("seated", 1, 0));
         assert!(report.has_errors());

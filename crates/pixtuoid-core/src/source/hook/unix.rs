@@ -447,11 +447,8 @@ mod tests {
 
     #[test]
     fn is_owned_fallback_fires_for_the_dir_the_socket_path_is_built_from() {
-        // The missing POSITIVE direction (#485): the guard's decision is a
-        // path comparison, and before `owned_socket_dir()` existed it compared
-        // against a hand-copied second literal — so changing the branch-3
-        // fallback form disarmed the guard with the whole suite green. Now
-        // both sides read the one definition, and this pins that they agree.
+        // The missing POSITIVE direction (#485): the guard is a path comparison,
+        // and a second hand-copied literal disarms it with the whole suite green.
         assert!(is_owned_fallback(
             &owned_socket_dir().join(SOCKET_FILE_NAME)
         ));

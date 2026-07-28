@@ -1349,12 +1349,8 @@ mod tests {
 
     #[test]
     fn transcript_subagent_arms_reject_an_empty_child_id_like_the_hook_twin() {
-        // The three carriers coalesce on ONE key
-        // (`child_session_id == subagent_id == the hook sessionId`), so an
-        // empty id must be refused identically on both lanes — the hook's
-        // `child_key` already filters it. Minting `AgentId::from_parts(grok,
-        // "")` instead registers a phantom ""-keyed child parented to the real
-        // session, holding a desk until the unknown-cwd reap.
+        // The three carriers coalesce on ONE key, so an empty id must be
+        // refused identically on both lanes — see `transcript_child_key`.
         for tag in ["subagent_spawned", "subagent_finished"] {
             for id_field in ["child_session_id", "subagent_id"] {
                 let evs = decode_line(xai_line(json!({
