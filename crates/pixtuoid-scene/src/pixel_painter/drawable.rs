@@ -483,12 +483,17 @@ pub(super) fn paint_drawable(
             let Some(frame) = frame_at(anim, *frame_idx) else {
                 return;
             };
+            // Borrow the pack's frame on the unflipped path — the old `clone()`
+            // copied a whole unmodified `Frame` every frame just to satisfy
+            // `blit_centered(&Frame, ..)`. `mirrored` outlives the borrow.
+            let mirrored;
             let final_frame = if *flip {
-                frame.mirror_horizontal()
+                mirrored = frame.mirror_horizontal();
+                &mirrored
             } else {
-                frame.clone()
+                frame
             };
-            blit_centered(&final_frame, *pos, buf);
+            blit_centered(final_frame, *pos, buf);
             if let Some(elapsed) = pet_elapsed_ms {
                 paint_pet_hearts(buf, *pos, *elapsed);
             } else if *anim_name == kind.sleep_anim() {

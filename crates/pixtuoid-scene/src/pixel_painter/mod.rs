@@ -10,9 +10,18 @@
 //! world — motion, poses, lighting, chitchat — with no pixel access and
 //! returns an immutable [`SimFrame`]; the paint pass (`paint_frame`)
 //! consumes `&SimFrame` and mutates only the buffer + the paint-local
-//! `FrameCache`. Everything else is private to this module except
-//! `character_anchor`, which `widgets.rs` uses for label placement and
-//! `hit_test.rs` for mouse hit-testing.
+//! `FrameCache`.
+//!
+//! `render_to_rgb_buffer` is the world-render seam every painter rides;
+//! `character_anchor` is the label/hit-test anchor AUTHORITY (the binary's
+//! `tui/hit_test/`, and every label painter indirectly via
+//! `overlay::build_overlay`). The rest of the module's public surface is the
+//! painters' construction + observation types (`PixelCtx` / `PixelPassResult` /
+//! `MascotFrame` / `SimFrame`), the weather + day/night queries the shells read
+//! (`weather_names`, `force_weather`, `precipitation_level`, `is_day_at`), and
+//! the geometry consts the binary's hit-tests pin to (`NEON_PANEL_INNER_*`,
+//! `PANTRY_COFFEE_COLS_*`) — all on the published crate's api golden, so widen
+//! it deliberately.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -718,7 +727,18 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // floor-touching row. Sort ascending and paint in order so things
     // closer to the camera (larger anchor_y) appear in front. This is
     // the painter's algorithm applied to a top-down 2D scene.
-    let mut drawables: Vec<Drawable<'_>> = Vec::new();
+    // One push per cubicle / character / waypoint appliance / decor item, plus
+    // the handful of fixed room pieces — a HINT derived from the layout's own
+    // counts (the vec still grows if a floor variant pushes more), sized so the
+    // ~100-250 pushes below don't rerun the doubling ladder every frame.
+    let mut drawables: Vec<Drawable<'_>> = Vec::with_capacity(
+        ctx.layout.home_desks.len()
+            + ctx.layout.waypoints.len()
+            + ctx.layout.plants.len()
+            + ctx.layout.pod_decor.len()
+            + ctx.layout.wall_decor.len()
+            + agents.len(),
+    );
 
     enqueue_desk_cubicles(ctx, agents, &frame.seated_agents, &mut drawables);
 

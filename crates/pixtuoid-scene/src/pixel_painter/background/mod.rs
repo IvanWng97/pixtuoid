@@ -367,21 +367,32 @@ pub(super) fn paint_floor_and_walls(
     let weather = weather_state(now);
     let tint = weather_floor_tint(weather);
 
-    for y in 0..buf_h {
+    // The noise picks one of THREE colours and the tint is fixed for the frame,
+    // so the blend has exactly three possible results — resolve them once here
+    // instead of re-deriving one per pixel. The carpet also starts BELOW the wall
+    // band: the band is opaquely overwritten by the loop right after, so ~30% of
+    // the buffer was noised and blended only to be thrown away each frame.
+    let carpet = [
+        blend_rgb(carpet_light, tint, 0.15),
+        blend_rgb(carpet_dark, tint, 0.15),
+        blend_rgb(carpet_base, tint, 0.15),
+    ];
+    let band_h = top_wall_h.min(buf_h);
+    for y in band_h..buf_h {
         for x in 0..buf_w {
             let hash = (x as u32)
                 .wrapping_mul(73)
                 .wrapping_add((y as u32).wrapping_mul(151))
                 ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
             let color = match hash % 17 {
-                0 | 1 => carpet_light,
-                2 | 3 => carpet_dark,
-                _ => carpet_base,
+                0 | 1 => carpet[0],
+                2 | 3 => carpet[1],
+                _ => carpet[2],
             };
-            buf.put(x, y, blend_rgb(color, tint, 0.15));
+            buf.put(x, y, color);
         }
     }
-    for y in 0..top_wall_h.min(buf_h) {
+    for y in 0..band_h {
         for x in 0..buf_w {
             buf.put(x, y, wall);
         }
