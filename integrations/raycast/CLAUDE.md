@@ -74,8 +74,9 @@ the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
   extension never invokes). Failure detail rides in the optional `message`
   field (present exactly when `outcome === "failed"`) — match tokens exactly,
   no prefix-stripping. This clean split landed while the in-repo extension was
-  the ONLY consumer (it ships atomically with the binary; NOT yet on the
-  Raycast store). **After store publication, installed copies parse the wire
+  the ONLY consumer (it shipped atomically with the binary, before it reached
+  the Raycast store). **It is now PUBLISHED
+  (`raycast.com/IvanWng97/pixtuoid`), so installed copies parse the wire
   independently of the binary's version — any further wire change needs a
   version handshake, not a flag-day edit.**
 
