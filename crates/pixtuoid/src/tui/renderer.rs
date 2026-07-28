@@ -207,6 +207,10 @@ pub(crate) struct OverlayFrame<'a> {
 /// size, so suppressing the overlay here made `?`/`s`/`Tab` toggle something
 /// invisible on any terminal below the office layout's 32×31 minimum (the classic
 /// 80×24 included) — and first run opens the onboarding modal there.
+// The footer half already travels as one `FooterStats` and the modal half as one
+// `OverlayFrame`; what remains are the five irreducible per-frame values the two
+// call sites hold separately anyway.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     scene: &SceneState,
