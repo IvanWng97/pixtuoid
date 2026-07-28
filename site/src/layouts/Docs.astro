@@ -312,9 +312,15 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
   /* global.css's `.prose p, .prose li {color: var(--fg)}` matches these
      elements DIRECTLY, and a direct match always beats the --chip-ink their
      .callout__body ancestor hands down — which pinned day's body copy to
-     dark ink on the dark --screen (1.16:1). Reclaim inheritance at (0,2,1),
-     the same beats-by-weight-not-source-order lift the a/code rules below
-     use; `inherit` keeps ONE definition of the window's ink. */
+     dark ink on the dark --screen (1.16:1). Reclaim inheritance here; Astro
+     compiles `.docs :global(.callout__body p)` to
+     `.docs[data-astro-cid-…] .callout__body p` = (0,3,1), which beats
+     `.prose p` (0,1,1) by WEIGHT; `inherit` keeps ONE definition of the ink.
+     CAVEAT for the a/code twins below: a THEME-prefixed global rule
+     (`:root[data-theme='night'] .prose a`) is ALSO (0,3,1), an exact tie those
+     twins win only because Astro emits component styles after global.css. A
+     new `.prose <tag>` rule that must be beaten on weight needs the twin
+     lifted past (0,3,1) — the `a > code` rule below is the worked example. */
   .docs :global(.callout__body p),
   .docs :global(.callout__body li) {
     color: inherit;
@@ -324,6 +330,15 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
   }
   .docs :global(.callout__body code) {
     color: var(--chip-bright);
+    background: var(--hw-hover);
+  }
+  /* The twin for global.css's dracula `.prose a > code` plate swap, which is
+     (0,3,2) — it OUTWEIGHS the (0,3,1) rule above, so without this the one
+     link-wrapped chip in a callout wore --surface next to its --hw-hover
+     siblings (measured rgb(52,55,70) vs rgb(28,25,22) on /architecture). The
+     extra `.callout` takes this to (0,4,2) so it wins on weight, not order:
+     the global rule it must beat is same-weight, so a plain twin would tie. */
+  .docs :global(.callout .callout__body a > code) {
     background: var(--hw-hover);
   }
   /* scrollspy state (#257) — same affordance family as the sidebar's current

@@ -84,12 +84,23 @@ callout window is a `--screen` panel dropped inside `.prose`, so every
 DIRECTLY (`.prose p`, `.prose li`, `.prose a`, `.prose :not(pre) > code`)
 always beats the `--chip-ink` the `.callout__body` blockquote hands DOWN —
 inheritance loses to any match, whatever the specificity. `Docs.astro`
-therefore reclaims each of them at `.docs :global(.callout__body <tag>)`
-(0,2,1), winning by WEIGHT not source order. `p`/`li` were missed when `a`
+therefore reclaims each of them at `.docs :global(.callout__body <tag>)`,
+which Astro's attribute scoping compiles to
+`.docs[data-astro-cid-…] .callout__body <tag>` = **(0,3,1)** — three
+class-level components plus one type, beating `.prose <tag>` (0,1,1) by
+WEIGHT. `p`/`li` were missed when `a`
 and `code` were first noticed, which shipped day's body copy as `--fg` ink on
 the near-black screen (1.16:1, three published pages) until the smoke suite's
 callout AA sweep pinned it. Add a `.prose` colour rule ⇒ add its callout
-twin, and let that sweep prove it. Elsewhere in the
+twin, and let that sweep prove it — but COUNT the twin: a theme-prefixed
+global rule (`:root[data-theme='night'] .prose a`) is ALSO (0,3,1), an exact
+TIE that the twin wins only on source order (Astro emits component styles
+after `global.css`), and one carrying a second type selector
+(`… .prose a > code`, (0,3,2)) OUTWEIGHS a plain twin outright — which is how
+dracula's link-wrapped code chip briefly wore `--surface` beside its
+`--hw-hover` siblings inside the terminal window. That twin therefore lifts to
+`.docs :global(.callout .callout__body a > code)` (0,4,2) and wins on weight.
+Elsewhere in the
 same arc: `src/faq.json` is a NEW single-sourced content manifest (the pantry
 chitchat FAQ copy, every answer citing a repo contract, e.g. the hook-shim
 200ms/exit-0 invariant); the lobby tenant-directory board restyle kept
