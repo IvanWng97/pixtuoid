@@ -555,7 +555,7 @@ impl AudioObserver {
             .iter()
             .filter(|(_, slot)| slot.floor_idx == floor_idx)
             .map(|(id, _)| id);
-        let events = self.cues.observe(floor_ids, occupied, waypoint_kind, now);
+        let events = self.cues.observe(floor_ids, occupied, waypoint_kind);
         AudioFrame {
             stems: crate::audio::stem_levels(&counts, precipitation),
             events,

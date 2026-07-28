@@ -86,7 +86,7 @@ export default function ManageSources() {
               <Action
                 title="Open Extension Preferences"
                 icon={Icon.Gear}
-                shortcut={{ modifiers: ["cmd"], key: "," }}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
                 onAction={openExtensionPreferences}
               />
             </ActionPanel>

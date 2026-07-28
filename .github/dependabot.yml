@@ -24,6 +24,14 @@ updates:
       - dependency-name: "objc2-app-kit"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
+      # Same discipline for x11rb (see crates/pixtuoid/Cargo.toml): winit and
+      # softbuffer both require `^0.13.0`, so a bump past 0.13.x builds a SECOND
+      # x11rb + x11rb-protocol on Linux instead of reusing the one already in
+      # tree. A grouped bump did exactly that once; [bans] is warn-only, so only
+      # this ignore stops it recurring. Lift it when winit moves to x11rb 0.14.
+      - dependency-name: "x11rb"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
     cooldown:
       default-days: 7
 

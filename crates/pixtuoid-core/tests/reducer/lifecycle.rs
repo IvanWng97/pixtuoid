@@ -248,7 +248,8 @@ fn resurrect_in_place_folds_the_active_span_into_active_ms() {
 
 // The resurrect-in-place arm is gated to ROOT agents on BOTH sides (slot AND
 // event parent_id None) so a late duplicate SessionStart can't un-exit a
-// b1-cascaded subagent — reducer.rs is the SOLE site that clears exiting_at.
+// b1-cascaded subagent — `state/reducer/mod.rs` is the SOLE site that clears
+// exiting_at.
 // Pin the negative: a SessionStart on an EXITING subagent leaves it exiting.
 #[test]
 fn session_start_on_exiting_subagent_does_not_resurrect() {
@@ -332,7 +333,8 @@ fn session_start_on_exiting_subagent_does_not_resurrect() {
 // A duplicate root SessionStart on a LIVE (non-exiting) session — the
 // Codex/Reasonix re-emit-a-start-per-prompt path — must refresh liveness WITHOUT
 // resurrect-in-place: resurrecting a live slot resets Active→Idle AND evicts its
-// active_tasks (reducer.rs:916), un-suppressing a delegating parent's subagent
+// active_tasks (the `remove_agent_correlation` right after `fsm::resurrect_in_place`
+// in `state/reducer/mod.rs`), un-suppressing a delegating parent's subagent
 // leak. This pins that the `&&`→`||` mutant on the LAST conjunct dies — the
 // mutant reads `(exiting && slot_root) || incoming_root`, which on this live root
 // (incoming_root = true) would wrongly resurrect. (The old inline "accepted

@@ -59,11 +59,16 @@ ignore:
   - "docs/"
   - "*.md"
   # Not coverable headlessly - exercising these needs a real TTY / OS / display.
-  # `.cargo/mutants.toml` also excludes the painter/glue files below (no headless
-  # test kills their mutants) but NOT crash/logging/sources_cli (pure helpers are
-  # unit-tested), and it additionally excludes some pixtuoid-core probe files not
-  # ignored here - so the two lists OVERLAP, neither is a subset. Keep the shared
-  # painter/glue entries in sync.
+  # `.cargo/mutants.toml` excludes MOST of the painter/glue files below (no
+  # headless test kills their mutants) but NOT crash/logging/sources_cli (pure
+  # helpers are unit-tested), and it additionally excludes some pixtuoid-core
+  # probe files not ignored here - so the two lists OVERLAP, neither is a subset.
+  # It also deliberately MUTATES the unit-tested decision layers inside
+  # tui/mod.rs + runtime/driver.rs, which stay WHOLLY ignored here: both are
+  # line-uncoverable in bulk, and per-function mutants see that split where
+  # per-line coverage cannot - so that file excludes their glue by FUNCTION
+  # (exclude_re) rather than by file, and records how far the measurements
+  # actually reach. Keep the shared entries in sync.
   - "crates/pixtuoid/src/main.rs"               # binary entry: arg-parse + dispatch + terminal preflights
   - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (was main.rs; its pure helpers stay unit-tested)
   - "crates/pixtuoid/src/logging.rs"            # global tracing-subscriber init (once per process; was main.rs; pure helpers unit-tested)
@@ -73,6 +78,6 @@ ignore:
   - "crates/pixtuoid/src/runtime/pipeline.rs"   # the shared source-to-reducer spine (#714): same channel/spawn glue class as driver.rs
   - "crates/pixtuoid/src/floating/mod.rs"       # floating run(): tokio runtime + winit EventLoop glue (the floating twin of driver.rs)
   - "crates/pixtuoid/src/floating/window.rs"    # winit ApplicationHandler: creates the real OS window + softbuffer surface
-  # The testable floating logic IS counted: offscreen.rs (render seam) + geometry.rs (window/monitor rect math) + input.rs (the pure audio key-map).
+  # The testable floating logic IS counted: offscreen.rs (render seam) + geometry.rs (window/monitor rect math) + input.rs (the pure audio key-map) + cadence.rs (the animation throttle).
   # Keeps the % honest: "of the code we CAN test headlessly, X% is tested",
   # rather than dragging the number down with paths no test can reach.

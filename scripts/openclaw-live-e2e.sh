@@ -26,10 +26,16 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIX="$REPO/target/release/pixtuoid"
 HOOK="$REPO/target/release/pixtuoid-hook"
-SOCK="${TMPDIR:-/tmp}/pixtuoid-openclaw-e2e.sock"
 OUT="$(mktemp)"
 PROJ="$(mktemp -d)"
 CFGDIR="$(mktemp -d)"
+# The socket lives inside a PRIVATE 0700 dir, never as a fixed name in the shared
+# temp dir: a fixed name makes two concurrent runs bind/`rm` each other's socket,
+# and on a shared /tmp it is pre-plantable by another user (nothing downstream
+# polices it — `ensure_owned_socket_dir` in hook/unix.rs deliberately leaves an
+# explicit PIXTUOID_SOCKET path alone).
+SOCKDIR="$(mktemp -d)"
+SOCK="$SOCKDIR/pixtuoid.sock"
 PIXPID=""
 
 for bin in "$PIX" "$HOOK"; do
@@ -46,11 +52,10 @@ cleanup() {
     for p in "${SPID:-}" "${APID:-}" "${BPID:-}"; do
         [ -n "$p" ] && kill "$p" 2>/dev/null
     done
-    rm -f "$SOCK" "$OUT"
-    rm -rf "$PROJ" "$CFGDIR"
+    rm -f "$OUT"
+    rm -rf "$PROJ" "$CFGDIR" "$SOCKDIR"
 }
 trap cleanup EXIT
-rm -f "$SOCK"
 
 # Self-contained: an ISOLATED config (via XDG_CONFIG_HOME) that marks OpenClaw
 # connected — the reducer's presence connection-gate drops every delta for a

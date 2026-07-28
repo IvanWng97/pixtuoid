@@ -8,4 +8,15 @@ import raycastConfig from "@raycast/eslint-config";
 export default defineConfig([
   { ignores: ["raycast-env.d.ts", "dist/**", "src/contract.ts", "src/contract-outcome.ts"] },
   ...raycastConfig,
+  {
+    // A chord Raycast reserves is silently swallowed by Raycast, so the Action it
+    // decorates is unreachable — a defect no other gate here can see (`tsc` types the
+    // `Keyboard.Shortcut` fine, and `ray build`/`ray lint` need the macOS app, so they
+    // are not in CI at all). Upstream ships it at WARN, and `eslint .` exits 0 on
+    // warnings, which is how a dead `⌘,` binding shipped. Errors are the only level CI
+    // reads. Scoped to this one rule rather than a blanket `--max-warnings 0`: a
+    // reserved chord is always a defect, whereas upstream's style rules are advice a
+    // routine version bump could turn into a surprise red.
+    rules: { "@raycast/no-reserved-shortcut": "error" },
+  },
 ]);

@@ -17,7 +17,7 @@ pub mod sources;
 pub mod term;
 pub mod tui;
 pub mod validate;
-pub mod version;
+pub(crate) mod version;
 
 /// Strip ASCII/Unicode control characters from an untrusted string before it
 /// reaches a terminal sink (the headless `println!` summary, the `doctor`

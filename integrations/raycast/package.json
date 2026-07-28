@@ -68,6 +68,7 @@
     "esbuild": "0.28.1"
   },
   "scripts": {
+    "audit": "node scripts/audit-adjudicated.mjs",
     "build": "ray build",
     "dev": "ray develop",
     "lint": "ray lint",

@@ -317,13 +317,17 @@ pub(super) fn compute_with_seed(
     } else {
         None
     };
+    /// How far SOUTH of the floor line (`top_margin`) the elevator spawn sits, so a
+    /// character entering stands on open floor rather than on the wall apron
+    /// (`wall_band_h()..top_margin`) — the strip the straddling wall decor stamps its
+    /// ground into. Pinned by
+    /// `placement_sweep::the_spawn_threshold_stands_on_the_floor_not_the_wall_apron`.
+    const DOOR_THRESHOLD_CLEARANCE_PX: u16 = 4;
     // Spawn point on the floor right outside the elevator's centre:
-    // characters walk from here to their desk. Y is 4 px south of
-    // the wall edge so the character clears the elevator threshold
-    // before pathing.
+    // characters walk from here to their desk.
     let door_threshold = door.map(|d| Point {
         x: d.x + ELEVATOR_W / 2,
-        y: top_margin + 4,
+        y: top_margin + DOOR_THRESHOLD_CLEARANCE_PX,
     });
 
     let Point {
@@ -567,6 +571,27 @@ pub(super) fn compute_with_seed(
             y: buf_h / 2,
         });
 
+    // Connectivity at ROUTER granularity, not just the pixel flood's — a ≤3 px
+    // channel is pixel-connected and coarse-IMPASSABLE (scene CLAUDE.md, #566).
+    let severed = |mask: &WalkableMask| -> bool {
+        if !unreachable_walkable_cells(mask, conn_seed).is_empty() {
+            return true;
+        }
+        let reach = ReachSet::from_mask(mask, conn_seed);
+        home_desks.iter().any(|&d| {
+            let chair = desk_walk_anchor(d);
+            approach_point(
+                Furniture::Desk,
+                chair,
+                Facing::South,
+                pantry_counter_size,
+                mask,
+                chair,
+                &reach,
+            ) == chair
+        })
+    };
+
     let mut walkable = build_mask(&plants, &wall_decor);
     // Connectivity guard (#566 CLASS B): a scatter plant can settle onto the
     // aisle floor and plug the SOLE inter-pod drain at a single-pod-column band,
@@ -578,7 +603,7 @@ pub(super) fn compute_with_seed(
     // — and compute is resize/floor-change-gated (not per-frame), sub-ms even at
     // the hero ceiling, so the O(w·h) cost on an obviously-connected wide floor is
     // an accepted trade for never shipping a pocket.
-    if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
+    if severed(&walkable) {
         // The seal-causer is a scatter plant that `settle_plant` RELOCATED off its
         // authored corridor-edge row (aisle.y − 4) DOWN onto an obstacle's row —
         // into the aisle floor itself, where its footprint plugs the drain. The
@@ -594,20 +619,21 @@ pub(super) fn compute_with_seed(
         // (the bookshelf/screen sit up in the already-blocked north band), so
         // drop THAT before the drastic clear-all-plants — plants here are usually
         // innocent, and losing a whiteboard beats losing every plant.
-        if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
+        if severed(&walkable) {
             wall_decor.retain(|d| d.kind != WallDecor::Whiteboard);
             walkable = build_mask(&plants, &wall_decor);
         }
         // Last resort — decor may NEVER disconnect the office: if a pocket somehow
         // survives (a non-aisle plant), drop every remaining scatter plant.
-        if !unreachable_walkable_cells(&walkable, conn_seed).is_empty() {
+        if severed(&walkable) {
             plants.clear();
             walkable = build_mask(&plants, &wall_decor);
         }
         debug_assert!(
-            unreachable_walkable_cells(&walkable, conn_seed).is_empty(),
-            "#566 connectivity guard: a pocket survived dropping every scatter plant \
-             AND the free-standing whiteboard — a new NON-decor seal cause needs its own fix"
+            !severed(&walkable),
+            "#566 connectivity guard: a pocket (or a coarse-unroutable home desk) survived \
+             dropping every scatter plant AND the free-standing whiteboard — a new NON-decor \
+             seal cause needs its own fix"
         );
     }
 
@@ -1221,10 +1247,12 @@ impl FloorGeometry {
         }
     }
     /// Resolved mid-column percent AFTER the Dense-degrade (a too-short Dense
-    /// widens to the Standard 28% column).
+    /// widens to the Standard column). Reads the Standard row rather than
+    /// repeating its percent, so retuning that row can't leave a degraded Dense
+    /// floor on the old column.
     fn mid_x_pct(self) -> u16 {
         if self.variant == FloorVariant::Dense && !self.has_dual_meeting {
-            28
+            FloorVariant::Standard.mid_x_pct()
         } else {
             self.variant.mid_x_pct()
         }
@@ -1657,4 +1685,35 @@ pub(super) fn compute_waypoints(
             y: couch_y,
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FloorGeometry, FloorVariant};
+
+    // The Dense-degrade accessor must READ the Standard column percent, not keep
+    // a second copy of it: `mid_x_pct`'s own doc says the degraded floor "widens
+    // to the Standard column", so retuning `FloorVariant::Standard` has to move
+    // the degraded Dense floor with it.
+    #[test]
+    fn a_degraded_dense_floor_reads_the_standard_column_percent() {
+        let degraded = FloorGeometry {
+            variant: FloorVariant::Dense,
+            has_dual_meeting: false,
+        };
+        assert_eq!(
+            degraded.mid_x_pct(),
+            FloorVariant::Standard.mid_x_pct(),
+            "a too-short Dense floor degrades to the Standard geometry"
+        );
+        let dual = FloorGeometry {
+            variant: FloorVariant::Dense,
+            has_dual_meeting: true,
+        };
+        assert_eq!(
+            dual.mid_x_pct(),
+            FloorVariant::Dense.mid_x_pct(),
+            "a Dense floor that KEEPS both meeting rooms keeps its own column"
+        );
+    }
 }

@@ -8,9 +8,9 @@ fn is_valid_version(s: &str) -> bool {
     parse_semver(s).is_some()
 }
 
-pub struct BootDecision {
-    pub should_show_popup: bool,
-    pub should_persist: bool,
+pub(crate) struct BootDecision {
+    pub(crate) should_show_popup: bool,
+    pub(crate) should_persist: bool,
 }
 
 /// Decide whether the version popup should fire on boot and whether to

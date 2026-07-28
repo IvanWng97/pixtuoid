@@ -223,7 +223,7 @@ def _selftest() -> int:
     # watcher orchestration loop the old file-list silently missed.
     for p in (
         "crates/pixtuoid-core/src/state/mod.rs",
-        "crates/pixtuoid-core/src/state/reducer.rs",
+        "crates/pixtuoid-core/src/state/reducer/mod.rs",
         "crates/pixtuoid-core/src/state/fsm.rs",
         "crates/pixtuoid-core/src/state/scope.rs",
         "crates/pixtuoid-core/src/state/correlation.rs",

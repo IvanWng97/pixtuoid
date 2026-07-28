@@ -116,7 +116,8 @@ flowchart TB
 **Walking the pipeline (real symbols):**
 
 1. **Ingest.** Claude Code fires a hook → the **`pixtuoid-hook`** shim
-   (`enrich_payload` stamps `_pixtuoid_source`, a 200 ms write timeout, exit 0) →
+   (`enrich_payload` stamps `_pixtuoid_source`, a 200 ms watchdog-bounded send,
+   exit 0) →
    `HookSocketListener` on a Unix socket (a named pipe on Windows) →
    **`decode_hook_payload`** turns the JSON into one or more `AgentEvent`s —
    tool/permission payloads are preceded by an `Identity` event the reducer uses
@@ -162,8 +163,10 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
 - **The `Source` trait is the only seam for adding a transcript-bearing agent
   CLI** (Codex, Copilot CLI, Antigravity, …). Per-source format knowledge lives in that source's
   own decoder functions (injected into `JsonlWatcher` as fn pointers), not in a
-  shared decoder. Hook-only CLIs (Reasonix, opencode, Cursor CLI,
-  CodeWhale, Hermes — no watchable transcript) are the documented exception: no
+  shared decoder. Hook-only CLIs (Reasonix, opencode, Cursor CLI, CodeWhale,
+  Hermes, Kimi Code CLI — none exposes a transcript pixtuoid watches; for
+  Kimi and Cursor CLI one DOES exist but is deliberately unwatched, see
+  `crates/pixtuoid-core/CLAUDE.md`) are the documented exception: no
   `Source` impl and no runtime wiring; their registry rows set
   `transcript: None` and supply a custom hook decoder, and each ships an
   install `Target` instead (bound via the in-TUI Sources panel).
@@ -190,8 +193,9 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
 - **`pixtuoid-core` has no terminal dependencies.** Anything terminal-specific
   lives in a thin painter over the engine's render seam (`render_floor` /
   `render_to_rgb_buffer`), never in the core or the scene engine.
-- **The hook shim must never block the agent** — always exit 0, 200 ms write
-  timeout.
+- **The hook shim must never block the agent** — always exit 0, and the 200 ms
+  send bound is enforced by a watchdog thread that hard-exits the process, on
+  both platforms.
 - **Subagent supervision is a scope tree** (`state/scope.rs`): exit cascades
   *down* (a parent's `SessionEnd` reaps its subtree), liveness flows *up* (a
   working subagent keeps its ancestors fresh), and permission-blocked subagents

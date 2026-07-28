@@ -340,10 +340,13 @@ pub static DRACULA: Theme = Theme {
             g: 250,
             b: 123,
         },
+        // Dracula yellow #f1fa8c — the palette's one unclaimed accent. Was the
+        // cyan #8be9fd, byte-identical to `edit`, so `ToolKind::Other` and a
+        // THINKING agent glowed exactly like an editing one.
         default: Rgb {
-            r: 139,
-            g: 233,
-            b: 253,
+            r: 241,
+            g: 250,
+            b: 140,
         },
     },
     ui: UiColors {

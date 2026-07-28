@@ -187,9 +187,13 @@ function rehypeRepoLinks() {
 // 7.0.5) it does NOT hash template-level `is:inline` scripts — the only kind
 // this site has — and it unconditionally appends style hashes, which would make
 // browsers IGNORE the 'unsafe-inline' that Shiki/mermaid style attributes need.
-// This build:done hook closes both gaps from the BUILT html itself, so the
+// It also emits the <meta> at its head-injection point, BELOW scripts the layout
+// wrote earlier — and a meta policy governs only what follows it, so those ran
+// unpoliced by the very hashes it carries.
+// This build:done hook closes all three gaps from the BUILT html itself, so the
 // hashes are mechanically derived and can never drift from the content
-// (script-src re-hashed per page, style-src stripped of hashes). The delicate
+// (script-src re-hashed per page, style-src stripped of hashes, the element
+// hoisted to just after <meta charset>). The delicate
 // per-page HTML→hashes→rewrite transform lives in ./config/csp-hashes.mjs so it
 // is unit-testable (config/csp-hashes.test.mjs) and its script-tag scan can't
 // diverge from the HTML tokenizer; this hook only walks dist/ and applies it.

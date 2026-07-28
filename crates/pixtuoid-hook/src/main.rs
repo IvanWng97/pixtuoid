@@ -198,7 +198,7 @@ fn env_payload_from(
 ) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     map.insert("event".into(), Value::from(event));
-    // CodeWhale's pid for the daemon's liveness watch (see `cw_parent_pid`).
+    // CodeWhale's pid for the daemon's liveness watch (see `parent_pid`).
     if let Some(pid) = pid {
         map.insert("_pid".into(), Value::from(pid));
     }

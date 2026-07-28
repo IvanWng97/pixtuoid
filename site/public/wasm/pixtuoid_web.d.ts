@@ -145,7 +145,9 @@ export class Office {
      * Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
      * "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
      * Applied each `step` (see the force_weather invariant) so two Offices sharing
-     * the one wasm module never fight over the thread-local override.
+     * the one wasm module never fight over the thread-local override. An
+     * unrecognized name renders as the clock-based cycle (`step` clears the
+     * override rather than leaving a sibling office's forced weather standing).
      */
     set_weather(name?: string | null): void;
     /**

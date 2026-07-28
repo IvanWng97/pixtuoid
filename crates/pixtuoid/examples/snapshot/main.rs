@@ -789,7 +789,7 @@ fn main() -> Result<()> {
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
     if args.debug_walkable {
-        debug_paint_walkable_overlay(&mut term)?;
+        debug_paint_walkable_overlay(&mut term, args.floor_seed)?;
     }
 
     let crop_rect = if args.crop_mascot {

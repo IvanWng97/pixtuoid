@@ -5,7 +5,7 @@
 # bundled `claude-cli` backend coding session renders as a full-fidelity `cc·`
 # desk sprite. One headless scene, two sources, two sprites:
 #
-#   agents=[… cc·<workspace>@N …] daemons=[openclaw@18789:busy]
+#   agents=[… cc·<workspace>@N …] daemons=[openclaw@<port>:busy]
 #
 # Flow:
 #   1. headless pixtuoid binds an ISOLATED socket + watches ~/.claude/projects
@@ -35,9 +35,15 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIX="$REPO/target/release/pixtuoid"
-SOCK="${TMPDIR:-/tmp}/pixtuoid-openclaw-cc-e2e.sock"
 PROJECTS="$HOME/.claude/projects"
 CFGDIR="$(mktemp -d)"
+# The socket lives inside a PRIVATE 0700 dir, never as a fixed name in the shared
+# temp dir: a fixed name makes two concurrent runs bind/`rm` each other's socket,
+# and on a shared /tmp it is pre-plantable by another user (nothing downstream
+# polices it — `ensure_owned_socket_dir` in hook/unix.rs deliberately leaves an
+# explicit PIXTUOID_SOCKET path alone).
+SOCKDIR="$(mktemp -d)"
+SOCK="$SOCKDIR/pixtuoid.sock"
 PIXLOG="$(mktemp)"
 GWLOG="$(mktemp)"
 AGENTLOG="$(mktemp)"
@@ -58,33 +64,54 @@ done
     echo "no $PROJECTS — has Claude Code ever run on this machine?" >&2
     exit 2
 }
+# The port THIS run's gateway will bind. The assertions below deliberately match
+# the `openclaw@` prefix because the user's config need not resolve the default —
+# so the conflict guard and the cleanup reap have to resolve it the same way
+# instead of pinning the default, or on a non-default box the guard passes while a
+# gateway IS running and the reap leaks the one we started. Falls back to the ONE
+# in-repo copy of OpenClaw's default (the plugin template's DEFAULT_GATEWAY_PORT,
+# the same literal check_upstream_drift.py compares against upstream) rather than
+# a second hardcoded number. Env overrides are NOT mirrored — that would mean
+# re-implementing upstream's `parseGatewayPortEnvValue` in shell.
+PORT="$(openclaw config get gateway.port 2>/dev/null | tr -d '" ' | tail -1)"
+case "$PORT" in
+'' | *[!0-9]*)
+    PORT="$(sed -n 's/^const DEFAULT_GATEWAY_PORT = \([0-9][0-9]*\);.*/\1/p' \
+        "$REPO/crates/pixtuoid/src/install/openclaw_plugin.js")"
+    ;;
+esac
+[ -n "$PORT" ] || {
+    echo "could not resolve the gateway port (openclaw config, nor openclaw_plugin.js)" >&2
+    exit 2
+}
+
 # Don't fight an already-running gateway: its plugin uses ITS env's socket, so we
 # could not isolate. Bail rather than --force-kill the user's gateway.
-if lsof -nP -iTCP:18789 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "a gateway is already listening on :18789 — stop it first (this test starts its own)" >&2
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "a gateway is already listening on :$PORT — stop it first (this test starts its own)" >&2
     exit 2
 fi
 
+# Reaps the gateway by job pid AND by listening port: `$!` is the listener on
+# openclaw 2026.7.1, so the pid kill normally suffices, but a version that
+# daemonises — or a kill that failed — would leak the port. The port reap is
+# scoped to OUR resolved port, never `pkill -f 'openclaw gateway run'`, which
+# would kill a gateway this script never started.
 cleanup() {
     [ -n "$GWPID" ] && kill "$GWPID" 2>/dev/null
-    pkill -f 'openclaw gateway run' 2>/dev/null
-    # `openclaw gateway run` execs/forks a child node that holds the port — killing
-    # the CLI wrapper alone LEAKS it. Kill whatever actually LISTENS on :18789
-    # (TERM, then KILL), so the user's machine isn't left with a stray gateway.
     local port_pids
-    port_pids="$(lsof -ti tcp:18789 -sTCP:LISTEN 2>/dev/null)"
+    port_pids="$(lsof -ti tcp:"$PORT" -sTCP:LISTEN 2>/dev/null)"
     # shellcheck disable=SC2086  # word-split is intended — one kill per listener pid
     [ -n "$port_pids" ] && kill $port_pids 2>/dev/null
     sleep 1
-    port_pids="$(lsof -ti tcp:18789 -sTCP:LISTEN 2>/dev/null)"
+    port_pids="$(lsof -ti tcp:"$PORT" -sTCP:LISTEN 2>/dev/null)"
     # shellcheck disable=SC2086  # word-split is intended — one kill per listener pid
     [ -n "$port_pids" ] && kill -9 $port_pids 2>/dev/null
     [ -n "$PIXPID" ] && kill "$PIXPID" 2>/dev/null
-    rm -f "$SOCK" "$PIXLOG" "$GWLOG" "$AGENTLOG"
-    rm -rf "$CFGDIR"
+    rm -f "$PIXLOG" "$GWLOG" "$AGENTLOG"
+    rm -rf "$CFGDIR" "$SOCKDIR"
 }
 trap cleanup EXIT
-rm -f "$SOCK"
 
 # The backend's `cc·` label is the openclaw agent WORKSPACE's cwd basename (the
 # claude-cli backend runs there → its transcript keys on that cwd). Naming the

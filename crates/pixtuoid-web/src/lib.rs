@@ -234,8 +234,14 @@ impl Office {
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
         // Re-apply THIS office's weather every frame: force_weather is a thread-local
         // shared by every Office in the module, so the last writer before a render
-        // wins — each office must set its own value right before rendering.
-        let _ = pixtuoid_scene::pixel_painter::force_weather(self.weather_override.as_deref());
+        // wins — each office must set its own value right before rendering. An
+        // unknown name leaves that thread-local UNTOUCHED (deliberate at the scene
+        // layer), which would silently render whatever the last writer forced, so
+        // the re-apply is only TOTAL if the Err path clears it to the clock-based
+        // cycle `set_weather` documents.
+        if pixtuoid_scene::pixel_painter::force_weather(self.weather_override.as_deref()).is_err() {
+            let _ = pixtuoid_scene::pixel_painter::force_weather(None);
+        }
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
         self.sync_capacity(buf_w, buf_h);
@@ -297,7 +303,9 @@ impl Office {
     /// Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
     /// "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
     /// Applied each `step` (see the force_weather invariant) so two Offices sharing
-    /// the one wasm module never fight over the thread-local override.
+    /// the one wasm module never fight over the thread-local override. An
+    /// unrecognized name renders as the clock-based cycle (`step` clears the
+    /// override rather than leaving a sibling office's forced weather standing).
     pub fn set_weather(&mut self, name: Option<String>) {
         self.weather_override = name;
     }
@@ -1444,10 +1452,30 @@ mod tests {
             "storm office must keep its own weather after another office stepped"
         );
 
-        // Unknown name = no panic, no-op (falls back to clock-based).
-        let mut c = Office::new(1).unwrap();
-        c.set_weather(Some("not-a-weather".into()));
-        c.step(T0_MS, 160, 96); // must not panic
+        // An UNKNOWN name falls back to the clock-based cycle this API documents
+        // — it must NOT inherit whatever the last writer on this thread forced.
+        // `force_weather` leaves the override UNTOUCHED on Err (deliberate at the
+        // scene layer, pinned by
+        // `force_weather_sets_known_clears_none_and_errs_on_unknown`), so a
+        // swallowed Err renders the PREVIOUS office's weather — here, storm.
+        let mut typo = Office::new(1).unwrap();
+        typo.set_weather(Some("stormy".into()));
+        typo.step(T0_MS, 160, 96);
+        let typo_frame = typo.frame().to_vec();
+
+        let mut unforced = Office::new(1).unwrap();
+        typo.step(T0_MS, 160, 96); // leave `typo`'s (mis)override as the last writer
+        unforced.step(T0_MS, 160, 96);
+        // `assert!` over the slices, not `assert_eq!`: a mismatch would otherwise
+        // dump two 61k-byte frames into the failure output.
+        assert!(
+            typo_frame == unforced.frame(),
+            "an unknown weather name must render the clock-based cycle"
+        );
+        assert!(
+            typo_frame != storm_frame,
+            "…and specifically must NOT inherit the sibling office's storm"
+        );
     }
 
     #[test]

@@ -19,4 +19,7 @@ jobs:
           persist-credentials: false
       - uses: EmbarkStudios/cargo-deny-action@v2.1.1 # explicit pin: the floating @v2 broke 2026-07-13 (v2.1.0 shift-5 ate the subcommand; v2.1.1 fixed same-day) — bump deliberately, not via the tag
         with:
+          # Stale-ignore detection is NOT a flag here: `[advisories]
+          # unused-ignored-advisory = "deny"` in deny.toml owns it, so it holds
+          # for any caller of `check advisories`, not just this cron.
           command: check advisories

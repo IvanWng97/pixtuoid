@@ -1814,21 +1814,22 @@ fn entry_walk_coordinates_are_continuous() {
 #[test]
 fn desk_approach_cell_is_never_inside_the_blocked_desk() {
     // The desk's ARRIVAL target must be a real walkable cell off an allowed
-    // (N/E/W) side — never the chair (blocked, inside the footprint) and never
-    // any other blocked cell. Aiming A* at the blocked chair directly is exactly
-    // what made it fall back to a straight door→chair line THROUGH the desk body
-    // (the "walk through the table" bug). A walkable result is, by construction,
-    // outside every blocked cell.
+    // (N/E/W) side — never the chair (blocked by the desk's routing pad) and
+    // never any other blocked cell. Aiming A* at the blocked chair directly is
+    // exactly what made it fall back to a straight door→chair line THROUGH the
+    // desk body (the "walk through the table" bug). A walkable result is, by
+    // construction, outside every blocked cell.
     use crate::layout::desk_walk_anchor;
     let l = layout();
     let mut any_some = false;
     for &desk in &l.home_desks {
         let chair = desk_walk_anchor(desk);
-        // The chair is inside the blocked footprint — that is WHY we can't aim
-        // A* at it and must settle onto it instead.
+        // The chair sits in the desk's blocked BAND — the `OBSTACLE_PAD_PX`
+        // routing pad, not the shallow `DESK_FOOT_H` footprint south of it.
         assert!(
             !l.is_walkable(chair.x, chair.y),
-            "the desk chair {chair:?} must be blocked (inside the footprint)"
+            "the desk chair {chair:?} must be blocked (covered by the desk's \
+             OBSTACLE_PAD_PX routing pad)"
         );
         // None = degenerate layout (every N/E/W side walled off); the entry then
         // falls back to the direct chair target. Acceptable, so not asserted.
@@ -1837,7 +1838,7 @@ fn desk_approach_cell_is_never_inside_the_blocked_desk() {
             assert!(
                 l.is_walkable(cell.x, cell.y),
                 "approach cell {cell:?} for desk {desk:?} must be walkable \
-                 (so it is neither inside the footprint nor the blocked chair)"
+                 (so it is neither inside the desk's blocked band nor the chair)"
             );
             assert_ne!(cell, chair, "approach cell must differ from the chair");
         }

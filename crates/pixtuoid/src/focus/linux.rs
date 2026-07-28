@@ -30,10 +30,18 @@ enum LinuxFocusChannel {
     X11,
 }
 
+/// EMPTY (or whitespace-only) counts as UNSET — the workspace
+/// `install::io::nonempty` rule, NOT bare presence: systemd user units and
+/// non-forwarded ssh sessions routinely leave an exported-but-blank `SWAYSOCK`
+/// behind, and reading that as "sway is running" routes BOTH halves (the
+/// `focusable` probe and the activation) to `swaymsg` on a host where EWMH
+/// would have worked — every click then dead-ends in the ONE failure rule's
+/// silent no-op, permanently. `doctor::marker_set` applies the same rule to the
+/// same markers so the jump and its diagnostic can't disagree.
 fn detect_channel() -> LinuxFocusChannel {
-    if std::env::var_os(SWAY_ENV).is_some() {
+    if crate::install::io::nonempty_env(SWAY_ENV).is_some() {
         LinuxFocusChannel::Sway
-    } else if std::env::var_os(HYPRLAND_ENV).is_some() {
+    } else if crate::install::io::nonempty_env(HYPRLAND_ENV).is_some() {
         LinuxFocusChannel::Hyprland
     } else {
         LinuxFocusChannel::X11
@@ -124,18 +132,40 @@ fn x11_window_of(pid: i32) -> Option<u32> {
 /// EWMH `_NET_ACTIVE_WINDOW`.
 pub(crate) fn activate_os(pid: i32) -> bool {
     match detect_channel() {
-        LinuxFocusChannel::Sway => std::process::Command::new("swaymsg")
-            .arg(format!("[pid={pid}] focus"))
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false),
-        LinuxFocusChannel::Hyprland => std::process::Command::new("hyprctl")
-            .args(["dispatch", "focuswindow", &format!("pid:{pid}")])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false),
+        LinuxFocusChannel::Sway => {
+            let criteria = format!("[pid={pid}] focus");
+            run_detached("swaymsg", &[criteria.as_str()])
+        }
+        LinuxFocusChannel::Hyprland => {
+            let target = format!("pid:{pid}");
+            run_detached("hyprctl", &["dispatch", "focuswindow", target.as_str()])
+        }
         LinuxFocusChannel::X11 => x11_activate(pid).unwrap_or(false),
     }
+}
+
+/// Run a compositor IPC command with EVERY stdio stream nulled, and report
+/// whether it succeeded.
+///
+/// The caller is the crossterm event loop, INSIDE the TUI's raw-mode alternate
+/// screen (a sprite click / dashboard `f`). Inherited stdio — `Command::status`'s
+/// default — would let the child paint into the office (`swaymsg`'s diagnostic
+/// for an unmatched `[pid=N]` criterion is the COMMON case, given focus's
+/// documented misses) where ratatui's diff-based redraw leaves it until those
+/// cells next change, and would hand the child the raw-mode tty the TUI is
+/// polling for keystrokes. Every other child spawn in the binary already
+/// captures or nulls (`.output()` in `tree_lists_pid` and `focus::macos`,
+/// explicit `Stdio` in `doctor::probe_version`); routing every arm through one
+/// helper is what stops a future compositor being added un-nulled.
+fn run_detached(cmd: &str, args: &[&str]) -> bool {
+    std::process::Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn x11_activate(pid: i32) -> Option<bool> {

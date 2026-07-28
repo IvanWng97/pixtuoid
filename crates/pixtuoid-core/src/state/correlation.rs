@@ -5,7 +5,7 @@
 //! parent↔subagent tree; cross-slot correlation lives in the REDUCER's layer)
 //! is satisfied — [`Correlation`] is owned by and consulted only from
 //! `Reducer`, the DECISIONS (which arm fires, what gets suppressed, when a
-//! sweep cascades) stay in `reducer.rs`, and this module owns the seven maps'
+//! sweep cascades) stay in `reducer/mod.rs`, and this module owns the seven maps'
 //! bookkeeping: the entry types, the TTL constants, the freshness predicates,
 //! and the one [`Correlation::gc`] pruning entry point. Don't move these maps
 //! onto `AgentSlot` (they span slots and are deliberately not a semver
@@ -28,8 +28,8 @@ use crate::AgentId;
 // `#[doc(hidden)]` keeps the cross-crate visibility the test needs while
 // excluding them from the rendered docs AND from cargo-semver-checks, so a
 // future retune/rename is not a breaking change. (`EXIT_GRACE_WINDOW` in
-// `reducer.rs` is deliberately NOT hidden — the binary's pose module is a real
-// consumer.)
+// `reducer/mod.rs` is deliberately NOT hidden — the binary's pose module is a
+// real consumer.)
 #[doc(hidden)]
 pub const HOOK_WINS_WINDOW: Duration = Duration::from_millis(500);
 

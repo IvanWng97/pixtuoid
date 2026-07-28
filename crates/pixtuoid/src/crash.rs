@@ -7,13 +7,10 @@ use std::path::PathBuf;
 
 pub(crate) fn install_crash_hook() {
     std::panic::set_hook(Box::new(|info| {
-        // Same ordering contract as tui::teardown_terminal: mouse-capture
-        // restore must precede disable_raw_mode (see the WHY there).
-        let _ = crossterm::execute!(
-            std::io::stderr(),
-            crossterm::event::DisableMouseCapture,
-            crossterm::terminal::LeaveAlternateScreen
-        );
+        let _ = restore_terminal(&mut std::io::stdout());
+        // Stream-INDEPENDENT, unlike the two above: crossterm resolves its own
+        // fd from /dev/tty here. Must still run AFTER the mouse-capture restore
+        // — same ordering contract as tui::teardown_terminal (the WHY is there).
         let _ = crossterm::terminal::disable_raw_mode();
 
         let version = env!("CARGO_PKG_VERSION");
@@ -56,6 +53,32 @@ pub(crate) fn install_crash_hook() {
         );
         eprintln!("  \x1b[2m(attach if the reviewer asks — the link above only carries a truncated trace)\x1b[0m\n");
     }));
+}
+
+/// Undo the terminal modes `tui::setup_terminal` entered, writing into `w`.
+///
+/// `w` MUST be the stream the alternate screen was ENTERED on — `stdout`. These
+/// are ANSI sequences delivered to whatever writer you hand `execute!`, and
+/// every other site in the terminal-mode state machine drives stdout
+/// (`setup_terminal` does `execute!(stdout(), EnterAlternateScreen,
+/// EnableMouseCapture)`; `teardown_terminal` writes through `Terminal<
+/// CrosstermBackend<Stdout>>`). Writing the restore to stderr instead worked
+/// only while stderr happened to be the same tty: under `pixtuoid run
+/// 2>/dev/null` — a plausible move, since main.rs eprintlns its truecolor and
+/// config warnings — the sequences went to the redirect and the user was left
+/// on the alternate screen with mouse reporting on, needing `reset`.
+///
+/// The human-readable report deliberately stays on stderr (see the caller): a
+/// non-TUI command with a redirected stdout gets a few escape bytes in its
+/// output on a panic, which is the cheap side of this trade — those commands
+/// never entered the alt screen, and their output is already truncated by the
+/// crash.
+fn restore_terminal(w: &mut impl std::io::Write) -> std::io::Result<()> {
+    crossterm::execute!(
+        w,
+        crossterm::event::DisableMouseCapture,
+        crossterm::terminal::LeaveAlternateScreen
+    )
 }
 
 #[allow(deprecated)]
@@ -170,6 +193,83 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    /// The escape the alternate screen is left with. Asserted as a literal
+    /// rather than re-executing the command into a second buffer, which would
+    /// only prove `execute!` is deterministic.
+    ///
+    /// Unix-only, and so is EVERY test below that reads it — the gate is a
+    /// property of crossterm, not of either test. crossterm 0.29 dispatches on a
+    /// PROCESS-GLOBAL flag rather than on the writer: `queue` and `execute_fmt`
+    /// both `return command.execute_winapi()` when `ansi_support::supports_ansi()`
+    /// is false, and that flag is `enable_vt_processing().is_ok() || TERM is set
+    /// and != "dumb"`. Under `windows-test` nextest runs each test binary with a
+    /// PIPED stdout and no console, and windows-latest/pwsh sets no `TERM`, so
+    /// the flag is false and the sequences go to the real console — no writer,
+    /// in-memory or piped, ever sees a byte to assert on.
+    #[cfg(unix)]
+    const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
+
+    /// That the restore reaches the writer it was HANDED (the generic seam),
+    /// as opposed to a stream of its own choosing. Unix-only for the crossterm
+    /// dispatch reason on `LEAVE_ALT_SCREEN` above.
+    #[cfg(unix)]
+    #[test]
+    fn the_restore_writes_the_leave_sequence_into_the_writer_it_is_given() {
+        let mut buf: Vec<u8> = Vec::new();
+        restore_terminal(&mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(
+            s.contains(LEAVE_ALT_SCREEN),
+            "the restore must reach the writer handed to it, not a fixed stream: {s:?}"
+        );
+    }
+
+    /// Which STREAM the installed hook writes to, end to end. The panic hook is
+    /// process-global and writes to a real fd, so the only way to observe its
+    /// choice is from outside: re-exec this test binary with the child marker,
+    /// let a real panic fire the hook, and read the two pipes apart.
+    ///
+    /// Unix-only for the same crossterm dispatch reason as `LEAVE_ALT_SCREEN`
+    /// above — and the defect itself is the Unix fd-redirection case.
+    #[cfg(unix)]
+    #[test]
+    fn the_hook_restores_on_stdout_and_keeps_the_report_on_stderr() {
+        const CHILD: &str = "PIXTUOID_CRASH_HOOK_STREAM_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            install_crash_hook();
+            panic!("deliberate panic: the crash-hook stream probe");
+        }
+        // Isolated XDG_STATE_HOME so the child's crash.log never lands in the
+        // developer's real ~/.cache.
+        let state = tempfile::tempdir().unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "crash::tests::the_hook_restores_on_stdout_and_keeps_the_report_on_stderr",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("XDG_STATE_HOME", state.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stdout.contains(LEAVE_ALT_SCREEN),
+            "the alt screen is ENTERED on stdout (tui::setup_terminal), so the panic \
+             restore must go there — on stderr, `pixtuoid run 2>/dev/null` strands it.\n\
+             stdout: {stdout:?}"
+        );
+        assert!(
+            !stderr.contains(LEAVE_ALT_SCREEN),
+            "stderr is the human-readable channel, not the terminal-mode one: {stderr:?}"
+        );
+        assert!(
+            stderr.contains("crashed"),
+            "the crash report itself still belongs on stderr: {stderr:?}"
+        );
+    }
 
     #[test]
     fn truncate_ascii() {

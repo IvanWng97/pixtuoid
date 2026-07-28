@@ -33,8 +33,9 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     // does: a watchdog thread that hard-exits the process — after stdin is
     // consumed this send is the shim's only job (see main), and
     // exit(0)-on-timeout IS the contract (never block CC, spec §2). The write
-    // timeout stays as a second layer: it usually errors out of a stalled write
-    // before the watchdog has to shoot the process.
+    // timeout below is a secondary backstop only: it is armed AFTER connect, so
+    // its deadline is strictly later than the watchdog's and it can only matter
+    // if the watchdog thread is starved of its wakeup.
     if !spawn_timeout_watchdog() {
         return;
     }

@@ -117,11 +117,14 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// (`DESK_APPROACH` = N/E/W, excluding the south front) via the SAME
 /// `approach_point` the wander seats use — so an arriving agent walks AROUND to
 /// sit behind the desk instead of straight through its front. The chair
-/// (`desk_walk_anchor`) is inside the blocked desk footprint, so targeting it
-/// directly made A\* fall back to a straight `door→chair` line THROUGH the desk
-/// body (the "walk through the table" bug). `None` only in a degenerate layout
-/// where every allowed side is walled off — the caller then falls back to the
-/// old direct target. The chair is the SETTLE endpoint, appended after this.
+/// (`desk_walk_anchor`) sits in the desk's blocked band — NOT in its footprint,
+/// which is the shallow `DESK_FOOT_H` south strip (`ground_y: End`, walk-behind);
+/// the chair row is covered by `mask.rs`'s `OBSTACLE_PAD_PX` routing pad. Either
+/// way it is blocked, so targeting it directly made A\* fall back to a straight
+/// `door→chair` line THROUGH the desk body (the "walk through the table" bug).
+/// `None` only in a degenerate layout where every allowed side is walled off —
+/// the caller then falls back to the old direct target. The chair is the SETTLE
+/// endpoint, appended after this.
 ///
 /// Scans from the CHAIR, not the desk's top-left origin: the footprint is
 /// anchored top-left, so a scan from the corner is lopsided and can't clear the

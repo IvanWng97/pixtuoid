@@ -484,6 +484,15 @@ vs 7.0.5) Astro does not hash template-level `is:inline` scripts — the only
 script kind this site has — and it appends style hashes unconditionally, which
 would make browsers *ignore* `'unsafe-inline'`. Consequences to not "fix":
 
+- **The hook also HOISTS the meta**, directly after `<meta charset>`. A
+  `<meta http-equiv>` policy governs only what FOLLOWS it, and Astro emits it at
+  its head-injection point — measured on 7.1.3, three `<script>` and one
+  `<style>` above it on `/`, including the theme-init that reads localStorage, so
+  the policy did not cover the scripts whose hashes it carries. `<meta charset>`
+  is the anchor rather than the `<head>` tag because the encoding sniffer only
+  reads the first 1024 bytes and the policy is 1-3 KB of hashes. Source-reading
+  cannot confirm this one — check `dist/**/*.html`.
+
 - **`script-src` carries no `'unsafe-inline'`** — every inline script is
   whitelisted by content hash, recomputed on each build. Adding/editing an
   `is:inline` script needs NO manual CSP step.

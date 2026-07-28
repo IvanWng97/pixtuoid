@@ -25,8 +25,10 @@ pub mod dsp;
 pub mod engine;
 #[doc(hidden)]
 pub mod mixer;
-#[doc(hidden)]
-pub mod score;
+// `score` is the one module with no bare `pub` item — the frozen takes are
+// `#[cfg(test)]` fingerprint ANCHORS, read only by its sibling `synth`/`compose`,
+// so it stays private rather than offering a publicly reachable empty path.
+mod score;
 #[doc(hidden)]
 pub mod synth;
 
@@ -281,16 +283,16 @@ impl AudioCueTracker {
     /// frame's edges. `waypoint_kind` resolves an occupied-waypoint index to
     /// its kind (painters pass a closure over `layout.waypoints`) so the
     /// tracker never holds a `Layout` borrow and tests need no layout at all.
+    /// Purely EDGE-triggered — it takes no clock, so a caller can't read it as
+    /// time-dependent (a timed cue would reintroduce one where it has a consumer).
     pub fn observe<'a>(
         &mut self,
         agent_ids: impl IntoIterator<Item = &'a pixtuoid_core::AgentId>,
         occupied_waypoints: &std::collections::HashSet<usize>,
         waypoint_kind: impl Fn(usize) -> Option<crate::layout::WaypointKind>,
-        now: std::time::SystemTime,
     ) -> Vec<OneShot> {
         use crate::layout::WaypointKind;
 
-        let _ = now; // per-frame clock; unused since the glug cut, kept for edge-cue timing
         let ids: std::collections::HashSet<pixtuoid_core::AgentId> =
             agent_ids.into_iter().cloned().collect();
 
@@ -526,7 +528,6 @@ mod tests {
     use crate::layout::WaypointKind;
     use pixtuoid_core::AgentId;
     use std::collections::HashSet;
-    use std::time::SystemTime;
 
     fn aid(n: usize) -> AgentId {
         AgentId::from_parts("test", &n.to_string())
@@ -541,30 +542,28 @@ mod tests {
         }
     }
 
-    const T0: SystemTime = SystemTime::UNIX_EPOCH;
-
     #[test]
     fn tracker_primes_silently_then_chimes_once_per_new_agent_wave() {
         let mut tr = AudioCueTracker::new();
         let none = HashSet::new();
         // priming frame: an already-full office fires NOTHING (mid-attach)
-        assert!(tr.observe(&[aid(1)], &none, kinds, T0).is_empty());
+        assert!(tr.observe(&[aid(1)], &none, kinds).is_empty());
         // a new agent walks in → exactly one chime…
         assert_eq!(
-            tr.observe(&[aid(1), aid(2)], &none, kinds, T0),
+            tr.observe(&[aid(1), aid(2)], &none, kinds),
             vec![OneShot::DoorChime]
         );
         // …and the same roster next frame re-fires nothing
-        assert!(tr.observe(&[aid(1), aid(2)], &none, kinds, T0).is_empty());
+        assert!(tr.observe(&[aid(1), aid(2)], &none, kinds).is_empty());
         // THREE simultaneous arrivals = one door moment, not a chord
         assert_eq!(
-            tr.observe(&[aid(1), aid(2), aid(3), aid(4), aid(5)], &none, kinds, T0),
+            tr.observe(&[aid(1), aid(2), aid(3), aid(4), aid(5)], &none, kinds),
             vec![OneShot::DoorChime]
         );
         // an exit fires nothing; the SAME id returning chimes again
-        assert!(tr.observe(&[aid(1)], &none, kinds, T0).is_empty());
+        assert!(tr.observe(&[aid(1)], &none, kinds).is_empty());
         assert_eq!(
-            tr.observe(&[aid(1), aid(2)], &none, kinds, T0),
+            tr.observe(&[aid(1), aid(2)], &none, kinds),
             vec![OneShot::DoorChime]
         );
     }
@@ -573,19 +572,19 @@ mod tests {
     fn tracker_emits_printer_whir_exactly_once_per_animation() {
         let mut tr = AudioCueTracker::new();
         let ids = [aid(1)];
-        tr.observe(&ids, &HashSet::new(), kinds, T0); // prime
+        tr.observe(&ids, &HashSet::new(), kinds); // prime
         let at_printer: HashSet<usize> = [5].into();
         assert_eq!(
-            tr.observe(&ids, &at_printer, kinds, T0),
+            tr.observe(&ids, &at_printer, kinds),
             vec![OneShot::PrinterWhir]
         );
         // still standing there N frames later → silence
-        assert!(tr.observe(&ids, &at_printer, kinds, T0).is_empty());
-        assert!(tr.observe(&ids, &at_printer, kinds, T0).is_empty());
+        assert!(tr.observe(&ids, &at_printer, kinds).is_empty());
+        assert!(tr.observe(&ids, &at_printer, kinds).is_empty());
         // leaves, comes back → the animation restarts → a second whir
-        assert!(tr.observe(&ids, &HashSet::new(), kinds, T0).is_empty());
+        assert!(tr.observe(&ids, &HashSet::new(), kinds).is_empty());
         assert_eq!(
-            tr.observe(&ids, &at_printer, kinds, T0),
+            tr.observe(&ids, &at_printer, kinds),
             vec![OneShot::PrinterWhir]
         );
     }
@@ -594,11 +593,11 @@ mod tests {
     fn tracker_maps_vending_and_ignores_non_appliance_waypoints() {
         let mut tr = AudioCueTracker::new();
         let ids = [aid(1)];
-        tr.observe(&ids, &HashSet::new(), kinds, T0); // prime
-                                                      // couch (idx 2) is not an appliance; vending (idx 7) drops a can
+        tr.observe(&ids, &HashSet::new(), kinds); // prime
+                                                  // couch (idx 2) is not an appliance; vending (idx 7) drops a can
         let occupied: HashSet<usize> = [2, 7].into();
         assert_eq!(
-            tr.observe(&ids, &occupied, kinds, T0),
+            tr.observe(&ids, &occupied, kinds),
             vec![OneShot::VendingDrop]
         );
     }

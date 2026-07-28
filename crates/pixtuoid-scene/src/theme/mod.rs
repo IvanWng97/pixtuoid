@@ -487,6 +487,68 @@ mod tests {
         }
     }
 
+    // Per-channel sum-of-abs-diff. Distinct from a luminance test on purpose: two
+    // hues can share a luminance yet read as different colors (catppuccin's sky
+    // and teal were lum 592 vs 587 — a lum-only floor would miss them), so mutual
+    // distinguishability is a Manhattan-distance question, not a brightness one.
+    // Shared by the source-badge and tool-glow legibility guards.
+    fn manhattan(a: Rgb, b: Rgb) -> u32 {
+        (a.r as u32).abs_diff(b.r as u32)
+            + (a.g as u32).abs_diff(b.g as u32)
+            + (a.b as u32).abs_diff(b.b as u32)
+    }
+
+    // The tool-glow map is an at-a-glance colour code (`pixel_painter::palette`:
+    // "green = generic/default, blue = Edit/Write, cyan = Read, orange = Bash,
+    // purple = Agent/Task") feeding FIVE surfaces from one table — the sprite's
+    // monitor glow, the desk screen glow, the ceiling halo, the footer tool tally
+    // and the tooltip. Two roles sharing an RGB is a CORRECTNESS bug, not taste:
+    // `recolor_frame` substitutes by RGB equality, and `CharacterGlow::Thinking`
+    // also resolves to `default`, so an aliased `default` makes a thinking agent
+    // and an editing agent glow identically. The appliance and source palettes
+    // each ship such a guard; this is the missing sibling.
+    #[test]
+    fn tool_glow_hues_are_distinct_for_every_theme() {
+        /// Lower than `MIN_SOURCE_HUE_DIST` (60) on purpose: six glow roles share
+        /// ONE palette's accent range, and the tightest legitimate pair across the
+        /// bundled themes is catppuccin's edit-vs-read at 54. It still fails loudly
+        /// on the near-collisions this caught — an aliased `default` sitting on
+        /// another tool's EXACT rgb (distance 0).
+        const MIN_TOOL_GLOW_DIST: u32 = 30;
+        for t in ALL_THEMES {
+            // Destructured with NO `..`: a seventh glow role must join the guard
+            // or this stops compiling (the `placement_sweep::pieces()` discipline).
+            let ToolGlowColors {
+                edit,
+                read,
+                bash,
+                agent,
+                grep,
+                default,
+            } = t.tool_glow;
+            let hues = [
+                ("edit", edit),
+                ("read", read),
+                ("bash", bash),
+                ("agent", agent),
+                ("grep", grep),
+                ("default", default),
+            ];
+            for i in 0..hues.len() {
+                for j in (i + 1)..hues.len() {
+                    let d = manhattan(hues[i].1, hues[j].1);
+                    assert!(
+                        d >= MIN_TOOL_GLOW_DIST,
+                        "{}: tool glow {} and {} too close ({d} < {MIN_TOOL_GLOW_DIST})",
+                        t.name,
+                        hues[i].0,
+                        hues[j].0
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn appliance_palette_is_legible_for_every_theme() {
         fn lum(c: Rgb) -> u32 {
@@ -561,16 +623,6 @@ mod tests {
     fn source_badges_legible_for_every_theme() {
         fn lum(c: Rgb) -> u32 {
             c.r as u32 + c.g as u32 + c.b as u32
-        }
-        // Per-channel sum-of-abs-diff. Distinct from `lum` on purpose: two hues
-        // can share a luminance yet read as different colors (catppuccin's sky
-        // and teal were lum 592 vs 587 — a lum-only floor would miss them), so
-        // mutual distinguishability is a Manhattan-distance question, not a
-        // brightness one.
-        fn manhattan(a: Rgb, b: Rgb) -> u32 {
-            (a.r as u32).abs_diff(b.r as u32)
-                + (a.g as u32).abs_diff(b.g as u32)
-                + (a.b as u32).abs_diff(b.b as u32)
         }
         // Floor at which two source badges read as different colors at the 2-char
         // badge scale. The tightest legitimate pair across the bundled themes is
