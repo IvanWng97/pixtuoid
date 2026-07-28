@@ -150,7 +150,7 @@ given change/tree, say so, don't skip it.
   rationale relocated onto the DECLARATION it explains (a `const`/fn/module doc
   can carry a ≈25-word rationale) or a `CLAUDE.md` sharp edge, and any present-tense
   code-state assertion moved into a test — the comment keeps only `pinned by
-  <test>`. A ≥3-line `//` run wedged inside a fn body is the flag); manifest-bridge (a
+  <test>`. A ≥3-line `//` run wedged inside a fn body is the flag); and comment-vs-ITSELF — apply CLAUDE.md's comment test #2 and report `N sentences, M ideas` with the cut; manifest-bridge (a
   `site/src/*.json` / generated schema vs its Rust source of truth).
 - **(D) Quality + tooling** — test-coverage gaps (changed/existing code with no
   exercising test); mutation-teeth (assertions that survive the mutation — and a
@@ -390,20 +390,27 @@ history:
 - **Diff adds or reshapes a substantial block of comments / doc comments**
   (a new multi-line `//` WHY, a large `///` docstring, a comment-heavy refactor,
   a mass doc pass) → add a comment lens that reads each NEW/changed comment
-  AGAINST the code it describes (not the diff in isolation), on the four
+  AGAINST the code it describes (not the diff in isolation), on five
   Family-C axes: **accuracy** (does it match what the code actually does?),
   **value** (a non-obvious WHY, never narration of the WHAT — the comment-value
   factor), **comment-rot** (now FALSE about the code), and the **vestigial**
   class (a comment describing code the SAME diff deleted — "code gone, comment
-  remains"). This is a SEMANTIC judgment the mechanical gate can't make: the
+  remains"), plus **REDUNDANCY-WITHIN** (below). This is a SEMANTIC judgment the mechanical gate can't make: the
   diff-scoped `just comment-lint` advisory finds structural CANDIDATES (runs of
   3+ consecutive line comments in a fn body — `//` in Rust, `#` in Python — on
   the diff's new lines only — the ~5k
   pre-existing legitimate WHY are grandfathered), but the keep / trim-to-≤2 /
   relocate-to-the-declaration-or-a-CLAUDE.md-sharp-edge call is this lens's.
+  **Redundancy-within is the axis this lens kept missing**: the other four
+  compare the comment to the CODE, and a restatement repeats no code, so
+  nothing else can flag it. Apply CLAUDE.md's comment test #2 verbatim — do
+  not paraphrase it here — an earlier copy drifted into the opposite procedure. The finding
+  is REPETITION, not length: "too long" sends the author to trim a legitimate
+  WHY instead of the duplicates.
+
   Anti-slop caveat: this repo's dense WHY-comment density is DELIBERATE — flag
-  only genuine slop (restated WHAT, stale, vestigial), never a legitimate WHY
-  that happens to run long. (Claude Code: the `comment-analyzer` agent is the
+  only genuine slop (restated WHAT, stale, vestigial, restated-ITSELF), never a
+  legitimate WHY that happens to run long. (Claude Code: the `comment-analyzer` agent is the
   ready implementation.)
 - **Interactive TUI flow changed** (onboarding, panel actions, popup gating,
   keybind dispatch) → add a UX / user-journey lens that WALKS each user path

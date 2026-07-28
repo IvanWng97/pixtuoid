@@ -702,10 +702,9 @@ class Report:
     `breaking` = verified upstream change, fix the decoder; `review` = a new
     surface to adopt or ignore; `blind` = probe health, repin and verify by hand;
     `errors` = transient. Collapsing `blind` into `breaking` is what made #793
-    report five phantom renames.
-
-    One type because the render order and the exit code are functions of all
-    four. File through `add_*` only — pinned by the selftest.
+    report five phantom renames. One type because the render order and the exit
+    code are functions of all four. File through `add_*` only — pinned by the
+    selftest.
     """
 
     breaking: list[str] = dataclasses.field(default_factory=list)
@@ -728,16 +727,10 @@ class Report:
     def add_blind(
         self, what: str, where: str, consequence: str, *, our_source: bool = False
     ) -> None:
-        """A lookup missed. Takes the three FACTS, not a finished line.
+        """A lookup missed. Composed here so the disclaimer always ships with it.
 
-        All the script knows is that ITS OWN probe missed; "upstream moved it" is
-        a guess. Composing the wording here means the disclaimer and the repin
-        action are always appended, so no probe-health line can ship asserting a
-        cause nobody verified.
-
-        `our_source=True` when the unreadable thing is OURS (a parser, the plugin
-        template). Nothing upstream is consulted there, so the default's
-        "re-verify upstream by hand" would be the wrong cause AND action.
+        `our_source=True` when the unreadable thing is OURS — the default wording
+        blames upstream, which nothing verified.
         """
         if our_source:
             cause = "Our own parser or constant is stale; nothing upstream was consulted."
@@ -1615,9 +1608,8 @@ READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
 def read_our_names(report: Report) -> OurNames:
     """Read every depended name from our own source, ISOLATING each reader.
 
-    A stale parser here means the MONITOR is broken, so it is loud probe health
-    (exit 1), never transient. Per-row `try` because one shared one let the first
-    failure leave every later field `None`, which `run_checks` skips in silence.
+    A stale parser here means the MONITOR is broken: loud probe health (exit 1),
+    never transient. Per-row `try` — one shared one left every later field `None`.
     """
     ours = OurNames()
     for field, reader, what in READERS:
