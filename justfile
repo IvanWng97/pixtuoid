@@ -815,6 +815,7 @@ gen-wasm: gen-wasm-tools wasm-build
 # Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
 # a lazy-load behind the poster, so a silent size regression (a dep pulling in
 # formatting machinery, an accidental debug build) fails loudly — 1 MiB raw ≈
+# ~350-400 KB gzipped over the wire, which is where the cap comes from.
 # The artifact is ~900 KB (the recipe prints the exact figure and the headroom
 # left against the cap — read it there rather than trusting this line). Pair (#424): the
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
@@ -822,8 +823,18 @@ gen-wasm: gen-wasm-tools wasm-build
 # so every committed file must match gen-wasm's sha256 manifest AND every file
 # must be covered by it. Byte-exact rebuild-match is deliberately NOT checked
 # in CI — wasm output drifts across rustc versions, and CI installs latest
-# stable (local `just gen-wasm` + review is the freshness authority, like the
-# committed demo media).
+# stable, so local `just gen-wasm` + review is the freshness authority. Note
+# what that does and does NOT resemble in the committed demo media: the
+# clips/gif are presence-only for this same non-determinism reason, but the
+# STILLS are re-rendered and pixel-diffed at threshold 0 by gen-check, so media
+# staleness IS mechanically gated and wasm staleness is not. Nothing here reads
+# a scene/core/web source, so a merge that skips `just gen-wasm` ships a stale
+# hero with every gate green; the compensating control is the merge-gate brief
+# (.github/prompts/pr-review.prompt.md, "a scene change stales the wasm"), not
+# this recipe. Input-hash stamping was considered and rejected: most commits
+# under crates/pixtuoid-{core,scene}/src are `native`-gated code the wasm never
+# links, so the gate would demand a ~1 MB binary regen on changes that provably
+# cannot alter it.
 [group('gen')]
 [doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]
 gen-wasm-check:
