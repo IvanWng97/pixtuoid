@@ -137,12 +137,25 @@ pub(crate) fn log_file_path() -> PathBuf {
 /// process umask they were 0644 under a 0755 dir, while the same binary pays a
 /// temp-rename dance to create settings.json 0600 (`install/io.rs`).
 ///
-/// The mode only binds at CREATE, so an existing sink from an older version is
-/// tightened through the OPEN HANDLE (fchmod, never a path chmod that could be
-/// re-raced) — best-effort, since a sink we don't own is not ours to re-mode.
+/// TWO mechanisms, kept separately callable because they cover different cases
+/// (and because folded together, reverting either was invisible to both tests):
+/// [`create_owner_only_append`] binds the mode AT CREATION — race-free, no window
+/// in which a co-located user can open the sink — and
+/// [`pixtuoid::install::tighten_to_owner_only`] restates it on a sink an older
+/// version created 0644, which the create mode cannot bind to.
 /// An already-existing DIRECTORY keeps its mode: the 0600 file is what protects
 /// the content, and silently re-moding a user's `~/.cache` is not ours to do.
 pub(crate) fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
+    let f = create_owner_only_append(path)?;
+    pixtuoid::install::tighten_to_owner_only(&f);
+    Ok(f)
+}
+
+/// The CREATE half of [`open_private_append`]: the sink's parent dir owner-only
+/// (0700) and the sink itself opened for append with the owner-only create mode.
+/// Deliberately does NOT fchmod — a test asserting the mode off THIS fn is
+/// asserting what the open established, not what a follow-up chmod repaired.
+fn create_owner_only_append(path: &Path) -> std::io::Result<std::fs::File> {
     if let Some(parent) = path.parent() {
         #[cfg(unix)]
         {
@@ -157,18 +170,8 @@ pub(crate) fn open_private_append(path: &Path) -> std::io::Result<std::fs::File>
     }
     let mut opts = OpenOptions::new();
     opts.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let f = opts.open(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(f)
+    pixtuoid::install::owner_only_create(&mut opts);
+    opts.open(path)
 }
 
 /// The append-only log was opt-in before #157; now that it is always on in
@@ -226,8 +229,14 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
+    fn mode_of(p: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
     #[test]
-    fn diagnostic_sinks_are_created_owner_only() {
+    fn a_fresh_diagnostic_sink_is_created_owner_only() {
         // The runtime log and the crash log are the LEAST protected artifacts
         // pixtuoid creates, and the most revealing: warn-floor records already
         // carry full transcript paths (a CC project dir encodes the project cwd
@@ -235,24 +244,36 @@ mod tests {
         // cwd; at debug the decoded `ToolDetail` carries the agent's own shell
         // commands and edited file paths. The same crate pays a temp-rename
         // dance to create settings.json 0600 for less.
-        use std::os::unix::fs::PermissionsExt;
+        //
+        // Drives `create_owner_only_append`, NOT `open_private_append`: the
+        // latter's follow-up fchmod would repair a dropped create mode, so the
+        // race-free half would be pinned by nothing.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state").join("pixtuoid").join("log");
-        let f = open_private_append(&path).expect("opens");
-        drop(f);
-        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&path), 0o600, "the sink must not inherit the umask");
+        drop(create_owner_only_append(&path).expect("opens"));
+        assert_eq!(mode_of(&path), 0o600, "the sink must not inherit the umask");
         assert_eq!(
-            mode(&dir.path().join("state").join("pixtuoid")),
+            mode_of(&dir.path().join("state").join("pixtuoid")),
             0o700,
             "nor the directory it is created in"
         );
+    }
 
-        // The mode only binds at CREATE — a 0644 sink written by an older
-        // version must be tightened on the next open, or upgraders stay exposed.
+    #[cfg(unix)]
+    #[test]
+    fn an_older_versions_world_readable_sink_is_tightened_on_reopen() {
+        // The UPGRADE half, and the wiring that reaches it: the create mode does
+        // not bind on a file that already exists, and these sinks are never
+        // unlinked, so an upgrader's 0644 log stays exposed unless
+        // `open_private_append` tightens it. Reds both if the fchmod goes AND if
+        // `open_private_append` stops calling it.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("log");
+        std::fs::write(&path, "old\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         drop(open_private_append(&path).expect("reopens"));
-        assert_eq!(mode(&path), 0o600, "a pre-existing sink is tightened");
+        assert_eq!(mode_of(&path), 0o600, "a pre-existing sink is tightened");
     }
 
     #[test]

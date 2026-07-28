@@ -75,6 +75,44 @@ pub(crate) fn home_relative_checked(rel: &str) -> Result<PathBuf> {
     checked_home_join(pixtuoid_core::platform::user_home_opt(), rel)
 }
 
+/// Apply owner-only permissions to a file this binary is about to CREATE — the
+/// race-free half, because the mode binds at creation and leaves no window in
+/// which a co-located user can `open()` the artifact. Used by the config lock
+/// sidecar, the atomic-write temp, and (through the bin crate's `logging`) the
+/// runtime + crash logs. Inert on Windows, where ACLs inherit from the directory.
+///
+/// Paired with [`tighten_to_owner_only`], which covers the ONE case this cannot:
+/// a create mode does not bind on a file that already exists. Keeping the two
+/// separately callable is deliberate — folded into one opener, reverting either
+/// half was invisible to every test, because the fchmod repaired what the create
+/// mode failed to set.
+pub fn owner_only_create(opts: &mut OpenOptions) -> &mut OpenOptions {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts
+}
+
+/// Restate owner-only on an ALREADY-OPEN handle — the UPGRADE half of
+/// [`owner_only_create`], for an artifact an older version created 0644. These
+/// files are deliberately never unlinked, so without this the hole would never
+/// close for an upgrader.
+///
+/// Through the fd (fchmod), never the path: a path chmod would re-race whatever
+/// `O_NOFOLLOW` guarantee the open established. Best-effort — a file we don't
+/// own is not ours to re-mode.
+pub fn tighten_to_owner_only(f: &File) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    let _ = f;
+}
+
 fn checked_home_join(home: Option<String>, rel: &str) -> Result<PathBuf> {
     home.map(|h| PathBuf::from(h).join(rel)).ok_or_else(|| {
         anyhow!("cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>")
@@ -101,15 +139,30 @@ pub(crate) const SHIM_LOCATE_REMEDY: &str = "install it alongside pixtuoid (`bre
 /// here, a relative value would get embedded into Codex/Reasonix configs and
 /// silently never fire from other cwds).
 pub(crate) fn default_hook_binary() -> Result<PathBuf> {
-    if let Ok(p) = which::which("pixtuoid-hook") {
-        if path_hit_is_native(&p, std::env::consts::EXE_EXTENSION) {
-            return Ok(p);
-        }
+    default_hook_binary_from(
+        || which::which("pixtuoid-hook").ok(),
+        std::env::consts::EXE_EXTENSION,
+        running_exe_dir,
+    )
+}
+
+/// The resolution ORDER itself, with every environment read injected — the same
+/// fn-injection seam `resolve_hook_binary_from` uses one layer up, and for the
+/// same reason: a truth table for [`path_hit_is_native`] pins the predicate, not
+/// its use, so without this the guard was one deleted `if` away from reverting
+/// with a fully green CI (windows-test included, since nothing drove the caller).
+///
+/// `exe_dir` stays LAZY: `current_exe()` must not be consulted — nor its failure
+/// propagated — when the PATH arm already answered.
+fn default_hook_binary_from(
+    lookup: impl FnOnce() -> Option<PathBuf>,
+    exe_extension: &str,
+    exe_dir: impl FnOnce() -> Result<PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(p) = lookup().filter(|p| path_hit_is_native(p, exe_extension)) {
+        return Ok(p);
     }
-    let exe = std::env::current_exe().context(
-        "could not determine the running executable's path while locating pixtuoid-hook",
-    )?;
-    let dir = exe.parent().ok_or_else(|| anyhow!("exe has no parent"))?;
+    let dir = exe_dir()?;
     let candidate = dir.join(hook_sibling_name());
     if candidate.exists() {
         return Ok(candidate);
@@ -119,6 +172,16 @@ pub(crate) fn default_hook_binary() -> Result<PathBuf> {
          binary at {}); {SHIM_LOCATE_REMEDY}",
         dir.display()
     ))
+}
+
+/// The directory holding the running executable — the sibling arm's anchor.
+fn running_exe_dir() -> Result<PathBuf> {
+    let exe = std::env::current_exe().context(
+        "could not determine the running executable's path while locating pixtuoid-hook",
+    )?;
+    exe.parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow!("exe has no parent"))
 }
 
 /// Whether a PATH hit is a real native executable rather than a PATHEXT shim —
@@ -214,22 +277,21 @@ fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
 /// clobber the link's target with our bytes), and the create owns a fresh inode
 /// rather than an adopted one. A pre-existing tmp — our own crash residue, or a
 /// hostile symlink O_NOFOLLOW rejected — is reclaimed ONCE (`remove_file` unlinks
-/// the entry itself, never following a symlink; the retry stays hardened). `mode`
-/// is the Unix create mode; the caller restates perms afterward as needed. Windows
+/// the entry itself, never following a symlink; the retry stays hardened). The tmp
+/// is created owner-only via [`owner_only_create`]; the caller restates perms
+/// afterward as needed (to the target's own mode). Windows
 /// keeps plain create+truncate (its rename-retry path owns the sharing semantics).
 /// The final rename onto the RESOLVED target still follows that target's own
 /// symlink (invariant #4) — only the distinct, attacker-controllable tmp is guarded.
-fn create_hardened_tmp(path: &Path, mode: u32) -> Result<File> {
+fn create_hardened_tmp(path: &Path) -> Result<File> {
     let mut opts = OpenOptions::new();
     opts.create(true).write(true).truncate(true);
+    owner_only_create(&mut opts);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(mode);
         opts.custom_flags(libc::O_NOFOLLOW | libc::O_EXCL);
     }
-    #[cfg(not(unix))]
-    let _ = mode;
     match opts.open(path) {
         Ok(f) => Ok(f),
         #[cfg(unix)]
@@ -268,34 +330,36 @@ pub(crate) fn lock_config(path: &Path) -> Result<ConfigLock> {
         std::fs::create_dir_all(parent)?;
     }
     let lock_path = sibling(&target, "lock");
-    let mut opts = OpenOptions::new();
-    opts.create(true).read(true).write(true).truncate(false);
-    // Parity with the hook socket-lock (hook/unix.rs), BOTH halves: O_NOFOLLOW so
-    // a symlink pre-planted at `<target>.lock` fails the open rather than making
-    // us flock an arbitrary file, and 0600 so a co-located user can't open+flock
-    // it and wedge every install/uninstall AND every config save (flock(2) grants
-    // an exclusive lock through a read-only descriptor, so umask-default 0644
-    // would be enough for them).
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-        opts.custom_flags(libc::O_NOFOLLOW);
-    }
-    let file = opts.open(&lock_path)?;
-    // The create mode does not bind on a pre-existing file, and the sidecar is
-    // deliberately never unlinked — so tighten an older version's 0644 one too.
-    // Through the open handle (fchmod), never the path: a path chmod would
-    // re-race the O_NOFOLLOW guarantee. Best-effort — a sidecar we don't own is
-    // not ours to re-mode, and the flock attempt below is the real gate.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
-    }
+    let file = open_lock_sidecar(&lock_path)?;
+    // The sidecar is deliberately never unlinked, so an older version's 0644 one
+    // is still on disk — the create mode above cannot bind to it. Best-effort;
+    // the flock attempt below is the real gate.
+    tighten_to_owner_only(&file);
     file.try_lock()
         .map_err(|e| anyhow!("could not lock {}: {e}", lock_path.display()))?;
     Ok(ConfigLock { target, file })
+}
+
+/// Open (creating) the advisory-lock sidecar, with parity to the hook
+/// socket-lock (hook/unix.rs) on BOTH halves: `O_NOFOLLOW` so a symlink
+/// pre-planted at `<target>.lock` fails the open rather than making us flock an
+/// arbitrary file, and an owner-only CREATE mode so a co-located user can't
+/// open+flock it and wedge every install/uninstall AND every config save
+/// (`flock(2)` grants an exclusive lock through a read-only descriptor, so a
+/// umask-default 0644 sidecar would be enough for them).
+///
+/// Separate from [`lock_config`]'s follow-up [`tighten_to_owner_only`] so each
+/// half is pinnable on its own — see `owner_only_create`'s doc.
+fn open_lock_sidecar(lock_path: &Path) -> std::io::Result<File> {
+    let mut opts = OpenOptions::new();
+    opts.create(true).read(true).write(true).truncate(false);
+    owner_only_create(&mut opts);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NOFOLLOW);
+    }
+    opts.open(lock_path)
 }
 
 impl ConfigLock {
@@ -343,7 +407,7 @@ impl ConfigLock {
     pub(crate) fn write_atomic(&self, contents: &str) -> Result<()> {
         let tmp = sibling(&self.target, "tmp");
         {
-            let mut f = create_hardened_tmp(&tmp, 0o600)?;
+            let mut f = create_hardened_tmp(&tmp)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -399,7 +463,7 @@ fn backup_once_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>> 
         return Ok(Some(bak));
     }
     let tmp = sibling(&bak, "tmp");
-    let mut dst = create_hardened_tmp(&tmp, 0o600)?;
+    let mut dst = create_hardened_tmp(&tmp)?;
     // Preserve the source's mode (fs::copy's old behavior: 0600 → 0600).
     if let Ok(m) = std::fs::metadata(target) {
         let _ = dst.set_permissions(m.permissions());
@@ -498,9 +562,49 @@ mod tests {
         assert!(path_hit_is_native(Path::new("/opt/pixtuoid-hook.sh"), ""));
     }
 
+    #[test]
+    fn resolution_refuses_a_pathext_shim_and_falls_through_to_the_exe_sibling() {
+        // The truth table above pins the PREDICATE; this pins its USE. Deleting the
+        // filter from `default_hook_binary`'s PATH arm used to be invisible on every
+        // platform — windows-test included — because nothing drove the caller, only
+        // the helper. Injecting the two environment reads makes both platforms'
+        // resolution assertable on any host.
+        let dir = TempDir::new().unwrap();
+        let sibling = dir.path().join(hook_sibling_name());
+        std::fs::write(&sibling, "").unwrap();
+        let shim = dir.path().join("npm").join("pixtuoid-hook.cmd");
+        let exe_dir = || Ok(dir.path().to_path_buf());
+
+        // Windows-shaped: the `.cmd` PATH hit is NOT a PE, so the real sibling wins.
+        assert_eq!(
+            default_hook_binary_from(|| Some(shim.clone()), "exe", exe_dir).unwrap(),
+            sibling,
+            "a PATHEXT shim must never outrank the exe sibling"
+        );
+        // Unix-shaped (EXE_EXTENSION is ""): the filter is inert, the PATH hit wins.
+        assert_eq!(
+            default_hook_binary_from(|| Some(shim.clone()), "", exe_dir).unwrap(),
+            shim,
+            "the filter must not reject anything where there is no PATHEXT"
+        );
+
+        // No PATH hit and no sibling: the error names the ONE working escape hatch.
+        let empty = TempDir::new().unwrap();
+        let e = default_hook_binary_from(|| None, "exe", || Ok(empty.path().to_path_buf()))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(HOOK_OVERRIDE_ENV), "got: {e}");
+    }
+
+    #[cfg(unix)]
+    fn mode_of(p: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
     #[cfg(unix)]
     #[test]
-    fn lock_config_creates_the_lock_sidecar_owner_only() {
+    fn a_fresh_lock_sidecar_is_created_owner_only() {
         // The twin of `pixtuoid-core/tests/transport/socket.rs`'s
         // `lock_mode == 0o600` assertion, worded so the two stay visibly paired:
         // if this regressed to a umask-default mode, another local user could
@@ -508,22 +612,41 @@ mod tests {
         // AND every config save (config/mod.rs's update_config takes the same
         // guard) to fail for as long as they hold it. `flock(2)` grants an
         // exclusive lock through a read-only descriptor, so 0644 is enough.
+        //
+        // Drives `open_lock_sidecar`, NOT `lock_config`: the latter's follow-up
+        // fchmod would repair a dropped create mode, leaving the race-free half
+        // — the one that closes the open-it-before-we-chmod-it window — unpinned.
+        let dir = TempDir::new().unwrap();
+        let lock_path = dir.path().join("settings.json.lock");
+        drop(open_lock_sidecar(&lock_path).unwrap());
+        assert_eq!(
+            mode_of(&lock_path),
+            0o600,
+            "a fresh lock sidecar must be owner-only from the open itself"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_config_tightens_a_pre_existing_world_readable_sidecar() {
+        // The UPGRADE half, and the wiring that reaches it: the create mode does
+        // not bind on a pre-existing file, and the sidecar is DELIBERATELY never
+        // unlinked — so an upgrader's 0644 one must be tightened on the next
+        // round or the hole never closes for them.
         use std::os::unix::fs::PermissionsExt;
         let dir = TempDir::new().unwrap();
         let target = dir.path().join("settings.json");
         std::fs::write(&target, "{}").unwrap();
         let lock_path = sibling(&target, "lock");
-        let mode = || std::fs::metadata(&lock_path).unwrap().permissions().mode() & 0o777;
-
-        drop(lock_config(&target).unwrap());
-        assert_eq!(mode(), 0o600, "a fresh lock sidecar must be owner-only");
-
-        // The create mode does not bind on a pre-existing file, and the sidecar
-        // is DELIBERATELY never unlinked — so an upgrader's 0644 one must be
-        // tightened on the next round or the hole never closes for them.
+        std::fs::write(&lock_path, "").unwrap();
         std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
         drop(lock_config(&target).unwrap());
-        assert_eq!(mode(), 0o600, "a pre-existing lock sidecar is tightened");
+        assert_eq!(
+            mode_of(&lock_path),
+            0o600,
+            "a pre-existing sidecar is tightened"
+        );
     }
 
     #[test]

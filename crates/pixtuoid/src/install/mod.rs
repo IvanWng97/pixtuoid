@@ -16,7 +16,7 @@ pub(crate) mod kimi;
 // config-write authority (invariant #4), which must never be cross-crate
 // reachable — only its three env filters (below) are re-exported.
 pub(crate) mod io;
-pub use io::{nonempty, nonempty_abs_env, nonempty_env};
+pub use io::{nonempty, nonempty_abs_env, nonempty_env, owner_only_create, tighten_to_owner_only};
 pub(crate) mod merge;
 pub(crate) mod openclaw;
 pub(crate) mod opencode;
