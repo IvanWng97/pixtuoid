@@ -1,13 +1,6 @@
 [advisories]
-# Each ignore is Linux-only build-graph exposure with no untrusted input;
-# issue #440 owns removal when upstream releases (full dependency-path
-# traces there; the winit-0.31 route is #441).
+# Issue #440 owns removal when upstream releases.
 ignore = [
-    # quick-xml 0.39 pair, reachable only via wayland-scanner (build-time
-    # codegen over vendored Wayland protocol XML — never attacker input).
-    # Fix needs wayland-rs to release against quick-xml >=0.41.
-    "RUSTSEC-2026-0194",
-    "RUSTSEC-2026-0195",
     # ttf-parser declared unmaintained; only via sctk-adwaita (Linux Wayland
     # CSD titlebar text, local system fonts). Upstream is migrating to skrifa.
     "RUSTSEC-2026-0192",
