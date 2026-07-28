@@ -119,10 +119,8 @@ fn gateway_instance(obj: &serde_json::Map<String, Value>, event: &str) -> Result
         .and_then(|n| u16::try_from(n).ok())
         .and_then(NonZeroU16::new)
         .ok_or_else(|| {
-            // The decode error is logged by the hook loop at the `warn` floor,
-            // i.e. RAW stderr in every non-TUI mode. `serde_json`'s Display
-            // escapes Cc but NOT the Cf bidi overrides (nor DEL), so this
-            // hostile-sender value needs the same treatment as the `bail!`s.
+            // The hook loop logs this at the `warn` floor = RAW stderr, and
+            // serde_json's Display escapes Cc but not DEL or the Cf overrides.
             let raw = crate::source::decoder::display_safe(&raw.to_string());
             anyhow!("openclaw {GATEWAY_PORT_FIELD} must be a port in 1..=65535, got {raw}")
         })?;

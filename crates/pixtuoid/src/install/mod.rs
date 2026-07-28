@@ -359,10 +359,9 @@ fn resolve_hook_binary_from(
             p
         };
         if !p.exists() {
-            // tracing, not println!: install runs under the TUI alt-screen
-            // (the Sources panel), where a stdout write corrupts the frame. But
-            // `connect`/`setup` route tracing to RAW stderr, and `p` is a
-            // PIXTUOID_HOOK value — strip it like every other terminal egress.
+            // tracing, not println!: install runs under the TUI alt-screen, where a
+            // stdout write corrupts the frame. Stripped: `connect`/`setup` route
+            // tracing to RAW stderr and `p` is a PIXTUOID_HOOK value.
             tracing::warn!(
                 "{origin} {} does not exist yet; the hook will fail until it does",
                 crate::strip_control_chars(&p.display().to_string())

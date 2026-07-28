@@ -230,7 +230,7 @@ fn warn_user(warnings: &mut Vec<String>, line: String) {
 /// defaults. Each fallback is reported twice on purpose (#87): to the log file
 /// via `tracing`, and onto `warnings` so `main` can print it to stderr BEFORE
 /// the alternate screen swallows it — the resolvers stay layer-clean (no
-/// printing here; the caller picks the sink), and [`warn_user`] emits both from
+/// printing here; the caller picks the sink), and `warn_user` emits both from
 /// one sanitized string. Callers that have no user to warn (the save path's
 /// internal reload, the in-TUI version re-load) pass a throwaway Vec.
 pub fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
