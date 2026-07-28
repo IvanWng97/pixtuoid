@@ -425,17 +425,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.last_pet_pos
     }
 
-    /// Drop per-agent state for agents no longer in `scene` — cached frames,
-    /// pose history, and motion (walk-path/profile) entries — across EVERY
-    /// floor (an agent's state lives on its own floor, which need not be the
-    /// current one). The event loop calls this with the live snapshot before
-    /// each render; keeping all per-agent eviction on this one seam means the
-    /// transition render path (which short-circuits the normal frame body)
-    /// can't skip it.
+    /// Drop per-agent state for agents no longer in `scene` — BOTH halves of
+    /// the dual eviction, the same pairing `FloorSession::evict_missing` writes
+    /// in the scene crate: the per-floor half (cached frames, pose history,
+    /// motion legs) across EVERY floor, since an agent's state lives on its own
+    /// floor which need not be the current one, and the office half (the coffee
+    /// cup, office-wide). The event loop calls this with the live snapshot
+    /// before each render; keeping BOTH on this one seam is what stops the
+    /// transition render path — which short-circuits the normal frame body —
+    /// from skipping either.
     pub fn evict_missing(&mut self, scene: &SceneState) {
         for pf in &mut self.floors {
             pf.evict_missing(scene);
         }
+        self.office.evict_missing(scene);
     }
 
     /// Whether an agent is a recorded coffee carrier (test harness only).
@@ -785,12 +788,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         // --- Normal path: single floor ------------------------------------
         let floor_scene = project_floor_scene(scene, self.current_floor);
-
-        // Evict coffee state for agents no longer in the scene (the office
-        // half of the session split). (History, motion, and frame-cache
-        // eviction live in `evict_missing`, which the event loop calls with
-        // the live snapshot before every render.)
-        self.office.evict_missing(scene);
 
         let floor_meta = FloorMeta::for_floor(self.current_floor, nf);
         // Compute popup scale before the mutable borrows below.

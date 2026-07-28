@@ -10,15 +10,49 @@ fn coffee_state_evicted_when_agent_leaves_scene() {
     let scene = scene_with(vec![slot(id, 0, 0, t0())], 16);
     let mut r = build(100, 40, vec![]);
     r.inject_coffee(id, t0());
+    r.evict_missing(&scene);
     r.render(&scene, &pack(), t0()).unwrap();
     assert!(r.coffee_contains(id));
-    // Agent gone from the scene ⇒ next render evicts its coffee state.
+    // Agent gone from the scene ⇒ the eviction seam drops its coffee state.
     let empty = SceneState::uniform(16);
+    r.evict_missing(&empty);
     r.render(&empty, &pack(), t0() + Duration::from_millis(33))
         .unwrap();
     assert!(
         !r.coffee_contains(id),
         "coffee state must be evicted when the agent leaves (no leak)"
+    );
+}
+
+// Regression: the office half of the dual eviction lived inside `render`'s
+// NORMAL path, AFTER the floor-transition early-return — so for the ~400 ms of
+// a slide a departed agent's cup stayed in `CoffeeState`, while the per-floor
+// half (on the `evict_missing` seam the loop calls before every render) was
+// already gone. Both halves now share ONE call site, like the scene crate's
+// `FloorSession::evict_missing`.
+#[test]
+fn coffee_state_is_evicted_during_a_floor_transition() {
+    let cap = 16;
+    let a = AgentId::from_transcript_path("/cof/slide0.jsonl");
+    let b = AgentId::from_transcript_path("/cof/slide1.jsonl");
+    let scene = scene_with(vec![slot(a, 0, 0, t0()), slot(b, 1, cap, t0())], cap);
+    let mut r = build(100, 40, vec![]);
+    r.inject_coffee(a, t0());
+    let mut now = t0();
+    r.evict_missing(&scene);
+    r.render(&scene, &pack(), now).expect("render");
+    assert!(r.coffee_contains(a), "cup staged");
+
+    now += Duration::from_millis(33);
+    r.navigate_floor(1, now);
+    let gone = scene_with(vec![slot(b, 1, cap, t0())], cap);
+    now += Duration::from_millis(33);
+    r.evict_missing(&gone);
+    r.render(&gone, &pack(), now).expect("render");
+    assert!(r.transition().is_some(), "still mid-slide");
+    assert!(
+        !r.coffee_contains(a),
+        "the office half must be evicted on the transition path too"
     );
 }
 

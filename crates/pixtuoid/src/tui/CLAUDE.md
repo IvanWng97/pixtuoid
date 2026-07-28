@@ -71,7 +71,11 @@ tui/
 │                   + staged roster reveal driven by OnboardingFrame.elapsed_ms)
 ├── hit_test/       mouse hit-test: agent hover, coffee machine click, furniture tooltips, pet
 ├── tui_renderer/   TuiRenderer + its inherent `render` flush, split production vs tests:
-│                   mod.rs (TuiRenderer: cross-frame state — Vec<pixtuoid_scene::floor::PerFloor> (each = FloorCtx
+│                   mod.rs (TuiRenderer: `evict_missing` is the ONE seam for BOTH halves of the dual
+│                   eviction — per-floor (cache/history/motion, every floor) AND office (coffee) — the same
+│                   pairing pixtuoid_scene::floor::FloorSession::evict_missing writes; the office half used
+│                   to sit inside `render`'s normal path, past the transition early-return, so a floor slide
+│                   skipped it. Cross-frame state — Vec<pixtuoid_scene::floor::PerFloor> (each = FloorCtx
 │                   [FrameCache/Router/PoseHistory/OccupancyOverlay + .motion + .door_anim_max_ms] + its RgbBuffer)
 │                   + one pixtuoid_scene::floor::PerOffice (coffee + chitchat, office-wide) — the session halves
 │                   the single-floor painters own as a FloorSession; plus Theme, cached Layout;
