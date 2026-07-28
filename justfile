@@ -1070,6 +1070,8 @@ drift-selftest:
 # Both-directions pins for the ast-grep rules themselves: `valid:` cases must
 # stay silent, `invalid:` must fire. Snapshots skipped — the cases assert
 # fires/does-not-fire, which is the contract; snapshots would only add churn.
+# Invoked by the `comment-lint` CI job (the one that pins ast-grep), so a broken
+# rule contract cannot rot unseen.
 [group('meta')]
 [doc('Test the ast-grep comment-slop rules (both directions)')]
 ast-grep-test:

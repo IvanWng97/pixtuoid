@@ -19,6 +19,10 @@ jobs:
       - name: Install ast-grep
         run: npm install -g @ast-grep/cli@0.44.1 # zizmor: ignore[adhoc-packages] upstream's pinned CLI install; advisory job has no write token
       - uses: extractions/setup-just@v4
+      # The rules' own both-directions pins. Runs BEFORE the advisory below,
+      # because a rule whose fires/does-not-fire contract broke makes that run
+      # meaningless — silently, which is how an uninvoked check rots.
+      - run: just ast-grep-test
       - run: |
           git fetch --quiet origin main
           just comment-lint origin/main --github
