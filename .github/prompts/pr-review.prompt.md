@@ -395,7 +395,7 @@ history:
   **value** (a non-obvious WHY, never narration of the WHAT — the comment-value
   factor), **comment-rot** (now FALSE about the code), and the **vestigial**
   class (a comment describing code the SAME diff deleted — "code gone, comment
-  remains"), and **REDUNDANCY-WITHIN** (below). This is a SEMANTIC judgment the mechanical gate can't make: the
+  remains"), plus **REDUNDANCY-WITHIN** (below). This is a SEMANTIC judgment the mechanical gate can't make: the
   diff-scoped `just comment-lint` advisory finds structural CANDIDATES (runs of
   3+ consecutive line comments in a fn body — `//` in Rust, `#` in Python — on
   the diff's new lines only — the ~5k
@@ -404,7 +404,7 @@ history:
   **Redundancy-within is the axis this lens kept missing**: the other four
   compare the comment to the CODE, and a restatement repeats no code, so
   nothing else can flag it. Apply CLAUDE.md's comment test #2 verbatim — do
-  not paraphrase it here, these two copies drifted once already. The finding
+  not paraphrase it here — an earlier copy drifted into the opposite procedure. The finding
   is REPETITION, not length: "too long" sends the author to trim a legitimate
   WHY instead of the duplicates.
 

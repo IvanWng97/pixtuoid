@@ -301,7 +301,11 @@ issue labels (e.g. `bug` / `enhancement` / `upstream-drift` / `needs-human-verif
 - **No comments unless WHY.** Comment only what a future reader can't tell from the code (a workaround, a non-obvious constraint, a surprising invariant). Three tests, in order — 1 and 3 are the known art; 2 is the one this repo kept failing:
   1. **A different abstraction level than the code.** If the reader could deduce it from the line below, delete it (Ousterhout, *A Philosophy of Software Design* ch. 13).
   2. **Every sentence carries information the earlier ones don't.** Rule 1 compares the comment to the CODE; this compares it to ITSELF. **The check: delete each sentence after the first, ONE AT A TIME. If nothing is lost — neither an action nor the ability to tell when the constraint stops applying — cut it.** The survivors are its *ideas*; report `N sentences, M ideas`.
-  3. **First sentence is the whole answer.** A reader who stops there is not misled and not missing anything actionable.
+  3. **First sentence is the whole answer.** A reader who stops there is not misled.
+
+  All three cut; none demands brevity. A comment that passes all three stays at
+  whatever length it earned — this repo's dense WHY is deliberate, and trimming a
+  legitimate one is the worse error.
 
   Evidence, not decoration: in a code comment, a measurement or before/after count belongs in the COMMIT MESSAGE — an inline number nobody re-measures is the first thing to rot. An issue number STAYS when it names the failure mode the comment exists to prevent (`#793` in `check_upstream_drift.py`), and is not provenance.
 
