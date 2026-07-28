@@ -380,6 +380,16 @@ fn apply_one(cfg: &Path, sid: &'static str, action: Action) -> ChangeOutcome {
 /// (`tui::reflect_onboarding_outcomes`) cannot drift.
 pub(crate) const HOOK_REMOVAL_FAILED_PREFIX: &str = "hooks not removed: ";
 
+/// How BOTH presenters word that same fold for a human: the disconnect landed,
+/// the hooks did not. `pub` (not `pub(crate)`) for the reason [`crate::tui::widgets::REPO_URL`]
+/// is — `disconnect`'s CLI arm lives in `main.rs`, a separate crate the lib's
+/// `pub(crate)` can't reach, and the pixtuoid lib target is not a semver surface
+/// so the widening is free. It is the PHRASE only: the panel frames it
+/// `{name}: {phrase} — {reason}` ([`crate::tui::connection::format_failure`]) and
+/// the CLI `{phrase}: {reason}` under its own `{id}: failed:` row prefix, so each
+/// surface keeps its own punctuation while neither can reword the fold alone.
+pub const HOOK_REMOVAL_FAILED_PHRASE: &str = "disconnected, but hook removal failed";
+
 /// Map a SUCCESSFUL `disconnect`'s [`DisconnectOutcome`] to the CLI
 /// [`ChangeOutcome`]. Split out of `apply_one` so the load-bearing fold is
 /// teeth-testable apart from the real install FS path: a folded hook-removal

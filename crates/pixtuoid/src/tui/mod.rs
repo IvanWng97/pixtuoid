@@ -188,7 +188,11 @@ fn connect_source(
                 }
             }
         }
-        Err(e) => format!("{display_name}: connect failed \u{2014} {e:#}"),
+        Err(e) => connection::format_failure(
+            connection::FailedOp::Connect,
+            display_name,
+            &format!("{e:#}"),
+        ),
     }
 }
 
@@ -214,11 +218,15 @@ fn disconnect_source(
                     format!("\u{2713} {display_name} disconnected")
                 }
                 crate::sources::DisconnectOutcome::HookRemovalFailed(e) => {
-                    format!("{display_name}: disconnected, but hook removal failed \u{2014} {e}")
+                    connection::format_failure(connection::FailedOp::HookRemoval, display_name, &e)
                 }
             }
         }
-        Err(e) => format!("{display_name}: disconnect failed \u{2014} {e:#}"),
+        Err(e) => connection::format_failure(
+            connection::FailedOp::Disconnect,
+            display_name,
+            &format!("{e:#}"),
+        ),
     }
 }
 
@@ -242,16 +250,16 @@ struct OnboardingFailure {
 /// (an already-connected source the user just confirmed must not have its live
 /// agents evicted). A failed connect must NOT go live.
 ///
-/// The wording BRANCHES on `want`, because `Failed` covers both directions:
-/// `apply_choices` maps an UNCHECKED row to a Disconnect, and `freeze_for_skip`
-/// makes that the common case — on a genuine first run every detected source
-/// freezes to `false`, so Esc issues a Disconnect for each one. Calling those
-/// "connect failed" named the wrong operation for a user who connected nothing.
-/// A hook-removal failure is a third case again: `map_disconnect_outcome` folds
-/// it into `Failed` on an OTHERWISE SUCCESSFUL disconnect (the flag IS persisted
-/// false), so it reads as the panel's "disconnected, but hook removal failed".
-/// All three strings are the panel's own — see [`connect_source`] /
-/// [`disconnect_source`].
+/// The `FailedOp` BRANCHES, because `Failed` covers all three: `apply_choices`
+/// maps an UNCHECKED row to a Disconnect, and `freeze_for_skip` makes that the
+/// common case — on a genuine first run every detected source freezes to `false`,
+/// so Esc issues a Disconnect for each one. Calling those "connect failed" named
+/// the wrong operation for a user who connected nothing. The third is the fold:
+/// `map_disconnect_outcome` tags an OTHERWISE SUCCESSFUL disconnect (the flag IS
+/// persisted false) with `HOOK_REMOVAL_FAILED_PREFIX`, so it words the residual
+/// instead of the operation. The sentences themselves belong to
+/// [`connection::format_failure`] — the panel's `t` toggle words its own failures
+/// through the same fn, so a retry on the row reads what the apply just said.
 ///
 /// The RETURN is the surfacing half. The warn-floor log is not a user surface —
 /// in TUI mode the alternate screen owns the terminal, and nothing in-session can
@@ -274,15 +282,19 @@ fn reflect_onboarding_outcomes(
             ChangeOutcome::NoOp => connected.set(id, *want),
             ChangeOutcome::Failed(e) => {
                 connected.set(id, false);
-                let verb = if *want { "connect" } else { "disconnect" };
+                let (op, verb) = if *want {
+                    (connection::FailedOp::Connect, "connect")
+                } else {
+                    (connection::FailedOp::Disconnect, "disconnect")
+                };
                 tracing::warn!("onboarding: {id} failed to {verb}: {e}");
                 let name =
                     crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
                 let line = match e.strip_prefix(crate::sources::HOOK_REMOVAL_FAILED_PREFIX) {
                     Some(reason) => {
-                        format!("{name}: disconnected, but hook removal failed \u{2014} {reason}")
+                        connection::format_failure(connection::FailedOp::HookRemoval, name, reason)
                     }
-                    None => format!("{name}: {verb} failed \u{2014} {e}"),
+                    None => connection::format_failure(op, name, e),
                 };
                 failures.push(OnboardingFailure {
                     source_id: id.clone(),
@@ -1368,7 +1380,10 @@ mod runtime_model {
 
 #[cfg(test)]
 mod dispatch_tests {
-    use super::{connect_source, disconnect_source, dispatch_key, FloorNav, KeyAction, ModalState};
+    use super::{
+        connect_source, connection, disconnect_source, dispatch_key, FloorNav, KeyAction,
+        ModalState,
+    };
     use crossterm::event::{KeyCode, KeyModifiers};
 
     const NONE: KeyModifiers = KeyModifiers::NONE;
@@ -1636,6 +1651,32 @@ mod dispatch_tests {
         );
         // A floor key while the popup is up is swallowed, not navigated.
         assert_eq!(dispatch_key(KeyCode::Up, NONE, c, nav()), KeyAction::None);
+    }
+
+    /// The version popup is DISMISS-ONLY, which is why its overflowing notes band
+    /// is marked with `widgets::version_popup`'s own non-scrolling marker instead
+    /// of the shared `⋮ N more ▾` the pageable panels use. Giving this modal a
+    /// scroll key would make that marker the wrong choice — so it reds here first.
+    #[test]
+    fn the_version_popup_binds_no_scroll_key() {
+        let c = ModalState {
+            version_popup: true,
+            ..modal()
+        };
+        for code in [
+            KeyCode::Down,
+            KeyCode::Up,
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::PageDown,
+            KeyCode::PageUp,
+        ] {
+            assert_eq!(
+                dispatch_key(code, NONE, c, nav()),
+                KeyAction::None,
+                "{code:?} must stay unbound while the version popup is up"
+            );
+        }
     }
 
     #[test]
@@ -2114,11 +2155,14 @@ mod dispatch_tests {
             line.contains(display_name),
             "the row must be named the way every other surface names it: {line}"
         );
-        // `starts_with`, not `contains`: "disconnect failed" CONTAINS
-        // "connect failed", so the loose form passes for the opposite operation.
-        assert!(
-            line.starts_with(&format!("{display_name}: connect failed")),
-            "reuse the Sources panel's own wording: {line}"
+        assert_eq!(
+            line,
+            &connection::format_failure(
+                connection::FailedOp::Connect,
+                display_name,
+                "settings is valid JSON but not an object",
+            ),
+            "the panel's own wording, from the panel's own formatter: {line}"
         );
         assert_eq!(
             failures[0].source_id, "cursor",
@@ -2157,17 +2201,29 @@ mod dispatch_tests {
             .expect("cursor is a target-bearing source")
             .display_name;
         let unchecked = &failures[0].line;
-        assert!(
-            unchecked.starts_with(&format!("{cursor_name}: disconnect failed")),
+        assert_eq!(
+            unchecked,
+            &connection::format_failure(
+                connection::FailedOp::Disconnect,
+                cursor_name,
+                "config is not writable",
+            ),
             "an unchecked row's failure is a DISCONNECT failure: {unchecked}"
         );
 
-        // The fold is a SUCCESSFUL disconnect with a residual, so it reads like
-        // the panel's own third string — never "failed to disconnect".
+        // The fold is a SUCCESSFUL disconnect with a residual, so it takes the
+        // formatter's third arm — never "disconnect failed".
+        let openclaw_name = crate::install::target::by_source("openclaw")
+            .expect("openclaw is a target-bearing source")
+            .display_name;
         let folded = &failures[1].line;
-        assert!(
-            folded.contains("disconnected, but hook removal failed")
-                && folded.contains("openclaw.json is JSON5, not strict JSON"),
+        assert_eq!(
+            folded,
+            &connection::format_failure(
+                connection::FailedOp::HookRemoval,
+                openclaw_name,
+                "openclaw.json is JSON5, not strict JSON",
+            ),
             "a folded hook-removal failure keeps the panel's wording: {folded}"
         );
         assert!(

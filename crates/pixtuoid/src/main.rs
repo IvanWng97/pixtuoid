@@ -126,11 +126,13 @@ fn main() -> Result<()> {
         // A folded hook-removal failure is a PARTIAL failure (the flag IS
         // disconnected, but hooks remain) — surface it AND signal it via a
         // non-zero exit (run_change treats an Err op as failed), so a $?-checking
-        // script isn't told a clean "disconnected".
+        // script isn't told a clean "disconnected". The phrase is the Sources
+        // panel's too, so neither surface can reword the fold alone.
         Cmd::Disconnect { ids, json } => {
             sources_cli::run_change(&ids, json, |c, i| match sources::disconnect(c, i)? {
                 sources::DisconnectOutcome::HookRemovalFailed(e) => Err(anyhow::anyhow!(
-                    "disconnected, but hook removal failed: {e}"
+                    "{}: {e}",
+                    sources::HOOK_REMOVAL_FAILED_PHRASE
                 )),
                 _ => Ok(sources::ChangeOutcome::Disconnected),
             })

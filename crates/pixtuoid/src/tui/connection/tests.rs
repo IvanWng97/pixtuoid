@@ -452,6 +452,33 @@ fn format_disconnect_result_renders_disconnected_plus_backup_note() {
     assert!(!s2.contains("backup"), "{s2}");
 }
 
+/// The panel's three failure sentences have ONE producer. They used to be three
+/// hand-written copies in `tui::mod` — and `disconnect_source`'s pair carried no
+/// test at all, so either could be reworded alone with the whole suite green.
+#[test]
+fn the_panel_words_every_failure_through_one_formatter() {
+    let connect = format_failure(FailedOp::Connect, "Cursor", "boom");
+    let disconnect = format_failure(FailedOp::Disconnect, "Cursor", "boom");
+    let folded = format_failure(FailedOp::HookRemoval, "OpenClaw", "JSON5, not strict JSON");
+
+    assert_eq!(connect, "Cursor: connect failed \u{2014} boom");
+    // Exact, not `contains`: "disconnect failed" CONTAINS "connect failed", so a
+    // loose check passes for the opposite operation.
+    assert_eq!(disconnect, "Cursor: disconnect failed \u{2014} boom");
+    assert_eq!(
+        folded,
+        format!(
+            "OpenClaw: {} \u{2014} JSON5, not strict JSON",
+            crate::sources::HOOK_REMOVAL_FAILED_PHRASE
+        ),
+        "the fold's phrase is the one `main`'s `disconnect` arm prints too"
+    );
+    assert!(
+        !folded.contains("disconnect failed"),
+        "the disconnect SUCCEEDED — only the hook removal didn't: {folded}"
+    );
+}
+
 #[test]
 fn no_action_hint_distinguishes_nocli_from_actionable() {
     let cc = claude_target();

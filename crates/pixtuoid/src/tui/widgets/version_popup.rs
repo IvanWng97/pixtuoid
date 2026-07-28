@@ -3,7 +3,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::panel::{overflow_cue, window_range};
+use super::panel::window_range;
 use super::{borderless_panel, panel_inner_width, to_color, truncate, PanelGeometry};
 
 /// The project repository — opened when the board's ★ Star CTA is clicked.
@@ -92,6 +92,21 @@ fn wrap_notes(notes: &[&str], inner_w: u16) -> Vec<String> {
 /// height-clamped inner rect leaves after these.
 const CHROME_ROWS: u16 = 3;
 
+/// The windowed notes band's overflow marker. Deliberately NOT the shared
+/// `panel::overflow_cue`: its `▾` is the affordance the dashboard and Sources
+/// panels page with `j`/`k`, and this modal's only binding is dismiss
+/// (`dispatch_key`'s version tier maps Enter and swallows the rest), so the
+/// chevron promised rows no key could reach. The hidden notes ARE reachable, just
+/// not in the terminal, so the marker points at the `↗ Release notes` CTA that
+/// `CHROME_ROWS` keeps two rows below it. Truncated because the band is wrapped
+/// to `inner_w` and this row is not — a `Paragraph` would clip it silently.
+fn notes_marker(hidden: usize, inner_w: usize) -> String {
+    truncate(
+        &format!("  \u{22ee} {hidden} more \u{2014} see the link"),
+        inner_w,
+    )
+}
+
 /// THE version-popup geometry authority: wrap the notes to the panel's inner
 /// width, window them to the inner height, then hand back the scaled/guarded
 /// envelope. BOTH `paint_version_popup` and `version_popup_url_rect` ride this
@@ -102,8 +117,8 @@ const CHROME_ROWS: u16 = 3;
 /// The WINDOWING is load-bearing: `PanelGeometry::compute` clamps the envelope to
 /// `bounds`, so a long note set on a short terminal asks for more rows than the
 /// inner rect has and ratatui silently drops the TRAILING lines — the blank and
-/// the `↗ Release notes` CTA. The notes are the band that may overflow (with the
-/// shared `⋮ N more ▾` cue every list panel uses); the link is chrome.
+/// the `↗ Release notes` CTA. The notes are the band that may overflow (marked by
+/// [`notes_marker`], this modal's own non-scrolling one); the link is chrome.
 fn version_geometry(
     bounds: Rect,
     notes: &[&str],
@@ -126,7 +141,7 @@ fn version_geometry(
         .take(win.count)
         .collect();
     if let Some(hidden) = win.cue {
-        body.push(overflow_cue(hidden));
+        body.push(notes_marker(hidden, inner.width as usize));
     }
     Some((geom, body))
 }
@@ -337,6 +352,42 @@ mod tests {
         // A wide panel still gets the full sentence.
         let wide_title = version_title("0.16.0", 60);
         assert_eq!(wide_title, "What's new in v0.16.0 \u{2014} Enter to close");
+    }
+
+    /// The windowed band's marker must not offer a scroll this modal has no key
+    /// for: `dispatch_key`'s version tier maps Enter to dismiss and swallows
+    /// everything else, so the shared `⋮ N more ▾` — whose `▾` is what the
+    /// dashboard/connection panels page with j/k — promised content the reader
+    /// cannot reach. It also has to FIT: the band is wrapped to the inner width,
+    /// the marker is not, and a `Paragraph` clips silently.
+    #[test]
+    fn the_notes_marker_offers_no_scroll_and_fits_its_row() {
+        let notes: Vec<String> = (0..40)
+            .map(|i| format!("release note number {i}"))
+            .collect();
+        let refs: Vec<&str> = notes.iter().map(String::as_str).collect();
+        for bounds in [Rect::new(0, 0, 80, 24), Rect::new(0, 0, 32, 31)] {
+            let (geom, body) = version_geometry(bounds, &refs, 1.0).expect("renders");
+            let inner = geom.inner().expect("rendered ⇒ inner Some");
+            let marker = body.last().expect("the band overflows at both sizes");
+            assert!(
+                marker.contains("more"),
+                "the band IS windowed here, so the last row is the marker: {marker:?}"
+            );
+            assert!(
+                !marker.contains('\u{25be}'),
+                "the ▾ reads as `page down` on a modal whose only key is dismiss: {marker:?}"
+            );
+            assert!(
+                marker.contains("the link"),
+                "the hidden notes need a reachable destination, and the CTA below is it: {marker:?}"
+            );
+            assert!(
+                marker.chars().count() <= inner.width as usize,
+                "the marker must fit its row unclipped: {marker:?} in {}",
+                inner.width
+            );
+        }
     }
 
     #[test]
