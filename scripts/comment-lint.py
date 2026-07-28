@@ -22,18 +22,25 @@ import subprocess
 import sys
 import tempfile
 
+# The file types comment-lint covers. One definition: the selftest drives the
+# reader that uses it, so a change here cannot pass a stale second copy.
+PATHSPEC = ("*.rs", "*.py", "*.pyi")
 
-def added_lines_by_file(base: str, worktree: bool) -> dict[str, set[int]]:
+
+def added_lines_by_file(
+    base: str, worktree: bool, cwd: str | None = None
+) -> dict[str, set[int]]:
     """Map each changed .rs/.py/.pyi file → the set of its NEW-side added/changed line
     numbers (1-indexed), parsed from a zero-context diff."""
     # `base...HEAD` = the PR's own commits (merge-base range); `base` alone also
     # folds in uncommitted working-tree edits (local `--worktree` mode).
     rev = base if worktree else f"{base}...HEAD"
     diff = subprocess.run(
-        ["git", "diff", "--unified=0", "--no-color", rev, "--", "*.rs", "*.py", "*.pyi"],
+        ["git", "diff", "--unified=0", "--no-color", rev, "--", *PATHSPEC],
         capture_output=True,
         text=True,
         check=True,
+        cwd=cwd,
     ).stdout
     added: dict[str, set[int]] = {}
     cur: str | None = None
@@ -93,6 +100,7 @@ def selftest() -> int:
         )
         git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
         subprocess.run([*git, "init", "-q", "-b", "main"], cwd=repo, check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], cwd=repo, check=True)
         subprocess.run([*git, "add", "-A"], cwd=repo, check=True)
         subprocess.run([*git, "commit", "-qm", "fixture"], cwd=repo, check=True)
 
@@ -105,16 +113,13 @@ def selftest() -> int:
             if path not in scanned:
                 fails.append(f"{why}: {path} missing from {sorted(scanned)}")
 
-        # The pathspec half: the same extensions must survive `git diff`.
-        diff = subprocess.run(
-            ["git", "diff", "--name-only", "--diff-filter=A",
-             "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "HEAD",
-             "--", "*.rs", "*.py", "*.pyi"],
-            cwd=repo, capture_output=True, text=True, check=True,
-        ).stdout.split()
+        # The pathspec half, driven through the REAL reader — not a second copy
+        # of the extension list, which would pass while the production pathspec
+        # silently changed underneath it.
+        added = added_lines_by_file("HEAD~1", worktree=False, cwd=str(repo))
         for path in ("src/plain.py", ".claude/skills/hidden.py", "src/keep.rs"):
-            if path not in diff:
-                fails.append(f"the pathspec drops {path}: {diff}")
+            if not added.get(path):
+                fails.append(f"the pathspec drops {path}: {sorted(added)}")
 
     if fails:
         print("comment-lint selftest FAILED:")
