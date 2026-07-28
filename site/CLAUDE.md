@@ -489,7 +489,20 @@ the Rust `ci.yml`).
 
 Lighthouse runs every route three times and gates volatile lab metrics by their
 median; the one first-visit reveal timing stays pessimistic because all three
-visits must clear it. `src/styles/fonts.css` uses Fontsource's own WOFF2 assets
+visits must clear it. **SHARP EDGE — a `categories:*` assertion cannot fail on
+one audit.** `color-contrast` weighs 7 of the accessibility category's 195
+points, so a TOTAL contrast failure costs 3.6% against a `minScore: 0.9` floor:
+the landing page really did score 0.93 with `color-contrast` at 0 and a hard AA
+failure in the footer, green. `lighthouserc.json` therefore asserts
+`"color-contrast": ["error", { "minScore": 1 }]` alongside the category — a
+category score is a budget, not a contract, so anything that must NEVER regress
+needs its own per-audit assertion. Second surprise: Lighthouse does **not** run
+a fixed theme. `Base.astro`'s init picks night off the 7/19 wall clock, so which
+palette gets audited depends on what time CI runs — every theme a visitor can
+land in has to clear the audit, not just day. (The per-theme WCAG sweeps live in
+`smoke.spec.ts`, which drives day/night/dracula explicitly; Lighthouse is the
+rendered-DOM axe backstop, not the theme matrix.)
+`src/styles/fonts.css` uses Fontsource's own WOFF2 assets
 with `font-display: optional`, while `Base.astro` preloads the regular faces.
 Do not replace those declarations with Fontsource's default `swap` CSS: an
 Ubuntu cold visit lacks the metric-matched Georgia fallback and reflows long doc

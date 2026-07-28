@@ -114,6 +114,14 @@
   --chip-line: #3a332a;
   --chip-bg: color-mix(in srgb, var(--screen) 82%, transparent);
   --chrome-halo: none;
+  /* The chip family's ACCENT ink — one branded hue for a chip-borne CTA (the
+     footer's ☕ link). Theme-independent and a LITERAL for the same reason
+     --focus-ring is: on the dark chip, day's --coral measures 3.70:1 and
+     night's 4.26:1, and a gallery retint can move --coral anywhere, so an
+     accent that inherits the theme token cannot hold the 4.5:1 floor. 5.53:1
+     on --chip-bg — the same lightened coral a dark ground wants, which is why
+     it is night's --coral-deep value rather than a fourth invented orange. */
+  --chip-accent: #f0a07f;
 
   /* Bare-over-office ink (no plate/scrim behind it) — the hero subcopy/eyebrow/
      platform-line and the 4F intro paragraph read directly against the live
