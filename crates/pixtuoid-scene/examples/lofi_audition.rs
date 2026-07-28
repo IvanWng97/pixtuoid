@@ -34,11 +34,23 @@ const TARGET_RMS_DBFS: f32 = -16.0;
 /// the usage line advertises, and the error message lists.
 const SOLO_LANES: [&str; 5] = ["pad", "sparkle", "keys", "drums", "texture"];
 
+/// The `--mood` vocabulary, paired with its [`Mood`] — the SOLO_LANES twin, so
+/// the parse and the error message can't list different spellings.
+const MOODS: [(&str, Mood); 2] = [("day", Mood::Day), ("night", Mood::Night)];
+
 /// A usage error: `run`'s caller turns it into `ExitCode::FAILURE` + a message.
 /// This example IS the generator's blind-audition gate, so an unusable argument
 /// must never render a DIFFERENT take than the one asked for.
 fn usage_error(msg: String) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidInput, msg)
+}
+
+/// A `u64` flag value that must be present AND parse — a missing or unparsable
+/// one is a usage error, never a silent fall back to the default.
+fn parse_count(v: Option<String>, flag: &str) -> std::io::Result<u64> {
+    let raw = v.ok_or_else(|| usage_error(format!("{flag} needs a non-negative integer")))?;
+    raw.parse()
+        .map_err(|_| usage_error(format!("{flag} needs a non-negative integer, got {raw:?}")))
 }
 
 fn main() -> ExitCode {
@@ -61,14 +73,28 @@ fn run() -> std::io::Result<()> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--mood" => {
-                mood = match args.next().as_deref() {
-                    Some("night") => Mood::Night,
-                    _ => Mood::Day,
+                let v = args.next().unwrap_or_default();
+                match MOODS.iter().find(|(name, _)| *name == v) {
+                    Some(&(_, m)) => mood = m,
+                    None => {
+                        return Err(usage_error(format!(
+                            "unknown --mood {v:?}; valid: {}",
+                            MOODS.map(|(name, _)| name).join("|")
+                        )))
+                    }
                 }
             }
-            "--seeds" => seeds = args.next().and_then(|v| v.parse().ok()).unwrap_or(12),
-            "--start" => start = args.next().and_then(|v| v.parse().ok()).unwrap_or(0),
-            "--out" => out = args.next().map(PathBuf::from).unwrap_or(out),
+            "--seeds" => {
+                seeds = parse_count(args.next(), "--seeds")?;
+                if seeds == 0 {
+                    return Err(usage_error("--seeds must be at least 1".into()));
+                }
+            }
+            "--start" => start = parse_count(args.next(), "--start")?,
+            "--out" => match args.next() {
+                Some(v) => out = PathBuf::from(v),
+                None => return Err(usage_error("--out needs a directory".into())),
+            },
             // fast voice/lane iteration: hear one stem alone
             "--solo" => {
                 let v = args.next().unwrap_or_default();
