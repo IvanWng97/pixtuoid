@@ -419,6 +419,14 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 >
 > Two things stay true and are worth not re-discovering. (a) The residue is mostly two mascots WALKING: 45% of every cycle is a routed leg and legs share the office's aisles however far apart their endpoints are, so no destination rule drives crowding to zero. (b) Expanding each anchor into its 8 neighbours instead of spreading was measured WORSE than the list at small sizes (62% -> 74%): 8 cells within 4px are ONE place to a 14x12 sprite. Spread, not offset, is the mechanism.
 >
+> Destinations come from the whole mask, but the RESOLVED point is clamped by the sprite's own
+> extent (`creatures::clamp_sprite_inside`, applied at every `mascot_position`/`pet_position` exit):
+> `blit_centered` parks a frame at `pos - size/2` and CLIPS at the buffer edge, so an unclamped
+> east draw rendered half a lobster pinned to the border (measured 3 of 8 independent port sets at
+> 192x80). Clamping the resolved POINT rather than insetting the destination draw is deliberate —
+> it leaves every seeded destination exactly where it was, so only the frames that would have
+> spilled move. The PET rides the same rule (same `walkable_target`, same centred blit).
+>
 > What was GIVEN UP, deliberately: destinations no longer encode daemon state (state reads from the CADENCE — 4.5s busy / 9s idle / 14s degraded — and the sprite tint), and a creature may rest in open floor rather than beside furniture. Don't re-add claim/probe machinery to tighten this: that would couple one mascot's motion to which siblings exist, breaking the stateless invariant the whole module is built on.
 
 ## When refactoring

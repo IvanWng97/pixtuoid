@@ -86,6 +86,39 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
     snap_point_to_walkable(&layout.walkable, last).unwrap_or(last)
 }
 
+/// A centre-anchored sprite's `(w, h)`, or `(0, 0)` when the pack lacks the
+/// animation (no extent known ⇒ [`clamp_sprite_inside`] leaves the point alone,
+/// and the painter draws nothing anyway).
+fn sprite_extent(pack: &Pack, anim: &str) -> (u16, u16) {
+    pack.animation(anim)
+        .and_then(|a| a.frames.first())
+        .map_or((0, 0), |f| (f.width(), f.height()))
+}
+
+/// Keep a centre-anchored creature sprite fully inside the buffer.
+///
+/// Destinations come from the walkable mask's FULL width ([`walkable_target`]),
+/// but `blit_centered` parks a frame at `pos − size/2` and CLIPS at the buffer
+/// edge, so a lobster drawn to `x = w−1` rendered with its right claw missing.
+/// Clamping the RESOLVED point rather than insetting the draw keeps the wander
+/// distribution (and every seeded destination) exactly as it was — only the
+/// frames that would have spilled move. A buffer narrower than the sprite has no
+/// in-bounds centre at all, so that axis is left untouched.
+fn clamp_sprite_inside(p: Point, (fw, fh): (u16, u16), layout: &Layout) -> Point {
+    let axis = |v: u16, span: u16, f: u16| {
+        let (lo, hi) = (f / 2, span.saturating_sub(f - f / 2));
+        if hi < lo {
+            v
+        } else {
+            v.clamp(lo, hi)
+        }
+    };
+    Point {
+        x: axis(p.x, layout.walkable.width(), fw),
+        y: axis(p.y, layout.walkable.height(), fh),
+    }
+}
+
 /// Pet roaming the whole office. Each 40s cycle picks a destination
 /// from all available spots (desks, pantry, meeting sofas, lounge
 /// couch, corridor), walks there from the previous spot, then sits or
@@ -133,7 +166,13 @@ pub(crate) fn pet_position(
         let flip = dest.x < prev.x;
         // Same no-flash A*+snap+sample as the gateway mascot (shared helper).
         let pos = walk_between(layout, prev, dest, t);
-        return Some((pos, flip, kind.walk_anim(), frame_idx));
+        let anim = kind.walk_anim();
+        return Some((
+            clamp_sprite_inside(pos, sprite_extent(pack, anim), layout),
+            flip,
+            anim,
+            frame_idx,
+        ));
     }
 
     // Rest phase: snap to a walkable cell so the sit/sleep pose isn't on
@@ -144,7 +183,12 @@ pub(crate) fn pet_position(
     } else {
         kind.sit_anim()
     };
-    Some((rest_pos, false, anim, 0))
+    Some((
+        clamp_sprite_inside(rest_pos, sprite_extent(pack, anim), layout),
+        false,
+        anim,
+        0,
+    ))
 }
 
 /// Sample a polyline at arc-length fraction `t ∈ [0, 1]`, using octile segment
@@ -348,9 +392,12 @@ fn mascot_wander(
 }
 
 /// Resolve the mascot's frame this tick: `(pos, anim_name, frame_idx)`, or
-/// `None` when it should not be drawn (gateway gone after the walk-out).
+/// `None` when it should not be drawn (gateway gone after the walk-out). `pack`
+/// supplies the sprite extent every returned point is clamped by — see
+/// [`clamp_sprite_inside`].
 pub(crate) fn mascot_position(
     layout: &Layout,
+    pack: &Pack,
     presence: &DaemonPresence,
     walk_anim: &'static str,
     rest_anim: &'static str,
@@ -359,6 +406,14 @@ pub(crate) fn mascot_position(
 ) -> Option<(Point, &'static str, usize)> {
     let elevator = mascot_elevator(layout)?;
     let home = mascot_home(layout)?;
+    // Anchor a resolved point: the sprite rect must land inside the buffer.
+    let anchor = |pos: Point, anim: &'static str, frame_idx: usize| {
+        (
+            clamp_sprite_inside(pos, sprite_extent(pack, anim), layout),
+            anim,
+            frame_idx,
+        )
+    };
     // Mascot (lobster) walk cycle: a 2-frame toggle at this interval.
     const MASCOT_ANIM_FRAME_MS: u64 = 200;
     let frame = ((epoch_ms(now) / MASCOT_ANIM_FRAME_MS) % 2) as usize;
@@ -388,7 +443,11 @@ pub(crate) fn mascot_position(
             .saturating_sub(MASCOT_ENTER_MS + enter_delay);
         let (from, _) = mascot_wander(layout, down_we, seed, home, MASCOT_IDLE_CYCLE_MS);
         let t = down_age as f32 / MASCOT_LEAVE_MS as f32;
-        return Some((walk_between(layout, from, elevator, t), walk_anim, frame));
+        return Some(anchor(
+            walk_between(layout, from, elevator, t),
+            walk_anim,
+            frame,
+        ));
     }
 
     let age = now.duration_since(presence.entered_at).ok()?.as_millis() as u64;
@@ -404,7 +463,11 @@ pub(crate) fn mascot_position(
     if entered < MASCOT_ENTER_MS {
         // Walk-in from the elevator to the home beat.
         let t = entered as f32 / MASCOT_ENTER_MS as f32;
-        return Some((walk_between(layout, elevator, home, t), walk_anim, frame));
+        return Some(anchor(
+            walk_between(layout, elevator, home, t),
+            walk_anim,
+            frame,
+        ));
     }
 
     // Steady wander, styled by state.
@@ -415,9 +478,9 @@ pub(crate) fn mascot_position(
     };
     let (pos, walking) = mascot_wander(layout, entered - MASCOT_ENTER_MS, seed, home, cycle_ms);
     if walking {
-        Some((pos, walk_anim, frame))
+        Some(anchor(pos, walk_anim, frame))
     } else {
-        Some((pos, rest_anim, 0))
+        Some(anchor(pos, rest_anim, 0))
     }
 }
 
@@ -675,6 +738,54 @@ mod tests {
         );
     }
 
+    // Destinations come from the walkable mask's FULL width, and `blit_centered`
+    // parks a frame at `pos − size/2` and CLIPS at the buffer edge — so a lobster
+    // drawn to x = w−1 renders with its right claw and half its body missing.
+    // Unlike desks/waypoints (placed by the layout with margins), nothing insets
+    // a creature by its own sprite extent. Sweep real gateway ports × the whole
+    // wander clock and require the sprite RECT to be in-buffer.
+    #[test]
+    fn a_wandering_mascot_sprite_never_spills_past_the_buffer_edge() {
+        let (w, h) = (192u16, 160u16);
+        let layout = crate::layout::Layout::compute(w, h, Some(12)).expect("layout fits");
+        let pack = test_pack();
+        let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
+        let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for port in ["18901", "18902", "18903", "18904", "100", "805"] {
+            let inst = pixtuoid_core::state::DaemonInstanceId::new(port).expect("non-empty");
+            let seed = mascot_seed(src, &inst);
+            // Well past the walk-in so every sample is a steady wander beat.
+            for step_ms in (0..MASCOT_IDLE_CYCLE_MS * 4).step_by(120) {
+                let now = t0 + std::time::Duration::from_millis(MASCOT_ENTER_MS * 2 + step_ms);
+                let presence = idle_presence(now, MASCOT_ENTER_MS * 2 + step_ms);
+                let Some((pos, anim, _)) = mascot_position(
+                    &layout,
+                    &pack,
+                    &presence,
+                    "lobster_walk",
+                    "lobster_rest",
+                    now,
+                    seed,
+                ) else {
+                    continue;
+                };
+                let frame = pack
+                    .animation(anim)
+                    .and_then(|a| a.frames.first())
+                    .expect("the bundled pack has both lobster anims");
+                let (fw, fh) = (frame.width(), frame.height());
+                let (x0, y0) = (pos.x.saturating_sub(fw / 2), pos.y.saturating_sub(fh / 2));
+                assert!(
+                    x0 + fw <= w && y0 + fh <= h,
+                    "port {port} at +{step_ms}ms: {fw}x{fh} sprite at {pos:?} spills the \
+                     {w}x{h} buffer (rect {x0},{y0}..{},{})",
+                    x0 + fw,
+                    y0 + fh
+                );
+            }
+        }
+    }
+
     fn idle_presence(now: SystemTime, age_ms: u64) -> DaemonPresence {
         DaemonPresence {
             // Up with an empty run set ⇒ Idle (the derived projection).
@@ -776,8 +887,16 @@ mod tests {
             let pts: Vec<Point> = seeds
                 .iter()
                 .filter_map(|&sd| {
-                    mascot_position(&layout, &p, "lobster_walk", "lobster_rest", now, sd)
-                        .map(|(pos, _, _)| pos)
+                    mascot_position(
+                        &layout,
+                        &test_pack(),
+                        &p,
+                        "lobster_walk",
+                        "lobster_rest",
+                        now,
+                        sd,
+                    )
+                    .map(|(pos, _, _)| pos)
                 })
                 .collect();
             if pts.len() < 2 {
@@ -824,9 +943,17 @@ mod tests {
         let pos_at = |seed: u64, age_ms: u64| {
             let now = entered + std::time::Duration::from_millis(age_ms);
             let p = idle_presence(now, age_ms);
-            mascot_position(&layout, &p, "lobster_walk", "lobster_rest", now, seed)
-                .expect("inside the enter window")
-                .0
+            mascot_position(
+                &layout,
+                &test_pack(),
+                &p,
+                "lobster_walk",
+                "lobster_rest",
+                now,
+                seed,
+            )
+            .expect("inside the enter window")
+            .0
         };
         // The window where the claim holds: from when the LATER instance leaves the
         // door to before the EARLIER one joins its wander. The only remaining
@@ -855,7 +982,16 @@ mod tests {
         let drawn = |seed: u64, age_ms: u64| {
             let now = entered + std::time::Duration::from_millis(age_ms);
             let p = idle_presence(now, age_ms);
-            mascot_position(&layout, &p, "lobster_walk", "lobster_rest", now, seed).is_some()
+            mascot_position(
+                &layout,
+                &test_pack(),
+                &p,
+                "lobster_walk",
+                "lobster_rest",
+                now,
+                seed,
+            )
+            .is_some()
         };
         let (first, second) = (da.min(db), da.max(db));
         for age in 0..first {
@@ -885,9 +1021,16 @@ mod tests {
 
         // age = 0 → at the elevator, walk anim.
         let p0 = idle_presence(now, 0);
-        let (pos0, anim0, _) =
-            mascot_position(&layout, &p0, "lobster_walk", "lobster_rest", now, seed)
-                .expect("walk-in position");
+        let (pos0, anim0, _) = mascot_position(
+            &layout,
+            &test_pack(),
+            &p0,
+            "lobster_walk",
+            "lobster_rest",
+            now,
+            seed,
+        )
+        .expect("walk-in position");
         assert_eq!(anim0, "lobster_walk", "enter window → walk anim");
         // The walk-in starts at the elevator. No per-instance offset is needed here
         // any more: instances are separated in TIME by the stagger (each is simply
@@ -901,9 +1044,16 @@ mod tests {
         // age = 1100 (half the 2200 window) → midway along elevator→home.
         let age = 1_100u64;
         let p_mid = idle_presence(now, age);
-        let (pos_mid, anim_mid, _) =
-            mascot_position(&layout, &p_mid, "lobster_walk", "lobster_rest", now, seed)
-                .expect("walk-in mid position");
+        let (pos_mid, anim_mid, _) = mascot_position(
+            &layout,
+            &test_pack(),
+            &p_mid,
+            "lobster_walk",
+            "lobster_rest",
+            now,
+            seed,
+        )
+        .expect("walk-in mid position");
         assert_eq!(anim_mid, "lobster_walk");
         let t = age as f32 / MASCOT_ENTER_MS as f32;
         assert_eq!(
@@ -962,11 +1112,19 @@ mod tests {
 
         let idle = mk(false, now);
         let degraded = mk(true, now);
-        let (_, idle_anim, _) =
-            mascot_position(&layout, &idle, "lobster_walk", "lobster_rest", now, seed)
-                .expect("idle pos");
+        let (_, idle_anim, _) = mascot_position(
+            &layout,
+            &test_pack(),
+            &idle,
+            "lobster_walk",
+            "lobster_rest",
+            now,
+            seed,
+        )
+        .expect("idle pos");
         let (_, deg_anim, _) = mascot_position(
             &layout,
+            &test_pack(),
             &degraded,
             "lobster_walk",
             "lobster_rest",
@@ -1044,7 +1202,7 @@ mod tests {
         assert_eq!(presence.liveness, DaemonLiveness::Down);
         let seed = mascot_seed(src, &id);
         assert!(
-            mascot_position(&layout, presence, "w", "r", killed_at, seed).is_some(),
+            mascot_position(&layout, &test_pack(), presence, "w", "r", killed_at, seed).is_some(),
             "a gateway killed after idling must play its elevator walk-out; it \
              vanished instantly instead, which is what the exit-watch rung exists \
              to avoid"
@@ -1075,10 +1233,12 @@ mod tests {
                 ..alive.clone()
             };
 
-            let (was, _, _) = mascot_position(&layout, &alive, "w", "r", died_at, seed)
-                .expect("a live gateway renders a mascot");
-            let (leaving_from, _, _) = mascot_position(&layout, &down, "w", "r", died_at, seed)
-                .expect("a just-died gateway is still walking out");
+            let (was, _, _) =
+                mascot_position(&layout, &test_pack(), &alive, "w", "r", died_at, seed)
+                    .expect("a live gateway renders a mascot");
+            let (leaving_from, _, _) =
+                mascot_position(&layout, &test_pack(), &down, "w", "r", died_at, seed)
+                    .expect("a just-died gateway is still walking out");
             // NOT byte-equality: the exit lerp routes its origin through
             // `walk_between`'s A*+snap, which can shift it a pixel or two off the raw
             // wander point. Measured — real code deviates 0-2px across these four
@@ -1114,7 +1274,7 @@ mod tests {
                     ..alive.clone()
                 };
                 assert!(
-                    mascot_position(&layout, &held, "w", "r", at, seed).is_none(),
+                    mascot_position(&layout, &test_pack(), &held, "w", "r", at, seed).is_none(),
                     "gateway {port} at age {early_ms}ms (< {delay}ms stagger) must not be \
                      drawn yet"
                 );
@@ -1127,7 +1287,8 @@ mod tests {
                 ..alive.clone()
             };
             assert!(
-                mascot_position(&layout, &at_arrival, "w", "r", arrived, seed).is_some(),
+                mascot_position(&layout, &test_pack(), &at_arrival, "w", "r", arrived, seed)
+                    .is_some(),
                 "gateway {port} must appear once its {delay}ms stagger elapses"
             );
         }
