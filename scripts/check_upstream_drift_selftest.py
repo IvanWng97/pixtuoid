@@ -25,6 +25,10 @@ the weekly job either alarms on junk or watches nothing). This pins:
      probe-health line (self-reporting, which is why that is acceptable).
   6. The report keeps the two dispositions under separate headings, so a
      "we could not verify" line can never be read as "upstream changed".
+  7. `Report` is the ONLY way to file a finding — no module code appends to a
+     bucket directly, so probe health cannot be hand-worded into a claim about
+     upstream. Plus the exit-2 (transient) path, which is unreachable through
+     `main()` without faking the network.
 
 Run: `python3 scripts/check_upstream_drift_selftest.py` (exit 0 = pass).
 No pytest dependency on purpose — the repo has no Python test harness.
@@ -32,6 +36,7 @@ No pytest dependency on purpose — the repo has no Python test harness.
 
 from __future__ import annotations
 
+import inspect
 import io
 import pathlib
 import re
@@ -42,6 +47,16 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
+
+# `run_checks`'s read-our-own-source inputs, read off the live signature rather
+# than copied: a test that drives ONE source has to supply all the others, and a
+# hand-maintained list would silently rot the day a source is added. `report` is
+# keyword-only, so it is not in here.
+_OURS_PARAMS = [
+    name
+    for name, p in inspect.signature(d.run_checks).parameters.items()
+    if p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+]
 
 
 def check(cond: bool, msg: str) -> None:
@@ -62,31 +77,39 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
         # wrong place.
         for code in (404, 410, 451):
             d.fetch = lambda _u, c=code: (_ for _ in ()).throw(_http_error(c))
-            bl: list[str] = []
-            er: list[str] = []
-            out = d.try_fetch("https://x/y", "T", bl, er)
+            r = d.Report()
+            out = d.try_fetch("https://x/y", "T", r)
             check(out is None, f"{code}: returns None")
-            check(len(bl) == 1 and not er, f"{code}: -> blind (got blind={bl} errors={er})")
-            check(str(code) in (bl[0] if bl else ""), f"{code}: message names the status")
+            check(
+                len(r.blind) == 1 and not r.errors,
+                f"{code}: -> blind (got blind={r.blind} errors={r.errors})",
+            )
+            check(str(code) in (r.blind[0] if r.blind else ""), f"{code}: message names the status")
 
         # Transient HTTP (server/throttle) → errors, NOT probe health.
         for code in (500, 502, 503, 429, 403):
             d.fetch = lambda _u, c=code: (_ for _ in ()).throw(_http_error(c))
-            bl, er = [], []
-            d.try_fetch("https://x/y", "T", bl, er)
-            check(not bl and len(er) == 1, f"{code}: -> transient (got blind={bl} errors={er})")
+            r = d.Report()
+            d.try_fetch("https://x/y", "T", r)
+            check(
+                not r.blind and len(r.errors) == 1,
+                f"{code}: -> transient (got blind={r.blind} errors={r.errors})",
+            )
 
         # Network-layer failure → transient.
         d.fetch = lambda _u: (_ for _ in ()).throw(urllib.error.URLError("conn refused"))
-        bl, er = [], []
-        d.try_fetch("https://x/y", "T", bl, er)
-        check(not bl and len(er) == 1, f"URLError -> transient (got blind={bl} errors={er})")
+        r = d.Report()
+        d.try_fetch("https://x/y", "T", r)
+        check(
+            not r.blind and len(r.errors) == 1,
+            f"URLError -> transient (got blind={r.blind} errors={r.errors})",
+        )
 
         # Success → returns the body, no buckets touched.
         d.fetch = lambda _u: "BODY"
-        bl, er = [], []
-        out = d.try_fetch("https://x/y", "T", bl, er)
-        check(out == "BODY" and not bl and not er, "success returns body, no buckets")
+        r = d.Report()
+        out = d.try_fetch("https://x/y", "T", r)
+        check(out == "BODY" and not r.blind and not r.errors, "success returns body, no buckets")
     finally:
         d.fetch = real
 
@@ -534,32 +557,120 @@ def test_anchor_gate_fires_in_both_directions() -> None:
             # (a) anchor ABSENT (a refactor moved the declaration away) -> the
             #     document is not swept at all, and the finding is probe health.
             d.fetch = lambda u, _s=served: (_s.append(u), _UNANCHORED)[1]
-            blind: list[str] = []
-            errors: list[str] = []
-            out = d.fetch_anchored(url, "T", blind, errors)
+            r = d.Report()
+            out = d.fetch_anchored(url, "T", r)
             check(served == [url], f"{anchor.owns}: the stubbed fetch actually ran")
             check(out is None, f"{anchor.owns}: no anchor -> the sweep is skipped")
-            check(len(blind) == 1 and not errors, f"{anchor.owns}: -> blind, got {blind}")
+            check(len(r.blind) == 1 and not r.errors, f"{anchor.owns}: -> blind, got {r.blind}")
             # Indexing is guarded, not assumed: a regressed gate leaves `blind`
             # empty and this test must REPORT that, not abort the suite before
             # the #793 regression test below ever runs.
             check(
-                "NOT evidence that upstream changed" in (blind[0] if blind else ""),
-                f"{anchor.owns}: the line disclaims upstream causation, got {blind!r}",
+                "NOT evidence that upstream changed" in (r.blind[0] if r.blind else ""),
+                f"{anchor.owns}: the line disclaims upstream causation, got {r.blind!r}",
             )
 
             # (b) anchor PRESENT -> the body comes back so the caller's presence
             #     sweep can run and report a REAL rename.
             sample = ANCHOR_SAMPLES.get(url, "")
             d.fetch = lambda _u, _s=sample: _s
-            blind, errors = [], []
-            out = d.fetch_anchored(url, "T", blind, errors)
+            r = d.Report()
+            out = d.fetch_anchored(url, "T", r)
             check(
-                out == sample and not blind and not errors,
-                f"{anchor.owns}: anchor present -> body returned, got blind={blind}",
+                out == sample and not r.blind and not r.errors,
+                f"{anchor.owns}: anchor present -> body returned, got blind={r.blind}",
             )
     finally:
         d.fetch = real
+
+
+def test_report_is_the_only_way_to_file_a_finding() -> None:
+    """`Report` owns the buckets, their wording, their order, and the exit code.
+
+    Two things this pins that nothing else can. First, the exit-2 path: an
+    errors-ONLY report is the transient case the workflow must NOT alarm on, and
+    it was reachable through `main()` only by faking a network stack. Second —
+    the teeth for folding `probe_failed` into `add_blind` — no module code may
+    `.append` to a bucket directly. Every one of the 20 probe-health sites used
+    to spell `blind.append(probe_failed(…))`, an invariant a reviewer had to
+    hold; a hand-worded line was one `blind.append("…")` away from claiming
+    upstream causation the script never verified, which IS #793.
+    """
+    empty = d.Report()
+    check(empty.exit_code() == 0, f"an empty report exits 0, got {empty.exit_code()}")
+    check("✅ No drift" in empty.render(), f"an empty report says so:\n{empty.render()}")
+
+    # Each adder files under its own name.
+    r = d.Report()
+    r.add_breaking("B-LINE")
+    r.add_review("R-LINE")
+    r.add_error("E-LINE")
+    r.add_blind("WHAT", "WHERE", "CONSEQUENCE")
+    check(r.breaking == ["B-LINE"], f"add_breaking -> breaking, got {r.breaking}")
+    check(r.review == ["R-LINE"], f"add_review -> review, got {r.review}")
+    check(r.errors == ["E-LINE"], f"add_error -> errors, got {r.errors}")
+    check(len(r.blind) == 1, f"add_blind -> blind, got {r.blind}")
+
+    # `add_blind` words the line; the caller cannot assert a cause it never read.
+    line = r.blind[0] if r.blind else ""
+    check(
+        all(p in line for p in ("WHAT", "WHERE", "CONSEQUENCE")),
+        f"add_blind keeps the caller's three facts: {line!r}",
+    )
+    check(
+        "NOT evidence that upstream changed" in line and "do NOT change a decoder" in line,
+        f"the default wording disclaims upstream causation: {line!r}",
+    )
+    ours = d.Report()
+    ours.add_blind("WHAT", "WHERE", "CONSEQUENCE", our_source=True)
+    our_line = ours.blind[0] if ours.blind else ""
+    check(
+        "nothing upstream was consulted" in our_line.lower()
+        and "Fix the script" in our_line,
+        f"our_source=True blames the script, not upstream: {our_line!r}",
+    )
+
+    # Render order is the disposition order, most-actionable first.
+    out = r.render()
+    offsets = [out.find(x) for x in ("B-LINE", "R-LINE", "WHAT", "E-LINE")]
+    check(
+        all(x >= 0 for x in offsets) and offsets == sorted(offsets),
+        f"every bucket renders, in disposition order (offsets {offsets}):\n{out}",
+    )
+
+    # The exit code is a function of all four buckets, so it lives with them.
+    # errors-ONLY is exit 2 (transient, do not alarm) — the one case `main()`
+    # could not reach without faking the network.
+    for adder, want in (("add_breaking", 1), ("add_review", 1), ("add_error", 2)):
+        one = d.Report()
+        getattr(one, adder)("LINE")
+        check(
+            one.exit_code() == want,
+            f"a {adder}-only report exits {want}, got {one.exit_code()}",
+        )
+    blind_only = d.Report()
+    blind_only.add_blind("w", "where", "c")
+    check(blind_only.exit_code() == 1, f"a blind-only report exits 1, got {blind_only.exit_code()}")
+    both = d.Report()
+    both.add_error("E")
+    both.add_blind("w", "where", "c")
+    check(both.exit_code() == 1, f"actionable outranks transient, got {both.exit_code()}")
+
+    # The structural half: a bucket is appended to ONLY from inside `Report`.
+    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
+    span = re.search(r"(?ms)^class Report:.*?(?=^\S)", src)
+    check(span is not None, "the module defines a top-level `class Report`")
+    lo, hi = (span.span() if span else (0, 0))
+    stray = [
+        m.group(0)
+        for m in re.finditer(r"\b(?:breaking|review|blind|errors)\.append\(", src)
+        if not lo <= m.start() < hi
+    ]
+    check(
+        not stray,
+        f"a finding is filed through Report, never appended — and a local list "
+        f"may not borrow a bucket's name (call it `findings`): {stray}",
+    )
 
 
 def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
@@ -596,22 +707,20 @@ def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
             raise urllib.error.URLError("not stubbed")  # -> transient, ignored below
 
         d.fetch = stub
-        breaking: list[str] = []
-        review: list[str] = []
-        blind: list[str] = []
-        errors: list[str] = []
+        report = d.Report()
+        # Named, not a wall of 14 positional `None`s: a miscount there silently
+        # drove the WRONG source and the test still passed. A wrong name here is
+        # a TypeError.
         d.run_checks(
-            None, None, None, None, None,
-            {"session_start", "tool_call_before"},  # codewhale_ours
-            None, None, None, None, None, None, None, None,
-            breaking, review, blind, errors,
+            **{**dict.fromkeys(_OURS_PARAMS), "codewhale_ours": {"session_start", "tool_call_before"}},
+            report=report,
         )
         check(
             d.CODEWHALE_EXECUTOR_URL in served,
             "the executor fetch actually ran (the injected fault fired)",
         )
         cw = lambda xs: [x for x in xs if "DEEPSEEK" in x or "CodeWhale" in x]  # noqa: E731
-        return cw(breaking), cw(blind), served
+        return cw(report.breaking), cw(report.blind), served
 
     # (a) THE BUG: the pin lands on the facade. Zero drift claims, one probe-health
     #     line — the report must not name a single env var as renamed.
@@ -656,14 +765,16 @@ def test_every_swept_url_declares_an_anchor() -> None:
     real = d.fetch
     try:
         d.fetch = lambda _u: "irrelevant body"
-        blind: list[str] = []
-        errors: list[str] = []
-        out = d.fetch_anchored("https://example.invalid/undeclared", "New", blind, errors)
+        r = d.Report()
+        out = d.fetch_anchored("https://example.invalid/undeclared", "New", r)
         check(out is None, "an undeclared URL is not swept")
-        check(len(blind) == 1 and not errors, f"undeclared -> blind, not transient: {blind}")
         check(
-            "ANCHORS" in (blind[0] if blind else ""),
-            f"the line names the fix (add an ANCHORS entry): {blind!r}",
+            len(r.blind) == 1 and not r.errors,
+            f"undeclared -> blind, not transient: {r.blind}",
+        )
+        check(
+            "ANCHORS" in (r.blind[0] if r.blind else ""),
+            f"the line names the fix (add an ANCHORS entry): {r.blind!r}",
         )
     finally:
         d.fetch = real
@@ -732,9 +843,9 @@ def test_report_separates_verified_change_from_probe_health() -> None:
     """
     real_run, real_read = d.run_checks, d.read_codex_events
     try:
-        def fake(*a: object, **k: object) -> None:
-            a[-4].append("VERIFIED-CHANGE-LINE")  # type: ignore[union-attr]
-            a[-2].append("PROBE-HEALTH-LINE")  # type: ignore[union-attr]
+        def fake(*a: object, report: d.Report, **k: object) -> None:
+            report.add_breaking("VERIFIED-CHANGE-LINE")
+            report.add_blind("PROBE-HEALTH-LINE", "somewhere", "Checks were SKIPPED.")
 
         d.run_checks = fake
         buf = io.StringIO()
@@ -775,8 +886,8 @@ def test_report_separates_verified_change_from_probe_health() -> None:
         # If it regressed, a report saying the watch is DARK would exit 0, both
         # `exit == '1'` workflow steps would skip, and the weekly run would go
         # green — #454's fail-open, in the file that exists because of #454.
-        def blind_only(*a: object, **k: object) -> None:
-            a[-2].append("PROBE-HEALTH-ONLY")  # type: ignore[union-attr]
+        def blind_only(*a: object, report: d.Report, **k: object) -> None:
+            report.add_blind("PROBE-HEALTH-ONLY", "somewhere", "Checks were SKIPPED.")
 
         d.run_checks = blind_only
         buf = io.StringIO()
@@ -876,16 +987,18 @@ def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
     """
     real = d.run_checks
     cases = [
-        ("breaking", -4, "Upstream CLI wire-format drift detected"),
-        ("review", -3, "New upstream events to review"),
-        ("blind", -2, "Upstream drift watch could not verify — repin needed"),
-        ("clean", None, "Upstream wire-format watch: no drift"),
+        ("breaking", "Upstream CLI wire-format drift detected"),
+        ("review", "New upstream events to review"),
+        ("blind", "Upstream drift watch could not verify — repin needed"),
+        ("clean", "Upstream wire-format watch: no drift"),
     ]
     try:
-        for name, slot, want in cases:
-            def fake(*a: object, _s: int | None = slot, **k: object) -> None:
-                if _s is not None:
-                    a[_s].append("LINE")  # type: ignore[union-attr]
+        for name, want in cases:
+            def fake(*a: object, report: d.Report, _n: str = name, **k: object) -> None:
+                if _n == "blind":
+                    report.add_blind("LINE", "somewhere", "Checks were SKIPPED.")
+                elif _n != "clean":
+                    getattr(report, f"add_{_n}")("LINE")
 
             d.run_checks = fake
             buf = io.StringIO()
@@ -923,6 +1036,7 @@ def main() -> int:
         test_block_scrape_is_bounded_to_the_decoder,
         test_every_const_array_reader_uses_the_shared_parser,
         test_anchor_gate_fires_in_both_directions,
+        test_report_is_the_only_way_to_file_a_finding,
         test_793_stale_pin_reads_as_probe_health_not_three_renames,
         test_every_swept_url_declares_an_anchor,
         test_report_separates_verified_change_from_probe_health,
