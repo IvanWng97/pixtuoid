@@ -390,20 +390,32 @@ history:
 - **Diff adds or reshapes a substantial block of comments / doc comments**
   (a new multi-line `//` WHY, a large `///` docstring, a comment-heavy refactor,
   a mass doc pass) → add a comment lens that reads each NEW/changed comment
-  AGAINST the code it describes (not the diff in isolation), on the four
+  AGAINST the code it describes (not the diff in isolation), on five
   Family-C axes: **accuracy** (does it match what the code actually does?),
   **value** (a non-obvious WHY, never narration of the WHAT — the comment-value
-  factor), **comment-rot** (now FALSE about the code), and the **vestigial**
+  factor), **comment-rot** (now FALSE about the code), the **vestigial**
   class (a comment describing code the SAME diff deleted — "code gone, comment
-  remains"). This is a SEMANTIC judgment the mechanical gate can't make: the
+  remains"), and **REDUNDANCY-WITHIN** (below). This is a SEMANTIC judgment the mechanical gate can't make: the
   diff-scoped `just comment-lint` advisory finds structural CANDIDATES (runs of
   3+ consecutive line comments in a fn body — `//` in Rust, `#` in Python — on
   the diff's new lines only — the ~5k
   pre-existing legitimate WHY are grandfathered), but the keep / trim-to-≤2 /
   relocate-to-the-declaration-or-a-CLAUDE.md-sharp-edge call is this lens's.
+  **Redundancy-within is the axis this lens kept missing**, because the other
+  four all compare the comment to the CODE and this one compares it to ITSELF:
+  one WHY restated from three more angles, where no restatement repeats the code
+  so nothing else flags it. Apply the deletion test PER SENTENCE — cut every
+  sentence after the first and ask whether a reader would now do something
+  wrong. No → restatement, cut it. Yes → it is a SECOND WHY and belongs on its
+  own declaration, not appended here. Report it as `N sentences, M ideas` with
+  the proposed cut — the finding is REPETITION, not length, and saying "too
+  long" sends the author to trim a legitimate WHY instead of the duplicates. A
+  real `add_blind` docstring went 11 lines to 2 under this test with nothing
+  lost. See CLAUDE.md's three comment tests, of which this is #2.
+
   Anti-slop caveat: this repo's dense WHY-comment density is DELIBERATE — flag
-  only genuine slop (restated WHAT, stale, vestigial), never a legitimate WHY
-  that happens to run long. (Claude Code: the `comment-analyzer` agent is the
+  only genuine slop (restated WHAT, stale, vestigial, restated-ITSELF), never a
+  legitimate WHY that happens to run long because it carries that much. (Claude Code: the `comment-analyzer` agent is the
   ready implementation.)
 - **Interactive TUI flow changed** (onboarding, panel actions, popup gating,
   keybind dispatch) → add a UX / user-journey lens that WALKS each user path
