@@ -59,12 +59,12 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.16.0" => Some(&[
-            "The office you can hear — press m for an all-procedural lofi score that layers up as agents get busier, plus typing, rain, and door/printer/vending cues. Starts muted; +/- sets volume",
-            "It never repeats — a fresh track composed every 10 minutes, in a slower night take after dark or when it rains",
-            "Token meters — each desk grows a paper tower as its session burns tokens, with a Σ row in the dossier",
-            "Two new agents — Grok Build (gk·) and Kimi Code (km·), bringing the roster to 13",
-            "Fits small terminals, and the floating window no longer pins a CPU core (100% → ~13%)",
-            "Sturdier under the hood — review sweeps, one lobster per OpenClaw gateway, and decoders that flag an upstream format change instead of guessing",
+            "The office you can hear — press m for procedural lofi that builds with the bustle, plus typing, rain, door and appliance cues. Starts muted; + and - set volume",
+            "It never repeats — a fresh 10-minute track, slower and sparser at night or in rain",
+            "Token meters — each desk grows a paper tower as it burns tokens; hover an agent for the Σ total",
+            "Two new agents — Grok Build (gk·) and Kimi Code CLI (km·), for 13 supported tools",
+            "The floating window no longer pins a CPU core — 100% → ~13% with agents, ~0.5% idle",
+            "Sturdier under the hood — a whole-codebase review sweep (correctness, security, performance), a mascot per OpenClaw gateway, and decoders that flag upstream format changes",
         ]),
         "0.15.0" => Some(&[
             "A busier, better-looking office — denser desk pods that pack the grid at every size, agents walking behind their desks, and a full interior-decor pass: glass walls with door jambs and mullions, a lounge aquarium, real head-of-table meeting chairs, greenery (two ficus trees) and mats",
