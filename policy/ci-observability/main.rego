@@ -459,6 +459,14 @@ claude_fork_refusal_precedes_the_action if {
 
 claude_reusable := object.get(documents, claude_reusable_workflow_path, {})
 claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
+
+claude_absence_condition := "needs.analyze.result == 'failure'"
+
+claude_absence_jobs := [job |
+	some job in claude_reusable_jobs
+	contains(normalized_claude_condition(object.get(job, "if", "")), claude_absence_condition)
+]
+
 claude_analyze_job := object.get(claude_reusable_jobs, "analyze", {})
 claude_publish_job := object.get(claude_reusable_jobs, "publish", {})
 claude_analyze_steps := object.get(claude_analyze_job, "steps", [])
@@ -754,6 +762,24 @@ deny contains msg if {
 	_ := documents[claude_tag_workflow_path]
 	count(claude_tag_jobs) != 1
 	msg := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
+}
+
+# The merge gate reads "Findings: 0 at HEAD", so a run that produces no verdict
+# must SAY so — otherwise a spent quota is indistinguishable from a clean review
+# (publish skips, nothing comments, the PR just reads UNSTABLE). #819
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	count(claude_absence_jobs) != 1
+	msg := sprintf("%s must report an absent review in exactly one job conditioned on `%s`", [claude_reusable_workflow_path, claude_absence_condition])
+}
+
+# A reporter that cannot comment is inert, and inert is the failure mode this
+# whole job exists to prevent.
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	count(claude_absence_jobs) == 1
+	object.get(claude_absence_jobs[0], ["permissions", "pull-requests"], "") != "write"
+	msg := sprintf("%s absent-review job needs `pull-requests: write` to post its notice", [claude_reusable_workflow_path])
 }
 
 deny contains msg if {

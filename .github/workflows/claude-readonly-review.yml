@@ -152,6 +152,37 @@ jobs:
             --allowedTools "Read,Glob,Grep"
             --json-schema ${{ steps.schema.outputs.json }}
 
+      # The action reports a rejected request as `subtype: "success"` with a
+      # missing structured_output, so its error blames the schema no matter the
+      # cause. `is_error` and a $0 cost are what actually separate "no quota"
+      # from "bad contract"; both sit in the same object, unread. #819
+      - name: Explain a failed analysis
+        if: always() && steps.claude.outcome == 'failure'
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          set -uo pipefail
+          if [[ -z "${EXECUTION_FILE:-}" || ! -f "$EXECUTION_FILE" ]]; then
+            echo "No execution file: the action failed before Claude ran." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          result="$(jq -c '[.. | objects | select(.type? == "result")] | last // {}' "$EXECUTION_FILE" 2>/dev/null)"
+          if [[ -z "$result" || "$result" == "{}" ]]; then
+            echo "Execution file carries no \`result\` object." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### Why the analysis failed"
+            echo
+            jq -r '"- is_error: `\(.is_error)`\n- num_turns: `\(.num_turns)`\n- duration_ms: `\(.duration_ms)`\n- total_cost_usd: `\(.total_cost_usd)`"' <<<"$result"
+            echo
+            if [[ "$(jq -r '.total_cost_usd // 1' <<<"$result")" == "0" ]]; then
+              echo "**\$0 spent — the request was rejected before inference. Spent quota or auth, NOT the JSON schema.**"
+            else
+              echo "Tokens were spent, so Claude ran: this is a contract or content failure, not quota."
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
       - name: Require a valid structured review
         if: steps.pr.outputs.reviewable == 'true'
         env:
@@ -163,6 +194,55 @@ jobs:
             and (.summary | type == "string" and length > 0)
             and (.findings | type == "array" and length <= 5)
           ' <<< "$REVIEW_JSON" > /dev/null
+
+  # A spent quota is an operating condition, not an incident, and it is the one
+  # the check table renders indistinguishably from a flaky advisory: analyze
+  # fails, publish skips, no comment lands, and `ci-gate` being the only
+  # required check leaves the PR merely UNSTABLE. The merge gate is "Findings: 0
+  # at HEAD", so an absent verdict has to SAY it is absent. #819
+  #
+  # Keyed on `needs.analyze.result` and `inputs.pr_number`, never on the failed
+  # job's `outputs` — a failed job propagating its outputs is not a documented
+  # guarantee, and this job is worthless if it silently stops running.
+  report_absence:
+    name: Report a missing review
+    needs: analyze
+    if: always() && needs.analyze.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Say the second lens did not run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+          REVIEW_MARKER: ${{ inputs.review_marker }}
+          REVIEW_TITLE: ${{ inputs.review_title }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$REVIEW_MARKER" =~ ^[a-z0-9-]+$ ]]
+          [[ -n "$REVIEW_TITLE" ]]
+          head_sha="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          note="$RUNNER_TEMP/claude-review-absent.md"
+          {
+            echo "<!-- ${REVIEW_MARKER}-absent:${head_sha} -->"
+            echo "## $REVIEW_TITLE — did not run"
+            echo
+            echo "Head: \`$head_sha\`"
+            echo
+            echo "**The automated second lens is ABSENT, not clean.** Treat this as"
+            echo "an unreviewed head: no findings were produced, so none being shown"
+            echo "means nothing. [Run log]($RUN_URL)."
+            echo
+            echo "The usual cause is a spent model quota. In the run log, the"
+            echo "\`\"type\": \"result\"\` object tells you which: \`total_cost_usd\` of 0"
+            echo "with 1 turn means the request never reached inference — the"
+            echo "action's own error message blames the JSON schema either way."
+          } > "$note"
+          gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body-file "$note"
 
   publish:
     name: Publish review

@@ -219,7 +219,13 @@ The two automatic Claude reviewers are thin trigger policies over
 `claude-readonly-review.yml`: the model job checks out only the trusted default
 branch, receives the exact PR diff as inert data, has read-only GitHub/tools,
 and emits schema-bound JSON; a separate no-checkout publisher revalidates the PR
-head before writing the review comment. The human-triggered `@claude` workflow
+head before writing the review comment. When the model job FAILS, a third job
+comments that the second lens is ABSENT rather than clean — a spent quota
+otherwise renders identically to a passing review (publisher skips, no
+`Findings:` comment, PR merely `UNSTABLE`), which is how #805–#818 merged with
+the gate silently unsatisfiable; it keys off `needs.analyze.result` and the
+workflow input, never the failed job's `outputs`, and the policy pins both its
+existence and its `pull-requests: write` (#819). The human-triggered `@claude` workflow
 (`claude.yml`, the only `contents: write` Claude job) checks out without a ref,
 so its two `pull_request_review*` arms — the events whose `GITHUB_REF` is the PR
 merge ref — additionally require the head to live in this repository, and the

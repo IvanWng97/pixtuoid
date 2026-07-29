@@ -811,6 +811,47 @@ test_claude_resolver_is_required if {
 	sprintf("%s must resolve one open internal default-branch pull request", [claude_reusable_workflow_path]) in violations
 }
 
+claude_absence_missing_message := sprintf("%s must report an absent review in exactly one job conditioned on `%s`", [claude_reusable_workflow_path, claude_absence_condition])
+
+claude_absence_permission_message := sprintf("%s absent-review job needs `pull-requests: write` to post its notice", [claude_reusable_workflow_path])
+
+claude_absence_reusable(jobs) := {"documents": [{
+	"path": claude_reusable_workflow_path,
+	"contents": {"jobs": jobs},
+}]}
+
+# Without this job a spent quota reads exactly like a clean review: publish
+# skips, nothing comments, the PR sits at UNSTABLE. #819
+test_claude_absent_review_must_be_reported if {
+	violations := deny with input as claude_absence_reusable({"analyze": {"steps": []}})
+	claude_absence_missing_message in violations
+}
+
+test_claude_absent_review_reporter_without_comment_permission_is_denied if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("always() && %s", [claude_absence_condition]),
+			"permissions": {"pull-requests": "read"},
+			"steps": [],
+		},
+	})
+	claude_absence_permission_message in violations
+}
+
+test_claude_absent_review_reporter_is_accepted if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("always() && %s", [claude_absence_condition]),
+			"permissions": {"pull-requests": "write"},
+			"steps": [],
+		},
+	})
+	not claude_absence_missing_message in violations
+	not claude_absence_permission_message in violations
+}
+
 test_claude_oauth_fallback_requires_all_wif_authority_fields_to_be_absent if {
 	fixture := {"documents": [{
 		"path": claude_reusable_workflow_path,
