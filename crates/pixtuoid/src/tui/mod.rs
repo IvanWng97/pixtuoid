@@ -1337,10 +1337,7 @@ mod teardown_tests {
     const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
 
     /// That the unwind reaches the writer it was HANDED, not a stream of its
-    /// own choosing — the property the panic hook's stdout-vs-stderr fix rests
-    /// on. Moved here from `crash.rs` when that module's own copy of the
-    /// sequence was deleted (#804): the writer seam belongs to whoever owns the
-    /// sequence, and the hook keeps only its STREAM-choice test.
+    /// own choosing — the property the panic hook's stdout-vs-stderr fix rests on.
     #[cfg(unix)]
     #[test]
     fn the_unwind_writes_the_leave_sequence_into_the_writer_it_is_given() {

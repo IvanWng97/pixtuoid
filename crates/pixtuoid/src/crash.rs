@@ -7,18 +7,8 @@ use std::path::PathBuf;
 
 pub(crate) fn install_crash_hook() {
     std::panic::set_hook(Box::new(|info| {
-        // STDOUT, because that is the stream `tui::setup_terminal` ENTERED the
-        // alt screen on, and these are ANSI bytes delivered to whatever writer
-        // you hand `execute!`. Restoring on stderr worked only while stderr
-        // happened to be the same tty: under `pixtuoid run 2>/dev/null` the
-        // sequences went to the redirect and left the user on the alternate
-        // screen with mouse reporting on, needing `reset`. The human-readable
-        // report below deliberately stays on stderr — a non-TUI command with a
-        // redirected stdout gets a few escape bytes on a panic, the cheap side
-        // of the trade (it never entered the alt screen, and its output is
-        // already truncated by the crash).
-        //
-        // The ORDER is not restated here: it belongs to the one seam (#804).
+        // stdout is the stream `setup_terminal` entered the alt screen on, and
+        // these are ANSI bytes going to whatever writer `execute!` is handed.
         let _ = pixtuoid::tui::unwind_terminal_modes(
             &mut std::io::stdout(),
             crossterm::terminal::disable_raw_mode,
@@ -194,11 +184,6 @@ mod tests {
     /// in-memory or piped, ever sees a byte to assert on.
     #[cfg(unix)]
     const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
-
-    // The writer-seam half of this pair moved with the sequence it asserts on:
-    // `tui::teardown_tests::the_unwind_writes_the_leave_sequence_into_the_writer_it_is_given`
-    // (#804). What stays here is the STREAM choice, which is this hook's own
-    // decision and is not observable from inside the seam.
 
     /// Which STREAM the installed hook writes to, end to end. The panic hook is
     /// process-global and writes to a real fd, so the only way to observe its
