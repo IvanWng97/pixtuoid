@@ -581,27 +581,28 @@ pub fn setup_terminal() -> Result<Term> {
     // roll the terminal all the way back before propagating. Otherwise the error
     // path strands the user's shell in raw mode (no echo) and/or the alt screen.
     if let Err(e) = execute!(out, EnterAlternateScreen, EnableMouseCapture) {
-        // Mirror the teardown order in case EnterAlternateScreen took effect
-        // before EnableMouseCapture failed — leave the alt screen too, not just
-        // raw mode, so the rollback is truly "all the way back".
-        let _ = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
-        let _ = disable_raw_mode();
+        // Roll all the way back in case EnterAlternateScreen took effect before
+        // EnableMouseCapture failed; the setup error is what propagates.
+        let _ = unwind_terminal_modes(&mut out, disable_raw_mode);
         return Err(e.into());
     }
     Terminal::new(CrosstermBackend::new(out)).map_err(|e| {
         let mut out = stdout();
-        let _ = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
-        let _ = disable_raw_mode();
+        let _ = unwind_terminal_modes(&mut out, disable_raw_mode);
         e.into()
     })
 }
 
-/// The mode half of the teardown, over an injected writer + raw-mode disabler so
-/// the unwind ORDER and its error policy are unit-testable without a real TTY.
-/// Every step runs even when an earlier one fails, and the FIRST error is
-/// returned: a `?` after the escape-sequence write would skip `disable_raw`
-/// exactly when it is needed most and strand the user's shell echo-less.
-fn unwind_terminal_modes<W: std::io::Write>(
+/// THE terminal-mode unwind: the ONE definition of the order every exit path
+/// takes — `teardown_terminal`, both `setup_terminal` rollback arms, and the
+/// panic hook (`crash.rs`, a separate crate, which is why this is `pub`).
+///
+/// Over an injected writer + raw-mode disabler so the ORDER and its error
+/// policy are unit-testable without a real TTY. Every step runs even when an
+/// earlier one fails, and the FIRST error is returned: a `?` after the
+/// escape-sequence write would skip `disable_raw` exactly when it is needed
+/// most and strand the user's shell echo-less.
+pub fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {
@@ -1325,6 +1326,30 @@ mod teardown_tests {
             disabled.get(),
             "raw mode must be disabled even when the escape-sequence write failed \
              — a `?` there strands the user's shell echo-less: {err:#}"
+        );
+    }
+
+    /// Windows dispatches these sequences to the console API rather than the
+    /// writer whenever crossterm's ANSI support flag is false, and under
+    /// `windows-test` that flag IS false (piped stdout, no console, no `TERM`),
+    /// so no writer ever sees a byte to assert on. Unix-only for that reason.
+    #[cfg(unix)]
+    const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
+
+    /// That the unwind reaches the writer it was HANDED, not a stream of its
+    /// own choosing — the property the panic hook's stdout-vs-stderr fix rests
+    /// on. Moved here from `crash.rs` when that module's own copy of the
+    /// sequence was deleted (#804): the writer seam belongs to whoever owns the
+    /// sequence, and the hook keeps only its STREAM-choice test.
+    #[cfg(unix)]
+    #[test]
+    fn the_unwind_writes_the_leave_sequence_into_the_writer_it_is_given() {
+        let mut buf: Vec<u8> = Vec::new();
+        unwind_terminal_modes(&mut buf, || Ok(())).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(
+            s.contains(LEAVE_ALT_SCREEN),
+            "the unwind must reach the writer handed to it, not a fixed stream: {s:?}"
         );
     }
 
