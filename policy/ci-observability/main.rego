@@ -463,17 +463,26 @@ claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
 
 claude_absence_condition := "needs.analyze.result == 'failure'"
 
+# The decline arm is the one with no red job behind it, so its silent removal
+# is what nothing else would catch.
+claude_decline_condition := "needs.analyze.outputs.reviewable == 'false'"
+
 # Without one of these an implicit `success()` is applied over `needs: analyze`,
 # so the job is skipped in precisely the situation it exists for — and the
 # inert form reads like a tidy-up, which is how it would land.
 claude_status_functions := {"always()", "!cancelled()", "failure()"}
 
-claude_absence_jobs := [job |
+claude_absence_conditioned_jobs := [job |
 	some job in claude_reusable_jobs
 	condition := normalized_claude_condition(object.get(job, "if", ""))
 	contains(condition, claude_absence_condition)
+	contains(condition, claude_decline_condition)
+]
+
+claude_absence_jobs := [job |
+	some job in claude_absence_conditioned_jobs
 	some status_function in claude_status_functions
-	contains(condition, status_function)
+	contains(normalized_claude_condition(object.get(job, "if", "")), status_function)
 ]
 
 claude_absence_job_checks_out if {
@@ -767,7 +776,7 @@ deny contains msg if {
 	claude_tag_triggers_event("issue_comment")
 	count(claude_tag_jobs) == 1
 	not claude_fork_refusal_precedes_the_action
-	msg := sprintf("%s must refuse fork pull requests in a step before `%s` runs", [claude_tag_workflow_path, claude_action])
+	msg := sprintf("%s must refuse fork pull requests in a step scoped to `issue_comment`, before `%s` runs", [claude_tag_workflow_path, claude_action])
 }
 
 # The existence half: the guard above resolves the job through its action step,
@@ -783,8 +792,17 @@ deny contains msg if {
 # (publish skips, nothing comments, the PR just reads UNSTABLE). #819
 deny contains msg if {
 	_ := documents[claude_reusable_workflow_path]
-	count(claude_absence_jobs) != 1
-	msg := sprintf("%s must report an absent review in exactly one job conditioned on `%s`", [claude_reusable_workflow_path, claude_absence_condition])
+	count(claude_absence_conditioned_jobs) != 1
+	msg := sprintf("%s must report an absent review in exactly one job, conditioned on BOTH `%s` and `%s`", [claude_reusable_workflow_path, claude_absence_condition, claude_decline_condition])
+}
+
+# Split from the rule above so the maintainer who deleted `always()` as tidy-up
+# is not told to add a condition they can see is already there.
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	count(claude_absence_conditioned_jobs) == 1
+	count(claude_absence_jobs) == 0
+	msg := sprintf("%s absent-review job's `if:` needs a status function (one of %v) — without one an implicit `success()` skips it exactly when analyze fails", [claude_reusable_workflow_path, claude_status_functions])
 }
 
 # An exact set, like its two siblings: a lower bound would let this job carry

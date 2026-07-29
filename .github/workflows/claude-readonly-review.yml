@@ -236,10 +236,11 @@ jobs:
           [[ "$REVIEW_MARKER" =~ ^[a-z0-9-]+$ ]]
           [[ -n "$REVIEW_TITLE" ]]
           head_sha="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
-          # `absent-<marker>`, not `<marker>-absent`: the published review's own
-          # marker is `<marker>:<sha>`, and a consumer matching it by prefix
-          # would read `<marker>-absent` as a review.
-          marker="<!-- absent-${REVIEW_MARKER} -->"
+          # `absent-<marker>`, not `<marker>-absent`: the review's own marker is
+          # `<marker>:<sha>`, so a prefix matcher would read the latter as a review.
+          # Keyed to the HEAD, so a later head posts a NEW notice rather than
+          # editing an old one in place and leaving a stale verdict as the latest.
+          marker="<!-- absent-${REVIEW_MARKER}:${head_sha} -->"
           note="$RUNNER_TEMP/claude-review-absent.md"
           {
             echo "$marker"
@@ -262,14 +263,14 @@ jobs:
             echo "[Run log]($RUN_URL)."
           } > "$note"
 
-          # Upsert, because a multi-hour outage fires this on every push of
-          # every PR, from BOTH callers. A failed listing must not be read as
-          # "no comment yet" — that posts a duplicate and loses idempotency.
-          if ! existing="$(gh api "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
-            --paginate --jq "[.[] | select(.body | startswith(\"$marker\")) | .id] | first // empty")"; then
+          # Upsert so a re-run of the same head edits its notice instead of
+          # stacking another. A failed listing must not read as "none yet".
+          if ! ids="$(gh api "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id")"; then
             echo "::warning::could not list comments; skipping to avoid a duplicate notice"
             exit 0
           fi
+          existing="${ids%%$'\n'*}"
           body="$(cat "$note")"
           if [[ -n "$existing" ]]; then
             gh api -X PATCH "repos/${REPOSITORY}/issues/comments/${existing}" -f body="$body" >/dev/null

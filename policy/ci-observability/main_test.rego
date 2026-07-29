@@ -811,7 +811,9 @@ test_claude_resolver_is_required if {
 	sprintf("%s must resolve one open internal default-branch pull request", [claude_reusable_workflow_path]) in violations
 }
 
-claude_absence_missing_message := sprintf("%s must report an absent review in exactly one job conditioned on `%s`", [claude_reusable_workflow_path, claude_absence_condition])
+claude_absence_missing_message := sprintf("%s must report an absent review in exactly one job, conditioned on BOTH `%s` and `%s`", [claude_reusable_workflow_path, claude_absence_condition, claude_decline_condition])
+
+claude_absence_status_message := sprintf("%s absent-review job's `if:` needs a status function (one of %v) — without one an implicit `success()` skips it exactly when analyze fails", [claude_reusable_workflow_path, claude_status_functions])
 
 claude_absence_permission_message := sprintf("%s absent-review job must carry exactly `pull-requests: write`", [claude_reusable_workflow_path])
 
@@ -833,7 +835,7 @@ test_claude_absent_review_reporter_without_comment_permission_is_denied if {
 	violations := deny with input as claude_absence_reusable({
 		"analyze": {"steps": []},
 		"report_absence": {
-			"if": sprintf("always() && %s", [claude_absence_condition]),
+			"if": sprintf("always() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
 			"permissions": {"pull-requests": "read"},
 			"steps": [],
 		},
@@ -845,7 +847,7 @@ test_claude_absent_review_reporter_is_accepted if {
 	violations := deny with input as claude_absence_reusable({
 		"analyze": {"steps": []},
 		"report_absence": {
-			"if": sprintf("always() && %s", [claude_absence_condition]),
+			"if": sprintf("always() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
 			"permissions": {"pull-requests": "write"},
 			"steps": [],
 		},
@@ -855,14 +857,13 @@ test_claude_absent_review_reporter_is_accepted if {
 	not claude_absence_checkout_message in violations
 }
 
-# The inert variant, and the one that would land as a cleanup: GitHub applies
-# an implicit `success()` over `needs:` unless a status function is present, so
-# this job would be SKIPPED exactly when analyze fails.
-test_claude_absent_review_without_a_status_function_is_denied if {
+# Dropping the decline arm leaves the shape with no red job behind it silent
+# again, and the shell tests cannot see it — they drive the step, not the `if:`.
+test_claude_absent_review_without_the_decline_arm_is_denied if {
 	violations := deny with input as claude_absence_reusable({
 		"analyze": {"steps": []},
 		"report_absence": {
-			"if": claude_absence_condition,
+			"if": sprintf("!cancelled() && %s", [claude_absence_condition]),
 			"permissions": {"pull-requests": "write"},
 			"steps": [],
 		},
@@ -870,13 +871,26 @@ test_claude_absent_review_without_a_status_function_is_denied if {
 	claude_absence_missing_message in violations
 }
 
-# A lower bound would let the reporter carry write scopes into a workflow whose
-# whole design is read-only.
+# The inert variant, and the one that would land as a cleanup — see
+# `claude_status_functions` in main.rego.
+test_claude_absent_review_without_a_status_function_is_denied if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("%s || %s", [claude_absence_condition, claude_decline_condition]),
+			"permissions": {"pull-requests": "write"},
+			"steps": [],
+		},
+	})
+	claude_absence_status_message in violations
+}
+
+# A lower bound is not enough — see the rule in main.rego.
 test_claude_absent_review_reporter_with_extra_permissions_is_denied if {
 	violations := deny with input as claude_absence_reusable({
 		"analyze": {"steps": []},
 		"report_absence": {
-			"if": sprintf("!cancelled() && %s", [claude_absence_condition]),
+			"if": sprintf("!cancelled() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
 			"permissions": {"contents": "write", "pull-requests": "write"},
 			"steps": [],
 		},
@@ -888,7 +902,7 @@ test_claude_absent_review_reporter_checking_out_is_denied if {
 	violations := deny with input as claude_absence_reusable({
 		"analyze": {"steps": []},
 		"report_absence": {
-			"if": sprintf("!cancelled() && %s", [claude_absence_condition]),
+			"if": sprintf("!cancelled() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
 			"permissions": {"pull-requests": "write"},
 			"steps": [{"uses": "actions/checkout@v7"}],
 		},
@@ -1263,7 +1277,7 @@ test_codeql_health_gate_before_upload_is_accepted if {
 
 claude_tag_head_guard_message(event) := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
 
-claude_tag_fork_refusal_message := sprintf("%s must refuse fork pull requests in a step before `%s` runs", [claude_tag_workflow_path, claude_action])
+claude_tag_fork_refusal_message := sprintf("%s must refuse fork pull requests in a step scoped to `issue_comment`, before `%s` runs", [claude_tag_workflow_path, claude_action])
 
 claude_tag_fork_refusal_step := {
 	"if": "github.event_name == 'issue_comment' && github.event.issue.pull_request",

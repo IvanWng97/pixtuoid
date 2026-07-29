@@ -490,10 +490,14 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ "$method" != GET ]]; then
     printf '%s' "$body" >"$ABSENCE_CAPTURE"
+    printf '%s' "$url" >"$ABSENCE_CAPTURE.url"
     exit 0
 fi
 case "$url" in
-    */comments) printf '%s' "${FAKE_COMMENTS:-[]}" | jq -r "$jq_expr" ;;
+    */comments)
+        [[ -z "${FAKE_LIST_FAILS:-}" ]] || exit 1
+        printf '%s' "${FAKE_COMMENTS:-[]}" | jq -r "$jq_expr"
+        ;;
     *) printf '%s' "$FAKE_PR_JSON" | jq -r "$jq_expr" ;;
 esac
 STUB
@@ -526,10 +530,12 @@ absence_capture="$test_dir/absence-body"
 
 run_absence() {
     : >"$absence_capture"
+    : >"$absence_capture.url"
     PATH="$fake_bin:$PATH" \
         ABSENCE_CAPTURE="$absence_capture" \
         ANALYZE_RESULT="$1" \
         FAKE_COMMENTS="${2:-[]}" \
+        FAKE_LIST_FAILS="${3:-}" \
         FAKE_PR_JSON="$valid_pr" \
         GH_TOKEN="test-token" \
         PR_NUMBER="42" \
@@ -545,7 +551,7 @@ run_absence failure
 absence_body="$(<"$absence_capture")"
 [[ "$absence_body" == *"ABSENT, not clean"* ]] ||
     fail "absence notice did not say the review is absent rather than clean"
-[[ "$absence_body" == *"<!-- absent-claude-auto-review -->"* ]] ||
+[[ "$absence_body" == *"<!-- absent-claude-auto-review:abc123 -->"* ]] ||
     fail "absence notice omitted its own marker"
 # A prefix matcher on the published review's marker must not read this notice
 # as a review.
@@ -558,3 +564,14 @@ run_absence success
 absence_body="$(<"$absence_capture")"
 [[ "$absence_body" == *"out of scope for the reviewer"* ]] ||
     fail "a declined review was reported as a failure"
+
+# A re-run of the same head must REPLACE its notice, not stack another.
+run_absence failure '[{"id":7,"body":"<!-- absent-claude-auto-review:abc123 -->\nstale"}]'
+[[ "$(<"$absence_capture.url")" == *"/issues/comments/7" ]] ||
+    fail "an existing notice was duplicated instead of refreshed in place"
+
+# A listing that ERRORS is not "no notice yet": writing here posts the duplicate
+# the guard exists to prevent.
+run_absence failure '[]' fail-the-listing
+[[ ! -s "$absence_capture" ]] ||
+    fail "a failed comment listing still wrote a notice"
