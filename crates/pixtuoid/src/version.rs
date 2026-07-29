@@ -64,7 +64,7 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
             "Token meters — each desk grows a paper tower as it burns tokens; hover an agent for the Σ total",
             "Two new agents — Grok Build (gk·) and Kimi Code CLI (km·), for 13 supported tools",
             "The floating window no longer pins a CPU core — 100% → ~13% with agents, ~0.5% idle",
-            "Sturdier under the hood — a whole-codebase review sweep (correctness, security, performance), a mascot per OpenClaw gateway, and decoders that flag upstream format changes",
+            "Sturdier under the hood — a whole-codebase review sweep (correctness, security, performance), panels that fit a small terminal, and drift-flagging decoders",
         ]),
         "0.15.0" => Some(&[
             "A busier, better-looking office — denser desk pods that pack the grid at every size, agents walking behind their desks, and a full interior-decor pass: glass walls with door jambs and mullions, a lounge aquarium, real head-of-table meeting chairs, greenery (two ficus trees) and mats",
