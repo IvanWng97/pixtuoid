@@ -59,8 +59,12 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.16.0" => Some(&[
-            "The office you can hear — press m to turn on sound (starts muted, remembers your choice): a lofi band that layers up as your agents get busier (warm pad, sparkle, keys, drums — composed in-house, synthesized at startup, zero assets), typing that tracks the bustle, gentle rain when the office weather rains, and little moments — a door chime when someone walks in, the printer, the vending machine; you hear the floor you're looking at, and a footer ♩ shows when sound is live",
-            "Two moods, picked by the office itself — after dark (the same sundown the lights follow) or whenever it rains, the band switches to a slower night take: deeper bass, lazier drums, sparser keys; it crossfades back at sunrise",
+            "The office you can hear — press m for an all-procedural lofi score that layers up as agents get busier, plus typing, rain, and door/printer/vending cues. Starts muted; +/- sets volume",
+            "It never repeats — a fresh track composed every 10 minutes, in a slower night take after dark or when it rains",
+            "Token meters — each desk grows a paper tower as its session burns tokens, with a Σ row in the dossier",
+            "Two new agents — Grok Build (gk·) and Kimi Code (km·), bringing the roster to 13",
+            "Fits small terminals, and the floating window no longer pins a CPU core (100% → ~13%)",
+            "Sturdier under the hood — review sweeps, one lobster per OpenClaw gateway, and decoders that flag an upstream format change instead of guessing",
         ]),
         "0.15.0" => Some(&[
             "A busier, better-looking office — denser desk pods that pack the grid at every size, agents walking behind their desks, and a full interior-decor pass: glass walls with door jambs and mullions, a lounge aquarium, real head-of-table meeting chairs, greenery (two ficus trees) and mats",
