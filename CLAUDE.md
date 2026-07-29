@@ -242,8 +242,8 @@ missing condition gates nothing). The `issues`/`issue_comment` arms carry no
 claude-code-action stages the fork tree itself (tag mode's `setupBranch` checks
 the PR head out for every open PR), so `issue_comment` needs a job STEP instead:
 `Refuse fork pull requests` resolves the PR and exits first, and the policy pins
-both its existence and that it precedes the action, keyed on the API field it
-reads rather than its name (#799). `issues` is unaffected — the action hardcodes
+its existence, that it is scoped to `issue_comment`, and that it precedes the
+action, keyed on the API field it reads rather than its name (#799). `issues` is unaffected — the action hardcodes
 `isPR` false there. Anthropic WIF is preferred when its
 repository variables are configured, with the existing OAuth secret as a
 compatibility fallback. Codecov uploads likewise use job-scoped GitHub OIDC

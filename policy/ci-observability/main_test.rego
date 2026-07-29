@@ -871,6 +871,21 @@ test_claude_absent_review_without_the_decline_arm_is_denied if {
 	claude_absence_missing_message in violations
 }
 
+# A second status function used to append the job TWICE, and every sibling rule
+# guards on `count == 1` — so writing both defensively disarmed them all.
+test_claude_absent_review_with_two_status_functions_still_pins_permissions if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("always() && !cancelled() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
+			"permissions": {"contents": "write", "pull-requests": "write"},
+			"steps": [{"uses": "actions/checkout@v7"}],
+		},
+	})
+	claude_absence_permission_message in violations
+	claude_absence_checkout_message in violations
+}
+
 # The inert variant, and the one that would land as a cleanup — see
 # `claude_status_functions` in main.rego.
 test_claude_absent_review_without_a_status_function_is_denied if {

@@ -402,10 +402,14 @@ claude_trigger_workflow_paths := {
 
 # Identified by the action it runs, not by its job NAME: keying on the literal
 # name `claude` let a rename retire the head guard below in silence.
-claude_tag_jobs := [job |
-	some job in object.get(documents[claude_tag_workflow_path], "jobs", {})
+claude_job_runs_the_action(job) if {
 	some step in object.get(job, "steps", [])
 	action_matches(object.get(step, "uses", ""), claude_action)
+}
+
+claude_tag_jobs := [job |
+	some job in object.get(documents[claude_tag_workflow_path], "jobs", {})
+	claude_job_runs_the_action(job)
 ]
 
 claude_tag_condition := normalized_claude_condition(object.get(claude_tag_jobs[0], "if", ""))
@@ -479,10 +483,14 @@ claude_absence_conditioned_jobs := [job |
 	contains(condition, claude_decline_condition)
 ]
 
+claude_condition_has_status_function(condition) if {
+	some status_function in claude_status_functions
+	contains(condition, status_function)
+}
+
 claude_absence_jobs := [job |
 	some job in claude_absence_conditioned_jobs
-	some status_function in claude_status_functions
-	contains(normalized_claude_condition(object.get(job, "if", "")), status_function)
+	claude_condition_has_status_function(normalized_claude_condition(object.get(job, "if", "")))
 ]
 
 claude_absence_job_checks_out if {

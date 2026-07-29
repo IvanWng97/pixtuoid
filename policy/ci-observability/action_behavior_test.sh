@@ -570,6 +570,12 @@ run_absence failure '[{"id":7,"body":"<!-- absent-claude-auto-review:abc123 -->\
 [[ "$(<"$absence_capture.url")" == *"/issues/comments/7" ]] ||
     fail "an existing notice was duplicated instead of refreshed in place"
 
+# `--jq` runs per page, so two matching notices yield two ids; splicing both
+# into the PATCH url would wedge the job exactly when it should self-heal.
+run_absence failure '[{"id":7,"body":"<!-- absent-claude-auto-review:abc123 -->\na"},{"id":8,"body":"<!-- absent-claude-auto-review:abc123 -->\nb"}]'
+[[ "$(<"$absence_capture.url")" == *"/issues/comments/7" ]] ||
+    fail "a second matching notice was spliced into the update target"
+
 # A listing that ERRORS is not "no notice yet": writing here posts the duplicate
 # the guard exists to prevent.
 run_absence failure '[]' fail-the-listing

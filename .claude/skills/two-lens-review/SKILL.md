@@ -76,7 +76,7 @@ silently dropped).
    the check table alone can't gate (#448). If the bot ERRORED or left no
    findings comment at HEAD (it can fail on a very large diff — `error_max_turns`
    with no comment — or on a spent quota, which the workflow now states itself in
-   an `<!-- absent-<marker> -->` comment; do NOT read that as a review),
+   an `<!-- absent-<marker>:<sha> -->` comment; do NOT read that as a review),
    the gate is unsatisfiable as written: split the PR smaller,
    else fall back to one extra differentiated lens + owner merge, recorded in the
    PR thread. State the condition behaviorally (errored/absent), never a fixed
