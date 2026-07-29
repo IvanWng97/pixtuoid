@@ -219,19 +219,13 @@ The two automatic Claude reviewers are thin trigger policies over
 `claude-readonly-review.yml`: the model job checks out only the trusted default
 branch, receives the exact PR diff as inert data, has read-only GitHub/tools,
 and emits schema-bound JSON; a separate no-checkout publisher revalidates the PR
-head before writing the review comment. A third job says so when no verdict was
-produced, because absence otherwise renders as a pass: the publisher skips, no
-`Findings:` comment lands, and the PR reads merely `UNSTABLE` — which is how
-#809 and #815–#818 merged with no verdict from either lens, and #813–#814 with
-only one of the two, a red job being the sole signal in every case. It
-covers BOTH shapes, the failure and the decline (`reviewable=false` exits 0, so
-that arm goes green and is the quieter one), reading `needs.analyze.result` and
-the workflow input for the first — a failed job propagating `outputs` is
-undocumented — and the successful job's `outputs` for the second. The policy
-pins its existence, both arms of its condition, an exact permission set of
-`pull-requests: write`, that it checks nothing out, and that its condition
-carries a status function — without one an implicit `success()` would skip it
-exactly when it is needed (#819). The human-triggered `@claude` workflow
+head before writing the review comment. A third job comments when the model job
+FAILS, because absence otherwise renders as a pass — the publisher skips, no
+`Findings:` comment lands, and the PR reads merely `UNSTABLE`, which is how #809
+and #815–#818 merged with only a red job to say so. Rare, so it is deliberately
+thin: one comment, and one policy rule pinning that the job exists and that its
+condition carries a status function — without one an implicit `success()` would
+skip it exactly when it is needed (#819). The human-triggered `@claude` workflow
 (`claude.yml`, the only `contents: write` Claude job) checks out without a ref,
 so its two `pull_request_review*` arms — the events whose `GITHUB_REF` is the PR
 merge ref — additionally require the head to live in this repository, and the

@@ -811,13 +811,9 @@ test_claude_resolver_is_required if {
 	sprintf("%s must resolve one open internal default-branch pull request", [claude_reusable_workflow_path]) in violations
 }
 
-claude_absence_missing_message := sprintf("%s must report an absent review in exactly one job, conditioned on BOTH `%s` and `%s`", [claude_reusable_workflow_path, claude_absence_condition, claude_decline_condition])
+claude_absence_missing_message := sprintf("%s must report an absent review in exactly one job conditioned on `%s`", [claude_reusable_workflow_path, claude_absence_condition])
 
 claude_absence_status_message := sprintf("%s absent-review job's `if:` needs a status function (one of %v) — without one an implicit `success()` skips it exactly when analyze fails", [claude_reusable_workflow_path, claude_status_functions])
-
-claude_absence_permission_message := sprintf("%s absent-review job must carry exactly `pull-requests: write`", [claude_reusable_workflow_path])
-
-claude_absence_checkout_message := sprintf("%s absent-review job must not check anything out", [claude_reusable_workflow_path])
 
 claude_absence_reusable(jobs) := {"documents": [{
 	"path": claude_reusable_workflow_path,
@@ -831,59 +827,16 @@ test_claude_absent_review_must_be_reported if {
 	claude_absence_missing_message in violations
 }
 
-test_claude_absent_review_reporter_without_comment_permission_is_denied if {
-	violations := deny with input as claude_absence_reusable({
-		"analyze": {"steps": []},
-		"report_absence": {
-			"if": sprintf("always() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
-			"permissions": {"pull-requests": "read"},
-			"steps": [],
-		},
-	})
-	claude_absence_permission_message in violations
-}
-
 test_claude_absent_review_reporter_is_accepted if {
 	violations := deny with input as claude_absence_reusable({
 		"analyze": {"steps": []},
 		"report_absence": {
-			"if": sprintf("always() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
+			"if": sprintf("always() && %s", [claude_absence_condition]),
 			"permissions": {"pull-requests": "write"},
 			"steps": [],
 		},
 	})
 	not claude_absence_missing_message in violations
-	not claude_absence_permission_message in violations
-	not claude_absence_checkout_message in violations
-}
-
-# Dropping the decline arm leaves the shape with no red job behind it silent
-# again, and the shell tests cannot see it — they drive the step, not the `if:`.
-test_claude_absent_review_without_the_decline_arm_is_denied if {
-	violations := deny with input as claude_absence_reusable({
-		"analyze": {"steps": []},
-		"report_absence": {
-			"if": sprintf("!cancelled() && %s", [claude_absence_condition]),
-			"permissions": {"pull-requests": "write"},
-			"steps": [],
-		},
-	})
-	claude_absence_missing_message in violations
-}
-
-# A second status function used to append the job TWICE, and every sibling rule
-# guards on `count == 1` — so writing both defensively disarmed them all.
-test_claude_absent_review_with_two_status_functions_still_pins_permissions if {
-	violations := deny with input as claude_absence_reusable({
-		"analyze": {"steps": []},
-		"report_absence": {
-			"if": sprintf("always() && !cancelled() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
-			"permissions": {"contents": "write", "pull-requests": "write"},
-			"steps": [{"uses": "actions/checkout@v7"}],
-		},
-	})
-	claude_absence_permission_message in violations
-	claude_absence_checkout_message in violations
 }
 
 # The inert variant, and the one that would land as a cleanup — see
@@ -892,37 +845,12 @@ test_claude_absent_review_without_a_status_function_is_denied if {
 	violations := deny with input as claude_absence_reusable({
 		"analyze": {"steps": []},
 		"report_absence": {
-			"if": sprintf("%s || %s", [claude_absence_condition, claude_decline_condition]),
+			"if": claude_absence_condition,
 			"permissions": {"pull-requests": "write"},
 			"steps": [],
 		},
 	})
 	claude_absence_status_message in violations
-}
-
-# A lower bound is not enough — see the rule in main.rego.
-test_claude_absent_review_reporter_with_extra_permissions_is_denied if {
-	violations := deny with input as claude_absence_reusable({
-		"analyze": {"steps": []},
-		"report_absence": {
-			"if": sprintf("!cancelled() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
-			"permissions": {"contents": "write", "pull-requests": "write"},
-			"steps": [],
-		},
-	})
-	claude_absence_permission_message in violations
-}
-
-test_claude_absent_review_reporter_checking_out_is_denied if {
-	violations := deny with input as claude_absence_reusable({
-		"analyze": {"steps": []},
-		"report_absence": {
-			"if": sprintf("!cancelled() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
-			"permissions": {"pull-requests": "write"},
-			"steps": [{"uses": "actions/checkout@v7"}],
-		},
-	})
-	claude_absence_checkout_message in violations
 }
 
 test_claude_oauth_fallback_requires_all_wif_authority_fields_to_be_absent if {

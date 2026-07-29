@@ -152,37 +152,6 @@ jobs:
             --allowedTools "Read,Glob,Grep"
             --json-schema ${{ steps.schema.outputs.json }}
 
-      # The action reports a rejected request as `subtype: "success"` with a
-      # missing structured_output, so its error blames the schema no matter the
-      # cause. `is_error` and a $0 cost are what actually separate "no quota"
-      # from "bad contract"; both sit in the same object, unread. #819
-      - name: Explain a failed analysis
-        if: always() && steps.claude.outcome == 'failure'
-        env:
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
-        run: |
-          set -uo pipefail
-          if [[ -z "${EXECUTION_FILE:-}" || ! -f "$EXECUTION_FILE" ]]; then
-            echo "No execution file was propagated: the action failed before Claude produced one." >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          result="$(jq -c '[.. | objects | select(.type? == "result")] | last // {}' "$EXECUTION_FILE" 2>/dev/null)"
-          if [[ -z "$result" || "$result" == "{}" ]]; then
-            echo "Execution file unreadable, or carrying no \`result\` object." >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          {
-            echo "### Why the analysis failed"
-            echo
-            jq -r '"- is_error: `\(.is_error)`\n- num_turns: `\(.num_turns)`\n- duration_ms: `\(.duration_ms)`\n- total_cost_usd: `\(.total_cost_usd)`"' <<<"$result"
-            echo
-            if [[ "$(jq -r '.total_cost_usd // 1' <<<"$result")" == "0" ]]; then
-              echo "**\$0 spent — the request was rejected before inference. Spent quota or auth, NOT the JSON schema.**"
-            else
-              echo "Tokens were spent, so Claude ran: this is a contract or content failure, not quota."
-            fi
-          } >>"$GITHUB_STEP_SUMMARY"
-
       - name: Require a valid structured review
         if: steps.pr.outputs.reviewable == 'true'
         env:
@@ -195,28 +164,16 @@ jobs:
             and (.findings | type == "array" and length <= 5)
           ' <<< "$REVIEW_JSON" > /dev/null
 
-  # A spent quota is an operating condition, not an incident, and it is the one
-  # the check table renders indistinguishably from a flaky advisory: analyze
-  # fails, publish skips, no comment lands, and `ci-gate` being the only
-  # required check leaves the PR merely UNSTABLE. The merge gate is "Findings: 0
-  # at HEAD", so an absent verdict has to SAY it is absent. #819
-  #
-  # Absence has TWO shapes and the quieter one is the greener: analyze FAILS
-  # (quota, timeout), or it DECLINES — `reviewable=false` exits 0, so the job
-  # goes green while publish skips on the same flag. A maintainer running
-  # `/claude-review` on a fork PR hits the second and sees an all-green check
-  # table with no comment at all. `!cancelled()` rather than `always()` so a
-  # superseded run stays quiet.
-  #
-  # The failure arm reads no `outputs` — a failed job propagating them is not a
-  # documented guarantee, and this job is worthless if it silently stops
-  # running. The decline arm can: that job succeeded.
+  # A spent quota is rare but silent: analyze fails, publish skips on its
+  # outcome, nothing comments, and `ci-gate` being the only required check
+  # leaves the PR merely UNSTABLE. The merge gate is "Findings: 0 at HEAD", so
+  # an absent verdict has to say it is absent. `!cancelled()` is load-bearing —
+  # without a status function an implicit `success()` skips this job in exactly
+  # the situation it exists for. #819
   report_absence:
     name: Report a missing review
     needs: analyze
-    if: >
-      !cancelled() &&
-      (needs.analyze.result == 'failure' || needs.analyze.outputs.reviewable == 'false')
+    if: "!cancelled() && needs.analyze.result == 'failure'"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -224,7 +181,6 @@ jobs:
     steps:
       - name: Say the second lens did not run
         env:
-          ANALYZE_RESULT: ${{ needs.analyze.result }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
           REPOSITORY: ${{ github.repository }}
@@ -234,49 +190,20 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$REVIEW_MARKER" =~ ^[a-z0-9-]+$ ]]
-          [[ -n "$REVIEW_TITLE" ]]
           head_sha="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
-          # `absent-<marker>`, not `<marker>-absent`: the review's own marker is
-          # `<marker>:<sha>`, so a prefix matcher would read the latter as a review.
-          # Keyed to the HEAD, so a later head posts a NEW notice rather than
-          # editing an old one in place and leaving a stale verdict as the latest.
-          marker="<!-- absent-${REVIEW_MARKER}:${head_sha} -->"
           note="$RUNNER_TEMP/claude-review-absent.md"
           {
-            echo "$marker"
+            # `absent-<marker>`, not `<marker>-absent`: the review's own marker is
+            # `<marker>:<sha>`, so a prefix matcher would read the latter as a review.
+            echo "<!-- absent-${REVIEW_MARKER}:${head_sha} -->"
             echo "## $REVIEW_TITLE — did not run"
             echo
             echo "Head: \`$head_sha\`"
             echo
-            echo "**The automated second lens is ABSENT, not clean.** Treat this as"
-            echo "an unreviewed head: no findings were produced, so none being shown"
-            echo "means nothing."
-            echo
-            if [[ "$ANALYZE_RESULT" == "failure" ]]; then
-              echo "The analysis job failed; its job summary names the cause"
-              echo "(a spent quota and a broken contract fail identically here)."
-            else
-              echo "This pull request is out of scope for the reviewer: a fork head,"
-              echo "a base other than the default branch, or already closed."
-            fi
-            echo
-            echo "[Run log]($RUN_URL)."
+            echo "**The automated second lens is ABSENT, not clean.** No findings were"
+            echo "produced, so none being shown means nothing. [Run log]($RUN_URL)."
           } > "$note"
-
-          # Upsert so a re-run of the same head edits its notice instead of
-          # stacking another. A failed listing must not read as "none yet".
-          if ! ids="$(gh api "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
-            --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id")"; then
-            echo "::warning::could not list comments; skipping to avoid a duplicate notice"
-            exit 0
-          fi
-          existing="${ids%%$'\n'*}"
-          body="$(cat "$note")"
-          if [[ -n "$existing" ]]; then
-            gh api -X PATCH "repos/${REPOSITORY}/issues/comments/${existing}" -f body="$body" >/dev/null
-          else
-            gh api -X POST "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="$body" >/dev/null
-          fi
+          gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body-file "$note"
 
   publish:
     name: Publish review

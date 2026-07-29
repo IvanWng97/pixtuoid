@@ -477,29 +477,20 @@ CLAUDE_TAG_WORKFLOW_FILE="${CLAUDE_TAG_WORKFLOW_FILE:-.github/workflows/claude.y
 cat >"$fake_bin/gh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$1" == api ]]
-jq_expr="" url="" body="" method=GET
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --jq) jq_expr="$2"; shift ;;
-        -X) method="$2"; shift ;;
-        -f) body="${2#body=}"; shift ;;
-        repos/*) url="$1" ;;
-    esac
-    shift
-done
-if [[ "$method" != GET ]]; then
-    printf '%s' "$body" >"$ABSENCE_CAPTURE"
-    printf '%s' "$url" >"$ABSENCE_CAPTURE.url"
+if [[ "$1" == pr && "$2" == comment ]]; then
+    while [[ $# -gt 0 ]]; do
+        [[ "$1" == --body-file ]] && cp "$2" "$ABSENCE_CAPTURE"
+        shift
+    done
     exit 0
 fi
-case "$url" in
-    */comments)
-        [[ -z "${FAKE_LIST_FAILS:-}" ]] || exit 1
-        printf '%s' "${FAKE_COMMENTS:-[]}" | jq -r "$jq_expr"
-        ;;
-    *) printf '%s' "$FAKE_PR_JSON" | jq -r "$jq_expr" ;;
-esac
+[[ "$1" == api ]]
+jq_expr=""
+while [[ $# -gt 0 ]]; do
+    [[ "$1" == --jq ]] && jq_expr="$2"
+    shift
+done
+printf '%s' "$FAKE_PR_JSON" | jq -r "$jq_expr"
 STUB
 chmod +x "$fake_bin/gh"
 
@@ -527,57 +518,22 @@ assert_refusal '{"head":{"repo":null},"base":{"ref":"main"},"state":"open"}' tru
 
 absence_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Say the second lens did not run")"
 absence_capture="$test_dir/absence-body"
+: >"$absence_capture"
+PATH="$fake_bin:$PATH" \
+    ABSENCE_CAPTURE="$absence_capture" \
+    FAKE_PR_JSON="$valid_pr" \
+    GH_TOKEN="test-token" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW_MARKER="claude-auto-review" \
+    REVIEW_TITLE="Claude Review" \
+    RUN_URL="https://example.invalid/run" \
+    bash -c "$absence_script" >/dev/null 2>&1 ||
+    fail "absence notice exited non-zero"
 
-run_absence() {
-    : >"$absence_capture"
-    : >"$absence_capture.url"
-    PATH="$fake_bin:$PATH" \
-        ABSENCE_CAPTURE="$absence_capture" \
-        ANALYZE_RESULT="$1" \
-        FAKE_COMMENTS="${2:-[]}" \
-        FAKE_LIST_FAILS="${3:-}" \
-        FAKE_PR_JSON="$valid_pr" \
-        GH_TOKEN="test-token" \
-        PR_NUMBER="42" \
-        REPOSITORY="owner/repo" \
-        REVIEW_MARKER="claude-auto-review" \
-        REVIEW_TITLE="Claude Review" \
-        RUN_URL="https://example.invalid/run" \
-        bash -c "$absence_script" >/dev/null 2>&1 ||
-        fail "absence notice exited non-zero for result=$1"
-}
-
-run_absence failure
 absence_body="$(<"$absence_capture")"
 [[ "$absence_body" == *"ABSENT, not clean"* ]] ||
     fail "absence notice did not say the review is absent rather than clean"
-[[ "$absence_body" == *"<!-- absent-claude-auto-review:abc123 -->"* ]] ||
-    fail "absence notice omitted its own marker"
-# A prefix matcher on the published review's marker must not read this notice
-# as a review.
+# A prefix matcher on the published review's marker must not read this as a review.
 [[ "$absence_body" != *"<!-- claude-auto-review"* ]] ||
     fail "absence marker collides with the published review marker"
-[[ "$absence_body" == *"job summary names the cause"* ]] ||
-    fail "absence notice did not route a failed analysis to its summary"
-
-run_absence success
-absence_body="$(<"$absence_capture")"
-[[ "$absence_body" == *"out of scope for the reviewer"* ]] ||
-    fail "a declined review was reported as a failure"
-
-# A re-run of the same head must REPLACE its notice, not stack another.
-run_absence failure '[{"id":7,"body":"<!-- absent-claude-auto-review:abc123 -->\nstale"}]'
-[[ "$(<"$absence_capture.url")" == *"/issues/comments/7" ]] ||
-    fail "an existing notice was duplicated instead of refreshed in place"
-
-# `--jq` runs per page, so two matching notices yield two ids; splicing both
-# into the PATCH url would wedge the job exactly when it should self-heal.
-run_absence failure '[{"id":7,"body":"<!-- absent-claude-auto-review:abc123 -->\na"},{"id":8,"body":"<!-- absent-claude-auto-review:abc123 -->\nb"}]'
-[[ "$(<"$absence_capture.url")" == *"/issues/comments/7" ]] ||
-    fail "a second matching notice was spliced into the update target"
-
-# A listing that ERRORS is not "no notice yet": writing here posts the duplicate
-# the guard exists to prevent.
-run_absence failure '[]' fail-the-listing
-[[ ! -s "$absence_capture" ]] ||
-    fail "a failed comment listing still wrote a notice"
