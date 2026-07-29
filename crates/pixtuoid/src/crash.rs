@@ -7,11 +7,12 @@ use std::path::PathBuf;
 
 pub(crate) fn install_crash_hook() {
     std::panic::set_hook(Box::new(|info| {
-        let _ = restore_terminal(&mut std::io::stdout());
-        // Stream-INDEPENDENT, unlike the two above: crossterm resolves its own
-        // fd from /dev/tty here. Must still run AFTER the mouse-capture restore
-        // — same ordering contract as tui::teardown_terminal (the WHY is there).
-        let _ = crossterm::terminal::disable_raw_mode();
+        // stdout is the stream `setup_terminal` entered the alt screen on, and
+        // these are ANSI bytes going to whatever writer `execute!` is handed.
+        let _ = pixtuoid::tui::unwind_terminal_modes(
+            &mut std::io::stdout(),
+            crossterm::terminal::disable_raw_mode,
+        );
 
         let version = env!("CARGO_PKG_VERSION");
         let crash_path = crash_log_path();
@@ -53,32 +54,6 @@ pub(crate) fn install_crash_hook() {
         );
         eprintln!("  \x1b[2m(attach if the reviewer asks — the link above only carries a truncated trace)\x1b[0m\n");
     }));
-}
-
-/// Undo the terminal modes `tui::setup_terminal` entered, writing into `w`.
-///
-/// `w` MUST be the stream the alternate screen was ENTERED on — `stdout`. These
-/// are ANSI sequences delivered to whatever writer you hand `execute!`, and
-/// every other site in the terminal-mode state machine drives stdout
-/// (`setup_terminal` does `execute!(stdout(), EnterAlternateScreen,
-/// EnableMouseCapture)`; `teardown_terminal` writes through `Terminal<
-/// CrosstermBackend<Stdout>>`). Writing the restore to stderr instead worked
-/// only while stderr happened to be the same tty: under `pixtuoid run
-/// 2>/dev/null` — a plausible move, since main.rs eprintlns its truecolor and
-/// config warnings — the sequences went to the redirect and the user was left
-/// on the alternate screen with mouse reporting on, needing `reset`.
-///
-/// The human-readable report deliberately stays on stderr (see the caller): a
-/// non-TUI command with a redirected stdout gets a few escape bytes in its
-/// output on a panic, which is the cheap side of this trade — those commands
-/// never entered the alt screen, and their output is already truncated by the
-/// crash.
-fn restore_terminal(w: &mut impl std::io::Write) -> std::io::Result<()> {
-    crossterm::execute!(
-        w,
-        crossterm::event::DisableMouseCapture,
-        crossterm::terminal::LeaveAlternateScreen
-    )
 }
 
 #[allow(deprecated)]
@@ -209,21 +184,6 @@ mod tests {
     /// in-memory or piped, ever sees a byte to assert on.
     #[cfg(unix)]
     const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
-
-    /// That the restore reaches the writer it was HANDED (the generic seam),
-    /// as opposed to a stream of its own choosing. Unix-only for the crossterm
-    /// dispatch reason on `LEAVE_ALT_SCREEN` above.
-    #[cfg(unix)]
-    #[test]
-    fn the_restore_writes_the_leave_sequence_into_the_writer_it_is_given() {
-        let mut buf: Vec<u8> = Vec::new();
-        restore_terminal(&mut buf).unwrap();
-        let s = String::from_utf8(buf).unwrap();
-        assert!(
-            s.contains(LEAVE_ALT_SCREEN),
-            "the restore must reach the writer handed to it, not a fixed stream: {s:?}"
-        );
-    }
 
     /// Which STREAM the installed hook writes to, end to end. The panic hook is
     /// process-global and writes to a real fd, so the only way to observe its
