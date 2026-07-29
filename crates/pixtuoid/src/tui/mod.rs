@@ -582,7 +582,7 @@ pub fn setup_terminal() -> Result<Term> {
     // path strands the user's shell in raw mode (no echo) and/or the alt screen.
     if let Err(e) = execute!(out, EnterAlternateScreen, EnableMouseCapture) {
         // Roll all the way back in case EnterAlternateScreen took effect before
-        // EnableMouseCapture failed; the setup error is what propagates.
+        // EnableMouseCapture failed.
         let _ = unwind_terminal_modes(&mut out, disable_raw_mode);
         return Err(e.into());
     }
@@ -595,7 +595,7 @@ pub fn setup_terminal() -> Result<Term> {
 
 /// THE terminal-mode unwind: the ONE definition of the order every exit path
 /// takes — `teardown_terminal`, both `setup_terminal` rollback arms, and the
-/// panic hook (`crash.rs`, a separate crate, which is why this is `pub`).
+/// panic hook (`crash.rs`, a module of the BIN crate, which is why this is `pub`).
 ///
 /// Over an injected writer + raw-mode disabler so the ORDER and its error
 /// policy are unit-testable without a real TTY. Every step runs even when an
@@ -1332,7 +1332,7 @@ mod teardown_tests {
     /// Windows dispatches these sequences to the console API rather than the
     /// writer whenever crossterm's ANSI support flag is false, and under
     /// `windows-test` that flag IS false (piped stdout, no console, no `TERM`),
-    /// so no writer ever sees a byte to assert on. Unix-only for that reason.
+    /// so no writer ever sees a byte to assert on.
     #[cfg(unix)]
     const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
 
@@ -1347,6 +1347,34 @@ mod teardown_tests {
         assert!(
             s.contains(LEAVE_ALT_SCREEN),
             "the unwind must reach the writer handed to it, not a fixed stream: {s:?}"
+        );
+    }
+
+    /// Unix-only for the same console-API reason as `LEAVE_ALT_SCREEN` above.
+    #[cfg(unix)]
+    #[test]
+    fn raw_mode_is_disabled_only_after_the_escape_bytes_are_written() {
+        struct Recorder<'a>(&'a Cell<bool>);
+        impl std::io::Write for Recorder<'_> {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.set(true);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let wrote = Cell::new(false);
+        let raw_saw_write = Cell::new(false);
+        unwind_terminal_modes(&mut Recorder(&wrote), || {
+            raw_saw_write.set(wrote.get());
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            raw_saw_write.get(),
+            "DisableMouseCapture must reach the terminal while raw mode is still ON"
         );
     }
 
