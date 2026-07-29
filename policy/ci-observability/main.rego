@@ -467,6 +467,10 @@ claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
 
 claude_absence_condition := "needs.analyze.result == 'failure'"
 
+# The decline arm has no red job behind it, so its removal is what nothing else
+# would catch.
+claude_decline_condition := "needs.analyze.outputs.reviewable == 'false'"
+
 # Without one of these an implicit `success()` is applied over `needs: analyze`,
 # so the job is skipped in precisely the situation it exists for — and the
 # inert form reads like a tidy-up, which is how it would land.
@@ -474,7 +478,9 @@ claude_status_functions := {"always()", "!cancelled()", "failure()"}
 
 claude_absence_conditioned_jobs := [job |
 	some job in claude_reusable_jobs
-	contains(normalized_claude_condition(object.get(job, "if", "")), claude_absence_condition)
+	condition := normalized_claude_condition(object.get(job, "if", ""))
+	contains(condition, claude_absence_condition)
+	contains(condition, claude_decline_condition)
 ]
 
 claude_condition_has_status_function(condition) if {
@@ -790,7 +796,7 @@ deny contains msg if {
 deny contains msg if {
 	_ := documents[claude_reusable_workflow_path]
 	count(claude_absence_conditioned_jobs) != 1
-	msg := sprintf("%s must report an absent review in exactly one job conditioned on `%s`", [claude_reusable_workflow_path, claude_absence_condition])
+	msg := sprintf("%s must report an absent review in exactly one job, conditioned on BOTH `%s` and `%s`", [claude_reusable_workflow_path, claude_absence_condition, claude_decline_condition])
 }
 
 # Split from the rule above so the maintainer who deleted `always()` as tidy-up

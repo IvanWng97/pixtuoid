@@ -811,7 +811,7 @@ test_claude_resolver_is_required if {
 	sprintf("%s must resolve one open internal default-branch pull request", [claude_reusable_workflow_path]) in violations
 }
 
-claude_absence_missing_message := sprintf("%s must report an absent review in exactly one job conditioned on `%s`", [claude_reusable_workflow_path, claude_absence_condition])
+claude_absence_missing_message := sprintf("%s must report an absent review in exactly one job, conditioned on BOTH `%s` and `%s`", [claude_reusable_workflow_path, claude_absence_condition, claude_decline_condition])
 
 claude_absence_status_message := sprintf("%s absent-review job's `if:` needs a status function (one of %v) — without one an implicit `success()` skips it exactly when analyze fails", [claude_reusable_workflow_path, claude_status_functions])
 
@@ -831,12 +831,25 @@ test_claude_absent_review_reporter_is_accepted if {
 	violations := deny with input as claude_absence_reusable({
 		"analyze": {"steps": []},
 		"report_absence": {
-			"if": sprintf("always() && %s", [claude_absence_condition]),
+			"if": sprintf("always() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
 			"permissions": {"pull-requests": "write"},
 			"steps": [],
 		},
 	})
 	not claude_absence_missing_message in violations
+}
+
+# The decline arm is the shape with no red job behind it, so nothing else would
+# notice its removal.
+test_claude_absent_review_without_the_decline_arm_is_denied if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("!cancelled() && %s", [claude_absence_condition]),
+			"steps": [],
+		},
+	})
+	claude_absence_missing_message in violations
 }
 
 # The inert variant, and the one that would land as a cleanup — see
@@ -845,7 +858,7 @@ test_claude_absent_review_without_a_status_function_is_denied if {
 	violations := deny with input as claude_absence_reusable({
 		"analyze": {"steps": []},
 		"report_absence": {
-			"if": claude_absence_condition,
+			"if": sprintf("%s || %s", [claude_absence_condition, claude_decline_condition]),
 			"permissions": {"pull-requests": "write"},
 			"steps": [],
 		},

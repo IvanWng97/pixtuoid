@@ -222,10 +222,11 @@ and emits schema-bound JSON; a separate no-checkout publisher revalidates the PR
 head before writing the review comment. A third job comments when the model job
 FAILS, because absence otherwise renders as a pass — the publisher skips, no
 `Findings:` comment lands, and the PR reads merely `UNSTABLE`, which is how #809
-and #815–#818 merged with only a red job to say so. Rare, so it is deliberately
-thin: one comment, and one policy rule pinning that the job exists and that its
-condition carries a status function — without one an implicit `success()` would
-skip it exactly when it is needed (#819). The human-triggered `@claude` workflow
+and #815–#818 merged with only a red job to say so. It covers both shapes — the
+failure and the decline (`reviewable=false` exits 0, so that arm has no red job
+at all). Rare, so it stays thin: one comment, and one rule pinning that the job
+exists with both arms and a status function, without which an implicit
+`success()` would skip it exactly when it is needed (#819). The human-triggered `@claude` workflow
 (`claude.yml`, the only `contents: write` Claude job) checks out without a ref,
 so its two `pull_request_review*` arms — the events whose `GITHUB_REF` is the PR
 merge ref — additionally require the head to live in this repository, and the

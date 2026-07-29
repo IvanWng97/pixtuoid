@@ -518,22 +518,34 @@ assert_refusal '{"head":{"repo":null},"base":{"ref":"main"},"state":"open"}' tru
 
 absence_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Say the second lens did not run")"
 absence_capture="$test_dir/absence-body"
-: >"$absence_capture"
-PATH="$fake_bin:$PATH" \
-    ABSENCE_CAPTURE="$absence_capture" \
-    FAKE_PR_JSON="$valid_pr" \
-    GH_TOKEN="test-token" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW_MARKER="claude-auto-review" \
-    REVIEW_TITLE="Claude Review" \
-    RUN_URL="https://example.invalid/run" \
-    bash -c "$absence_script" >/dev/null 2>&1 ||
-    fail "absence notice exited non-zero"
 
+run_absence() {
+    : >"$absence_capture"
+    PATH="$fake_bin:$PATH" \
+        ABSENCE_CAPTURE="$absence_capture" \
+        ANALYZE_RESULT="$1" \
+        FAKE_PR_JSON="$valid_pr" \
+        GH_TOKEN="test-token" \
+        PR_NUMBER="42" \
+        REPOSITORY="owner/repo" \
+        REVIEW_MARKER="claude-auto-review" \
+        REVIEW_TITLE="Claude Review" \
+        RUN_URL="https://example.invalid/run" \
+        bash -c "$absence_script" >/dev/null 2>&1 ||
+        fail "absence notice exited non-zero for result=$1"
+}
+
+run_absence failure
 absence_body="$(<"$absence_capture")"
 [[ "$absence_body" == *"ABSENT, not clean"* ]] ||
     fail "absence notice did not say the review is absent rather than clean"
 # A prefix matcher on the published review's marker must not read this as a review.
 [[ "$absence_body" != *"<!-- claude-auto-review"* ]] ||
     fail "absence marker collides with the published review marker"
+[[ "$absence_body" == *"total_cost_usd"* ]] ||
+    fail "a failed analysis did not name the field that identifies a spent quota"
+
+# The decline arm has no red job behind it; it must still say something.
+run_absence success
+[[ "$(<"$absence_capture")" == *"out of scope for the reviewer"* ]] ||
+    fail "a declined review was reported as a failure"
