@@ -402,10 +402,14 @@ claude_trigger_workflow_paths := {
 
 # Identified by the action it runs, not by its job NAME: keying on the literal
 # name `claude` let a rename retire the head guard below in silence.
-claude_tag_jobs := [job |
-	some job in object.get(documents[claude_tag_workflow_path], "jobs", {})
+claude_job_runs_the_action(job) if {
 	some step in object.get(job, "steps", [])
 	action_matches(object.get(step, "uses", ""), claude_action)
+}
+
+claude_tag_jobs := [job |
+	some job in object.get(documents[claude_tag_workflow_path], "jobs", {})
+	claude_job_runs_the_action(job)
 ]
 
 claude_tag_condition := normalized_claude_condition(object.get(claude_tag_jobs[0], "if", ""))
@@ -437,8 +441,58 @@ claude_tag_event_is_guarded(event) if {
 	}
 }
 
+claude_tag_steps := object.get(claude_tag_jobs[0], "steps", [])
+
+# Keyed on the API field the refusal must READ, not on its step name — the same
+# reason `claude_tag_jobs` keys off the action instead of the job name.
+claude_fork_refusal_marker := "head.repo.full_name"
+
+claude_fork_refusal_indices := [idx |
+	some idx, step in claude_tag_steps
+	contains(object.get(step, "run", ""), claude_fork_refusal_marker)
+	contains(object.get(step, "if", ""), "issue_comment")
+]
+
+claude_action_step_indices := [idx |
+	some idx, step in claude_tag_steps
+	action_matches(object.get(step, "uses", ""), claude_action)
+]
+
+claude_fork_refusal_precedes_the_action if {
+	min(claude_fork_refusal_indices) < min(claude_action_step_indices)
+}
+
 claude_reusable := object.get(documents, claude_reusable_workflow_path, {})
 claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
+
+claude_absence_condition := "needs.analyze.result == 'failure'"
+
+# The decline arm has no red job behind it, so its removal is what nothing else
+# would catch.
+claude_decline_condition := "needs.analyze.outputs.reviewable == 'false'"
+
+# Without one of these an implicit `success()` is applied over `needs: analyze`,
+# so the job is skipped in precisely the situation it exists for — and the
+# inert form reads like a tidy-up, which is how it would land.
+claude_status_functions := {"always()", "!cancelled()", "failure()"}
+
+claude_absence_conditioned_jobs := [job |
+	some job in claude_reusable_jobs
+	condition := normalized_claude_condition(object.get(job, "if", ""))
+	contains(condition, claude_absence_condition)
+	contains(condition, claude_decline_condition)
+]
+
+claude_condition_has_status_function(condition) if {
+	some status_function in claude_status_functions
+	contains(condition, status_function)
+}
+
+claude_absence_jobs := [job |
+	some job in claude_absence_conditioned_jobs
+	claude_condition_has_status_function(normalized_claude_condition(object.get(job, "if", "")))
+]
+
 claude_analyze_job := object.get(claude_reusable_jobs, "analyze", {})
 claude_publish_job := object.get(claude_reusable_jobs, "publish", {})
 claude_analyze_steps := object.get(claude_analyze_job, "steps", [])
@@ -716,12 +770,42 @@ deny contains msg if {
 	msg := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
 }
 
+# The issue_comment arm cannot be closed by an `if:` at all: its payload carries
+# no pull_request object, and the fork tree arrives through the action's own
+# setupBranch (tag mode checks the PR head out for every open PR, fork or not)
+# rather than through GITHUB_REF. So the guard has to be a STEP, and it has to
+# run before the action stages that tree. #799
+deny contains msg if {
+	claude_tag_triggers_event("issue_comment")
+	count(claude_tag_jobs) == 1
+	not claude_fork_refusal_precedes_the_action
+	msg := sprintf("%s must refuse fork pull requests in a step scoped to `issue_comment`, before `%s` runs", [claude_tag_workflow_path, claude_action])
+}
+
 # The existence half: the guard above resolves the job through its action step,
 # so a workflow where no job runs the action leaves nothing to check.
 deny contains msg if {
 	_ := documents[claude_tag_workflow_path]
 	count(claude_tag_jobs) != 1
 	msg := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
+}
+
+# The merge gate reads "Findings: 0 at HEAD", so a run that produces no verdict
+# must SAY so — otherwise a spent quota is indistinguishable from a clean review
+# (publish skips, nothing comments, the PR just reads UNSTABLE). #819
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	count(claude_absence_conditioned_jobs) != 1
+	msg := sprintf("%s must report an absent review in exactly one job, conditioned on BOTH `%s` and `%s`", [claude_reusable_workflow_path, claude_absence_condition, claude_decline_condition])
+}
+
+# Split from the rule above so the maintainer who deleted `always()` as tidy-up
+# is not told to add a condition they can see is already there.
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	count(claude_absence_conditioned_jobs) == 1
+	count(claude_absence_jobs) == 0
+	msg := sprintf("%s absent-review job's `if:` needs a status function (one of %v) — without one an implicit `success()` skips it exactly when analyze fails", [claude_reusable_workflow_path, claude_status_functions])
 }
 
 deny contains msg if {

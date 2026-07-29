@@ -219,7 +219,14 @@ The two automatic Claude reviewers are thin trigger policies over
 `claude-readonly-review.yml`: the model job checks out only the trusted default
 branch, receives the exact PR diff as inert data, has read-only GitHub/tools,
 and emits schema-bound JSON; a separate no-checkout publisher revalidates the PR
-head before writing the review comment. The human-triggered `@claude` workflow
+head before writing the review comment. A third job comments when the model job
+FAILS, because absence otherwise renders as a pass — the publisher skips, no
+`Findings:` comment lands, and the PR reads merely `UNSTABLE`, which is how #809
+and #815–#818 merged with only a red job to say so. It covers both shapes — the
+failure and the decline (`reviewable=false` exits 0, so that arm has no red job
+at all). Rare, so it stays thin: one comment, and one rule pinning that the job
+exists with both arms and a status function, without which an implicit
+`success()` would skip it exactly when it is needed (#819). The human-triggered `@claude` workflow
 (`claude.yml`, the only `contents: write` Claude job) checks out without a ref,
 so its two `pull_request_review*` arms — the events whose `GITHUB_REF` is the PR
 merge ref — additionally require the head to live in this repository, and the
@@ -227,8 +234,12 @@ policy keys that requirement off the workflow's `on:` triggers rather than its
 surviving `if:` arms (a condition that never names an event SKIPS the job; a
 missing condition gates nothing). The `issues`/`issue_comment` arms carry no
 `pull_request` object, so the same guard is not expressible there — and
-claude-code-action checks the PR head out itself, which keeps `issue_comment`
-exposed on fork PRs (#799). Anthropic WIF is preferred when its
+claude-code-action stages the fork tree itself (tag mode's `setupBranch` checks
+the PR head out for every open PR), so `issue_comment` needs a job STEP instead:
+`Refuse fork pull requests` resolves the PR and exits first, and the policy pins
+its existence, that it is scoped to `issue_comment`, and that it precedes the
+action, keyed on the API field it reads rather than its name (#799). `issues` is unaffected — the action hardcodes
+`isPR` false there. Anthropic WIF is preferred when its
 repository variables are configured, with the existing OAuth secret as a
 compatibility fallback. Codecov uploads likewise use job-scoped GitHub OIDC
 (fork PRs remain Codecov's tokenless path), never a repository upload token.

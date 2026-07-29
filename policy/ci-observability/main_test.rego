@@ -811,6 +811,61 @@ test_claude_resolver_is_required if {
 	sprintf("%s must resolve one open internal default-branch pull request", [claude_reusable_workflow_path]) in violations
 }
 
+claude_absence_missing_message := sprintf("%s must report an absent review in exactly one job, conditioned on BOTH `%s` and `%s`", [claude_reusable_workflow_path, claude_absence_condition, claude_decline_condition])
+
+claude_absence_status_message := sprintf("%s absent-review job's `if:` needs a status function (one of %v) — without one an implicit `success()` skips it exactly when analyze fails", [claude_reusable_workflow_path, claude_status_functions])
+
+claude_absence_reusable(jobs) := {"documents": [{
+	"path": claude_reusable_workflow_path,
+	"contents": {"jobs": jobs},
+}]}
+
+# Absence and a clean review render identically without this job — see the
+# rule in main.rego. #819
+test_claude_absent_review_must_be_reported if {
+	violations := deny with input as claude_absence_reusable({"analyze": {"steps": []}})
+	claude_absence_missing_message in violations
+}
+
+test_claude_absent_review_reporter_is_accepted if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("always() && (%s || %s)", [claude_absence_condition, claude_decline_condition]),
+			"permissions": {"pull-requests": "write"},
+			"steps": [],
+		},
+	})
+	not claude_absence_missing_message in violations
+}
+
+# The decline arm is the shape with no red job behind it, so nothing else would
+# notice its removal.
+test_claude_absent_review_without_the_decline_arm_is_denied if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("!cancelled() && %s", [claude_absence_condition]),
+			"steps": [],
+		},
+	})
+	claude_absence_missing_message in violations
+}
+
+# The inert variant, and the one that would land as a cleanup — see
+# `claude_status_functions` in main.rego.
+test_claude_absent_review_without_a_status_function_is_denied if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("%s || %s", [claude_absence_condition, claude_decline_condition]),
+			"permissions": {"pull-requests": "write"},
+			"steps": [],
+		},
+	})
+	claude_absence_status_message in violations
+}
+
 test_claude_oauth_fallback_requires_all_wif_authority_fields_to_be_absent if {
 	fixture := {"documents": [{
 		"path": claude_reusable_workflow_path,
@@ -1178,6 +1233,13 @@ test_codeql_health_gate_before_upload_is_accepted if {
 
 claude_tag_head_guard_message(event) := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
 
+claude_tag_fork_refusal_message := sprintf("%s must refuse fork pull requests in a step scoped to `issue_comment`, before `%s` runs", [claude_tag_workflow_path, claude_action])
+
+claude_tag_fork_refusal_step := {
+	"if": "github.event_name == 'issue_comment' && github.event.issue.pull_request",
+	"run": sprintf("head_repo=\"$(gh api \"repos/$REPOSITORY/pulls/$PR_NUMBER\" --jq '.%s')\"", [claude_fork_refusal_marker]),
+}
+
 claude_tag_single_job_message := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
 
 claude_tag_triggers := {
@@ -1280,6 +1342,60 @@ test_claude_tag_dropping_a_pull_request_trigger_is_accepted if {
 	every violation in violations {
 		not contains(violation, "arm must require")
 	}
+}
+
+# The `if:` guard the other arms use is inexpressible here — see the rule in
+# main.rego. #799
+test_claude_tag_issue_comment_without_a_fork_refusal_step_is_denied if {
+	violations := deny with input as claude_tag_fixture(sprintf(" && %s", [claude_same_repo_head_condition]))
+	claude_tag_fork_refusal_message in violations
+}
+
+# ORDER is the whole point — a refusal that runs after the action has already
+# staged the fork tree is decoration.
+test_claude_tag_fork_refusal_after_the_action_is_denied if {
+	violations := deny with input as claude_tag_workflow("claude", {
+		"if": claude_tag_condition_text(sprintf(" && %s", [claude_same_repo_head_condition])),
+		"steps": [{"uses": claude_action}, claude_tag_fork_refusal_step],
+	})
+	claude_tag_fork_refusal_message in violations
+}
+
+# Narrowing the step's own condition reopens #799 in full while leaving the
+# `run:` body — and so a run-only rule — untouched.
+test_claude_tag_fork_refusal_not_scoped_to_issue_comment_is_denied if {
+	violations := deny with input as claude_tag_workflow("claude", {
+		"if": claude_tag_condition_text(sprintf(" && %s", [claude_same_repo_head_condition])),
+		"steps": [
+			object.union(claude_tag_fork_refusal_step, {"if": "github.event_name == 'pull_request_review'"}),
+			{"uses": claude_action},
+		],
+	})
+	claude_tag_fork_refusal_message in violations
+}
+
+test_claude_tag_fork_refusal_before_the_action_is_accepted if {
+	violations := deny with input as claude_tag_workflow("claude", {
+		"if": claude_tag_condition_text(sprintf(" && %s", [claude_same_repo_head_condition])),
+		"steps": [claude_tag_fork_refusal_step, {"uses": claude_action}],
+	})
+	not claude_tag_fork_refusal_message in violations
+}
+
+# Retiring the trigger retires the requirement, same as the head-guard rule.
+test_claude_tag_without_the_issue_comment_trigger_needs_no_fork_refusal if {
+	fixture := {"documents": [{
+		"path": claude_tag_workflow_path,
+		"contents": {
+			"on": {"issues": {"types": ["opened"]}},
+			"jobs": {"claude": {
+				"if": "(github.event_name == 'issues' && trusted)",
+				"steps": [{"uses": claude_action}],
+			}},
+		},
+	}]}
+	violations := deny with input as fixture
+	not claude_tag_fork_refusal_message in violations
 }
 
 test_codeql_init_hardcoding_a_language_is_denied if {
