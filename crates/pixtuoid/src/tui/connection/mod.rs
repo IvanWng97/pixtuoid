@@ -242,5 +242,40 @@ pub fn format_disconnect_result(r: &UninstallReport, display_name: &str) -> Stri
     s
 }
 
+/// WHICH bind/unbind step a panel failure line reports. `HookRemoval` is not a
+/// failed disconnect: the flag IS persisted false and only the hook removal
+/// didn't land, so it words the residual rather than the operation — the
+/// distinction `sources::DisconnectOutcome::HookRemovalFailed` and
+/// `sources::HOOK_REMOVAL_FAILED_PREFIX` carry to this seam from their two
+/// different call paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailedOp {
+    /// A connect that left the source disconnected (the core rolled the flag back).
+    Connect,
+    /// A disconnect that wrote nothing (the persist itself aborted).
+    Disconnect,
+    /// A disconnect that persisted, with the hooks left behind.
+    HookRemoval,
+}
+
+/// THE Sources-panel failure line, `{display_name}: {what failed} — {reason}`.
+///
+/// Every site that words a failed bind/unbind rides this: the panel's own `t`
+/// toggle (`tui::connect_source` / `tui::disconnect_source`) and the onboarding
+/// apply's surfacing (`tui::reflect_onboarding_outcomes`), which routes its
+/// failures onto this very panel, so a retry on the row reads the sentence the
+/// failure first gave. Hand-writing a fourth copy is exactly the drift this seam
+/// forecloses, and the risk is asymmetric: `disconnect_source`'s two are behind a
+/// real `ConfigLock` round no in-process test drives, so a reword there is
+/// invisible to the suite in a way the onboarding one is not.
+pub fn format_failure(op: FailedOp, display_name: &str, reason: &str) -> String {
+    let what = match op {
+        FailedOp::Connect => "connect failed",
+        FailedOp::Disconnect => "disconnect failed",
+        FailedOp::HookRemoval => crate::sources::HOOK_REMOVAL_FAILED_PHRASE,
+    };
+    format!("{display_name}: {what} \u{2014} {reason}")
+}
+
 #[cfg(test)]
 mod tests;

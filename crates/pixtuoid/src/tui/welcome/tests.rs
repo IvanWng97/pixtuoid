@@ -58,22 +58,44 @@ fn dim_ramps_in_on_open_and_out_on_close() {
     );
     assert!(dim_opening(DIM_RAMP_MS / 2) > DIM_FLOOR && dim_opening(DIM_RAMP_MS / 2) < 1.0);
 
-    // Closing: starts at the floor, climbs back toward full, None once restored.
+    // Closing: starts at whatever the open ramp reached, climbs back toward
+    // full, None once restored.
     assert!(
-        (dim_closing(0).unwrap() - DIM_FLOOR).abs() < 1e-6,
+        (dim_closing(DIM_FLOOR, 0).unwrap() - DIM_FLOOR).abs() < 1e-6,
         "floor at fade start"
     );
-    let mid = dim_closing(DIM_FADE_OUT_MS / 2).unwrap();
+    let mid = dim_closing(DIM_FLOOR, DIM_FADE_OUT_MS / 2).unwrap();
     assert!(mid > DIM_FLOOR && mid < 1.0, "climbing back: {mid}");
     assert_eq!(
-        dim_closing(DIM_FADE_OUT_MS),
+        dim_closing(DIM_FLOOR, DIM_FADE_OUT_MS),
         None,
         "fully restored ⇒ drop the state"
     );
-    assert_eq!(dim_closing(DIM_FADE_OUT_MS + 100), None);
+    assert_eq!(dim_closing(DIM_FLOOR, DIM_FADE_OUT_MS + 100), None);
 
     // The default frame never dims.
     assert!((OnboardingFrame::default().dim - 1.0).abs() < 1e-6);
+}
+
+/// An overlay skipped MID-RAMP must fade out from where it actually was — a
+/// close ramp hardcoded to `DIM_FLOOR` darkened the whole office by up to
+/// `1.0 - DIM_FLOOR` for a frame before climbing back.
+#[test]
+fn the_close_fade_continues_from_the_dim_it_was_interrupted_at() {
+    let interrupted = dim_opening(DIM_RAMP_MS / 3);
+    assert!(
+        interrupted > DIM_FLOOR,
+        "the probe must be mid-ramp: {interrupted}"
+    );
+    let first_close_frame = dim_closing(interrupted, 0).expect("the fade is armed");
+    assert!(
+        (first_close_frame - interrupted).abs() < 1e-6,
+        "the fade must resume at {interrupted}, not snap to {first_close_frame}"
+    );
+    // …and still climb monotonically to full over the same window.
+    let mid = dim_closing(interrupted, DIM_FADE_OUT_MS / 2).expect("still fading");
+    assert!(mid > interrupted && mid < 1.0, "climbing back: {mid}");
+    assert_eq!(dim_closing(interrupted, DIM_FADE_OUT_MS), None);
 }
 
 #[test]

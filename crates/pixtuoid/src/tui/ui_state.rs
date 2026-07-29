@@ -137,7 +137,9 @@ pub(crate) struct UiState {
     // is gone, then clears to fully live).
     pub(crate) onboarding_ui: WelcomeUi,
     onboarding_opened_at: Option<Instant>,
-    onboarding_closing_at: Option<Instant>,
+    /// `(fade start, the dim the open ramp was interrupted at)` — the second
+    /// half is what keeps a mid-ramp skip from snapping the office darker.
+    onboarding_closing_at: Option<(Instant, f32)>,
     /// The "what's new in vX" version popup.
     version_popup: bool,
     /// `?` help overlay. Owned HERE (the projection's one source of truth);
@@ -352,6 +354,23 @@ impl UiState {
         self.connection.last_result = None;
     }
 
+    /// Park the selection on `source_id`'s row, leaving it where it is when the
+    /// panel has no such row. `open_connection` deliberately CARRIES the previous
+    /// index (0 on a fresh `UiState`), so a caller that opens the panel about ONE
+    /// source — the onboarding failure surfacing — has to say which; otherwise the
+    /// `t` it offers acts on an unrelated row. Unlike `connection_move` this keeps
+    /// `last_result` (the reason the panel was opened at all).
+    pub(crate) fn select_connection_source(&mut self, source_id: &str) {
+        if let Some(idx) = self
+            .connection
+            .rows
+            .iter()
+            .position(|r| r.source_id == source_id)
+        {
+            self.connection.selected = idx;
+        }
+    }
+
     pub(crate) fn connection_move(&mut self, delta: i32) {
         self.connection.selected =
             connection::move_selection(&self.connection.rows, self.connection.selected, delta);
@@ -372,10 +391,15 @@ impl UiState {
     }
 
     /// Confirm/skip both end the overlay the same way: card gone, close fade
-    /// armed (the office keeps dimming back up for a beat).
+    /// armed (the office keeps dimming back up for a beat) FROM the dim the open
+    /// ramp had reached — a skip mid-ramp must not snap the office darker first.
     pub(crate) fn close_onboarding(&mut self) {
-        self.onboarding_opened_at = None;
-        self.onboarding_closing_at = Some(Instant::now());
+        self.onboarding_closing_at = self.onboarding_opened_at.take().map(|o| {
+            (
+                Instant::now(),
+                welcome::dim_opening(o.elapsed().as_millis() as u64),
+            )
+        });
     }
 
     // --- the per-frame renderer mirrors -------------------------------------
@@ -465,8 +489,8 @@ impl UiState {
                 elapsed_ms: e,
                 dim: welcome::dim_opening(e),
             }
-        } else if let Some(closing) = self.onboarding_closing_at {
-            match welcome::dim_closing(closing.elapsed().as_millis() as u64) {
+        } else if let Some((closing, from)) = self.onboarding_closing_at {
+            match welcome::dim_closing(from, closing.elapsed().as_millis() as u64) {
                 Some(dim) => OnboardingFrame {
                     dim,
                     ..Default::default()
@@ -590,6 +614,14 @@ mod tests {
         let scene = SceneState::new([4, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         let frames = ui.build_frames(SystemTime::now(), &scene, &[]);
         assert!(!frames.onboarding.open, "the card itself is gone");
+        // Closed immediately, so the open ramp had barely dimmed — the first
+        // close frame must still be near full brightness.
+        assert!(
+            frames.onboarding.dim > 0.9,
+            "an instantly-skipped overlay must not snap the office to the dim \
+             floor before fading back, got {}",
+            frames.onboarding.dim
+        );
     }
 
     /// Pause freezes `now()` at one instant; unpausing releases it.

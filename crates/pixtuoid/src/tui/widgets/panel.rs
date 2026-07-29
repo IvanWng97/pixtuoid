@@ -27,6 +27,17 @@ const PANEL_PAD_Y: u16 = 1;
 const PANEL_MIN_W: u16 = 4;
 const PANEL_MIN_H: u16 = 3;
 
+/// Rows at the bottom of `bounds` a panel may never occupy: the footer, painted
+/// by every draw path and the one persistent affordance (`[q]uit`, `[?]help`).
+/// Without it a panel taller than the terminal clamps to `bounds.height` and
+/// paints straight over it — the version popup did exactly that at 32×31, where
+/// the wrapped release notes outgrow the frame. Reserved HERE rather than by
+/// shrinking each caller's `bounds`, because centering in a shorter box would
+/// also move every panel that already fits. This is only the card BODY's half of
+/// the rule — the drop shadow is offset a row further down and clips itself
+/// (`super::cast_drop_shadow`).
+const RESERVED_FOOTER_ROWS: u16 = crate::tui::renderer::FOOTER_ROWS;
+
 /// Inner content `Rect` of a borderless panel: `outer` inset by `PANEL_PAD_*`
 /// with the title row (when present) dropped. Raw-area fallback when `outer` is
 /// too small to inset — the historical `borderless_panel` behavior. Extracted so
@@ -63,7 +74,8 @@ pub(crate) struct PanelGeometry {
 
 impl PanelGeometry {
     /// `content_rows` is the content BELOW the title; the title row is added here.
-    /// Envelope = `(content + 2·PANEL_PAD)` clamped to `bounds`, THEN ·`scale`
+    /// Envelope = `(content + 2·PANEL_PAD)` clamped to `bounds` less
+    /// `RESERVED_FOOTER_ROWS`, THEN ·`scale`
     /// (rounded), centered off the SCALED dims, THEN the `<PANEL_MIN → None` guard
     /// (subsumes the 5 per-caller `<4||<3` guards AND version_popup's `.max(2)`
     /// floor + `scale<=0.01` return). `scale` is clamped to `0.0..=1.0`.
@@ -79,7 +91,7 @@ impl PanelGeometry {
         let full_h = content_rows
             .saturating_add(title.is_some() as u16)
             .saturating_add(2 * PANEL_PAD_Y)
-            .min(bounds.height);
+            .min(bounds.height.saturating_sub(RESERVED_FOOTER_ROWS));
         let w = (full_w as f32 * scale).round() as u16;
         let h = (full_h as f32 * scale).round() as u16;
         if w < PANEL_MIN_W || h < PANEL_MIN_H {
@@ -485,6 +497,55 @@ mod tests {
         assert_eq!(r(0, 0), 200, "cells outside the band stay bright");
     }
 
+    /// The clamp keeps the card BODY off the footer row — but the silhouette is
+    /// offset a row further DOWN, so a card ending one row short still dropped its
+    /// band onto the live `[q]uit` text (`fg` only, bg left lit — invisible to any
+    /// substring assertion). Covers BOTH card kinds — the hover tooltips anchor
+    /// inside `scene_rect` and sit at the same edge.
+    #[test]
+    fn a_card_at_the_scene_floor_casts_no_shadow_onto_the_footer_row() {
+        use ratatui::style::Color;
+        let bright = Color::Rgb(200, 200, 200);
+        let (w, h) = (20u16, 12u16);
+        let footer_y = h - crate::tui::renderer::FOOTER_ROWS;
+        // A card whose last row is the one above the footer — where the clamp
+        // parks a too-tall panel, and where a bottom-anchored tooltip lands.
+        let area = Rect::new(2, footer_y - 4, 8, 4);
+        assert_eq!(
+            area.bottom(),
+            footer_y,
+            "the card ends right above the footer"
+        );
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| {
+            let full = f.area();
+            for y in 0..full.height {
+                for x in 0..full.width {
+                    let cell = &mut f.buffer_mut()[(x, y)];
+                    cell.set_symbol("\u{2580}");
+                    cell.fg = bright;
+                    cell.bg = bright;
+                }
+            }
+            borderless_panel(f, area, None, &pixtuoid_scene::theme::NORMAL);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        for x in 0..w {
+            let cell = buf.cell((x, footer_y)).expect("footer cell");
+            assert_eq!(
+                (cell.fg, cell.bg),
+                (bright, bright),
+                "the footer row must be untouched at x={x}, got {cell:?}"
+            );
+        }
+        // The card's own right band still casts — the clip is the footer row only.
+        assert!(
+            matches!(buf.cell((area.right(), area.y + 1)).expect("cell").fg, Color::Rgb(r, _, _) if r < 200),
+            "the right band still casts above the footer"
+        );
+    }
+
     // ---- PanelGeometry: the pure geometry authority (no TestBackend) ----------
 
     #[test]
@@ -507,6 +568,36 @@ mod tests {
             PanelGeometry::compute(Rect::new(0, 0, 100, 2), 20, 5, Some("t"), 1.0)
                 .outer()
                 .is_none()
+        );
+    }
+
+    /// A panel taller than its bounds clamps — and used to clamp right over the
+    /// footer, the one persistent `[q]uit` affordance. It must stop above the
+    /// footer ROW, WITHOUT moving a panel that already fits (that shift would
+    /// redraw every committed modal still).
+    #[test]
+    fn a_too_tall_panel_stops_one_row_short_of_the_footer() {
+        let b = Rect::new(0, 0, 40, 20);
+        let tall = PanelGeometry::compute(b, 30, 100, Some("t"), 1.0)
+            .outer()
+            .expect("renders");
+        // Asserted against the FOOTER's own authority: `== b.bottom() -
+        // RESERVED_FOOTER_ROWS` restates the constant under test and can't fail.
+        let footer_row = b.bottom() - crate::tui::renderer::FOOTER_ROWS;
+        assert!(
+            tall.bottom() <= footer_row,
+            "a clamped panel must leave the footer row (y={footer_row}) free, got {tall:?}"
+        );
+        // A panel that FITS keeps its exact centering — the reserve only bites
+        // the clamp, never the common case.
+        let fits = PanelGeometry::compute(b, 30, 5, Some("t"), 1.0)
+            .outer()
+            .expect("renders");
+        assert_eq!(
+            fits.y,
+            (b.height - fits.height) / 2,
+            "a fitting panel stays centered in the FULL height — centering it in \
+             a footer-shortened box would move every committed modal still"
         );
     }
 

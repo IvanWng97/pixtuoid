@@ -425,17 +425,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.last_pet_pos
     }
 
-    /// Drop per-agent state for agents no longer in `scene` — cached frames,
-    /// pose history, and motion (walk-path/profile) entries — across EVERY
-    /// floor (an agent's state lives on its own floor, which need not be the
-    /// current one). The event loop calls this with the live snapshot before
-    /// each render; keeping all per-agent eviction on this one seam means the
-    /// transition render path (which short-circuits the normal frame body)
-    /// can't skip it.
+    /// Drop per-agent state for agents no longer in `scene` — BOTH halves of
+    /// the dual eviction, the same pairing `FloorSession::evict_missing` writes
+    /// in the scene crate: the per-floor half (cached frames, pose history,
+    /// motion legs) across EVERY floor, since an agent's state lives on its own
+    /// floor which need not be the current one, and the office half (the coffee
+    /// cup, office-wide). The event loop calls this with the live snapshot
+    /// before each render; keeping BOTH on this one seam is what stops the
+    /// transition render path — which short-circuits the normal frame body —
+    /// from skipping either.
     pub fn evict_missing(&mut self, scene: &SceneState) {
         for pf in &mut self.floors {
             pf.evict_missing(scene);
         }
+        self.office.evict_missing(scene);
     }
 
     /// Whether an agent is a recorded coffee carrier (test harness only).
@@ -491,10 +494,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         {
             // Too small to render this frame: clear the interaction state the
             // mouse handler reads, so a click doesn't hit-test against a stale
-            // layout / pet / popup left over from a larger prior frame.
+            // layout / pet left over from a larger prior frame. The popup's rect
+            // derives from the terminal bounds alone, so it stays live below —
+            // painted and clickable at the SAME scale.
             self.cached_layout = None;
             self.last_pet_pos = None;
-            self.popup.last_scale = 0.0;
             // Paint the SAME footer-only frame draw_scene's gate does (shared
             // MIN_SCENE_* threshold ⇒ shared behavior), not nothing — else the
             // stale pre-shrink frame stays frozen on screen. AND land the
@@ -515,6 +519,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 audio_audible: self.audio.is_audible(),
                 volume_flash: self.volume_flash,
             };
+            // The modals survive the slide (`Tab`/`s` aren't transition-gated), so
+            // they paint here for the same reason draw_scene's gate paints them:
+            // their key handlers stay live at every size.
+            let popup_scale = self.version_popup_scale(now);
+            self.popup.last_scale = popup_scale;
+            let overlays = crate::tui::renderer::OverlayFrame {
+                theme_picker: self.theme_picker,
+                dashboard: &self.dashboard,
+                connection: &self.connection,
+                popup_scale,
+                help_open: self.help_open,
+                onboarding: &self.onboarding,
+            };
             crate::tui::renderer::draw_footer_only_frame(
                 &mut self.terminal,
                 scene,
@@ -522,6 +539,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 theme,
                 floor_info,
                 source_warning.as_deref(),
+                &overlays,
+                now,
             )?;
             self.cancel_transition();
             return Ok(());
@@ -698,12 +717,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
             crate::tui::renderer::paint_overlays(
                 f,
-                theme_picker,
-                &dashboard,
-                &connection,
-                popup_scale,
-                help_open,
-                &onboarding,
+                &crate::tui::renderer::OverlayFrame {
+                    theme_picker,
+                    dashboard: &dashboard,
+                    connection: &connection,
+                    popup_scale,
+                    help_open,
+                    onboarding: &onboarding,
+                },
                 now,
                 actual_full,
                 theme,
@@ -767,12 +788,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         // --- Normal path: single floor ------------------------------------
         let floor_scene = project_floor_scene(scene, self.current_floor);
-
-        // Evict coffee state for agents no longer in the scene (the office
-        // half of the session split). (History, motion, and frame-cache
-        // eviction live in `evict_missing`, which the event loop calls with
-        // the live snapshot before every render.)
-        self.office.evict_missing(scene);
 
         let floor_meta = FloorMeta::for_floor(self.current_floor, nf);
         // Compute popup scale before the mutable borrows below.
@@ -856,15 +871,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         );
         if let Ok(ref layout_opt) = result {
             self.cached_layout = layout_opt.clone();
-            // Ok(None) = draw_scene painted footer-only (compute failed at this
-            // size): no popup was drawn, so zero the popup-click hit-box rather
-            // than leave a stale scale the mouse handler reads as "popup on
-            // screen". Mirrors the too-small early-return + the transition path.
-            self.popup.last_scale = if layout_opt.is_some() {
-                popup_scale
-            } else {
-                0.0
-            };
+            // The popup paints on the footer-only frame too (its key handler is
+            // live there), and its click rect derives from the terminal bounds —
+            // NOT the office layout — so the painted scale IS the clickable one on
+            // both paths. Only a FAILED draw leaves nothing on screen.
+            self.popup.last_scale = popup_scale;
         } else {
             self.popup.last_scale = 0.0;
         }

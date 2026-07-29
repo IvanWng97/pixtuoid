@@ -126,12 +126,16 @@ pub fn dim_opening(elapsed_ms: u64) -> f32 {
     1.0 - t * (1.0 - DIM_FLOOR)
 }
 
-/// Dim factor `elapsed_ms` into the CLOSE fade — ramps `DIM_FLOOR → 1.0`, then
-/// `None` once fully restored (the caller drops the closing state at `None`).
-pub fn dim_closing(elapsed_ms: u64) -> Option<f32> {
+/// Dim factor `elapsed_ms` into the CLOSE fade — ramps `from → 1.0`, then `None`
+/// once fully restored (the caller drops the closing state at `None`). `from` is
+/// the dim the OPEN ramp was interrupted at, not `DIM_FLOOR`: an overlay skipped
+/// before the 450ms ramp finished would otherwise snap the whole office darker
+/// for a frame before climbing back (the same interrupted-animation rule
+/// `PopupState.scale_at_edge` follows).
+pub fn dim_closing(from: f32, elapsed_ms: u64) -> Option<f32> {
     if elapsed_ms >= DIM_FADE_OUT_MS {
         return None;
     }
     let t = elapsed_ms as f32 / DIM_FADE_OUT_MS as f32;
-    Some(DIM_FLOOR + t * (1.0 - DIM_FLOOR))
+    Some(from + t * (1.0 - from))
 }

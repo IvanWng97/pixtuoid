@@ -170,7 +170,13 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
 
-/// The drawable scene rect: the full terminal area minus the 1-row footer.
+/// How many rows at the bottom of the terminal the status footer owns. THE
+/// authority for that count: `scene_rect` subtracts it, `panel::RESERVED_FOOTER_ROWS`
+/// keeps a clamped modal off it, and the card drop shadow clips to it — three
+/// consumers of one fact rather than three copies of a bare `1`.
+pub(crate) const FOOTER_ROWS: u16 = 1;
+
+/// The drawable scene rect: the full terminal area minus the footer.
 /// Single source of truth for the "everything but the footer" geometry that
 /// both `draw_scene` and the floor-transition path re-derive each frame.
 pub(crate) fn scene_rect(full: Rect) -> Rect {
@@ -178,8 +184,22 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
         x: 0,
         y: 0,
         width: full.width,
-        height: full.height.saturating_sub(1),
+        height: full.height.saturating_sub(FOOTER_ROWS),
     }
+}
+
+/// The modal-overlay state [`paint_overlays`] paints, bundled so the two draw
+/// paths AND the footer-only frame all hand it over as one value. The overlays
+/// are terminal-size-independent (each self-guards through `PanelGeometry`), so
+/// they ride EVERY frame — including the ones where the office itself can't be
+/// laid out.
+pub(crate) struct OverlayFrame<'a> {
+    pub theme_picker: Option<usize>,
+    pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
+    pub connection: &'a crate::tui::connection::ConnectionFrame,
+    pub popup_scale: f32,
+    pub help_open: bool,
+    pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
 }
 
 /// Paint the footer-only frame shown when the terminal is too small to render the
@@ -188,6 +208,15 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
 /// threshold implies shared BEHAVIOR (one clean footer-only frame) instead of two
 /// divergent on-hit paths (one painting a footer, the other painting nothing —
 /// which left a stale, clipped, footer-less frame frozen on screen).
+///
+/// It paints the modal overlays too: every modal's key handler stays live at any
+/// size, so suppressing the overlay here made `?`/`s`/`Tab` toggle something
+/// invisible on any terminal below the office layout's 32×31 minimum (the classic
+/// 80×24 included) — and first run opens the onboarding modal there.
+// The footer half already travels as one `FooterStats` and the modal half as one
+// `OverlayFrame`; what remains are the five irreducible per-frame values the two
+// call sites hold separately anyway.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     scene: &SceneState,
@@ -195,10 +224,13 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     theme: &pixtuoid_scene::theme::Theme,
     floor_info: Option<FloorInfo>,
     source_warning: Option<&str>,
+    overlays: &OverlayFrame<'_>,
+    now: SystemTime,
 ) -> Result<()> {
     term.draw(|f| {
         let actual = f.area();
         paint_footer(f, scene, stats, actual, theme, floor_info, source_warning);
+        paint_overlays(f, overlays, now, actual, theme);
     })?;
     Ok(())
 }
@@ -249,6 +281,16 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         audio_audible: ctx.audio_audible,
         volume_flash: ctx.volume_flash,
     };
+    // Borrowed once (spine 2): the modals paint on the too-small frames too — see
+    // `draw_footer_only_frame`.
+    let overlays = OverlayFrame {
+        theme_picker: ctx.theme_picker,
+        dashboard: ctx.dashboard,
+        connection: ctx.connection,
+        popup_scale: ctx.popup_scale,
+        help_open: ctx.help_open,
+        onboarding: ctx.onboarding,
+    };
 
     if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
         draw_footer_only_frame(
@@ -258,6 +300,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             theme,
             floor_info,
             source_warning,
+            &overlays,
+            now,
         )?;
         return Ok(None);
     }
@@ -277,6 +321,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             theme,
             floor_info,
             source_warning,
+            &overlays,
+            now,
         )?;
         return Ok(None);
     };
@@ -319,7 +365,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     }
 
     let buf = &ctx.buf;
-    let theme_picker = ctx.theme_picker;
     let chitchat_bubbles = &ctx.chitchat_bubbles;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
@@ -414,18 +459,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 }
             }
         }
-        paint_overlays(
-            f,
-            theme_picker,
-            ctx.dashboard,
-            ctx.connection,
-            ctx.popup_scale,
-            ctx.help_open,
-            ctx.onboarding,
-            now,
-            actual_full,
-            theme,
-        );
+        paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
     Ok(Some(layout))
 }
@@ -433,22 +467,25 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 /// The modal-overlay dispatch shared by `draw_scene` (normal path) and
 /// `TuiRenderer::render_transition` (the floor-slide path): theme picker → dashboard →
 /// Sources panel → version popup → help, each gated by its own state and drawn
-/// at the same `bounds` (the full terminal area). Centralized so the two draw
-/// paths can't drift in ordering or args; behavior-identical to the inlined
-/// blocks it replaced.
-#[allow(clippy::too_many_arguments)]
+/// at the same `bounds` (the full terminal area — a modal is centered over the
+/// whole frame, and `PanelGeometry` keeps it off the footer row itself via
+/// `RESERVED_FOOTER_ROWS`). Centralized so the three draw paths can't drift in
+/// ordering or args.
 pub(super) fn paint_overlays(
     f: &mut ratatui::Frame<'_>,
-    theme_picker: Option<usize>,
-    dashboard: &crate::tui::dashboard::DashboardFrame,
-    connection: &crate::tui::connection::ConnectionFrame,
-    popup_scale: f32,
-    help_open: bool,
-    onboarding: &crate::tui::welcome::OnboardingFrame,
+    ov: &OverlayFrame<'_>,
     now: SystemTime,
     bounds: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
+    let &OverlayFrame {
+        theme_picker,
+        dashboard,
+        connection,
+        popup_scale,
+        help_open,
+        onboarding,
+    } = ov;
     if let Some(idx) = theme_picker {
         paint_theme_picker(f, idx, bounds, theme);
     }

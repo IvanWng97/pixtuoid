@@ -156,8 +156,16 @@ fn dim_cell(f: &mut ratatui::Frame<'_>, x: u16, y: u16, bounds: Rect, top_half_o
 /// the silhouette (the visible bottom band + corner) is rendered TOP-HALF only, so
 /// the bottom shadow reads as a 1px contact line instead of a full 2px cell, while
 /// the vertical right strip stays full cells. Bounds-checked per cell.
+///
+/// Clipped to `scene_rect`, NOT the frame: the footer is painted before every card
+/// and the bottom band dims `fg` only, so a band reaching that row repaints the
+/// live `[q]uit` over its still-lit bg. Keeping the card BODY off the footer
+/// (`panel::RESERVED_FOOTER_ROWS`) is only half the rule — the silhouette is offset
+/// a row further DOWN. One clip covers both card kinds (the hover tooltips anchor
+/// inside `scene_rect` and sit at the same edge); see the tui guide's every-frame
+/// sharp edge for why it lives here rather than in the reserve.
 fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
-    let bounds = f.area();
+    let bounds = crate::tui::renderer::scene_rect(f.area());
     let sx = area.x.saturating_add(SHADOW_OFFSET);
     let sy = area.y.saturating_add(SHADOW_OFFSET);
     let last_row = sy.saturating_add(area.height.saturating_sub(1));

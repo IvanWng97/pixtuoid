@@ -188,7 +188,11 @@ fn connect_source(
                 }
             }
         }
-        Err(e) => format!("{display_name}: connect failed \u{2014} {e:#}"),
+        Err(e) => connection::format_failure(
+            connection::FailedOp::Connect,
+            display_name,
+            &format!("{e:#}"),
+        ),
     }
 }
 
@@ -214,28 +218,63 @@ fn disconnect_source(
                     format!("\u{2713} {display_name} disconnected")
                 }
                 crate::sources::DisconnectOutcome::HookRemovalFailed(e) => {
-                    format!("{display_name}: disconnected, but hook removal failed \u{2014} {e}")
+                    connection::format_failure(connection::FailedOp::HookRemoval, display_name, &e)
                 }
             }
         }
-        Err(e) => format!("{display_name}: disconnect failed \u{2014} {e:#}"),
+        Err(e) => connection::format_failure(
+            connection::FailedOp::Disconnect,
+            display_name,
+            &format!("{e:#}"),
+        ),
     }
 }
 
-/// Reflect the onboarding apply's outcomes into the LIVE connected-set.
+/// One presentable onboarding failure: the source it belongs to (so the panel can
+/// put the selection — and thus the offered `t` retry — on the row that actually
+/// failed) plus the line the user reads. The two always travel together; a bare
+/// line can't be routed to a row.
+#[derive(Debug)]
+struct OnboardingFailure {
+    source_id: String,
+    line: String,
+}
+
+/// Reflect the onboarding apply's outcomes into the LIVE connected-set, and hand
+/// BACK one presentable failure per failed row.
+///
 /// `choices` and `outcomes` are index-aligned (`apply_choices` maps each choice
 /// in order). `NoOp` means "already in the DESIRED state — nothing written"
 /// (`sources::ChangeOutcome`), so it sets the gate to the desired flag rather
 /// than hardcoding it closed: a NoOp for a CHECKED row must leave the gate OPEN
 /// (an already-connected source the user just confirmed must not have its live
-/// agents evicted). A failed connect must NOT go live, and leaves a trace on
-/// the warn-floor log (doctor + the footer nudge read it).
+/// agents evicted). A failed connect must NOT go live.
+///
+/// The `FailedOp` BRANCHES, because `Failed` covers all three: `apply_choices`
+/// maps an UNCHECKED row to a Disconnect, and `freeze_for_skip` makes that the
+/// common case — on a genuine first run every detected source freezes to `false`,
+/// so Esc issues a Disconnect for each one. Calling those "connect failed" named
+/// the wrong operation for a user who connected nothing. The third is the fold:
+/// `map_disconnect_outcome` tags an OTHERWISE SUCCESSFUL disconnect (the flag IS
+/// persisted false) with `HOOK_REMOVAL_FAILED_PREFIX`, so it words the residual
+/// instead of the operation. The sentences themselves belong to
+/// [`connection::format_failure`] — the panel's `t` toggle words its own failures
+/// through the same fn, so a retry on the row reads what the apply just said.
+///
+/// The RETURN is the surfacing half. The warn-floor log is not a user surface —
+/// in TUI mode the alternate screen owns the terminal, and nothing in-session can
+/// read the line back (`doctor::scan_log_for_source` matches `pixtuoid::drift`
+/// breadcrumbs only, and `build_rows` computes its health verdict for CONNECTED
+/// rows, which a rolled-back one is not). Every sibling `Failed` presenter shows
+/// its message; the caller puts these on the Sources panel — see
+/// [`surface_onboarding_failures`].
 fn reflect_onboarding_outcomes(
     connected: &crate::runtime::ConnectedSources,
     choices: &[(&'static str, bool)],
     outcomes: &[(String, crate::sources::ChangeOutcome)],
-) {
+) -> Vec<OnboardingFailure> {
     use crate::sources::ChangeOutcome;
+    let mut failures = Vec::new();
     for ((_, want), (id, oc)) in choices.iter().zip(outcomes) {
         match oc {
             ChangeOutcome::Connected => connected.set(id, true),
@@ -243,10 +282,58 @@ fn reflect_onboarding_outcomes(
             ChangeOutcome::NoOp => connected.set(id, *want),
             ChangeOutcome::Failed(e) => {
                 connected.set(id, false);
-                tracing::warn!("onboarding: {id} failed to connect: {e}");
+                let (op, verb) = if *want {
+                    (connection::FailedOp::Connect, "connect")
+                } else {
+                    (connection::FailedOp::Disconnect, "disconnect")
+                };
+                tracing::warn!("onboarding: {id} failed to {verb}: {e}");
+                let name =
+                    crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
+                let line = match e.strip_prefix(crate::sources::HOOK_REMOVAL_FAILED_PREFIX) {
+                    Some(reason) => {
+                        connection::format_failure(connection::FailedOp::HookRemoval, name, reason)
+                    }
+                    None => connection::format_failure(op, name, e),
+                };
+                failures.push(OnboardingFailure {
+                    source_id: id.clone(),
+                    line,
+                });
             }
         }
     }
+    failures
+}
+
+/// Put an onboarding apply's failures where the user is actually looking: open
+/// the Sources panel ON the first failed row and seed its result line — the SAME
+/// surface and wording its own `t` toggle renders, so the retry is one keystroke
+/// away on the right source. (Without the explicit selection `open_connection`
+/// keeps the PREVIOUS index — 0 on a fresh `UiState` — so the offered `t` would
+/// act on whatever sorts first.) Nothing else can tell them: `warn_broken_installs`
+/// ran before the TUI, the footer nudge reads drift breadcrumbs only, and the
+/// rolled-back row's detail line reads the benign "press t to connect" with no
+/// reason attached.
+fn surface_onboarding_failures(
+    ui: &mut ui_state::UiState,
+    connected: &crate::runtime::ConnectedSources,
+    failures: Vec<OnboardingFailure>,
+) {
+    let Some(first) = failures.first() else {
+        return;
+    };
+    let first_id = first.source_id.clone();
+    let rows = connection::build_rows(&connected.snapshot(), &ui.read_conn_log());
+    ui.open_connection(rows);
+    ui.select_connection_source(&first_id);
+    ui.connection.last_result = Some(
+        failures
+            .into_iter()
+            .map(|f| f.line)
+            .collect::<Vec<_>>()
+            .join("  \u{b7}  "),
+    );
 }
 
 fn is_quit_chord(code: KeyCode, mods: KeyModifiers) -> bool {
@@ -287,6 +374,54 @@ fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
         }
         connection::ConnState::Disconnected => ToggleIntent::Connect,
         connection::ConnState::NoCli { connected: false } => ToggleIntent::Hint,
+    }
+}
+
+/// The per-floor desk-capacity sweep, memoized on its own inputs.
+///
+/// `floor_capacity` runs a FULL `Layout::compute_with_seed` — walkable-mask
+/// stamp + coarse BFS, quadratic in buffer area — and keeps only
+/// `home_desks.len()`; the event loop ran `MAX_FLOORS` of them every frame and
+/// discarded every byte. The result is a pure function of
+/// `(buf_w, buf_h, desk_cap)`, and the publish is a monotone `fetch_max`, so a
+/// repeat with identical inputs could only rewrite the same values — a steady
+/// frame skips the whole sweep.
+///
+/// Factored out of the `run_tui` loop (codecov-excluded, undriveable headlessly)
+/// so the memo is unit-testable, mirroring `toggle_intent` / `dispatch_key`.
+struct FloorCapacitySweep {
+    last: Option<(u16, u16, Option<usize>)>,
+}
+
+impl FloorCapacitySweep {
+    fn new() -> Self {
+        Self { last: None }
+    }
+
+    /// Publish each floor's auto-computed capacity into `caps`. Returns whether
+    /// it actually recomputed (`false` = served from the memo).
+    fn publish(
+        &mut self,
+        buf_w: u16,
+        buf_h: u16,
+        desk_cap: Option<usize>,
+        caps: &[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS],
+    ) -> bool {
+        if self.last == Some((buf_w, buf_h, desk_cap)) {
+            return false;
+        }
+        self.last = Some((buf_w, buf_h, desk_cap));
+        for (floor_idx, cap_slot) in caps.iter().enumerate() {
+            let seed = pixtuoid_scene::floor::floor_seed(floor_idx);
+            let mut capacity = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);
+            if let Some(cap) = desk_cap {
+                capacity = capacity.min(cap);
+            }
+            if capacity > 0 {
+                cap_slot.fetch_max(capacity, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        true
     }
 }
 
@@ -461,18 +596,32 @@ pub fn setup_terminal() -> Result<Term> {
     })
 }
 
-pub fn teardown_terminal(term: &mut Term) -> Result<()> {
+/// The mode half of the teardown, over an injected writer + raw-mode disabler so
+/// the unwind ORDER and its error policy are unit-testable without a real TTY.
+/// Every step runs even when an earlier one fails, and the FIRST error is
+/// returned: a `?` after the escape-sequence write would skip `disable_raw`
+/// exactly when it is needed most and strand the user's shell echo-less.
+fn unwind_terminal_modes<W: std::io::Write>(
+    out: &mut W,
+    disable_raw: impl FnOnce() -> std::io::Result<()>,
+) -> Result<()> {
     // DisableMouseCapture must run while raw mode is still ON: on Windows it
     // restores the input mode snapshotted at Enable time (which was raw-era),
     // so running it after disable_raw_mode re-raws the console and leaves
     // the user's shell echo-less. Raw mode goes off LAST.
-    execute!(
-        term.backend_mut(),
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    )?;
-    disable_raw_mode()?;
-    term.show_cursor()?;
+    let seq = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
+    let raw = disable_raw();
+    seq?;
+    raw?;
+    Ok(())
+}
+
+pub fn teardown_terminal(term: &mut Term) -> Result<()> {
+    let modes = unwind_terminal_modes(term.backend_mut(), disable_raw_mode);
+    // Unconditional: a failed mode restore must not ALSO leave the cursor hidden.
+    let cursor = term.show_cursor();
+    modes?;
+    cursor?;
     Ok(())
 }
 
@@ -595,6 +744,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // effects (see ui_state.rs).
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
     let mut last_layout_sig: Option<(u16, u16)> = None;
+    let mut cap_sweep = FloorCapacitySweep::new();
 
     // Render/event-loop tick (~30fps).
     const FRAME_TICK_MS: u64 = 33;
@@ -671,22 +821,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             // cumulative offsets that would remap agents on floor 1+ to
             // wrong desk positions. On terminal shrink, agents beyond the
             // layout's capacity become invisible but stay alive; they
-            // reappear when the terminal grows back.
+            // reappear when the terminal grows back. Memoized on its own
+            // inputs — see `FloorCapacitySweep`.
             if let Some(layout) = renderer.cached_layout() {
-                use pixtuoid_core::state::MAX_FLOORS;
-                let buf_w = layout.buf_w;
-                let buf_h = layout.buf_h;
-                for floor_idx in 0..MAX_FLOORS {
-                    let seed = pixtuoid_scene::floor::floor_seed(floor_idx);
-                    let mut capacity = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);
-                    if let Some(cap) = desk_cap {
-                        capacity = capacity.min(cap);
-                    }
-                    if capacity > 0 {
-                        floor_caps[floor_idx]
-                            .fetch_max(capacity, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
+                cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
             }
 
             let start = Instant::now();
@@ -875,8 +1013,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 // Reflect each into the LIVE connected-set off its
                                 // ACTUAL outcome (a failed connect must NOT go live;
                                 // a NoOp keeps the DESIRED state) — see the helper.
-                                reflect_onboarding_outcomes(&connected, &choices, &outcomes);
+                                let failed =
+                                    reflect_onboarding_outcomes(&connected, &choices, &outcomes);
                                 ui.close_onboarding();
+                                surface_onboarding_failures(&mut ui, &connected, failed);
                             }
                             KeyAction::OnboardingSkip => {
                                 // Skip = mark onboarding done WITHOUT changing any
@@ -905,9 +1045,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 // in-process gate must open THIS session too, else
                                 // their office stays empty until the next restart
                                 // re-seeds the gate from the (now true) flags. Also
-                                // logs any persist failure (its Failed arm).
-                                reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
+                                // reports any persist failure (its Failed arm).
+                                let failed =
+                                    reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
                                 ui.close_onboarding();
+                                surface_onboarding_failures(&mut ui, &connected, failed);
                             }
                         }
                     }
@@ -1087,6 +1229,121 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 }
 
 #[cfg(test)]
+mod capacity_sweep_tests {
+    use super::FloorCapacitySweep;
+    use pixtuoid_core::state::MAX_FLOORS;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn caps() -> [AtomicUsize; MAX_FLOORS] {
+        std::array::from_fn(|_| AtomicUsize::new(0))
+    }
+
+    // A 192x80 terminal (buf 192x158). One sweep is 10 full
+    // `Layout::compute_with_seed` runs, so a steady frame must not repeat it.
+    const W: u16 = 192;
+    const H: u16 = 158;
+
+    #[test]
+    fn a_repeat_frame_serves_the_memo_instead_of_recomputing() {
+        let caps = caps();
+        let mut sweep = FloorCapacitySweep::new();
+        assert!(sweep.publish(W, H, None, &caps), "first frame computes");
+        let published: Vec<usize> = caps.iter().map(|c| c.load(Ordering::Relaxed)).collect();
+        assert!(
+            !sweep.publish(W, H, None, &caps),
+            "an unchanged frame must skip the whole 10-floor layout sweep"
+        );
+        let after: Vec<usize> = caps.iter().map(|c| c.load(Ordering::Relaxed)).collect();
+        assert_eq!(
+            published, after,
+            "the memo hit must publish the same values"
+        );
+    }
+
+    #[test]
+    fn a_resize_or_a_new_cap_recomputes() {
+        let caps = caps();
+        let mut sweep = FloorCapacitySweep::new();
+        sweep.publish(W, H, None, &caps);
+        assert!(sweep.publish(W, H - 2, None, &caps), "a resize recomputes");
+        assert!(
+            sweep.publish(W, H - 2, Some(4), &caps),
+            "a different desk cap recomputes"
+        );
+    }
+
+    #[test]
+    fn published_capacities_are_the_per_floor_auto_capacity_clamped_by_the_cap() {
+        let caps = caps();
+        let mut sweep = FloorCapacitySweep::new();
+        sweep.publish(W, H, None, &caps);
+        for (i, slot) in caps.iter().enumerate() {
+            let want =
+                pixtuoid_scene::floor::floor_capacity(W, H, pixtuoid_scene::floor::floor_seed(i));
+            assert_eq!(slot.load(Ordering::Relaxed), want, "floor {i}");
+            assert!(want > 0, "floor {i} must seat someone at 192x80");
+        }
+        let capped: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
+        let mut sweep = FloorCapacitySweep::new();
+        sweep.publish(W, H, Some(3), &capped);
+        for (i, slot) in capped.iter().enumerate() {
+            assert_eq!(
+                slot.load(Ordering::Relaxed),
+                3,
+                "floor {i} clamped to the cap"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod teardown_tests {
+    use super::unwind_terminal_modes;
+    use std::cell::Cell;
+
+    /// A writer whose every `write` fails — the "terminal went away mid-quit"
+    /// case (SIGHUP, closed pty) the teardown must still unwind through.
+    struct FailingWriter;
+    impl std::io::Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("terminal gone"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("terminal gone"))
+        }
+    }
+
+    #[test]
+    fn raw_mode_is_disabled_even_when_the_escape_write_fails() {
+        let disabled = Cell::new(false);
+        let err = unwind_terminal_modes(&mut FailingWriter, || {
+            disabled.set(true);
+            Ok(())
+        })
+        .expect_err("the write failure still propagates");
+        assert!(
+            disabled.get(),
+            "raw mode must be disabled even when the escape-sequence write failed \
+             — a `?` there strands the user's shell echo-less: {err:#}"
+        );
+    }
+
+    #[test]
+    fn the_escape_write_error_outranks_a_later_raw_mode_error() {
+        // Both steps fail: the FIRST error is the one reported, and the second
+        // step still ran (pinned by the test above).
+        let err = unwind_terminal_modes(&mut FailingWriter, || {
+            Err(std::io::Error::other("raw mode gone"))
+        })
+        .expect_err("both steps failed");
+        assert!(
+            err.to_string().contains("terminal gone"),
+            "the first failure is reported, got: {err:#}"
+        );
+    }
+}
+
+#[cfg(test)]
 mod runtime_model {
     // Pins WHY #603 removed the wraps — see the tui/CLAUDE.md `block_on` sharp
     // edge for the full model. Deterministic: worker_threads(1) + a std channel
@@ -1123,7 +1380,10 @@ mod runtime_model {
 
 #[cfg(test)]
 mod dispatch_tests {
-    use super::{connect_source, disconnect_source, dispatch_key, FloorNav, KeyAction, ModalState};
+    use super::{
+        connect_source, connection, disconnect_source, dispatch_key, FloorNav, KeyAction,
+        ModalState,
+    };
     use crossterm::event::{KeyCode, KeyModifiers};
 
     const NONE: KeyModifiers = KeyModifiers::NONE;
@@ -1391,6 +1651,32 @@ mod dispatch_tests {
         );
         // A floor key while the popup is up is swallowed, not navigated.
         assert_eq!(dispatch_key(KeyCode::Up, NONE, c, nav()), KeyAction::None);
+    }
+
+    /// The version popup is DISMISS-ONLY, which is why its overflowing notes band
+    /// is marked with `widgets::version_popup`'s own non-scrolling marker instead
+    /// of the shared `⋮ N more ▾` the pageable panels use. Giving this modal a
+    /// scroll key would make that marker the wrong choice — so it reds here first.
+    #[test]
+    fn the_version_popup_binds_no_scroll_key() {
+        let c = ModalState {
+            version_popup: true,
+            ..modal()
+        };
+        for code in [
+            KeyCode::Down,
+            KeyCode::Up,
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::PageDown,
+            KeyCode::PageUp,
+        ] {
+            assert_eq!(
+                dispatch_key(code, NONE, c, nav()),
+                KeyAction::None,
+                "{code:?} must stay unbound while the version popup is up"
+            );
+        }
     }
 
     #[test]
@@ -1831,6 +2117,165 @@ mod dispatch_tests {
         assert!(
             !connected.is_connected("cursor"),
             "a failed connect must NOT go live"
+        );
+    }
+
+    /// A failed onboarding connect is the ONE `ChangeOutcome::Failed` presenter
+    /// that used to drop its message: the CLI prints the row and exits non-zero,
+    /// the Sources panel renders it in the result line, onboarding only
+    /// `tracing::warn!`d it into a file the alternate screen hides. Reflect must
+    /// hand the reason BACK so the loop can put it on a real surface.
+    #[test]
+    fn a_failed_onboarding_connect_reports_the_reason_to_the_caller() {
+        use crate::sources::ChangeOutcome;
+        let connected = crate::runtime::ConnectedSources::default();
+        let choices: Vec<(&'static str, bool)> = vec![("cursor", true), ("antigravity", true)];
+        let outcomes = vec![
+            (
+                "cursor".to_string(),
+                ChangeOutcome::Failed("settings is valid JSON but not an object".into()),
+            ),
+            ("antigravity".to_string(), ChangeOutcome::Connected),
+        ];
+        let failures = super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
+        assert_eq!(
+            failures.len(),
+            1,
+            "only the failed row reports: {failures:?}"
+        );
+        let line = &failures[0].line;
+        assert!(
+            line.contains("settings is valid JSON but not an object"),
+            "the REASON must survive — it is the whole point: {line}"
+        );
+        let display_name = crate::install::target::by_source("cursor")
+            .expect("cursor is a target-bearing source")
+            .display_name;
+        assert!(
+            line.contains(display_name),
+            "the row must be named the way every other surface names it: {line}"
+        );
+        assert_eq!(
+            line,
+            &connection::format_failure(
+                connection::FailedOp::Connect,
+                display_name,
+                "settings is valid JSON but not an object",
+            ),
+            "the panel's own wording, from the panel's own formatter: {line}"
+        );
+        assert_eq!(
+            failures[0].source_id, "cursor",
+            "the failure carries the row it belongs to, so the panel can select it"
+        );
+    }
+
+    /// `Failed` is NOT connect-only: `apply_choices` maps an unchecked row to a
+    /// Disconnect, and on a genuine first run `freeze_for_skip` makes that EVERY
+    /// detected source — so Esc, which connects nothing, was reporting
+    /// "connect failed". The third string is the fold: `map_disconnect_outcome`
+    /// turns a hook-removal failure on an OTHERWISE SUCCESSFUL disconnect into
+    /// `Failed`, which the panel words differently again.
+    #[test]
+    fn an_onboarding_failure_names_the_operation_that_actually_failed() {
+        use crate::sources::ChangeOutcome;
+        let connected = crate::runtime::ConnectedSources::default();
+        let choices: Vec<(&'static str, bool)> = vec![("cursor", false), ("openclaw", false)];
+        let outcomes = vec![
+            (
+                "cursor".to_string(),
+                ChangeOutcome::Failed("config is not writable".into()),
+            ),
+            (
+                "openclaw".to_string(),
+                ChangeOutcome::Failed(format!(
+                    "{}openclaw.json is JSON5, not strict JSON",
+                    crate::sources::HOOK_REMOVAL_FAILED_PREFIX
+                )),
+            ),
+        ];
+        let failures = super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
+        assert_eq!(failures.len(), 2, "both rows report: {failures:?}");
+
+        let cursor_name = crate::install::target::by_source("cursor")
+            .expect("cursor is a target-bearing source")
+            .display_name;
+        let unchecked = &failures[0].line;
+        assert_eq!(
+            unchecked,
+            &connection::format_failure(
+                connection::FailedOp::Disconnect,
+                cursor_name,
+                "config is not writable",
+            ),
+            "an unchecked row's failure is a DISCONNECT failure: {unchecked}"
+        );
+
+        // The fold is a SUCCESSFUL disconnect with a residual, so it takes the
+        // formatter's third arm — never "disconnect failed".
+        let openclaw_name = crate::install::target::by_source("openclaw")
+            .expect("openclaw is a target-bearing source")
+            .display_name;
+        let folded = &failures[1].line;
+        assert_eq!(
+            folded,
+            &connection::format_failure(
+                connection::FailedOp::HookRemoval,
+                openclaw_name,
+                "openclaw.json is JSON5, not strict JSON",
+            ),
+            "a folded hook-removal failure keeps the panel's wording: {folded}"
+        );
+        assert!(
+            !folded.contains(crate::sources::HOOK_REMOVAL_FAILED_PREFIX),
+            "the machine token is stripped once the wording carries it: {folded}"
+        );
+    }
+
+    /// The failure line has to land on a surface the user is looking at: the
+    /// Sources panel, opened ON the failed row with the reason in its result
+    /// line (so the `t` retry is one keystroke away on the RIGHT source —
+    /// `open_connection` alone keeps the previous index, 0 on a fresh UiState).
+    #[test]
+    fn onboarding_failures_open_the_sources_panel_on_the_failed_row() {
+        let connected = crate::runtime::ConnectedSources::default();
+        let mut ui = crate::tui::ui_state::UiState::new(
+            pixtuoid_scene::theme::ALL_THEMES[0],
+            crate::tui::welcome::WelcomeUi::from_detected(&[]),
+            false,
+            std::path::PathBuf::from("/tmp/sock"),
+            None,
+        );
+        assert!(!ui.modal().connection_open, "panel starts closed");
+
+        super::surface_onboarding_failures(&mut ui, &connected, Vec::new());
+        assert!(
+            !ui.modal().connection_open,
+            "a clean apply must not pop the panel"
+        );
+
+        super::surface_onboarding_failures(
+            &mut ui,
+            &connected,
+            vec![super::OnboardingFailure {
+                source_id: "cursor".into(),
+                line: "Cursor: connect failed \u{2014} boom".into(),
+            }],
+        );
+        assert!(ui.modal().connection_open, "a failure opens the panel");
+        assert_eq!(
+            ui.connection.last_result.as_deref(),
+            Some("Cursor: connect failed \u{2014} boom"),
+            "the reason rides the panel's own result line"
+        );
+        let selected = ui.connection.rows[ui.connection.selected].source_id;
+        assert_eq!(
+            selected, "cursor",
+            "the panel must open ON the failed row — `t` acts on the SELECTED one"
+        );
+        assert_ne!(
+            ui.connection.selected, 0,
+            "cursor is not the first registry row, so this could not pass by default"
         );
     }
 
