@@ -446,6 +446,7 @@ claude_fork_refusal_marker := "head.repo.full_name"
 claude_fork_refusal_indices := [idx |
 	some idx, step in claude_tag_steps
 	contains(object.get(step, "run", ""), claude_fork_refusal_marker)
+	contains(object.get(step, "if", ""), "issue_comment")
 ]
 
 claude_action_step_indices := [idx |
@@ -462,10 +463,23 @@ claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
 
 claude_absence_condition := "needs.analyze.result == 'failure'"
 
+# Without one of these an implicit `success()` is applied over `needs: analyze`,
+# so the job is skipped in precisely the situation it exists for — and the
+# inert form reads like a tidy-up, which is how it would land.
+claude_status_functions := {"always()", "!cancelled()", "failure()"}
+
 claude_absence_jobs := [job |
 	some job in claude_reusable_jobs
-	contains(normalized_claude_condition(object.get(job, "if", "")), claude_absence_condition)
+	condition := normalized_claude_condition(object.get(job, "if", ""))
+	contains(condition, claude_absence_condition)
+	some status_function in claude_status_functions
+	contains(condition, status_function)
 ]
+
+claude_absence_job_checks_out if {
+	some step in object.get(claude_absence_jobs[0], "steps", [])
+	object.get(step, "uses", "") != ""
+}
 
 claude_analyze_job := object.get(claude_reusable_jobs, "analyze", {})
 claude_publish_job := object.get(claude_reusable_jobs, "publish", {})
@@ -773,13 +787,22 @@ deny contains msg if {
 	msg := sprintf("%s must report an absent review in exactly one job conditioned on `%s`", [claude_reusable_workflow_path, claude_absence_condition])
 }
 
-# A reporter that cannot comment is inert, and inert is the failure mode this
-# whole job exists to prevent.
+# An exact set, like its two siblings: a lower bound would let this job carry
+# `contents: write` into the workflow whose whole design is read-only.
 deny contains msg if {
 	_ := documents[claude_reusable_workflow_path]
 	count(claude_absence_jobs) == 1
-	object.get(claude_absence_jobs[0], ["permissions", "pull-requests"], "") != "write"
-	msg := sprintf("%s absent-review job needs `pull-requests: write` to post its notice", [claude_reusable_workflow_path])
+	object.get(claude_absence_jobs[0], "permissions", {}) != {"pull-requests": "write"}
+	msg := sprintf("%s absent-review job must carry exactly `pull-requests: write`", [claude_reusable_workflow_path])
+}
+
+# It reports on a head it must never fetch; a checkout here would reintroduce
+# the untrusted-tree class the analyze job is built to avoid.
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	count(claude_absence_jobs) == 1
+	claude_absence_job_checks_out
+	msg := sprintf("%s absent-review job must not check anything out", [claude_reusable_workflow_path])
 }
 
 deny contains msg if {

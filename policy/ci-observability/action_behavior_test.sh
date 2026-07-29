@@ -466,3 +466,95 @@ if PATH="$fake_bin:$PATH" \
     bash -c "$publisher_script" >/dev/null 2>&1; then
     fail "Claude publisher accepted an unsafe finding path"
 fi
+
+# --- #799 fork refusal + #819 absence notice -------------------------------
+# Both are shell that GUARDS something, and the rego rules pin only that they
+# exist and where they sit. What they actually do is asserted here.
+CLAUDE_TAG_WORKFLOW_FILE="${CLAUDE_TAG_WORKFLOW_FILE:-.github/workflows/claude.yml}"
+
+# These steps pass --jq and hit two different endpoints, neither of which the
+# resolver stub above models.
+cat >"$fake_bin/gh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == api ]]
+jq_expr="" url="" body="" method=GET
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --jq) jq_expr="$2"; shift ;;
+        -X) method="$2"; shift ;;
+        -f) body="${2#body=}"; shift ;;
+        repos/*) url="$1" ;;
+    esac
+    shift
+done
+if [[ "$method" != GET ]]; then
+    printf '%s' "$body" >"$ABSENCE_CAPTURE"
+    exit 0
+fi
+case "$url" in
+    */comments) printf '%s' "${FAKE_COMMENTS:-[]}" | jq -r "$jq_expr" ;;
+    *) printf '%s' "$FAKE_PR_JSON" | jq -r "$jq_expr" ;;
+esac
+STUB
+chmod +x "$fake_bin/gh"
+
+refusal_script="$(workflow_step_script "$CLAUDE_TAG_WORKFLOW_FILE" "Refuse fork pull requests")"
+
+assert_refusal() {
+    local fixture="$1"
+    local expect_refused="$2"
+    local label="$3"
+    if PATH="$fake_bin:$PATH" \
+        FAKE_PR_JSON="$fixture" \
+        GH_TOKEN="test-token" \
+        PR_NUMBER="42" \
+        REPOSITORY="owner/repo" \
+        bash -c "$refusal_script" >/dev/null 2>&1; then
+        [[ "$expect_refused" == false ]] || fail "@claude fork guard admitted $label"
+    else
+        [[ "$expect_refused" == true ]] || fail "@claude fork guard rejected $label"
+    fi
+}
+
+assert_refusal "$valid_pr" false "an internal pull request"
+assert_refusal "$fork_pr" true "a fork pull request"
+assert_refusal '{"head":{"repo":null},"base":{"ref":"main"},"state":"open"}' true "a deleted fork head"
+
+absence_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Say the second lens did not run")"
+absence_capture="$test_dir/absence-body"
+
+run_absence() {
+    : >"$absence_capture"
+    PATH="$fake_bin:$PATH" \
+        ABSENCE_CAPTURE="$absence_capture" \
+        ANALYZE_RESULT="$1" \
+        FAKE_COMMENTS="${2:-[]}" \
+        FAKE_PR_JSON="$valid_pr" \
+        GH_TOKEN="test-token" \
+        PR_NUMBER="42" \
+        REPOSITORY="owner/repo" \
+        REVIEW_MARKER="claude-auto-review" \
+        REVIEW_TITLE="Claude Review" \
+        RUN_URL="https://example.invalid/run" \
+        bash -c "$absence_script" >/dev/null 2>&1 ||
+        fail "absence notice exited non-zero for result=$1"
+}
+
+run_absence failure
+absence_body="$(<"$absence_capture")"
+[[ "$absence_body" == *"ABSENT, not clean"* ]] ||
+    fail "absence notice did not say the review is absent rather than clean"
+[[ "$absence_body" == *"<!-- absent-claude-auto-review -->"* ]] ||
+    fail "absence notice omitted its own marker"
+# A prefix matcher on the published review's marker must not read this notice
+# as a review.
+[[ "$absence_body" != *"<!-- claude-auto-review"* ]] ||
+    fail "absence marker collides with the published review marker"
+[[ "$absence_body" == *"job summary names the cause"* ]] ||
+    fail "absence notice did not route a failed analysis to its summary"
+
+run_absence success
+absence_body="$(<"$absence_capture")"
+[[ "$absence_body" == *"out of scope for the reviewer"* ]] ||
+    fail "a declined review was reported as a failure"

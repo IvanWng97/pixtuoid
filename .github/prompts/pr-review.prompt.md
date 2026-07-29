@@ -527,7 +527,9 @@ gates and watch the NEW head's CI — and gate the merge on the online bot
 review's LATEST COMMENT verdict (`Findings: N`) plus `mergeStateStatus`,
 never the check table: the claude-review JOB is green even when it posts
 findings (#448 merged past a fresh MEDIUM; #449 onward reads the comment
-verdict).
+verdict). A run that produced NO verdict now says so in its own comment,
+carrying an `<!-- absent-<marker> -->` marker — that is an unreviewed head,
+not a clean one, and it is not a `Findings: 0`.
 
 ---
 

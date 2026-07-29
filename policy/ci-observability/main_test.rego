@@ -813,15 +813,17 @@ test_claude_resolver_is_required if {
 
 claude_absence_missing_message := sprintf("%s must report an absent review in exactly one job conditioned on `%s`", [claude_reusable_workflow_path, claude_absence_condition])
 
-claude_absence_permission_message := sprintf("%s absent-review job needs `pull-requests: write` to post its notice", [claude_reusable_workflow_path])
+claude_absence_permission_message := sprintf("%s absent-review job must carry exactly `pull-requests: write`", [claude_reusable_workflow_path])
+
+claude_absence_checkout_message := sprintf("%s absent-review job must not check anything out", [claude_reusable_workflow_path])
 
 claude_absence_reusable(jobs) := {"documents": [{
 	"path": claude_reusable_workflow_path,
 	"contents": {"jobs": jobs},
 }]}
 
-# Without this job a spent quota reads exactly like a clean review: publish
-# skips, nothing comments, the PR sits at UNSTABLE. #819
+# Absence and a clean review render identically without this job — see the
+# rule in main.rego. #819
 test_claude_absent_review_must_be_reported if {
 	violations := deny with input as claude_absence_reusable({"analyze": {"steps": []}})
 	claude_absence_missing_message in violations
@@ -850,6 +852,48 @@ test_claude_absent_review_reporter_is_accepted if {
 	})
 	not claude_absence_missing_message in violations
 	not claude_absence_permission_message in violations
+	not claude_absence_checkout_message in violations
+}
+
+# The inert variant, and the one that would land as a cleanup: GitHub applies
+# an implicit `success()` over `needs:` unless a status function is present, so
+# this job would be SKIPPED exactly when analyze fails.
+test_claude_absent_review_without_a_status_function_is_denied if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": claude_absence_condition,
+			"permissions": {"pull-requests": "write"},
+			"steps": [],
+		},
+	})
+	claude_absence_missing_message in violations
+}
+
+# A lower bound would let the reporter carry write scopes into a workflow whose
+# whole design is read-only.
+test_claude_absent_review_reporter_with_extra_permissions_is_denied if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("!cancelled() && %s", [claude_absence_condition]),
+			"permissions": {"contents": "write", "pull-requests": "write"},
+			"steps": [],
+		},
+	})
+	claude_absence_permission_message in violations
+}
+
+test_claude_absent_review_reporter_checking_out_is_denied if {
+	violations := deny with input as claude_absence_reusable({
+		"analyze": {"steps": []},
+		"report_absence": {
+			"if": sprintf("!cancelled() && %s", [claude_absence_condition]),
+			"permissions": {"pull-requests": "write"},
+			"steps": [{"uses": "actions/checkout@v7"}],
+		},
+	})
+	claude_absence_checkout_message in violations
 }
 
 test_claude_oauth_fallback_requires_all_wif_authority_fields_to_be_absent if {
@@ -1221,7 +1265,10 @@ claude_tag_head_guard_message(event) := sprintf("%s %s arm must require `%s`", [
 
 claude_tag_fork_refusal_message := sprintf("%s must refuse fork pull requests in a step before `%s` runs", [claude_tag_workflow_path, claude_action])
 
-claude_tag_fork_refusal_step := {"run": sprintf("head_repo=\"$(gh api \"repos/$REPOSITORY/pulls/$PR_NUMBER\" --jq '.%s')\"", [claude_fork_refusal_marker])}
+claude_tag_fork_refusal_step := {
+	"if": "github.event_name == 'issue_comment' && github.event.issue.pull_request",
+	"run": sprintf("head_repo=\"$(gh api \"repos/$REPOSITORY/pulls/$PR_NUMBER\" --jq '.%s')\"", [claude_fork_refusal_marker]),
+}
 
 claude_tag_single_job_message := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
 
@@ -1327,10 +1374,8 @@ test_claude_tag_dropping_a_pull_request_trigger_is_accepted if {
 	}
 }
 
-# The `if:` guard the other arms use is INEXPRESSIBLE here: an issue_comment
-# payload carries no pull_request object, and the fork tree arrives through the
-# action's own setupBranch rather than through GITHUB_REF. Only a step can
-# close it, so the policy demands one. #799
+# The `if:` guard the other arms use is inexpressible here — see the rule in
+# main.rego. #799
 test_claude_tag_issue_comment_without_a_fork_refusal_step_is_denied if {
 	violations := deny with input as claude_tag_fixture(sprintf(" && %s", [claude_same_repo_head_condition]))
 	claude_tag_fork_refusal_message in violations
@@ -1342,6 +1387,19 @@ test_claude_tag_fork_refusal_after_the_action_is_denied if {
 	violations := deny with input as claude_tag_workflow("claude", {
 		"if": claude_tag_condition_text(sprintf(" && %s", [claude_same_repo_head_condition])),
 		"steps": [{"uses": claude_action}, claude_tag_fork_refusal_step],
+	})
+	claude_tag_fork_refusal_message in violations
+}
+
+# Narrowing the step's own condition reopens #799 in full while leaving the
+# `run:` body — and so a run-only rule — untouched.
+test_claude_tag_fork_refusal_not_scoped_to_issue_comment_is_denied if {
+	violations := deny with input as claude_tag_workflow("claude", {
+		"if": claude_tag_condition_text(sprintf(" && %s", [claude_same_repo_head_condition])),
+		"steps": [
+			object.union(claude_tag_fork_refusal_step, {"if": "github.event_name == 'pull_request_review'"}),
+			{"uses": claude_action},
+		],
 	})
 	claude_tag_fork_refusal_message in violations
 }
