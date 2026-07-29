@@ -227,8 +227,12 @@ policy keys that requirement off the workflow's `on:` triggers rather than its
 surviving `if:` arms (a condition that never names an event SKIPS the job; a
 missing condition gates nothing). The `issues`/`issue_comment` arms carry no
 `pull_request` object, so the same guard is not expressible there — and
-claude-code-action checks the PR head out itself, which keeps `issue_comment`
-exposed on fork PRs (#799). Anthropic WIF is preferred when its
+claude-code-action stages the fork tree itself (tag mode's `setupBranch` checks
+the PR head out for every open PR), so `issue_comment` needs a job STEP instead:
+`Refuse fork pull requests` resolves the PR and exits first, and the policy pins
+both its existence and that it precedes the action, keyed on the API field it
+reads rather than its name (#799). `issues` is unaffected — the action hardcodes
+`isPR` false there. Anthropic WIF is preferred when its
 repository variables are configured, with the existing OAuth secret as a
 compatibility fallback. Codecov uploads likewise use job-scoped GitHub OIDC
 (fork PRs remain Codecov's tokenless path), never a repository upload token.

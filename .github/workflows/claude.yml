@@ -27,10 +27,11 @@ jobs:
     # GITHUB_REF to refs/pull/<n>/merge, so the ref-less checkout below lands
     # fork-authored files — including a repo-root CLAUDE.md the agent auto-loads
     # as instructions — in the workspace of the one job holding contents:write
-    # and the OAuth token. This does NOT make the rest safe: issues/issue_comment
-    # carry no pull_request object, so the guard is not expressible there, and
-    # claude-code-action checks the PR head out ITSELF (setupBranch, tag mode) —
-    # an @claude comment on a fork PR still stages fork files here. See #799.
+    # and the OAuth token. issue_comment reaches that same tree by a different
+    # route — the action's own setupBranch checks the PR head out for every open
+    # PR — which no `if:` here can express, since that payload carries no
+    # pull_request object; the "Refuse fork pull requests" step below closes it
+    # (#799). `issues` is unaffected: the action hardcodes isPR false there.
     if: >
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
@@ -42,6 +43,22 @@ jobs:
       group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
+      # First, so it precedes BOTH checkouts: ours, and the one the action does
+      # for itself. Resolving the PR is the only way to see fork-ness here.
+      - name: Refuse fork pull requests
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          head_repo="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.repo.full_name // ""')"
+          if [[ "$head_repo" != "$REPOSITORY" ]]; then
+            echo "::error::@claude does not run on fork pull requests: it would stage the fork's tree in the only contents:write job. Push the branch to this repository instead."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1

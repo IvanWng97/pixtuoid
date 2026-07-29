@@ -437,6 +437,26 @@ claude_tag_event_is_guarded(event) if {
 	}
 }
 
+claude_tag_steps := object.get(claude_tag_jobs[0], "steps", [])
+
+# Keyed on the API field the refusal must READ, not on its step name — the same
+# reason `claude_tag_jobs` keys off the action instead of the job name.
+claude_fork_refusal_marker := "head.repo.full_name"
+
+claude_fork_refusal_indices := [idx |
+	some idx, step in claude_tag_steps
+	contains(object.get(step, "run", ""), claude_fork_refusal_marker)
+]
+
+claude_action_step_indices := [idx |
+	some idx, step in claude_tag_steps
+	action_matches(object.get(step, "uses", ""), claude_action)
+]
+
+claude_fork_refusal_precedes_the_action if {
+	min(claude_fork_refusal_indices) < min(claude_action_step_indices)
+}
+
 claude_reusable := object.get(documents, claude_reusable_workflow_path, {})
 claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
 claude_analyze_job := object.get(claude_reusable_jobs, "analyze", {})
@@ -714,6 +734,18 @@ deny contains msg if {
 	claude_tag_triggers_event(event)
 	not claude_tag_event_is_guarded(event)
 	msg := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
+}
+
+# The issue_comment arm cannot be closed by an `if:` at all: its payload carries
+# no pull_request object, and the fork tree arrives through the action's own
+# setupBranch (tag mode checks the PR head out for every open PR, fork or not)
+# rather than through GITHUB_REF. So the guard has to be a STEP, and it has to
+# run before the action stages that tree. #799
+deny contains msg if {
+	claude_tag_triggers_event("issue_comment")
+	count(claude_tag_jobs) == 1
+	not claude_fork_refusal_precedes_the_action
+	msg := sprintf("%s must refuse fork pull requests in a step before `%s` runs", [claude_tag_workflow_path, claude_action])
 }
 
 # The existence half: the guard above resolves the job through its action step,

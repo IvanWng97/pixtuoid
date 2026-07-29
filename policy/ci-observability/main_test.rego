@@ -1178,6 +1178,10 @@ test_codeql_health_gate_before_upload_is_accepted if {
 
 claude_tag_head_guard_message(event) := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
 
+claude_tag_fork_refusal_message := sprintf("%s must refuse fork pull requests in a step before `%s` runs", [claude_tag_workflow_path, claude_action])
+
+claude_tag_fork_refusal_step := {"run": sprintf("head_repo=\"$(gh api \"repos/$REPOSITORY/pulls/$PR_NUMBER\" --jq '.%s')\"", [claude_fork_refusal_marker])}
+
 claude_tag_single_job_message := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
 
 claude_tag_triggers := {
@@ -1280,6 +1284,49 @@ test_claude_tag_dropping_a_pull_request_trigger_is_accepted if {
 	every violation in violations {
 		not contains(violation, "arm must require")
 	}
+}
+
+# The `if:` guard the other arms use is INEXPRESSIBLE here: an issue_comment
+# payload carries no pull_request object, and the fork tree arrives through the
+# action's own setupBranch rather than through GITHUB_REF. Only a step can
+# close it, so the policy demands one. #799
+test_claude_tag_issue_comment_without_a_fork_refusal_step_is_denied if {
+	violations := deny with input as claude_tag_fixture(sprintf(" && %s", [claude_same_repo_head_condition]))
+	claude_tag_fork_refusal_message in violations
+}
+
+# ORDER is the whole point — a refusal that runs after the action has already
+# staged the fork tree is decoration.
+test_claude_tag_fork_refusal_after_the_action_is_denied if {
+	violations := deny with input as claude_tag_workflow("claude", {
+		"if": claude_tag_condition_text(sprintf(" && %s", [claude_same_repo_head_condition])),
+		"steps": [{"uses": claude_action}, claude_tag_fork_refusal_step],
+	})
+	claude_tag_fork_refusal_message in violations
+}
+
+test_claude_tag_fork_refusal_before_the_action_is_accepted if {
+	violations := deny with input as claude_tag_workflow("claude", {
+		"if": claude_tag_condition_text(sprintf(" && %s", [claude_same_repo_head_condition])),
+		"steps": [claude_tag_fork_refusal_step, {"uses": claude_action}],
+	})
+	not claude_tag_fork_refusal_message in violations
+}
+
+# Retiring the trigger retires the requirement, same as the head-guard rule.
+test_claude_tag_without_the_issue_comment_trigger_needs_no_fork_refusal if {
+	fixture := {"documents": [{
+		"path": claude_tag_workflow_path,
+		"contents": {
+			"on": {"issues": {"types": ["opened"]}},
+			"jobs": {"claude": {
+				"if": "(github.event_name == 'issues' && trusted)",
+				"steps": [{"uses": claude_action}],
+			}},
+		},
+	}]}
+	violations := deny with input as fixture
+	not claude_tag_fork_refusal_message in violations
 }
 
 test_codeql_init_hardcoding_a_language_is_denied if {
