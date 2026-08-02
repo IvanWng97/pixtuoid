@@ -687,13 +687,16 @@ async fn a_metadata_append_does_not_revive_a_gated_transcript_but_a_turn_does() 
         let seen = seen.clone();
         async move {
             if let Some(line) = body {
-                use tokio::io::AsyncWriteExt;
-                let mut f = tokio::fs::OpenOptions::new()
+                // SYNC append: a tokio File buffers, so an un-flushed write can
+                // lose the race with the walk's own stat and the phase silently
+                // tests nothing (it did — the cursor never moved).
+                use std::io::Write;
+                let mut f = std::fs::OpenOptions::new()
                     .append(true)
                     .open(&path)
-                    .await
                     .unwrap();
-                f.write_all(line.as_bytes()).await.unwrap();
+                f.write_all(line.as_bytes()).unwrap();
+                f.sync_all().unwrap();
             }
             let events = walk_once_with_recency(
                 &path,
