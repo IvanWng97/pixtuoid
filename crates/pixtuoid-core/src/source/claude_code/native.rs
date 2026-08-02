@@ -92,6 +92,29 @@ impl ClaudeCodeSource {
     }
 }
 
+/// THE CC watcher wiring — the per-source decoder/deriver set, in one place.
+///
+/// Production, the out-of-crate integration harness (`tests/watcher/`) and the
+/// `--live` snapshot example all need the SAME chain, and hand-mirroring it has
+/// drifted three times: the id-deriver (#203, latent until a burn-tier replay),
+/// the liveness probe (caught by the #632 dogfood), and the activity clock (the
+/// ghost-gate arc). Each time the mirror silently exercised a configuration
+/// production does not run. Callers add only what is genuinely theirs — the
+/// liveness probe needs a resolved sessions dir, the unclaims handle is
+/// runtime-only, the harness wants a polling backend.
+pub fn cc_watcher(projects_root: std::path::PathBuf) -> JsonlWatcher {
+    JsonlWatcher::new(
+        projects_root,
+        SOURCE_NAME.to_string(),
+        decode_cc_line,
+        cc_session_ended,
+    )
+    .with_id_deriver(cc_id_from_path)
+    .with_label_deriver(cc_derive_label)
+    .with_activity_recency(super::cc_activity_recency)
+    .with_path_filter(skip_workflow_journal)
+}
+
 impl Source for ClaudeCodeSource {
     fn name(&self) -> &str {
         SOURCE_NAME
@@ -101,15 +124,7 @@ impl Source for ClaudeCodeSource {
         // Pure transcript watcher: the hook socket (and its presence/pid/tee
         // plumbing) lives on the `HookRouter` now. CC keeps only the
         // `child_end_unclaims` CONSUMER (the #246 blocked-stop continuation).
-        let mut watcher = JsonlWatcher::new(
-            self.projects_root.clone(),
-            SOURCE_NAME.to_string(),
-            decode_cc_line,
-            cc_session_ended,
-        )
-        .with_id_deriver(cc_id_from_path)
-        .with_label_deriver(cc_derive_label)
-        .with_path_filter(skip_workflow_journal);
+        let mut watcher = cc_watcher(self.projects_root.clone());
         if let Some(sessions_dir) = cc_sessions_dir(&self.projects_root) {
             watcher = watcher.with_liveness_probe(std::sync::Arc::new(move || {
                 live_cc_session_ids(&sessions_dir)

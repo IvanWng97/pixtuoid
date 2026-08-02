@@ -44,6 +44,11 @@ use walk::{scan_root, walk_jsonl};
 // a second local alias would be the two-copies drift bug.
 pub use crate::source::decoder::LineDecoder;
 
+// Same always-compiled rationale as `LineDecoder`: CC's `cc_activity_recency`
+// returns it and must keep building under `--no-default-features` (wasm), where
+// this whole module is gated out.
+pub use crate::source::decoder::TailActivity;
+
 /// Derives an agent's display label from its transcript `(path, source, cwd)`.
 /// The default (`default_prefixed_label`) is the source-prefixed cwd basename
 /// (`cx·dotfiles`) that EVERY transcript-bearing source except CC uses — it
@@ -60,6 +65,19 @@ fn default_prefixed_label(_path: &Path, source: &str, cwd: &Path) -> String {
 /// marker. The first-sight gate consults it so an already-ended transcript is
 /// never seeded as a live sprite.
 pub type SessionEndChecker = fn(&[u8]) -> bool;
+
+/// Reads a transcript tail into a [`TailActivity`] verdict.
+///
+/// Only **CC** supplies one (see `claude_code::cc_activity_recency` for the
+/// write that made mtime lie). Every other transcript source keeps the mtime
+/// proxy until a write like that is OBSERVED on its wire — supplying one is a
+/// per-source wire fact, not a policy.
+pub type ActivityRecency = fn(&[u8]) -> TailActivity;
+
+/// The default [`ActivityRecency`]: no opinion, so the gate keeps using mtime.
+fn no_activity_recency(_tail: &[u8]) -> TailActivity {
+    TailActivity::Unknown
+}
 
 /// Derives the opaque session-id string used to build the generic
 /// `SessionStart`'s `AgentId`. The default (`default_id_from_path`) returns
@@ -109,6 +127,7 @@ struct SourceDecoders {
     decode_line: LineDecoder,
     derive_label: LabelDeriver,
     check_ended: SessionEndChecker,
+    activity_recency: ActivityRecency,
     id_derive: IdDeriver,
     path_filter: PathFilter,
     cwd_derive: CwdDeriver,
@@ -179,6 +198,7 @@ pub struct JsonlWatcher {
     decode_line: LineDecoder,
     derive_label: LabelDeriver,
     check_session_ended: SessionEndChecker,
+    activity_recency: ActivityRecency,
     id_derive: IdDeriver,
     path_filter: PathFilter,
     cwd_derive: CwdDeriver,
@@ -223,6 +243,7 @@ impl JsonlWatcher {
             decode_line,
             derive_label: default_prefixed_label,
             check_session_ended,
+            activity_recency: no_activity_recency,
             id_derive: default_id_from_path,
             path_filter: accept_all_paths,
             cwd_derive: no_cwd_from_path,
@@ -237,6 +258,15 @@ impl JsonlWatcher {
     /// seed at EOF (default `DEFAULT_INITIAL_WINDOW`).
     pub fn with_initial_window(mut self, window: Duration) -> Self {
         self.initial_window = window;
+        self
+    }
+
+    /// Supply this source's [`ActivityRecency`] — what the first-sight gate
+    /// measures the initial window against, in place of the file mtime. Only a
+    /// source whose transcripts are provably written by something other than
+    /// the owning session needs one (CC; see the type's docs).
+    pub fn with_activity_recency(mut self, recency: ActivityRecency) -> Self {
+        self.activity_recency = recency;
         self
     }
 
@@ -461,6 +491,7 @@ impl JsonlWatcher {
             decode_line: self.decode_line,
             derive_label: self.derive_label,
             check_ended: self.check_session_ended,
+            activity_recency: self.activity_recency,
             id_derive: self.id_derive,
             path_filter: self.path_filter,
             cwd_derive: self.cwd_derive,

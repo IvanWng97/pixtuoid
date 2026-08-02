@@ -1371,13 +1371,13 @@ fn entry_duration_scales_with_path_longer_desk_takes_longer() {
         .entry
         .as_ref()
         .expect("entry profile set for near desk")
-        .1
+        .profile
         .duration_ms;
     let dur_far = motion_far[&far.agent_id]
         .entry
         .as_ref()
         .expect("entry profile set for far desk")
-        .1
+        .profile
         .duration_ms;
 
     assert!(
@@ -1433,7 +1433,7 @@ fn nearer_desk_arrives_before_farther_desk() {
 
     // Advance time past the near desk's duration+pause but stay within
     // the far desk's window. Use the near desk's profile to compute exact time.
-    let near_profile = motion_near[&near.agent_id].entry.unwrap().1;
+    let near_profile = motion_near[&near.agent_id].entry.as_ref().unwrap().profile;
     // One ms past the near desk's full trip (duration + pause).
     let done_ms = near_profile.duration_ms + near_profile.pause_ms + 1;
     let t1 = now + Duration::from_millis(done_ms);
@@ -1506,7 +1506,7 @@ fn five_same_created_at_agents_have_distinct_entry_durations() {
             .entry
             .as_ref()
             .expect("entry profile set")
-            .1
+            .profile
             .duration_ms;
         durations.push(dur);
     }
@@ -3084,5 +3084,233 @@ fn settle_from_pair_both_none_is_settle_none() {
             Settle::Both { start, end } if start == p && end == q
         ),
         "(Some, Some) collapses to Settle::Both start,end"
+    );
+}
+
+// ====================================================================
+// RESURRECT: a cancelled walkout must not teleport the agent onto its chair.
+// `resurrect_in_place` clears `exiting_at` without re-stamping `created_at`,
+// so both walk overrides declined and the sprite popped back to the desk.
+// ====================================================================
+
+/// Drive `derive_with_routing` and return the pose, keeping the caller's stores.
+fn pose_at(
+    slot: &AgentSlot,
+    now: SystemTime,
+    l: &Layout,
+    router: &mut StubRouter,
+    history: &mut PoseHistory,
+    motion: &mut HashMap<AgentId, MotionState>,
+) -> Option<Pose> {
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    derive_with_routing(
+        slot,
+        now,
+        l,
+        &mut crate::pose::RouteCtx {
+            router,
+            overlay: &overlay,
+            history,
+            motion,
+        },
+    )
+}
+
+#[test]
+fn a_resurrect_after_the_walkout_arrived_re_enters_through_the_door() {
+    let l = layout();
+    let door = l.door_threshold.expect("layout has a door");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    // Born long before the spawn window, so only a re-arm can produce an entry.
+    let created = t0 - Duration::from_secs(3600);
+    let mut slot = entry_slot(created);
+    slot.exiting_at = Some(t0);
+
+    let mut router = StubRouter::straight();
+    let mut history = PoseHistory::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    // Walk out, then let the leg arrive: the sprite is off-floor (`None`) and
+    // `history` has nothing recent — the state the snap-back cannot recover from.
+    pose_at(&slot, t0, &l, &mut router, &mut history, &mut motion);
+    assert!(
+        motion[&slot.agent_id].exit.is_some(),
+        "test setup: the walkout must have snapshotted a leg"
+    );
+    let arrived = t0 + pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    assert!(
+        pose_at(&slot, arrived, &l, &mut router, &mut history, &mut motion).is_none(),
+        "test setup: the walkout must have reached the door"
+    );
+
+    // The resurrect: exiting_at cleared, state_started_at re-stamped, created_at
+    // untouched — exactly what `fsm::resurrect_in_place` leaves behind.
+    slot.exiting_at = None;
+    slot.state_started_at = arrived;
+
+    let p = pose_at(&slot, arrived, &l, &mut router, &mut history, &mut motion);
+    match p {
+        Some(Pose::Walking { from, .. }) => assert_eq!(
+            from, door,
+            "a resurrect past its walkout must re-enter from the door"
+        ),
+        other => panic!("expected a fresh entry walk, got {other:?}"),
+    }
+    assert!(
+        motion[&slot.agent_id].exit.is_none(),
+        "the spent exit leg must be cleared, or the NEXT exit replays an \
+         already-arrived profile and the sprite vanishes instead of walking out"
+    );
+}
+
+#[test]
+fn a_resurrect_mid_walkout_re_enters_from_the_live_position() {
+    // The in-flight half. The sprite is still on the floor, so re-entering from
+    // the DOOR would jump it backwards — the leg must start where it actually
+    // is. This is the whole reason `MotionState::entry` carries a `from`.
+    let l = layout();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let created = t0 - Duration::from_secs(3600);
+    let mut slot = entry_slot(created);
+    slot.exiting_at = Some(t0);
+
+    let mut router = StubRouter::straight();
+    let mut history = PoseHistory::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    pose_at(&slot, t0, &l, &mut router, &mut history, &mut motion);
+    let mid = t0 + Duration::from_millis(200);
+    assert!(
+        matches!(
+            pose_at(&slot, mid, &l, &mut router, &mut history, &mut motion),
+            Some(Pose::Walking { .. })
+        ),
+        "test setup: the walkout must still be in flight"
+    );
+    let live = history
+        .recent(slot.agent_id, HISTORY_RECENT_MS, mid)
+        .expect("the walkout renders every frame, so history holds a position");
+
+    slot.exiting_at = None;
+    slot.state_started_at = mid;
+    let pose = pose_at(&slot, mid, &l, &mut router, &mut history, &mut motion);
+
+    let leg = motion[&slot.agent_id]
+        .entry
+        .as_ref()
+        .expect("an in-flight resurrect must re-arm entry");
+    assert_eq!(
+        leg.from, live,
+        "it re-enters from the sprite's real position, not the door"
+    );
+    assert_ne!(
+        leg.from,
+        l.door_threshold.expect("layout has a door"),
+        "starting at the door would jump the walker backwards"
+    );
+    assert!(
+        matches!(pose, Some(Pose::Walking { .. })),
+        "and it RENDERS that walk — the entry branch runs before the wander \
+         dispatch, which would otherwise return SeatedThinking and teleport it"
+    );
+}
+
+/// The exit render and the resurrect check must read "has the walkout finished?"
+/// through the SAME time-compressed clock. A far/slow desk's physics duration
+/// exceeds the GC budget, so compression is the only reason the leg reads as
+/// arrived before `EXIT_GRACE_WINDOW` reaps it — a resurrect landing in that
+/// window must still re-enter through the door.
+///
+/// Without this the sharing is unpinned: every other resurrect test routes
+/// straight-line on the small test layout, where the profile never exceeds the
+/// budget and the compression branch is dead. Reading raw elapsed at the
+/// resurrect site then survives the whole suite.
+#[test]
+fn the_resurrect_check_reads_the_same_compressed_clock_as_the_exit_render() {
+    let l = layout();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut slot = entry_slot(t0 - Duration::from_secs(3600));
+    slot.exiting_at = Some(t0);
+
+    // A long cornered route: physics duration lands well past the compression
+    // budget, so raw and compressed elapsed genuinely disagree.
+    let far: Vec<Point> = (0..24)
+        .map(|i| Point {
+            x: if i % 2 == 0 { 8 } else { 110 },
+            y: 20 + i * 3,
+        })
+        .collect();
+    let mut router = StubRouter::corners(far);
+    let mut history = PoseHistory::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    pose_at(&slot, t0, &l, &mut router, &mut history, &mut motion);
+    let profile = motion[&slot.agent_id]
+        .exit
+        .as_ref()
+        .expect("exit leg snapshotted")
+        .profile;
+    let budget = (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64)
+        .saturating_sub(EXIT_BUDGET_MARGIN_MS);
+    assert!(
+        profile.duration_ms + profile.pause_ms > budget,
+        "fixture must exceed the compression budget, else this pins nothing \
+         (duration {} + pause {} vs budget {budget})",
+        profile.duration_ms,
+        profile.pause_ms
+    );
+
+    // The first instant the COMPRESSED clock reports arrival. Compression scales
+    // elapsed by duration/budget, so arrival lands past the budget edge — find it
+    // rather than assume it.
+    let arrived_at = (1..20_000u64)
+        .find(|e| walk_arrived(&profile, exit_elapsed_ms(&profile, *e)))
+        .expect("compressed clock must arrive within the search range");
+    assert!(
+        !walk_arrived(&profile, arrived_at),
+        "raw elapsed must still read in-flight at {arrived_at}ms — otherwise the \
+         two clocks agree and this fixture cannot tell them apart"
+    );
+    let at = t0 + Duration::from_millis(arrived_at);
+
+    // Render one frame just BEFORE the compressed arrival so `PoseHistory` holds
+    // a fresh corridor position. Without it both clocks fall back to the door
+    // (the arrived exit branch returns None without recording) and the fixture
+    // cannot tell them apart — the trap this test exists to avoid.
+    let just_before = t0 + Duration::from_millis(arrived_at.saturating_sub(100));
+    pose_at(
+        &slot,
+        just_before,
+        &l,
+        &mut router,
+        &mut history,
+        &mut motion,
+    );
+    assert!(
+        history
+            .recent(slot.agent_id, HISTORY_RECENT_MS, at)
+            .is_some(),
+        "setup: history must be fresh at the resurrect instant"
+    );
+    slot.exiting_at = None;
+    slot.state_started_at = at;
+    pose_at(&slot, at, &l, &mut router, &mut history, &mut motion);
+    // The clock decides the ORIGIN, not whether entry re-arms — both halves
+    // re-arm. Past the compressed arrival the sprite is off-floor, so the leg
+    // must start at the DOOR; reading raw elapsed here still measures in-flight
+    // and would start it from the stale corridor position instead.
+    let leg = motion[&slot.agent_id]
+        .entry
+        .as_ref()
+        .expect("a resurrect must re-arm entry");
+    assert_eq!(
+        leg.started_at, at,
+        "the re-armed leg runs on a fresh clock, not the un-restamped birth"
+    );
+    assert_eq!(
+        leg.from,
+        l.door_threshold.expect("layout has a door"),
+        "past the COMPRESSED arrival the sprite is gone — the door is the only \
+         honest origin, and raw elapsed would resume it mid-corridor"
     );
 }
