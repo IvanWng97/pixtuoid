@@ -620,6 +620,16 @@ pub fn grok_session_ended(tail: &[u8]) -> bool {
 // Path derivers (the watcher's id/cwd come from the PATH, not line content)
 // ---------------------------------------------------------------------------
 
+/// Only `updates.jsonl` is the tailable transcript. Every session dir carries
+/// SIBLING `.jsonl` files that must never be walked: `chat_history.jsonl` and
+/// `rewind_points.jsonl` are REWRITTEN via temp+rename (a tail would replay
+/// whole files as fresh events and mint a second path-keyed sprite), and
+/// `feedback.jsonl`/`btw_history.jsonl`/the group-level `prompt_history.jsonl`
+/// are not session streams at all.
+pub(crate) fn is_updates_jsonl(p: &Path) -> bool {
+    p.file_name().and_then(|n| n.to_str()) == Some("updates.jsonl")
+}
+
 /// Session id from a transcript path: the PARENT-DIR name (the filename stem
 /// is the constant `updates`) — `…/sessions/<enc-cwd>/<session-id>/updates.jsonl`.
 /// Same shape as copilot's parent-dir UUID. Equal to every hook event's
@@ -1588,5 +1598,23 @@ mod tests {
         assert_eq!(percent_decode("%2"), None, "truncated escape");
         assert_eq!(percent_decode("%zz"), None, "non-hex escape");
         assert_eq!(percent_decode("%FF"), None, "invalid UTF-8 byte");
+    }
+
+    #[test]
+    fn path_filter_admits_only_updates_jsonl() {
+        let dir = Path::new("/h/.grok/sessions/%2Fr/0197-sess");
+        assert!(is_updates_jsonl(&dir.join("updates.jsonl")));
+        for sibling in [
+            "chat_history.jsonl",
+            "rewind_points.jsonl",
+            "feedback.jsonl",
+            "btw_history.jsonl",
+            "prompt_history.jsonl",
+        ] {
+            assert!(
+                !is_updates_jsonl(&dir.join(sibling)),
+                "{sibling} must be filtered (rewrite-on-resume / not a session stream)"
+            );
+        }
     }
 }

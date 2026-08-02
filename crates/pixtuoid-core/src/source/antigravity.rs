@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde_json::Value;
+use std::path::Path;
 
 use crate::source::decoder::{first_present_str, generic_tool_display};
 use crate::source::AgentEvent;
@@ -15,6 +16,26 @@ pub use native::AntigravitySource;
 
 /// The Antigravity CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "antigravity";
+
+/// Antigravity-cli writes BOTH `transcript.jsonl` (truncated) and
+/// `transcript_full.jsonl` (untruncated) per conversation in one
+/// `.../logs/` dir, carrying the SAME `step_index` stream — so walking both
+/// mints two path-keyed `AgentId`s and double-renders the conversation. Watch
+/// only the canonical `transcript.jsonl` (also the shorter one, so less likely
+/// to trip the >1 MiB oversized-skip); the decoder ignores content length, so
+/// dropping the untruncated copy loses nothing. Narrow by construction — it
+/// skips ONLY the known duplicate, never an unrelated `.jsonl`.
+///
+/// Accepted residual: a dir with ONLY `transcript_full.jsonl` (a brief
+/// write-order race before `transcript.jsonl` lands, or a future AG that drops
+/// the truncated file) renders nothing and — unlike a step-type rename, which
+/// trips `drift::unknown_event` — emits NO drift breadcrumb, because the
+/// `fn(&Path) -> bool` filter can't see the sibling to fall back on. It
+/// self-heals once `transcript.jsonl` appears, and is strictly better than the
+/// every-conversation double-render it replaces.
+pub(crate) fn skip_transcript_full(path: &Path) -> bool {
+    path.file_name().and_then(|s| s.to_str()) != Some("transcript_full.jsonl")
+}
 
 /// Decode one Antigravity CLI transcript line into `AgentEvent`s (the step_index / tool_calls JSONL schema).
 pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
@@ -303,4 +324,19 @@ mod tests {
 
     // The label / session-ended / default-paths tests live with the runtime
     // half in `native.rs`.
+
+    #[test]
+    fn skip_transcript_full_drops_only_the_duplicate() {
+        // The conversation's canonical transcript is walked; its untruncated
+        // twin is skipped so one conversation renders one sprite. Any OTHER
+        // `.jsonl` is admitted (the filter is narrow by construction).
+        let dir = Path::new("/h/.gemini/antigravity-cli/brain/c1/.system_generated/logs");
+        assert!(skip_transcript_full(&dir.join("transcript.jsonl")));
+        assert!(!skip_transcript_full(&dir.join("transcript_full.jsonl")));
+        assert!(skip_transcript_full(&dir.join("other.jsonl")));
+    }
+
+    // The brain dir is the CLI's (`antigravity-cli`), home-rooted, on every OS —
+    // the suffix is separator-agnostic so this pins it on Unix AND Windows. The
+    // USERPROFILE-vs-HOME rooting itself is covered by platform::user_home tests.
 }

@@ -641,8 +641,9 @@ mod tests {
     }
 
     // Coalescing guard: `codex_id_from_path` is invoked in THREE places that must
-    // agree — the per-line decode (here), the watcher's `with_id_deriver`
-    // (CodexSource::run), and the fixture test above. If the per-line decode ever
+    // agree — the per-line decode (here), the `codex` registry row's
+    // `id_from_path` (read by both `JsonlWatcher::new` and the offline
+    // `harness::Drive` seed), and the fixture test above. If the per-line decode ever
     // keys differently from the deriver, one Codex session splits into two
     // sprites. Pin the per-line AgentId to the deriver's output directly.
     #[test]

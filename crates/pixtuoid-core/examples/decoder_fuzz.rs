@@ -1,18 +1,18 @@
 //! Real-corpus never-panic harness for a source's transcript LINE decoder.
 //!
-//! Reads JSONL lines on stdin and runs EVERY line through the `line_decoder()`
-//! of the source named on the command line — resolved through the registry
-//! (`registry::descriptor_for(<source>).line_decoder()`), inside `catch_unwind`,
-//! asserting the **never-panic** invariant (workspace invariant #5 / the "log +
-//! continue, never panic" decoder contract).
+//! The thinnest of the four `harness::Drive` shells: bytes come from **stdin**
+//! and the verdict is **exit non-zero on any panic**. Everything between —
+//! parse, decode under `catch_unwind`, fold — is the shared pipeline, so this
+//! tool can no longer drift from what the fixture/corpus/render drivers run.
 //!
 //! The source is an ARGUMENT, not sniffed from line shape. The caller already
 //! knows which source a corpus is (one dir per invocation), and inferring it
 //! from `type`/field shape silently MISROUTED newer sources whose shape didn't
 //! match a hard-coded predicate (grok's `method` envelope, omp's bare `type`)
 //! to `decode_cc_line`, reporting a false-green "0 panics" having exercised the
-//! WRONG decoder. Registry dispatch makes coverage structural — a new source is
-//! reachable the moment it has a `SourceDescriptor` row, with no edit here.
+//! WRONG decoder. `Drive::transcript` resolves the decoder through the registry
+//! and REFUSES a source that has none, so coverage stays structural — a new
+//! source is reachable the moment it has a `SourceDescriptor` row.
 //!
 //! It is a TOOL, not a committed corpus: point it at any JSONL tree —
 //! ```
@@ -26,7 +26,12 @@
 //! ```
 //! Nothing is committed or redistributed, so there's no license / size /
 //! sanitization concern — the public sessions are a target, not a dependency.
-//! Exits non-zero if any line panics (so `just fuzz` fails loudly).
+//!
+//! Memory: one invocation drives the WHOLE piped corpus as a single stream, and
+//! `Driven` retains every decoded event for it (~500k `AgentEvent`s over a
+//! mature CC tree). Bounded, and fine for an on-demand release-mode tool — the
+//! alternative is a fold-and-drop variant of `Drive::lines` that widens the
+//! shared seam for this one caller. Split the corpus if it ever bites.
 //!
 //! Decode `Err` is allowed (the watcher logs + skips malformed lines); only a
 //! PANIC is a contract violation. Hook-only sources have no transcript line
@@ -35,11 +40,16 @@
 
 use std::io::BufRead;
 
+use pixtuoid_core::harness::Drive;
 use pixtuoid_core::source::registry;
+
+/// Panic reports are capped: a systematically broken decoder panics on every
+/// line, and the point is the SHAPE, which repeats.
+const MAX_REPORTED_PANICS: usize = 10;
 
 fn main() {
     let source = std::env::args().nth(1).unwrap_or_default();
-    let Some(desc) = registry::descriptor_for(&source) else {
+    if registry::descriptor_for(&source).is_none() {
         let known: Vec<&str> = registry::registered_source_names().collect();
         eprintln!(
             "decoder_fuzz: unknown source {source:?} — pass a registered source name \
@@ -47,8 +57,11 @@ fn main() {
             known.join(", ")
         );
         std::process::exit(2);
-    };
-    let Some(decode) = desc.line_decoder() else {
+    }
+    // A placeholder transcript path: each decoder folds it into an AgentId, but
+    // the never-panic contract is path-independent, so one stand-in is fine.
+    // Unseeded for the same reason — registration is not what is under test.
+    let Some(drive) = Drive::transcript(&source, "/fuzz/session.jsonl") else {
         eprintln!(
             "decoder_fuzz: source {source:?} has no transcript line decoder (hook-only or \
              daemon) — its never-panic contract is covered by the \
@@ -57,54 +70,32 @@ fn main() {
         std::process::exit(2);
     };
 
-    // A placeholder transcript path: each decoder folds it into an AgentId, but
-    // the never-panic contract is path-independent, so one stand-in is fine.
-    let path = "/fuzz/session.jsonl";
-
-    let (mut lines, mut parsed, mut events, mut errs, mut panics) = (0u64, 0u64, 0u64, 0u64, 0u64);
-    let mut panic_shapes: Vec<String> = Vec::new();
-
-    for line in std::io::stdin().lock().lines() {
-        let Ok(line) = line else { continue };
-        if line.trim().is_empty() {
-            continue;
-        }
-        lines += 1;
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue; // non-JSON: the watcher skips it — outside the decoder contract
-        };
-        parsed += 1;
-
-        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            decode(path, &source, v.clone())
-        }));
-
-        match res {
-            Ok(Ok(evs)) => events += evs.len() as u64,
-            Ok(Err(_)) => errs += 1,
-            Err(_) => {
-                panics += 1;
-                if panic_shapes.len() < 10 {
-                    // Print STRUCTURE only (top-level keys), never the content —
-                    // a transcript line carries real prose/code.
-                    let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                    let keys = v
-                        .as_object()
-                        .map(|o| o.keys().cloned().collect::<Vec<_>>().join(","))
-                        .unwrap_or_else(|| "<non-object>".into());
-                    panic_shapes.push(format!("type={ty:?} keys=[{keys}]"));
-                }
-            }
-        }
-    }
+    // Both error policies are wrong on their own, so split by KIND. A
+    // non-UTF-8 line must be SKIPPED — `read_line` already consumed it, and
+    // stopping there would fuzz the corpus PREFIX while still reporting
+    // "0 PANIC", the false-green this tool exists to avoid. Any other read
+    // error must STOP: it repeats without consuming, so skipping would spin
+    // forever (clippy::lines_filter_map_ok).
+    let lines = std::io::stdin().lock().lines().map_while(|r| match r {
+        Ok(line) => Some(Some(line)),
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => Some(None),
+        Err(_) => None,
+    });
+    let driven = drive.lines(lines.flatten());
 
     eprintln!(
-        "decoder_fuzz[{source}]: {lines} lines, {parsed} parsed, {events} events, {errs} decode-err, {panics} PANIC"
+        "decoder_fuzz[{source}]: {} lines, {} parsed, {} events, {} decode-err, {} PANIC",
+        driven.lines,
+        driven.lines - driven.unparseable,
+        driven.events.len(),
+        driven.decode_errors.len(),
+        driven.panics.len()
     );
-    for s in &panic_shapes {
-        eprintln!("  PANIC on: {s}");
+    // STRUCTURE only, never content — a transcript line carries real prose/code.
+    for f in driven.panics.iter().take(MAX_REPORTED_PANICS) {
+        eprintln!("  PANIC on: {f}");
     }
-    if panics > 0 {
+    if !driven.panics.is_empty() {
         std::process::exit(1);
     }
 }

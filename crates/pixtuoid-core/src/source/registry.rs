@@ -6,12 +6,42 @@
 //! test-enforced, but adding a CLI meant restating "this source exists" in
 //! 5+ files. Now it's this table + the source's own module.
 //!
+//! **What earns a column, in two parts — BOTH required.** (1) A GENERIC caller
+//! — one that does not own the source — must pick the fn by NAME. A fn the
+//! source's own `run()` hands to the watcher through a `with_*` builder needs no
+//! table: that caller already knows which source it is, so there is no name→fn
+//! lookup to centralize and a row would be mirrored data. (2) The answer must be
+//! one production DEPENDS on, not one a report consults. Together these predict
+//! every column and every exclusion below.
+//!
+//! In, by that test: `line_decoder` and `cwd_extractor` (the walker dispatches
+//! per SCANNED source), `presence_decoder` (the hook demux), and — since the
+//! offline `harness::Drive` — the **id deriver** and the **path filter**.
+//! `Drive` stands in for `emit_first_sight` and must key identically or a driven
+//! transcript registers nothing; a driver that WALKS a tree must select the same
+//! files or its census counts what production never reads. All are READ, not
+//! mirrored: `JsonlWatcher::new` takes its defaults from `id_deriver_for` /
+//! `path_filter_for` instead of each `run()` re-passing its own fns.
+//!
 //! Deliberately NOT in the table (the scatter there is load-bearing):
-//! - The `Source` trait impls and their JsonlWatcher wiring (label derivers,
-//!   session-end checkers, id derivers): each source's `run()` uses its own
-//!   module's fns directly — that's per-source code in a per-source file,
-//!   not a cross-source registry, and mirroring it here would only add
-//!   dead-data drift risk.
+//! - The `Source` trait impls and the rest of their JsonlWatcher wiring (label
+//!   derivers, session-end checkers, cwd derivers, liveness probes): per-source
+//!   code in a per-source file, dispatched by the source itself.
+//! - The `ActivityRecency` clock is the deliberate near-miss, and it fails part
+//!   (2), not part (1): a generic caller DOES name-dispatch it (`corpus_check`'s
+//!   `newest_activity` hardcodes the CC check), but what it feeds is a
+//!   provenance REPORT — nothing production reads back — so a hand-written
+//!   source check there costs a wrong column, not a wrong verdict. In production
+//!   it stays owner-passed (`with_activity_recency`, CC only). The "dead data in
+//!   most rows" argument does NOT justify the exclusion on its own:
+//!   `accept_all_paths` is dead data in three of six transcript rows. Move this
+//!   in when a second source publishes a clock AND something beyond a report
+//!   depends on it.
+//! - `should_seed_at_eof` — the recency + end-marker + liveness gate — is the
+//!   limit case worth stating: it excludes far MORE of a real corpus than any
+//!   path filter, and it is still not a column, because the offline harness
+//!   deliberately does not model it (a driver reads historical transcripts on
+//!   purpose). Part (1) alone would drag it in; part (2) is what keeps it out.
 //! - `_pixtuoid_source` attribution + the shared CC-shaped hook arms: they
 //!   stay in `decoder.rs` at the read site, pinned by their regression tests.
 //! - The binary crate's `install::Target` registry (this table's design
@@ -20,7 +50,10 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::{extract_top_level_cwd, CwdExtractor, LineDecoder};
+use crate::source::decoder::{
+    accept_all_paths, default_id_from_path, extract_top_level_cwd, CwdExtractor, IdDeriver,
+    LineDecoder, PathFilter,
+};
 use crate::source::{
     antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, kimi, omp, openclaw,
     opencode, reasonix, AgentEvent,
@@ -168,15 +201,30 @@ pub struct SourceDescriptor {
     pub kind: SourceKind,
 }
 
-/// The transcript half of an `Agent` row. A watchable transcript needs BOTH a
-/// line decoder AND a first-sight cwd extractor — bundling them makes the
-/// Some↔Some pairing structural (the pre-bundle paired `Option`s' iff
-/// invariant was only test-pinned): a row is either transcript-bearing (both
-/// fns) or hook-only (`transcript: None`), and a half-populated row is
-/// unrepresentable.
+/// The transcript half of an `Agent` row. A watchable transcript needs a line
+/// decoder, a first-sight cwd extractor AND the path→session-id derivation —
+/// bundling them makes the all-or-nothing pairing structural (the pre-bundle
+/// paired `Option`s' iff invariant was only test-pinned): a row is either
+/// transcript-bearing (every fn) or hook-only (`transcript: None`), and a
+/// half-populated row is unrepresentable.
 pub struct Transcript {
     /// JSONL line decoder.
     pub line_decoder: LineDecoder,
+    /// How this source's transcript PATH becomes the session id its
+    /// `SessionStart` is keyed on. Read by the JSONL watcher (its first-sight
+    /// registration) AND by the offline `harness::Drive` (the seed standing in
+    /// for that registration) — ONE derivation, so a driven transcript keys
+    /// exactly as production does. Each source's own fn lives in its module
+    /// (invariant #3); `default_id_from_path` is the path-keyed default.
+    pub id_from_path: IdDeriver,
+    /// WHICH `.jsonl` files under this source's root are its transcripts. Read
+    /// by the JSONL watcher AND by any offline driver that WALKS a tree — a
+    /// census over the unfiltered set counts files production never reads
+    /// (Antigravity's duplicate `transcript_full.jsonl` double-counts every
+    /// conversation; grok's rewrite-on-resume siblings and CC's foreign-schema
+    /// workflow `journal.jsonl` decode as garbage). `accept_all_paths` is the
+    /// admit-everything default.
+    pub path_filter: PathFilter,
     /// First-sight cwd extractor for the walker's transcript head scan. The fn
     /// lives in the source's own module (invariant #3: per-source
     /// transcript-format knowledge stays per-source); the shared
@@ -276,6 +324,18 @@ impl SourceDescriptor {
         self.transcript().map(|t| t.cwd_extractor)
     }
 
+    /// The transcript path→session-id derivation (`None` for a hook-only agent
+    /// AND every daemon — neither has a transcript path to key on).
+    pub fn id_deriver(&self) -> Option<IdDeriver> {
+        self.transcript().map(|t| t.id_from_path)
+    }
+
+    /// Which `.jsonl` files are this source's transcripts (`None` for a
+    /// hook-only agent AND every daemon — neither has a tree to walk).
+    pub fn path_filter(&self) -> Option<PathFilter> {
+        self.transcript().map(|t| t.path_filter)
+    }
+
     /// The focus-jump pid channel (`Unsupported` for a daemon — a mascot has
     /// no terminal to jump to).
     pub fn focus_channel(&self) -> FocusChannel {
@@ -360,6 +420,31 @@ pub fn cwd_extractor_for(source: &str) -> CwdExtractor {
         .unwrap_or(extract_top_level_cwd)
 }
 
+/// How this source keys a transcript path onto a session id. THE single
+/// derivation: [`crate::source::jsonl::JsonlWatcher::new`] defaults to it (so a
+/// registration keys the row's way with no per-source `run()` wiring) and the
+/// offline `harness::Drive` seeds with it (so a driven transcript lands on the
+/// SAME `AgentId` the watcher would have registered — key it any other way and
+/// every JSONL event is a documented no-op against an unknown id, which reads
+/// as "the decoder produced nothing"). Falls back to the path-keyed default for
+/// a hook-only, daemon, or unregistered (test-harness) source name.
+pub fn id_deriver_for(source: &str) -> IdDeriver {
+    descriptor_for(source)
+        .and_then(|d| d.id_deriver())
+        .unwrap_or(default_id_from_path)
+}
+
+/// Which `.jsonl` files under this source's root ARE its transcripts. Same
+/// two-reader shape as [`id_deriver_for`]: `JsonlWatcher::new` defaults to it,
+/// and any offline driver that walks a tree must select the SAME files or its
+/// census counts what production never reads. Admits everything for a
+/// hook-only, daemon, or unregistered source name.
+pub fn path_filter_for(source: &str) -> PathFilter {
+    descriptor_for(source)
+        .and_then(|d| d.path_filter())
+        .unwrap_or(accept_all_paths)
+}
+
 /// A daemon source's wire decoder: its envelope → the sending INSTANCE's identity
 /// plus its presence deltas. The pointer type the registry hands the `HookRouter`
 /// demux so each daemon routes to its OWN decoder (a 2nd daemon needs no
@@ -393,6 +478,11 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: claude_code::decode_cc_line,
+            // The transcript filename stem IS the session UUID the hook keys on.
+            id_from_path: claude_code::cc_id_from_path,
+            // The workflow orchestrator's foreign-schema `journal.jsonl` sidecar
+            // lives in the SAME projects tree.
+            path_filter: claude_code::skip_workflow_journal,
             // CC writes a top-level `cwd` on transcript lines — the shared shape.
             cwd_extractor: extract_top_level_cwd,
         }),
@@ -427,6 +517,9 @@ const CODEX: SourceDescriptor = SourceDescriptor {
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: codex::decode_codex_line,
+            // The rollout filename's trailing UUID (the stem also carries a timestamp).
+            id_from_path: codex::codex_id_from_path,
+            path_filter: accept_all_paths,
             // Rollouts carry cwd ONLY on the head session_meta line, under `payload`.
             cwd_extractor: codex::extract_codex_cwd,
         }),
@@ -460,6 +553,12 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: antigravity::decode_ag_line,
+            // Path-keyed: its hook keys on `transcript_path` too, so the default
+            // coalesces the two transports with no per-source derivation.
+            id_from_path: default_id_from_path,
+            // BOTH `transcript.jsonl` and the untruncated `transcript_full.jsonl`
+            // carry one conversation — walking both double-renders it.
+            path_filter: antigravity::skip_transcript_full,
             // AG step lines carry no cwd field at all — the shared top-level shape
             // never matches and the label falls back to the bare `ag` prefix,
             // exactly the pre-dispatch behavior.
@@ -625,6 +724,9 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: copilot::decode_copilot_line,
+            // The PARENT-DIR uuid — the filename stem is the constant `events`.
+            id_from_path: copilot::copilot_id_from_path,
+            path_filter: accept_all_paths,
             // `session.start` nests the cwd at `data.context.cwd`.
             cwd_extractor: copilot::extract_copilot_cwd,
         }),
@@ -753,6 +855,11 @@ const GROK: SourceDescriptor = SourceDescriptor {
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: grok::decode_grok_line,
+            // The transcript's parent-DIR name is the hook's `sessionId`.
+            id_from_path: grok::grok_id_from_path,
+            // Session dirs carry rewrite-on-resume siblings (chat_history /
+            // rewind_points / the 0.2.x events.jsonl) that must never be tailed.
+            path_filter: grok::is_updates_jsonl,
             // Always-None: grok lines carry no cwd — the PATH carries it
             // (URL-encoded group dir), applied via the watcher's cwd deriver.
             cwd_extractor: grok::extract_grok_cwd,
@@ -807,6 +914,10 @@ const OMP: SourceDescriptor = SourceDescriptor {
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: omp::decode_omp_line,
+            // The nested stem CHAIN, so a subagent task id can't collide across
+            // sessions (omp persists subagents as `<parent-stem>/<taskId>.jsonl`).
+            id_from_path: omp::omp_id_from_path,
+            path_filter: accept_all_paths,
             // The `type:"session"` header carries a top-level `cwd` — the
             // shared shape.
             cwd_extractor: extract_top_level_cwd,
@@ -996,6 +1107,144 @@ mod tests {
     fn descriptor_for_resolves_known_and_rejects_unknown() {
         assert_eq!(descriptor_for("codex").unwrap().label_prefix, "cx");
         assert!(descriptor_for("not-a-source").is_none());
+    }
+
+    // The id derivation is the table's, so the WATCHER and every offline
+    // driver key one transcript identically. Pin each row against its source's
+    // own documented key shape: a row wired to the wrong source's fn would
+    // split that CLI's hook and JSONL events into two sprites.
+    #[test]
+    fn id_deriver_for_returns_each_sources_own_transcript_key() {
+        use std::path::Path;
+        let cases: &[(&str, &str, &str)] = &[
+            // CC: the filename stem IS the session UUID.
+            (
+                claude_code::SOURCE_NAME,
+                "/h/.claude/projects/-h-p/01000000-0000-7000-8000-0000000000cc.jsonl",
+                "01000000-0000-7000-8000-0000000000cc",
+            ),
+            // Codex: the trailing UUID of the rollout filename.
+            (
+                codex::SOURCE_NAME,
+                "/h/.codex/sessions/2026/05/29/rollout-2026-05-29T22-36-52-019e7762-9ded-7e33-be41-946ecf105bf4.jsonl",
+                "019e7762-9ded-7e33-be41-946ecf105bf4",
+            ),
+            // Copilot: the PARENT DIR uuid (the stem is the constant `events`).
+            (
+                copilot::SOURCE_NAME,
+                "/h/.copilot/session-state/019e7762-9ded-7e33-be41-946ecf105bf4/events.jsonl",
+                "019e7762-9ded-7e33-be41-946ecf105bf4",
+            ),
+            // grok: the transcript's parent-DIR name is the session id.
+            (
+                grok::SOURCE_NAME,
+                "/h/.grok/sessions/enc-cwd/019e7762-9ded-7e33-be41-946ecf105bf4/updates.jsonl",
+                "019e7762-9ded-7e33-be41-946ecf105bf4",
+            ),
+        ];
+        for (source, path, want) in cases {
+            assert_eq!(
+                id_deriver_for(source)(Path::new(path)),
+                *want,
+                "{source}: the registry must derive this transcript's own session key"
+            );
+        }
+
+        // Antigravity is the path-keyed DEFAULT (its hook keys on the
+        // transcript path via `IdKey::TranscriptPathThenSessionId`), and so is
+        // an unregistered (test-harness) source name.
+        let ag = "/h/.gemini/antigravity-cli/brain/x/.system_generated/logs/transcript.jsonl";
+        assert_eq!(
+            id_deriver_for(antigravity::SOURCE_NAME)(Path::new(ag)),
+            crate::id::normalize_path_key(ag),
+        );
+        assert_eq!(
+            id_deriver_for("not-a-source")(Path::new(ag)),
+            crate::id::normalize_path_key(ag),
+        );
+    }
+
+    // The file SELECTION is the table's too, for the same reason the id
+    // derivation is: the walker and any offline driver must walk the SAME set
+    // or the offline one reads files production never does. Pin each row's
+    // sibling denylist against a real path from that source's tree.
+    #[test]
+    fn path_filter_for_rejects_each_sources_own_foreign_siblings() {
+        use std::path::Path;
+        let reject: &[(&str, &str)] = &[
+            // CC: the workflow orchestrator's FOREIGN-schema sidecar, in the
+            // same projects tree (its lines would flood `unknown_event`).
+            (
+                claude_code::SOURCE_NAME,
+                "/h/.claude/projects/-h-p/uuid/subagents/workflows/wf_1/journal.jsonl",
+            ),
+            // Antigravity: the untruncated twin — walking both double-renders
+            // one conversation.
+            (
+                antigravity::SOURCE_NAME,
+                "/h/.gemini/antigravity-cli/brain/c1/.system_generated/logs/transcript_full.jsonl",
+            ),
+            // grok: rewrite-on-resume siblings in every session dir.
+            (
+                grok::SOURCE_NAME,
+                "/h/.grok/sessions/%2Fr/s1/chat_history.jsonl",
+            ),
+            (grok::SOURCE_NAME, "/h/.grok/sessions/%2Fr/s1/events.jsonl"),
+        ];
+        for (source, path) in reject {
+            assert!(
+                !path_filter_for(source)(Path::new(path)),
+                "{source} must not walk {path}"
+            );
+        }
+
+        let admit: &[(&str, &str)] = &[
+            (
+                claude_code::SOURCE_NAME,
+                "/h/.claude/projects/-h-p/uuid/subagents/workflows/wf_1/agent-xyz.jsonl",
+            ),
+            (
+                antigravity::SOURCE_NAME,
+                "/h/.gemini/antigravity-cli/brain/c1/.system_generated/logs/transcript.jsonl",
+            ),
+            (grok::SOURCE_NAME, "/h/.grok/sessions/%2Fr/s1/updates.jsonl"),
+            // Rows with no sibling problem admit everything, as does an
+            // unregistered (test-harness) source name.
+            (
+                codex::SOURCE_NAME,
+                "/h/.codex/sessions/2026/05/29/rollout-x.jsonl",
+            ),
+            (omp::SOURCE_NAME, "/h/.omp/agent/sessions/e/2026_0199.jsonl"),
+            (
+                copilot::SOURCE_NAME,
+                "/h/.copilot/session-state/019e/events.jsonl",
+            ),
+            ("not-a-source", "/anything.jsonl"),
+        ];
+        for (source, path) in admit {
+            assert!(
+                path_filter_for(source)(Path::new(path)),
+                "{source} must walk {path}"
+            );
+        }
+    }
+
+    // omp keys the whole stem CHAIN below the sessions root, so a subagent's
+    // task id can never collide across sessions. Split from the table above
+    // because its expected value is derived, not a literal.
+    #[test]
+    fn id_deriver_for_omp_keys_the_nested_stem_chain() {
+        use std::path::Path;
+        let child =
+            Path::new("/h/.omp/agent/sessions/enc-cwd/2026-07-10T08-00-00-000Z_0199/Alpha.jsonl");
+        assert_eq!(
+            id_deriver_for(omp::SOURCE_NAME)(child),
+            omp::omp_id_from_path(child),
+        );
+        assert!(
+            id_deriver_for(omp::SOURCE_NAME)(child).contains("Alpha"),
+            "the omp key must carry the subagent stem"
+        );
     }
 
     // The walker's head scan needs a cwd extractor for EXACTLY the

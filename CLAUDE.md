@@ -144,8 +144,30 @@ flat, three of them deliberately publish-excluded) with `#[cfg(windows)]` parity
 [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md);
 the headless render harness (`tui_renderer/harness`) drives the real
 `TuiRenderer` through ratatui `TestBackend` — see the tui guide. Coverage:
-`just coverage`. Decoder never-panic fuzz vs a real session corpus:
-`just fuzz <source> <jsonl-dir>` (on-demand, not in CI). Mutation testing (do the
+`just coverage`.
+
+**Real wire bytes ride ONE pipeline.** Everything that feeds captured or live
+transcript/hook bytes through the production path — the conformance fixtures,
+the `wire_to_pixels` render proof, the never-panic fuzz tool, the corpus census
+— drives `pixtuoid_core::harness::Drive` (behind core's dev-only `harness`
+cargo feature, so it never enters the published crate). The four call sites
+differ ONLY in where bytes come from and in assert-vs-report; the decode →
+reduce path between those ends is shared, including the first-sight `SessionStart`
+seed keyed by the source's registry row — and, for a driver that walks a TREE,
+the row's `path_filter` too, so the census reads the files the watcher would and
+no more (unfiltered, CC's workflow `journal.jsonl` sidecars alone inflated a
+4,120-transcript corpus to 4,377). **A driver that keys that seed any
+other way registers NOTHING** (a JSONL event for an unknown id is a documented
+no-op) and reports it as a decoder failure — which is what the corpus census
+did on its first run. Two on-demand tools sit on top: decoder never-panic fuzz
+over a session corpus, `just fuzz <source> <jsonl-dir>`, and the
+"parsed AND reached the UI" census, `cargo run --release -p pixtuoid-scene
+--example corpus_check -- <source> <root> [--json]` (it adds the render half —
+`FloorSession::observe` — and is the only shell that reports rather than
+asserts, because corpus content is unbounded; a decode error or a panic there
+still exits non-zero). Neither runs in CI.
+
+Mutation testing (do the
 assertions have teeth?): `just mutants` — diff-scoped (`cargo-mutants
 --in-diff` vs origin/main), config in `.cargo/mutants.toml`; in CI it is its own
 **on-demand** workflow (`mutants.yml`, `workflow_dispatch` from the Actions tab),

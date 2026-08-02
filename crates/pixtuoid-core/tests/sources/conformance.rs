@@ -1,12 +1,18 @@
 //! Golden-fixture decode + coalescing harness.
 //!
-//! For each `tests/sources/fixtures/<source>/<scenario>/` directory, decode the
-//! transcript lines (via the source's `LineDecoder`) and the hook payloads
-//! (via `decode_hook_payload`), then:
-//!   1. snapshot the full decoded `AgentEvent` sequence (insta yaml), and
-//!   2. assert every decoded event shares ONE `AgentId` — the hook↔JSONL
-//!      coalescing contract that keeps regressing (a mismatch = two sprites
-//!      for one session).
+//! One of the four `harness::Drive` shells: bytes come from the COMMITTED
+//! fixture dirs (`tests/sources/fixtures/<source>/<scenario>/`) and the verdict
+//! is an assertion — the full decoded `AgentEvent` sequence is snapshotted
+//! (insta yaml), and every decoded event must share ONE `AgentId` (the
+//! hook↔JSONL coalescing contract that keeps regressing; a mismatch = two
+//! sprites for one session).
+//!
+//! Each transport is one drive: the transcript through `Drive::transcript`
+//! (the source's registry `LineDecoder`, `Transport::Jsonl`) and the hook
+//! payloads through `Drive::hooks` (the shared dispatcher, `Transport::Hook`).
+//! Neither is SEEDED — this harness asserts what the WIRE alone produces, so a
+//! transcript that registers nothing on its own is a fact the snapshot shows
+//! rather than one a seed hides.
 //!
 //! Adding a CLI = drop a fixture dir; the decoder comes from the source's
 //! `SourceDescriptor` row in `source/registry.rs` — no harness edit. Run
@@ -19,23 +25,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use pixtuoid_core::source::decoder::decode_hook_payload;
-use pixtuoid_core::source::jsonl::LineDecoder;
+use pixtuoid_core::harness::{Drive, Driven};
 use pixtuoid_core::source::{registry, AgentEvent};
-
-/// A fixture source's JSONL line decoder, from the source registry. A
-/// hook-only source (`transcript: None`) ships no transcript and never
-/// reaches this fn (`is_hook_only` gates the transcript requirement).
-fn decoder_for(source: &str) -> LineDecoder {
-    registry::descriptor_for(source)
-        .and_then(|d| d.line_decoder())
-        .unwrap_or_else(|| {
-            panic!(
-                "fixture source {source:?} has no line_decoder — add/extend its \
-                 SourceDescriptor row in source/registry.rs"
-            )
-        })
-}
 
 /// Hook-only-ness comes from the registry row (`line_decoder()` is `None`), never
 /// a harness-side list — a second list could mark a JSONL source hook-only and
@@ -79,22 +70,57 @@ fn sorted_dirs(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// One fixture's decoded events, split by transport so the test can assert each
-/// side actually contributed (a degenerate all-no-op transcript must not pass
+/// One fixture's drives, split by transport so the test can assert each side
+/// actually contributed (a degenerate all-no-op transcript must not pass
 /// coalescing on hooks alone).
 struct Decoded {
-    jsonl: Vec<AgentEvent>,
-    hooks: Vec<AgentEvent>,
-    /// The raw parsed hook payloads (before the registry dispatcher), so a
-    /// presence-only source can pin its OWN field-reading decoder against the
-    /// byte-real fixture — `hooks` is empty for those by design.
-    hooks_raw: Vec<serde_json::Value>,
-    had_hook_file: bool,
+    /// The transcript drive — `None` for a hook-only source (no transcript).
+    jsonl: Option<Driven>,
+    /// The hook drive — `None` when the scenario ships no `hook-payloads.jsonl`.
+    hooks: Option<Driven>,
+    /// The hook payload LINES as committed (after `{{TRANSCRIPT_PATH}}`
+    /// substitution), so a presence-only source can pin its OWN field-reading
+    /// decoder against the byte-real fixture — a daemon's `hooks` drive decodes
+    /// to zero `AgentEvent`s by design.
+    hook_lines: Vec<String>,
 }
 
-/// Decode one fixture dir, feeding the decoders the fixture's *relative* path as
-/// the transcript key — `AgentId` is a deterministic FNV hash of that key, so
-/// snapshots stay machine-independent.
+impl Decoded {
+    /// Every decoded event, transcript side first — the snapshot's order.
+    fn events(&self) -> Vec<AgentEvent> {
+        self.jsonl
+            .iter()
+            .chain(self.hooks.iter())
+            .flat_map(|d| d.events.iter().cloned())
+            .collect()
+    }
+}
+
+/// A scenario's transcripts: the non-hook `.jsonl` files, sorted. Exactly one
+/// for a JSONL-bearing source — two would make selection (and the snapshot)
+/// depend on `read_dir` order, zero would skip its LineDecoder entirely — and
+/// ZERO for a hook-only source (`transcript: None` in its registry row), which
+/// is the only kind that may ship none.
+fn transcripts_in(dir: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.extension().and_then(|s| s.to_str()) == Some("jsonl")
+                && p.file_name().and_then(|s| s.to_str()) != Some("hook-payloads.jsonl")
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The one transcript a JSONL-bearing scenario ships.
+fn transcript_in(dir: &Path) -> PathBuf {
+    let mut t = transcripts_in(dir);
+    assert_eq!(t.len(), 1, "{} must ship one transcript", dir.display());
+    t.remove(0)
+}
+
 fn decode_fixture(source: &str, dir: &Path) -> Decoded {
     // Catch the dir-name-typo / removed-source cases up front — otherwise
     // they'd be misdiagnosed as "JSONL-bearing, found 0" (a false claim about
@@ -105,20 +131,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
         "fixture dir {source:?} matches no SourceDescriptor row — dir-name typo, \
          or a removed source whose fixtures should be deleted"
     );
-    // The transcript is the lone non-hook .jsonl in the dir. Exactly one for a
-    // JSONL-bearing source — two would make selection (and the snapshot)
-    // depend on read_dir order, zero would skip its LineDecoder entirely. A
-    // hook-only source (`transcript: None` in its registry row) must ship
-    // ZERO transcripts — and ONLY it may.
-    let mut transcripts: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap()
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.extension().and_then(|s| s.to_str()) == Some("jsonl")
-                && p.file_name().and_then(|s| s.to_str()) != Some("hook-payloads.jsonl")
-        })
-        .collect();
-    transcripts.sort();
+    let transcripts = transcripts_in(dir);
     let expected = if is_hook_only(source) { 0 } else { 1 };
     assert_eq!(
         transcripts.len(),
@@ -146,45 +159,106 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
         .to_string_lossy()
         .replace('\\', "/");
 
-    let mut jsonl = Vec::new();
-    if let Some(transcript) = transcripts.first() {
-        let decode = decoder_for(source);
-        for line in read_lines(transcript) {
-            let v: serde_json::Value = serde_json::from_str(&line)
-                .unwrap_or_else(|e| panic!("bad json in {}: {e}", transcript.display()));
-            match decode(&logical, source, v) {
-                Ok(evs) => jsonl.extend(evs),
-                Err(e) => panic!("decode error in {}: {e}", transcript.display()),
-            }
-        }
-    }
+    let jsonl = transcripts.first().map(|transcript| {
+        let drive = Drive::transcript(source, &logical).unwrap_or_else(|| {
+            panic!(
+                "fixture source {source:?} has no line_decoder — add/extend its \
+                 SourceDescriptor row in source/registry.rs"
+            )
+        });
+        let driven = drive.lines(read_lines(transcript));
+        driven.assert_clean(&format!("transcript {}", transcript.display()));
+        driven
+    });
 
     let hooks_path = dir.join("hook-payloads.jsonl");
-    let had_hook_file = hooks_path.exists();
-    let mut hooks = Vec::new();
-    let mut hooks_raw = Vec::new();
-    if had_hook_file {
-        for line in read_lines(&hooks_path) {
-            // `{{TRANSCRIPT_PATH}}` lets a path-keyed hook (CC) line up with its
-            // transcript; Codex carries it too, to prove it's ignored.
-            let line = line.replace("{{TRANSCRIPT_PATH}}", &logical);
-            let v: serde_json::Value = serde_json::from_str(&line)
-                .unwrap_or_else(|e| panic!("bad hook json in {}: {e}", hooks_path.display()));
-            hooks_raw.push(v.clone());
-            match decode_hook_payload(v) {
-                // One payload can decode to multiple events (Identity attached
-                // ahead of a tool/permission event, #221).
-                Ok(evs) => hooks.extend(evs),
-                Err(e) => panic!("hook decode error in {}: {e}", hooks_path.display()),
-            }
-        }
-    }
+    // `{{TRANSCRIPT_PATH}}` lets a path-keyed hook (CC) line up with its
+    // transcript; Codex carries it too, to prove it's ignored.
+    let hook_lines: Vec<String> = if hooks_path.exists() {
+        read_lines(&hooks_path)
+            .into_iter()
+            .map(|l| l.replace("{{TRANSCRIPT_PATH}}", &logical))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    // A scenario with no hook file drives nothing; an EMPTY one still drives
+    // (and the daemon arm's non-empty check below is what catches it).
+    let hooks = hooks_path.exists().then(|| {
+        // One payload can decode to multiple events (Identity attached ahead of
+        // a tool/permission event, #221).
+        let driven = Drive::hooks().lines(&hook_lines);
+        driven.assert_clean(&format!("hook payloads {}", hooks_path.display()));
+        driven
+    });
+
     Decoded {
         jsonl,
         hooks,
-        hooks_raw,
-        had_hook_file,
+        hook_lines,
     }
+}
+
+/// The WATCHER half of coalescing, over the same byte-real fixtures: a
+/// first-sight seed keyed by the source's registry row must land on the SAME
+/// `AgentId` that source's own decoder derives from the transcript it is
+/// reading. A row wired to the wrong deriver registers one agent while every
+/// decoded line lands on another — two sprites for one session, and (in an
+/// offline driver) a census that reports "parsed but never rendered".
+///
+/// `all_source_fixtures_decode_and_coalesce` cannot see this: it drives the
+/// wire ALONE, so the seed — the thing production actually registers with — is
+/// never exercised. This is also the windows-test catch for the path-key fold
+/// (`transcript_at`): on Unix `normalize_path_key` is the identity, so a raw
+/// vs normalized key divergence is invisible locally.
+#[test]
+fn a_seeded_drive_coalesces_with_each_transcripts_own_decoder() {
+    let root = fixtures_root();
+    let mut ran = 0;
+    for source_dir in sorted_dirs(&root) {
+        let source = source_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        if is_hook_only(&source) || is_daemon(&source) {
+            continue;
+        }
+        for scenario_dir in sorted_dirs(&source_dir) {
+            let transcript = transcript_in(&scenario_dir);
+            let driven = Drive::transcript_at(&source, &transcript)
+                .unwrap_or_else(|| panic!("{source}: no transcript decoder"))
+                .seeded()
+                .lines(read_lines(&transcript));
+            driven.assert_clean(&format!("seeded transcript {}", transcript.display()));
+
+            let ids: BTreeSet<_> = driven.events.iter().map(AgentEvent::agent_id).collect();
+            assert!(
+                driven.events.len() >= 2,
+                "{source}: the seed plus this transcript's own events, got {:?}",
+                driven.events
+            );
+            assert_eq!(
+                ids.len(),
+                1,
+                "{source}/{}: the first-sight seed and the decoded lines must be ONE agent \
+                 — the registry row's id deriver disagrees with this source's own decoder \
+                 keying, got {ids:?}",
+                scenario_dir.file_name().unwrap().to_string_lossy(),
+            );
+            assert_eq!(
+                driven.registered(),
+                1,
+                "{source}: a seeded transcript must register exactly one slot"
+            );
+            ran += 1;
+        }
+    }
+    assert!(
+        ran > 0,
+        "no transcript fixtures found under {}",
+        root.display()
+    );
 }
 
 /// Every registered source MUST ship a coalescing fixture. Without this,
@@ -232,7 +306,7 @@ fn all_source_fixtures_decode_and_coalesce() {
                 .to_string_lossy()
                 .into_owned();
             let d = decode_fixture(&source, &scenario_dir);
-            let events: Vec<AgentEvent> = d.jsonl.iter().chain(d.hooks.iter()).cloned().collect();
+            let events = d.events();
 
             // DAEMON (OpenClaw): the presence_decoder claims every event but
             // emits ZERO AgentEvents — presence rides a sibling channel into
@@ -242,7 +316,7 @@ fn all_source_fixtures_decode_and_coalesce() {
             // coalesce contracts below don't apply (no agent slots).
             if is_daemon(&source) {
                 assert!(
-                    d.had_hook_file && !d.hooks_raw.is_empty(),
+                    !d.hook_lines.is_empty(),
                     "{source}/{scenario}: a daemon source must ship a NON-EMPTY \
                      hook-payloads.jsonl (an empty fixture passes the zero-events check vacuously)"
                 );
@@ -257,11 +331,16 @@ fn all_source_fixtures_decode_and_coalesce() {
                 // (`runId`→`run_id`) FAILS here, not just the synthetic units that
                 // hardcode the same names. Matches the byte-real-pin standard
                 // (Copilot #294 / CodeWhale #276).
+                // The PRESENCE lane, not the agent one: these payloads ride the
+                // sibling channel, so they are decoded here from the committed
+                // lines rather than through `Drive` (whose `AgentEvent` output
+                // for a daemon is empty by construction, asserted just above).
                 let decoded: Vec<_> = d
-                    .hooks_raw
+                    .hook_lines
                     .iter()
+                    .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
                     .filter_map(|v| {
-                        pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(v).ok()
+                        pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&v).ok()
                     })
                     .collect();
                 assert!(
@@ -299,18 +378,18 @@ fn all_source_fixtures_decode_and_coalesce() {
             // A hook-only source ships no transcript and must then ship hooks.
             if is_hook_only(&source) {
                 assert!(
-                    d.had_hook_file && !d.hooks.is_empty(),
+                    d.hooks.as_ref().is_some_and(|h| !h.events.is_empty()),
                     "{source}/{scenario}: a hook-only source's scenario must ship a non-empty hook-payloads.jsonl"
                 );
             } else {
                 assert!(
-                    !d.jsonl.is_empty(),
+                    d.jsonl.as_ref().is_some_and(|j| !j.events.is_empty()),
                     "{source}/{scenario}: transcript decoded to ZERO events"
                 );
             }
-            if d.had_hook_file {
+            if let Some(hooks) = &d.hooks {
                 assert!(
-                    !d.hooks.is_empty(),
+                    !hooks.events.is_empty(),
                     "{source}/{scenario}: hook-payloads.jsonl decoded to ZERO events"
                 );
             }

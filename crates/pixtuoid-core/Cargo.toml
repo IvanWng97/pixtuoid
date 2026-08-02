@@ -34,9 +34,17 @@ workspace = true
 # wasm32-unknown-unknown: the event vocabulary + reducer + state + the
 # sprite/render surface, no tokio/notify. That no-default
 # build is what pixtuoid-scene → the WebAssembly office hero compiles against.
+#
+# `harness` (NON-default) adds `src/harness.rs` — the offline decode→reduce
+# driver the fixture/corpus/fuzz/render call sites all ride. Dev scaffolding,
+# so it stays OUT of a normal build and out of the published crate's API
+# surface (`cargo public-api` + `cargo semver-checks` both run on default
+# features): a test harness compiled into the shipped lib would be dead weight
+# AND a semver commitment we don't intend to make.
 [features]
 default = ["native"]
 native  = ["dep:tokio", "dep:notify"]
+harness = []
 
 [dependencies]
 tokio       = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util"], optional = true }
@@ -64,6 +72,15 @@ rustix = { version = "1", features = ["event", "process", "pipe"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }
 
 [dev-dependencies]
+# Depending on ourselves BY PATH is how a crate turns its own non-default
+# feature on for its dev targets — Cargo has no direct mechanism for it
+# (rust-analyzer#20836 does the same thing for the same reason). It covers
+# tests AND examples, which is exactly the set that needs `harness`
+# (tests/sources/conformance.rs + examples/decoder_fuzz.rs). `cargo build` does
+# not BUILD dev-dependencies, and the workspace's `resolver = "2"` keeps their
+# features out of a normal build (under v1 they would unify in and `harness`
+# would ship), so the published lib is unaffected.
+pixtuoid-core = { path = ".", features = ["harness"] }
 tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util", "rt-multi-thread"] }
 # Property-based testing of the pure-core algebraic invariants (the walkable-mask
 # geometry today — the rest of the sim-geometry prop modules moved to

@@ -29,6 +29,42 @@ pub type LineDecoder = fn(&str, &str, Value) -> Result<Vec<AgentEvent>>;
 /// the session with a foreign, identity-bearing cwd).
 pub type CwdExtractor = fn(&Value) -> Option<PathBuf>;
 
+/// Derives the opaque session-id string a transcript PATH keys its agent on —
+/// what the JSONL watcher's first-sight `SessionStart` carries, and therefore
+/// what a hook event must agree with or one session renders as two sprites.
+/// **CC** derives the filename stem (== the session UUID), **Codex** the
+/// rollout UUID, **Copilot** the parent-dir UUID, **grok** the parent-DIR name,
+/// **omp** the nested stem chain; **Antigravity** keeps the path-keyed
+/// `default_id_from_path` (its hook keys on the path too).
+///
+/// Defined HERE for the same reason as [`LineDecoder`]: the registry names one
+/// per transcript row and must compile under `--no-default-features`, where the
+/// `native`-gated `jsonl` module is absent. `jsonl` re-exports it.
+pub type IdDeriver = fn(&Path) -> String;
+
+/// The path-keyed [`IdDeriver`] default — the normalized transcript path.
+pub(crate) fn default_id_from_path(p: &Path) -> String {
+    normalize_path_key(&p.to_string_lossy())
+}
+
+/// Decides which `.jsonl` FILES a source's transcripts are — checked after the
+/// extension gate, so it filters files, never directories. A source dir often
+/// holds SIBLINGS that must never be walked: grok's rewrite-on-resume
+/// `chat_history.jsonl`, Antigravity's duplicate `transcript_full.jsonl`, CC's
+/// foreign-schema workflow `journal.jsonl`. The default
+/// (`accept_all_paths`) admits every transcript.
+///
+/// Always-compiled for the [`LineDecoder`] reason: the registry names one per
+/// transcript row, and any driver that walks a tree must select the SAME files
+/// the watcher would — a census over a superset counts files production never
+/// reads.
+pub type PathFilter = fn(&Path) -> bool;
+
+/// The admit-everything [`PathFilter`] default.
+pub(crate) fn accept_all_paths(_p: &Path) -> bool {
+    true
+}
+
 /// Narrow a raw JSON integer to a valid POSIX pid: in `i32` range AND strictly
 /// positive. The `> 0` reject is load-bearing — `kill(0)`/`kill(-n)` target
 /// process GROUPS, and a bogus/zero `_pid` would otherwise synthesize a phantom

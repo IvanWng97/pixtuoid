@@ -39,6 +39,10 @@ chrono        = { version = "0.4", default-features = false, features = ["clock"
 palette       = { version = "0.7", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+# `examples/corpus_check.rs` drives real transcripts through the shared
+# `pixtuoid_core::harness` pipeline; the feature is dev-only (see core's
+# manifest), so it is requested here rather than in [dependencies].
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.16.0", default-features = false, features = ["harness"] }
 serde_json = { workspace = true }
 # Property-based testing of the pure-geometry algebraic invariants (the
 # walk-physics module today; the walkable-mask props stayed core-side): generate thousands of inputs to

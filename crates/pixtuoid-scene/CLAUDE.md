@@ -366,6 +366,23 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 > binary's `floating/`; the RGBA blit to canvas is `pixtuoid-web`'s. Keep
 > `pixtuoid-scene` flush-free.
 
+## The corpus census (`examples/corpus_check.rs`)
+
+The one place the render layer answers "would the UI actually SHOW this?" for
+real, uncurated bytes: `cargo run --release -p pixtuoid-scene --example
+corpus_check -- <source> <root> [--json]` walks the `.jsonl` under a live
+transcript tree that the source's registry `path_filter` admits (the same set
+the watcher would), drives each file through `pixtuoid_core::harness::Drive` (the
+shared decode→reduce pipeline, first-sight seed included), then asks
+`FloorSession::observe` whether its `SimFrame.characters` is non-empty — the
+documented headless seam, so a non-empty set IS "a sprite would be painted", no
+pixel buffer or terminal involved. It REPORTS (corpus content is unbounded and
+partly historical, so a non-registering file is not automatically a bug); the
+hard failures are a decode `Err` or a PANIC on bytes the source itself wrote.
+The provenance column — file mtime minus the newest turn the SESSION wrote — is
+the ghost-session class made countable, and it lives in this shell rather than
+the registry because it feeds a report, not a contract.
+
 ## Known sharp edges (don't be surprised by these)
 
 - **Agent OUTFIT (shirt+pants) is keyed on the normalized `cwd`, not `agent_id`** (Team Palette): same working directory → same outfit, so the office reads as a color-coded org-chart. Hair/skin stay `agent_id`-seeded for individual distinctness; `unknown_cwd`/empty-cwd falls back to the `agent_id` seed. The old WARM/COOL personality split for outfit selection was intentionally dropped (it was an `agent_id` artifact) — the outfit now spans the full 16-preset pool. The `examples/snapshot` fixture deliberately assigns VARIED cwds so the gallery shows grouping; don't collapse it back to one cwd.

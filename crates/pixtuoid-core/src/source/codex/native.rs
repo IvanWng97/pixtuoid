@@ -33,7 +33,7 @@ fn codex_session_ended(_tail: &[u8]) -> bool {
 /// and the id deriver (`codex_id_from_path`) are ours (invariant #3).
 pub fn live_codex_rollout_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
     // A held-open path vouches iff it is a `rollout-*.jsonl`; its id is the
-    // rollout UUID via `codex_id_from_path` — the SAME fn `with_id_deriver`
+    // rollout UUID via `codex_id_from_path` — the SAME fn the registry row
     // installs, so probe ids and gate ids can't drift (UUIDs are fold-invariant).
     ProbeSnapshot::from_open_fds(
         sessions_root,
@@ -123,8 +123,7 @@ impl Source for CodexSource {
             SOURCE_NAME.to_string(),
             decode_codex_line,
             codex_session_ended,
-        )
-        .with_id_deriver(codex_id_from_path);
+        );
         if let Some(root) = codex_probe_root(&self.sessions_root) {
             watcher = watcher
                 .with_liveness_probe(std::sync::Arc::new(move || live_codex_rollout_ids(&root)));

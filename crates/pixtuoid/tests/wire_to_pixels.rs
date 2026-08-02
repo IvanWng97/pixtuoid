@@ -15,8 +15,8 @@
 //! just a slot.
 //!
 //! Three transport classes are covered:
-//!   - JSONL transcript  → `Transport::Jsonl` (claude-code, codex, antigravity, copilot)
-//!   - agent hook         → `Transport::Hook`  (reasonix, codewhale, opencode, cursor)
+//!   - JSONL transcript  → `Transport::Jsonl` (every transcript-bearing registered source)
+//!   - agent hook         → `Transport::Hook`  (every hook-only registered source)
 //!   - daemon presence    → the sibling channel (`apply_presence`) (openclaw)
 //!
 //! The agent assertion is a pixel-diff FLOOR: an occupied frame must repaint
@@ -31,10 +31,10 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use pixtuoid_core::harness::{Drive, Reach, DRIVEN_DESKS};
 use pixtuoid_core::source::daemon::apply_presence;
-use pixtuoid_core::source::decoder::decode_hook_payload;
-use pixtuoid_core::source::{registry, AgentEvent};
-use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
+use pixtuoid_core::source::registry;
+use pixtuoid_core::SceneState;
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::theme::NORMAL;
 use ratatui::backend::TestBackend;
@@ -106,9 +106,10 @@ fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> 
 }
 
 /// The empty→occupied pixel-diff floor. A settled, recolored character (body +
-/// shadow + name label) repaints ~160 subpixels of the frame; the empty office
-/// rendered through the identical sequence differs from itself by 0 (the render
-/// is deterministic). 40 sits well above that noise floor and comfortably below
+/// shadow + name label) repaints ~135–166 subpixels of the frame (the spread is
+/// the label width, which the seed's cwd sets); the empty office rendered
+/// through the identical sequence differs from itself by 0 (the render is
+/// deterministic). 40 sits well above that noise floor and comfortably below
 /// the real footprint, tolerant of sprite-art tweaks. This is IMMUNE to the
 /// time-of-day sky because the diff cancels the (identical) background — the old
 /// distinct-color metric was not, and broke as a timezone lottery once the
@@ -120,62 +121,30 @@ const MIN_SPRITE_PIXELS: usize = 40;
 // Part A — every AGENT source renders a sprite from real wire bytes
 // =====================================================================
 
-/// How a source's wire bytes reach `AgentEvent`s.
-enum DecodeKind {
-    /// A transcript / JSONL line decoder (from the source registry — the SAME
-    /// `LineDecoder` the conformance harness runs). Folded on `Transport::Jsonl`.
-    Transcript,
-    /// A hook envelope through `decode_hook_payload` (the registry dispatcher).
-    /// Folded on `Transport::Hook`.
-    Hook,
-}
-
-/// Whether the fixture's own decoded stream registers a slot, or a synthetic
-/// `SessionStart` must seed one first (JSONL events for an unknown id are a
-/// no-op in the reducer — a transcript that carries only tool activity, like
-/// claude-code's and antigravity's, never registers itself).
-enum SeedStart {
-    /// The fixture's decoded events include a `SessionStart` (copilot) OR the
-    /// hook path synthesizes the slot from an unknown id (every hook source).
-    /// (Codex is NOT here — its line decoder emits only activity, so it uses
-    /// `CodexUuid` below.)
-    None,
-    /// Seed a `SessionStart` keyed `AgentId::from_parts(source, <logical-path>)`
-    /// — antigravity's decoder keys exactly this way.
-    FromParts,
-    /// Seed a `SessionStart` keyed the claude-code way (`cc_id_from_path`, the
-    /// transcript filename stem == the session UUID).
-    CcStem,
-    /// Seed a `SessionStart` keyed the codex way (`codex_id_from_path`, the
-    /// rollout filename UUID). Codex's LINE decoder emits only activity — the
-    /// watcher's first-sight (or the UserPromptSubmit hook) supplies the
-    /// SessionStart in production; this seed stands in for that registration so
-    /// the transcript path is exercised in isolation.
-    CodexUuid,
-    /// Seed a `SessionStart` keyed the grok way (`grok_id_from_path`, the
-    /// transcript's parent-DIR name). Grok's line decoder emits only activity
-    /// for the root session (subagent lines register children) — the watcher's
-    /// first-sight (or any hook) registers the root in production.
-    GrokDir,
-}
-
-/// The `ActivityState` classes a fixture's wire legitimately drives the slot
-/// THROUGH during the fold — asserted as reached-at-some-point, NOT as the
-/// terminal state. Terminal-state would be wrong: `mark_exiting` sets only
-/// `exiting_at` and never resets `slot.state` (`fsm.rs`), so a fixture whose
-/// last activity its own wire never resolves legitimately ends non-Idle
-/// (opencode ends Waiting, cursor ends Delegating). `Delegating` is `Active`
-/// with `kind == ToolKind::Task` — `ActivityState` has no separate variant.
+/// WHICH of a source's two wires this case drives — and, for a transcript,
+/// whether the driver stands in for the watcher's first-sight registration.
 ///
-/// A CLASS pin on purpose, not a ToolKind pin: `from_display` is case-sensitive,
-/// so a lowercase wire tool name (`"bash"`) renders `Active(Other)` while
-/// `"Bash"` renders `Active(Bash)` — a cosmetic glow-tint difference across
-/// sources that must not be frozen into a lifecycle assertion.
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Reach {
-    Active,
-    Waiting,
-    Delegating,
+/// One field where there were three (`DecodeKind` + `Transport` + a five-variant
+/// `SeedStart`): the decoder, the transport and the seed keying are not
+/// independent choices, and `harness::Drive` makes each pairing a constructor.
+/// The four per-source seed variants are gone entirely — the seed is keyed by
+/// the source's registry row, so a new CLI needs no new variant here.
+enum Wire {
+    /// The fixture is a transcript, driven through the source's registry
+    /// `LineDecoder` on `Transport::Jsonl`.
+    Transcript {
+        /// Seed the `SessionStart` the watcher's first-sight would emit. True
+        /// for a transcript that carries only activity (CC, Codex, Antigravity,
+        /// grok) — a JSONL event for an unknown id is a documented no-op, so
+        /// without it the wire drives nothing. False where the fixture's own
+        /// head line registers the session (Copilot's `session.start`, omp's
+        /// session header).
+        seeded: bool,
+    },
+    /// The fixture is a `hook-payloads.jsonl`, driven through the shared
+    /// `decode_hook_payload` on `Transport::Hook`. Never seeded: a hook event
+    /// for an unknown session id REGISTERS it (hooks are proof of life).
+    Hooks,
 }
 
 struct WireCase {
@@ -183,9 +152,7 @@ struct WireCase {
     source: &'static str,
     /// Path to the fixture file, relative to `core_fixtures_root()`.
     fixture: &'static str,
-    decode: DecodeKind,
-    transport: Transport,
-    seed: SeedStart,
+    wire: Wire,
     /// The state classes this fixture's committed wire must drive the slot
     /// through. Derived from a measurement pass judged per-source against each
     /// decoder's documented semantics (not guessed): the eight `&[Active]` rows
@@ -199,118 +166,41 @@ struct WireCase {
     must_reach: &'static [Reach],
 }
 
-/// Build the synthetic `SessionStart` a transcript-only source needs (its slot
-/// is otherwise never registered). The agent id is keyed exactly as the
-/// source's own decoder keys, so the seed and the decoded activity coalesce to
-/// one agent — exactly as production keys them.
-fn seed_session_start(seed: &SeedStart, source: &str, logical: &str) -> Option<AgentEvent> {
-    let agent_id = match seed {
-        SeedStart::None => return None,
-        SeedStart::FromParts => AgentId::from_parts(source, logical),
-        SeedStart::CcStem => {
-            use pixtuoid_core::source::claude_code::cc_id_from_path;
-            AgentId::from_parts(source, &cc_id_from_path(Path::new(logical)))
-        }
-        SeedStart::CodexUuid => {
-            use pixtuoid_core::source::codex::codex_id_from_path;
-            AgentId::from_parts(source, &codex_id_from_path(Path::new(logical)))
-        }
-        SeedStart::GrokDir => {
-            use pixtuoid_core::source::grok::grok_id_from_path;
-            AgentId::from_parts(source, &grok_id_from_path(Path::new(logical)))
-        }
-    };
-    Some(AgentEvent::SessionStart {
-        agent_id,
-        source: source.to_string(),
-        session_id: "wire-to-pixels-seed".to_string(),
-        cwd: PathBuf::from("/home/user/demo-project"),
-        parent_id: None,
-    })
-}
-
-/// THE shared proof: real fixture bytes → the production decoder its conformance
-/// test uses → a real `Reducer` on the correct `Transport` → ≥1 registered slot
-/// → the real `TuiRenderer` (settled ~30 frames) → more distinct colors than the
-/// empty-office baseline (a character was painted, not merely slotted).
+/// THE shared proof: real fixture bytes → `harness::Drive` (the SAME pipeline
+/// the conformance, corpus and fuzz shells run: the source's registry decoder,
+/// its registry-keyed first-sight seed, a real `Reducer` on the correct
+/// `Transport`) → ≥1 registered slot → the real `TuiRenderer` (settled ~30
+/// frames) → materially more repainted subpixels than the empty office.
+///
+/// What this shell adds to the other three is the LAST hop: `Driven.scene` is
+/// where they stop, and this one paints it.
 fn assert_renders_a_sprite(case: &WireCase) {
     let path = core_fixtures_root().join(case.fixture);
-    // The decoder's logical key — the transcript path for a JSONL source (its
-    // `AgentId` is a hash of it). For a hook source the per-line envelope keys
-    // itself, so the value is unused; pass the path for symmetry.
-    let logical = path.to_string_lossy().into_owned();
+    let lines = read_nonblank_lines(&path);
 
-    let mut events = Vec::new();
-    if let Some(start) = seed_session_start(&case.seed, case.source, &logical) {
-        events.push(start);
-    }
-
-    for line in read_nonblank_lines(&path) {
-        let v: serde_json::Value =
-            serde_json::from_str(&line).unwrap_or_else(|e| panic!("{}: bad json: {e}", case.name));
-        let decoded = match case.decode {
-            DecodeKind::Transcript => {
-                let decode = registry::descriptor_for(case.source)
-                    .and_then(|d| d.line_decoder())
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "{}: source {:?} has no line_decoder",
-                            case.name, case.source
-                        )
-                    });
-                decode(&logical, case.source, v)
-                    .unwrap_or_else(|e| panic!("{}: decode_line: {e}", case.name))
-            }
-            DecodeKind::Hook => decode_hook_payload(v)
-                .unwrap_or_else(|e| panic!("{}: decode_hook_payload: {e}", case.name)),
-        };
-        events.extend(decoded);
-    }
-    assert!(
-        events.len() >= 2,
-        "{}: fixture should decode to a registration + activity, got {events:?}",
-        case.name
-    );
-
-    // Fold through a real reducer into a real SceneState, on the SAME transport
-    // production tags this source's events with. Capture the state class reached
-    // after each event, since `must_reach` pins reached-during-fold, not the
-    // terminal state (a slot exits via `exiting_at` without its `state` reset).
-    use pixtuoid_core::state::{ActivityState, ToolKind};
-    let mut scene = SceneState::uniform(8);
-    let mut reducer = Reducer::new();
-    let mut reached: Vec<Reach> = Vec::new();
-    let mut note = |slot: &pixtuoid_core::state::AgentSlot| {
-        let r = match &slot.state {
-            ActivityState::Active {
-                kind: ToolKind::Task,
-                ..
-            } => Some(Reach::Delegating),
-            ActivityState::Active { .. } => Some(Reach::Active),
-            ActivityState::Waiting { .. } => Some(Reach::Waiting),
-            ActivityState::Idle => None,
-        };
-        if let Some(r) = r {
-            if !reached.contains(&r) {
-                reached.push(r);
-            }
+    let driven = match case.wire {
+        Wire::Transcript { seeded } => {
+            let drive = Drive::transcript_at(case.source, &path).unwrap_or_else(|| {
+                panic!(
+                    "{}: source {:?} has no line_decoder",
+                    case.name, case.source
+                )
+            });
+            let drive = if seeded { drive.seeded() } else { drive };
+            drive.at(t0()).lines(lines)
         }
+        Wire::Hooks => Drive::hooks().at(t0()).lines(lines),
     };
-    for ev in events {
-        reducer.apply(&mut scene, ev, t0(), case.transport);
-        // A settle tick mirrors production (pending-idle arms on ActivityEnd),
-        // but the class is captured PRE-tick too so a transient Active/Waiting
-        // that a later event resolves is still counted as reached.
-        if let Some(slot) = scene.agents.values().next() {
-            note(slot);
-        }
-        reducer.tick(&mut scene, t0() + Duration::from_secs(3));
-        if let Some(slot) = scene.agents.values().next() {
-            note(slot);
-        }
-    }
+
+    driven.assert_clean(case.name);
     assert!(
-        !scene.agents.is_empty(),
+        driven.events.len() >= 2,
+        "{}: fixture should decode to a registration + activity, got {:?}",
+        case.name,
+        driven.events
+    );
+    assert!(
+        !driven.scene.agents.is_empty(),
         "{}: the wire bytes must register at least one agent slot (got 0)",
         case.name
     );
@@ -320,9 +210,10 @@ fn assert_renders_a_sprite(case: &WireCase) {
     // paint checks; this is what catches it.
     for want in case.must_reach {
         assert!(
-            reached.contains(want),
-            "{}: the wire must drive the slot through {want:?}; reached only {reached:?}",
-            case.name
+            driven.reached.contains(want),
+            "{}: the wire must drive the slot through {want:?}; reached only {:?}",
+            case.name,
+            driven.reached
         );
     }
 
@@ -335,8 +226,10 @@ fn assert_renders_a_sprite(case: &WireCase) {
     // `chrono::Local`, dwarfed and collided with the sprite's few colors at
     // bright hours, and a rich dawn even netted a NEGATIVE delta).
     let (cols, rows) = (120, 44);
-    let empty = settled_pixels(&SceneState::uniform(8), cols, rows, t0());
-    let occupied = settled_pixels(&scene, cols, rows, t0());
+    // The empty baseline must be shaped like the driven scene (same desk
+    // capacity), or the diff would carry a layout difference as well as the agent.
+    let empty = settled_pixels(&SceneState::uniform(DRIVEN_DESKS), cols, rows, t0());
+    let occupied = settled_pixels(&driven.scene, cols, rows, t0());
     let changed = empty.iter().zip(&occupied).filter(|(a, b)| a != b).count();
     assert!(
         changed >= MIN_SPRITE_PIXELS,
@@ -357,65 +250,50 @@ fn agent_cases() -> Vec<WireCase> {
             name: "claude_code",
             source: "claude-code",
             fixture: "claude-code/tool-call/01000000-0000-7000-8000-0000000000cc.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // CC's transcript carries only tool activity → seed a SessionStart
-            // keyed the cc_id_from_path (filename-stem) way.
-            seed: SeedStart::CcStem,
+            // CC's transcript carries only tool activity.
+            wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "codex",
             source: "codex",
             fixture: "codex/tool-run/rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000002.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // Codex's line decoder emits only activity — the watcher first-sight
-            // (or the UserPromptSubmit hook) registers the slot in production;
-            // seed a SessionStart keyed the codex_id_from_path (rollout-UUID) way.
-            seed: SeedStart::CodexUuid,
+            // Codex's line decoder emits only activity — the watcher's
+            // first-sight (or the UserPromptSubmit hook) registers it live.
+            wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "antigravity",
             source: "antigravity",
             fixture: "antigravity/tool-run/transcript.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // Antigravity's decoder emits only activity → seed keyed from_parts.
-            seed: SeedStart::FromParts,
+            // Antigravity's decoder emits only activity.
+            wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "copilot",
             source: "copilot",
             fixture: "copilot/tool-run/events.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
             // The events.jsonl carries a session.start → its own SessionStart.
-            seed: SeedStart::None,
+            wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "omp",
             source: "omp",
             fixture: "omp/tool-run/2026-07-10T08-00-00-000Z_01990000-0000-7000-8000-000000000002.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
             // The session header line carries its own SessionStart.
-            seed: SeedStart::None,
+            wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "grok",
             source: "grok",
             fixture: "grok/tool-run/updates.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // updates.jsonl carries only activity for the root (the watcher
-            // first-sight or any hook registers it in production) → seed keyed
-            // the grok_id_from_path (parent-dir) way.
-            seed: SeedStart::GrokDir,
+            // updates.jsonl carries only activity for the root (the watcher's
+            // first-sight or any hook registers it in production).
+            wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         // ---- hook-only sources (decode_hook_payload, Hook transport) ----
@@ -426,54 +304,42 @@ fn agent_cases() -> Vec<WireCase> {
             name: "reasonix",
             source: "reasonix",
             fixture: "reasonix/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "codewhale",
             source: "codewhale",
             fixture: "codewhale/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "opencode",
             source: "opencode",
             fixture: "opencode/session-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Waiting, Reach::Delegating],
         },
         WireCase {
             name: "cursor",
             source: "cursor",
             fixture: "cursor/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "hermes",
             source: "hermes",
             fixture: "hermes/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "kimi",
             source: "kimi",
             fixture: "kimi/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Waiting],
         },
     ]

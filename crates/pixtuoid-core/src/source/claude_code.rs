@@ -410,6 +410,25 @@ const ACTIVITY_TYPES: &[&str] = &[
     "user",
 ];
 
+/// The workflow/skills orchestrator writes a `journal.jsonl` sidecar under
+/// `<uuid>/subagents/workflows/wf_*/` — a FOREIGN schema (top-level
+/// `type:"started"`/`"result"`, not CC transcript lines) living in the SAME
+/// projects tree the CC watcher walks. `walk_jsonl` recurses into every
+/// `.jsonl`, and the GENERIC `accept_all_paths` default admits every one of
+/// them — this fn is what the `claude-code` registry row supplies in its place,
+/// and without it a recent
+/// journal (read from the top — it is not liveness-probed nor `cc_session_ended`)
+/// feeds each line to `decode_cc_line`, and the #763 unknown-`type` breadcrumb
+/// would FLOOD the warn-floor (avg ~14 `started`+`result` per file, `unknown_event`
+/// has no dedup). Skips ONLY `journal.jsonl` — the real subagent transcripts
+/// (`agent-<id>.jsonl`, INCLUDING the ones nested under `workflows/wf_*/`) are
+/// admitted, so subagent attribution is untouched. A denylist, not an allowlist:
+/// misfiltering a real transcript (a vanished sprite) is worse than a future
+/// foreign sidecar breadcrumbing (visible, self-heals by adding it here).
+pub(crate) fn skip_workflow_journal(path: &Path) -> bool {
+    path.file_name().and_then(|s| s.to_str()) != Some("journal.jsonl")
+}
+
 /// When this transcript's SESSION last wrote, read from its tail — the honest
 /// TIGHTENING of the file's mtime in the first-sight recency gate. A stale mtime
 /// still gates before the tail is read at all; this only ever adds a reason to
@@ -930,8 +949,9 @@ mod tests {
     // pins the common string-content shape the array-only fixtures never
     // exercise.
     // Coalescing guard: `cc_id_from_path` is invoked in multiple places that
-    // must agree — the per-line decode (here), the watcher's `with_id_deriver`
-    // (ClaudeCodeSource::run), and the hook decoder's session-id key. If the
+    // must agree — the per-line decode (here), the `claude-code` registry
+    // row's `id_from_path` (which `JsonlWatcher::new` and the offline
+    // `harness::Drive` seed both read), and the hook decoder's session-id key. If the
     // per-line decode ever keys differently from the deriver, one CC session
     // splits into two sprites. Mirrors codex's
     // `decode_line_keys_agent_id_on_codex_id_from_path`.
@@ -1251,5 +1271,23 @@ mod cc_id_tests {
             matches!(&events[0], AgentEvent::Rename { label, .. } if label == "explorer"),
             "a short label must pass through unchanged, got {events:?}"
         );
+    }
+
+    #[test]
+    fn skip_workflow_journal_drops_only_the_orchestrator_journal() {
+        // The workflow orchestrator's FOREIGN-schema journal is skipped so its
+        // `started`/`result` lines never reach decode_cc_line (the #763 flood).
+        let wf = Path::new("/h/.claude/projects/proj/uuid/subagents/workflows/wf_abc");
+        assert!(!skip_workflow_journal(&wf.join("journal.jsonl")));
+        // The real subagent transcripts nested ALONGSIDE it stay admitted, as do
+        // the main + top-level subagent transcripts — subagent attribution is
+        // unaffected (a denylist, narrow by construction).
+        assert!(skip_workflow_journal(&wf.join("agent-xyz.jsonl")));
+        assert!(skip_workflow_journal(Path::new(
+            "/h/.claude/projects/proj/uuid.jsonl"
+        )));
+        assert!(skip_workflow_journal(Path::new(
+            "/h/.claude/projects/proj/uuid/subagents/agent-xyz.jsonl"
+        )));
     }
 }

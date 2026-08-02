@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use super::{copilot_home, copilot_id_from_path, decode_copilot_line, SOURCE_NAME};
+use super::{copilot_home, decode_copilot_line, SOURCE_NAME};
 use crate::source::decoder::parsed_tail_lines;
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};
@@ -60,7 +60,6 @@ impl Source for CopilotSource {
             decode_copilot_line,
             copilot_session_ended,
         )
-        .with_id_deriver(copilot_id_from_path)
         .run(tx)
         .await
     }

@@ -11,7 +11,7 @@ use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Transport;
 use pixtuoid_core::AgentId;
 
-use crate::{cc_watcher, fast_watch, vouch_snapshot};
+use crate::{cc_watcher, fast_watch, vouch_snapshot, write_lines};
 
 /// On startup, the watcher must NOT emit SessionStart for every historical
 /// .jsonl on disk. With small `max_desks` this would saturate desks with
@@ -119,7 +119,7 @@ async fn watcher_registers_stale_file_when_probe_says_live() {
 #[tokio::test]
 async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     fast_watch();
-    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line};
+    use pixtuoid_core::source::codex::decode_codex_line;
 
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -142,7 +142,6 @@ async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
         false
     })
-    .with_id_deriver(codex_id_from_path)
     .with_initial_window(Duration::from_secs(60))
     .with_liveness_probe(std::sync::Arc::new(move || vouch_snapshot(&[uuid])));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
@@ -176,7 +175,7 @@ async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
 #[tokio::test]
 async fn codex_first_sight_session_start_carries_bare_uuid_session_id() {
     fast_watch();
-    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line};
+    use pixtuoid_core::source::codex::decode_codex_line;
 
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -195,8 +194,7 @@ async fn codex_first_sight_session_start_carries_bare_uuid_session_id() {
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
         false
-    })
-    .with_id_deriver(codex_id_from_path);
+    });
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     let mut got = None;
@@ -581,7 +579,7 @@ async fn watcher_custom_label_deriver() {
 #[tokio::test]
 async fn codex_rollout_yields_uuid_keyed_session_start() {
     fast_watch();
-    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line};
+    use pixtuoid_core::source::codex::decode_codex_line;
 
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -589,10 +587,12 @@ async fn codex_rollout_yields_uuid_keyed_session_start() {
     let transcript = root.join(format!("rollout-2026-05-29T22-36-52-{uuid}.jsonl"));
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    // NO `.with_id_deriver`: the `codex` registry row IS the derivation, so a
+    // bare `JsonlWatcher::new` keys on the rollout UUID. Wiring it here would
+    // make the test pass even if the row and the watcher default diverged.
     let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
         false
-    })
-    .with_id_deriver(codex_id_from_path);
+    });
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -651,10 +651,10 @@ async fn codex_rollout_yields_uuid_keyed_session_start() {
 
 #[tokio::test]
 async fn default_id_deriver_stays_path_keyed() {
-    // Pin the IdDeriver DEFAULT: a watcher built WITHOUT `.with_id_deriver`
-    // (e.g. Antigravity) must key on the file path. CC + Codex override it
-    // (`.with_id_deriver`) to key on the session UUID; this guards the
-    // un-overridden default so the path-keyed sources keep coalescing.
+    // Pin the PATH-KEYED rows: Antigravity's registry row carries the
+    // `default_id_from_path` deriver (its hook keys on `transcript_path` too),
+    // where CC/Codex/copilot/grok/omp rows carry their own session-key fn. This
+    // guards the default so the path-keyed sources keep coalescing.
     fast_watch();
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -663,7 +663,7 @@ async fn default_id_deriver_stays_path_keyed() {
     let transcript = project_dir.join("abc.jsonl");
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    // No `.with_id_deriver` → the default path-keyed deriver is exercised.
+    // `antigravity` resolves to the path-keyed default via its registry row.
     let watcher = JsonlWatcher::new(
         root.clone(),
         "antigravity".to_string(),
@@ -693,10 +693,10 @@ async fn default_id_deriver_stays_path_keyed() {
     f.flush().await.unwrap();
     drop(f);
 
-    // A bare watcher (no `.with_id_deriver`) uses the DEFAULT deriver, which
-    // keys on the file PATH (`default_id_from_path` = `normalize_path_key(path)`),
-    // NOT a UUID/stem — the keying Antigravity relies on; the real
-    // ClaudeCodeSource overrides it with `cc_id_from_path`. Assert the emitted id
+    // An `antigravity`-sourced watcher keys on the file PATH
+    // (`default_id_from_path` = `normalize_path_key(path)`), NOT a UUID/stem —
+    // the keying Antigravity relies on; a `claude-code` watcher would key on
+    // `cc_id_from_path` off ITS row. Assert the emitted id
     // is NOT the stem-keyed id (the regression a stem-keyed default deriver would
     // introduce); this holds on every platform since the path string is never
     // "abc". The EXACT value (`from_parts(source, normalize_path_key(path))`) is
@@ -1126,4 +1126,88 @@ async fn watcher_links_subagent_across_project_dirs() {
         "subagent parent_id must equal the parent's agent_id across a cwd-split (different project dirs)"
     );
     handle.abort();
+}
+
+/// The registry row's `path_filter` is what keeps the workflow orchestrator's
+/// FOREIGN-schema `journal.jsonl` out of a CC watcher — and the `with_*`
+/// builder is what an unregistered source would override it with. Pin BOTH
+/// directions in one place: the row EXCLUDES the journal (a bare
+/// `JsonlWatcher::new("claude-code", …)` first-sights only the real
+/// transcript), and an explicit override ADMITS it (proving the builder still
+/// beats the row — it has no in-tree caller otherwise, so the escape hatch
+/// would be untested API).
+///
+/// `emit_first_sight` emits one SessionStart per first-sight FILE regardless of
+/// content, so the journal's foreign lines decoding to nothing is not what
+/// distinguishes the two runs — the count of SessionStarts is.
+#[tokio::test]
+async fn the_registry_row_filters_the_workflow_journal_and_the_builder_overrides_it() {
+    fn admit_every_jsonl(_p: &std::path::Path) -> bool {
+        true
+    }
+
+    async fn first_sight_starts(root: std::path::PathBuf, admit_all: bool) -> usize {
+        let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+        let mut watcher = JsonlWatcher::new(
+            root,
+            "claude-code".to_string(),
+            decode_cc_line,
+            cc_session_ended,
+        );
+        if admit_all {
+            watcher = watcher.with_path_filter(admit_every_jsonl);
+        }
+        let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+        let mut starts = 0;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(Some((_, AgentEvent::SessionStart { .. }))) =
+                tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            {
+                starts += 1;
+            }
+        }
+        handle.abort();
+        starts
+    }
+
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let wf = dir
+        .path()
+        .join("proj")
+        .join("01000000-0000-7000-8000-0000000000cc")
+        .join("subagents")
+        .join("workflows")
+        .join("wf_1");
+    tokio::fs::create_dir_all(&wf).await.unwrap();
+    // The orchestrator's foreign-schema sidecar…
+    write_lines(
+        &wf.join("journal.jsonl"),
+        &[serde_json::json!({"type": "started", "name": "wf"})],
+    )
+    .await;
+    // …beside a real subagent transcript, which must always be admitted.
+    write_lines(
+        &wf.join("agent-xyz.jsonl"),
+        &[serde_json::json!({
+            "type": "assistant",
+            "cwd": "/repo",
+            "message": {"content": [{"type": "text", "text": "hi"}]}
+        })],
+    )
+    .await;
+
+    assert_eq!(
+        first_sight_starts(dir.path().to_path_buf(), false).await,
+        1,
+        "the claude-code row's path_filter must exclude journal.jsonl — only the \
+         real subagent transcript first-sights"
+    );
+    assert_eq!(
+        first_sight_starts(dir.path().to_path_buf(), true).await,
+        2,
+        "an explicit with_path_filter must OVERRIDE the row (both files first-sight)"
+    );
 }
