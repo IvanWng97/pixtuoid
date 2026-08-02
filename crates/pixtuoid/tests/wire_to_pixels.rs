@@ -15,8 +15,8 @@
 //! just a slot.
 //!
 //! Three transport classes are covered:
-//!   - JSONL transcript  → `Transport::Jsonl` (claude-code, codex, antigravity, copilot)
-//!   - agent hook         → `Transport::Hook`  (reasonix, codewhale, opencode, cursor)
+//!   - JSONL transcript  → `Transport::Jsonl` (every transcript-bearing registered source)
+//!   - agent hook         → `Transport::Hook`  (every hook-only registered source)
 //!   - daemon presence    → the sibling channel (`apply_presence`) (openclaw)
 //!
 //! The agent assertion is a pixel-diff FLOOR: an occupied frame must repaint

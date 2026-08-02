@@ -127,7 +127,7 @@ src/
 ├── harness.rs          `harness` FEATURE (non-default, dev-only — absent from the published crate): the ONE
 │                       offline decode→reduce driver every test/tool that feeds real wire bytes rides
 │                       (Drive::transcript_at/transcript/hooks → Driven{scene, events, lines, unparseable,
-│                       decode_errors, panics, reached}). Its four shells are tests/sources/conformance.rs,
+│                       seed_events, decode_errors, panics, reached}). Its four shells are tests/sources/conformance.rs,
 │                       pixtuoid/tests/wire_to_pixels.rs, examples/decoder_fuzz.rs and
 │                       pixtuoid-scene/examples/corpus_check.rs. Every line runs under catch_unwind (the
 │                       never-panic contract, now inherent rather than fuzz-only); failures report the line's

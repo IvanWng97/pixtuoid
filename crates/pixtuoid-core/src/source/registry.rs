@@ -26,8 +26,8 @@
 //!   code in a per-source file, dispatched by the source itself.
 //! - The `ActivityRecency` clock is the deliberate near-miss: it HAS a
 //!   name-keyed reader (`corpus_check`'s provenance census), but only CC
-//!   supplies one, so the column would be twelve `None`s — dead data — and it
-//!   feeds a REPORT, not the coalescing contract. Move it in when a second
+//!   supplies one, so the column would be dead data in every transcript row but
+//!   CC's — and it feeds a REPORT, not the coalescing contract. Move it in when a second
 //!   source publishes an activity clock.
 //! - `_pixtuoid_source` attribution + the shared CC-shaped hook arms: they
 //!   stay in `decoder.rs` at the read site, pinned by their regression tests.

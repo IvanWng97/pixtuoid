@@ -20,9 +20,9 @@
 //!
 //! 1. **Registration comes from the WATCHER, not the decoder.** A JSONL event
 //!    for an unknown id is a documented no-op, so a transcript driven with no
-//!    seed registers nothing however well it decodes — `corpus_check`'s first
-//!    run reported 0/4376 registered for exactly this reason, and that was the
-//!    harness's bug, not the decoder's. [`Drive::seeded`] stands in for
+//!    seed registers nothing however well it decodes — the corpus census's
+//!    first run reported EVERY transcript unregistered for exactly this reason,
+//!    and that was the harness's bug, not the decoder's. [`Drive::seeded`] stands in for
 //!    `emit_first_sight`, keyed by [`registry::id_deriver_for`] — the SAME row
 //!    the watcher reads, so the seed can't drift from production. The file SET
 //!    comes from that row too ([`registry::path_filter_for`]), so a driver that
@@ -30,7 +30,7 @@
 //! 2. **Transport is load-bearing** (the reducer's hook-wins dedup keys on it),
 //!    so it is not a free parameter: [`Drive::transcript`] is `Jsonl` through
 //!    the row's `LineDecoder` and [`Drive::hooks`] is `Hook` through the shared
-//!    `decode_hook_payload`. A driver can't pair the wrong two.
+//!    `decode_hook_payload`.
 //! 3. **A decoder panic is a contract violation, everywhere.** The watcher and
 //!    hook listener log-and-continue on malformed input; a panic takes the
 //!    whole watcher down. Every line therefore runs under `catch_unwind` — the
@@ -178,8 +178,9 @@ const DEFAULT_NOW_EPOCH_SECS: u64 = 1_800_000_000;
 /// `slot.state` — so a fired cascade cannot erase a class already reached.
 const SETTLE: Duration = Duration::from_secs(3);
 
-/// Desk capacity for the driven scene. Registration past it is REFUSED, and
-/// SILENTLY — so a wire carrying more agents than this reads as "decoded but
+/// PER-FLOOR desk capacity for the driven scene (`SceneState::uniform`
+/// replicates it across `MAX_FLOORS`). Registration past the TOTAL is REFUSED,
+/// and SILENTLY — so a wire carrying more agents than that reads as "decoded but
 /// never reached the scene", which is exactly the false verdict every driver
 /// here exists to avoid. Sized well above any single wire's agent count
 /// (Copilot interleaves all of a session's subagents in ONE transcript), not at
@@ -452,7 +453,7 @@ mod tests {
     use super::*;
 
     /// A CC transcript line carrying only tool activity — the shape that made
-    /// the seed load-bearing (nothing in it registers a session).
+    /// `seeded()` load-bearing (nothing in it registers a session).
     fn cc_tool_line() -> String {
         serde_json::json!({
             "type": "assistant",
@@ -468,7 +469,7 @@ mod tests {
 
     #[test]
     fn an_unseeded_activity_only_transcript_decodes_but_registers_nothing() {
-        // The documented no-op the whole SeedKind exists for: the events are
+        // The documented no-op `seeded()` exists for: the events are
         // real, and every one of them lands against an unknown id.
         let d = Drive::transcript("claude-code", CC_TRANSCRIPT)
             .unwrap()

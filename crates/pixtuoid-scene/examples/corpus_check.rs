@@ -87,6 +87,13 @@ fn epoch(t: SystemTime) -> Option<u64> {
 }
 
 /// Drive one transcript through the production path.
+///
+/// Seeded, because the WATCHER is what registers a transcript in production and
+/// a JSONL event for an unknown id is a documented no-op — unseeded, every file
+/// would report "parsed but never rendered" for a reason that has nothing to do
+/// with the decoder. The seed's own events are then excluded from every count
+/// (`wire_events`), or the census would report a verdict on bytes that decoded
+/// to nothing.
 fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     let mut v = Verdict {
         mtime: std::fs::metadata(path)
@@ -101,12 +108,6 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     };
     v.newest_activity = newest_activity(source, body.as_bytes());
 
-    // `.seeded()` is what makes the rest meaningful: the watcher's
-    // `emit_first_sight` is what registers a transcript in production, and a
-    // JSONL event for an unknown id is a documented no-op. The seed is keyed by
-    // the source's OWN registry row, so it lands on the same `AgentId` the
-    // decoded lines do — this harness's first run reported 0/4376 registered
-    // for want of exactly that.
     let Some(drive) = Drive::transcript_at(source, path) else {
         return v;
     };
@@ -116,9 +117,7 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     v.unparseable = driven.unparseable;
     v.decode_errors = driven.decode_errors.len();
     v.events = driven.wire_events();
-    // A file whose WIRE decoded to nothing registers nothing, however many
-    // slots the seed put on the floor — otherwise every readable file, garbage
-    // included, reports "registered · would paint".
+    // Garbage in, nothing out: see `check_file`'s doc.
     if v.events == 0 {
         v.panics = driven.panics;
         return v;

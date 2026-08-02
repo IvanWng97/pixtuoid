@@ -414,9 +414,9 @@ const ACTIVITY_TYPES: &[&str] = &[
 /// `<uuid>/subagents/workflows/wf_*/` — a FOREIGN schema (top-level
 /// `type:"started"`/`"result"`, not CC transcript lines) living in the SAME
 /// projects tree the CC watcher walks. `walk_jsonl` recurses into every
-/// `.jsonl` and the watcher's default filter admits every one of them — this
-/// fn IS what the `claude-code` registry row supplies as that default, and
-/// without it a recent
+/// `.jsonl`, and the GENERIC `accept_all_paths` default admits every one of
+/// them — this fn is what the `claude-code` registry row supplies in its place,
+/// and without it a recent
 /// journal (read from the top — it is not liveness-probed nor `cc_session_ended`)
 /// feeds each line to `decode_cc_line`, and the #763 unknown-`type` breadcrumb
 /// would FLOOD the warn-floor (avg ~14 `started`+`result` per file, `unknown_event`

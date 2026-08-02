@@ -370,8 +370,9 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 
 The one place the render layer answers "would the UI actually SHOW this?" for
 real, uncurated bytes: `cargo run --release -p pixtuoid-scene --example
-corpus_check -- <source> <root> [--json]` walks every `.jsonl` under a live
-transcript tree, drives each file through `pixtuoid_core::harness::Drive` (the
+corpus_check -- <source> <root> [--json]` walks the `.jsonl` under a live
+transcript tree that the source's registry `path_filter` admits (the same set
+the watcher would), drives each file through `pixtuoid_core::harness::Drive` (the
 shared decode→reduce pipeline, first-sight seed included), then asks
 `FloorSession::observe` whether its `SimFrame.characters` is non-empty — the
 documented headless seam, so a non-empty set IS "a sprite would be painted", no
