@@ -54,6 +54,18 @@ const RAMP_SHADE_PCT: u8 = 34;
 /// peek out beneath, not carry the pose.
 const CHAIR_BACK_H: u16 = 3;
 
+/// Narrowest skyline building, in logical units.
+const SKYLINE_MIN_W: u16 = 3;
+/// How much wider than [`SKYLINE_MIN_W`] a building may be.
+const SKYLINE_W_SPREAD: u16 = 6;
+/// Shortest skyline building — below this the city reads as a jagged floor.
+const SKYLINE_MIN_H: u16 = 2;
+
+/// How far down the desk sprite the screen's spill lands.
+const GLOW_ROW_NUMER: u16 = 5;
+/// Denominator of [`GLOW_ROW_NUMER`].
+const GLOW_ROW_DENOM: u16 = 8;
+
 /// Paint `frame`'s office into `buf` as an orthographic cutaway.
 ///
 /// `layout` is in LOGICAL units and `buf` in buffer pixels; `scale` converts.
@@ -74,7 +86,18 @@ pub fn render_cutaway(
     // ordering IS the occlusion — there is no separate occlusion pass.
     let mut order: Vec<Piece> =
         Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
-    order.extend(layout.home_desks.iter().map(|d| Piece::Desk { at: *d }));
+    // A desk's screen is lit iff the sim says someone is seated at it — the
+    // observation is already in the frame, so the profile never re-derives it.
+    order.extend(layout.home_desks.iter().enumerate().map(|(i, d)| {
+        Piece::Desk {
+            at: *d,
+            lit: frame
+                .seated_agents
+                .get(&pixtuoid_core::state::FloorLocalDeskIndex(i))
+                .copied()
+                .unwrap_or(false),
+        }
+    }));
     order.extend(
         frame
             .characters
@@ -89,7 +112,7 @@ pub fn render_cutaway(
 
     for piece in &order {
         match *piece {
-            Piece::Desk { at } => paint_desk(at.x, at.y, pack, theme, scale, buf),
+            Piece::Desk { at, lit } => paint_desk(at.x, at.y, lit, pack, theme, scale, buf),
             Piece::Character { idx, .. } => paint_character(frame, idx, pack, theme, scale, buf),
         }
     }
@@ -97,7 +120,7 @@ pub fn render_cutaway(
 
 /// A thing to draw, carrying the depth it sorts on.
 enum Piece {
-    Desk { at: crate::layout::Point },
+    Desk { at: crate::layout::Point, lit: bool },
     Character { idx: usize, y: u16 },
 }
 
@@ -116,7 +139,7 @@ impl Piece {
     /// rather than the constant, so the split can't drift from what is painted.
     fn depth(&self) -> u16 {
         match self {
-            Piece::Desk { at } => at.y + desk_top_h(),
+            Piece::Desk { at, .. } => at.y + desk_top_h(),
             Piece::Character { y, .. } => *y,
         }
     }
@@ -166,6 +189,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
     if glass_h > 0 {
         let glass = Ramp::from_base(theme.lighting.night_sky_a, RAMP_TINT_PCT, RAMP_SHADE_PCT);
         slab(buf, 0, inset * s, w, glass_h * s, &glass);
+        paint_skyline(layout, theme, scale, inset, glass_h, buf);
         fill(buf, 0, (inset + glass_h) * s, w, s, theme.surface.wall_trim);
     }
     // The wall's own contact line with the floor.
@@ -177,6 +201,69 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
         s,
         Ramp::from_base(theme.surface.carpet_dark, 0, RAMP_SHADE_PCT).shade,
     );
+}
+
+/// A city skyline standing on the window sill, lit windows scattered through it.
+///
+/// Flat glass reads as a painted stripe; a skyline is what makes the band a
+/// WINDOW, and the lit windows are what make it night. Deterministic from the
+/// layout width so the same office always gets the same city — a per-frame
+/// reshuffle would flicker.
+fn paint_skyline(
+    layout: &Layout,
+    theme: &Theme,
+    scale: RenderScale,
+    glass_top: u16,
+    glass_h: u16,
+    buf: &mut RgbBuffer,
+) {
+    let s = scale.get();
+    let sill = glass_top + glass_h;
+    // A local mix, per this crate's documented convention: each noise site owns
+    // its own finaliser over a disjoint domain (see the splitmix sharp edge).
+    let mix = |n: u32| -> u32 {
+        let mut v = n.wrapping_mul(0x9E37_79B9);
+        v ^= v >> 15;
+        v = v.wrapping_mul(0x85EB_CA6B);
+        v ^ (v >> 13)
+    };
+
+    let mut x = 0u16;
+    let mut i = 0u32;
+    while x < layout.buf_w {
+        let bw = SKYLINE_MIN_W + (mix(i) % u32::from(SKYLINE_W_SPREAD)) as u16;
+        let bh = SKYLINE_MIN_H + (mix(i ^ 0x5A5A) % u32::from(glass_h.max(1))) as u16;
+        let bh = bh.min(glass_h);
+        let dark = mix(i ^ 0x1234) % 3 != 0;
+        let tone = if dark {
+            theme.office.building_dark
+        } else {
+            theme.office.building_light
+        };
+        let top = sill.saturating_sub(bh);
+        fill(buf, scale.to_buffer(x), top * s, bw * s, bh * s, tone);
+        // Lit windows — the thing that says "night", not just "dark".
+        let mut wy = top + 1;
+        while wy + 1 < sill {
+            let mut wx = x + 1;
+            while wx + 1 < x + bw {
+                if mix(u32::from(wx) ^ (u32::from(wy) << 8)) % 5 == 0 {
+                    fill(
+                        buf,
+                        scale.to_buffer(wx),
+                        wy * s,
+                        s,
+                        s,
+                        theme.lighting.twilight_a,
+                    );
+                }
+                wx += 2;
+            }
+            wy += 2;
+        }
+        x = x.saturating_add(bw + 1);
+        i += 1;
+    }
 }
 
 fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
@@ -199,6 +286,7 @@ fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut Rgb
 fn paint_desk(
     lx: u16,
     ly: u16,
+    lit: bool,
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
@@ -224,6 +312,25 @@ fn paint_desk(
     let Some(material) = dominant_opaque_row(art, art.height().saturating_sub(1)) else {
         return;
     };
+    // An occupied desk spills its screen light onto the surface in front of it.
+    // The office is lit by two things — the windows and the monitors — and this
+    // is the only place the second one shows.
+    if lit {
+        let glow = Ramp::from_base(
+            theme.effects.monitor_frame_lit,
+            RAMP_TINT_PCT,
+            RAMP_SHADE_PCT,
+        );
+        fill(
+            buf,
+            x + art.width() * s / 4,
+            top_y + art.height() * s * GLOW_ROW_NUMER / GLOW_ROW_DENOM,
+            art.width() * s / 2,
+            s,
+            glow.lit,
+        );
+    }
+
     let ramp = Ramp::from_base(material, RAMP_TINT_PCT, RAMP_SHADE_PCT);
     let base_y = top_y + art.height() * s;
     let w = art.width() * s;
@@ -368,6 +475,7 @@ mod tests {
         // the real input this rule has to beat.
         let desk = Piece::Desk {
             at: crate::layout::Point { x: 0, y: 10 },
+            lit: false,
         };
         let seated = Piece::Character { idx: 0, y: 10 + 4 };
         assert_eq!(desk.depth(), 10 + desk_top_h());
@@ -422,6 +530,7 @@ mod tests {
         // desk, which is what gives the office depth rather than a flat plan.
         let desk = Piece::Desk {
             at: crate::layout::Point { x: 0, y: 10 },
+            lit: false,
         };
         let behind = Piece::Character { idx: 0, y: 9 };
         assert!(behind.depth() < desk.depth());
