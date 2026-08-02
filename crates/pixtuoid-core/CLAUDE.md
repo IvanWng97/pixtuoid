@@ -96,6 +96,15 @@ src/
 │                       home_desks is floor_local_desk(), or the documented single_floor_local()
 │                       identity for a single-floor scene)
 ├── sprite/             .sprite parser, pack.toml loader, blit_frame blitter, Pack::merge_from
+│                       + blit_frame_scaled — the integer nearest-neighbour twin, the FALLBACK
+│                       for art authored at a lower density than the buffer is painted at
+│                       (a 1x pack fills a scaled render; a pack authored AT the render scale
+│                       blits through blit_frame untouched, so richer art REMOVES the upscale
+│                       rather than fighting it). Not `image::imageops::resize`: that pulls a
+│                       large dep into the headless core for a doubled loop AND cannot
+│                       composite transparency into an existing buffer, which is the job.
+│                       `scale: NonZeroU16` makes a paint-nothing zero unrepresentable; the
+│                       layout↔buffer MEANING stays up in `pixtuoid_scene::render_scale`
 ├── platform.rs         cross-platform home-dir resolution (user_home(), USERPROFILE-first on
 │                       Windows — HOME is unset there and Git Bash's HOME is POSIX-form) +
 │                       codex_home() (honors CODEX_HOME when it points at an existing dir, else

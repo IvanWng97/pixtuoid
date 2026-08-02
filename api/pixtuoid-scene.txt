@@ -1508,6 +1508,7 @@ pub mod pixtuoid_scene::render_scale
 pub struct pixtuoid_scene::render_scale::RenderScale(_)
 impl pixtuoid_scene::render_scale::RenderScale
 pub const pixtuoid_scene::render_scale::RenderScale::ONE: Self
+pub fn pixtuoid_scene::render_scale::RenderScale::factor(self) -> core::num::nonzero::NonZeroU16
 pub fn pixtuoid_scene::render_scale::RenderScale::get(self) -> u16
 pub fn pixtuoid_scene::render_scale::RenderScale::logical(self, u16) -> u16
 pub fn pixtuoid_scene::render_scale::RenderScale::new(u16) -> core::option::Option<Self>

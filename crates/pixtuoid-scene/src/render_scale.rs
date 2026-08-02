@@ -37,6 +37,16 @@ impl RenderScale {
         self.0.get()
     }
 
+    /// The factor as a [`NonZeroU16`], for the core blitter.
+    ///
+    /// `pixtuoid-core` owns the pixel primitives but sits BELOW this crate in
+    /// the DAG, so it cannot name `RenderScale`; it takes the bare non-zero
+    /// factor and this is the one conversion. Core gets "repeat each pixel N
+    /// times", the layout↔buffer meaning stays here.
+    pub fn factor(self) -> NonZeroU16 {
+        self.0
+    }
+
     /// The logical extent a buffer of `buf_px` covers. Truncating is deliberate:
     /// a buffer that is not a whole multiple of the scale leaves a sub-unit
     /// remainder that no layout unit could occupy anyway.
@@ -76,6 +86,27 @@ mod tests {
         assert_eq!(s.logical(640), 160);
         // A partial unit at the edge belongs to no layout unit.
         assert_eq!(s.logical(643), 160);
+    }
+
+    /// The seam reaches the core blitter unchanged — a scale that says "4" must
+    /// expand a sprite by 4, or layout and paint would disagree about what a
+    /// unit is while every test above still passed.
+    #[test]
+    fn the_factor_drives_the_core_blitter_at_the_same_scale() {
+        use pixtuoid_core::sprite::blit::blit_frame_scaled;
+        use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
+
+        let red = Rgb { r: 255, g: 0, b: 0 };
+        let bg = Rgb { r: 0, g: 0, b: 0 };
+        let s = RenderScale::new(4).expect("nonzero");
+        let f = Frame::from_pixels(1, 1, vec![Some(red)]);
+        let mut buf = RgbBuffer::filled(8, 8, bg);
+        blit_frame_scaled(&f, 0, 0, s.factor(), &mut buf);
+
+        // One source pixel covers exactly s.get() x s.get() buffer pixels.
+        let last = s.get() - 1;
+        assert_eq!(buf.get(last, last), red, "the block reaches its far corner");
+        assert_eq!(buf.get(s.get(), 0), bg, "and stops there");
     }
 
     #[test]

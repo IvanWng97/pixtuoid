@@ -673,6 +673,7 @@ pub type pixtuoid_core::source::TaggedSender = tokio::sync::mpsc::bounded::Sende
 pub mod pixtuoid_core::sprite
 pub mod pixtuoid_core::sprite::blit
 pub fn pixtuoid_core::sprite::blit::blit_frame(&pixtuoid_core::sprite::Frame, u16, u16, &mut pixtuoid_core::sprite::RgbBuffer)
+pub fn pixtuoid_core::sprite::blit::blit_frame_scaled(&pixtuoid_core::sprite::Frame, u16, u16, core::num::nonzero::NonZeroU16, &mut pixtuoid_core::sprite::RgbBuffer)
 pub mod pixtuoid_core::sprite::format
 pub struct pixtuoid_core::sprite::format::Pack
 pub pixtuoid_core::sprite::format::Pack::name: alloc::string::String
