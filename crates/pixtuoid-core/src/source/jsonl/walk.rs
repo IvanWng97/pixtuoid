@@ -79,10 +79,8 @@ async fn should_seed_at_eof(
     if probe_live {
         return false;
     }
-    // Recent-but-unvouched: ask the source whether those recent bytes were the
-    // SESSION writing, which is all mtime ever proxied and which CC falsifies
-    // (`claude_code::cc_activity_recency`). `Unknown` keeps mtime's verdict, so
-    // this arm only ever TIGHTENS the proxy.
+    // Recent-but-unvouched: ask whether those recent bytes were the SESSION
+    // writing — the only thing mtime ever proxied, and the half CC falsifies.
     match activity_recency(&tail) {
         TailActivity::At(secs) => !within(
             std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(secs),
@@ -321,7 +319,17 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         // child-end-RELEASED claim (`false`, #246) re-registers here like an
         // absent one.
         let registered = seen.lock().await.get(path) == Some(&true);
-        if !registered {
+        // The oversized twin of the append guard above. Here the span is too big
+        // to hold, so the tail is the instrument — a metadata run always lands at
+        // the end, and a session that wrote 1 MiB carries turns in that window.
+        let metadata_only = matches!(
+            read_tail(path, TAIL_BYTES)
+                .await
+                .as_deref()
+                .map(decoders.activity_recency),
+            Some(super::TailActivity::SidecarOnly)
+        );
+        if !registered && !metadata_only {
             let head_cwd = read_head_cwd(path, MAX_PENDING_BYTES, cwd_extractor_for(source)).await;
             emit_first_sight(path, source, decoders, seen, tx, head_cwd).await;
         }
@@ -393,7 +401,19 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     if first_sight_cwd.is_none() && seen.lock().await.get(path) != Some(&true) {
         first_sight_cwd = read_head_cwd(path, MAX_PENDING_BYTES, extract).await;
     }
-    emit_first_sight(path, source, decoders, seen, tx, first_sight_cwd).await;
+    // A gated transcript revives on ANY append, and the write that revives it is
+    // not always the session's: CC appends metadata into OTHER, long-dead
+    // sessions' transcripts, so the first-sight gate alone closes only the
+    // cold-start ordering — with pixtuoid already running (the normal one) the
+    // file is `known` by boot and this path is what registers the ghost. Judge
+    // the APPENDED SPAN, not a tail window: on the read-from-top path the span
+    // IS the whole file, so a real session always carries a turn.
+    if !matches!(
+        (decoders.activity_recency)(new_bytes),
+        super::TailActivity::SidecarOnly
+    ) {
+        emit_first_sight(path, source, decoders, seen, tx, first_sight_cwd).await;
+    }
 
     // Used below to recognize a decoded SessionEnd for THIS transcript (the
     // decoder keys events the same way `id_derive` does — pinned by the
@@ -571,9 +591,10 @@ async fn read_head_cwd(path: &Path, limit: u64, extract: CwdExtractor) -> Option
 
 /// Read at most `bytes` from the END of a file (clamped to file size).
 /// `None` on any I/O error — callers treat that as "nothing to scan" (log +
-/// continue, never panic). Shared by `check_session_ended` (8 KiB ended-marker
-/// scan) and `scan_pending_tasks` (the #222 Task scan) so the two bounded
-/// tail reads can't drift apart.
+/// continue, never panic). EVERY bounded tail read goes through it — the
+/// first-sight gate and `check_session_ended` at `TAIL_BYTES`, the oversized
+/// revive guard, `scan_pending_tasks` at `TASK_SCAN_BYTES` — so they can't
+/// drift apart.
 async fn read_tail(path: &Path, bytes: u64) -> Option<Vec<u8>> {
     let meta = tokio::fs::metadata(path).await.ok()?;
     let file_len = meta.len();

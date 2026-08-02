@@ -660,6 +660,75 @@ async fn a_turnless_tail_gates_even_though_the_newest_turn_is_off_window() {
     );
 }
 
+/// The ordering the first-sight gate alone cannot close, and the one a
+/// long-running pixtuoid actually meets: the dead transcript is already GATED
+/// (so `known`, cursor parked at EOF) when a STARTING session appends its
+/// metadata run into it. Revive-on-append is unconditional by design, so that
+/// append re-registers the corpse — the gate is never consulted a second time.
+///
+/// The live-session revive is asserted in the SAME test: it is the behaviour
+/// the guard must not cost, and a guard that gated it would still pass a test
+/// that only checked the ghost.
+#[tokio::test]
+async fn a_metadata_append_does_not_revive_a_gated_transcript_but_a_turn_does() {
+    use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dead-then-touched.jsonl");
+    tokio::fs::write(&path, cc_metadata_touched_transcript())
+        .await
+        .unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    let walk = |body: Option<&'static str>| {
+        let path = path.clone();
+        let cursors = cursors.clone();
+        let seen = seen.clone();
+        async move {
+            if let Some(line) = body {
+                use tokio::io::AsyncWriteExt;
+                let mut f = tokio::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&path)
+                    .await
+                    .unwrap();
+                f.write_all(line.as_bytes()).await.unwrap();
+            }
+            let events = walk_once_with_recency(
+                &path,
+                Duration::from_secs(3600),
+                decode_cc_line,
+                cc_session_ended,
+                cc_activity_recency,
+                &cursors,
+                &seen,
+            )
+            .await;
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+        }
+    };
+
+    assert!(!walk(None).await, "first sight of the dead file must gate");
+    assert!(
+        !walk(Some(
+            "{\"type\":\"pr-link\",\"timestamp\":\"2026-08-02T05:56:43.894Z\"}\n"
+        ))
+        .await,
+        "a metadata-only append must not revive the corpse — this is the ordering \
+         a running pixtuoid meets, and the first-sight gate never sees it"
+    );
+    assert!(
+        walk(Some(
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-08-02T06:05:26.613Z\"}\n"
+        ))
+        .await,
+        "a real turn still revives it — the documented revive-on-append must survive"
+    );
+}
+
 /// Drive `walk_jsonl` once over a fresh (never-seeded) file — the
 /// deterministic, timing-free repro of the #85 race. When the watcher's
 /// `walk_jsonl` (rescan / 60s poll / notify) is the FIRST to see a file,

@@ -50,6 +50,10 @@ fn cc_watcher(root: std::path::PathBuf) -> JsonlWatcher {
     )
     .with_id_deriver(cc_id_from_path)
     .with_label_deriver(cc_derive_label)
+    // The SAME activity clock the real source wires: without it this mirror
+    // exercises the pre-gate CC wiring and a first_sight test would assert
+    // against a configuration production does not run.
+    .with_activity_recency(pixtuoid_core::source::claude_code::cc_activity_recency)
 }
 
 // ── Shared watcher harness + builders ───────────────────────────────────────

@@ -143,6 +143,10 @@ pub(crate) fn parsed_tail_lines(tail: &[u8]) -> impl Iterator<Item = Value> + '_
 /// motivating ghost through: the write that bumped mtime was metadata, but the
 /// bytes proving it sat behind a 7 KB `file-history-snapshot` line that ate the
 /// whole tail window.
+// `non_exhaustive` while still unpublished: the third state was itself found
+// late, by measuring a real transcript, so a fourth is plausible and this buys
+// it without a break. In-crate exhaustive matches are unaffected.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TailActivity {
     /// Newest agent-activity line in the tail, epoch seconds.

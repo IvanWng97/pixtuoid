@@ -3164,9 +3164,11 @@ fn a_resurrect_after_the_walkout_arrived_re_enters_through_the_door() {
 }
 
 #[test]
-fn a_resurrect_mid_walkout_keeps_its_live_position_for_the_snap_back() {
-    // The in-flight half of the same branch: the sprite is still rendering, so
-    // re-entering from the door would jump it BACKWARDS. It must not re-arm entry.
+fn a_resurrect_mid_walkout_declines_the_entry_re_arm() {
+    // The in-flight half of the same branch. This pins ONLY that entry declines
+    // to re-arm — the agent still teleports here (the snap-back is Active/
+    // Waiting-only and a resurrected slot is Idle), which is why this test does
+    // NOT assert a pose. Tracked separately; see the scene CLAUDE.md sharp edge.
     let l = layout();
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let created = t0 - Duration::from_secs(3600);
@@ -3192,7 +3194,79 @@ fn a_resurrect_mid_walkout_keeps_its_live_position_for_the_snap_back() {
     pose_at(&slot, mid, &l, &mut router, &mut history, &mut motion);
     assert!(
         motion[&slot.agent_id].entry.is_none(),
-        "an in-flight walkout is the snap-back's case — re-arming entry would \
-         teleport the walker back to the door"
+        "an in-flight walkout must not re-arm entry — that would jump the \
+         walker back to the door"
+    );
+}
+
+/// The exit render and the resurrect check must read "has the walkout finished?"
+/// through the SAME time-compressed clock. A far/slow desk's physics duration
+/// exceeds the GC budget, so compression is the only reason the leg reads as
+/// arrived before `EXIT_GRACE_WINDOW` reaps it — a resurrect landing in that
+/// window must still re-enter through the door.
+///
+/// Without this the sharing is unpinned: every other resurrect test routes
+/// straight-line on the small test layout, where the profile never exceeds the
+/// budget and the compression branch is dead. Reading raw elapsed at the
+/// resurrect site then survives the whole suite.
+#[test]
+fn the_resurrect_check_reads_the_same_compressed_clock_as_the_exit_render() {
+    let l = layout();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut slot = entry_slot(t0 - Duration::from_secs(3600));
+    slot.exiting_at = Some(t0);
+
+    // A long cornered route: physics duration lands well past the compression
+    // budget, so raw and compressed elapsed genuinely disagree.
+    let far: Vec<Point> = (0..24)
+        .map(|i| Point {
+            x: if i % 2 == 0 { 8 } else { 110 },
+            y: 20 + i * 3,
+        })
+        .collect();
+    let mut router = StubRouter::corners(far);
+    let mut history = PoseHistory::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    pose_at(&slot, t0, &l, &mut router, &mut history, &mut motion);
+    let profile = motion[&slot.agent_id]
+        .exit
+        .as_ref()
+        .expect("exit leg snapshotted")
+        .profile;
+    let budget = (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64)
+        .saturating_sub(EXIT_BUDGET_MARGIN_MS);
+    assert!(
+        profile.duration_ms + profile.pause_ms > budget,
+        "fixture must exceed the compression budget, else this pins nothing \
+         (duration {} + pause {} vs budget {budget})",
+        profile.duration_ms,
+        profile.pause_ms
+    );
+
+    // The first instant the COMPRESSED clock reports arrival. Compression scales
+    // elapsed by duration/budget, so arrival lands past the budget edge — find it
+    // rather than assume it.
+    let arrived_at = (1..20_000u64)
+        .find(|e| walk_arrived(&profile, exit_elapsed_ms(&profile, *e)))
+        .expect("compressed clock must arrive within the search range");
+    assert!(
+        !walk_arrived(&profile, arrived_at),
+        "raw elapsed must still read in-flight at {arrived_at}ms — otherwise the \
+         two clocks agree and this fixture cannot tell them apart"
+    );
+    let at = t0 + Duration::from_millis(arrived_at);
+
+    pose_at(&slot, at, &l, &mut router, &mut history, &mut motion);
+    slot.exiting_at = None;
+    slot.state_started_at = at;
+    pose_at(&slot, at, &l, &mut router, &mut history, &mut motion);
+    // Assert the RE-ARM, not the rendered `from`: the stub returns its polyline
+    // for every route, so `from` would pin the fixture, not the behaviour. Read
+    // raw elapsed here instead and the leg still measures in-flight, no re-arm.
+    assert_eq!(
+        motion[&slot.agent_id].entry.map(|(started, _)| started),
+        Some(at),
+        "a resurrect past the COMPRESSED arrival must re-arm entry on a fresh clock"
     );
 }

@@ -177,10 +177,12 @@ pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<
 /// the sprite vanishes in the corridor instead of reaching the door. (Entry has
 /// no such cap — nothing GCs an entering agent.)
 ///
-/// One definition because "has the walkout finished?" is asked twice — by the
-/// exit render, and by the resurrect check that decides whether a cancelled
-/// walkout needs a fresh entry walk — and an uncompressed second copy would
-/// call an already-arrived leg in-flight.
+/// One definition because "has the walkout finished?" is asked twice on the
+/// RENDER path — by the exit branch and by the resurrect check — and an
+/// uncompressed second copy would call an already-arrived leg in-flight.
+/// `floor::recompute_door_anim_max_ms` asks a third time and deliberately stays
+/// UNCOMPRESSED: it wants the physics window for a door cosmetic, not the
+/// render's deadline.
 fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
     let budget = (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64)
         .saturating_sub(EXIT_BUDGET_MARGIN_MS);
@@ -332,20 +334,19 @@ pub fn derive_with_routing(
     }
 
     // ---- RESURRECT: a cancelled walkout ------------------------------------
-    // Reaching here with an exit leg on file means `exiting_at` was CLEARED —
-    // the reducer's `resurrect_in_place`, a SessionStart landing on a slot
-    // mid-walkout. It re-stamps `state_started_at` but deliberately NOT
-    // `created_at`, so the spawn-window gate below can never re-arm entry; and
-    // once the walkout has ARRIVED the sprite has stopped rendering, so
-    // `history` holds no recent position for the snap-back either — so the agent
-    // popped onto its chair. Re-enter through the door instead. A walkout still
-    // IN FLIGHT is left to the
-    // snap-back: it resumes from the agent's live position, which reads better
-    // than teleporting back to the door to start over.
+    // An exit leg on file here means `exiting_at` was cleared under us — the
+    // reducer's `resurrect_in_place`, or a GC-then-re-register inside one tick.
+    // `created_at` is NOT re-stamped either way, so the spawn-window gate below
+    // can never re-arm entry on its own. Re-arm it once the walkout ARRIVED (the
+    // sprite is off-floor, so a fresh door walk is the only honest render).
     //
-    // Clearing the stale leg is load-bearing on its own: kept, a LATER exit
-    // would replay this already-arrived profile and the sprite would vanish on
-    // its first frame instead of walking out.
+    // An IN-FLIGHT walkout gets the `take()` but NO walk override, and still
+    // teleports — see the scene CLAUDE.md sharp edge. The snap-back is not the
+    // mechanism: it is Active/Waiting-only and a resurrected slot is Idle.
+    //
+    // Clearing the leg is load-bearing on its own: kept, a LATER exit would
+    // replay this already-arrived profile and the sprite would vanish on its
+    // first frame instead of walking out.
     let mut re_enter_at = None;
     if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
         if let Some(leg) = ms.exit.take() {

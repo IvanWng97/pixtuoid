@@ -110,6 +110,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::claude_code::ClaudeCod
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::claude_code::ClaudeCodeSource
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::claude_code::ClaudeCodeSource
 pub const pixtuoid_core::source::claude_code::SOURCE_NAME: &str
+pub fn pixtuoid_core::source::claude_code::cc_activity_recency(&[u8]) -> pixtuoid_core::source::decoder::TailActivity
 pub fn pixtuoid_core::source::claude_code::cc_derive_label(&std::path::Path, &str, &std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::claude_code::cc_id_from_path(&std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::claude_code::cc_session_ended(&[u8]) -> bool
@@ -295,6 +296,26 @@ pub fn pixtuoid_core::source::daemon::spawn_presence_exit_watch(pixtuoid_core::s
 pub fn pixtuoid_core::source::daemon::sweep_presence_ttl(&mut pixtuoid_core::state::SceneState, &str, pixtuoid_core::source::daemon::PresenceTtl, std::time::SystemTime)
 pub type pixtuoid_core::source::daemon::PresenceSender = tokio::sync::mpsc::unbounded::UnboundedSender<pixtuoid_core::source::daemon::PresenceMsg>
 pub mod pixtuoid_core::source::decoder
+#[non_exhaustive] pub enum pixtuoid_core::source::decoder::TailActivity
+pub pixtuoid_core::source::decoder::TailActivity::At(u64)
+pub pixtuoid_core::source::decoder::TailActivity::SidecarOnly
+pub pixtuoid_core::source::decoder::TailActivity::Unknown
+impl core::clone::Clone for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::clone(&self) -> pixtuoid_core::source::decoder::TailActivity
+impl core::cmp::Eq for pixtuoid_core::source::decoder::TailActivity
+impl core::cmp::PartialEq for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::eq(&self, &pixtuoid_core::source::decoder::TailActivity) -> bool
+impl core::fmt::Debug for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::StructuralPartialEq for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Freeze for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Send for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Sync for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Unpin for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::UnsafeUnpin for pixtuoid_core::source::decoder::TailActivity
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::decoder::TailActivity
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::decoder::TailActivity
 pub fn pixtuoid_core::source::decoder::decode_hook_payload(serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub type pixtuoid_core::source::decoder::CwdExtractor = fn(&serde_json::value::Value) -> core::option::Option<std::path::PathBuf>
 pub type pixtuoid_core::source::decoder::LineDecoder = fn(&str, &str, serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
@@ -375,6 +396,26 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::hook::SocketBusy
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::hook::SocketBusy
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::hook::SocketBusy
 pub mod pixtuoid_core::source::jsonl
+#[non_exhaustive] pub enum pixtuoid_core::source::jsonl::TailActivity
+pub pixtuoid_core::source::jsonl::TailActivity::At(u64)
+pub pixtuoid_core::source::jsonl::TailActivity::SidecarOnly
+pub pixtuoid_core::source::jsonl::TailActivity::Unknown
+impl core::clone::Clone for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::clone(&self) -> pixtuoid_core::source::decoder::TailActivity
+impl core::cmp::Eq for pixtuoid_core::source::decoder::TailActivity
+impl core::cmp::PartialEq for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::eq(&self, &pixtuoid_core::source::decoder::TailActivity) -> bool
+impl core::fmt::Debug for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::StructuralPartialEq for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Freeze for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Send for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Sync for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Unpin for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::UnsafeUnpin for pixtuoid_core::source::decoder::TailActivity
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::decoder::TailActivity
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::decoder::TailActivity
 pub struct pixtuoid_core::source::jsonl::ChildEndUnclaims
 impl pixtuoid_core::source::jsonl::ChildEndUnclaims
 pub fn pixtuoid_core::source::jsonl::ChildEndUnclaims::new() -> Self
@@ -395,6 +436,7 @@ pub struct pixtuoid_core::source::jsonl::JsonlWatcher
 impl pixtuoid_core::source::jsonl::JsonlWatcher
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::new(std::path::PathBuf, alloc::string::String, pixtuoid_core::source::decoder::LineDecoder, pixtuoid_core::source::jsonl::SessionEndChecker) -> Self
 pub async fn pixtuoid_core::source::jsonl::JsonlWatcher::run(self, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
+pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_activity_recency(self, pixtuoid_core::source::jsonl::ActivityRecency) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_cwd_deriver(self, pixtuoid_core::source::jsonl::CwdDeriver) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_id_deriver(self, pixtuoid_core::source::jsonl::IdDeriver) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_initial_window(self, core::time::Duration) -> Self
@@ -427,6 +469,7 @@ impl core::marker::Unpin for pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::marker::UnsafeUnpin for pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::jsonl::ProbeSnapshot
+pub type pixtuoid_core::source::jsonl::ActivityRecency = fn(&[u8]) -> pixtuoid_core::source::decoder::TailActivity
 pub type pixtuoid_core::source::jsonl::CwdDeriver = fn(&std::path::Path) -> core::option::Option<std::path::PathBuf>
 pub type pixtuoid_core::source::jsonl::IdDeriver = fn(&std::path::Path) -> alloc::string::String
 pub type pixtuoid_core::source::jsonl::LabelDeriver = fn(&std::path::Path, &str, &std::path::Path) -> alloc::string::String

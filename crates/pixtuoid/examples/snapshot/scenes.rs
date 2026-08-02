@@ -36,7 +36,10 @@ pub(crate) async fn capture_live_scene(
     // line-decoded event (activity, ModelInfo) keys on the UUID — nothing
     // coalesces and --live agents sit Idle/model-less forever (latent since
     // #203, exposed by the burn-tier replay).
-    .with_id_deriver(pixtuoid_core::source::claude_code::cc_id_from_path);
+    .with_id_deriver(pixtuoid_core::source::claude_code::cc_id_from_path)
+    // The SAME activity clock — the third builder call this harness has had to
+    // chase after the real source (id-deriver #203, liveness probe #632).
+    .with_activity_recency(pixtuoid_core::source::claude_code::cc_activity_recency);
     // The SAME liveness probe as the real source — the same harness-vs-app
     // parity gap as the id-deriver above (a JsonlWatcher builder call the
     // real CC source makes and this harness omitted): without the probe an

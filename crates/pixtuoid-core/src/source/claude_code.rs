@@ -401,35 +401,53 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
 /// whether we decode the type: `system` carries no `AgentEvent` but IS the
 /// session speaking (it closes live tails), while `pr-link` carries a
 /// timestamp and is NOT.
-const ACTIVITY_TYPES: &[&str] = &["assistant", "attachment", "system", "user"];
+const ACTIVITY_TYPES: &[&str] = &[
+    "assistant",
+    "attachment",
+    "file-history-delta",
+    "queue-operation",
+    "system",
+    "user",
+];
 
 /// When this transcript's SESSION last wrote, read from its tail — the honest
-/// replacement for the file's mtime in the first-sight recency gate (see
-/// [`ACTIVITY_TYPES`] for the write that made mtime lie).
+/// TIGHTENING of the file's mtime in the first-sight recency gate. A stale mtime
+/// still gates before the tail is read at all; this only ever adds a reason to
+/// gate. See the `ACTIVITY_TYPES` docs for the write that made mtime lie.
 ///
-/// [`TailActivity::SidecarOnly`] is the load-bearing verdict, and measuring the
-/// motivating file is what found it: a `file-history-snapshot` line ran 7 KB, so
-/// the tail window held that ONE torn line plus seven sidecars and not a single
-/// turn — reporting "no information" there fell back to the very mtime the
-/// sidecars had just bumped. Parseable-but-all-sidecar is not ignorance, it is
-/// evidence. Widening the window is NOT the fix: these lines carry file
-/// contents, so no fixed window bounds them.
+/// [`TailActivity::SidecarOnly`] is the load-bearing verdict (its own docs carry
+/// the measured tail that forced the split). Widening the window is NOT the fix:
+/// these lines carry file contents, so no fixed window bounds them.
 ///
-/// [`TailActivity::Unknown`] stays the fail-open answer for genuine ignorance —
-/// nothing parseable, or turn lines whose `timestamp` we cannot read. The
-/// residual it accepts: an UNVOUCHED live session (headless `claude -p`, or a
-/// non-standard projects root, since the registry probe pre-empts this arm
-/// entirely) whose tail is momentarily all sidecar stays invisible until its
-/// next turn — the documented revive-on-append, not a permanent gate.
+/// An UNRECOGNIZED type degrades to [`TailActivity::Unknown`], never to sidecar
+/// evidence: the day CC renames a turn type, reading it as "not a turn" would
+/// gate every live session at once — a fail-CLOSED drift failure inside a
+/// subsystem whose whole doctrine is breadcrumb-and-self-heal. `decode_cc_line`'s
+/// `unknown_event` breadcrumb is what drives the fix instead.
+///
+/// Accepted residual: an UNVOUCHED live session whose tail is momentarily all
+/// sidecar stays invisible until its next turn (the documented revive-on-append).
+/// "Unvouched" is wider than it reads — headless `claude -p`, a non-standard
+/// projects root, and EVERY CC session on Windows, where `live_cc_session_ids`
+/// returns `None` by construction. A session with working hooks registers through
+/// the hook plane regardless, which is what keeps this bounded.
 pub fn cc_activity_recency(tail: &[u8]) -> TailActivity {
     let mut newest: Option<u64> = None;
     let mut saw_turn = false;
-    let mut saw_line = false;
+    let mut saw_classified = false;
+    let mut saw_unclassifiable = false;
     for v in parsed_tail_lines(tail) {
-        saw_line = true;
+        // A typeless line, or one whose type we have never seen, classifies as
+        // NOTHING — it is not evidence the recent bytes were metadata.
         let Some(ty) = v.get("type").and_then(|t| t.as_str()) else {
+            saw_unclassifiable = true;
             continue;
         };
+        if !KNOWN_TYPES.contains(&ty) {
+            saw_unclassifiable = true;
+            continue;
+        }
+        saw_classified = true;
         if !ACTIVITY_TYPES.contains(&ty) {
             continue;
         }
@@ -444,9 +462,9 @@ pub fn cc_activity_recency(tail: &[u8]) -> TailActivity {
     }
     match newest {
         Some(secs) => TailActivity::At(secs),
-        // A stampless turn line means the session DID write here and we merely
-        // can't date it — the opposite of SidecarOnly, so it must not gate.
-        None if saw_line && !saw_turn => TailActivity::SidecarOnly,
+        // A stampless turn means the session DID write here and we merely cannot
+        // date it — the opposite of SidecarOnly, so it must not gate.
+        None if saw_classified && !saw_turn && !saw_unclassifiable => TailActivity::SidecarOnly,
         None => TailActivity::Unknown,
     }
 }
