@@ -81,9 +81,11 @@ frames   = ["desk.sprite"]
 frame_ms = 600
 
 # The 4x-density variant. OPTIONAL: a pack without it renders exactly as
-# before, because the cutaway only prefers a `_hi` sprite when it finds one.
-[animations.desk_hi]
-frames   = ["desk_hi.sprite"]
+# before. The `@4x` is the CLAIM; validate-pack proves it against desk's
+# own size, and a renderer at another scale picks whichever density
+# divides it.
+[animations."desk@4x"]
+frames   = ["desk@4x.sprite"]
 frame_ms = 600
 
 [animations.plant]

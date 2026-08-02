@@ -41,13 +41,28 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
     // parseable channel (the OK line, WARN/INFO advisories) even when a caller
     // redirects stdout — errors also drive a non-zero exit via the bail! below.
-    // The missing/insufficient names come from the REQUIRED/OPTIONAL registry
-    // constants (not pack input), so only the OK line + unknown keys are untrusted.
+    // `missing_required`/`missing_optional` are REGISTRY constants, but the
+    // insufficient-frames and mismatched-density names can be DENSITY VARIANTS,
+    // which the validator finds by walking the pack's own table — so those are
+    // pack input and get the same sanitising as the unknown keys.
     for name in &report.missing_required {
         eprintln!("ERROR: missing required animation \"{name}\"");
     }
     for (name, need, got) in &report.insufficient_frames {
-        eprintln!("ERROR: \"{name}\" needs at least {need} frames, has {got}");
+        eprintln!(
+            "ERROR: \"{}\" needs at least {need} frames, has {got}",
+            strip_control_chars(name)
+        );
+    }
+    for m in &report.mismatched_density {
+        eprintln!(
+            "ERROR: \"{}\" is {}x{}, but its name claims {}x{}",
+            strip_control_chars(&m.name),
+            m.found.0,
+            m.found.1,
+            m.claimed.0,
+            m.claimed.1
+        );
     }
     for name in &report.missing_optional {
         println!("WARN:  missing optional animation \"{name}\" (will not render)");
@@ -56,7 +71,9 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         println!("{}", unknown_line(name));
     }
 
-    let errors = report.missing_required.len() + report.insufficient_frames.len();
+    let errors = report.missing_required.len()
+        + report.insufficient_frames.len()
+        + report.mismatched_density.len();
     let warnings = report.missing_optional.len();
     eprintln!("\n{} error(s), {} warning(s)", errors, warnings);
 

@@ -11,7 +11,7 @@
 //! disagree about the office — the invariant the brief spends its §9 on.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
-use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_core::sprite::format::{density_variant_name, Pack};
 use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::cutaway::shade::{dither_band, fill, slab, Ramp};
@@ -651,31 +651,43 @@ fn paint_character(
 
 /// The densest art the pack has for `name`, and the factor to blit it at.
 ///
-/// A pack may ship `{name}_hi` — the SAME piece drawn on a bigger grid. When
-/// that variant's size is exactly `scale` times the base, it is authored AT
-/// this render density and blits 1:1; otherwise the base blits block-scaled.
+/// A pack may ship `{name}@{N}x` — the SAME piece drawn on an N-times grid.
+/// This picks the densest one that DIVIDES the render scale and blits it at
+/// the remaining factor, so 4x art still halves the upscale on an 8x render
+/// instead of being discarded for not being an exact match.
 ///
 /// This is the whole mixed-density contract, and its direction is the point:
 /// richer art REMOVES the upscale rather than fighting it, so the asset work
-/// can land one piece at a time instead of as a flag day. A pack with no `_hi`
-/// variant renders exactly as it did before this existed.
+/// can land one piece at a time instead of as a flag day. A pack with no
+/// variants renders exactly as it did before this existed.
 ///
-/// Density is inferred from the SIZE RATIO rather than declared in `pack.toml`
-/// because the ratio is the fact — a `_hi` sprite that is not a clean multiple
-/// of its base is not a density variant of it, whatever a manifest claimed.
+/// A variant whose size is not its base's times the density its NAME claims is
+/// SKIPPED rather than drawn wrong. `validate_pack_animations` reports it as a
+/// hard error, so the check here is the render-time backstop for a pack that
+/// was never validated — not the place an author is meant to find out.
 fn densest_art<'a>(
     pack: &'a Pack,
     name: &str,
     scale: RenderScale,
 ) -> Option<(&'a pixtuoid_core::sprite::Frame, std::num::NonZeroU16)> {
     let base = pack.animation(name).and_then(|a| a.frames.first())?;
-    let hi = pack
-        .animation(&format!("{name}_hi"))
-        .and_then(|a| a.frames.first());
-    if let Some(hi) = hi {
-        let s = scale.get();
-        if hi.width() == base.width() * s && hi.height() == base.height() * s {
-            return Some((hi, std::num::NonZeroU16::MIN));
+    let s = scale.get();
+    for density in (2..=s).rev() {
+        if !s.is_multiple_of(density) {
+            continue;
+        }
+        let Some(art) = pack
+            .animation(&density_variant_name(name, density))
+            .and_then(|a| a.frames.first())
+        else {
+            continue;
+        };
+        if art.width() != base.width() * density || art.height() != base.height() * density {
+            continue;
+        }
+        // `density` divides `s` and both are >= 1, so the quotient is nonzero.
+        if let Some(factor) = std::num::NonZeroU16::new(s / density) {
+            return Some((art, factor));
         }
     }
     Some((base, scale.factor()))
@@ -961,7 +973,7 @@ mod tests {
         assert!(behind.depth() < desk.depth());
     }
 
-    /// The bundled pack, which ships `desk` (14x8) and `desk_hi` (56x32).
+    /// The bundled pack, which ships `desk` (14x8) and `desk@4x` (56x32).
     fn pack() -> Pack {
         crate::embedded_pack::load_sprite_pack(None).expect("the embedded pack loads")
     }
@@ -984,7 +996,7 @@ mod tests {
         // what shipped before this test existed).
         let pack = pack();
         let (bw, bh) = base_size(&pack, "desk");
-        for s in 1..=6u16 {
+        for s in 1..=12u16 {
             let scale = RenderScale::new(s).expect("nonzero");
             let (art, blit_at) = densest_art(&pack, "desk", scale).expect("desk is in the pack");
             assert_eq!(
@@ -997,16 +1009,14 @@ mod tests {
 
     #[test]
     fn the_hi_variant_is_taken_only_at_the_density_it_was_authored_for() {
-        // `desk_hi` is 4x. At 4x it must WIN and blit 1:1 (the upscale is what
-        // richer art exists to remove); at 3x it must LOSE — art that is not a
-        // clean multiple of this render density is not a density variant of it,
-        // and blitting it anyway would draw a desk a third too wide. The ratio
-        // is checked rather than declared precisely so a mis-sized `_hi` cannot
-        // claim a density it does not have.
+        // `desk@4x` must WIN at 4x and blit 1:1 (the upscale is what richer art
+        // exists to remove), must HALVE the upscale at 8x rather than being
+        // discarded for not matching exactly, and must LOSE at 3x — 4 does not
+        // divide 3, so blitting it would draw a desk a third too wide.
         let pack = pack();
         let (bw, bh) = base_size(&pack, "desk");
-        let (hi_w, hi_h) = base_size(&pack, "desk_hi");
-        assert_eq!((hi_w, hi_h), (bw * 4, bh * 4), "desk_hi is the 4x variant");
+        let (hi_w, hi_h) = base_size(&pack, "desk@4x");
+        assert_eq!((hi_w, hi_h), (bw * 4, bh * 4), "desk@4x is the 4x variant");
 
         let (art, blit_at) =
             densest_art(&pack, "desk", RenderScale::new(4).expect("nonzero")).expect("desk exists");
@@ -1017,11 +1027,19 @@ mod tests {
         );
 
         let (art, blit_at) =
+            densest_art(&pack, "desk", RenderScale::new(8).expect("nonzero")).expect("desk exists");
+        assert_eq!(
+            (art.width(), blit_at.get()),
+            (hi_w, 2),
+            "at 8x the 4x art still halves the upscale"
+        );
+
+        let (art, blit_at) =
             densest_art(&pack, "desk", RenderScale::new(3).expect("nonzero")).expect("desk exists");
         assert_eq!(
             (art.width(), blit_at.get()),
             (bw, 3),
-            "at 3x the 4x art is rejected and the base block-scales"
+            "at 3x the 4x art does not divide and the base block-scales"
         );
     }
 
@@ -1032,8 +1050,8 @@ mod tests {
         // adding one `_hi` sprite would be a flag day for all of them.
         let pack = pack();
         assert!(
-            pack.animation("plant_hi").is_none(),
-            "this test is only meaningful while `plant` has no hi variant"
+            pack.animation("plant@4x").is_none(),
+            "this test is only meaningful while `plant` has no 4x variant"
         );
         let (bw, _) = base_size(&pack, "plant");
         let scale = RenderScale::new(4).expect("nonzero");
