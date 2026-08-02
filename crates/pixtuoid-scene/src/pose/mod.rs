@@ -171,6 +171,31 @@ pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<
         None => (chair, None),
     }
 }
+/// Take a spent EXIT leg off the non-exiting path, reporting when entry must
+/// re-arm: `Some(now)` once the walkout ARRIVED, `None` while it is in flight.
+///
+/// An exit leg surviving onto this path means `exiting_at` was cleared under us
+/// — the reducer's `resurrect_in_place`, or a GC-then-re-register inside one
+/// tick. Neither re-stamps `created_at`, so the entry branch's spawn-window gate
+/// can never re-arm on its own; once the walkout arrived the sprite is off-floor
+/// and a fresh door walk is the only honest render.
+///
+/// The IN-FLIGHT case gets the take but NO walk override, and still teleports —
+/// the snap-back is Active/Waiting-only and a resurrected slot is Idle. See the
+/// `pixtuoid-scene` CLAUDE.md exit-compression sharp edge.
+///
+/// The take is load-bearing on its own: a retained arrived leg is replayed by
+/// the NEXT exit, vanishing the sprite on its first frame instead of walking out.
+fn take_arrived_exit_leg(ms: Option<&mut MotionState>, now: SystemTime) -> Option<SystemTime> {
+    let ms = ms?;
+    let leg = ms.exit.take()?;
+    let elapsed = crate::anim::elapsed_ms(now, leg.started_at);
+    walk_arrived(&leg.profile, exit_elapsed_ms(&leg.profile, elapsed)).then(|| {
+        ms.entry = None;
+        now
+    })
+}
+
 /// Time-compressed elapsed for an EXIT leg, so the walk REACHES the door before
 /// the reducer's `EXIT_GRACE_WINDOW` reaps the slot. Physics exit duration for
 /// far/slow desks can exceed 4500ms; without this the slot is GC'd mid-walk and
@@ -334,29 +359,7 @@ pub fn derive_with_routing(
     }
 
     // ---- RESURRECT: a cancelled walkout ------------------------------------
-    // An exit leg on file here means `exiting_at` was cleared under us — the
-    // reducer's `resurrect_in_place`, or a GC-then-re-register inside one tick.
-    // `created_at` is NOT re-stamped either way, so the spawn-window gate below
-    // can never re-arm entry on its own. Re-arm it once the walkout ARRIVED (the
-    // sprite is off-floor, so a fresh door walk is the only honest render).
-    //
-    // An IN-FLIGHT walkout gets the `take()` but NO walk override, and still
-    // teleports — see the scene CLAUDE.md sharp edge. The snap-back is not the
-    // mechanism: it is Active/Waiting-only and a resurrected slot is Idle.
-    //
-    // Clearing the leg is load-bearing on its own: kept, a LATER exit would
-    // replay this already-arrived profile and the sprite would vanish on its
-    // first frame instead of walking out.
-    let mut re_enter_at = None;
-    if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
-        if let Some(leg) = ms.exit.take() {
-            let elapsed = crate::anim::elapsed_ms(now, leg.started_at);
-            if walk_arrived(&leg.profile, exit_elapsed_ms(&leg.profile, elapsed)) {
-                ms.entry = None;
-                re_enter_at = Some(now);
-            }
-        }
-    }
+    let re_enter_at = take_arrived_exit_leg(rctx.motion.get_mut(&slot.agent_id), now);
 
     // ---- ENTRY branch ------------------------------------------------------
     // Gate: spawn window check reuses ENTRY_ANIMATION_MS only as a bound on

@@ -319,9 +319,8 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         // child-end-RELEASED claim (`false`, #246) re-registers here like an
         // absent one.
         let registered = seen.lock().await.get(path) == Some(&true);
-        // The oversized twin of the append guard above. Here the span is too big
-        // to hold, so the tail is the instrument — a metadata run always lands at
-        // the end, and a session that wrote 1 MiB carries turns in that window.
+        // Oversized twin of the append guard: the span is too big to hold, so the
+        // tail is the instrument — a metadata run always lands at the end.
         let metadata_only = matches!(
             read_tail(path, TAIL_BYTES)
                 .await
@@ -401,13 +400,8 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     if first_sight_cwd.is_none() && seen.lock().await.get(path) != Some(&true) {
         first_sight_cwd = read_head_cwd(path, MAX_PENDING_BYTES, extract).await;
     }
-    // A gated transcript revives on ANY append, and the write that revives it is
-    // not always the session's: CC appends metadata into OTHER, long-dead
-    // sessions' transcripts, so the first-sight gate alone closes only the
-    // cold-start ordering — with pixtuoid already running (the normal one) the
-    // file is `known` by boot and this path is what registers the ghost. Judge
-    // the APPENDED SPAN, not a tail window: on the read-from-top path the span
-    // IS the whole file, so a real session always carries a turn.
+    // Revive-on-append is unconditional by design, so this — not the first-sight
+    // gate — is what registers the ghost for a running pixtuoid (core CLAUDE.md).
     if !matches!(
         (decoders.activity_recency)(new_bytes),
         super::TailActivity::SidecarOnly
