@@ -83,7 +83,7 @@ pub fn render_cutaway(
 ) {
     paint_floor(layout, theme, scale, buf);
     paint_wall(layout, theme, scale, buf);
-    paint_rooms(layout, theme, scale, buf);
+    paint_rooms(layout, pack, theme, scale, buf);
 
     // ONE ordered draw list, so a character and the desk it sits at resolve
     // against each other by depth instead of by which loop ran first. That
@@ -102,6 +102,10 @@ pub fn render_cutaway(
                 .unwrap_or(false),
         }
     }));
+    order.extend(layout.plants.iter().map(|pl| Piece::Plant {
+        at: pl.pos,
+        sprite: pl.kind.sprite_name(),
+    }));
     order.extend(
         frame
             .characters
@@ -118,14 +122,25 @@ pub fn render_cutaway(
         match *piece {
             Piece::Desk { at, lit } => paint_desk(at.x, at.y, lit, pack, theme, scale, buf),
             Piece::Character { idx, .. } => paint_character(frame, idx, pack, theme, scale, buf),
+            Piece::Plant { at, sprite } => paint_prop(at, sprite, pack, theme, scale, buf),
         }
     }
 }
 
 /// A thing to draw, carrying the depth it sorts on.
 enum Piece {
-    Desk { at: crate::layout::Point, lit: bool },
-    Character { idx: usize, y: u16 },
+    Desk {
+        at: crate::layout::Point,
+        lit: bool,
+    },
+    Plant {
+        at: crate::layout::Point,
+        sprite: &'static str,
+    },
+    Character {
+        idx: usize,
+        y: u16,
+    },
 }
 
 impl Piece {
@@ -145,6 +160,8 @@ impl Piece {
         match self {
             Piece::Desk { at, .. } => at.y + desk_top_h(),
             Piece::Character { y, .. } => *y,
+            // A plant's ground is its own base row, the layout's `pos` convention.
+            Piece::Plant { at, .. } => at.y,
         }
     }
 }
@@ -279,7 +296,13 @@ fn paint_skyline(
 ///
 /// Glass rather than solid: a cutaway shows what is inside a room, which is the
 /// whole reason the concept is a cutaway and not a floor plan.
-fn paint_rooms(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
+fn paint_rooms(
+    layout: &Layout,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
     let s = scale.get();
     let glass = Ramp::from_base(
         theme.office.room_wall_trim_light,
@@ -292,6 +315,26 @@ fn paint_rooms(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut Rgb
         .map(|r| r.bounds)
         .chain(layout.pantry.iter().map(|p| p.bounds))
         .collect();
+    // The pantry's counter is a fixture the layout already sized — paint it so
+    // the room reads as a pantry rather than an empty glass box.
+    if let Some(pantry) = &layout.pantry {
+        let sprite = if pantry.counter_size.w >= crate::layout::PANTRY_COUNTER_LARGE_W {
+            "pantry"
+        } else {
+            "pantry_small"
+        };
+        if let Some(art) = pack.animation(sprite).and_then(|a| a.frames.first()) {
+            let x = pantry.bounds.x + (pantry.bounds.width.saturating_sub(art.width())) / 2;
+            let y = pantry.bounds.y + ROOM_WALL_PX + 1;
+            blit_frame_scaled(
+                art,
+                scale.to_buffer(x),
+                scale.to_buffer(y),
+                scale.factor(),
+                buf,
+            );
+        }
+    }
     for b in bounds {
         let (x, y) = (scale.to_buffer(b.x), scale.to_buffer(b.y));
         let (w, h) = (b.width * s, b.height * s);
@@ -488,6 +531,43 @@ fn paint_character(
     if c.seat_desk.is_some() {
         paint_chair(at, art.width(), art.height(), theme, scale, buf);
     }
+}
+
+/// Blit a floor-standing prop from the pack, centred on its layout point.
+///
+/// The layout already places these and the pack already draws them; the cutaway
+/// only adds the ground contact a top-down view never needed. Reusing the art
+/// rather than re-inventing it is the whole shape of this profile's asset work.
+fn paint_prop(
+    at: crate::layout::Point,
+    sprite: &str,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let Some(art) = pack.animation(sprite).and_then(|a| a.frames.first()) else {
+        return;
+    };
+    // The layout's point is the piece's CENTRE; `blit_frame_scaled` takes a
+    // top-left, so undo the centring in logical space before converting.
+    let x = at.x.saturating_sub(art.width() / 2);
+    let y = at.y.saturating_sub(art.height() / 2);
+    contact_shadow(
+        crate::layout::Point { x, y },
+        art.width(),
+        art.height(),
+        theme,
+        scale,
+        buf,
+    );
+    blit_frame_scaled(
+        art,
+        scale.to_buffer(x),
+        scale.to_buffer(y),
+        scale.factor(),
+        buf,
+    );
 }
 
 /// A tight dark band where a figure meets the floor.
