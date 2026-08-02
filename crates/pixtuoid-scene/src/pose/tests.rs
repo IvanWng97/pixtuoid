@@ -3086,3 +3086,113 @@ fn settle_from_pair_both_none_is_settle_none() {
         "(Some, Some) collapses to Settle::Both start,end"
     );
 }
+
+// ====================================================================
+// RESURRECT: a cancelled walkout must not teleport the agent onto its chair.
+// `resurrect_in_place` clears `exiting_at` without re-stamping `created_at`,
+// so both walk overrides declined and the sprite popped back to the desk.
+// ====================================================================
+
+/// Drive `derive_with_routing` and return the pose, keeping the caller's stores.
+fn pose_at(
+    slot: &AgentSlot,
+    now: SystemTime,
+    l: &Layout,
+    router: &mut StubRouter,
+    history: &mut PoseHistory,
+    motion: &mut HashMap<AgentId, MotionState>,
+) -> Option<Pose> {
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    derive_with_routing(
+        slot,
+        now,
+        l,
+        &mut crate::pose::RouteCtx {
+            router,
+            overlay: &overlay,
+            history,
+            motion,
+        },
+    )
+}
+
+#[test]
+fn a_resurrect_after_the_walkout_arrived_re_enters_through_the_door() {
+    let l = layout();
+    let door = l.door_threshold.expect("layout has a door");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    // Born long before the spawn window, so only a re-arm can produce an entry.
+    let created = t0 - Duration::from_secs(3600);
+    let mut slot = entry_slot(created);
+    slot.exiting_at = Some(t0);
+
+    let mut router = StubRouter::straight();
+    let mut history = PoseHistory::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    // Walk out, then let the leg arrive: the sprite is off-floor (`None`) and
+    // `history` has nothing recent — the state the snap-back cannot recover from.
+    pose_at(&slot, t0, &l, &mut router, &mut history, &mut motion);
+    assert!(
+        motion[&slot.agent_id].exit.is_some(),
+        "test setup: the walkout must have snapshotted a leg"
+    );
+    let arrived = t0 + pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    assert!(
+        pose_at(&slot, arrived, &l, &mut router, &mut history, &mut motion).is_none(),
+        "test setup: the walkout must have reached the door"
+    );
+
+    // The resurrect: exiting_at cleared, state_started_at re-stamped, created_at
+    // untouched — exactly what `fsm::resurrect_in_place` leaves behind.
+    slot.exiting_at = None;
+    slot.state_started_at = arrived;
+
+    let p = pose_at(&slot, arrived, &l, &mut router, &mut history, &mut motion);
+    match p {
+        Some(Pose::Walking { from, .. }) => assert_eq!(
+            from, door,
+            "a resurrect past its walkout must re-enter from the door"
+        ),
+        other => panic!("expected a fresh entry walk, got {other:?}"),
+    }
+    assert!(
+        motion[&slot.agent_id].exit.is_none(),
+        "the spent exit leg must be cleared, or the NEXT exit replays an \
+         already-arrived profile and the sprite vanishes instead of walking out"
+    );
+}
+
+#[test]
+fn a_resurrect_mid_walkout_keeps_its_live_position_for_the_snap_back() {
+    // The in-flight half of the same branch: the sprite is still rendering, so
+    // re-entering from the door would jump it BACKWARDS. It must not re-arm entry.
+    let l = layout();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let created = t0 - Duration::from_secs(3600);
+    let mut slot = entry_slot(created);
+    slot.exiting_at = Some(t0);
+
+    let mut router = StubRouter::straight();
+    let mut history = PoseHistory::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    pose_at(&slot, t0, &l, &mut router, &mut history, &mut motion);
+    let mid = t0 + Duration::from_millis(200);
+    assert!(
+        matches!(
+            pose_at(&slot, mid, &l, &mut router, &mut history, &mut motion),
+            Some(Pose::Walking { .. })
+        ),
+        "test setup: the walkout must still be in flight"
+    );
+
+    slot.exiting_at = None;
+    slot.state_started_at = mid;
+    pose_at(&slot, mid, &l, &mut router, &mut history, &mut motion);
+    assert!(
+        motion[&slot.agent_id].entry.is_none(),
+        "an in-flight walkout is the snap-back's case — re-arming entry would \
+         teleport the walker back to the door"
+    );
+}

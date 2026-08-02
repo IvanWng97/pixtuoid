@@ -21,7 +21,7 @@ use crate::motion::{
     advance_wander, snapshot_leg_profile, walking_position, MotionState, WalkLeg, WalkPathSnapshot,
     WanderKind, WanderPhase,
 };
-use crate::physics::{walk_arrived, walk_progress, WalkIntent};
+use crate::physics::{walk_arrived, walk_progress, WalkIntent, WalkProfile};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 pub use pure::{
@@ -171,6 +171,25 @@ pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<
         None => (chair, None),
     }
 }
+/// Time-compressed elapsed for an EXIT leg, so the walk REACHES the door before
+/// the reducer's `EXIT_GRACE_WINDOW` reaps the slot. Physics exit duration for
+/// far/slow desks can exceed 4500ms; without this the slot is GC'd mid-walk and
+/// the sprite vanishes in the corridor instead of reaching the door. (Entry has
+/// no such cap — nothing GCs an entering agent.)
+///
+/// One definition because "has the walkout finished?" is asked twice — by the
+/// exit render, and by the resurrect check that decides whether a cancelled
+/// walkout needs a fresh entry walk — and an uncompressed second copy would
+/// call an already-arrived leg in-flight.
+fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
+    let budget = (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64)
+        .saturating_sub(EXIT_BUDGET_MARGIN_MS);
+    if profile.duration_ms.saturating_add(profile.pause_ms) > budget {
+        (elapsed_ms.saturating_mul(profile.duration_ms) / budget.max(1)).max(elapsed_ms)
+    } else {
+        elapsed_ms
+    }
+}
 
 /// Routed variant of `derive`. For Walking poses, asks `router` for an
 /// A*-routed polyline (composed against the layout's static mask + the
@@ -275,18 +294,7 @@ pub fn derive_with_routing(
 
         let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
 
-        // Compress the exit walk so it REACHES the door before the reducer's
-        // EXIT_GRACE_WINDOW reaps the slot. Physics exit duration for far/slow
-        // desks can exceed 4500ms; without this the slot is GC'd mid-walk and
-        // the sprite vanishes in the corridor instead of reaching the door.
-        // (Entry has no such cap — nothing GCs an entering agent.)
-        let exit_budget = (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64)
-            .saturating_sub(EXIT_BUDGET_MARGIN_MS);
-        let eff_elapsed = if profile.duration_ms.saturating_add(profile.pause_ms) > exit_budget {
-            (elapsed_ms.saturating_mul(profile.duration_ms) / exit_budget.max(1)).max(elapsed_ms)
-        } else {
-            elapsed_ms
-        };
+        let eff_elapsed = exit_elapsed_ms(profile, elapsed_ms);
 
         // GC: walk fully done including pause → return None so the slot
         // disappears (same as old ENTRY_ANIMATION_MS gate).
@@ -323,6 +331,32 @@ pub fn derive_with_routing(
         );
     }
 
+    // ---- RESURRECT: a cancelled walkout ------------------------------------
+    // Reaching here with an exit leg on file means `exiting_at` was CLEARED —
+    // the reducer's `resurrect_in_place`, a SessionStart landing on a slot
+    // mid-walkout. It re-stamps `state_started_at` but deliberately NOT
+    // `created_at`, so the spawn-window gate below can never re-arm entry; and
+    // once the walkout has ARRIVED the sprite has stopped rendering, so
+    // `history` holds no recent position for the snap-back either — so the agent
+    // popped onto its chair. Re-enter through the door instead. A walkout still
+    // IN FLIGHT is left to the
+    // snap-back: it resumes from the agent's live position, which reads better
+    // than teleporting back to the door to start over.
+    //
+    // Clearing the stale leg is load-bearing on its own: kept, a LATER exit
+    // would replay this already-arrived profile and the sprite would vanish on
+    // its first frame instead of walking out.
+    let mut re_enter_at = None;
+    if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
+        if let Some(leg) = ms.exit.take() {
+            let elapsed = crate::anim::elapsed_ms(now, leg.started_at);
+            if walk_arrived(&leg.profile, exit_elapsed_ms(&leg.profile, elapsed)) {
+                ms.entry = None;
+                re_enter_at = Some(now);
+            }
+        }
+    }
+
     // ---- ENTRY branch ------------------------------------------------------
     // Gate: spawn window check reuses ENTRY_ANIMATION_MS only as a bound on
     // how long we try to route. Physics duration is the real walk time.
@@ -344,8 +378,8 @@ pub fn derive_with_routing(
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
 
-        // Snapshot on first sighting if we're within the spawn window.
-        if mstate.entry.is_none() && since_spawn < ENTRY_ANIMATION_MS {
+        // Snapshot on first sighting within the spawn window, or on a resurrect.
+        if mstate.entry.is_none() && (since_spawn < ENTRY_ANIMATION_MS || re_enter_at.is_some()) {
             // Profile covers door→approach PLUS the short settle glide onto the chair
             // (end settle; the door start has no seat).
             let profile = snapshot_leg_profile(
@@ -359,7 +393,7 @@ pub fn derive_with_routing(
                 chair_settle,
                 WalkIntent::Entry,
             );
-            mstate.entry = Some((slot.created_at, profile));
+            mstate.entry = Some((re_enter_at.unwrap_or(slot.created_at), profile));
         }
 
         if let Some((started_at, profile)) = mstate.entry {

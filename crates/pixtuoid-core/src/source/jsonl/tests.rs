@@ -362,12 +362,37 @@ async fn walk_once_with(
     cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
     seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
 ) -> Vec<(Transport, AgentEvent)> {
+    walk_once_with_recency(
+        path,
+        window,
+        decode_line,
+        check_ended,
+        super::no_activity_recency,
+        cursors,
+        seen,
+    )
+    .await
+}
+
+/// [`walk_once_with`] plus the source's [`ActivityRecency`] — the seam for the
+/// gate's mtime-vs-activity half. The default-recency helper above delegates
+/// here, so both share ONE walk body.
+async fn walk_once_with_recency(
+    path: &Path,
+    window: Duration,
+    decode_line: LineDecoder,
+    check_ended: SessionEndChecker,
+    activity_recency: super::ActivityRecency,
+    cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+) -> Vec<(Transport, AgentEvent)> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
     let source: Arc<str> = Arc::from("test");
     let decoders = SourceDecoders {
         decode_line,
         derive_label: t_label,
         check_ended,
+        activity_recency,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
@@ -409,6 +434,7 @@ async fn first_sight_cwd_falls_back_to_the_path_deriver_when_content_has_none() 
             decode_line: t_decode,
             derive_label: t_label,
             check_ended: t_ended,
+            activity_recency: super::no_activity_recency,
             id_derive: default_id_from_path,
             path_filter: accept_all_paths,
             cwd_derive: derived_cwd,
@@ -465,6 +491,7 @@ async fn walk_once_live(
         decode_line: t_decode,
         derive_label: t_label,
         check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: crate::source::claude_code::cc_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
@@ -506,6 +533,131 @@ async fn walk_once(
     seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
 ) -> Vec<(Transport, AgentEvent)> {
     walk_once_with(path, window, t_decode, check_ended, cursors, seen).await
+}
+
+/// A CC transcript whose only TURN line is old and whose tail is the metadata
+/// run a DIFFERENT live session appends (observed 2026-08-01, CC 2.1.220). Its
+/// mtime is NOW — it was just written — so mtime alone reads it as live.
+fn cc_metadata_touched_transcript() -> String {
+    [
+        r#"{"type":"assistant","cwd":"/repo/dead","timestamp":"2026-07-29T05:46:24.525Z"}"#,
+        r#"{"type":"bridge-session","sessionId":"dead"}"#,
+        r#"{"type":"last-prompt","sessionId":"dead"}"#,
+        r#"{"type":"file-history-snapshot"}"#,
+        r#"{"type":"pr-link","timestamp":"2026-08-02T05:56:43.894Z"}"#,
+    ]
+    .join("\n")
+        + "\n"
+}
+
+/// The gate must measure CC's newest TURN, not the file's mtime: a session
+/// three days dead, whose transcript a live session just appended metadata to,
+/// is historical however fresh the file looks. Same bytes, same fresh mtime,
+/// three configurations — only the ACTIVITY stamp moves the verdict, and the
+/// third is the negative control that pins WHICH arm did it (with the default
+/// no-opinion recency the mtime proxy still admits, i.e. the bug reproduces).
+#[tokio::test]
+async fn a_metadata_touched_dead_cc_transcript_is_gated_though_its_mtime_is_fresh() {
+    use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
+
+    // Wide enough to hold the fixture's 2026 stamps for the lifetime of this
+    // test suite — the "the turn IS recent" configuration.
+    const TEN_YEARS: Duration = Duration::from_secs(10 * 365 * 24 * 3600);
+    const ONE_HOUR: Duration = Duration::from_secs(3600);
+
+    async fn walk(window: Duration, recency: super::ActivityRecency) -> bool {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dead-session.jsonl");
+        tokio::fs::write(&path, cc_metadata_touched_transcript())
+            .await
+            .unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+        let events = walk_once_with_recency(
+            &path,
+            window,
+            decode_cc_line,
+            cc_session_ended,
+            recency,
+            &cursors,
+            &seen,
+        )
+        .await;
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    }
+
+    assert!(
+        !walk(ONE_HOUR, cc_activity_recency).await,
+        "a transcript whose newest TURN is outside the window must gate, \
+         however recently something else wrote to it"
+    );
+    assert!(
+        walk(TEN_YEARS, cc_activity_recency).await,
+        "the same transcript registers once its newest turn is inside the \
+         window — the gate reads the turn, not a blanket refusal"
+    );
+    assert!(
+        walk(ONE_HOUR, super::no_activity_recency).await,
+        "negative control: with no activity probe the mtime proxy admits it \
+         (the pre-fix behaviour), so the first case is the new arm's doing"
+    );
+}
+
+/// The shape the live file actually had — and the reason the gate needs a
+/// SidecarOnly verdict rather than an `Option`. A `file-history-snapshot` line
+/// ran 7 KB, so the tail window opens MID-LINE and holds nothing but that torn
+/// fragment plus sidecars: the newest turn is off-window entirely, and reading
+/// that as "no information" falls straight back to the mtime the sidecars just
+/// bumped. Measured against the reporting user's transcript, 2026-08-01.
+#[tokio::test]
+async fn a_turnless_tail_gates_even_though_the_newest_turn_is_off_window() {
+    use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("buried-turn.jsonl");
+    let mut body = String::new();
+    body.push_str(
+        r#"{"type":"assistant","cwd":"/repo/dead","timestamp":"2026-07-29T05:46:24.525Z"}"#,
+    );
+    body.push('\n');
+    // One oversized sidecar line, then the metadata run — together they push the
+    // turn above out of any fixed tail window.
+    body.push_str(&format!(
+        r#"{{"type":"file-history-snapshot","blob":"{}"}}"#,
+        "x".repeat(super::walk::TAIL_BYTES as usize)
+    ));
+    body.push('\n');
+    for line in [
+        r#"{"type":"custom-title","sessionId":"dead"}"#,
+        r#"{"type":"mode","sessionId":"dead"}"#,
+        r#"{"type":"pr-link","timestamp":"2026-08-02T05:56:43.894Z"}"#,
+    ] {
+        body.push_str(line);
+        body.push('\n');
+    }
+    tokio::fs::write(&path, &body).await.unwrap();
+
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let events = walk_once_with_recency(
+        &path,
+        Duration::from_secs(3600),
+        decode_cc_line,
+        cc_session_ended,
+        cc_activity_recency,
+        &cursors,
+        &seen,
+    )
+    .await;
+    assert!(
+        !events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+        "a tail of nothing but sidecar lines is EVIDENCE the recent write was \
+         metadata, not an absence of evidence"
+    );
 }
 
 /// Drive `walk_jsonl` once over a fresh (never-seeded) file — the
@@ -577,6 +729,7 @@ async fn walk_jsonl_honors_the_path_filter() {
         decode_line: t_decode,
         derive_label: t_label,
         check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: default_id_from_path,
         path_filter: skip_full,
         cwd_derive: no_cwd_from_path,
@@ -783,6 +936,7 @@ async fn session_exit_drains_pending_bytes_so_a_straggler_walk_cannot_resurrect(
         decode_line: t_decode,
         derive_label: t_label,
         check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
@@ -869,6 +1023,7 @@ async fn session_exit_purges_live_so_a_probe_failure_pass_cannot_revouch() {
         decode_line: t_decode,
         derive_label: t_label,
         check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
@@ -930,6 +1085,7 @@ fn t_decoders() -> SourceDecoders {
         decode_line: t_decode,
         derive_label: t_label,
         check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
@@ -1158,6 +1314,7 @@ async fn decoded_terminator_release_is_not_revouched_into_a_full_replay() {
         decode_line: t_decode_lifecycle,
         derive_label: t_label,
         check_ended: never_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
@@ -1435,6 +1592,7 @@ async fn known_oversized_tail_emits_session_end_if_the_skipped_span_ended() {
         decode_line: t_decode,
         derive_label: t_label,
         check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
@@ -1733,6 +1891,7 @@ async fn scan_pass_re_vouches_a_transiently_gated_live_file() {
         decode_line: t_decode,
         derive_label: t_label,
         check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: crate::source::claude_code::cc_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
@@ -1856,6 +2015,7 @@ async fn revouch_does_not_replay_a_probe_vouched_ended_transcript() {
         decode_line: t_decode,
         derive_label: t_label,
         check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: crate::source::claude_code::cc_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
@@ -3061,6 +3221,7 @@ async fn revouch_pass_prunes_deleted_files_from_cursors() {
         decode_line: t_decode,
         derive_label: t_label,
         check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
         id_derive: default_id_from_path,
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,

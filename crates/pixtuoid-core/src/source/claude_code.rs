@@ -4,8 +4,10 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::decoder::{
-    cwd_basename_label, ellipsize, make_tool_detail, parsed_tail_lines, MAX_DECODED_FIELD_CHARS,
+    cwd_basename_label, ellipsize, make_tool_detail, parsed_tail_lines, TailActivity,
+    MAX_DECODED_FIELD_CHARS,
 };
+
 use crate::source::AgentEvent;
 use crate::AgentId;
 
@@ -385,6 +387,70 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     Ok(out)
 }
 
+/// The [`KNOWN_TYPES`] subset whose lines are AGENT TURN activity — the
+/// timestamped record of a session doing work. Everything else in that list is
+/// a session-metadata SIDECAR line, which CC appends to a transcript for
+/// reasons that have nothing to do with the owning process being alive.
+///
+/// The split is not hypothetical: a STARTING session writes a metadata run
+/// (`bridge-session`, `pr-link`, …) into an OTHER, long-dead session's
+/// transcript, and a cwd change relocates one with `relocated`/`worktree-state`
+/// (capture-verified against CC 2.1.220, 2026-08-01). Those writes bump mtime,
+/// which the first-sight gate trusted as its liveness proxy — so a dead session
+/// registered as a live sprite. Membership is by TURN-AUTHORSHIP, not by
+/// whether we decode the type: `system` carries no `AgentEvent` but IS the
+/// session speaking (it closes live tails), while `pr-link` carries a
+/// timestamp and is NOT.
+const ACTIVITY_TYPES: &[&str] = &["assistant", "attachment", "system", "user"];
+
+/// When this transcript's SESSION last wrote, read from its tail — the honest
+/// replacement for the file's mtime in the first-sight recency gate (see
+/// [`ACTIVITY_TYPES`] for the write that made mtime lie).
+///
+/// [`TailActivity::SidecarOnly`] is the load-bearing verdict, and measuring the
+/// motivating file is what found it: a `file-history-snapshot` line ran 7 KB, so
+/// the tail window held that ONE torn line plus seven sidecars and not a single
+/// turn — reporting "no information" there fell back to the very mtime the
+/// sidecars had just bumped. Parseable-but-all-sidecar is not ignorance, it is
+/// evidence. Widening the window is NOT the fix: these lines carry file
+/// contents, so no fixed window bounds them.
+///
+/// [`TailActivity::Unknown`] stays the fail-open answer for genuine ignorance —
+/// nothing parseable, or turn lines whose `timestamp` we cannot read. The
+/// residual it accepts: an UNVOUCHED live session (headless `claude -p`, or a
+/// non-standard projects root, since the registry probe pre-empts this arm
+/// entirely) whose tail is momentarily all sidecar stays invisible until its
+/// next turn — the documented revive-on-append, not a permanent gate.
+pub fn cc_activity_recency(tail: &[u8]) -> TailActivity {
+    let mut newest: Option<u64> = None;
+    let mut saw_turn = false;
+    let mut saw_line = false;
+    for v in parsed_tail_lines(tail) {
+        saw_line = true;
+        let Some(ty) = v.get("type").and_then(|t| t.as_str()) else {
+            continue;
+        };
+        if !ACTIVITY_TYPES.contains(&ty) {
+            continue;
+        }
+        saw_turn = true;
+        if let Some(secs) = v
+            .get("timestamp")
+            .and_then(|t| t.as_str())
+            .and_then(crate::source::decoder::rfc3339_to_epoch_secs)
+        {
+            newest = Some(newest.map_or(secs, |n: u64| n.max(secs)));
+        }
+    }
+    match newest {
+        Some(secs) => TailActivity::At(secs),
+        // A stampless turn line means the session DID write here and we merely
+        // can't date it — the opposite of SidecarOnly, so it must not gate.
+        None if saw_line && !saw_turn => TailActivity::SidecarOnly,
+        None => TailActivity::Unknown,
+    }
+}
+
 /// CC session-end checker: parses lines as JSON and checks for
 /// session lifecycle markers structurally (not byte scan).
 pub fn cc_session_ended(tail: &[u8]) -> bool {
@@ -449,6 +515,80 @@ pub fn cc_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ---- transcript-activity recency (the first-sight gate's mtime replacement) ----
+
+    #[test]
+    fn every_activity_type_is_a_known_type() {
+        // ACTIVITY_TYPES is a SUBSET of the drift-watched vocabulary, never a
+        // second list: a type named here but not there would breadcrumb
+        // `unknown_event` on every line it admits.
+        for t in ACTIVITY_TYPES {
+            assert!(KNOWN_TYPES.contains(t), "{t} missing from KNOWN_TYPES");
+        }
+    }
+
+    #[test]
+    fn a_metadata_only_tail_does_not_refresh_the_activity_clock() {
+        // The observed 2026-08-01 shape: a session whose last real turn was days
+        // ago, then a run of sidecar lines a DIFFERENT live session appended.
+        // Recency must report the old turn, not the fresh `pr-link` — that gap
+        // is exactly what the file's mtime hides.
+        let tail = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-29T05:46:24.525Z"}"#,
+            "\n",
+            r#"{"type":"bridge-session","sessionId":"s"}"#,
+            "\n",
+            r#"{"type":"custom-title","sessionId":"s"}"#,
+            "\n",
+            r#"{"type":"pr-link","timestamp":"2026-08-02T05:56:43.894Z"}"#,
+            "\n",
+        );
+        assert_eq!(
+            cc_activity_recency(tail.as_bytes()),
+            TailActivity::At(1_785_303_984),
+            "the July turn is the newest ACTIVITY, whatever the sidecars stamp"
+        );
+    }
+
+    #[test]
+    fn a_live_tail_reports_its_newest_turn_and_a_stampless_tail_reports_nothing() {
+        // Live sessions close their tail with timestamped turn lines, so the
+        // max is the newest of them (order-independent — `.max()`, not last).
+        let live = concat!(
+            r#"{"type":"user","timestamp":"2026-08-02T06:04:54.650Z"}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-08-02T06:05:26.261Z"}"#,
+            "\n",
+            r#"{"type":"system","timestamp":"2026-08-02T06:05:26.613Z"}"#,
+            "\n",
+        );
+        assert_eq!(
+            cc_activity_recency(live.as_bytes()),
+            TailActivity::At(1_785_650_726)
+        );
+        // Parseable but turn-less is EVIDENCE the recent write was metadata —
+        // the measured ghost shape, where the torn giant line leaves only
+        // sidecars in the window.
+        assert_eq!(
+            cc_activity_recency(br#"{"type":"pr-link","timestamp":"2026-08-02T05:56:43.894Z"}"#),
+            TailActivity::SidecarOnly
+        );
+        // Genuine ignorance stays fail-open: nothing parseable, and a turn line
+        // we cannot date (the session DID write — it must not gate).
+        for blind in [
+            &b""[..],
+            br#"not json at all"#,
+            br#"{"type":"assistant"}"#,
+            br#"{"type":"assistant","timestamp":"not-a-date"}"#,
+        ] {
+            assert_eq!(
+                cc_activity_recency(blind),
+                TailActivity::Unknown,
+                "{blind:?}"
+            );
+        }
+    }
 
     // ---- burn-tier observations (ModelInfo) ----
 

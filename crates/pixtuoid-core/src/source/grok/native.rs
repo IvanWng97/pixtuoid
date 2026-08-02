@@ -223,7 +223,9 @@ fn grok_ids_from_registry(
             continue;
         }
         if let (Some(claimed_secs), Some(actual_secs)) = (
-            e.opened_at.as_deref().and_then(rfc3339_to_epoch_secs),
+            e.opened_at
+                .as_deref()
+                .and_then(crate::source::decoder::rfc3339_to_epoch_secs),
             start_time(e.pid),
         ) {
             // `opened_at` is stamped at session OPEN, which can lag process
@@ -248,60 +250,6 @@ fn grok_ids_from_registry(
         snap.bind_pid(e.session_id, e.pid);
     }
     Some(snap)
-}
-
-/// Minimal RFC3339 → epoch seconds for the registry's `opened_at` (chrono
-/// `DateTime<Utc>` serialization: `YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)`).
-/// Core deliberately carries no date dependency for one field read on one
-/// probe path; the identity check is additive, so `None` on anything
-/// unexpected simply degrades that entry to pid-alive-only.
-#[cfg(unix)]
-fn rfc3339_to_epoch_secs(s: &str) -> Option<u64> {
-    let b = s.as_bytes();
-    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' && b[10] != b't' {
-        return None;
-    }
-    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
-    let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
-    let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
-        return None;
-    }
-    // Trailing zone: skip an optional fraction, then Z or ±HH:MM.
-    let mut i = 19;
-    if b.get(i) == Some(&b'.') {
-        i += 1;
-        while b.get(i).is_some_and(u8::is_ascii_digit) {
-            i += 1;
-        }
-    }
-    let offset_secs: i64 = match b.get(i) {
-        Some(b'Z') | Some(b'z') if i + 1 == b.len() => 0,
-        Some(sign @ (b'+' | b'-')) if i + 6 == b.len() && b.get(i + 3) == Some(&b':') => {
-            let oh = num(i + 1..i + 3)?;
-            let om = num(i + 4..i + 6)?;
-            let mag = oh * 3600 + om * 60;
-            if *sign == b'+' {
-                mag
-            } else {
-                -mag
-            }
-        }
-        _ => return None,
-    };
-    // Howard Hinnant's days-from-civil (the standard branchless algorithm).
-    let (y_adj, era_m) = if mo <= 2 {
-        (y - 1, mo + 9)
-    } else {
-        (y, mo - 3)
-    };
-    let era = y_adj.div_euclid(400);
-    let yoe = y_adj - era * 400;
-    let doy = (153 * era_m + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    let secs = days * 86_400 + h * 3600 + mi * 60 + sec - offset_secs;
-    u64::try_from(secs).ok()
 }
 
 /// Attach the probe ONLY for grok's first-party layout: the standard
@@ -470,7 +418,8 @@ mod tests {
             // opened_at 12:00:05Z = epoch 1784203205. A process started LATER
             // than the claim + tolerance ⇒ the original process died and the
             // pid was recycled — the entry must be skipped.
-            let opened = rfc3339_to_epoch_secs("2026-07-16T12:00:05Z").unwrap();
+            let opened =
+                crate::source::decoder::rfc3339_to_epoch_secs("2026-07-16T12:00:05Z").unwrap();
             let tolerance = crate::source::cc_probe::PID_START_TOLERANCE_SECS;
             let recycled_start = opened + tolerance + 1;
             let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(recycled_start));
@@ -554,31 +503,6 @@ mod tests {
             let snap = augment_with_leader_vouch(seeded, tmp.path());
             assert_eq!(snap.pid_of.get("s"), Some(&42));
             assert_eq!(snap.pid_of.len(), 1);
-        }
-
-        #[test]
-        fn rfc3339_parses_chrono_utc_shapes_and_rejects_garbage() {
-            // 2026-07-16T12:00:05Z — cross-checked epoch.
-            assert_eq!(
-                rfc3339_to_epoch_secs("2026-07-16T12:00:05Z"),
-                Some(1_784_203_205)
-            );
-            // Fractional seconds + explicit offset forms (chrono's default
-            // to_rfc3339 uses `+00:00`).
-            assert_eq!(
-                rfc3339_to_epoch_secs("2026-07-16T12:00:05.123456+00:00"),
-                Some(1_784_203_205)
-            );
-            // A NON-UTC offset shifts the epoch.
-            assert_eq!(
-                rfc3339_to_epoch_secs("2026-07-16T14:00:05+02:00"),
-                Some(1_784_203_205)
-            );
-            // Epoch anchor sanity.
-            assert_eq!(rfc3339_to_epoch_secs("1970-01-01T00:00:00Z"), Some(0));
-            for bad in ["", "2026-07-16", "not a date", "2026-13-01T00:00:00Z"] {
-                assert_eq!(rfc3339_to_epoch_secs(bad), None, "{bad:?}");
-            }
         }
     }
 }

@@ -109,6 +109,7 @@ impl Source for ClaudeCodeSource {
         )
         .with_id_deriver(cc_id_from_path)
         .with_label_deriver(cc_derive_label)
+        .with_activity_recency(super::cc_activity_recency)
         .with_path_filter(skip_workflow_journal);
         if let Some(sessions_dir) = cc_sessions_dir(&self.projects_root) {
             watcher = watcher.with_liveness_probe(std::sync::Arc::new(move || {

@@ -14,7 +14,7 @@ use crate::AgentId;
 
 use super::health::FailureLatch;
 use super::liveness::{probe_admits, revouch_gated_files};
-use super::{SessionEndChecker, SourceDecoders, WatchCtx};
+use super::{ActivityRecency, SessionEndChecker, SourceDecoders, TailActivity, WatchCtx};
 
 /// Oversized-span skip threshold (#204): a pending span past this is never
 /// replayed. Module-scoped (not fn-local) so the boundary TEST imports THIS
@@ -43,6 +43,9 @@ pub(super) fn id_path(path: &Path) -> std::path::PathBuf {
 /// fix: the post-startup rescan used to bypass it and resurrect a missed
 /// ended/stale session as a phantom live sprite.
 ///
+/// "Historical" is measured by the source's [`ActivityRecency`] where it has
+/// one, and by the file mtime otherwise.
+///
 /// `probe_live` (the liveness vouch) exempts only the RECENCY half: mtime is a
 /// PROXY for liveness that a long-idle/delegating session falsifies, so ground
 /// truth about the owning process must win over it. It does NOT exempt the
@@ -57,21 +60,52 @@ async fn should_seed_at_eof(
     window: Duration,
     path: &Path,
     check_ended: SessionEndChecker,
+    activity_recency: ActivityRecency,
     probe_live: bool,
 ) -> bool {
-    let recent = meta
-        .modified()
-        .ok()
-        .map(|mtime| {
-            // elapsed() Errs when mtime is in the future (APFS nanosecond clock
-            // jitter); a future mtime is necessarily within any recency window.
-            mtime.elapsed().unwrap_or(Duration::ZERO) <= window
-        })
-        .unwrap_or(false);
-    // Historical AND unvouched → seed EOF. Ended → seed EOF. Otherwise read.
-    // `||` short-circuits, so the tail read stays off the historical path.
-    (!recent && !probe_live) || check_session_ended(path, check_ended).await
+    let mtime_recent = meta.modified().ok().is_some_and(|m| within(m, window));
+    // Answered without reading the tail — the historical path pays no IO.
+    if !mtime_recent && !probe_live {
+        return true;
+    }
+    let Some(tail) = read_tail(path, TAIL_BYTES).await else {
+        // Neither tail predicate can speak, so admit: an unreadable tail is
+        // no evidence that the session is over.
+        return false;
+    };
+    if check_ended(&tail) {
+        return true;
+    }
+    if probe_live {
+        return false;
+    }
+    // Recent-but-unvouched: ask the source whether those recent bytes were the
+    // SESSION writing, which is all mtime ever proxied and which CC falsifies
+    // (`claude_code::cc_activity_recency`). `Unknown` keeps mtime's verdict, so
+    // this arm only ever TIGHTENS the proxy.
+    match activity_recency(&tail) {
+        TailActivity::At(secs) => !within(
+            std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(secs),
+            window,
+        ),
+        TailActivity::SidecarOnly => true,
+        TailActivity::Unknown => false,
+    }
 }
+
+/// `elapsed()` Errs when `t` is in the FUTURE (APFS nanosecond clock jitter on
+/// the mtime side, a clock-skewed wire stamp on the activity side), and a future
+/// instant is necessarily within any window — so both callers read it the same
+/// way, from one definition.
+fn within(t: std::time::SystemTime, window: Duration) -> bool {
+    t.elapsed().unwrap_or(Duration::ZERO) <= window
+}
+
+/// How far back from EOF the first-sight predicates read. One value for BOTH
+/// the end-marker scan and the activity-recency probe: they judge the same
+/// window of the same file, and a split would let a transcript be "ended" and
+/// "active" over different bytes.
+pub(super) const TAIL_BYTES: u64 = 8192;
 
 pub(super) async fn scan_root(
     root: &Path,
@@ -194,6 +228,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             window,
             path,
             check_ended,
+            decoders.activity_recency,
             probe_admits(path, decoders, ctx).await,
         )
         .await
@@ -552,7 +587,6 @@ async fn read_tail(path: &Path, bytes: u64) -> Option<Vec<u8>> {
 
 /// Read the tail of a file and delegate to the source-specific checker.
 pub(super) async fn check_session_ended(path: &Path, checker: SessionEndChecker) -> bool {
-    const TAIL_BYTES: u64 = 8192;
     match read_tail(path, TAIL_BYTES).await {
         Some(buf) => checker(&buf),
         None => false,
