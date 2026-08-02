@@ -307,6 +307,13 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   (`"D" = #8b5a2b`), NOT the theme — `furniture.wood_top` is a different material
 │                   that reads nearly identical to the carpet in tokyo-night — and sampling means a
 │                   custom `--pack-dir` desk gets a matching front face for free.
+│                   (3) a desk-seated pose is RE-PROJECTED: `CharacterPlacement.seat_desk`
+│                   carries the desk the sim seated an agent at, because `anchor` is already
+│                   projected FOR CLASSIC (it raises the sprite so the monitor overhangs and hides
+│                   the lower body) and a second profile cannot recover the desk from it. Classic
+│                   ignores the field; the cutaway anchors at the desk's own row so the head reads
+│                   OVER the surface. That field is what "one simulation, two projections" has to
+│                   mean in practice — without it the shared frame silently belongs to one painter.
 │                   Visual check: `cargo run --release --example cutaway_snapshot`
 ├── render_scale.rs THE layout-space ↔ buffer-space seam. Every layout coordinate is a buffer
 │                   pixel today, so the office's SIZE and its RESOLUTION are ONE axis — doubling

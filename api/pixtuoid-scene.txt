@@ -1328,6 +1328,7 @@ pub pixtuoid_scene::pixel_painter::CharacterPlacement::anim_name: &'static str
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::flip_x: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::frame_idx: usize
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::glow: pixtuoid_scene::pixel_painter::CharacterGlow
+pub pixtuoid_scene::pixel_painter::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::sleep_z_seed: core::option::Option<u64>
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::waiting_bubble: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::walking_dust_frame: core::option::Option<usize>

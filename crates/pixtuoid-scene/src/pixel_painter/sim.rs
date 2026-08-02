@@ -92,6 +92,17 @@ pub struct CharacterPlacement {
     pub waiting_bubble: bool,
     /// `Some(frame)` draws the walking dust puff; `None` when standing still.
     pub walking_dust_frame: Option<usize>,
+    /// The home desk this placement is SEATED AT, in logical units — `None` for
+    /// anyone not sitting at one (walking, at a waypoint, standing).
+    ///
+    /// `anchor` is already projected for the classic top-down painter (it rises
+    /// the sprite above the desk so the monitor overhangs). A second profile
+    /// needs to project the SAME seated agent differently — the cutaway seats
+    /// them at the near side with their head over the surface — and cannot
+    /// recover the desk from a pre-projected anchor. Carrying the desk keeps the
+    /// sim's one pass authoritative while leaving the projection to each
+    /// painter, which is what "one simulation, two projections" has to mean.
+    pub seat_desk: Option<Point>,
 }
 
 /// The immutable outcome of one `sim_step`: the world advanced, observed.
@@ -328,6 +339,8 @@ fn resolve_characters(
                 glow,
                 sleep_z_seed,
                 waiting_bubble: false,
+                // The one arm that IS seated at a desk — see the field's doc.
+                seat_desk: Some(desk),
                 walking_dust_frame: None,
             }
         };
@@ -368,6 +381,7 @@ fn resolve_characters(
                     glow: CharacterGlow::None,
                     sleep_z_seed: None,
                     waiting_bubble: is_waiting,
+                    seat_desk: None,
                     walking_dust_frame: None,
                 });
             }
@@ -453,6 +467,7 @@ fn resolve_characters(
                         glow: CharacterGlow::None,
                         sleep_z_seed: None,
                         waiting_bubble: false,
+                        seat_desk: None,
                         walking_dust_frame: None,
                     });
                 }
@@ -472,6 +487,7 @@ fn resolve_characters(
                     glow: CharacterGlow::None,
                     sleep_z_seed: None,
                     waiting_bubble: false,
+                    seat_desk: None,
                     walking_dust_frame: None,
                 });
             }
@@ -540,6 +556,7 @@ fn resolve_characters(
                     glow: CharacterGlow::None,
                     sleep_z_seed: None,
                     waiting_bubble: false,
+                    seat_desk: None,
                     walking_dust_frame: Some(frame),
                 });
             }

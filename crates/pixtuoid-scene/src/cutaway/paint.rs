@@ -212,6 +212,25 @@ fn dominant_opaque_row(
     best.map(|(c, _)| c)
 }
 
+/// Where the cutaway seats an occupant, given the desk the sim says they sit at.
+///
+/// The classic painter RAISES a seated sprite above its desk so the monitor
+/// overhangs and hides the lower body — right for a pure top-down view. A
+/// cutaway seats them at the NEAR side instead, head over the surface, which is
+/// what the ratified reference shows. Anchoring at the desk's own row does that:
+/// the head lands on the surface band and the torso falls in front of it.
+fn cutaway_seat_anchor(
+    desk: crate::layout::Point,
+    classic: crate::layout::Point,
+) -> crate::layout::Point {
+    crate::layout::Point {
+        // x keeps the sim's centring (it already accounts for sprite width, and
+        // re-deriving it here would be a second copy that could drift).
+        x: classic.x,
+        y: desk.y,
+    }
+}
+
 fn paint_character(
     frame: &SimFrame,
     idx: usize,
@@ -233,10 +252,15 @@ fn paint_character(
     } else {
         f.clone()
     };
+    // Re-project a desk-seated pose; everyone else keeps the sim's anchor.
+    let at = match c.seat_desk {
+        Some(desk) => cutaway_seat_anchor(desk, c.anchor),
+        None => c.anchor,
+    };
     blit_frame_scaled(
         &art,
-        scale.to_buffer(c.anchor.x),
-        scale.to_buffer(c.anchor.y),
+        scale.to_buffer(at.x),
+        scale.to_buffer(at.y),
         scale.factor(),
         buf,
     );
@@ -265,6 +289,25 @@ mod tests {
             desk.depth(),
             seated.depth()
         );
+    }
+
+    #[test]
+    fn the_cutaway_seats_an_occupant_lower_than_the_classic_painter_does() {
+        // The visible difference between the two profiles for the same agent.
+        // Classic raises the sprite above the desk (monitor overhangs, lower
+        // body hidden); the cutaway drops it onto the surface so the head reads
+        // over the desk, which is what the reference shows.
+        let desk = crate::layout::Point { x: 40, y: 30 };
+        let classic = crate::layout::Point { x: 41, y: 30 - 8 };
+        let cut = cutaway_seat_anchor(desk, classic);
+        assert_eq!(cut.x, classic.x, "x centring comes from the sim, unchanged");
+        assert!(
+            cut.y > classic.y,
+            "the cutaway must seat LOWER (classic {}, cutaway {})",
+            classic.y,
+            cut.y
+        );
+        assert_eq!(cut.y, desk.y, "the head lands on the desk's own row");
     }
 
     #[test]
