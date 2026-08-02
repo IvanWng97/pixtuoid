@@ -314,6 +314,25 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   ignores the field; the cutaway anchors at the desk's own row so the head reads
 │                   OVER the surface. That field is what "one simulation, two projections" has to
 │                   mean in practice — without it the shared frame silently belongs to one painter.
+│                   (4) MIXED DENSITY: `densest_art(pack, name, scale)` prefers a `<name>@<N>x`
+│                   pack variant (see the core guide) over block-scaling the base — picking the
+│                   densest one that DIVIDES the render scale and blitting it at the remainder,
+│                   so 4x art still HALVES the upscale at 8x instead of being discarded for not
+│                   matching exactly. Its direction is the point: richer art REMOVES the upscale
+│                   rather than fighting it, so the asset work lands one piece at a time instead
+│                   of as a flag day, and a pack with no variants renders byte-identically. The
+│                   size check here is only the render-time BACKSTOP for an unvalidated pack —
+│                   `validate_pack_animations` is where an author is meant to find out. The one
+│                   arithmetic trap: `paint_desk` sizes the front face off `art.width() *
+│                   blit_at`, NOT `art.width() * scale` — variant art is already in buffer
+│                   units, and multiplying twice puts the front face a whole desk below the
+│                   surface it belongs to (pinned by
+│                   `the_drawn_size_is_the_same_whichever_density_the_art_came_from`).
+│                   The bundled `desk@4x` also records two ART decisions made against the
+│                   RENDERED OFFICE rather than the sprite: grain runs ALONG the boards (random
+│                   dots read as dirt) and screen chrome is the monitor-frame grey, NOT a bright
+│                   tone — the cutaway says "occupied" with the `lit` glow it paints OVER the
+│                   screen, so bright baked content made all 12 desks read as staffed.
 │                   Visual check: `cargo run --release --example cutaway_snapshot`
 ├── render_scale.rs THE layout-space ↔ buffer-space seam. Every layout coordinate is a buffer
 │                   pixel today, so the office's SIZE and its RESOLUTION are ONE axis — doubling
@@ -330,7 +349,9 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   pattern): `size` alone is ambiguous once the spaces differ, so every painter
 │                   states which it means. `render_floor` is where they part — the buffer sizes
 │                   in PIXELS, the layout computes at `scale.logical(size)`. Density is the core
-│                   blitter's `blit_frame_scaled`; see the core guide
+│                   blitter's `blit_frame_scaled` for art authored BELOW the render scale, and
+│                   the pack's `<piece>@<N>x` variants for art authored AT it (`cutaway::paint::
+│                   densest_art` is the picker); see the core guide
 └── pixel_painter/  the SHARED world render (render_to_rgb_buffer) — TWO phases behind that one seam:
                     sim.rs (sim_step: advances every &mut sim store — router/overlay/history/motion/
                     light/chitchat, bundled as SimStores — and returns an OWNED immutable SimFrame:

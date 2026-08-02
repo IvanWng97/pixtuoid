@@ -104,7 +104,27 @@ src/
 │                       large dep into the headless core for a doubled loop AND cannot
 │                       composite transparency into an existing buffer, which is the job.
 │                       `scale: NonZeroU16` makes a paint-nothing zero unrepresentable; the
-│                       layout↔buffer MEANING stays up in `pixtuoid_scene::render_scale`
+│                       layout↔buffer MEANING stays up in `pixtuoid_scene::render_scale`.
+│                       DENSITY VARIANTS are the other half: a pack may ship `<piece>@<N>x`
+│                       (`density_variant_name`/`split_density_variant`/`DENSITY_VARIANT_SEP`)
+│                       — the same piece drawn on an N-times grid, following the prevailing
+│                       asset convention (`@2x`/`@3x` Apple, `scale-200` Windows). The SCALE is
+│                       in the name because a name saying only "denser" can't express a pack
+│                       shipping BOTH a 2x and a 4x variant, and leaves the file's meaning
+│                       dependent on whichever render scale measures it. Variants are legal by
+│                       DERIVATION from OPTIONAL_FURNITURE_ANIMATIONS, never their own rows
+│                       (`is_optional_furniture_animation`) — a second list forgotten fails
+│                       quietly in its least visible direction: the variant loads for the
+│                       bundled pack but `merge_from` never inherits it, so only `--pack-dir`
+│                       users drop back to the upscale. `merge_from` therefore iterates what
+│                       the BASE pack HAS (the density axis is open — the registry names
+│                       PIECES, not the grids each may be drawn on). The name CLAIMS a density
+│                       and the frame size PROVES it: `validate_pack_animations` reports a
+│                       `DensityMismatch` as a hard ERROR, because otherwise the claim is only
+│                       ever tested by whichever renderer looks for that density — silently, at
+│                       paint time, on someone else's terminal. `1x` and `+4x` are rejected:
+│                       this string is a lookup KEY, and two spellings of one density is two
+│                       files a renderer picks between arbitrarily
 ├── platform.rs         cross-platform home-dir resolution (user_home(), USERPROFILE-first on
 │                       Windows — HOME is unset there and Git Bash's HOME is POSIX-form) +
 │                       codex_home() (honors CODEX_HOME when it points at an existing dir, else
