@@ -74,6 +74,8 @@ pub fn pixtuoid_scene::chitchat::supports_chitchat(pixtuoid_scene::layout::Waypo
 pub fn pixtuoid_scene::chitchat::update_and_collect(&mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, usize, &[pixtuoid_scene::chitchat::Visitor], std::time::SystemTime) -> alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
 pub fn pixtuoid_scene::chitchat::venue_wp_idx(pixtuoid_scene::layout::WaypointKind, usize, &[pixtuoid_scene::layout::Waypoint]) -> usize
 pub mod pixtuoid_scene::cutaway
+pub mod pixtuoid_scene::cutaway::paint
+pub fn pixtuoid_scene::cutaway::paint::render_cutaway(&pixtuoid_scene::pixel_painter::SimFrame, &pixtuoid_scene::layout::Layout, &pixtuoid_core::sprite::format::Pack, &pixtuoid_scene::theme::Theme, pixtuoid_scene::render_scale::RenderScale, &mut pixtuoid_core::sprite::RgbBuffer)
 pub mod pixtuoid_scene::cutaway::shade
 pub struct pixtuoid_scene::cutaway::shade::Ramp
 pub pixtuoid_scene::cutaway::shade::Ramp::base: pixtuoid_core::sprite::Rgb
@@ -81,6 +83,7 @@ pub pixtuoid_scene::cutaway::shade::Ramp::lit: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::cutaway::shade::Ramp::shade: pixtuoid_core::sprite::Rgb
 impl pixtuoid_scene::cutaway::shade::Ramp
 pub fn pixtuoid_scene::cutaway::shade::Ramp::flat(pixtuoid_core::sprite::Rgb) -> Self
+pub fn pixtuoid_scene::cutaway::shade::Ramp::from_base(pixtuoid_core::sprite::Rgb, u8, u8) -> Self
 impl core::clone::Clone for pixtuoid_scene::cutaway::shade::Ramp
 pub fn pixtuoid_scene::cutaway::shade::Ramp::clone(&self) -> pixtuoid_scene::cutaway::shade::Ramp
 impl core::cmp::Eq for pixtuoid_scene::cutaway::shade::Ramp

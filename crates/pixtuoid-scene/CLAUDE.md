@@ -295,8 +295,19 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   dither is NOT a workaround: an indexed palette cannot blend, so a gradient IS
 │                   a dither — and it costs TWO palette slots instead of a dozen, which is what
 │                   keeps theme recolour an index swap and SIXEL free of a quantisation pass.
-│                   NOT wired to a painter yet — the vocabulary lands first because it is pure and
-│                   testable in a way the paint pass over it will not be
+│                   paint.rs = `render_cutaway(&SimFrame, layout, pack, theme, scale, buf)` —
+│                   floor + desks + cast, DELIBERATELY partial (walls/rooms/effects change no
+│                   answer yet). Two decisions worth not re-deriving: (1) a desk sorts on its TOP
+│                   SURFACE's south edge, a deliberate DIVERGENCE from classic (which sorts on the
+│                   desk's visual base so the monitor hides the occupant) — the reference draws the
+│                   head OVER the surface, because in a cutaway the occupant sits at the near side;
+│                   (2) the desk BLITS the pack's `desk` sprite at classic's exact anchor
+│                   (`desk.y - 1`, its monitor-bezel raise) and derives the cutaway's front face by
+│                   SAMPLING the sprite's own base row. The desk's brown lives in the PACK
+│                   (`"D" = #8b5a2b`), NOT the theme — `furniture.wood_top` is a different material
+│                   that reads nearly identical to the carpet in tokyo-night — and sampling means a
+│                   custom `--pack-dir` desk gets a matching front face for free.
+│                   Visual check: `cargo run --release --example cutaway_snapshot`
 ├── render_scale.rs THE layout-space ↔ buffer-space seam. Every layout coordinate is a buffer
 │                   pixel today, so the office's SIZE and its RESOLUTION are ONE axis — doubling
 │                   the buffer builds a room with 4× the desks rather than drawing the same room

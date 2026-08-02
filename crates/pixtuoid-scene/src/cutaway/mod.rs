@@ -10,4 +10,5 @@
 //! it is what the visual mock ratified, and because it is pure and testable in
 //! a way the paint pass built on top of it will not be.
 
+pub mod paint;
 pub mod shade;
