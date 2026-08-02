@@ -189,7 +189,7 @@ pub struct Transcript {
     /// registration) AND by the offline `harness::Drive` (the seed standing in
     /// for that registration) — ONE derivation, so a driven transcript keys
     /// exactly as production does. Each source's own fn lives in its module
-    /// (invariant #3); [`default_id_from_path`] is the path-keyed default.
+    /// (invariant #3); `default_id_from_path` is the path-keyed default.
     pub id_from_path: IdDeriver,
     /// First-sight cwd extractor for the walker's transcript head scan. The fn
     /// lives in the source's own module (invariant #3: per-source

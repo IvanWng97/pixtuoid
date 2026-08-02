@@ -218,7 +218,7 @@ impl JsonlWatcher {
     /// `decode_line` and gating ended sessions with `check_session_ended`.
     /// Label/filter/probe defaults are set by the `with_*` builders; the id
     /// derivation comes from `source`'s own registry row
-    /// ([`registry::id_deriver_for`]) so a registration keys the way that row
+    /// ([`crate::source::registry::id_deriver_for`]) so a registration keys the way that row
     /// says — no per-source `run()` wiring to forget, and the offline
     /// `harness::Drive` reads the same row.
     pub fn new(

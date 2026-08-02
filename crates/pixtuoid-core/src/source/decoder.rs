@@ -35,7 +35,7 @@ pub type CwdExtractor = fn(&Value) -> Option<PathBuf>;
 /// **CC** derives the filename stem (== the session UUID), **Codex** the
 /// rollout UUID, **Copilot** the parent-dir UUID, **grok** the parent-DIR name,
 /// **omp** the nested stem chain; **Antigravity** keeps the path-keyed
-/// [`default_id_from_path`] (its hook keys on the path too).
+/// `default_id_from_path` (its hook keys on the path too).
 ///
 /// Defined HERE for the same reason as [`LineDecoder`]: the registry names one
 /// per transcript row and must compile under `--no-default-features`, where the
