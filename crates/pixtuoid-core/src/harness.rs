@@ -184,10 +184,28 @@ enum Decode {
 }
 
 impl Drive {
+    /// Drive the transcript AT `path` — the production form: the logical key
+    /// is `normalize_path_key` of it, which is exactly the string `walk_jsonl`
+    /// hands the decoder AND runs the id deriver over.
+    ///
+    /// Use this whenever the transcript is a real file. Normalizing at this ONE
+    /// point is what keeps the seed and the decoded lines on one `AgentId` for a
+    /// source whose deriver normalizes (Antigravity's path key): passing a raw
+    /// Windows path to [`Drive::transcript`] would key the seed lowercased and
+    /// forward-slashed while the decoder kept the raw string — every decoded
+    /// event landing on a phantom id, on Windows only.
+    pub fn transcript_at(source: &str, path: &Path) -> Option<Self> {
+        Self::transcript(
+            source,
+            &crate::id::normalize_path_key(&path.to_string_lossy()),
+        )
+    }
+
     /// Drive a transcript's lines through `source`'s own `LineDecoder` on
-    /// `Transport::Jsonl`. `logical` is the transcript path the decoder keys
-    /// its `AgentId`s on — pass the fixture-relative path where snapshots must
-    /// stay machine-independent, the real path otherwise.
+    /// `Transport::Jsonl`, keyed on the LOGICAL string `logical` — for a caller
+    /// whose key is not a filesystem path (a fixture-relative key chosen so
+    /// snapshots stay machine-independent). For a real file use
+    /// [`Drive::transcript_at`], which applies production's normalization.
     ///
     /// `None` when the source is hook-only, a daemon, or unregistered: those
     /// have no transcript, and a caller that silently fell back to some other
@@ -433,6 +451,29 @@ mod tests {
             ids.into_iter().next().unwrap(),
             AgentId::from_parts("claude-code", "01000000-0000-7000-8000-0000000000cc"),
             "the seed must key on the row's derivation (the CC filename stem)"
+        );
+    }
+
+    /// `transcript_at` keys on the SAME normalized string production hands the
+    /// decoder — the one place a raw OS path may be folded.
+    #[test]
+    fn transcript_at_keys_on_the_normalized_path_like_the_walker_does() {
+        let path = Path::new(CC_TRANSCRIPT);
+        let by_path = Drive::transcript_at("claude-code", path)
+            .unwrap()
+            .seeded()
+            .lines([cc_tool_line()]);
+        let by_key = Drive::transcript(
+            "claude-code",
+            &crate::id::normalize_path_key(&path.to_string_lossy()),
+        )
+        .unwrap()
+        .seeded()
+        .lines([cc_tool_line()]);
+        assert_eq!(
+            by_path.events[0].agent_id(),
+            by_key.events[0].agent_id(),
+            "transcript_at must fold the path exactly as walk_jsonl does"
         );
     }
 

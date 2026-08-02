@@ -2,17 +2,19 @@
 //! it" out.
 //!
 //! The committed fixtures answer that question for a dozen curated files. This
-//! answers it for the whole corpus on the machine: every transcript a source
-//! actually wrote, driven through the SAME path production uses —
+//! answers it for the whole corpus on the machine, and it is the ONE shell of
+//! the four that closes the loop all the way to the render layer:
 //!
 //! ```text
-//!   file bytes → the registry's line_decoder → a real Reducer
-//!              → FloorSession::observe → SimFrame.characters
+//!   harness::Drive (decode → reduce)  →  FloorSession::observe → SimFrame.characters
 //! ```
 //!
-//! `observe` is the documented headless seam: its `characters` are the fully
-//! resolved sprites the painter would draw, so a non-empty set is the honest
-//! "it reached the UI layer" — no pixel buffer, no terminal, no timing.
+//! The first half is the shared pipeline every other driver runs — same
+//! decoders, same first-sight seed, same reducer — so a difference here is a
+//! difference in the BYTES, never in the harness. `observe` is the documented
+//! headless seam: its `characters` are the fully resolved sprites the painter
+//! would draw, so a non-empty set is the honest "it reached the UI layer" — no
+//! pixel buffer, no terminal, no timing.
 //!
 //! It REPORTS rather than asserts. Corpus content is unbounded and partly
 //! historical, so a failing file is not automatically a bug — the value is the
@@ -27,11 +29,18 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use pixtuoid_core::harness::{Drive, LineFailure};
+use pixtuoid_core::source::decoder::TailActivity;
 use pixtuoid_core::source::registry;
-use pixtuoid_core::state::SceneState;
-use pixtuoid_core::{AgentEvent, Reducer, Transport};
+use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::floor::{FloorMeta, FloorSession};
+
+/// The instant the whole census runs at — the drive's fold and the observe
+/// below MUST share it, or every sprite is judged mid-entry-walk.
+fn now() -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000)
+}
 
 /// One transcript's verdict. Every field answers a piece of "did we parse it
 /// and would the UI show it".
@@ -43,6 +52,8 @@ struct Verdict {
     /// The decoder returned Err. ALWAYS a defect: the contract is
     /// log-and-continue, never a hard error on a line the source wrote.
     decode_errors: usize,
+    /// The decoder PANICKED — the never-panic contract violated.
+    panics: Vec<LineFailure>,
     events: usize,
     registered: usize,
     /// Sprites the painter would draw for this transcript's agents.
@@ -68,11 +79,7 @@ fn epoch(t: SystemTime) -> Option<u64> {
 }
 
 /// Drive one transcript through the production path.
-fn check_file(
-    source: &str,
-    path: &Path,
-    decode: pixtuoid_core::source::decoder::LineDecoder,
-) -> Verdict {
+fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     let mut v = Verdict {
         mtime: std::fs::metadata(path)
             .ok()
@@ -84,97 +91,56 @@ fn check_file(
     let Ok(body) = std::fs::read_to_string(path) else {
         return v;
     };
-    let logical = path.to_string_lossy().into_owned();
+    v.newest_activity = newest_activity(source, body.as_bytes());
 
-    // The watcher's `emit_first_sight` is what registers a transcript in
-    // production — a JSONL event for an unknown id is a documented no-op. Seed
-    // the SAME SessionStart it would emit, keyed by the source's own id
-    // derivation, or every file reports "parsed but never reached the UI" for a
-    // reason that has nothing to do with the decoder.
-    let mut events: Vec<AgentEvent> = vec![AgentEvent::SessionStart {
-        agent_id: seed_id(source, path),
-        source: source.to_string(),
-        session_id: "corpus-check-seed".to_string(),
-        cwd: PathBuf::from("/corpus/check"),
-        parent_id: None,
-    }];
-    for line in body.lines().filter(|l| !l.trim().is_empty()) {
-        v.lines += 1;
-        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
-            v.unparseable += 1;
-            continue;
-        };
-        // The newest turn stamp, read the same way the first-sight gate reads it.
-        if let Some(secs) = activity_stamp(source, &val) {
-            v.newest_activity = Some(v.newest_activity.map_or(secs, |n: u64| n.max(secs)));
-        }
-        match decode(&logical, source, val) {
-            Ok(decoded) => events.extend(decoded),
-            Err(_) => v.decode_errors += 1,
-        }
-    }
-    v.events = events.len();
+    // `.seeded()` is what makes the rest meaningful: the watcher's
+    // `emit_first_sight` is what registers a transcript in production, and a
+    // JSONL event for an unknown id is a documented no-op. The seed is keyed by
+    // the source's OWN registry row, so it lands on the same `AgentId` the
+    // decoded lines do — this harness's first run reported 0/4376 registered
+    // for want of exactly that.
+    let Some(drive) = Drive::transcript(source, &path.to_string_lossy()) else {
+        return v;
+    };
+    let driven = drive.seeded().at(now()).lines(body.lines());
 
-    // Fold through a real Reducer. A transcript-only source never carries its
-    // own SessionStart on every line, so registration is whatever the wire
-    // genuinely produces — that IS the thing under test.
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
-    let mut scene = SceneState::uniform(8);
-    let mut reducer = Reducer::new();
-    for ev in events {
-        reducer.apply(&mut scene, ev, now, Transport::Jsonl);
-    }
-    reducer.tick(&mut scene, now + Duration::from_secs(2));
-    v.registered = scene.agents.len();
+    v.lines = driven.lines;
+    v.unparseable = driven.unparseable;
+    v.decode_errors = driven.decode_errors.len();
+    v.events = driven.events.len();
+    v.registered = driven.registered();
+    v.panics = driven.panics;
     if v.registered == 0 {
         return v;
     }
 
     // The UI-layer half: `observe` is the headless seam whose `characters` are
-    // the resolved sprites the painter would draw.
-    let pack = load_sprite_pack(None).expect("embedded pack");
+    // the resolved sprites the painter would draw. One `FloorSession` per file
+    // so no cross-file render state can carry a verdict.
     let mut session = FloorSession::new();
     v.drawn = session
-        .observe(&scene, &pack, 192, 80, FloorMeta::ground(), now)
+        .observe(&driven.scene, pack, 192, 80, FloorMeta::ground(), now())
         .map_or(0, |frame| frame.characters.len());
     v
 }
 
-/// The agent id the WATCHER would key this transcript on — each source derives
-/// it from the path its own way, and a mismatch here would split one transcript
-/// into two agents exactly as it does in production.
-fn seed_id(source: &str, path: &Path) -> pixtuoid_core::AgentId {
-    use pixtuoid_core::AgentId;
-    match source {
-        "claude-code" => AgentId::from_parts(
-            source,
-            &pixtuoid_core::source::claude_code::cc_id_from_path(path),
-        ),
-        "codex" => AgentId::from_parts(
-            source,
-            &pixtuoid_core::source::codex::codex_id_from_path(path),
-        ),
-        "grok" => AgentId::from_parts(
-            source,
-            &pixtuoid_core::source::grok::grok_id_from_path(path),
-        ),
-        _ => AgentId::from_transcript_path(&path.to_string_lossy()),
-    }
-}
-
-/// The per-source "is this line the SESSION speaking, and when" read. Only CC
-/// has a published answer today (its `ACTIVITY_TYPES`); every other source
-/// reports no stamp, which shows up as an empty provenance column rather than a
-/// wrong one.
-fn activity_stamp(source: &str, v: &serde_json::Value) -> Option<u64> {
+/// The newest turn this file's SESSION wrote, epoch seconds — read with the
+/// source's own `ActivityRecency` over the raw bytes, exactly as the first-sight
+/// gate reads a tail (it returns the newest stamp across whatever buffer it is
+/// given, so the whole body yields the file's newest turn).
+///
+/// Only CC has a published answer today (its `ACTIVITY_TYPES`); every other
+/// source reports no stamp, which shows up as an empty provenance column rather
+/// than a wrong one. Kept in this shell rather than the registry because it has
+/// exactly one consumer besides the watcher and it feeds a REPORT, not a
+/// contract — when a second source publishes an activity clock, the row is the
+/// place for it (see `registry`'s header on what earns a column).
+fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
     if source != pixtuoid_core::source::claude_code::SOURCE_NAME {
         return None;
     }
-    let line = serde_json::to_vec(v).ok()?;
-    let mut buf = line;
-    buf.push(b'\n');
-    match pixtuoid_core::source::claude_code::cc_activity_recency(&buf) {
-        pixtuoid_core::source::decoder::TailActivity::At(secs) => Some(secs),
+    match pixtuoid_core::source::claude_code::cc_activity_recency(body) {
+        TailActivity::At(secs) => Some(secs),
         _ => None,
     }
 }
@@ -203,10 +169,17 @@ fn main() {
     }
     let (source, root) = (positional[0].as_str(), PathBuf::from(positional[1]));
 
-    let Some(decode) = registry::descriptor_for(source).and_then(|d| d.line_decoder()) else {
-        eprintln!("error: {source:?} is not a transcript-bearing registered source");
+    // Refuse up front for the same reason the fuzz shell does: a source with no
+    // transcript decoder would otherwise report a clean census of nothing.
+    if Drive::transcript(source, "/probe.jsonl").is_none() {
+        let known: Vec<&str> = registry::registered_source_names().collect();
+        eprintln!(
+            "error: {source:?} is not a transcript-bearing registered source \
+             (registered: {})",
+            known.join(", ")
+        );
         std::process::exit(2);
-    };
+    }
 
     let mut files = Vec::new();
     walk(&root, &mut files);
@@ -216,14 +189,16 @@ fn main() {
         std::process::exit(2);
     }
 
+    let pack = load_sprite_pack(None).expect("embedded pack");
     let mut totals = Verdict::default();
     let mut registered_files = 0usize;
     let mut drawn_files = 0usize;
     let mut gap_buckets: BTreeMap<&str, usize> = BTreeMap::new();
     let mut error_files: Vec<(PathBuf, usize)> = Vec::new();
+    let mut panic_files: Vec<(PathBuf, LineFailure)> = Vec::new();
 
     for f in &files {
-        let v = check_file(source, f, decode);
+        let v = check_file(source, f, &pack);
         totals.lines += v.lines;
         totals.unparseable += v.unparseable;
         totals.decode_errors += v.decode_errors;
@@ -237,6 +212,10 @@ fn main() {
         if v.decode_errors > 0 {
             error_files.push((f.clone(), v.decode_errors));
         }
+        if let Some(p) = v.panics.first() {
+            panic_files.push((f.clone(), p.clone()));
+        }
+        totals.panics.extend(v.panics.iter().cloned());
         // Provenance census: how far mtime runs ahead of the newest turn.
         let bucket = match v.provenance_gap_secs() {
             None => "no-stamp",
@@ -250,11 +229,12 @@ fn main() {
 
     if json {
         println!(
-            r#"{{"source":"{source}","files":{},"lines":{},"unparseable":{},"decode_errors":{},"events":{},"registered_files":{registered_files},"drawn_files":{drawn_files}}}"#,
+            r#"{{"source":"{source}","files":{},"lines":{},"unparseable":{},"decode_errors":{},"panics":{},"events":{},"registered_files":{registered_files},"drawn_files":{drawn_files}}}"#,
             files.len(),
             totals.lines,
             totals.unparseable,
             totals.decode_errors,
+            totals.panics.len(),
             totals.events
         );
     } else {
@@ -266,6 +246,7 @@ fn main() {
             totals.unparseable
         );
         println!("  DECODE ERRORS     {}  <- must be 0", totals.decode_errors);
+        println!("  PANICS            {}  <- must be 0", totals.panics.len());
         println!("  events decoded    {}", totals.events);
         println!(
             "  registered        {registered_files}/{} files produced >=1 slot",
@@ -278,14 +259,20 @@ fn main() {
         for (k, n) in &gap_buckets {
             println!("      {k:<9} {n}");
         }
+        // Paths + line SHAPES only — a transcript line carries real prose/code.
         for (p, n) in error_files.iter().take(10) {
             println!("  decode error x{n}: {}", p.display());
         }
+        for (p, f) in panic_files.iter().take(10) {
+            println!("  PANIC {}: {f}", p.display());
+        }
     }
 
-    // The ONLY hard failure: a decoder returning Err on bytes its own source
-    // wrote. Everything else is a census, because corpus content is unbounded.
-    if totals.decode_errors > 0 {
+    // The ONLY hard failures: a decoder that PANICS on bytes its own source
+    // wrote (it would take the whole watcher down), or one that returns Err
+    // there (the contract is log-and-continue). Everything else is a census,
+    // because corpus content is unbounded.
+    if totals.decode_errors > 0 || !totals.panics.is_empty() {
         std::process::exit(1);
     }
 }
