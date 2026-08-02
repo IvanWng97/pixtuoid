@@ -11,7 +11,7 @@ use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Transport;
 use pixtuoid_core::AgentId;
 
-use crate::{cc_watcher, fast_watch, vouch_snapshot};
+use crate::{cc_watcher, fast_watch, vouch_snapshot, write_lines};
 
 /// On startup, the watcher must NOT emit SessionStart for every historical
 /// .jsonl on disk. With small `max_desks` this would saturate desks with
@@ -1126,4 +1126,88 @@ async fn watcher_links_subagent_across_project_dirs() {
         "subagent parent_id must equal the parent's agent_id across a cwd-split (different project dirs)"
     );
     handle.abort();
+}
+
+/// The registry row's `path_filter` is what keeps the workflow orchestrator's
+/// FOREIGN-schema `journal.jsonl` out of a CC watcher — and the `with_*`
+/// builder is what an unregistered source would override it with. Pin BOTH
+/// directions in one place: the row EXCLUDES the journal (a bare
+/// `JsonlWatcher::new("claude-code", …)` first-sights only the real
+/// transcript), and an explicit override ADMITS it (proving the builder still
+/// beats the row — it has no in-tree caller otherwise, so the escape hatch
+/// would be untested API).
+///
+/// `emit_first_sight` emits one SessionStart per first-sight FILE regardless of
+/// content, so the journal's foreign lines decoding to nothing is not what
+/// distinguishes the two runs — the count of SessionStarts is.
+#[tokio::test]
+async fn the_registry_row_filters_the_workflow_journal_and_the_builder_overrides_it() {
+    fn admit_every_jsonl(_p: &std::path::Path) -> bool {
+        true
+    }
+
+    async fn first_sight_starts(root: std::path::PathBuf, admit_all: bool) -> usize {
+        let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+        let mut watcher = JsonlWatcher::new(
+            root,
+            "claude-code".to_string(),
+            decode_cc_line,
+            cc_session_ended,
+        );
+        if admit_all {
+            watcher = watcher.with_path_filter(admit_every_jsonl);
+        }
+        let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+        let mut starts = 0;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(Some((_, AgentEvent::SessionStart { .. }))) =
+                tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            {
+                starts += 1;
+            }
+        }
+        handle.abort();
+        starts
+    }
+
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let wf = dir
+        .path()
+        .join("proj")
+        .join("01000000-0000-7000-8000-0000000000cc")
+        .join("subagents")
+        .join("workflows")
+        .join("wf_1");
+    tokio::fs::create_dir_all(&wf).await.unwrap();
+    // The orchestrator's foreign-schema sidecar…
+    write_lines(
+        &wf.join("journal.jsonl"),
+        &[serde_json::json!({"type": "started", "name": "wf"})],
+    )
+    .await;
+    // …beside a real subagent transcript, which must always be admitted.
+    write_lines(
+        &wf.join("agent-xyz.jsonl"),
+        &[serde_json::json!({
+            "type": "assistant",
+            "cwd": "/repo",
+            "message": {"content": [{"type": "text", "text": "hi"}]}
+        })],
+    )
+    .await;
+
+    assert_eq!(
+        first_sight_starts(dir.path().to_path_buf(), false).await,
+        1,
+        "the claude-code row's path_filter must exclude journal.jsonl — only the \
+         real subagent transcript first-sights"
+    );
+    assert_eq!(
+        first_sight_starts(dir.path().to_path_buf(), true).await,
+        2,
+        "an explicit with_path_filter must OVERRIDE the row (both files first-sight)"
+    );
 }

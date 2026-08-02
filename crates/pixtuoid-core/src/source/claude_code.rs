@@ -413,8 +413,10 @@ const ACTIVITY_TYPES: &[&str] = &[
 /// The workflow/skills orchestrator writes a `journal.jsonl` sidecar under
 /// `<uuid>/subagents/workflows/wf_*/` — a FOREIGN schema (top-level
 /// `type:"started"`/`"result"`, not CC transcript lines) living in the SAME
-/// projects tree the CC watcher walks. The watcher has no default path_filter and
-/// `walk_jsonl` recurses into every `.jsonl`, so without this skip a recent
+/// projects tree the CC watcher walks. `walk_jsonl` recurses into every
+/// `.jsonl` and the watcher's default filter admits every one of them — this
+/// fn IS what the `claude-code` registry row supplies as that default, and
+/// without it a recent
 /// journal (read from the top — it is not liveness-probed nor `cc_session_ended`)
 /// feeds each line to `decode_cc_line`, and the #763 unknown-`type` breadcrumb
 /// would FLOOD the warn-floor (avg ~14 `started`+`result` per file, `unknown_event`
