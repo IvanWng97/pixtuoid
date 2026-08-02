@@ -73,6 +73,33 @@ pub const pixtuoid_scene::chitchat::CHITCHAT_TOTAL_MS: u64
 pub fn pixtuoid_scene::chitchat::supports_chitchat(pixtuoid_scene::layout::WaypointKind) -> bool
 pub fn pixtuoid_scene::chitchat::update_and_collect(&mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, usize, &[pixtuoid_scene::chitchat::Visitor], std::time::SystemTime) -> alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
 pub fn pixtuoid_scene::chitchat::venue_wp_idx(pixtuoid_scene::layout::WaypointKind, usize, &[pixtuoid_scene::layout::Waypoint]) -> usize
+pub mod pixtuoid_scene::cutaway
+pub mod pixtuoid_scene::cutaway::shade
+pub struct pixtuoid_scene::cutaway::shade::Ramp
+pub pixtuoid_scene::cutaway::shade::Ramp::base: pixtuoid_core::sprite::Rgb
+pub pixtuoid_scene::cutaway::shade::Ramp::lit: pixtuoid_core::sprite::Rgb
+pub pixtuoid_scene::cutaway::shade::Ramp::shade: pixtuoid_core::sprite::Rgb
+impl pixtuoid_scene::cutaway::shade::Ramp
+pub fn pixtuoid_scene::cutaway::shade::Ramp::flat(pixtuoid_core::sprite::Rgb) -> Self
+impl core::clone::Clone for pixtuoid_scene::cutaway::shade::Ramp
+pub fn pixtuoid_scene::cutaway::shade::Ramp::clone(&self) -> pixtuoid_scene::cutaway::shade::Ramp
+impl core::cmp::Eq for pixtuoid_scene::cutaway::shade::Ramp
+impl core::cmp::PartialEq for pixtuoid_scene::cutaway::shade::Ramp
+pub fn pixtuoid_scene::cutaway::shade::Ramp::eq(&self, &pixtuoid_scene::cutaway::shade::Ramp) -> bool
+impl core::fmt::Debug for pixtuoid_scene::cutaway::shade::Ramp
+pub fn pixtuoid_scene::cutaway::shade::Ramp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_scene::cutaway::shade::Ramp
+impl core::marker::StructuralPartialEq for pixtuoid_scene::cutaway::shade::Ramp
+impl core::marker::Freeze for pixtuoid_scene::cutaway::shade::Ramp
+impl core::marker::Send for pixtuoid_scene::cutaway::shade::Ramp
+impl core::marker::Sync for pixtuoid_scene::cutaway::shade::Ramp
+impl core::marker::Unpin for pixtuoid_scene::cutaway::shade::Ramp
+impl core::marker::UnsafeUnpin for pixtuoid_scene::cutaway::shade::Ramp
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::cutaway::shade::Ramp
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::cutaway::shade::Ramp
+pub fn pixtuoid_scene::cutaway::shade::dither_band(&mut pixtuoid_core::sprite::RgbBuffer, u16, u16, pixtuoid_core::sprite::Rgb, pixtuoid_core::sprite::Rgb)
+pub fn pixtuoid_scene::cutaway::shade::fill(&mut pixtuoid_core::sprite::RgbBuffer, u16, u16, u16, u16, pixtuoid_core::sprite::Rgb)
+pub fn pixtuoid_scene::cutaway::shade::slab(&mut pixtuoid_core::sprite::RgbBuffer, u16, u16, u16, u16, &pixtuoid_scene::cutaway::shade::Ramp)
 pub mod pixtuoid_scene::embedded_pack
 pub fn pixtuoid_scene::embedded_pack::load_sprite_pack(core::option::Option<std::path::PathBuf>) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub mod pixtuoid_scene::floor

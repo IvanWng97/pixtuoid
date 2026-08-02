@@ -54,6 +54,7 @@ pub mod board;
 pub mod burn;
 pub mod chitchat;
 pub(crate) mod creatures;
+pub mod cutaway;
 pub mod embedded_pack;
 pub mod floor;
 // The status-footer MODEL the two in-workspace painters consume — their shared

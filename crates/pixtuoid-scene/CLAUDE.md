@@ -282,6 +282,21 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 ├── embedded_pack.rs  include_str! the default character pack at compile time (from this crate's own
 │                   ../sprites/default/, watched by pixtuoid-scene's build.rs for rerun-if-changed) →
 │                   sprite::format::load_pack_from_strings; --pack-dir merges OPTIONAL_FURNITURE over it
+├── cutaway/        the ENRICHED orthographic cutaway PROFILE — the sibling renderer, not a
+│                   fidelity knob on the classic one. The brief models two renderers over ONE
+│                   shared scene frame, and that frame already exists: `pixel_painter::sim.rs`'s
+│                   `sim_step` returns an owned immutable `SimFrame`, so this module becomes its
+│                   SECOND reader and no new seam is invented. shade.rs = the vocabulary the
+│                   visual mock ratified BEFORE any of it was written: `Ramp {lit, base, shade}`
+│                   (one key light from the north windows, every material carries one — uniformity
+│                   is why the room reads lit from one direction) + `slab` (top-lit mass; a 1-row
+│                   mass is all `base`, since either edge tone would make a 1px detail read as a
+│                   highlight/shadow instead of the material) + `dither_band` (4x4 Bayer). The
+│                   dither is NOT a workaround: an indexed palette cannot blend, so a gradient IS
+│                   a dither — and it costs TWO palette slots instead of a dozen, which is what
+│                   keeps theme recolour an index swap and SIXEL free of a quantisation pass.
+│                   NOT wired to a painter yet — the vocabulary lands first because it is pure and
+│                   testable in a way the paint pass over it will not be
 ├── render_scale.rs THE layout-space ↔ buffer-space seam. Every layout coordinate is a buffer
 │                   pixel today, so the office's SIZE and its RESOLUTION are ONE axis — doubling
 │                   the buffer builds a room with 4× the desks rather than drawing the same room
