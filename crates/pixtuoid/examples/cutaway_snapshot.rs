@@ -25,11 +25,11 @@ use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::render_scale::RenderScale;
 use pixtuoid_scene::theme::theme_by_name;
 
-/// Logical office size — the SAME extent whatever `--scale` is, which is the
-/// property the whole seam exists for: more pixels, not more desks.
-const LOGICAL_W: u16 = 160;
-/// Logical office height. See [`LOGICAL_W`].
-const LOGICAL_H: u16 = 96;
+/// Default logical office size — the SAME extent whatever `--scale` is, which
+/// is the property the whole seam exists for: more pixels, not more desks.
+/// `--logical WxH` overrides it; a bigger office is how the size-gated pieces
+/// (corridor appliances) get placed at all.
+const DEFAULT_LOGICAL: (u16, u16) = (160, 96);
 
 fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
     let seated = now.checked_sub(Duration::from_secs(120)).unwrap_or(now);
@@ -84,6 +84,7 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("usage: cutaway_snapshot <out.png> [--scale N] [--agents N]"))?;
 
     let (mut scale_n, mut agents, mut theme_name) = (4u16, 10usize, "tokyo-night".to_string());
+    let (mut lw, mut lh) = DEFAULT_LOGICAL;
     let rest: Vec<String> = args.collect();
     let mut i = 0;
     while i < rest.len() {
@@ -96,6 +97,14 @@ fn main() -> Result<()> {
             "--scale" => scale_n = val("--scale")?.parse().context("bad --scale")?,
             "--agents" => agents = val("--agents")?.parse().context("bad --agents")?,
             "--theme" => theme_name = val("--theme")?,
+            "--logical" => {
+                let v = val("--logical")?;
+                let (w, h) = v
+                    .split_once('x')
+                    .ok_or_else(|| anyhow!("--logical wants WxH"))?;
+                lw = w.parse().context("bad --logical width")?;
+                lh = h.parse().context("bad --logical height")?;
+            }
             other => return Err(anyhow!("unexpected arg: {other}")),
         }
         i += 2;
@@ -113,12 +122,12 @@ fn main() -> Result<()> {
     // The real sim, at LOGICAL size — the cutaway is its second reader.
     let mut session = FloorSession::new();
     let frame = session
-        .observe(&scene, &pack, LOGICAL_W, LOGICAL_H, meta, now)
-        .ok_or_else(|| anyhow!("{LOGICAL_W}x{LOGICAL_H} does not lay out"))?;
-    let layout = Layout::compute_with_seed(LOGICAL_W, LOGICAL_H, None, meta.floor_seed)
+        .observe(&scene, &pack, lw, lh, meta, now)
+        .ok_or_else(|| anyhow!("{lw}x{lh} does not lay out"))?;
+    let layout = Layout::compute_with_seed(lw, lh, None, meta.floor_seed)
         .ok_or_else(|| anyhow!("layout compute failed"))?;
 
-    let (bw, bh) = (scale.to_buffer(LOGICAL_W), scale.to_buffer(LOGICAL_H));
+    let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
     let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
     render_cutaway(&frame, &layout, &pack, theme, scale, &mut buf);
 
@@ -129,7 +138,7 @@ fn main() -> Result<()> {
     }
     img.save(&out).with_context(|| format!("writing {out}"))?;
     eprintln!(
-        "wrote {out} ({bw}x{bh} = {LOGICAL_W}x{LOGICAL_H} logical @{scale_n}x, \
+        "wrote {out} ({bw}x{bh} = {lw}x{lh} logical @{scale_n}x, \
          {} desks, {} characters)",
         layout.home_desks.len(),
         frame.characters.len()

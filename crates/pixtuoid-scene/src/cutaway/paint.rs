@@ -61,6 +61,11 @@ const SKYLINE_W_SPREAD: u16 = 6;
 /// Shortest skyline building — below this the city reads as a jagged floor.
 const SKYLINE_MIN_H: u16 = 2;
 
+/// Meeting-table footprint, in logical units. Sized to the trio's sofa gap.
+const TABLE_W: u16 = 18;
+/// Height of [`TABLE_W`]'s table.
+const TABLE_H: u16 = 6;
+
 /// Thickness of a room's glass wall, in logical units.
 const ROOM_WALL_PX: u16 = 1;
 
@@ -106,6 +111,56 @@ pub fn render_cutaway(
         at: pl.pos,
         sprite: pl.kind.sprite_name(),
     }));
+    // Standalone waypoint furniture. Seats (MeetingSofa/MeetingChair/Island)
+    // are deliberately absent: they are slots ON a body that is painted once
+    // from the room's trio, so one sprite per seat would triple-paint it.
+    order.extend(layout.waypoints.iter().filter_map(|wp| {
+        waypoint_sprite(wp.kind).map(|sprite| Piece::Plant { at: wp.pos, sprite })
+    }));
+    // The corridor appliances classic draws procedurally: they have no sprite
+    // to reuse, so the cutaway gives them its own solid geometry.
+    order.extend(
+        layout
+            .waypoints
+            .iter()
+            .filter(|wp| {
+                matches!(
+                    wp.kind,
+                    crate::layout::WaypointKind::VendingMachine
+                        | crate::layout::WaypointKind::Printer
+                )
+            })
+            .map(|wp| Piece::Appliance {
+                at: wp.pos,
+                kind: wp.kind,
+            }),
+    );
+    // The meeting trio: two sofa bodies plus the table between them.
+    order.extend(
+        layout
+            .meeting_rooms
+            .iter()
+            .filter_map(|r| r.trio.as_ref())
+            .flat_map(|t| {
+                [
+                    Piece::Plant {
+                        at: t.sofas[0],
+                        sprite: "meeting_sofa",
+                    },
+                    Piece::Plant {
+                        at: t.sofas[1],
+                        sprite: "meeting_sofa",
+                    },
+                ]
+            }),
+    );
+    order.extend(
+        layout
+            .meeting_rooms
+            .iter()
+            .filter_map(|r| r.trio.as_ref())
+            .map(|t| Piece::Table { at: t.table }),
+    );
     order.extend(
         frame
             .characters
@@ -123,6 +178,8 @@ pub fn render_cutaway(
             Piece::Desk { at, lit } => paint_desk(at.x, at.y, lit, pack, theme, scale, buf),
             Piece::Character { idx, .. } => paint_character(frame, idx, pack, theme, scale, buf),
             Piece::Plant { at, sprite } => paint_prop(at, sprite, pack, theme, scale, buf),
+            Piece::Table { at } => paint_table(at, theme, scale, buf),
+            Piece::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
         }
     }
 }
@@ -136,6 +193,13 @@ enum Piece {
     Plant {
         at: crate::layout::Point,
         sprite: &'static str,
+    },
+    Table {
+        at: crate::layout::Point,
+    },
+    Appliance {
+        at: crate::layout::Point,
+        kind: crate::layout::WaypointKind,
     },
     Character {
         idx: usize,
@@ -162,6 +226,8 @@ impl Piece {
             Piece::Character { y, .. } => *y,
             // A plant's ground is its own base row, the layout's `pos` convention.
             Piece::Plant { at, .. } => at.y,
+            Piece::Table { at } => at.y,
+            Piece::Appliance { at, .. } => at.y,
         }
     }
 }
@@ -531,6 +597,103 @@ fn paint_character(
     if c.seat_desk.is_some() {
         paint_chair(at, art.width(), art.height(), theme, scale, buf);
     }
+}
+
+/// The pack sprite for a waypoint kind, when it has one.
+///
+/// `None` covers three cases, all deliberate: a SEAT slot whose body paints
+/// once elsewhere (MeetingSofa/MeetingChair/Island), a fixture already drawn by
+/// its room (Pantry), and the corridor appliances the classic painter draws
+/// PROCEDURALLY rather than from art (VendingMachine/Printer/Couch) — those
+/// need their own cutaway geometry, not a missing-sprite lookup.
+fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
+    use crate::layout::WaypointKind as K;
+    match kind {
+        K::PhoneBooth => Some("phone_booth"),
+        K::StandingDesk => Some("standing_desk"),
+        K::SnackShelf => Some("snack_shelf"),
+        K::Couch
+        | K::Pantry
+        | K::VendingMachine
+        | K::Printer
+        | K::MeetingSofa
+        | K::MeetingChair
+        | K::Island => None,
+    }
+}
+
+/// The meeting table — a slab, because the classic painter draws it
+/// procedurally too and there is no sprite to reuse.
+fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
+    let ramp = Ramp::from_base(theme.furniture.wood_top, RAMP_TINT_PCT, RAMP_SHADE_PCT);
+    let s = scale.get();
+    let (w, h) = (TABLE_W, TABLE_H);
+    let x = at.x.saturating_sub(w / 2);
+    let y = at.y.saturating_sub(h / 2);
+    slab(
+        buf,
+        scale.to_buffer(x),
+        scale.to_buffer(y),
+        w * s,
+        h * s,
+        &ramp,
+    );
+    // The same front face every solid in this profile gets.
+    slab(
+        buf,
+        scale.to_buffer(x),
+        scale.to_buffer(y + h),
+        w * s,
+        desk_front_h() * s,
+        &Ramp::from_base(theme.furniture.wood_trim, RAMP_TINT_PCT, RAMP_SHADE_PCT),
+    );
+}
+
+/// A corridor appliance as a cutaway solid.
+///
+/// Vending machine and printer have no sprite — classic paints them per-pixel —
+/// so this gives them the same body + front-face + lit-panel treatment every
+/// other solid here gets. Its footprint comes from the SHARED furniture table,
+/// not a second set of numbers, so the cutaway box matches the ground the mask
+/// actually blocks.
+fn paint_appliance(
+    at: crate::layout::Point,
+    kind: crate::layout::WaypointKind,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    use crate::layout::WaypointKind as K;
+    let def = crate::layout::furniture_def(kind.furniture());
+    let (body, panel) = match kind {
+        K::Printer => (theme.appliance.printer_body, theme.appliance.printer_glass),
+        _ => (theme.appliance.vending_body, theme.appliance.vending_panel),
+    };
+    let s = scale.get();
+    let (w, h) = (def.visual.w, def.visual.h);
+    let x = at.x.saturating_sub(w / 2);
+    let y = at.y.saturating_sub(h / 2);
+    slab(
+        buf,
+        scale.to_buffer(x),
+        scale.to_buffer(y),
+        w * s,
+        h * s,
+        &Ramp::from_base(body, RAMP_TINT_PCT, RAMP_SHADE_PCT),
+    );
+    // The lit face — a vending display or a printer's glass — is what stops
+    // these reading as anonymous blocks in a dark corridor.
+    if w > 2 && h > 2 {
+        fill(
+            buf,
+            scale.to_buffer(x + 1),
+            scale.to_buffer(y + 1),
+            (w - 2) * s,
+            (h / 2).max(1) * s,
+            panel,
+        );
+    }
+    contact_shadow(crate::layout::Point { x, y }, w, h, theme, scale, buf);
 }
 
 /// Blit a floor-standing prop from the pack, centred on its layout point.
