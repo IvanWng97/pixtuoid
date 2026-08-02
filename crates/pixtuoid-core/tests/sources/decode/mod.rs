@@ -1190,13 +1190,13 @@ fn decode_hook_payload_missing_tool_name_still_succeeds() {
 // `session_id`) and the watcher side (`cc_id_from_path` of a transcript named
 // `<session_id>.jsonl`) must hash to ONE AgentId or every CC session renders as
 // two sprites (hook-wins dedup and permission-Waiting silently die). Pinned via
-// the REAL seams on both sides (no inline re-simulation): the watcher uses the
-// SAME `.with_id_deriver(cc_id_from_path)` that ClaudeCodeSource::run wires.
+// the REAL seams on both sides (no inline re-simulation), and with NO
+// `.with_id_deriver`: a `claude-code` watcher takes `cc_id_from_path` from that
+// source's registry row — the same row every other driver of a CC transcript
+// reads — so this fails if the row and the hook's `IdKey::SessionId` diverge.
 #[tokio::test]
 async fn hook_and_watcher_keys_coalesce_for_one_file() {
-    use pixtuoid_core::source::claude_code::{
-        cc_derive_label, cc_id_from_path, cc_session_ended, decode_cc_line,
-    };
+    use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
     use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher};
     use pixtuoid_core::source::Transport;
     use std::time::Duration;
@@ -1234,7 +1234,6 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
         decode_cc_line,
         cc_session_ended,
     )
-    .with_id_deriver(cc_id_from_path)
     .with_label_deriver(cc_derive_label);
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 

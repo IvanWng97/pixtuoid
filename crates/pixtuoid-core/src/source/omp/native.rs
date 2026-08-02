@@ -61,8 +61,7 @@ impl Source for OmpSource {
             SOURCE_NAME.to_string(),
             decode_omp_line,
             omp_session_ended,
-        )
-        .with_id_deriver(omp_id_from_path);
+        );
         if let Some(root) = omp_probe_root(&self.sessions_root) {
             watcher = watcher
                 .with_liveness_probe(std::sync::Arc::new(move || live_omp_session_ids(&root)));

@@ -8,10 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{
-    decode_grok_line, grok_cwd_from_path, grok_home, grok_id_from_path, grok_session_ended,
-    SOURCE_NAME,
-};
+use super::{decode_grok_line, grok_cwd_from_path, grok_home, grok_session_ended, SOURCE_NAME};
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
@@ -314,7 +311,6 @@ impl Source for GrokSource {
             decode_grok_line,
             grok_session_ended,
         )
-        .with_id_deriver(grok_id_from_path)
         .with_path_filter(is_updates_jsonl)
         .with_cwd_deriver(grok_cwd_from_path);
         if let Some(root) = grok_probe_root(&self.sessions_root) {

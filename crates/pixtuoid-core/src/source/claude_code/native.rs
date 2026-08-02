@@ -9,10 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{
-    cc_derive_label, cc_id_from_path, cc_session_ended, claude_config_dir, decode_cc_line,
-    SOURCE_NAME,
-};
+use super::{cc_derive_label, cc_session_ended, claude_config_dir, decode_cc_line, SOURCE_NAME};
 use crate::source::cc_probe::cc_sessions_dir;
 // The registry-probe machinery lives in `source/cc_probe.rs`; the public path
 // `claude_code::live_cc_session_ids` is preserved via this re-export chain.
@@ -109,7 +106,6 @@ pub fn cc_watcher(projects_root: std::path::PathBuf) -> JsonlWatcher {
         decode_cc_line,
         cc_session_ended,
     )
-    .with_id_deriver(cc_id_from_path)
     .with_label_deriver(cc_derive_label)
     .with_activity_recency(super::cc_activity_recency)
     .with_path_filter(skip_workflow_journal)

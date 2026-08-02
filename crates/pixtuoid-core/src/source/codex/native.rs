@@ -123,8 +123,7 @@ impl Source for CodexSource {
             SOURCE_NAME.to_string(),
             decode_codex_line,
             codex_session_ended,
-        )
-        .with_id_deriver(codex_id_from_path);
+        );
         if let Some(root) = codex_probe_root(&self.sessions_root) {
             watcher = watcher
                 .with_liveness_probe(std::sync::Arc::new(move || live_codex_rollout_ids(&root)));

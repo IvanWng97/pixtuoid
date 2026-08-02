@@ -46,8 +46,9 @@ pub use crate::source::decoder::LineDecoder;
 
 // Same always-compiled rationale as `LineDecoder`: CC's `cc_activity_recency`
 // returns it and must keep building under `--no-default-features` (wasm), where
-// this whole module is gated out.
-pub use crate::source::decoder::TailActivity;
+// this whole module is gated out. `IdDeriver` joins them because the REGISTRY
+// names one per transcript row (see `registry::id_deriver_for`).
+pub use crate::source::decoder::{IdDeriver, TailActivity};
 
 /// Derives an agent's display label from its transcript `(path, source, cwd)`.
 /// The default (`default_prefixed_label`) is the source-prefixed cwd basename
@@ -77,20 +78,6 @@ pub type ActivityRecency = fn(&[u8]) -> TailActivity;
 /// The default [`ActivityRecency`]: no opinion, so the gate keeps using mtime.
 fn no_activity_recency(_tail: &[u8]) -> TailActivity {
     TailActivity::Unknown
-}
-
-/// Derives the opaque session-id string used to build the generic
-/// `SessionStart`'s `AgentId`. The default (`default_id_from_path`) returns
-/// the normalized transcript file path — used by **Antigravity** (its hook
-/// keys on the path via `IdKey::TranscriptPathThenSessionId`). **CC**
-/// overrides to `cc_id_from_path` (the transcript filename stem = the session
-/// UUID), and **Codex** overrides to `codex_id_from_path` (the rollout UUID),
-/// so that both sources coalesce hook↔JSONL on the session UUID rather than
-/// the full path.
-pub type IdDeriver = fn(&Path) -> String;
-
-fn default_id_from_path(p: &Path) -> String {
-    crate::id::normalize_path_key(&p.to_string_lossy())
 }
 
 /// Decides which `.jsonl` FILES a watcher walks — checked after the extension
@@ -229,7 +216,11 @@ static TEST_POLL_OVERRIDE: OnceLock<Duration> = OnceLock::new();
 impl JsonlWatcher {
     /// A watcher over `root` for `source`, decoding each transcript line with
     /// `decode_line` and gating ended sessions with `check_session_ended`.
-    /// Deriver/filter/probe defaults are set by the `with_*` builders.
+    /// Label/filter/probe defaults are set by the `with_*` builders; the id
+    /// derivation comes from `source`'s own registry row
+    /// ([`registry::id_deriver_for`]) so a registration keys the way that row
+    /// says — no per-source `run()` wiring to forget, and the offline
+    /// `harness::Drive` reads the same row.
     pub fn new(
         root: PathBuf,
         source: String,
@@ -237,6 +228,7 @@ impl JsonlWatcher {
         check_session_ended: SessionEndChecker,
     ) -> Self {
         Self {
+            id_derive: crate::source::registry::id_deriver_for(&source),
             root,
             initial_window: DEFAULT_INITIAL_WINDOW,
             source_name: source,
@@ -244,7 +236,6 @@ impl JsonlWatcher {
             derive_label: default_prefixed_label,
             check_session_ended,
             activity_recency: no_activity_recency,
-            id_derive: default_id_from_path,
             path_filter: accept_all_paths,
             cwd_derive: no_cwd_from_path,
             liveness_probe: None,
@@ -291,9 +282,11 @@ impl JsonlWatcher {
         self
     }
 
-    /// Override how the opaque session-id string is derived from a transcript
-    /// path (default [`IdDeriver`], the normalized path). CC and Codex use it to
-    /// key on the session UUID in the filename stem instead.
+    /// Override the [`IdDeriver`] the source's registry row supplies. No
+    /// in-tree source needs this — the row IS each CLI's derivation, and
+    /// overriding it here would re-open the drift the row closed. It exists for
+    /// a watcher over a source with no row (a test harness naming its own
+    /// source), where the default is the path key.
     pub fn with_id_deriver(mut self, id_derive: IdDeriver) -> Self {
         self.id_derive = id_derive;
         self
