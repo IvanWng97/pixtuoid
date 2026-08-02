@@ -384,8 +384,16 @@ pub struct FrameInputs<'a> {
     pub theme: &'static Theme,
     /// This frame's wall-clock time.
     pub now: SystemTime,
-    /// Target pixel-buffer size.
+    /// Target pixel-buffer size — BUFFER pixels, which `scale` converts to the
+    /// logical extent the office is laid out in.
     pub size: Size,
+    /// How many buffer pixels one layout unit paints as.
+    ///
+    /// A compile-forced field rather than a defaulted one: `size` alone is
+    /// ambiguous once the two spaces differ, so every painter states which it
+    /// means. `RenderScale::ONE` is the classic path and keeps `size` the
+    /// office's extent exactly as before.
+    pub scale: crate::render_scale::RenderScale,
     /// This floor's index, altitude, and layout seed.
     pub floor_meta: FloorMeta,
     /// The pet's live interaction state, if a pet is present.
@@ -432,9 +440,17 @@ pub fn render_floor(
         active_pet,
         floor_pet,
         debug_walkable,
+        scale,
     } = inputs;
+    // The two spaces part here: the buffer is sized in PIXELS, the office is
+    // laid out in LOGICAL units. At `RenderScale::ONE` they coincide and this
+    // is byte-identical to the pre-seam behaviour.
     buf.resize_fill(size.w, size.h, theme.surface.bg_fallback);
-    let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
+    let layout = fctx.frame_layout(
+        scale.logical(size.w),
+        scale.logical(size.h),
+        floor_meta.floor_seed,
+    )?;
     let result = render_to_rgb_buffer(&mut PixelCtx {
         // Reborrow: `frame_epilogue` uses `fctx` after this render.
         store: &mut *fctx,

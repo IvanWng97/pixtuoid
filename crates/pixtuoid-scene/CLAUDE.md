@@ -292,7 +292,12 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   pre-seam behaviour. `floor::floor_capacity_scaled` is the seam-aware twin of
 │                   `floor_capacity` — deliberately a SECOND fn, not a defaulted param: every
 │                   existing caller means "buffer pixels ARE layout units" and must keep meaning
-│                   it, so a painter adopting a scale opts in at its own call site
+│                   it, so a painter adopting a scale opts in at its own call site. `FrameInputs`
+│                   carries `scale` as a COMPILE-FORCED field (the `Target.post_install_hint`
+│                   pattern): `size` alone is ambiguous once the spaces differ, so every painter
+│                   states which it means. `render_floor` is where they part — the buffer sizes
+│                   in PIXELS, the layout computes at `scale.logical(size)`. Density is the core
+│                   blitter's `blit_frame_scaled`; see the core guide
 └── pixel_painter/  the SHARED world render (render_to_rgb_buffer) — TWO phases behind that one seam:
                     sim.rs (sim_step: advances every &mut sim store — router/overlay/history/motion/
                     light/chitchat, bundled as SimStores — and returns an OWNED immutable SimFrame:

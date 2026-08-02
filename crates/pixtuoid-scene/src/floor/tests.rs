@@ -666,6 +666,7 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
             theme,
             now,
             size: Size { w: 192, h: 160 },
+            scale: crate::render_scale::RenderScale::ONE,
             floor_meta: FloorMeta::ground(),
             active_pet: None,
             floor_pet: None,
@@ -710,6 +711,7 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
             theme,
             now,
             size: Size { w: 8, h: 8 },
+            scale: crate::render_scale::RenderScale::ONE,
             floor_meta: FloorMeta::ground(),
             active_pet: None,
             floor_pet: None,
@@ -736,6 +738,7 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
             theme,
             now,
             size: Size { w: 160, h: 96 },
+            scale: crate::render_scale::RenderScale::ONE,
             floor_meta: FloorMeta::ground(),
             active_pet: None,
             floor_pet: None,
@@ -780,6 +783,7 @@ fn floor_session_render_owns_the_dual_eviction() {
         theme,
         now,
         size: Size { w: 160, h: 96 },
+        scale: crate::render_scale::RenderScale::ONE,
         floor_meta: FloorMeta::ground(),
         active_pet: None,
         floor_pet: None,
@@ -832,6 +836,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
                 theme,
                 now,
                 size: Size { w: 160, h: 96 },
+                scale: crate::render_scale::RenderScale::ONE,
                 floor_meta: FloorMeta::ground(),
                 active_pet: None,
                 floor_pet: None,
@@ -869,6 +874,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         theme,
         now: now0,
         size: Size { w: 8, h: 8 },
+        scale: crate::render_scale::RenderScale::ONE,
         floor_meta: FloorMeta::ground(),
         active_pet: None,
         floor_pet: None,
@@ -1060,5 +1066,74 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
     assert!(
         !resumed.events.contains(&crate::audio::OneShot::DoorChime),
         "no volley on resume — the observer saw the agent while muted"
+    );
+}
+
+#[test]
+fn a_render_scale_grows_the_buffer_without_growing_the_office() {
+    // THE decoupling property, at the frame seam. Before `RenderScale`, `size`
+    // was both the buffer's extent AND the office's, so doubling the buffer
+    // built an office with ~4x the desks (measured: 25 at 192x160, 1554 at
+    // 1536x1280). The seam exists so a richer visual profile buys detail per
+    // object instead of more objects — which is only true if the SAME logical
+    // size yields the SAME desks however many pixels it is painted into.
+    let pack = crate::embedded_pack::test_default_pack();
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = SceneState::new([8; MAX_FLOORS]);
+    let logical = Size { w: 160, h: 96 };
+    let two = crate::render_scale::RenderScale::new(2).expect("2 is nonzero");
+
+    let mut classic = FloorSession::new();
+    let a = classic
+        .render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
+            theme,
+            now,
+            size: logical,
+            scale: crate::render_scale::RenderScale::ONE,
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        })
+        .expect("the classic size lays out");
+
+    let mut scaled = FloorSession::new();
+    let b = scaled
+        .render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
+            theme,
+            now,
+            size: Size {
+                w: two.to_buffer(logical.w),
+                h: two.to_buffer(logical.h),
+            },
+            scale: two,
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        })
+        .expect("the scaled size lays out");
+
+    // Same office, desk for desk, in LOGICAL coordinates.
+    assert_eq!(
+        a.home_desks, b.home_desks,
+        "a render scale must not move or add a single desk"
+    );
+    // ...and the buffer genuinely grew, or the assertion above would pass
+    // trivially by nothing having scaled at all.
+    assert_eq!(
+        scaled.buf().width(),
+        two.to_buffer(logical.w),
+        "the scaled buffer is sized in PIXELS"
+    );
+    assert_eq!(
+        classic.buf().width(),
+        logical.w,
+        "the classic buffer is unchanged"
     );
 }

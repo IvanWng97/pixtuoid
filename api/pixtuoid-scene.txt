@@ -208,6 +208,7 @@ pub pixtuoid_scene::floor::FrameInputs::floor_meta: pixtuoid_scene::floor::Floor
 pub pixtuoid_scene::floor::FrameInputs::floor_pet: core::option::Option<&'a pixtuoid_scene::pet::Pet>
 pub pixtuoid_scene::floor::FrameInputs::now: std::time::SystemTime
 pub pixtuoid_scene::floor::FrameInputs::pack: &'a pixtuoid_core::sprite::format::Pack
+pub pixtuoid_scene::floor::FrameInputs::scale: pixtuoid_scene::render_scale::RenderScale
 pub pixtuoid_scene::floor::FrameInputs::scene: &'a pixtuoid_core::state::SceneState
 pub pixtuoid_scene::floor::FrameInputs::size: pixtuoid_scene::layout::Size
 pub pixtuoid_scene::floor::FrameInputs::theme: &'static pixtuoid_scene::theme::Theme
