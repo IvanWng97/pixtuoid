@@ -153,7 +153,10 @@ the `wire_to_pixels` render proof, the never-panic fuzz tool, the corpus census
 cargo feature, so it never enters the published crate). The four call sites
 differ ONLY in where bytes come from and in assert-vs-report; the decode →
 reduce path between those ends is shared, including the first-sight `SessionStart`
-seed keyed by the source's registry row. **A driver that keys that seed any
+seed keyed by the source's registry row — and, for a driver that walks a TREE,
+the row's `path_filter` too, so the census reads the files the watcher would and
+no more (unfiltered, CC's workflow `journal.jsonl` sidecars alone inflated a
+4,120-transcript corpus to 4,377). **A driver that keys that seed any
 other way registers NOTHING** (a JSONL event for an unknown id is a documented
 no-op) and reports it as a decoder failure — which is what the corpus census
 did on its first run. Two on-demand tools sit on top: decoder never-panic fuzz

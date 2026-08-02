@@ -64,9 +64,18 @@ fn main() {
         std::process::exit(2);
     };
 
-    // A non-UTF-8 line is skipped, not fatal — the corpus is whatever is on
-    // disk, and stopping would silently truncate the run.
-    let driven = drive.lines(std::io::stdin().lock().lines().map_while(Result::ok));
+    // Both error policies are wrong on their own, so split by KIND. A
+    // non-UTF-8 line must be SKIPPED — `read_line` already consumed it, and
+    // stopping there would fuzz the corpus PREFIX while still reporting
+    // "0 PANIC", the false-green this tool exists to avoid. Any other read
+    // error must STOP: it repeats without consuming, so skipping would spin
+    // forever (clippy::lines_filter_map_ok).
+    let lines = std::io::stdin().lock().lines().map_while(|r| match r {
+        Ok(line) => Some(Some(line)),
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => Some(None),
+        Err(_) => None,
+    });
+    let driven = drive.lines(lines.flatten());
 
     eprintln!(
         "decoder_fuzz[{source}]: {} lines, {} parsed, {} events, {} decode-err, {} PANIC",

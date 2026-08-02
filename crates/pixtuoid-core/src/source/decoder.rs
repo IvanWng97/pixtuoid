@@ -47,6 +47,24 @@ pub(crate) fn default_id_from_path(p: &Path) -> String {
     normalize_path_key(&p.to_string_lossy())
 }
 
+/// Decides which `.jsonl` FILES a source's transcripts are — checked after the
+/// extension gate, so it filters files, never directories. A source dir often
+/// holds SIBLINGS that must never be walked: grok's rewrite-on-resume
+/// `chat_history.jsonl`, Antigravity's duplicate `transcript_full.jsonl`, CC's
+/// foreign-schema workflow `journal.jsonl`. The default
+/// (`accept_all_paths`) admits every transcript.
+///
+/// Always-compiled for the [`LineDecoder`] reason: the registry names one per
+/// transcript row, and any driver that walks a tree must select the SAME files
+/// the watcher would — a census over a superset counts files production never
+/// reads.
+pub type PathFilter = fn(&Path) -> bool;
+
+/// The admit-everything [`PathFilter`] default.
+pub(crate) fn accept_all_paths(_p: &Path) -> bool {
+    true
+}
+
 /// Narrow a raw JSON integer to a valid POSIX pid: in `i32` range AND strictly
 /// positive. The `> 0` reject is load-bearing — `kill(0)`/`kill(-n)` target
 /// process GROUPS, and a bogus/zero `_pid` would otherwise synthesize a phantom

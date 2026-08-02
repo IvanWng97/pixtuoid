@@ -12,16 +12,6 @@ use super::{decode_grok_line, grok_cwd_from_path, grok_home, grok_session_ended,
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
-/// Only `updates.jsonl` is the tailable transcript. Every session dir carries
-/// SIBLING `.jsonl` files that must never be walked: `chat_history.jsonl` and
-/// `rewind_points.jsonl` are REWRITTEN via temp+rename (a tail would replay
-/// whole files as fresh events and mint a second path-keyed sprite), and
-/// `feedback.jsonl`/`btw_history.jsonl`/the group-level `prompt_history.jsonl`
-/// are not session streams at all.
-fn is_updates_jsonl(p: &Path) -> bool {
-    p.file_name().and_then(|n| n.to_str()) == Some("updates.jsonl")
-}
-
 /// grok's liveness probe: the session ids of every entry in
 /// `{grok_home}/active_sessions.json` whose pid is alive, in
 /// `grok_id_from_path` id-space (the registry stores the bare session id ==
@@ -311,7 +301,6 @@ impl Source for GrokSource {
             decode_grok_line,
             grok_session_ended,
         )
-        .with_path_filter(is_updates_jsonl)
         .with_cwd_deriver(grok_cwd_from_path);
         if let Some(root) = grok_probe_root(&self.sessions_root) {
             watcher = watcher
@@ -327,24 +316,6 @@ impl Source for GrokSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn path_filter_admits_only_updates_jsonl() {
-        let dir = Path::new("/h/.grok/sessions/%2Fr/0197-sess");
-        assert!(is_updates_jsonl(&dir.join("updates.jsonl")));
-        for sibling in [
-            "chat_history.jsonl",
-            "rewind_points.jsonl",
-            "feedback.jsonl",
-            "btw_history.jsonl",
-            "prompt_history.jsonl",
-        ] {
-            assert!(
-                !is_updates_jsonl(&dir.join(sibling)),
-                "{sibling} must be filtered (rewrite-on-resume / not a session stream)"
-            );
-        }
-    }
 
     #[test]
     fn probe_root_accepts_first_party_layouts_only() {

@@ -11,7 +11,7 @@ use super::walk::{
 use super::*;
 // The path-keyed `IdDeriver` default now lives with the type in the
 // always-compiled `decoder` module (the registry names one per row).
-use crate::source::decoder::default_id_from_path;
+use crate::source::decoder::{accept_all_paths, default_id_from_path};
 use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, Transport};
 use crate::AgentId;

@@ -33,7 +33,7 @@ fn codex_session_ended(_tail: &[u8]) -> bool {
 /// and the id deriver (`codex_id_from_path`) are ours (invariant #3).
 pub fn live_codex_rollout_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
     // A held-open path vouches iff it is a `rollout-*.jsonl`; its id is the
-    // rollout UUID via `codex_id_from_path` — the SAME fn `with_id_deriver`
+    // rollout UUID via `codex_id_from_path` — the SAME fn the registry row
     // installs, so probe ids and gate ids can't drift (UUIDs are fold-invariant).
     ProbeSnapshot::from_open_fds(
         sessions_root,

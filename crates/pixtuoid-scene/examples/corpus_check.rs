@@ -99,7 +99,7 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     // the source's OWN registry row, so it lands on the same `AgentId` the
     // decoded lines do — this harness's first run reported 0/4376 registered
     // for want of exactly that.
-    let Some(drive) = Drive::transcript(source, &path.to_string_lossy()) else {
+    let Some(drive) = Drive::transcript_at(source, path) else {
         return v;
     };
     let driven = drive.seeded().at(now()).lines(body.lines());
@@ -145,15 +145,32 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
     }
 }
 
-fn walk(root: &Path, out: &mut Vec<PathBuf>) {
+/// Collect the transcripts under `root` the WATCHER would walk — same
+/// extension gate, same registry `path_filter`, same refusal to follow a
+/// symlinked entry (`walk_jsonl`'s `symlink_metadata` guard, so a planted dir
+/// link can't recurse a loop or drag a foreign tree into the census).
+///
+/// Walking the unfiltered set would make the census a superset of production:
+/// Antigravity's duplicate `transcript_full.jsonl` counts every conversation
+/// twice, grok's rewrite-on-resume siblings replay as fresh events, and CC's
+/// foreign-schema workflow `journal.jsonl` decodes as garbage — all reported
+/// as if the decoders had seen them in the field.
+fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
+    let admits = registry::path_filter_for(source);
     let Ok(rd) = std::fs::read_dir(root) else {
         return;
     };
     for e in rd.flatten() {
         let p = e.path();
-        if p.is_dir() {
-            walk(&p, out);
-        } else if p.extension().and_then(|x| x.to_str()) == Some("jsonl") {
+        let Ok(meta) = std::fs::symlink_metadata(&p) else {
+            continue;
+        };
+        if meta.is_dir() {
+            walk(source, &p, out);
+        } else if meta.is_file()
+            && p.extension().and_then(|x| x.to_str()) == Some("jsonl")
+            && admits(&p)
+        {
             out.push(p);
         }
     }
@@ -182,7 +199,7 @@ fn main() {
     }
 
     let mut files = Vec::new();
-    walk(&root, &mut files);
+    walk(source, &root, &mut files);
     files.sort();
     if files.is_empty() {
         eprintln!("error: no .jsonl under {}", root.display());

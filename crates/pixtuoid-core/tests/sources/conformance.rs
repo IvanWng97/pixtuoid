@@ -96,35 +96,6 @@ impl Decoded {
     }
 }
 
-/// A committed fixture is bytes WE control, so every line must parse and decode
-/// cleanly — an `Err` here is a decoder regression and a panic is the
-/// never-panic contract broken, both of which a count-only harness would let
-/// through as "fewer events than expected".
-fn assert_drove_cleanly(d: &Driven, what: &str, at: &std::path::Path) {
-    assert_eq!(
-        d.unparseable,
-        0,
-        "{what} in {}: {} line(s) are not valid JSON",
-        at.display(),
-        d.unparseable
-    );
-    assert!(
-        d.decode_errors.is_empty(),
-        "{what} in {}: decode error(s): {:?}",
-        at.display(),
-        d.decode_errors
-    );
-    assert!(
-        d.panics.is_empty(),
-        "{what} in {}: the decoder PANICKED (never-panic contract): {:?}",
-        at.display(),
-        d.panics
-    );
-}
-
-/// Decode one fixture dir, feeding the decoders the fixture's *relative* path as
-/// the transcript key — `AgentId` is a deterministic FNV hash of that key, so
-/// snapshots stay machine-independent.
 /// A scenario's transcripts: the non-hook `.jsonl` files, sorted. Exactly one
 /// for a JSONL-bearing source — two would make selection (and the snapshot)
 /// depend on `read_dir` order, zero would skip its LineDecoder entirely — and
@@ -196,7 +167,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
             )
         });
         let driven = drive.lines(read_lines(transcript));
-        assert_drove_cleanly(&driven, "transcript", transcript);
+        driven.assert_clean(&format!("transcript {}", transcript.display()));
         driven
     });
 
@@ -217,7 +188,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
         // One payload can decode to multiple events (Identity attached ahead of
         // a tool/permission event, #221).
         let driven = Drive::hooks(source).lines(&hook_lines);
-        assert_drove_cleanly(&driven, "hook payloads", &hooks_path);
+        driven.assert_clean(&format!("hook payloads {}", hooks_path.display()));
         driven
     });
 
@@ -259,7 +230,7 @@ fn a_seeded_drive_coalesces_with_each_transcripts_own_decoder() {
                 .unwrap_or_else(|| panic!("{source}: no transcript decoder"))
                 .seeded()
                 .lines(read_lines(&transcript));
-            assert_drove_cleanly(&driven, "seeded transcript", &transcript);
+            driven.assert_clean(&format!("seeded transcript {}", transcript.display()));
 
             let ids: BTreeSet<_> = driven.events.iter().map(AgentEvent::agent_id).collect();
             assert!(

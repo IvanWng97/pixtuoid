@@ -5,7 +5,7 @@
 //! behind the parent's ONE `#[cfg(feature = "native")] mod native;` gate and
 //! is re-exported there, so public paths don't move.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 
@@ -108,7 +108,6 @@ pub fn cc_watcher(projects_root: std::path::PathBuf) -> JsonlWatcher {
     )
     .with_label_deriver(cc_derive_label)
     .with_activity_recency(super::cc_activity_recency)
-    .with_path_filter(skip_workflow_journal)
 }
 
 impl Source for ClaudeCodeSource {
@@ -133,44 +132,9 @@ impl Source for ClaudeCodeSource {
     }
 }
 
-/// The workflow/skills orchestrator writes a `journal.jsonl` sidecar under
-/// `<uuid>/subagents/workflows/wf_*/` — a FOREIGN schema (top-level
-/// `type:"started"`/`"result"`, not CC transcript lines) living in the SAME
-/// projects tree the CC watcher walks. The watcher has no default path_filter and
-/// `walk_jsonl` recurses into every `.jsonl`, so without this skip a recent
-/// journal (read from the top — it is not liveness-probed nor `cc_session_ended`)
-/// feeds each line to `decode_cc_line`, and the #763 unknown-`type` breadcrumb
-/// would FLOOD the warn-floor (avg ~14 `started`+`result` per file, `unknown_event`
-/// has no dedup). Skips ONLY `journal.jsonl` — the real subagent transcripts
-/// (`agent-<id>.jsonl`, INCLUDING the ones nested under `workflows/wf_*/`) are
-/// admitted, so subagent attribution is untouched. A denylist, not an allowlist:
-/// misfiltering a real transcript (a vanished sprite) is worse than a future
-/// foreign sidecar breadcrumbing (visible, self-heals by adding it here).
-fn skip_workflow_journal(path: &Path) -> bool {
-    path.file_name().and_then(|s| s.to_str()) != Some("journal.jsonl")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn skip_workflow_journal_drops_only_the_orchestrator_journal() {
-        // The workflow orchestrator's FOREIGN-schema journal is skipped so its
-        // `started`/`result` lines never reach decode_cc_line (the #763 flood).
-        let wf = Path::new("/h/.claude/projects/proj/uuid/subagents/workflows/wf_abc");
-        assert!(!skip_workflow_journal(&wf.join("journal.jsonl")));
-        // The real subagent transcripts nested ALONGSIDE it stay admitted, as do
-        // the main + top-level subagent transcripts — subagent attribution is
-        // unaffected (a denylist, narrow by construction).
-        assert!(skip_workflow_journal(&wf.join("agent-xyz.jsonl")));
-        assert!(skip_workflow_journal(Path::new(
-            "/h/.claude/projects/proj/uuid.jsonl"
-        )));
-        assert!(skip_workflow_journal(Path::new(
-            "/h/.claude/projects/proj/uuid/subagents/agent-xyz.jsonl"
-        )));
-    }
 
     // The socket-path and default-paths env precedence. Every socket branch
     // (incl. the invalid-XDG fallback) is checked in ONE test because the env

@@ -99,7 +99,7 @@ impl Source for OmpSource {
 /// lints).
 fn live_omp_session_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
     // A held-open `.jsonl` under the root vouches; its id is the stem-chain key
-    // via `omp_id_from_path` — the SAME fn `with_id_deriver` installs, over the
+    // via `omp_id_from_path` — the SAME fn the registry row names, over the
     // folded `walk::id_path` (root transcripts AND nested task children both key
     // on the chain, so a live child vouches for the child id specifically). omp's
     // case-carrying stems are WHY the fold lives at the SEAM (`from_open_fds`),

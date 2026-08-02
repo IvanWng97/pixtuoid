@@ -22,9 +22,11 @@
 //!    for an unknown id is a documented no-op, so a transcript driven with no
 //!    seed registers nothing however well it decodes — `corpus_check`'s first
 //!    run reported 0/4376 registered for exactly this reason, and that was the
-//!    harness's bug, not the decoder's. [`SeedKind::FirstSight`] stands in for
+//!    harness's bug, not the decoder's. [`Drive::seeded`] stands in for
 //!    `emit_first_sight`, keyed by [`registry::id_deriver_for`] — the SAME row
-//!    the watcher reads, so the seed can't drift from production.
+//!    the watcher reads, so the seed can't drift from production. The file SET
+//!    comes from that row too ([`registry::path_filter_for`]), so a driver that
+//!    walks a tree reads what the watcher would and no more.
 //! 2. **Transport is load-bearing** (the reducer's hook-wins dedup keys on it),
 //!    so it is not a free parameter: [`Drive::transcript`] is `Jsonl` through
 //!    the row's `LineDecoder` and [`Drive::hooks`] is `Hook` through the shared
@@ -41,27 +43,10 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 
-use crate::source::decoder::{decode_hook_payload, LineDecoder};
+use crate::source::decoder::{decode_hook_payload, display_safe, LineDecoder};
 use crate::source::registry;
 use crate::state::{ActivityState, SceneState, ToolKind};
 use crate::{AgentEvent, AgentId, Reducer, Transport};
-
-/// Whether the driver stands in for the watcher's first-sight registration.
-///
-/// Not a free choice: it mirrors what the source's OWN wire does. A transcript
-/// that carries no `SessionStart` of its own (CC, Codex, Antigravity, grok) is
-/// registered in production by the watcher, so an offline driver must seed it;
-/// one whose head line IS a `SessionStart` (Copilot, omp) registers itself and
-/// a seed would only duplicate it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum SeedKind {
-    /// The wire registers itself — drive exactly the bytes.
-    #[default]
-    None,
-    /// Prepend the `SessionStart` the watcher's `emit_first_sight` would emit
-    /// for this transcript path, keyed by the source's registry row.
-    FirstSight,
-}
 
 /// A lifecycle CLASS a driven wire pushed the slot through — asserted as
 /// reached-at-some-point, never as the terminal state (`mark_exiting` sets only
@@ -95,16 +80,17 @@ pub struct LineFailure {
     pub line: usize,
     /// `type="…" keys=[…]` — structure only.
     pub shape: String,
-    /// The decoder's own error, or the empty string for a panic (a panic
-    /// payload is not ours to format).
-    pub message: String,
+    /// The decoder's own error. `None` for a panic — which `Vec` the failure
+    /// landed in already says which it was, so the message stays honest
+    /// instead of doubling as a sentinel.
+    pub message: Option<String>,
 }
 
 impl std::fmt::Display for LineFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "line {}: {}", self.line, self.shape)?;
-        if !self.message.is_empty() {
-            write!(f, ": {}", self.message)?;
+        if let Some(m) = &self.message {
+            write!(f, ": {m}")?;
         }
         Ok(())
     }
@@ -140,6 +126,30 @@ impl Driven {
     pub fn registered(&self) -> usize {
         self.scene.agents.len()
     }
+
+    /// Assert bytes WE control drove cleanly: every line parsed, no decoder
+    /// `Err` (the contract is log-and-continue, so an Err on a source's own
+    /// bytes is a defect), no panic. `what` names the input in the failure.
+    ///
+    /// The corpus shell deliberately does NOT call this — its bytes are
+    /// unbounded, so it reports the same three counts instead.
+    pub fn assert_clean(&self, what: &str) {
+        assert_eq!(
+            self.unparseable, 0,
+            "{what}: {} line(s) are not valid JSON",
+            self.unparseable
+        );
+        assert!(
+            self.decode_errors.is_empty(),
+            "{what}: decode error(s): {:?}",
+            self.decode_errors
+        );
+        assert!(
+            self.panics.is_empty(),
+            "{what}: the decoder PANICKED (never-panic contract): {:?}",
+            self.panics
+        );
+    }
 }
 
 /// The fixed wall clock the fold runs at. Deterministic by construction: with
@@ -150,8 +160,18 @@ const DEFAULT_NOW_EPOCH_SECS: u64 = 1_800_000_000;
 /// How far past `now` the settle tick runs. Long enough for the reducer's
 /// `ACTIVE_GRACE_WINDOW` pending-idle to realize (so a resolved tool really
 /// reads Idle), short enough to stay inside `EXIT_GRACE_WINDOW` (so a wire
-/// carrying its own `SessionEnd` still leaves the slot to observe).
+/// carrying its own `SessionEnd` still leaves the slot to observe). It also
+/// clears `B1_CASCADE_GRACE`, which only stamps `exiting_at` and never resets
+/// `slot.state` — so a fired cascade cannot erase a class already reached.
 const SETTLE: Duration = Duration::from_secs(3);
+
+/// Desk capacity for the driven scene. Registration past it is REFUSED, and
+/// SILENTLY — so a wire carrying more agents than this reads as "decoded but
+/// never reached the scene", which is exactly the false verdict every driver
+/// here exists to avoid. Sized well above any single wire's agent count
+/// (Copilot interleaves all of a session's subagents in ONE transcript), not at
+/// the production headless fallback, whose 16 answers a different question.
+pub const DRIVEN_DESKS: usize = 64;
 
 /// The seed session's working directory. Non-empty on purpose: an empty cwd
 /// registers the reducer's unknown-cwd ghost (a bare ordinal label, and a
@@ -167,7 +187,7 @@ pub struct Drive {
     source: String,
     transport: Transport,
     decode: Decode,
-    seed: SeedKind,
+    seeded: bool,
     now: SystemTime,
 }
 
@@ -220,7 +240,7 @@ impl Drive {
                 decode,
                 logical: logical.to_string(),
             },
-            seed: SeedKind::None,
+            seeded: false,
             now: SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_NOW_EPOCH_SECS),
         })
     }
@@ -237,16 +257,23 @@ impl Drive {
             source: source.to_string(),
             transport: Transport::Hook,
             decode: Decode::Hooks,
-            seed: SeedKind::None,
+            seeded: false,
             now: SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_NOW_EPOCH_SECS),
         }
     }
 
-    /// Stand in for the watcher's first-sight registration (see
-    /// [`SeedKind::FirstSight`]). No-op on a hook drive, which never needs one.
+    /// Prepend the `SessionStart` the watcher's `emit_first_sight` would emit
+    /// for this transcript, keyed by the source's registry row.
+    ///
+    /// Not a free choice: it mirrors what the source's OWN wire does. A
+    /// transcript carrying no `SessionStart` of its own (CC, Codex,
+    /// Antigravity, grok) is registered in production by the watcher, so an
+    /// offline driver must seed it; one whose head line IS a `SessionStart`
+    /// (Copilot, omp) registers itself and a seed would only duplicate it. A
+    /// no-op on a hook drive, which never needs one (hooks are proof of life).
     #[must_use]
     pub fn seeded(mut self) -> Self {
-        self.seed = SeedKind::FirstSight;
+        self.seeded = true;
         self
     }
 
@@ -278,7 +305,7 @@ impl Drive {
         S: AsRef<str>,
     {
         let mut d = Driven {
-            scene: SceneState::uniform(8),
+            scene: SceneState::uniform(DRIVEN_DESKS),
             events: Vec::new(),
             lines: 0,
             unparseable: 0,
@@ -287,9 +314,7 @@ impl Drive {
             reached: Vec::new(),
         };
 
-        if let (SeedKind::FirstSight, Decode::Transcript { logical, .. }) =
-            (self.seed, &self.decode)
-        {
+        if let (true, Decode::Transcript { logical, .. }) = (self.seeded, &self.decode) {
             d.events.push(AgentEvent::SessionStart {
                 agent_id: self.seed_id(logical),
                 source: self.source.clone(),
@@ -317,12 +342,12 @@ impl Drive {
                 Ok(Err(e)) => d.decode_errors.push(LineFailure {
                     line: d.lines,
                     shape: shape_of(line),
-                    message: e.to_string(),
+                    message: Some(e.to_string()),
                 }),
                 Err(_) => d.panics.push(LineFailure {
                     line: d.lines,
                     shape: shape_of(line),
-                    message: String::new(),
+                    message: None,
                 }),
             }
         }
@@ -382,10 +407,14 @@ fn shape_of(line: &str) -> String {
     let Ok(v) = serde_json::from_str::<Value>(line) else {
         return "<unparseable>".to_string();
     };
-    let ty = v.get("type").and_then(Value::as_str).unwrap_or("");
+    // Key NAMES are wire-controlled too, so they route through the crate's ONE
+    // terminal-egress policy (Cc + the Cf bidi set, then capped) like every
+    // drift breadcrumb — a second, laxer sanitizer here would be the documented
+    // chokepoint-BYPASS class.
+    let ty = display_safe(v.get("type").and_then(Value::as_str).unwrap_or(""));
     let keys = v.as_object().map_or_else(
         || "<non-object>".to_string(),
-        |o| o.keys().cloned().collect::<Vec<_>>().join(","),
+        |o| display_safe(&o.keys().cloned().collect::<Vec<_>>().join(",")),
     );
     format!("type={ty:?} keys=[{keys}]")
 }
@@ -523,7 +552,7 @@ mod tests {
                 decode,
                 logical: CC_TRANSCRIPT.to_string(),
             },
-            seed: SeedKind::None,
+            seeded: false,
             now: SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_NOW_EPOCH_SECS),
         }
     }
@@ -541,7 +570,10 @@ mod tests {
 
         assert_eq!(d.decode_errors.len(), 1);
         assert_eq!(d.decode_errors[0].line, 1);
-        assert_eq!(d.decode_errors[0].message, "unsupported event");
+        assert_eq!(
+            d.decode_errors[0].message.as_deref(),
+            Some("unsupported event")
+        );
         let shape = &d.decode_errors[0].shape;
         assert!(
             !shape.contains("do not print me"),

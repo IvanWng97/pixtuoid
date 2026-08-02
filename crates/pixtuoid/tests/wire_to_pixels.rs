@@ -31,7 +31,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::harness::{Drive, Reach};
+use pixtuoid_core::harness::{Drive, Reach, DRIVEN_DESKS};
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::source::registry;
 use pixtuoid_core::SceneState;
@@ -192,26 +192,7 @@ fn assert_renders_a_sprite(case: &WireCase) {
         Wire::Hooks => Drive::hooks(case.source).at(t0()).lines(lines),
     };
 
-    // A committed fixture is bytes we control: every line must parse, decode
-    // and not panic. (The other shells assert the same three; only the corpus
-    // one reports instead, because its bytes are unbounded.)
-    assert_eq!(
-        driven.unparseable, 0,
-        "{}: {} fixture line(s) are not valid JSON",
-        case.name, driven.unparseable
-    );
-    assert!(
-        driven.decode_errors.is_empty(),
-        "{}: decode error(s): {:?}",
-        case.name,
-        driven.decode_errors
-    );
-    assert!(
-        driven.panics.is_empty(),
-        "{}: the decoder PANICKED: {:?}",
-        case.name,
-        driven.panics
-    );
+    driven.assert_clean(case.name);
     assert!(
         driven.events.len() >= 2,
         "{}: fixture should decode to a registration + activity, got {:?}",
@@ -245,7 +226,9 @@ fn assert_renders_a_sprite(case: &WireCase) {
     // `chrono::Local`, dwarfed and collided with the sprite's few colors at
     // bright hours, and a rich dawn even netted a NEGATIVE delta).
     let (cols, rows) = (120, 44);
-    let empty = settled_pixels(&SceneState::uniform(8), cols, rows, t0());
+    // The empty baseline must be shaped like the driven scene (same desk
+    // capacity), or the diff would carry a layout difference as well as the agent.
+    let empty = settled_pixels(&SceneState::uniform(DRIVEN_DESKS), cols, rows, t0());
     let occupied = settled_pixels(&driven.scene, cols, rows, t0());
     let changed = empty.iter().zip(&occupied).filter(|(a, b)| a != b).count();
     assert!(

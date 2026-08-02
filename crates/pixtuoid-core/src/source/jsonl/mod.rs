@@ -48,7 +48,7 @@ pub use crate::source::decoder::LineDecoder;
 // returns it and must keep building under `--no-default-features` (wasm), where
 // this whole module is gated out. `IdDeriver` joins them because the REGISTRY
 // names one per transcript row (see `registry::id_deriver_for`).
-pub use crate::source::decoder::{IdDeriver, TailActivity};
+pub use crate::source::decoder::{IdDeriver, PathFilter, TailActivity};
 
 /// Derives an agent's display label from its transcript `(path, source, cwd)`.
 /// The default (`default_prefixed_label`) is the source-prefixed cwd basename
@@ -78,19 +78,6 @@ pub type ActivityRecency = fn(&[u8]) -> TailActivity;
 /// The default [`ActivityRecency`]: no opinion, so the gate keeps using mtime.
 fn no_activity_recency(_tail: &[u8]) -> TailActivity {
     TailActivity::Unknown
-}
-
-/// Decides which `.jsonl` FILES a watcher walks — checked after the extension
-/// gate in `walk_jsonl`, so it filters files, never directories. The default
-/// (`accept_all_paths`) admits every transcript. **Antigravity** overrides it to
-/// skip the sibling `transcript_full.jsonl`: the CLI writes BOTH a truncated
-/// `transcript.jsonl` and an untruncated `transcript_full.jsonl` per conversation
-/// in one logs dir, carrying the SAME step stream, so without the filter one
-/// conversation mints two path-keyed `AgentId`s and double-renders.
-pub type PathFilter = fn(&Path) -> bool;
-
-fn accept_all_paths(_p: &Path) -> bool {
-    true
 }
 
 /// Derives a first-sight cwd from the transcript PATH when the content
@@ -229,6 +216,7 @@ impl JsonlWatcher {
     ) -> Self {
         Self {
             id_derive: crate::source::registry::id_deriver_for(&source),
+            path_filter: crate::source::registry::path_filter_for(&source),
             root,
             initial_window: DEFAULT_INITIAL_WINDOW,
             source_name: source,
@@ -236,7 +224,6 @@ impl JsonlWatcher {
             derive_label: default_prefixed_label,
             check_session_ended,
             activity_recency: no_activity_recency,
-            path_filter: accept_all_paths,
             cwd_derive: no_cwd_from_path,
             liveness_probe: None,
             poll_interval: DEFAULT_POLL_INTERVAL,
@@ -309,9 +296,9 @@ impl JsonlWatcher {
         self
     }
 
-    /// Restrict which `.jsonl` FILES this watcher walks (default: every
-    /// transcript). See [`PathFilter`] — Antigravity uses it to skip the
-    /// duplicate `transcript_full.jsonl` sibling and avoid double-rendering.
+    /// Override the [`PathFilter`] the source's registry row supplies. Like
+    /// [`Self::with_id_deriver`], no in-tree source needs it — the row IS each
+    /// CLI's file selection, and any offline driver reads the same row.
     pub fn with_path_filter(mut self, path_filter: PathFilter) -> Self {
         self.path_filter = path_filter;
         self
