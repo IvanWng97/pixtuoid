@@ -738,6 +738,15 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
         out.push_str(line);
         out.push('\n');
     }
+    // Whether this terminal can paint the cutaway profile, gated on the SAME
+    // `probe_ok` as the truecolor row: the capability query writes escape
+    // sequences and reads the replies, so a piped `doctor > file` must neither
+    // emit them nor wait for an answer that cannot come.
+    out.push_str(&crate::graphics::graphics_diagnostic_row(
+        crate::graphics::GraphicsMode::default(),
+        probe_ok.then(crate::graphics::detect).flatten(),
+    ));
+    out.push('\n');
     // Surface config-load warnings IN the report — a malformed config makes every
     // source read disconnected, and a diagnostic tool must say WHY rather than
     // silently swallow it. Sanitized: a warning can interpolate config content.
