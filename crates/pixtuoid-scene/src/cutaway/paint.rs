@@ -117,6 +117,21 @@ pub fn render_cutaway(
     order.extend(layout.waypoints.iter().filter_map(|wp| {
         waypoint_sprite(wp.kind).map(|sprite| Piece::Plant { at: wp.pos, sprite })
     }));
+    // Aisle decor + the lounge couch — both already placed and already drawn by
+    // the pack, so both are pure reuse like the plants.
+    order.extend(layout.pod_decor.iter().map(|d| Piece::Plant {
+        at: d.pos,
+        sprite: d.kind.sprite_name(),
+    }));
+    order.extend(layout.couch_sprite_center().map(|at| Piece::Plant {
+        at,
+        sprite: "back_couch",
+    }));
+    // Wall decor hangs on the north band, so it is NOT floor-sorted: it paints
+    // with the wall, before anything standing on the floor can occlude it.
+    for item in &layout.wall_decor {
+        paint_prop(item.pos, item.kind.sprite_name(), pack, theme, scale, buf);
+    }
     // The corridor appliances classic draws procedurally: they have no sprite
     // to reuse, so the cutaway gives them its own solid geometry.
     order.extend(
