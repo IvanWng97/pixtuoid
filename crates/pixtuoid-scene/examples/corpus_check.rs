@@ -56,9 +56,14 @@ struct Verdict {
     panics: Vec<LineFailure>,
     /// Events the WIRE produced — the first-sight seed is NOT counted.
     events: usize,
-    /// Did the wire's own events land on a registered slot? Gated on
-    /// `wire_events > 0` because the seed registers unconditionally: counting
-    /// it made this column read 1/1 for a file of pure garbage.
+    /// Slots on the floor, reported only when the wire produced events (the
+    /// seed registers unconditionally, so counting it ungated made this read
+    /// 1/1 for a file of pure garbage). It does NOT establish that a wire event
+    /// landed on the SEEDED id — a row whose `id_from_path` disagreed with its
+    /// decoder would still report N/N here off the seed alone. `drove` is the
+    /// column that collapses in that case, and
+    /// `conformance::a_seeded_drive_coalesces_with_each_transcripts_own_decoder`
+    /// is what fails in CI for it.
     registered: usize,
     /// Did the wire drive the slot through a lifecycle class? The
     /// anti-tautology column — a transcript can decode and register while
@@ -288,7 +293,7 @@ fn main() {
             totals.events
         );
         println!(
-            "  registered        {registered_files}/{} files whose WIRE drove >=1 event onto a slot",
+            "  registered        {registered_files}/{} files with >=1 wire event AND a slot on the floor",
             files.len()
         );
         println!(

@@ -6,29 +6,42 @@
 //! test-enforced, but adding a CLI meant restating "this source exists" in
 //! 5+ files. Now it's this table + the source's own module.
 //!
-//! **What earns a column: name-keyed DISPATCH, not consumer count.** A fn a
-//! source's own `run()` wires through a `with_*` builder (label deriver,
-//! session-end checker) needs no table — the caller already knows which source
-//! it is, so there is no name→fn lookup to centralize, and mirroring it here
-//! would be dead data. A fn a caller that does NOT own the source must pick by
-//! NAME belongs in the row: the walker's per-scanned-source head scan
-//! (`cwd_extractor`, one consumer and correctly here), and — since the offline
-//! `harness::Drive` — the **id deriver** and the **path filter**. `Drive`
-//! stands in for `emit_first_sight` and must key identically or a driven
-//! transcript registers nothing; a driver that WALKS a tree must select the
-//! same files or its census counts what production never reads. Both are READ,
-//! not mirrored: `JsonlWatcher::new` takes its defaults from `id_deriver_for` /
+//! **What earns a column, in two parts — BOTH required.** (1) A GENERIC caller
+//! — one that does not own the source — must pick the fn by NAME. A fn the
+//! source's own `run()` hands to the watcher through a `with_*` builder needs no
+//! table: that caller already knows which source it is, so there is no name→fn
+//! lookup to centralize and a row would be mirrored data. (2) The answer must be
+//! one production DEPENDS on, not one a report consults. Together these predict
+//! every column and every exclusion below.
+//!
+//! In, by that test: `line_decoder` and `cwd_extractor` (the walker dispatches
+//! per SCANNED source), `presence_decoder` (the hook demux), and — since the
+//! offline `harness::Drive` — the **id deriver** and the **path filter**.
+//! `Drive` stands in for `emit_first_sight` and must key identically or a driven
+//! transcript registers nothing; a driver that WALKS a tree must select the same
+//! files or its census counts what production never reads. All are READ, not
+//! mirrored: `JsonlWatcher::new` takes its defaults from `id_deriver_for` /
 //! `path_filter_for` instead of each `run()` re-passing its own fns.
 //!
 //! Deliberately NOT in the table (the scatter there is load-bearing):
 //! - The `Source` trait impls and the rest of their JsonlWatcher wiring (label
 //!   derivers, session-end checkers, cwd derivers, liveness probes): per-source
 //!   code in a per-source file, dispatched by the source itself.
-//! - The `ActivityRecency` clock is the deliberate near-miss: it HAS a
-//!   name-keyed reader (`corpus_check`'s provenance census), but only CC
-//!   supplies one, so the column would be dead data in every transcript row but
-//!   CC's — and it feeds a REPORT, not the coalescing contract. Move it in when a second
-//!   source publishes an activity clock.
+//! - The `ActivityRecency` clock is the deliberate near-miss, and it fails part
+//!   (2), not part (1): a generic caller DOES name-dispatch it (`corpus_check`'s
+//!   `newest_activity` hardcodes the CC check), but what it feeds is a
+//!   provenance REPORT — nothing production reads back — so a hand-written
+//!   source check there costs a wrong column, not a wrong verdict. In production
+//!   it stays owner-passed (`with_activity_recency`, CC only). The "dead data in
+//!   most rows" argument does NOT justify the exclusion on its own:
+//!   `accept_all_paths` is dead data in three of six transcript rows. Move this
+//!   in when a second source publishes a clock AND something beyond a report
+//!   depends on it.
+//! - `should_seed_at_eof` — the recency + end-marker + liveness gate — is the
+//!   limit case worth stating: it excludes far MORE of a real corpus than any
+//!   path filter, and it is still not a column, because the offline harness
+//!   deliberately does not model it (a driver reads historical transcripts on
+//!   purpose). Part (1) alone would drag it in; part (2) is what keeps it out.
 //! - `_pixtuoid_source` attribution + the shared CC-shaped hook arms: they
 //!   stay in `decoder.rs` at the read site, pinned by their regression tests.
 //! - The binary crate's `install::Target` registry (this table's design

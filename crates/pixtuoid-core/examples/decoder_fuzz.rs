@@ -27,6 +27,12 @@
 //! Nothing is committed or redistributed, so there's no license / size /
 //! sanitization concern — the public sessions are a target, not a dependency.
 //!
+//! Memory: one invocation drives the WHOLE piped corpus as a single stream, and
+//! `Driven` retains every decoded event for it (~500k `AgentEvent`s over a
+//! mature CC tree). Bounded, and fine for an on-demand release-mode tool — the
+//! alternative is a fold-and-drop variant of `Drive::lines` that widens the
+//! shared seam for this one caller. Split the corpus if it ever bites.
+//!
 //! Decode `Err` is allowed (the watcher logs + skips malformed lines); only a
 //! PANIC is a contract violation. Hook-only sources have no transcript line
 //! decoder; their never-panic contract is covered by the in-crate proptest

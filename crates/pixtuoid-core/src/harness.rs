@@ -185,6 +185,11 @@ const SETTLE: Duration = Duration::from_secs(3);
 /// here exists to avoid. Sized well above any single wire's agent count
 /// (Copilot interleaves all of a session's subagents in ONE transcript), not at
 /// the production headless fallback, whose 16 answers a different question.
+///
+/// SECOND consumer, in another crate: `wire_to_pixels` shapes its EMPTY pixel
+/// baseline with this same value so both sides of its sprite diff share a desk
+/// layout. Changing it for a corpus reason moves that test's measured delta —
+/// check its floor before raising this.
 pub const DRIVEN_DESKS: usize = 64;
 
 /// The seed session's working directory. Non-empty on purpose: an empty cwd
@@ -411,7 +416,12 @@ impl Drive {
 ///
 /// Every slot, not the first: a `HashMap`'s iteration order is arbitrary, so
 /// reading one slot makes a multi-agent wire (a parent and its subagent) report
-/// a different class run to run.
+/// a different class run to run. The trade is explicit — this is a DETERMINISM
+/// fix that is also strictly WEAKER: on a fixture registering a parent AND a
+/// child, "one slot reached both classes" and "two slots reached one each" are
+/// now indistinguishable. A stronger form is `HashMap<AgentId, Vec<Reach>>` with
+/// "some ONE slot reached all of these"; not worth the shape until a caller
+/// needs to tell those apart.
 fn note_reached(scene: &SceneState, reached: &mut Vec<Reach>) {
     for slot in scene.agents.values() {
         let r = match &slot.state {
