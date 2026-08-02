@@ -31,6 +31,10 @@ use pixtuoid_scene::theme::theme_by_name;
 /// (corridor appliances) get placed at all.
 const DEFAULT_LOGICAL: (u16, u16) = (160, 96);
 
+/// Badge type size per unit of render scale. At 4x this is ~10px, which is the
+/// smallest Monaspace Neon stays legible at.
+const LABEL_PX_PER_SCALE: f32 = 2.6;
+
 fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
     let seated = now.checked_sub(Duration::from_secs(120)).unwrap_or(now);
     let recent = now.checked_sub(Duration::from_secs(3)).unwrap_or(now);
@@ -129,7 +133,65 @@ fn main() -> Result<()> {
 
     let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
     let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
-    render_cutaway(&frame, &layout, &pack, theme, scale, &mut buf);
+    let labels = render_cutaway(&frame, &layout, &pack, theme, scale, &mut buf);
+
+    // Name badges: the engine reports WHERE, the binary owns the font. Drawn
+    // straight into the RGB buffer here (the real painters blend post-upscale
+    // with a drop shadow — this only has to be legible enough to judge
+    // placement).
+    let label_px = f32::from(scale.get()) * LABEL_PX_PER_SCALE;
+    for l in &labels {
+        let Some(agent) = frame.agents.get(l.agent_idx) else {
+            continue;
+        };
+        let text: &str = &agent.label.text();
+        // The SHARED tone authority every other label painter uses, so the
+        // cutaway cannot invent its own state colours. `label_idle` alone was
+        // rgb(65,72,104) on a rgb(36,40,59) floor — technically drawn, visually
+        // absent, which is exactly the class of bug a dev tool should not have.
+        let tone = pixtuoid_scene::overlay::label_tone_rgb(
+            if agent.exiting_at.is_some() {
+                pixtuoid_scene::overlay::LabelTone::Exiting
+            } else {
+                match agent.state {
+                    ActivityState::Active { .. } => pixtuoid_scene::overlay::LabelTone::Active,
+                    ActivityState::Waiting { .. } => pixtuoid_scene::overlay::LabelTone::Waiting,
+                    _ => pixtuoid_scene::overlay::LabelTone::Idle,
+                }
+            },
+            theme,
+        );
+        let half = pixtuoid::aa_text::text_width(text, label_px) / 2;
+        // `draw_text_at` takes a TOP y and draws downward, so the anchor (which
+        // marks where the badge should END, just above the head) has to be
+        // lifted by a full line or the name lands on the sprite's face.
+        let (ox, oy) = (
+            i32::from(l.anchor_px.x) - half,
+            i32::from(l.anchor_px.y) - pixtuoid::aa_text::line_height(label_px),
+        );
+        pixtuoid::aa_text::draw_text_at(text, ox, oy, label_px, |x, y, cov| {
+            if cov <= 0.0 || x < 0 || y < 0 {
+                return;
+            }
+            let (x, y) = (x as u16, y as u16);
+            if x >= buf.width() || y >= buf.height() {
+                return;
+            }
+            let under = buf.get(x, y);
+            let a = cov.clamp(0.0, 1.0);
+            let mix = |u: u8, t: u8| (f32::from(u) * (1.0 - a) + f32::from(t) * a) as u8;
+            let t = tone;
+            buf.put(
+                x,
+                y,
+                pixtuoid_core::sprite::Rgb {
+                    r: mix(under.r, t.r),
+                    g: mix(under.g, t.g),
+                    b: mix(under.b, t.b),
+                },
+            );
+        });
+    }
 
     let mut img = RgbImage::new(u32::from(bw), u32::from(bh));
     for (i, px) in buf.as_slice().iter().enumerate() {

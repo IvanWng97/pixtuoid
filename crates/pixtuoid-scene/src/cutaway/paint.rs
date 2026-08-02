@@ -66,6 +66,9 @@ const TABLE_W: u16 = 18;
 /// Height of [`TABLE_W`]'s table.
 const TABLE_H: u16 = 6;
 
+/// Logical rows between a head and its name badge.
+const LABEL_GAP_PX: u16 = 2;
+
 /// Thickness of a room's glass wall, in logical units.
 const ROOM_WALL_PX: u16 = 1;
 
@@ -74,10 +77,27 @@ const GLOW_ROW_NUMER: u16 = 5;
 /// Denominator of [`GLOW_ROW_NUMER`].
 const GLOW_ROW_DENOM: u16 = 8;
 
+/// Where a painter should hang one agent's name badge, in BUFFER pixels.
+///
+/// The engine cannot draw text — the font lives in the binary — so the profile
+/// reports anchors and lets the painter render. Crucially these are the
+/// CUTAWAY's anchors: `overlay::build_overlay` derives its own from the classic
+/// projection, so a badge placed with those would float where the classic
+/// painter would have drawn the body, not where this one did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CutawayLabel {
+    /// Index into [`SimFrame::agents`].
+    pub agent_idx: usize,
+    /// Badge anchor: horizontal centre of the sprite, just above its head.
+    pub anchor_px: crate::layout::Point,
+}
+
 /// Paint `frame`'s office into `buf` as an orthographic cutaway.
 ///
 /// `layout` is in LOGICAL units and `buf` in buffer pixels; `scale` converts.
 /// The classic painter is untouched — this is its sibling, not its successor.
+///
+/// Returns where each visible agent's badge belongs; see [`CutawayLabel`].
 pub fn render_cutaway(
     frame: &SimFrame,
     layout: &Layout,
@@ -85,7 +105,7 @@ pub fn render_cutaway(
     theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
-) {
+) -> Vec<CutawayLabel> {
     paint_floor(layout, theme, scale, buf);
     paint_wall(layout, theme, scale, buf);
     paint_rooms(layout, pack, theme, scale, buf);
@@ -188,15 +208,21 @@ pub fn render_cutaway(
     );
     order.sort_by_key(Piece::depth);
 
+    let mut labels = Vec::with_capacity(frame.characters.len());
     for piece in &order {
         match *piece {
             Piece::Desk { at, lit } => paint_desk(at.x, at.y, lit, pack, theme, scale, buf),
-            Piece::Character { idx, .. } => paint_character(frame, idx, pack, theme, scale, buf),
+            Piece::Character { idx, .. } => {
+                if let Some(l) = paint_character(frame, idx, pack, theme, scale, buf) {
+                    labels.push(l);
+                }
+            }
             Piece::Plant { at, sprite } => paint_prop(at, sprite, pack, theme, scale, buf),
             Piece::Table { at } => paint_table(at, theme, scale, buf),
             Piece::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
         }
     }
+    labels
 }
 
 /// A thing to draw, carrying the depth it sorts on.
@@ -574,16 +600,10 @@ fn paint_character(
     theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
-) {
-    let Some(c) = frame.characters.get(idx) else {
-        return;
-    };
-    let Some(anim) = pack.animation(c.anim_name) else {
-        return;
-    };
-    let Some(f) = anim.frames.get(c.frame_idx) else {
-        return;
-    };
+) -> Option<CutawayLabel> {
+    let c = frame.characters.get(idx)?;
+    let anim = pack.animation(c.anim_name)?;
+    let f = anim.frames.get(c.frame_idx)?;
     let art = if c.flip_x {
         f.mirror_vertical()
     } else {
@@ -612,6 +632,15 @@ fn paint_character(
     if c.seat_desk.is_some() {
         paint_chair(at, art.width(), art.height(), theme, scale, buf);
     }
+    Some(CutawayLabel {
+        agent_idx: c.agent_idx,
+        anchor_px: crate::layout::Point {
+            x: scale.to_buffer(at.x + art.width() / 2),
+            y: scale
+                .to_buffer(at.y)
+                .saturating_sub(LABEL_GAP_PX * scale.get()),
+        },
+    })
 }
 
 /// The pack sprite for a waypoint kind, when it has one.
@@ -842,6 +871,26 @@ mod tests {
             cut.y
         );
         assert_eq!(cut.y, desk.y, "the head lands on the desk's own row");
+    }
+
+    #[test]
+    fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
+        // The badge has to follow the CUTAWAY's body, not the classic one:
+        // `overlay::build_overlay` anchors off the classic projection, which
+        // for a seated agent is eight rows higher. Pin the two properties a
+        // painter depends on — centred, and clear of the head.
+        let scale = RenderScale::new(3).expect("nonzero");
+        let at = crate::layout::Point { x: 10, y: 20 };
+        let (w, gap) = (8u16, LABEL_GAP_PX);
+        let anchor = crate::layout::Point {
+            x: scale.to_buffer(at.x + w / 2),
+            y: scale.to_buffer(at.y).saturating_sub(gap * scale.get()),
+        };
+        assert_eq!(anchor.x, scale.to_buffer(at.x) + scale.to_buffer(w / 2));
+        assert!(
+            anchor.y < scale.to_buffer(at.y),
+            "the badge must clear the head, not overlap it"
+        );
     }
 
     #[test]

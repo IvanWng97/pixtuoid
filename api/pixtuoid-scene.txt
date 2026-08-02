@@ -75,7 +75,26 @@ pub fn pixtuoid_scene::chitchat::update_and_collect(&mut std::collections::hash:
 pub fn pixtuoid_scene::chitchat::venue_wp_idx(pixtuoid_scene::layout::WaypointKind, usize, &[pixtuoid_scene::layout::Waypoint]) -> usize
 pub mod pixtuoid_scene::cutaway
 pub mod pixtuoid_scene::cutaway::paint
-pub fn pixtuoid_scene::cutaway::paint::render_cutaway(&pixtuoid_scene::pixel_painter::SimFrame, &pixtuoid_scene::layout::Layout, &pixtuoid_core::sprite::format::Pack, &pixtuoid_scene::theme::Theme, pixtuoid_scene::render_scale::RenderScale, &mut pixtuoid_core::sprite::RgbBuffer)
+pub struct pixtuoid_scene::cutaway::paint::CutawayLabel
+pub pixtuoid_scene::cutaway::paint::CutawayLabel::agent_idx: usize
+pub pixtuoid_scene::cutaway::paint::CutawayLabel::anchor_px: pixtuoid_scene::layout::Point
+impl core::clone::Clone for pixtuoid_scene::cutaway::paint::CutawayLabel
+pub fn pixtuoid_scene::cutaway::paint::CutawayLabel::clone(&self) -> pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::cmp::Eq for pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::cmp::PartialEq for pixtuoid_scene::cutaway::paint::CutawayLabel
+pub fn pixtuoid_scene::cutaway::paint::CutawayLabel::eq(&self, &pixtuoid_scene::cutaway::paint::CutawayLabel) -> bool
+impl core::fmt::Debug for pixtuoid_scene::cutaway::paint::CutawayLabel
+pub fn pixtuoid_scene::cutaway::paint::CutawayLabel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::marker::StructuralPartialEq for pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::marker::Freeze for pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::marker::Send for pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::marker::Sync for pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::marker::Unpin for pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::marker::UnsafeUnpin for pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::cutaway::paint::CutawayLabel
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::cutaway::paint::CutawayLabel
+pub fn pixtuoid_scene::cutaway::paint::render_cutaway(&pixtuoid_scene::pixel_painter::SimFrame, &pixtuoid_scene::layout::Layout, &pixtuoid_core::sprite::format::Pack, &pixtuoid_scene::theme::Theme, pixtuoid_scene::render_scale::RenderScale, &mut pixtuoid_core::sprite::RgbBuffer) -> alloc::vec::Vec<pixtuoid_scene::cutaway::paint::CutawayLabel>
 pub mod pixtuoid_scene::cutaway::shade
 pub struct pixtuoid_scene::cutaway::shade::Ramp
 pub pixtuoid_scene::cutaway::shade::Ramp::base: pixtuoid_core::sprite::Rgb
