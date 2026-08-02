@@ -317,7 +317,15 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
                     private PaintCtx), background/ (weather, sunset, skyline,
                     sky.rs, lighting.rs, celestial.rs [sun/moon disc + night stars, #469]),
                     ambient.rs (sun spot + dust motes + ceiling halos),
-                    drawable.rs (y-sort Drawable enum + paint dispatch; creature BEHAVIOR moved to crate::creatures — only the Pet/GatewayMascot PAINT arms + paint_mascot_bubbles stay here), effects.rs (glow/z's/steam/dust/bubble),
+                    drawable.rs (y-sort Drawable enum + paint dispatch via `DrawableCtx` — the
+                                  param BUNDLE {buf, pack, cache, now, theme, scale}: this was six
+                                  positional params and the render scale would have made seven, the
+                                  growth PixelCtx/PaintCtx already answered the same way. `blit_centered`
+                                  is THE density-aware centring seam every centred sprite rides — it
+                                  centres in LOGICAL space then converts ONCE (centring in buffer space
+                                  halves the already-scaled width and drifts odd-width art off the
+                                  footprint its mask stamped — a drift NO scale-1 test can see, pinned by
+                                  `a_centred_blit_scales_both_its_position_and_its_art`); creature BEHAVIOR moved to crate::creatures — only the Pet/GatewayMascot PAINT arms + paint_mascot_bubbles stay here), effects.rs (glow/z's/steam/dust/bubble),
                     palette.rs (agent palette + recolor + tool_glow_tint), anchors.rs (breath, character_anchor —
                     pub(crate); walk position re-imported from motion::walking_position;
                     the per-pose anchor fns take `sprite_w` — the pack's character width,

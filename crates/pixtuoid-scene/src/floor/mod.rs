@@ -455,6 +455,7 @@ pub fn render_floor(
         // Reborrow: `frame_epilogue` uses `fctx` after this render.
         store: &mut *fctx,
         buf,
+        scale,
         scene,
         layout: &layout,
         pack,

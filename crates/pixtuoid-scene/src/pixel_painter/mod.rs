@@ -292,8 +292,15 @@ pub struct PixelCtx<'a> {
     /// field: it is a sibling of the `FloorCtx` on a `PerFloor`, borrowed
     /// disjointly by a multi-floor painter's `split_at_mut`.
     pub store: &'a mut crate::floor::FloorCtx,
-    /// The RGB pixel buffer this pass paints into.
+    /// The RGB pixel buffer this pass paints into — sized in BUFFER pixels,
+    /// which `scale` relates to the `layout`'s logical units.
     pub buf: &'a mut RgbBuffer,
+    /// How many buffer pixels one layout unit paints as.
+    ///
+    /// `layout` is in LOGICAL units and `buf` in pixels; this is the conversion
+    /// between them. At `RenderScale::ONE` they coincide and the pass paints
+    /// exactly as it did before the seam existed.
+    pub scale: crate::render_scale::RenderScale,
     /// The live scene state to render.
     pub scene: &'a SceneState,
     /// The computed office geometry for this frame.
@@ -332,6 +339,7 @@ struct PaintCtx<'a> {
     pack: &'a Pack,
     now: SystemTime,
     buf: &'a mut RgbBuffer,
+    scale: crate::render_scale::RenderScale,
     cache: &'a mut FrameCache,
     theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
@@ -376,6 +384,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             pack: ctx.pack,
             now: ctx.now,
             buf: &mut *ctx.buf,
+            scale: ctx.scale,
             cache: &mut ctx.store.cache,
             theme: ctx.theme,
             floor: ctx.floor,
@@ -754,8 +763,20 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // shallow south-anchored ground strip, so a walker parks DEEP behind it and
     // the object's own sprite (y-sorted at its south base, painted after the
     // walker) hides their lower body — no snapshot, no synthetic back-cap.
+    // Rebuilt per iteration because the bundle borrows `buf`/`cache` mutably
+    // and `drawables` is borrowed for the loop.
     for d in &drawables {
-        paint_drawable(d, ctx.buf, ctx.pack, ctx.cache, ctx.now, ctx.theme);
+        paint_drawable(
+            d,
+            &mut drawable::DrawableCtx {
+                buf: &mut *ctx.buf,
+                pack: ctx.pack,
+                cache: &mut *ctx.cache,
+                now: ctx.now,
+                theme: ctx.theme,
+                scale: ctx.scale,
+            },
+        );
     }
 
     // Room-wide lightning bounce — LAST, so a Storm strike briefly flares the

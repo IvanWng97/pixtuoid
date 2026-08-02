@@ -2528,6 +2528,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 pack: &pack,
                 now,
                 buf,
+                scale: crate::render_scale::RenderScale::ONE,
                 cache: &mut cache,
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
@@ -2891,7 +2892,17 @@ fn busy_printer_ejects_a_page_and_idle_printer_stays_still() {
             anchor_y: pos.y + 2,
             kind: DrawableKind::Printer { pos, busy },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme);
+        paint_drawable(
+            &d,
+            &mut super::drawable::DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme,
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         buf
     };
     let busy = render(true);
@@ -2919,7 +2930,17 @@ fn busy_vending_machine_drops_a_can_and_idle_stays_stocked() {
             anchor_y: pos.y + 3,
             kind: DrawableKind::VendingMachine { pos, busy },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme);
+        paint_drawable(
+            &d,
+            &mut super::drawable::DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme,
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         buf
     };
     let busy = render(true);

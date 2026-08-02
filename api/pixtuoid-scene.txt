@@ -1342,6 +1342,7 @@ pub pixtuoid_scene::pixel_painter::PixelCtx::floor_pet: core::option::Option<&'a
 pub pixtuoid_scene::pixel_painter::PixelCtx::layout: &'a pixtuoid_scene::layout::Layout
 pub pixtuoid_scene::pixel_painter::PixelCtx::now: std::time::SystemTime
 pub pixtuoid_scene::pixel_painter::PixelCtx::pack: &'a pixtuoid_core::sprite::format::Pack
+pub pixtuoid_scene::pixel_painter::PixelCtx::scale: pixtuoid_scene::render_scale::RenderScale
 pub pixtuoid_scene::pixel_painter::PixelCtx::scene: &'a pixtuoid_core::state::SceneState
 pub pixtuoid_scene::pixel_painter::PixelCtx::store: &'a mut pixtuoid_scene::floor::FloorCtx
 pub pixtuoid_scene::pixel_painter::PixelCtx::theme: &'a pixtuoid_scene::theme::Theme

@@ -17,7 +17,7 @@
 
 use std::time::SystemTime;
 
-use pixtuoid_core::sprite::blit::blit_frame;
+use pixtuoid_core::sprite::blit::{blit_frame, blit_frame_scaled};
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
@@ -271,31 +271,61 @@ fn paint_mascot_bubbles(buf: &mut RgbBuffer, pos: Point, frame_h: u16, runs: u32
 /// meeting sofa, the pet, and the gateway mascot all park a sprite on a centre
 /// point, and each open-coded this `saturating_sub(w/2)` / `saturating_sub(h/2)`
 /// pair.
-fn blit_centered(frame: &Frame, pos: Point, buf: &mut RgbBuffer) {
+fn blit_centered(
+    frame: &Frame,
+    pos: Point,
+    scale: crate::render_scale::RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    // Centre in LOGICAL space, THEN convert. Centring in buffer space would
+    // halve a scaled sprite's width, drifting odd-width art half a logical unit
+    // off the footprint its mask stamped.
     let px = pos.x.saturating_sub(frame.width() / 2);
     let py = pos.y.saturating_sub(frame.height() / 2);
-    blit_frame(frame, px, py, buf);
+    blit_frame_scaled(
+        frame,
+        scale.to_buffer(px),
+        scale.to_buffer(py),
+        scale.factor(),
+        buf,
+    );
 }
 
 /// Look up `anim_name`, take its FIRST frame, and [`blit_centered`] it on `pos`
 /// — a no-op if the pack lacks the animation. The point-decor idiom (pantry,
 /// snack shelf, plant, pod decor, floor lamp) that repeated verbatim per arm.
-fn blit_centered_first_frame(pack: &Pack, anim_name: &str, pos: Point, buf: &mut RgbBuffer) {
+fn blit_centered_first_frame(
+    pack: &Pack,
+    anim_name: &str,
+    pos: Point,
+    scale: crate::render_scale::RenderScale,
+    buf: &mut RgbBuffer,
+) {
     if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
-        blit_centered(f, pos, buf);
+        blit_centered(f, pos, scale, buf);
     }
 }
 
 /// Dispatch one Drawable's paint. Effects attached to characters paint
 /// inline so they ride along with the character in z-order.
-pub(super) fn paint_drawable(
-    d: &Drawable<'_>,
-    buf: &mut RgbBuffer,
-    pack: &Pack,
-    cache: &mut FrameCache,
-    now: SystemTime,
-    theme: &crate::theme::Theme,
-) {
+/// The paint-time context one [`Drawable`] arm needs — the subset of `PaintCtx`
+/// they touch. Bundled rather than passed flat: this was six positional
+/// parameters and the render scale would have made seven, the growth
+/// `PixelCtx`/`PaintCtx` already answered the same way.
+pub(super) struct DrawableCtx<'a> {
+    pub buf: &'a mut RgbBuffer,
+    pub pack: &'a Pack,
+    pub cache: &'a mut FrameCache,
+    pub now: SystemTime,
+    pub theme: &'a crate::theme::Theme,
+    pub scale: crate::render_scale::RenderScale,
+}
+
+pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
+    // Re-bound to the original names so the arms below are untouched.
+    let buf = &mut *c.buf;
+    let cache = &mut *c.cache;
+    let (pack, now, theme, scale) = (c.pack, c.now, c.theme, c.scale);
     match &d.kind {
         DrawableKind::DeskCubicle {
             desk,
@@ -374,7 +404,7 @@ pub(super) fn paint_drawable(
             // sprite (it y-sorts at the south base → paints over a north-stander).
             // The mask south-anchors a shallow strip to that base so the walker
             // parks deep behind the visual; no synthetic cap.
-            blit_centered_first_frame(pack, anim_name, *pos, buf);
+            blit_centered_first_frame(pack, anim_name, *pos, scale, buf);
             // The coffee machine occupies `PANTRY_COFFEE_COLS_{LARGE,SMALL}` (the
             // shared source of truth, also used by the binary's hit-test). The
             // steam plumes from within that column range — hand-tuned per sprite
@@ -404,9 +434,9 @@ pub(super) fn paint_drawable(
                 // Mirrored (south sofa / lounge couch): back faces NORTH toward
                 // the windows. `mirror_vertical` allocates a flipped frame.
                 if *mirrored {
-                    blit_centered(&f.mirror_vertical(), *pos, buf);
+                    blit_centered(&f.mirror_vertical(), *pos, scale, buf);
                 } else {
-                    blit_centered(f, *pos, buf);
+                    blit_centered(f, *pos, scale, buf);
                 }
             }
         }
@@ -427,20 +457,20 @@ pub(super) fn paint_drawable(
             paint_kitchen_island(buf, pos.x, pos.y, theme);
         }
         DrawableKind::SnackShelf { pos } => {
-            blit_centered_first_frame(pack, "snack_shelf", *pos, buf);
+            blit_centered_first_frame(pack, "snack_shelf", *pos, scale, buf);
         }
         DrawableKind::Plant { kind, pos } => {
             // Occlusion is the sprite's own job: the foliage overhangs north of
             // the mask's shallow south-anchored pot strip, so a walker parks deep
             // behind the pot and the leaves (y-sorted over them) hide their lower
             // body. No synthetic back-cap.
-            blit_centered_first_frame(pack, kind.sprite_name(), *pos, buf);
+            blit_centered_first_frame(pack, kind.sprite_name(), *pos, scale, buf);
         }
         DrawableKind::PodDecorItem { kind, pos } => {
-            blit_centered_first_frame(pack, kind.sprite_name(), *pos, buf);
+            blit_centered_first_frame(pack, kind.sprite_name(), *pos, scale, buf);
         }
         DrawableKind::FloorLamp { pos } => {
-            blit_centered_first_frame(pack, "floor_lamp", *pos, buf);
+            blit_centered_first_frame(pack, "floor_lamp", *pos, scale, buf);
         }
         DrawableKind::Door { pos, frame_idx } => {
             if let Some(f) = pack.animation("door").and_then(|a| frame_at(a, *frame_idx)) {
@@ -481,7 +511,7 @@ pub(super) fn paint_drawable(
             } else {
                 frame.clone()
             };
-            blit_centered(&final_frame, *pos, buf);
+            blit_centered(&final_frame, *pos, scale, buf);
             if let Some(elapsed) = pet_elapsed_ms {
                 paint_pet_hearts(buf, *pos, *elapsed);
             } else if *anim_name == kind.sleep_anim() {
@@ -503,9 +533,9 @@ pub(super) fn paint_drawable(
             };
             // Degraded (#317): blit a sickly-red tinted copy of the frame.
             if *degraded {
-                blit_centered(&super::palette::degraded_frame(frame), *pos, buf);
+                blit_centered(&super::palette::degraded_frame(frame), *pos, scale, buf);
             } else {
-                blit_centered(frame, *pos, buf);
+                blit_centered(frame, *pos, scale, buf);
             }
             // Busy (an in-flight agent run) → a rising activity-bubble stream
             // above the lobster's head. `run_count > 0` IS the busy gate (busy ⟺
@@ -745,7 +775,17 @@ mod tests {
         let th = theme();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(Point { x: 40, y: 30 }, 0, None);
-        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         assert_eq!(paper_pixel_count(&buf, th), 0);
         // …including a mid-fall sheet: a big EARLY reading (delta cleared the
         // sheet minimum before cumulative reached T1) paints nothing — a
@@ -753,7 +793,17 @@ mod tests {
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(Point { x: 40, y: 30 }, 0, Some(2));
-        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         assert_eq!(paper_pixel_count(&buf, th), 0);
     }
 
@@ -768,7 +818,17 @@ mod tests {
             let mut cache = FrameCache::new();
             let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
             let d = desk_cubicle_drawable(desk, tier, None);
-            paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+            paint_drawable(
+                &d,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut cache,
+                    now: SystemTime::UNIX_EPOCH,
+                    theme: th,
+                    scale: crate::render_scale::RenderScale::ONE,
+                },
+            );
             counts.push(paper_pixel_count(&buf, th));
             // Base row always paints paper across the 3-wide stack column.
             for xoff in 0..STACK_W {
@@ -793,7 +853,17 @@ mod tests {
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 3, None);
-        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         let t3_top = base_y - (3 * STACK_PX_PER_TIER - 1);
         let overhang = buf.get(desk.x + STACK_X_OFF + STACK_W, t3_top);
         assert!(
@@ -814,7 +884,17 @@ mod tests {
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 1, Some(2));
-        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         let sy = stack_top - (crate::token_meter::SHEET_FALL_PX - 2);
         assert_eq!(buf.get(desk.x + STACK_X_OFF, sy), th.furniture.paper);
         // Fully fallen: the sheet has merged into the pile — nothing paints
@@ -822,7 +902,17 @@ mod tests {
         let mut cache = FrameCache::new();
         let mut buf2 = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 1, Some(crate::token_meter::SHEET_FALL_PX));
-        paint_drawable(&d, &mut buf2, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf2,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         for y in 0..stack_top {
             for xoff in 0..STACK_W {
                 let c = buf2.get(desk.x + STACK_X_OFF + xoff, y);
@@ -874,7 +964,17 @@ mod tests {
                 sheet_fall: None,
             },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: theme(),
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         // Cabinet lands at desk.x - cab.width - 1 .. ; sample a pixel inside it.
         let cab_x = desk.x.saturating_sub(cab.width() + 1);
         let mut cab_painted = false;
@@ -919,7 +1019,17 @@ mod tests {
                 anchor_y: pos.y,
                 kind: DrawableKind::MeetingSofa { pos, mirrored },
             };
-            paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+            paint_drawable(
+                &d,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut cache,
+                    now,
+                    theme: theme(),
+                    scale: crate::render_scale::RenderScale::ONE,
+                },
+            );
             buf
         };
         let plain = render(false);
@@ -956,7 +1066,17 @@ mod tests {
                 pet_elapsed_ms: None,
             },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: theme(),
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), bg, "missing pet anim must paint nothing");
@@ -985,7 +1105,17 @@ mod tests {
                     pet_elapsed_ms: None,
                 },
             };
-            paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+            paint_drawable(
+                &d,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut cache,
+                    now,
+                    theme: theme(),
+                    scale: crate::render_scale::RenderScale::ONE,
+                },
+            );
             buf
         };
         // Count non-background pixels ABOVE the pet (where the z's float) — the
@@ -1024,7 +1154,17 @@ mod tests {
             anchor_y: pos.y,
             kind: DrawableKind::VendingMachine { pos, busy: false },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: th,
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         let vx = pos.x - VENDING_BODY.w / 2;
         let vy = pos.y - VENDING_BODY.h / 2;
         // dy==0 row → panel.
@@ -1073,7 +1213,17 @@ mod tests {
             anchor_y: pos.y,
             kind: DrawableKind::Printer { pos, busy: false },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: th,
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         let px0 = pos.x - PRINTER_BODY.w / 2;
         let py0 = pos.y - PRINTER_BODY.h / 2;
         // dy==0, dx in 1..=3 → glass.
@@ -1120,11 +1270,42 @@ mod tests {
         let marker = Rgb { r: 9, g: 8, b: 7 };
         let frame = Frame::from_pixels(3, 2, vec![Some(marker); 6]);
         let mut buf = RgbBuffer::filled(20, 20, bg);
-        blit_centered(&frame, Point { x: 10, y: 10 }, &mut buf);
+        blit_centered(
+            &frame,
+            Point { x: 10, y: 10 },
+            crate::render_scale::RenderScale::ONE,
+            &mut buf,
+        );
         assert_eq!(buf.get(9, 9), marker, "top-left lands at pos − size/2");
         assert_eq!(buf.get(11, 10), marker, "bottom-right at (9+2, 9+1)");
         assert_eq!(buf.get(8, 9), bg, "one column west of the frame stays bg");
         assert_eq!(buf.get(9, 8), bg, "one row north of the frame stays bg");
+    }
+
+    #[test]
+    fn a_centred_blit_scales_both_its_position_and_its_art() {
+        // The sibling of the test above, at scale. Centring must happen in
+        // LOGICAL space and convert ONCE: centring in buffer space would halve
+        // the already-scaled width, drifting the sprite off the footprint its
+        // mask stamped — a drift no single-scale test can see.
+        let bg = Rgb { r: 0, g: 0, b: 0 };
+        let marker = Rgb { r: 9, g: 8, b: 7 };
+        let two = crate::render_scale::RenderScale::new(2).expect("2 is nonzero");
+        // Same 3x2 odd-width frame, so the floor division is pinned here too:
+        // logical top-left (9, 9) -> buffer (18, 18), art 3x2 -> 6x4 pixels.
+        let frame = Frame::from_pixels(3, 2, vec![Some(marker); 6]);
+        let mut buf = RgbBuffer::filled(40, 40, bg);
+        blit_centered(&frame, Point { x: 10, y: 10 }, two, &mut buf);
+
+        assert_eq!(buf.get(18, 18), marker, "top-left at scale.to_buffer(9)");
+        assert_eq!(buf.get(23, 21), marker, "bottom-right at (18+5, 18+3)");
+        assert_eq!(buf.get(17, 18), bg, "one column west stays bg");
+        assert_eq!(
+            buf.get(24, 18),
+            bg,
+            "one column east of the 6px span stays bg"
+        );
+        assert_eq!(buf.get(18, 17), bg, "one row north stays bg");
     }
 
     #[test]
@@ -1146,7 +1327,17 @@ mod tests {
                 degraded: false,
             },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: theme(),
+                scale: crate::render_scale::RenderScale::ONE,
+            },
+        );
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), bg, "missing mascot anim must paint nothing");
@@ -1179,7 +1370,17 @@ mod tests {
                     degraded,
                 },
             };
-            paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+            paint_drawable(
+                &d,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut cache,
+                    now,
+                    theme: theme(),
+                    scale: crate::render_scale::RenderScale::ONE,
+                },
+            );
             buf
         };
         let plain = render(false);
