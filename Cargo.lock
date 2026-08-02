@@ -2498,6 +2498,7 @@ dependencies = [
  "insta",
  "libc",
  "notify",
+ "pixtuoid-core",
  "proptest",
  "rustix 1.1.4",
  "serde",

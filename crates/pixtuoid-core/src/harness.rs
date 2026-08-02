@@ -1,0 +1,570 @@
+//! ONE offline driver for the owner's contract: *transcripts in → "did we
+//! parse it AND would the UI show it" out.*
+//!
+//! Four call sites used to implement the same pipeline by hand — the committed
+//! fixtures (conformance), one fixture through the real renderer
+//! (`wire_to_pixels`), stdin (`decoder_fuzz`), and a whole corpus tree
+//! (`corpus_check`). They differ ONLY in where bytes come from and in
+//! assert-vs-report; the pipeline between those two ends is the same:
+//!
+//! ```text
+//!   raw line → JSON → the registry's decoder → a real Reducer → SceneState
+//! ```
+//!
+//! [`Drive`] is that pipeline and [`Driven`] is everything the four shells ever
+//! asserted or reported about it. Whether the resulting scene would PAINT is
+//! the render layer's question, asked one crate up (`FloorSession::observe`);
+//! this half stops at the state the painter reads.
+//!
+//! Three things here are load-bearing rather than incidental:
+//!
+//! 1. **Registration comes from the WATCHER, not the decoder.** A JSONL event
+//!    for an unknown id is a documented no-op, so a transcript driven with no
+//!    seed registers nothing however well it decodes — `corpus_check`'s first
+//!    run reported 0/4376 registered for exactly this reason, and that was the
+//!    harness's bug, not the decoder's. [`SeedKind::FirstSight`] stands in for
+//!    `emit_first_sight`, keyed by [`registry::id_deriver_for`] — the SAME row
+//!    the watcher reads, so the seed can't drift from production.
+//! 2. **Transport is load-bearing** (the reducer's hook-wins dedup keys on it),
+//!    so it is not a free parameter: [`Drive::transcript`] is `Jsonl` through
+//!    the row's `LineDecoder` and [`Drive::hooks`] is `Hook` through the shared
+//!    `decode_hook_payload`. A driver can't pair the wrong two.
+//! 3. **A decoder panic is a contract violation, everywhere.** The watcher and
+//!    hook listener log-and-continue on malformed input; a panic takes the
+//!    whole watcher down. Every line therefore runs under `catch_unwind` — the
+//!    never-panic invariant used to be checked only by the on-demand fuzz shell,
+//!    and is now inherent in the pipeline all four ride.
+
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
+
+use serde_json::Value;
+
+use crate::source::decoder::{decode_hook_payload, LineDecoder};
+use crate::source::registry;
+use crate::state::{ActivityState, SceneState, ToolKind};
+use crate::{AgentEvent, AgentId, Reducer, Transport};
+
+/// Whether the driver stands in for the watcher's first-sight registration.
+///
+/// Not a free choice: it mirrors what the source's OWN wire does. A transcript
+/// that carries no `SessionStart` of its own (CC, Codex, Antigravity, grok) is
+/// registered in production by the watcher, so an offline driver must seed it;
+/// one whose head line IS a `SessionStart` (Copilot, omp) registers itself and
+/// a seed would only duplicate it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SeedKind {
+    /// The wire registers itself — drive exactly the bytes.
+    #[default]
+    None,
+    /// Prepend the `SessionStart` the watcher's `emit_first_sight` would emit
+    /// for this transcript path, keyed by the source's registry row.
+    FirstSight,
+}
+
+/// A lifecycle CLASS a driven wire pushed the slot through — asserted as
+/// reached-at-some-point, never as the terminal state (`mark_exiting` sets only
+/// `exiting_at` and never resets `slot.state`, so a fixture whose last activity
+/// its own wire never resolves legitimately ends non-Idle).
+///
+/// A class, not a `ToolKind`: `from_display` is case-sensitive, so a lowercase
+/// wire tool name (`"bash"`) renders `Active(Other)` where `"Bash"` renders
+/// `Active(Bash)` — a cosmetic per-source difference that must not be frozen
+/// into a lifecycle assertion. `Delegating` is `Active` with `kind ==
+/// ToolKind::Task`; `ActivityState` has no separate variant.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Reach {
+    /// A tool call is in flight.
+    Active,
+    /// Blocked on a permission/input prompt.
+    Waiting,
+    /// A subagent dispatch is in flight.
+    Delegating,
+}
+
+/// One line the pipeline could not carry, identified by position and SHAPE.
+///
+/// Never by content: a real transcript line carries the user's prose, code and
+/// paths, and these render on a terminal (the fuzz shell prints them). `shape`
+/// is the top-level `type` plus the key NAMES — enough to find the line in the
+/// file it came from, and nothing a reader of the report shouldn't see.
+#[derive(Clone, Debug)]
+pub struct LineFailure {
+    /// 1-based index among the non-blank lines driven.
+    pub line: usize,
+    /// `type="…" keys=[…]` — structure only.
+    pub shape: String,
+    /// The decoder's own error, or the empty string for a panic (a panic
+    /// payload is not ours to format).
+    pub message: String,
+}
+
+impl std::fmt::Display for LineFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "line {}: {}", self.line, self.shape)?;
+        if !self.message.is_empty() {
+            write!(f, ": {}", self.message)?;
+        }
+        Ok(())
+    }
+}
+
+/// Everything the pipeline observed. The four shells project different fields:
+/// conformance snapshots `events` and asserts they coalesce, `wire_to_pixels`
+/// asserts on `reached` then renders `scene`, the fuzz shell counts `panics`,
+/// the corpus shell reports the lot.
+#[derive(Debug)]
+pub struct Driven {
+    /// The folded scene — `agents.len()` is "did it register", and the scene
+    /// itself is what a painter would observe.
+    pub scene: SceneState,
+    /// Every decoded event in wire order, seed first when there is one.
+    pub events: Vec<AgentEvent>,
+    /// Non-blank lines driven (blank lines are skipped, not counted).
+    pub lines: usize,
+    /// Lines that were not valid JSON — a torn write, outside the decoder
+    /// contract (the watcher skips them too).
+    pub unparseable: usize,
+    /// Lines whose decoder returned `Err`. ALWAYS a defect on bytes the source
+    /// itself wrote: the contract is log-and-continue, never a hard error.
+    pub decode_errors: Vec<LineFailure>,
+    /// Lines whose decoder PANICKED — the never-panic contract violated.
+    pub panics: Vec<LineFailure>,
+    /// Lifecycle classes any slot passed through, in first-reached order.
+    pub reached: Vec<Reach>,
+}
+
+impl Driven {
+    /// Slots the fold registered — "did the wire reach the scene at all".
+    pub fn registered(&self) -> usize {
+        self.scene.agents.len()
+    }
+}
+
+/// The fixed wall clock the fold runs at. Deterministic by construction: with
+/// one instant for every event, no sweep's elapsed-time threshold can fire
+/// mid-drive and reap a slot the caller is about to assert on.
+const DEFAULT_NOW_EPOCH_SECS: u64 = 1_800_000_000;
+
+/// How far past `now` the settle tick runs. Long enough for the reducer's
+/// `ACTIVE_GRACE_WINDOW` pending-idle to realize (so a resolved tool really
+/// reads Idle), short enough to stay inside `EXIT_GRACE_WINDOW` (so a wire
+/// carrying its own `SessionEnd` still leaves the slot to observe).
+const SETTLE: Duration = Duration::from_secs(3);
+
+/// The seed session's working directory. Non-empty on purpose: an empty cwd
+/// registers the reducer's unknown-cwd ghost (a bare ordinal label, and a
+/// ~3-min reap in production), which is not what any driver wants to observe.
+const SEED_CWD: &str = "/pixtuoid/harness";
+
+/// The decode-and-fold pipeline for one source's bytes.
+///
+/// Construct with [`Drive::transcript`] (JSONL lines through the source's
+/// registry `LineDecoder`) or [`Drive::hooks`] (hook envelopes through the
+/// shared dispatcher), then feed lines to [`Drive::lines`].
+pub struct Drive {
+    source: String,
+    transport: Transport,
+    decode: Decode,
+    seed: SeedKind,
+    now: SystemTime,
+}
+
+/// The transport's decoder plus whatever it needs. Private so the
+/// decoder↔transport pairing stays a constructor's job, never a caller's.
+enum Decode {
+    /// A transcript's line decoder, with the logical path it keys on.
+    Transcript {
+        decode: LineDecoder,
+        logical: String,
+    },
+    /// The shared hook dispatcher — each envelope keys itself, so no path.
+    Hooks,
+}
+
+impl Drive {
+    /// Drive a transcript's lines through `source`'s own `LineDecoder` on
+    /// `Transport::Jsonl`. `logical` is the transcript path the decoder keys
+    /// its `AgentId`s on — pass the fixture-relative path where snapshots must
+    /// stay machine-independent, the real path otherwise.
+    ///
+    /// `None` when the source is hook-only, a daemon, or unregistered: those
+    /// have no transcript, and a caller that silently fell back to some other
+    /// decoder would report a green never-panic run having exercised the wrong
+    /// one.
+    pub fn transcript(source: &str, logical: &str) -> Option<Self> {
+        let decode = registry::descriptor_for(source)?.line_decoder()?;
+        Some(Self {
+            source: source.to_string(),
+            transport: Transport::Jsonl,
+            decode: Decode::Transcript {
+                decode,
+                logical: logical.to_string(),
+            },
+            seed: SeedKind::None,
+            now: SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_NOW_EPOCH_SECS),
+        })
+    }
+
+    /// Drive hook envelopes through the shared `decode_hook_payload` on
+    /// `Transport::Hook`. Available for every source: the dispatcher routes by
+    /// the envelope's own `_pixtuoid_source` stamp, and a daemon's payloads
+    /// short-circuit to zero `AgentEvent`s (presence rides a sibling channel).
+    ///
+    /// There is no seed here by construction — a hook for an unknown id
+    /// REGISTERS it (hooks are proof of life), so hook bytes never need one.
+    pub fn hooks(source: &str) -> Self {
+        Self {
+            source: source.to_string(),
+            transport: Transport::Hook,
+            decode: Decode::Hooks,
+            seed: SeedKind::None,
+            now: SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_NOW_EPOCH_SECS),
+        }
+    }
+
+    /// Stand in for the watcher's first-sight registration (see
+    /// [`SeedKind::FirstSight`]). No-op on a hook drive, which never needs one.
+    #[must_use]
+    pub fn seeded(mut self) -> Self {
+        self.seed = SeedKind::FirstSight;
+        self
+    }
+
+    /// Fold at `now` instead of the default fixed instant. Only a caller that
+    /// RENDERS the resulting scene needs this — the render must read the same
+    /// clock the fold wrote, or every sprite is mid-entry-walk.
+    #[must_use]
+    pub fn at(mut self, now: SystemTime) -> Self {
+        self.now = now;
+        self
+    }
+
+    /// The `AgentId` a first-sight seed keys on: the source's registry
+    /// derivation over the transcript path — byte-identical to what the
+    /// watcher would have registered.
+    fn seed_id(&self, logical: &str) -> AgentId {
+        AgentId::from_parts(
+            &self.source,
+            &registry::id_deriver_for(&self.source)(Path::new(logical)),
+        )
+    }
+
+    /// Drive `lines` end to end. Blank lines are skipped; every other line is
+    /// parsed, decoded under `catch_unwind`, and the whole decoded stream is
+    /// folded through a real `Reducer`.
+    pub fn lines<I, S>(&self, lines: I) -> Driven
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut d = Driven {
+            scene: SceneState::uniform(8),
+            events: Vec::new(),
+            lines: 0,
+            unparseable: 0,
+            decode_errors: Vec::new(),
+            panics: Vec::new(),
+            reached: Vec::new(),
+        };
+
+        if let (SeedKind::FirstSight, Decode::Transcript { logical, .. }) =
+            (self.seed, &self.decode)
+        {
+            d.events.push(AgentEvent::SessionStart {
+                agent_id: self.seed_id(logical),
+                source: self.source.clone(),
+                session_id: format!("{}-harness-seed", self.source),
+                cwd: PathBuf::from(SEED_CWD),
+                parent_id: None,
+            });
+        }
+
+        for line in lines {
+            let line = line.as_ref();
+            if line.trim().is_empty() {
+                continue;
+            }
+            d.lines += 1;
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                d.unparseable += 1;
+                continue;
+            };
+            // `v` moves into the decoder: cloning every line to keep a copy for
+            // the failure shape would clone whole transcript bodies on the
+            // corpus path. A panic is rare enough to re-parse for.
+            match catch_unwind(AssertUnwindSafe(|| self.decode_one(v))) {
+                Ok(Ok(evs)) => d.events.extend(evs),
+                Ok(Err(e)) => d.decode_errors.push(LineFailure {
+                    line: d.lines,
+                    shape: shape_of(line),
+                    message: e.to_string(),
+                }),
+                Err(_) => d.panics.push(LineFailure {
+                    line: d.lines,
+                    shape: shape_of(line),
+                    message: String::new(),
+                }),
+            }
+        }
+
+        self.fold(&mut d);
+        d
+    }
+
+    fn decode_one(&self, v: Value) -> anyhow::Result<Vec<AgentEvent>> {
+        match &self.decode {
+            Decode::Transcript { decode, logical } => decode(logical, &self.source, v),
+            Decode::Hooks => decode_hook_payload(v),
+        }
+    }
+
+    /// Fold the decoded stream through a real `Reducer`, recording every
+    /// lifecycle class any slot passes through. Each event is observed BEFORE
+    /// and AFTER a settle tick, so a transient class a later event resolves
+    /// still counts as reached.
+    fn fold(&self, d: &mut Driven) {
+        let mut reducer = Reducer::new();
+        for ev in &d.events {
+            reducer.apply(&mut d.scene, ev.clone(), self.now, self.transport);
+            note_reached(&d.scene, &mut d.reached);
+            reducer.tick(&mut d.scene, self.now + SETTLE);
+            note_reached(&d.scene, &mut d.reached);
+        }
+    }
+}
+
+/// Union the lifecycle classes every live slot is in into `reached`.
+///
+/// Every slot, not the first: a `HashMap`'s iteration order is arbitrary, so
+/// reading one slot makes a multi-agent wire (a parent and its subagent) report
+/// a different class run to run.
+fn note_reached(scene: &SceneState, reached: &mut Vec<Reach>) {
+    for slot in scene.agents.values() {
+        let r = match &slot.state {
+            ActivityState::Active {
+                kind: ToolKind::Task,
+                ..
+            } => Reach::Delegating,
+            ActivityState::Active { .. } => Reach::Active,
+            ActivityState::Waiting { .. } => Reach::Waiting,
+            ActivityState::Idle => continue,
+        };
+        if !reached.contains(&r) {
+            reached.push(r);
+        }
+    }
+}
+
+/// A line's STRUCTURE — its top-level `type` and key names, never its values.
+/// The one content-safe formatter for failure reporting (the corpus and fuzz
+/// shells print these straight to a terminal).
+fn shape_of(line: &str) -> String {
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return "<unparseable>".to_string();
+    };
+    let ty = v.get("type").and_then(Value::as_str).unwrap_or("");
+    let keys = v.as_object().map_or_else(
+        || "<non-object>".to_string(),
+        |o| o.keys().cloned().collect::<Vec<_>>().join(","),
+    );
+    format!("type={ty:?} keys=[{keys}]")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A CC transcript line carrying only tool activity — the shape that made
+    /// the seed load-bearing (nothing in it registers a session).
+    fn cc_tool_line() -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "id": "tu-1", "name": "Bash", "input": {"command": "ls"}}
+            ]}
+        })
+        .to_string()
+    }
+
+    const CC_TRANSCRIPT: &str =
+        "/h/.claude/projects/-h-p/01000000-0000-7000-8000-0000000000cc.jsonl";
+
+    #[test]
+    fn an_unseeded_activity_only_transcript_decodes_but_registers_nothing() {
+        // The documented no-op the whole SeedKind exists for: the events are
+        // real, and every one of them lands against an unknown id.
+        let d = Drive::transcript("claude-code", CC_TRANSCRIPT)
+            .unwrap()
+            .lines([cc_tool_line()]);
+        assert!(!d.events.is_empty(), "the line must decode");
+        assert_eq!(
+            d.registered(),
+            0,
+            "a JSONL event for an unknown id is a no-op"
+        );
+        assert!(d.reached.is_empty());
+    }
+
+    #[test]
+    fn the_first_sight_seed_registers_and_the_wire_drives_the_slot_active() {
+        let d = Drive::transcript("claude-code", CC_TRANSCRIPT)
+            .unwrap()
+            .seeded()
+            .lines([cc_tool_line()]);
+        assert_eq!(d.registered(), 1);
+        assert_eq!(d.reached, vec![Reach::Active]);
+    }
+
+    /// The seed must key EXACTLY as the watcher's first-sight would, or it
+    /// registers one agent and the decoded activity lands on another — two
+    /// slots for one session, which is the bug this seeds against.
+    #[test]
+    fn the_seed_coalesces_with_the_decoders_own_agent_id() {
+        let d = Drive::transcript("claude-code", CC_TRANSCRIPT)
+            .unwrap()
+            .seeded()
+            .lines([cc_tool_line()]);
+        let ids: std::collections::BTreeSet<_> =
+            d.events.iter().map(AgentEvent::agent_id).collect();
+        assert_eq!(ids.len(), 1, "seed + decoded activity must be ONE agent");
+        assert_eq!(
+            ids.into_iter().next().unwrap(),
+            AgentId::from_parts("claude-code", "01000000-0000-7000-8000-0000000000cc"),
+            "the seed must key on the row's derivation (the CC filename stem)"
+        );
+    }
+
+    #[test]
+    fn blank_lines_are_skipped_and_non_json_counts_as_unparseable() {
+        let d = Drive::transcript("claude-code", CC_TRANSCRIPT)
+            .unwrap()
+            .lines(["", "   ", "not json at all", "{}"]);
+        assert_eq!(d.lines, 2, "only the non-blank lines are driven");
+        assert_eq!(d.unparseable, 1);
+        assert!(d.decode_errors.is_empty());
+    }
+
+    #[test]
+    fn a_hook_envelope_registers_itself_with_no_seed() {
+        // Hooks are proof of life: an unknown id is REGISTERED, not ignored.
+        let payload = serde_json::json!({
+            "_pixtuoid_source": "claude-code",
+            "hook_event_name": "SessionStart",
+            "session_id": "ses-h",
+            "cwd": "/repo"
+        })
+        .to_string();
+        let d = Drive::hooks("claude-code").lines([payload]);
+        assert_eq!(d.registered(), 1);
+    }
+
+    /// A hook-only source has no transcript to drive — the constructor refuses
+    /// rather than falling back to another source's decoder (the misroute that
+    /// once reported a false-green fuzz run).
+    #[test]
+    fn transcript_is_none_for_hook_only_daemon_and_unknown_sources() {
+        assert!(Drive::transcript("cursor", "/x.jsonl").is_none());
+        assert!(Drive::transcript("openclaw", "/x.jsonl").is_none());
+        assert!(Drive::transcript("not-a-source", "/x.jsonl").is_none());
+    }
+
+    /// A `Drive` over a STAND-IN decoder. The two failure lanes below are about
+    /// the harness's capture, not about which real decoder happens to reject
+    /// which bytes today (a corpus run measures 0 decode errors, so no real
+    /// decoder can serve as the fixture for either lane).
+    fn drive_with(decode: LineDecoder) -> Drive {
+        Drive {
+            source: "claude-code".to_string(),
+            transport: Transport::Jsonl,
+            decode: Decode::Transcript {
+                decode,
+                logical: CC_TRANSCRIPT.to_string(),
+            },
+            seed: SeedKind::None,
+            now: SystemTime::UNIX_EPOCH + Duration::from_secs(DEFAULT_NOW_EPOCH_SECS),
+        }
+    }
+
+    /// A line carrying prose under a key — the shape a real transcript has, and
+    /// what the failure report must NOT echo back to a terminal.
+    const PROSE_LINE: &str = r#"{"type":"assistant","secret":"do not print me"}"#;
+
+    #[test]
+    fn a_decoder_error_is_recorded_with_the_lines_shape_not_its_content() {
+        fn refuse(_p: &str, _s: &str, _v: Value) -> anyhow::Result<Vec<AgentEvent>> {
+            Err(anyhow::anyhow!("unsupported event"))
+        }
+        let d = drive_with(refuse).lines([PROSE_LINE]);
+
+        assert_eq!(d.decode_errors.len(), 1);
+        assert_eq!(d.decode_errors[0].line, 1);
+        assert_eq!(d.decode_errors[0].message, "unsupported event");
+        let shape = &d.decode_errors[0].shape;
+        assert!(
+            !shape.contains("do not print me"),
+            "the shape must carry key NAMES only, got {shape}"
+        );
+        assert!(shape.contains("type=\"assistant\""), "got {shape}");
+        assert!(shape.contains("secret"), "got {shape}");
+        assert!(d.panics.is_empty(), "a decode error is not a panic");
+    }
+
+    /// NEGATIVE CONTROL for the never-panic capture: a decoder that panics must
+    /// be RECORDED, not propagated. Without this the `panics` field could stay
+    /// permanently empty and every shell would report a green contract.
+    #[test]
+    fn a_panicking_decoder_is_caught_and_recorded_by_shape() {
+        fn boom(_p: &str, _s: &str, _v: Value) -> anyhow::Result<Vec<AgentEvent>> {
+            panic!("decoder blew up")
+        }
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let d = drive_with(boom).lines([PROSE_LINE]);
+        std::panic::set_hook(prev);
+
+        assert_eq!(d.panics.len(), 1, "the panic must be captured, not unwound");
+        assert_eq!(d.panics[0].line, 1);
+        assert!(
+            d.panics[0].shape.contains("type=\"assistant\""),
+            "got {}",
+            d.panics[0].shape
+        );
+        assert!(
+            !d.panics[0].shape.contains("do not print me"),
+            "got {}",
+            d.panics[0].shape
+        );
+        assert!(d.decode_errors.is_empty(), "a panic is not a decode error");
+    }
+
+    /// A class reached only transiently — resolved by a later line — still
+    /// counts, because the fold observes before AND after each settle tick.
+    #[test]
+    fn a_transient_class_resolved_by_a_later_line_still_counts_as_reached() {
+        let start = serde_json::json!({
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "id": "tu-9", "name": "Bash", "input": {"command": "ls"}}
+            ]}
+        })
+        .to_string();
+        let end = serde_json::json!({
+            "type": "user",
+            "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "tu-9", "content": "ok"}
+            ]}
+        })
+        .to_string();
+        let d = Drive::transcript("claude-code", CC_TRANSCRIPT)
+            .unwrap()
+            .seeded()
+            .lines([start, end]);
+        assert!(
+            d.reached.contains(&Reach::Active),
+            "the resolved tool call must still count as reached, got {:?}",
+            d.reached
+        );
+    }
+}

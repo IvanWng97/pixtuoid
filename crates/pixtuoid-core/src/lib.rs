@@ -47,6 +47,12 @@
 #![warn(missing_docs)]
 
 pub mod grid;
+/// The offline decode→reduce driver every test/tool that feeds real wire bytes
+/// through the production path rides. DEV-ONLY: behind the non-default
+/// `harness` feature, so it is absent from a normal build and from the
+/// published crate's API surface.
+#[cfg(feature = "harness")]
+pub mod harness;
 /// Agent identity: the `AgentId` session key and its path/parts derivations.
 pub mod id;
 pub mod platform;
