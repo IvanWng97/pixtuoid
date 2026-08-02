@@ -171,29 +171,49 @@ pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<
         None => (chair, None),
     }
 }
-/// Take a spent EXIT leg off the non-exiting path, reporting when entry must
-/// re-arm: `Some(now)` once the walkout ARRIVED, `None` while it is in flight.
+/// Where a cancelled walkout must re-enter FROM, or `None` when there was no
+/// walkout to cancel.
+enum ReEnter {
+    /// The walkout ARRIVED — the sprite is off-floor, so the door is the only
+    /// honest origin.
+    Door,
+    /// Still in flight: resume from where the sprite actually is.
+    Live(Point),
+}
+
+/// Take a spent EXIT leg off the non-exiting path and say where entry re-arms.
 ///
 /// An exit leg surviving onto this path means `exiting_at` was cleared under us
 /// — the reducer's `resurrect_in_place`, or a GC-then-re-register inside one
 /// tick. Neither re-stamps `created_at`, so the entry branch's spawn-window gate
-/// can never re-arm on its own; once the walkout arrived the sprite is off-floor
-/// and a fresh door walk is the only honest render.
+/// can never re-arm on its own and the agent would pop onto its chair.
 ///
-/// The IN-FLIGHT case gets the take but NO walk override, and still teleports —
-/// the snap-back is Active/Waiting-only and a resurrected slot is Idle. See the
-/// `pixtuoid-scene` CLAUDE.md exit-compression sharp edge.
+/// Both halves re-arm ENTRY rather than deferring to the snap-back, which is
+/// unreachable here: `resurrect_in_place` leaves the slot `Idle`, and the wander
+/// dispatch returns (usually `SeatedThinking`) before the snap-back is ever
+/// consulted. The entry branch runs BEFORE that dispatch, so an armed leg is
+/// what actually renders.
 ///
 /// The take is load-bearing on its own: a retained arrived leg is replayed by
 /// the NEXT exit, vanishing the sprite on its first frame instead of walking out.
-fn take_arrived_exit_leg(ms: Option<&mut MotionState>, now: SystemTime) -> Option<SystemTime> {
+fn take_cancelled_walkout(
+    ms: Option<&mut MotionState>,
+    now: SystemTime,
+    live: Option<Point>,
+) -> Option<ReEnter> {
     let ms = ms?;
     let leg = ms.exit.take()?;
+    ms.entry = None;
     let elapsed = crate::anim::elapsed_ms(now, leg.started_at);
-    walk_arrived(&leg.profile, exit_elapsed_ms(&leg.profile, elapsed)).then(|| {
-        ms.entry = None;
-        now
-    })
+    Some(
+        if walk_arrived(&leg.profile, exit_elapsed_ms(&leg.profile, elapsed)) {
+            ReEnter::Door
+        } else {
+            // No recent render (an off-screen floor) leaves the door as the only
+            // position we can honestly claim.
+            live.map_or(ReEnter::Door, ReEnter::Live)
+        },
+    )
 }
 
 /// Time-compressed elapsed for an EXIT leg, so the walk REACHES the door before
@@ -359,7 +379,8 @@ pub fn derive_with_routing(
     }
 
     // ---- RESURRECT: a cancelled walkout ------------------------------------
-    let re_enter_at = take_arrived_exit_leg(rctx.motion.get_mut(&slot.agent_id), now);
+    let live_now = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now);
+    let re_enter = take_cancelled_walkout(rctx.motion.get_mut(&slot.agent_id), now, live_now);
 
     // ---- ENTRY branch ------------------------------------------------------
     // Gate: spawn window check reuses ENTRY_ANIMATION_MS only as a bound on
@@ -383,7 +404,13 @@ pub fn derive_with_routing(
             .or_insert_with(|| MotionState::new(slot.agent_id));
 
         // Snapshot on first sighting within the spawn window, or on a resurrect.
-        if mstate.entry.is_none() && (since_spawn < ENTRY_ANIMATION_MS || re_enter_at.is_some()) {
+        // A resurrect re-arms whatever `created_at` says, and starts its leg at
+        // the sprite's real position.
+        let entry_from = match re_enter {
+            Some(ReEnter::Live(p)) => p,
+            _ => door,
+        };
+        if mstate.entry.is_none() && (since_spawn < ENTRY_ANIMATION_MS || re_enter.is_some()) {
             // Profile covers door→approach PLUS the short settle glide onto the chair
             // (end settle; the door start has no seat).
             let profile = snapshot_leg_profile(
@@ -391,16 +418,29 @@ pub fn derive_with_routing(
                 &layout.walkable,
                 rctx.overlay,
                 slot.agent_id,
-                door,
+                entry_from,
                 approach,
                 None,
                 chair_settle,
                 WalkIntent::Entry,
             );
-            mstate.entry = Some((re_enter_at.unwrap_or(slot.created_at), profile));
+            mstate.entry = Some(WalkLeg {
+                started_at: if re_enter.is_some() {
+                    now
+                } else {
+                    slot.created_at
+                },
+                profile,
+                from: entry_from,
+            });
         }
 
-        if let Some((started_at, profile)) = mstate.entry {
+        if let Some(WalkLeg {
+            started_at,
+            profile,
+            from,
+        }) = mstate.entry
+        {
             let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
 
             if !walk_arrived(&profile, elapsed_ms) {
@@ -412,7 +452,7 @@ pub fn derive_with_routing(
                     layout,
                     rctx,
                     Pose::Walking {
-                        from: door,
+                        from,
                         to: approach,
                         t_x1000,
                         frame,

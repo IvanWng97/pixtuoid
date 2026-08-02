@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
-use pixtuoid_core::source::jsonl::JsonlWatcher;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Reducer, SceneState, Transport};
@@ -24,22 +23,9 @@ pub(crate) async fn capture_live_scene(
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(1024);
     let tx_hook = tx.clone();
     let root = PathBuf::from(projects_root);
-    let mut watcher = JsonlWatcher::new(
-        root.clone(),
-        pixtuoid_core::source::claude_code::SOURCE_NAME.to_string(),
-        pixtuoid_core::source::claude_code::decode_cc_line,
-        pixtuoid_core::source::claude_code::cc_session_ended,
-    )
-    .with_label_deriver(pixtuoid_core::source::claude_code::cc_derive_label)
-    // The SAME UUID keying the real CC source wires (claude_code/native.rs):
-    // without it the watcher registers under the path-hash id while every
-    // line-decoded event (activity, ModelInfo) keys on the UUID — nothing
-    // coalesces and --live agents sit Idle/model-less forever (latent since
-    // #203, exposed by the burn-tier replay).
-    .with_id_deriver(pixtuoid_core::source::claude_code::cc_id_from_path)
-    // The SAME activity clock — the third builder call this harness has had to
-    // chase after the real source (id-deriver #203, liveness probe #632).
-    .with_activity_recency(pixtuoid_core::source::claude_code::cc_activity_recency);
+    // THE production chain (claude_code::cc_watcher) — this harness had to chase
+    // it three times when it was hand-mirrored (#203, #632, the activity clock).
+    let mut watcher = pixtuoid_core::source::claude_code::cc_watcher(root.clone());
     // The SAME liveness probe as the real source — the same harness-vs-app
     // parity gap as the id-deriver above (a JsonlWatcher builder call the
     // real CC source makes and this harness omitted): without the probe an

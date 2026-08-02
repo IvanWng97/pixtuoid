@@ -18,7 +18,7 @@ use crate::AgentId;
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{live_cc_session_ids, ClaudeCodeSource};
+pub use native::{cc_watcher, live_cc_session_ids, ClaudeCodeSource};
 
 /// homebrew-core contract: their formula's `test do` runs
 /// `pixtuoid connect claude-code --json` and asserts the parsed result equals

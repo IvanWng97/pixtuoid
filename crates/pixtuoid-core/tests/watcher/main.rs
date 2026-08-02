@@ -9,9 +9,6 @@ use std::time::{Duration, SystemTime};
 
 use filetime::{set_file_mtime, FileTime};
 
-use pixtuoid_core::source::claude_code::{
-    cc_derive_label, cc_id_from_path, cc_session_ended, decode_cc_line,
-};
 use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher, ProbeSnapshot};
 
 /// Run every watcher test on a fast `PollWatcher` backend instead of the native
@@ -39,21 +36,9 @@ fn vouch_snapshot(ids: &[&str]) -> Option<ProbeSnapshot> {
 
 fn cc_watcher(root: std::path::PathBuf) -> JsonlWatcher {
     fast_watch();
-    // Mirror ClaudeCodeSource::run: CC keys on the session UUID (filename stem),
-    // not the raw path, so hook↔JSONL coalesce and the subagent→parent link
-    // survives a git-worktree cwd-split.
-    JsonlWatcher::new(
-        root,
-        "claude-code".to_string(),
-        decode_cc_line,
-        cc_session_ended,
-    )
-    .with_id_deriver(cc_id_from_path)
-    .with_label_deriver(cc_derive_label)
-    // The SAME activity clock the real source wires: without it this mirror
-    // exercises the pre-gate CC wiring and a first_sight test would assert
-    // against a configuration production does not run.
-    .with_activity_recency(pixtuoid_core::source::claude_code::cc_activity_recency)
+    // THE production chain, not a mirror of it — hand-mirroring drifted three
+    // times (id-deriver #203, liveness probe #632, activity clock).
+    pixtuoid_core::source::claude_code::cc_watcher(root)
 }
 
 // ── Shared watcher harness + builders ───────────────────────────────────────

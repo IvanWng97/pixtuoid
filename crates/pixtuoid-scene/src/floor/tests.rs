@@ -86,16 +86,17 @@ fn door_anim_excludes_arrived_entry_profiles() {
     let mut fctx = FloorCtx::new();
     let mut ms = MotionState::new(id);
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
-    ms.entry = Some((
-        t0,
-        WalkProfile {
+    ms.entry = Some(crate::motion::WalkLeg {
+        started_at: t0,
+        profile: WalkProfile {
             duration_ms: 2000,
             pause_ms: 300,
             path_len_octile: 500,
             v_cruise: 0.36,
             accel: 6.5e-4,
         },
-    ));
+        from: crate::layout::Point { x: 0, y: 0 },
+    });
     fctx.motion.insert(id, ms);
 
     // Mid-walk → profile is in-flight → it sets the door window.

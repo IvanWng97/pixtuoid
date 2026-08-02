@@ -114,6 +114,7 @@ pub fn pixtuoid_core::source::claude_code::cc_activity_recency(&[u8]) -> pixtuoi
 pub fn pixtuoid_core::source::claude_code::cc_derive_label(&std::path::Path, &str, &std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::claude_code::cc_id_from_path(&std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::claude_code::cc_session_ended(&[u8]) -> bool
+pub fn pixtuoid_core::source::claude_code::cc_watcher(std::path::PathBuf) -> pixtuoid_core::source::jsonl::JsonlWatcher
 pub fn pixtuoid_core::source::claude_code::decode_cc_line(&str, &str, serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub fn pixtuoid_core::source::claude_code::live_cc_session_ids(&std::path::Path) -> core::option::Option<pixtuoid_core::source::jsonl::ProbeSnapshot>
 pub mod pixtuoid_core::source::codewhale

@@ -83,8 +83,8 @@ pub struct WanderFrame {
     pub phase_started_at: SystemTime,
 }
 
-/// A one-shot walk leg (exit / snap-back): the wall-clock instant the leg
-/// armed, its frozen physics profile, and the FROZEN origin recorded at
+/// A one-shot walk leg (entry / exit / snap-back): the wall-clock instant the
+/// leg armed, its frozen physics profile, and the FROZEN origin recorded at
 /// arm-time (reused every frame so the leg doesn't drift). Names the fields
 /// of what was a `(SystemTime, WalkProfile, Point)` tuple.
 #[derive(Debug, Clone)]
@@ -207,8 +207,12 @@ pub struct MotionState {
     pub agent_id: AgentId,
 
     // --- entry / exit / snap-back one-shot walks ---
-    /// `(walk_started_at, profile)` snapshotted once at door-crossing.
-    pub entry: Option<(SystemTime, WalkProfile)>,
+    /// The arrival walk, snapshotted once at door-crossing. Carries its `from`
+    /// like the exit/snap-back legs do: the origin is the door for a fresh
+    /// spawn, but a resurrect that cancels an IN-FLIGHT walkout re-enters from
+    /// wherever the sprite actually is, and a hardcoded door origin is what
+    /// made that case teleport.
+    pub entry: Option<WalkLeg>,
     /// `(walk_started_at, profile, from)` snapshotted once when `exiting_at`
     /// fires. `from` is the agent's position at that moment — its current
     /// wander position if it was out, else the desk anchor — so the exit walk

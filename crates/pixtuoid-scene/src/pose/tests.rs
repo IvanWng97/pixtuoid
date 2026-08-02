@@ -1371,13 +1371,13 @@ fn entry_duration_scales_with_path_longer_desk_takes_longer() {
         .entry
         .as_ref()
         .expect("entry profile set for near desk")
-        .1
+        .profile
         .duration_ms;
     let dur_far = motion_far[&far.agent_id]
         .entry
         .as_ref()
         .expect("entry profile set for far desk")
-        .1
+        .profile
         .duration_ms;
 
     assert!(
@@ -1433,7 +1433,7 @@ fn nearer_desk_arrives_before_farther_desk() {
 
     // Advance time past the near desk's duration+pause but stay within
     // the far desk's window. Use the near desk's profile to compute exact time.
-    let near_profile = motion_near[&near.agent_id].entry.unwrap().1;
+    let near_profile = motion_near[&near.agent_id].entry.as_ref().unwrap().profile;
     // One ms past the near desk's full trip (duration + pause).
     let done_ms = near_profile.duration_ms + near_profile.pause_ms + 1;
     let t1 = now + Duration::from_millis(done_ms);
@@ -1506,7 +1506,7 @@ fn five_same_created_at_agents_have_distinct_entry_durations() {
             .entry
             .as_ref()
             .expect("entry profile set")
-            .1
+            .profile
             .duration_ms;
         durations.push(dur);
     }
@@ -3164,11 +3164,10 @@ fn a_resurrect_after_the_walkout_arrived_re_enters_through_the_door() {
 }
 
 #[test]
-fn a_resurrect_mid_walkout_declines_the_entry_re_arm() {
-    // The in-flight half of the same branch. This pins ONLY that entry declines
-    // to re-arm — the agent still teleports here (the snap-back is Active/
-    // Waiting-only and a resurrected slot is Idle), which is why this test does
-    // NOT assert a pose. Tracked separately; see the scene CLAUDE.md sharp edge.
+fn a_resurrect_mid_walkout_re_enters_from_the_live_position() {
+    // The in-flight half. The sprite is still on the floor, so re-entering from
+    // the DOOR would jump it backwards — the leg must start where it actually
+    // is. This is the whole reason `MotionState::entry` carries a `from`.
     let l = layout();
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let created = t0 - Duration::from_secs(3600);
@@ -3188,14 +3187,31 @@ fn a_resurrect_mid_walkout_declines_the_entry_re_arm() {
         ),
         "test setup: the walkout must still be in flight"
     );
+    let live = history
+        .recent(slot.agent_id, HISTORY_RECENT_MS, mid)
+        .expect("the walkout renders every frame, so history holds a position");
 
     slot.exiting_at = None;
     slot.state_started_at = mid;
-    pose_at(&slot, mid, &l, &mut router, &mut history, &mut motion);
+    let pose = pose_at(&slot, mid, &l, &mut router, &mut history, &mut motion);
+
+    let leg = motion[&slot.agent_id]
+        .entry
+        .as_ref()
+        .expect("an in-flight resurrect must re-arm entry");
+    assert_eq!(
+        leg.from, live,
+        "it re-enters from the sprite's real position, not the door"
+    );
+    assert_ne!(
+        leg.from,
+        l.door_threshold.expect("layout has a door"),
+        "starting at the door would jump the walker backwards"
+    );
     assert!(
-        motion[&slot.agent_id].entry.is_none(),
-        "an in-flight walkout must not re-arm entry — that would jump the \
-         walker back to the door"
+        matches!(pose, Some(Pose::Walking { .. })),
+        "and it RENDERS that walk — the entry branch runs before the wander \
+         dispatch, which would otherwise return SeatedThinking and teleport it"
     );
 }
 
@@ -3257,16 +3273,44 @@ fn the_resurrect_check_reads_the_same_compressed_clock_as_the_exit_render() {
     );
     let at = t0 + Duration::from_millis(arrived_at);
 
-    pose_at(&slot, at, &l, &mut router, &mut history, &mut motion);
+    // Render one frame just BEFORE the compressed arrival so `PoseHistory` holds
+    // a fresh corridor position. Without it both clocks fall back to the door
+    // (the arrived exit branch returns None without recording) and the fixture
+    // cannot tell them apart — the trap this test exists to avoid.
+    let just_before = t0 + Duration::from_millis(arrived_at.saturating_sub(100));
+    pose_at(
+        &slot,
+        just_before,
+        &l,
+        &mut router,
+        &mut history,
+        &mut motion,
+    );
+    assert!(
+        history
+            .recent(slot.agent_id, HISTORY_RECENT_MS, at)
+            .is_some(),
+        "setup: history must be fresh at the resurrect instant"
+    );
     slot.exiting_at = None;
     slot.state_started_at = at;
     pose_at(&slot, at, &l, &mut router, &mut history, &mut motion);
-    // Assert the RE-ARM, not the rendered `from`: the stub returns its polyline
-    // for every route, so `from` would pin the fixture, not the behaviour. Read
-    // raw elapsed here instead and the leg still measures in-flight, no re-arm.
+    // The clock decides the ORIGIN, not whether entry re-arms — both halves
+    // re-arm. Past the compressed arrival the sprite is off-floor, so the leg
+    // must start at the DOOR; reading raw elapsed here still measures in-flight
+    // and would start it from the stale corridor position instead.
+    let leg = motion[&slot.agent_id]
+        .entry
+        .as_ref()
+        .expect("a resurrect must re-arm entry");
     assert_eq!(
-        motion[&slot.agent_id].entry.map(|(started, _)| started),
-        Some(at),
-        "a resurrect past the COMPRESSED arrival must re-arm entry on a fresh clock"
+        leg.started_at, at,
+        "the re-armed leg runs on a fresh clock, not the un-restamped birth"
+    );
+    assert_eq!(
+        leg.from,
+        l.door_threshold.expect("layout has a door"),
+        "past the COMPRESSED arrival the sprite is gone — the door is the only \
+         honest origin, and raw elapsed would resume it mid-corridor"
     );
 }
