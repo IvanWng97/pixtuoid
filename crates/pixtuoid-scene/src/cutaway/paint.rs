@@ -61,6 +61,9 @@ const SKYLINE_W_SPREAD: u16 = 6;
 /// Shortest skyline building — below this the city reads as a jagged floor.
 const SKYLINE_MIN_H: u16 = 2;
 
+/// Thickness of a room's glass wall, in logical units.
+const ROOM_WALL_PX: u16 = 1;
+
 /// How far down the desk sprite the screen's spill lands.
 const GLOW_ROW_NUMER: u16 = 5;
 /// Denominator of [`GLOW_ROW_NUMER`].
@@ -80,6 +83,7 @@ pub fn render_cutaway(
 ) {
     paint_floor(layout, theme, scale, buf);
     paint_wall(layout, theme, scale, buf);
+    paint_rooms(layout, theme, scale, buf);
 
     // ONE ordered draw list, so a character and the desk it sits at resolve
     // against each other by depth instead of by which loop ran first. That
@@ -266,6 +270,54 @@ fn paint_skyline(
     }
 }
 
+/// The enclosed rooms — meeting rooms and the pantry — as glass boxes.
+///
+/// Their bounds already exist on the layout, and without them the whole west
+/// half of the office reads as empty floor: the classic painter fills it with
+/// walls, furniture and rugs this profile has not drawn yet, so the rooms are
+/// the cheapest thing that restores the office's SHAPE.
+///
+/// Glass rather than solid: a cutaway shows what is inside a room, which is the
+/// whole reason the concept is a cutaway and not a floor plan.
+fn paint_rooms(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
+    let s = scale.get();
+    let glass = Ramp::from_base(
+        theme.office.room_wall_trim_light,
+        RAMP_TINT_PCT,
+        RAMP_SHADE_PCT,
+    );
+    let bounds: Vec<_> = layout
+        .meeting_rooms
+        .iter()
+        .map(|r| r.bounds)
+        .chain(layout.pantry.iter().map(|p| p.bounds))
+        .collect();
+    for b in bounds {
+        let (x, y) = (scale.to_buffer(b.x), scale.to_buffer(b.y));
+        let (w, h) = (b.width * s, b.height * s);
+        // Walls only — the interior stays floor, so the room reads as a room
+        // you can see into rather than a filled block.
+        slab(buf, x, y, w, ROOM_WALL_PX * s, &glass);
+        slab(
+            buf,
+            x,
+            y + h - ROOM_WALL_PX * s,
+            w,
+            ROOM_WALL_PX * s,
+            &glass,
+        );
+        fill(buf, x, y, ROOM_WALL_PX * s, h, glass.base);
+        fill(
+            buf,
+            x + w - ROOM_WALL_PX * s,
+            y,
+            ROOM_WALL_PX * s,
+            h,
+            glass.base,
+        );
+    }
+}
+
 fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
     let lit = theme.surface.carpet_light;
     let base = theme.surface.carpet_base;
@@ -418,6 +470,9 @@ fn paint_character(
         Some(desk) => cutaway_seat_anchor(desk, c.anchor),
         None => c.anchor,
     };
+    // Ground contact BEFORE the body, so the sprite sits on its own shadow
+    // rather than the shadow being stamped over their feet.
+    contact_shadow(at, art.width(), art.height(), theme, scale, buf);
     blit_frame_scaled(
         &art,
         scale.to_buffer(at.x),
@@ -433,6 +488,31 @@ fn paint_character(
     if c.seat_desk.is_some() {
         paint_chair(at, art.width(), art.height(), theme, scale, buf);
     }
+}
+
+/// A tight dark band where a figure meets the floor.
+///
+/// Two rows, not an ellipse: a wide soft pool reads as a stain on a dark carpet
+/// (the visual mock proved that twice), while a band the width of the sprite
+/// reads as weight.
+fn contact_shadow(
+    at: crate::layout::Point,
+    sprite_w: u16,
+    sprite_h: u16,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let shade = Ramp::from_base(theme.surface.carpet_dark, 0, RAMP_SHADE_PCT).shade;
+    let s = scale.get();
+    fill(
+        buf,
+        scale.to_buffer(at.x),
+        scale.to_buffer(at.y + sprite_h),
+        sprite_w * s,
+        s,
+        shade,
+    );
 }
 
 /// A chair back covering the occupant's lower torso.
