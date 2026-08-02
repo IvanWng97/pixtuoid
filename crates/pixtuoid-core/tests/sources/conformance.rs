@@ -187,7 +187,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
     let hooks = hooks_path.exists().then(|| {
         // One payload can decode to multiple events (Identity attached ahead of
         // a tool/permission event, #221).
-        let driven = Drive::hooks(source).lines(&hook_lines);
+        let driven = Drive::hooks().lines(&hook_lines);
         driven.assert_clean(&format!("hook payloads {}", hooks_path.display()));
         driven
     });

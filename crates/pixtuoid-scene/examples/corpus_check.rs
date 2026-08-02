@@ -54,8 +54,16 @@ struct Verdict {
     decode_errors: usize,
     /// The decoder PANICKED — the never-panic contract violated.
     panics: Vec<LineFailure>,
+    /// Events the WIRE produced — the first-sight seed is NOT counted.
     events: usize,
+    /// Did the wire's own events land on a registered slot? Gated on
+    /// `wire_events > 0` because the seed registers unconditionally: counting
+    /// it made this column read 1/1 for a file of pure garbage.
     registered: usize,
+    /// Did the wire drive the slot through a lifecycle class? The
+    /// anti-tautology column — a transcript can decode and register while
+    /// every event lands on an id the seed does not share.
+    drove: bool,
     /// Sprites the painter would draw for this transcript's agents.
     drawn: usize,
     /// Newest agent-activity stamp the file carries, epoch seconds.
@@ -107,9 +115,17 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     v.lines = driven.lines;
     v.unparseable = driven.unparseable;
     v.decode_errors = driven.decode_errors.len();
-    v.events = driven.events.len();
+    v.events = driven.wire_events();
+    // A file whose WIRE decoded to nothing registers nothing, however many
+    // slots the seed put on the floor — otherwise every readable file, garbage
+    // included, reports "registered · would paint".
+    if v.events == 0 {
+        v.panics = driven.panics;
+        return v;
+    }
     v.registered = driven.registered();
-    v.panics = driven.panics;
+    v.drove = !driven.reached.is_empty();
+    v.panics = driven.panics.clone();
     if v.registered == 0 {
         return v;
     }
@@ -209,6 +225,7 @@ fn main() {
     let pack = load_sprite_pack(None).expect("embedded pack");
     let mut totals = Verdict::default();
     let mut registered_files = 0usize;
+    let mut drove_files = 0usize;
     let mut drawn_files = 0usize;
     let mut gap_buckets: BTreeMap<&str, usize> = BTreeMap::new();
     let mut error_files: Vec<(PathBuf, usize)> = Vec::new();
@@ -222,6 +239,9 @@ fn main() {
         totals.events += v.events;
         if v.registered > 0 {
             registered_files += 1;
+        }
+        if v.drove {
+            drove_files += 1;
         }
         if v.drawn > 0 {
             drawn_files += 1;
@@ -246,7 +266,7 @@ fn main() {
 
     if json {
         println!(
-            r#"{{"source":"{source}","files":{},"lines":{},"unparseable":{},"decode_errors":{},"panics":{},"events":{},"registered_files":{registered_files},"drawn_files":{drawn_files}}}"#,
+            r#"{{"source":"{source}","files":{},"lines":{},"unparseable":{},"decode_errors":{},"panics":{},"events":{},"registered_files":{registered_files},"drove_files":{drove_files},"drawn_files":{drawn_files}}}"#,
             files.len(),
             totals.lines,
             totals.unparseable,
@@ -264,10 +284,16 @@ fn main() {
         );
         println!("  DECODE ERRORS     {}  <- must be 0", totals.decode_errors);
         println!("  PANICS            {}  <- must be 0", totals.panics.len());
-        println!("  events decoded    {}", totals.events);
         println!(
-            "  registered        {registered_files}/{} files produced >=1 slot",
+            "  events decoded    {} (the wire's own; first-sight seeds excluded)",
+            totals.events
+        );
+        println!(
+            "  registered        {registered_files}/{} files whose WIRE drove >=1 event onto a slot",
             files.len()
+        );
+        println!(
+            "  drove the slot    {drove_files}/{registered_files} reached >=1 lifecycle class (Active/Waiting/Delegating)"
         );
         println!(
             "  reached the UI    {drawn_files}/{registered_files} registered files would paint a sprite"

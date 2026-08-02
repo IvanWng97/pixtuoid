@@ -107,6 +107,12 @@ pub struct Driven {
     pub scene: SceneState,
     /// Every decoded event in wire order, seed first when there is one.
     pub events: Vec<AgentEvent>,
+    /// How many leading `events` are the first-sight SEED, not the wire's own
+    /// output (0 or 1). Separable because a driver that COUNTS the seed reports
+    /// a verdict on bytes that produced nothing: the seed registers a slot
+    /// unconditionally, so "registered" and "would paint" both come out 1/1 for
+    /// a file of pure garbage. Report [`Self::wire_events`] instead.
+    pub seed_events: usize,
     /// Non-blank lines driven (blank lines are skipped, not counted).
     pub lines: usize,
     /// Lines that were not valid JSON — a torn write, outside the decoder
@@ -125,6 +131,13 @@ impl Driven {
     /// Slots the fold registered — "did the wire reach the scene at all".
     pub fn registered(&self) -> usize {
         self.scene.agents.len()
+    }
+
+    /// Events the WIRE produced, excluding the first-sight seed. The honest
+    /// numerator for any census: zero here means the bytes decoded to nothing,
+    /// however many slots the seed put on the floor.
+    pub fn wire_events(&self) -> usize {
+        self.events.len() - self.seed_events
     }
 
     /// Assert bytes WE control drove cleanly: every line parsed, no decoder
@@ -184,7 +197,6 @@ const SEED_CWD: &str = "/pixtuoid/harness";
 /// registry `LineDecoder`) or [`Drive::hooks`] (hook envelopes through the
 /// shared dispatcher), then feed lines to [`Drive::lines`].
 pub struct Drive {
-    source: String,
     transport: Transport,
     decode: Decode,
     seeded: bool,
@@ -194,12 +206,17 @@ pub struct Drive {
 /// The transport's decoder plus whatever it needs. Private so the
 /// decoder↔transport pairing stays a constructor's job, never a caller's.
 enum Decode {
-    /// A transcript's line decoder, with the logical path it keys on.
+    /// A transcript's line decoder, with the source it decodes for and the
+    /// logical path it keys on.
     Transcript {
         decode: LineDecoder,
+        source: String,
         logical: String,
     },
-    /// The shared hook dispatcher — each envelope keys itself, so no path.
+    /// The shared hook dispatcher. It carries NO source: `decode_hook_payload`
+    /// routes on the envelope's own `_pixtuoid_source` stamp, so a source
+    /// passed in here would be inert at best and a lie at worst — the payload
+    /// would win.
     Hooks,
 }
 
@@ -234,10 +251,10 @@ impl Drive {
     pub fn transcript(source: &str, logical: &str) -> Option<Self> {
         let decode = registry::descriptor_for(source)?.line_decoder()?;
         Some(Self {
-            source: source.to_string(),
             transport: Transport::Jsonl,
             decode: Decode::Transcript {
                 decode,
+                source: source.to_string(),
                 logical: logical.to_string(),
             },
             seeded: false,
@@ -246,15 +263,14 @@ impl Drive {
     }
 
     /// Drive hook envelopes through the shared `decode_hook_payload` on
-    /// `Transport::Hook`. Available for every source: the dispatcher routes by
-    /// the envelope's own `_pixtuoid_source` stamp, and a daemon's payloads
+    /// `Transport::Hook`. Takes NO source: the dispatcher routes by the
+    /// envelope's own `_pixtuoid_source` stamp, and a daemon's payloads
     /// short-circuit to zero `AgentEvent`s (presence rides a sibling channel).
     ///
     /// There is no seed here by construction — a hook for an unknown id
     /// REGISTERS it (hooks are proof of life), so hook bytes never need one.
-    pub fn hooks(source: &str) -> Self {
+    pub fn hooks() -> Self {
         Self {
-            source: source.to_string(),
             transport: Transport::Hook,
             decode: Decode::Hooks,
             seeded: false,
@@ -289,10 +305,10 @@ impl Drive {
     /// The `AgentId` a first-sight seed keys on: the source's registry
     /// derivation over the transcript path — byte-identical to what the
     /// watcher would have registered.
-    fn seed_id(&self, logical: &str) -> AgentId {
+    fn seed_id(source: &str, logical: &str) -> AgentId {
         AgentId::from_parts(
-            &self.source,
-            &registry::id_deriver_for(&self.source)(Path::new(logical)),
+            source,
+            &registry::id_deriver_for(source)(Path::new(logical)),
         )
     }
 
@@ -307,6 +323,7 @@ impl Drive {
         let mut d = Driven {
             scene: SceneState::uniform(DRIVEN_DESKS),
             events: Vec::new(),
+            seed_events: 0,
             lines: 0,
             unparseable: 0,
             decode_errors: Vec::new(),
@@ -314,11 +331,18 @@ impl Drive {
             reached: Vec::new(),
         };
 
-        if let (true, Decode::Transcript { logical, .. }) = (self.seeded, &self.decode) {
+        if let (
+            true,
+            Decode::Transcript {
+                source, logical, ..
+            },
+        ) = (self.seeded, &self.decode)
+        {
+            d.seed_events = 1;
             d.events.push(AgentEvent::SessionStart {
-                agent_id: self.seed_id(logical),
-                source: self.source.clone(),
-                session_id: format!("{}-harness-seed", self.source),
+                agent_id: Self::seed_id(source, logical),
+                source: source.clone(),
+                session_id: format!("{source}-harness-seed"),
                 cwd: PathBuf::from(SEED_CWD),
                 parent_id: None,
             });
@@ -358,7 +382,11 @@ impl Drive {
 
     fn decode_one(&self, v: Value) -> anyhow::Result<Vec<AgentEvent>> {
         match &self.decode {
-            Decode::Transcript { decode, logical } => decode(logical, &self.source, v),
+            Decode::Transcript {
+                decode,
+                source,
+                logical,
+            } => decode(logical, source, v),
             Decode::Hooks => decode_hook_payload(v),
         }
     }
@@ -526,7 +554,7 @@ mod tests {
             "cwd": "/repo"
         })
         .to_string();
-        let d = Drive::hooks("claude-code").lines([payload]);
+        let d = Drive::hooks().lines([payload]);
         assert_eq!(d.registered(), 1);
     }
 
@@ -546,10 +574,10 @@ mod tests {
     /// decoder can serve as the fixture for either lane).
     fn drive_with(decode: LineDecoder) -> Drive {
         Drive {
-            source: "claude-code".to_string(),
             transport: Transport::Jsonl,
             decode: Decode::Transcript {
                 decode,
+                source: "claude-code".to_string(),
                 logical: CC_TRANSCRIPT.to_string(),
             },
             seeded: false,

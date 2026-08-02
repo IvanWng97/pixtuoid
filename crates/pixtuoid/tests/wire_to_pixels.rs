@@ -189,7 +189,7 @@ fn assert_renders_a_sprite(case: &WireCase) {
             let drive = if seeded { drive.seeded() } else { drive };
             drive.at(t0()).lines(lines)
         }
-        Wire::Hooks => Drive::hooks(case.source).at(t0()).lines(lines),
+        Wire::Hooks => Drive::hooks().at(t0()).lines(lines),
     };
 
     driven.assert_clean(case.name);
