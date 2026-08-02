@@ -623,6 +623,75 @@ mod tests {
         assert!(d.panics.is_empty(), "a decode error is not a panic");
     }
 
+    /// THE anti-tautology pin, at the lib level rather than only in the census
+    /// that consumes it: a seeded drive registers a slot unconditionally, so
+    /// `registered()` alone reports success for bytes that decoded to NOTHING.
+    /// `wire_events()` is what a report must count instead.
+    #[test]
+    fn wire_events_excludes_the_seed_so_garbage_scores_zero() {
+        let garbage = ["not json at all", r#"{"totally":"unrelated"}"#];
+        let d = Drive::transcript("claude-code", CC_TRANSCRIPT)
+            .unwrap()
+            .seeded()
+            .lines(garbage);
+        assert_eq!(
+            d.registered(),
+            1,
+            "the seed registers a slot even for garbage — that is WHY the census \
+             cannot count it"
+        );
+        assert_eq!(d.wire_events(), 0, "no wire event came out of garbage");
+        assert_eq!(d.events.len(), 1, "the one event is the seed itself");
+
+        // A real line: the seed is still excluded, the activity is not.
+        let d = Drive::transcript("claude-code", CC_TRANSCRIPT)
+            .unwrap()
+            .seeded()
+            .lines([cc_tool_line()]);
+        assert_eq!(d.seed_events, 1);
+        assert_eq!(d.wire_events(), d.events.len() - 1);
+
+        // Unseeded, every event is the wire's.
+        let d = Drive::transcript("claude-code", CC_TRANSCRIPT)
+            .unwrap()
+            .lines([cc_tool_line()]);
+        assert_eq!(d.seed_events, 0);
+        assert_eq!(d.wire_events(), d.events.len());
+    }
+
+    /// Both on-demand tools PRINT failures to a terminal, so `Display` is the
+    /// last content-safety boundary: position + shape, never the line's values.
+    #[test]
+    fn line_failure_display_carries_position_and_shape_not_content() {
+        fn refuse(_p: &str, _s: &str, _v: Value) -> anyhow::Result<Vec<AgentEvent>> {
+            Err(anyhow::anyhow!("unsupported event"))
+        }
+        let d = drive_with(refuse).lines([PROSE_LINE]);
+        let rendered = d.decode_errors[0].to_string();
+        assert!(rendered.starts_with("line 1: "), "got {rendered}");
+        assert!(rendered.contains("type=\"assistant\""), "got {rendered}");
+        assert!(rendered.ends_with(": unsupported event"), "got {rendered}");
+        assert!(
+            !rendered.contains("do not print me"),
+            "Display must not echo the line's values, got {rendered}"
+        );
+
+        // A panic carries no message, so Display stops at the shape.
+        fn boom(_p: &str, _s: &str, _v: Value) -> anyhow::Result<Vec<AgentEvent>> {
+            panic!("decoder blew up")
+        }
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let d = drive_with(boom).lines([PROSE_LINE]);
+        std::panic::set_hook(prev);
+        let rendered = d.panics[0].to_string();
+        assert!(!rendered.contains("blew up"), "got {rendered}");
+        assert!(
+            rendered.ends_with(']'),
+            "shape is the whole line, got {rendered}"
+        );
+    }
+
     /// NEGATIVE CONTROL for the never-panic capture: a decoder that panics must
     /// be RECORDED, not propagated. Without this the `panics` field could stay
     /// permanently empty and every shell would report a green contract.
