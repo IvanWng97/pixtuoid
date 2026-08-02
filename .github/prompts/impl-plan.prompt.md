@@ -42,6 +42,21 @@ Every section gets an answer; "n/a" counts only with a reason.
    paths up front (Unix/Windows arms, twin call sites, parallel manifests —
    for a config key: the docs and manifest twins) and says which get the
    same treatment in this change (pitfall 2's in-diff form).
+3b. **Reachability** — a guard protects an OUTCOME, so enumerate every path
+   that reaches that outcome, not just the one the bug arrived through, and
+   give each a disposition (guarded here / already guarded at X / genuinely
+   exempt because Y). Mechanical, not from memory: `rg` the function the
+   outcome flows through and read EVERY call site. This is distinct from
+   item 3 — siblings are parallel IMPLEMENTATIONS (a per-source decoder, a
+   platform arm), reachability is the call sites into ONE implementation, and
+   a plan can enumerate the first while missing the second entirely. The
+   ghost-gate arc is the worked example: the first-sight gate was written,
+   reviewed and live-verified against `!known` files while `emit_first_sight`
+   had a SECOND caller on the append path — `rg emit_first_sight` returns both
+   in seconds — so the shipped fix did nothing for the ordering a running
+   pixtuoid actually meets. State the ORDERINGS too where the outcome is
+   timing-dependent (boot-then-write vs write-then-boot): they are reachability
+   in the time axis and the verification plan must exercise each.
 4. **Untrusted input** — if the change touches transcript/hook/file/config
    input, name the decode boundary where it is sanitized (pitfall 3), and
    whether any user-visible truncation is char-safe (pitfall 1). A
@@ -59,7 +74,14 @@ Every section gets an answer; "n/a" counts only with a reason.
    motion/pose changes render an animation and WATCH it; sprite changes run
    the `beautify-decoration` loop. Verification steps are blocking plan
    items, not checkboxes — PR #61 shipped five walk regressions behind an
-   unchecked "live run" checkbox.
+   unchecked "live run" checkbox. Name the CI-ONLY gates the change can red
+   (semver, api-surface, doc-check, gen-check, wasm-check, windows-test,
+   snapshots): `just preflight` is blind to all of them, so "preflight green"
+   is a claim about a SUBSET and must say so — the ghost-gate arc reported
+   all-green with api-surface and doc-check both red. And reproduce the
+   REPORTED scenario, including its ordering (item 3b), not a convenient one:
+   a repro built from the artifact left on disk re-runs the state you already
+   fixed and proves nothing about how it got there.
 8. **Layering / orchestration boundary** — if the change adds or crosses a
    layer seam (a mechanism/foundation layer with an orchestrator over it,
    like `install` ← `sources`), name the ONE orchestration entry point and
