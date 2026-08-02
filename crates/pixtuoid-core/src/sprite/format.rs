@@ -214,14 +214,17 @@ impl Pack {
     }
 
     /// Merge furniture/environment animations from `base` into self.
-    /// Only fills animations listed in OPTIONAL_FURNITURE_ANIMATIONS —
-    /// character animations are never inherited so a robot pack doesn't
-    /// accidentally show human sprites for missing optional poses.
+    /// Only fills animations listed in OPTIONAL_FURNITURE_ANIMATIONS (and their
+    /// [`DENSITY_VARIANT_SUFFIX`] variants) — character animations are never
+    /// inherited so a robot pack doesn't accidentally show human sprites for
+    /// missing optional poses.
     pub fn merge_from(&mut self, base: &Pack) {
         for &name in OPTIONAL_FURNITURE_ANIMATIONS {
-            if !self.animations.contains_key(name) {
-                if let Some(sprite) = base.animations.get(name) {
-                    self.animations.insert(name.to_string(), sprite.clone());
+            for name in [name.to_string(), format!("{name}{DENSITY_VARIANT_SUFFIX}")] {
+                if let Some(sprite) = base.animations.get(&name) {
+                    self.animations
+                        .entry(name)
+                        .or_insert_with(|| sprite.clone());
                 }
             }
         }
@@ -399,9 +402,30 @@ pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
 /// when absent (e.g. `side_seated` falls back to the front `seated` pose).
 pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &["walking_coffee", "side_seated"];
 
+/// Suffix marking a furniture animation's higher-DENSITY variant — the same
+/// piece drawn on a bigger grid, for a painter rendering at a scale where the
+/// base art would be block-upscaled.
+///
+/// A variant is legal for every name in [`OPTIONAL_FURNITURE_ANIMATIONS`] BY
+/// DERIVATION rather than by its own registry row, so authoring one is a
+/// sprite file and nothing else. A second list would have to be kept in step
+/// with the first, and forgetting an entry fails QUIETLY in the direction that
+/// matters least visibly: the variant loads for the bundled pack but
+/// `Pack::merge_from` never inherits it, so a `--pack-dir` user silently drops
+/// back to the upscale.
+pub const DENSITY_VARIANT_SUFFIX: &str = "_hi";
+
+/// Whether `name` is a furniture animation a pack may provide — either a
+/// registry entry or one of their [`DENSITY_VARIANT_SUFFIX`] variants.
+pub fn is_optional_furniture_animation(name: &str) -> bool {
+    let base = name.strip_suffix(DENSITY_VARIANT_SUFFIX).unwrap_or(name);
+    OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
+}
+
 /// Environment/furniture animation names a pack MAY provide; `Pack::merge_from`
-/// inherits any of these that are missing from the base pack (character
-/// animations are never inherited).
+/// inherits any of these — and any of their [`DENSITY_VARIANT_SUFFIX`]
+/// variants — that are missing from the base pack (character animations are
+/// never inherited).
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
     "filing_cabinet",
@@ -501,10 +525,13 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     // draws nothing; an empty OPTIONAL entry additionally SHADOWS the embedded
     // default in `Pack::merge_from` (`contains_key` is true). Names in
     // MULTI_FRAME_REQUIREMENTS carry their own higher minimum.
-    for name in known_names() {
+    // A density variant rides its BASE's minimum — it is the same piece drawn
+    // bigger, so an empty `desk_hi` shadows the embedded default exactly as an
+    // empty `desk` does.
+    let mut check_frames = |name: &str, requirement_key: &str| {
         let min_frames = MULTI_FRAME_REQUIREMENTS
             .iter()
-            .find(|&&(n, _)| n == name)
+            .find(|&&(n, _)| n == requirement_key)
             .map_or(1, |&(_, min)| min);
         if let Some(anim) = pack.animation(name) {
             if anim.frames.len() < min_frames {
@@ -513,11 +540,17 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
                     .push((name.to_string(), min_frames, anim.frames.len()));
             }
         }
+    };
+    for name in known_names() {
+        check_frames(name, name);
+    }
+    for &name in OPTIONAL_FURNITURE_ANIMATIONS {
+        check_frames(&format!("{name}{DENSITY_VARIANT_SUFFIX}"), name);
     }
 
     let all_known: std::collections::HashSet<&str> = known_names().collect();
     for name in pack.animation_names() {
-        if !all_known.contains(name.as_str()) {
+        if !all_known.contains(name.as_str()) && !is_optional_furniture_animation(&name) {
             report.unknown.push(name.clone());
         }
     }
@@ -535,6 +568,88 @@ mod validation_floor_tests {
              [animations.{name}]\nframes={frames_toml}\nframe_ms=100\n"
         );
         load_pack_from_strings(&pack_toml, &[("f.sprite", "@frame 0\nA")]).expect("pack builds")
+    }
+
+    fn pack_with(animations: &str) -> Pack {
+        let toml = format!(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n{animations}"
+        );
+        load_pack_from_strings(&toml, &[("f.sprite", "@frame 0\nA")]).expect("pack builds")
+    }
+
+    #[test]
+    fn a_density_variant_is_known_by_derivation_not_by_its_own_row() {
+        // The whole point of deriving: authoring `<piece>_hi` is a sprite file
+        // and nothing else. A second registry list would have to be kept in
+        // step with the first, and every entry someone forgets is a silent
+        // downgrade for `--pack-dir` users.
+        assert!(is_optional_furniture_animation("desk"));
+        assert!(is_optional_furniture_animation("desk_hi"));
+        assert!(is_optional_furniture_animation("phone_booth_hi"));
+        // The derivation is not a blanket suffix pass — the BASE still has to
+        // be a real registered piece, or a typo'd `dsek_hi` would validate.
+        assert!(!is_optional_furniture_animation("dsek_hi"));
+        assert!(!is_optional_furniture_animation("standing_hi"));
+        assert!(!is_optional_furniture_animation("desk_lo"));
+    }
+
+    #[test]
+    fn merge_from_inherits_a_density_variant_so_a_custom_pack_keeps_the_richer_art() {
+        // THE failure this derivation exists to prevent, and it is invisible
+        // from inside the bundled pack: a `--pack-dir` pack that ships its own
+        // `desk` but no `_hi` variant must still inherit the default's, or the
+        // custom pack silently renders block-upscaled while the bundled one
+        // does not.
+        let base = pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.desk_hi]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        );
+        let mut custom = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        custom.merge_from(&base);
+        assert!(
+            custom.animation("desk").is_some(),
+            "the base piece inherits"
+        );
+        assert!(
+            custom.animation("desk_hi").is_some(),
+            "its density variant must inherit too"
+        );
+    }
+
+    #[test]
+    fn an_unauthored_density_variant_is_not_reported_missing() {
+        // Neither "missing" nor "unknown": a density variant is authored or it
+        // is not, and every pack that has not been redrawn is the normal case.
+        // Listing them as missing optionals would put ~28 permanent lines in
+        // every `validate-pack` run.
+        let report = validate_pack_animations(&pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        ));
+        assert!(
+            !report.missing_optional.iter().any(|n| n.ends_with("_hi")),
+            "unauthored variants must not read as missing: {:?}",
+            report.missing_optional
+        );
+        assert!(!report.unknown.contains(&"desk".to_string()));
+    }
+
+    #[test]
+    fn an_empty_density_variant_still_fails_the_frame_floor() {
+        // An empty `desk_hi` is the WORSE shadow: `contains_key` is true, so
+        // `merge_from` skips the default's real art and the piece renders
+        // nothing at the density it claims to serve.
+        let report = validate_pack_animations(&pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.desk_hi]\nframes=[]\nframe_ms=100\n",
+        ));
+        assert!(
+            report
+                .insufficient_frames
+                .iter()
+                .any(|(n, _, got)| n == "desk_hi" && *got == 0),
+            "an empty variant must be caught: {:?}",
+            report.insufficient_frames
+        );
     }
 
     #[test]

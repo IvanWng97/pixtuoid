@@ -1,0 +1,41 @@
+# 56x32 desk at 4x authoring density -- the SAME piece as desk.sprite, drawn on a
+# grid big enough to hold what 14x8 could not: grain along the boards, a thin
+# monitor bezel, readable screen content, individual keycaps, and the key
+# light's top edge baked in.
+#
+# OPTIONAL. The cutaway prefers a `<name>_hi` frame ONLY when its size is
+# exactly the render scale times the base frame's, and blits it 1:1 instead of
+# block-scaling `desk`. A pack without this file renders exactly as before.
+@frame 0
+. . . . . . . . . . . . n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n . . . . . . . . . . . .
+. . . . . . . . . . . . M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M . . . . . . . . . . . .
+. . . . . . . . . . . . M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M . . . . . . . . . . . .
+. . . . . . . . . . . . M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M . . . . . . . . . . . .
+g g g g g g g g g g g g M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M g g g g g g g g g g g g
+D D D D D D D D D D D D M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M D D D D D D D D D D D D
+D D D D D D D D D D D D M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M D D D D D D D D D D D D
+D d d d d D D D D D D D M M M n n n n n n n n n n n n n n n n n n n n n n n n n n M M M D d d d d D D D D D D D
+D D D D D D D D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D D D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D d d d D D D M M M n j j M M M M M M M M M M j j j j j j j j j j j j n M M M D D D D D D d d d D D D
+D D D D D D D D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D d d d d d D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D d d d d d D D D D D
+D D D D D D D D D D D D M M M n j j M M M M M M M M M M M M M M M M j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D D D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D D D D D D D M M M n j j M M M M M M M j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D D D D D D D n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n D D D D D D D D D D D D
+D D D D D D D D D D D D n n n k k n k k n k k n k k n k k n k k n k k n k k n k k n n n D D D D D D D D D D D D
+D D D D D D D D D D D D n n n k k n k k n k k n k k n k k n k k n k k n k k n k k n n n D D D D D D D D D D D D
+D D D D D D D D D D D D n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n D D D D D D D D D D D D
+D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
+d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
+d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
+d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d

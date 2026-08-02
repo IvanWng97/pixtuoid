@@ -501,9 +501,10 @@ fn paint_desk(
     // profiles cannot place the same desk differently.
     let top_y = scale.to_buffer(ly.saturating_sub(1));
 
-    let art = pack.animation("desk").and_then(|a| a.frames.first());
-    let Some(art) = art else { return };
-    blit_frame_scaled(art, x, top_y, scale.factor(), buf);
+    let Some((art, blit_at)) = densest_art(pack, "desk", scale) else {
+        return;
+    };
+    blit_frame_scaled(art, x, top_y, blit_at, buf);
 
     // The front face is the SPRITE'S own material, shaded — sampled from its
     // base row rather than a theme role. Two reasons: the desk's colour lives in
@@ -525,17 +526,22 @@ fn paint_desk(
         );
         fill(
             buf,
-            x + art.width() * s / 4,
-            top_y + art.height() * s * GLOW_ROW_NUMER / GLOW_ROW_DENOM,
-            art.width() * s / 2,
+            x + art.width() * blit_at.get() / 4,
+            top_y + art.height() * blit_at.get() * GLOW_ROW_NUMER / GLOW_ROW_DENOM,
+            art.width() * blit_at.get() / 2,
             s,
             glow.lit,
         );
     }
 
     let ramp = Ramp::from_base(material, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-    let base_y = top_y + art.height() * s;
-    let w = art.width() * s;
+    // Sized off what was ACTUALLY drawn, not off the base sprite: hi art blits
+    // 1:1 and is already in buffer units, so multiplying again would put the
+    // front face a whole desk below the surface it belongs to.
+    let drawn_w = art.width() * blit_at.get();
+    let drawn_h = art.height() * blit_at.get();
+    let base_y = top_y + drawn_h;
+    let w = drawn_w;
     slab(buf, x, base_y, w, desk_front_h() * s, &ramp);
 
     // Contact occlusion hugs the front face; a wide pool reads as a stain.
@@ -641,6 +647,38 @@ fn paint_character(
                 .saturating_sub(LABEL_GAP_PX * scale.get()),
         },
     })
+}
+
+/// The densest art the pack has for `name`, and the factor to blit it at.
+///
+/// A pack may ship `{name}_hi` — the SAME piece drawn on a bigger grid. When
+/// that variant's size is exactly `scale` times the base, it is authored AT
+/// this render density and blits 1:1; otherwise the base blits block-scaled.
+///
+/// This is the whole mixed-density contract, and its direction is the point:
+/// richer art REMOVES the upscale rather than fighting it, so the asset work
+/// can land one piece at a time instead of as a flag day. A pack with no `_hi`
+/// variant renders exactly as it did before this existed.
+///
+/// Density is inferred from the SIZE RATIO rather than declared in `pack.toml`
+/// because the ratio is the fact — a `_hi` sprite that is not a clean multiple
+/// of its base is not a density variant of it, whatever a manifest claimed.
+fn densest_art<'a>(
+    pack: &'a Pack,
+    name: &str,
+    scale: RenderScale,
+) -> Option<(&'a pixtuoid_core::sprite::Frame, std::num::NonZeroU16)> {
+    let base = pack.animation(name).and_then(|a| a.frames.first())?;
+    let hi = pack
+        .animation(&format!("{name}_hi"))
+        .and_then(|a| a.frames.first());
+    if let Some(hi) = hi {
+        let s = scale.get();
+        if hi.width() == base.width() * s && hi.height() == base.height() * s {
+            return Some((hi, std::num::NonZeroU16::MIN));
+        }
+    }
+    Some((base, scale.factor()))
 }
 
 /// The pack sprite for a waypoint kind, when it has one.
@@ -921,6 +959,86 @@ mod tests {
         };
         let behind = Piece::Character { idx: 0, y: 9 };
         assert!(behind.depth() < desk.depth());
+    }
+
+    /// The bundled pack, which ships `desk` (14x8) and `desk_hi` (56x32).
+    fn pack() -> Pack {
+        crate::embedded_pack::load_sprite_pack(None).expect("the embedded pack loads")
+    }
+
+    fn base_size(pack: &Pack, name: &str) -> (u16, u16) {
+        let f = pack
+            .animation(name)
+            .and_then(|a| a.frames.first())
+            .expect("the bundled pack has this piece");
+        (f.width(), f.height())
+    }
+
+    #[test]
+    fn the_drawn_size_is_the_same_whichever_density_the_art_came_from() {
+        // THE property the whole mixed-density contract rests on: a `_hi`
+        // variant must change how a piece is DRAWN, never how big it is. The two
+        // branches return different (frame, factor) pairs whose PRODUCT has to
+        // agree, and getting that wrong is silent — the desk still renders, just
+        // with its front face a whole desk below the surface (which is exactly
+        // what shipped before this test existed).
+        let pack = pack();
+        let (bw, bh) = base_size(&pack, "desk");
+        for s in 1..=6u16 {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let (art, blit_at) = densest_art(&pack, "desk", scale).expect("desk is in the pack");
+            assert_eq!(
+                (art.width() * blit_at.get(), art.height() * blit_at.get()),
+                (bw * s, bh * s),
+                "scale {s} drew a different size than the base art implies"
+            );
+        }
+    }
+
+    #[test]
+    fn the_hi_variant_is_taken_only_at_the_density_it_was_authored_for() {
+        // `desk_hi` is 4x. At 4x it must WIN and blit 1:1 (the upscale is what
+        // richer art exists to remove); at 3x it must LOSE — art that is not a
+        // clean multiple of this render density is not a density variant of it,
+        // and blitting it anyway would draw a desk a third too wide. The ratio
+        // is checked rather than declared precisely so a mis-sized `_hi` cannot
+        // claim a density it does not have.
+        let pack = pack();
+        let (bw, bh) = base_size(&pack, "desk");
+        let (hi_w, hi_h) = base_size(&pack, "desk_hi");
+        assert_eq!((hi_w, hi_h), (bw * 4, bh * 4), "desk_hi is the 4x variant");
+
+        let (art, blit_at) =
+            densest_art(&pack, "desk", RenderScale::new(4).expect("nonzero")).expect("desk exists");
+        assert_eq!(
+            (art.width(), blit_at.get()),
+            (hi_w, 1),
+            "at its own density the hi art blits 1:1"
+        );
+
+        let (art, blit_at) =
+            densest_art(&pack, "desk", RenderScale::new(3).expect("nonzero")).expect("desk exists");
+        assert_eq!(
+            (art.width(), blit_at.get()),
+            (bw, 3),
+            "at 3x the 4x art is rejected and the base block-scales"
+        );
+    }
+
+    #[test]
+    fn a_piece_with_no_hi_variant_renders_exactly_as_it_did_before() {
+        // The other half of "the asset work lands one piece at a time": every
+        // piece the pack has NOT redrawn must be untouched by the lookup, or
+        // adding one `_hi` sprite would be a flag day for all of them.
+        let pack = pack();
+        assert!(
+            pack.animation("plant_hi").is_none(),
+            "this test is only meaningful while `plant` has no hi variant"
+        );
+        let (bw, _) = base_size(&pack, "plant");
+        let scale = RenderScale::new(4).expect("nonzero");
+        let (art, blit_at) = densest_art(&pack, "plant", scale).expect("plant is in the pack");
+        assert_eq!((art.width(), blit_at.get()), (bw, 4));
     }
 
     #[test]
