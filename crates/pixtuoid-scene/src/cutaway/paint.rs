@@ -46,6 +46,14 @@ const RAMP_TINT_PCT: u8 = 26;
 /// turning away from the only light loses more than a facing one gains.
 const RAMP_SHADE_PCT: u8 = 34;
 
+/// Rows of chair back visible BELOW a seated occupant.
+///
+/// Deliberately small. A first pass covered the torso from the waist down and
+/// swallowed the figure — the shirt vanished behind a dark block. The occupant
+/// is already grounded by the desk in front of them, so the chair only has to
+/// peek out beneath, not carry the pose.
+const CHAIR_BACK_H: u16 = 3;
+
 /// Paint `frame`'s office into `buf` as an orthographic cutaway.
 ///
 /// `layout` is in LOGICAL units and `buf` in buffer pixels; `scale` converts.
@@ -59,6 +67,7 @@ pub fn render_cutaway(
     buf: &mut RgbBuffer,
 ) {
     paint_floor(layout, theme, scale, buf);
+    paint_wall(layout, theme, scale, buf);
 
     // ONE ordered draw list, so a character and the desk it sits at resolve
     // against each other by depth instead of by which loop ran first. That
@@ -81,7 +90,7 @@ pub fn render_cutaway(
     for piece in &order {
         match *piece {
             Piece::Desk { at } => paint_desk(at.x, at.y, pack, theme, scale, buf),
-            Piece::Character { idx, .. } => paint_character(frame, idx, pack, scale, buf),
+            Piece::Character { idx, .. } => paint_character(frame, idx, pack, theme, scale, buf),
         }
     }
 }
@@ -124,6 +133,50 @@ fn desk_top_h() -> u16 {
 /// Rows of a desk that are its front face — the thickness.
 fn desk_front_h() -> u16 {
     (DESK_H * DESK_FRONT_NUMER / DESK_FRONT_DENOM).max(1)
+}
+
+/// Rows of the wall band that are glass rather than wall.
+///
+/// The windows are the cutaway's only light SOURCE on screen, so the band has to
+/// read as glass and not as a stripe — it is what makes the north-to-south floor
+/// falloff legible as light instead of as a gradient someone chose.
+const WINDOW_INSET_NUMER: u16 = 1;
+/// Denominator of [`WINDOW_INSET_NUMER`].
+const WINDOW_INSET_DENOM: u16 = 4;
+
+fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
+    // The layout's own derivation, not a re-guess: the wall band ends
+    // `WALL_BAND_TO_TOP_MARGIN` above `top_margin`, and the rows between are
+    // floor the agents walk on.
+    let band_h = layout
+        .top_margin
+        .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
+    if band_h == 0 {
+        return;
+    }
+    let s = scale.get();
+    let w = scale.to_buffer(layout.buf_w);
+    let wall = Ramp::from_base(theme.surface.wall, RAMP_TINT_PCT, RAMP_SHADE_PCT);
+    slab(buf, 0, 0, w, band_h * s, &wall);
+
+    // One glass run inset inside the band, with a lit sill under it — the sill
+    // is what sells the light as coming THROUGH rather than being painted on.
+    let inset = (band_h * WINDOW_INSET_NUMER / WINDOW_INSET_DENOM).max(1);
+    let glass_h = band_h.saturating_sub(inset * 2);
+    if glass_h > 0 {
+        let glass = Ramp::from_base(theme.lighting.night_sky_a, RAMP_TINT_PCT, RAMP_SHADE_PCT);
+        slab(buf, 0, inset * s, w, glass_h * s, &glass);
+        fill(buf, 0, (inset + glass_h) * s, w, s, theme.surface.wall_trim);
+    }
+    // The wall's own contact line with the floor.
+    fill(
+        buf,
+        0,
+        band_h * s,
+        w,
+        s,
+        Ramp::from_base(theme.surface.carpet_dark, 0, RAMP_SHADE_PCT).shade,
+    );
 }
 
 fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
@@ -235,6 +288,7 @@ fn paint_character(
     frame: &SimFrame,
     idx: usize,
     pack: &Pack,
+    theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
@@ -263,6 +317,40 @@ fn paint_character(
         scale.to_buffer(at.y),
         scale.factor(),
         buf,
+    );
+    // The chair paints straight after ITS occupant rather than as its own
+    // sorted piece: it belongs to exactly one character, so tying it to them
+    // makes the order correct by construction. The trade is that a chair cannot
+    // occlude a DIFFERENT agent walking past — acceptable while the profile has
+    // no walkers rendered at a desk, and the fix is a Piece::Chair when it does.
+    if c.seat_desk.is_some() {
+        paint_chair(at, art.width(), art.height(), theme, scale, buf);
+    }
+}
+
+/// A chair back covering the occupant's lower torso.
+///
+/// Without it a seated figure floats: the cutaway shows their whole body, where
+/// the classic painter hid the lower half behind the desk's overhang.
+fn paint_chair(
+    at: crate::layout::Point,
+    sprite_w: u16,
+    sprite_h: u16,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let ramp = Ramp::from_base(theme.furniture.chair_trim, RAMP_TINT_PCT, RAMP_SHADE_PCT);
+    let s = scale.get();
+    // Just below the body, one pixel proud on each side — a seat back peeking
+    // out, not a panel over the occupant.
+    slab(
+        buf,
+        scale.to_buffer(at.x.saturating_sub(1)),
+        scale.to_buffer(at.y + sprite_h),
+        (sprite_w + 2) * s,
+        CHAIR_BACK_H * s,
+        &ramp,
     );
 }
 
@@ -308,6 +396,24 @@ mod tests {
             cut.y
         );
         assert_eq!(cut.y, desk.y, "the head lands on the desk's own row");
+    }
+
+    #[test]
+    fn the_wall_band_stops_where_the_layout_says_the_floor_begins() {
+        // The band is derived from the layout's OWN `top_margin` minus its own
+        // constant, never re-guessed — the rows between are floor the agents
+        // walk on, so a band drawn to `top_margin` would paint over walkers.
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let band_h = layout
+            .top_margin
+            .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
+        assert!(band_h > 0, "a laid-out office has a wall band");
+        assert!(
+            band_h < layout.top_margin,
+            "the band must end ABOVE top_margin, leaving walkable rows: \
+             band {band_h}, top_margin {}",
+            layout.top_margin
+        );
     }
 
     #[test]
