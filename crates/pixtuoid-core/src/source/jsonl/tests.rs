@@ -108,11 +108,11 @@ fn from_open_fds_with_reports_an_enumeration_failure_as_none() {
     );
 }
 
+/// The OTHER side of #223's distinction: an absent / un-canonicalizable root is
+/// not a failure (the source may simply never have run), so it is a healthy
+/// `Some(empty)` — and the enumeration is skipped entirely.
 #[test]
 fn from_open_fds_with_reports_an_absent_root_as_a_healthy_empty() {
-    // The OTHER side of that distinction: an absent / un-canonicalizable root is
-    // not a failure (the source may simply never have run), so it is a healthy
-    // `Some(empty)` — and the enumeration is skipped entirely.
     let got = ProbeSnapshot::from_open_fds_with(
         std::path::Path::new("/definitely/not/here"),
         &["codex"],
@@ -161,17 +161,17 @@ fn from_open_fds_with_joins_each_pid_to_the_transcripts_it_holds_open() {
     );
 }
 
+/// This seam's failure mode is SILENT: with its body a no-op, every watcher
+/// integration test quietly falls back to the native FSEvents backend and still
+/// PASSES — just far slower. Measured under exactly that mutation, the workspace
+/// suite's test phase went 10s → 34s and stayed green, so nothing in the tree
+/// could catch it. Asserting the effect is the whole fix.
+///
+/// Safe to call from a unit test: no lib unit test constructs a `JsonlWatcher`
+/// (they drive walk/ladder directly), so this process-wide `OnceLock` changes
+/// nothing else in this binary.
 #[test]
 fn force_polling_backend_for_tests_actually_sets_the_override() {
-    // This seam's failure mode is SILENT: with its body a no-op, every watcher
-    // integration test quietly falls back to the native FSEvents backend and
-    // still PASSES — just far slower. Measured under exactly that mutation, the
-    // workspace suite's test phase went 10s → 34s and stayed green, so nothing
-    // in the tree could catch it. Asserting the effect is the whole fix.
-    //
-    // Safe to call from a unit test: no lib unit test constructs a
-    // `JsonlWatcher` (they drive walk/ladder directly), so this process-wide
-    // `OnceLock` changes nothing else in this binary.
     force_polling_backend_for_tests(Duration::from_millis(25));
     assert!(
         TEST_POLL_OVERRIDE.get().is_some(),
@@ -1002,16 +1002,16 @@ async fn gated_file_oversized_ended_append_stays_unregistered() {
     );
 }
 
+/// The `!metadata_only` half of the #204 oversized registration guard. The
+/// POSITIVE direction is covered above; this is the negative one, and without it
+/// `!registered && !metadata_only` could be mutated to `||` with the whole suite
+/// green. Only THIS combination can tell the two spellings apart: when
+/// `registered` is true the mutation is absorbed anyway (`emit_first_sight`
+/// early-returns on a held claim), so unregistered-AND-metadata-only is the
+/// single observable case. Its ≤1 MiB twin is
+/// `a_turnless_tail_gates_even_though_the_newest_turn_is_off_window`.
 #[tokio::test]
 async fn gated_file_oversized_metadata_only_append_stays_unregistered() {
-    // The `!metadata_only` half of the #204 oversized registration guard. The
-    // POSITIVE direction is covered above; this is the negative one, and without
-    // it `!registered && !metadata_only` could be mutated to `||` with the whole
-    // suite green. Only THIS combination can tell the two spellings apart:
-    // when `registered` is true the mutation is absorbed anyway (emit_first_sight
-    // early-returns on a held claim), so unregistered-AND-metadata-only is the
-    // single observable case. Its ≤1 MiB twin is
-    // `a_turnless_tail_gates_even_though_the_newest_turn_is_off_window`.
     use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
 
     let dir = tempfile::tempdir().unwrap();
@@ -1023,8 +1023,7 @@ async fn gated_file_oversized_metadata_only_append_stays_unregistered() {
     // The oversized span itself...
     full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
     // ...ending in a metadata run longer than the tail window, so the tail holds
-    // NOTHING but sidecars — positive evidence the recent write was metadata,
-    // not an absence of evidence.
+    // NOTHING but sidecars — positive metadata evidence, not an absence of evidence.
     let sidecar = "{\"type\":\"custom-title\",\"sessionId\":\"s\"}\n";
     full.push_str(&sidecar.repeat((super::walk::TAIL_BYTES as usize / sidecar.len()) + 8));
     tokio::fs::write(&path, &full).await.unwrap();

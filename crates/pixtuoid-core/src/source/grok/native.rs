@@ -380,24 +380,24 @@ mod tests {
         // `SessionEnd` two healthy misses later. Reading one as the other
         // either freezes the ladder forever or ends live sessions.
 
+        /// No `active_sessions.json` = no TUI clients, a real observation — NOT
+        /// an enumeration failure. `None` here would freeze the negative-vouch
+        /// ledger on every machine that never ran grok.
         #[test]
         fn binder_absent_registry_is_a_healthy_empty_not_a_failure() {
-            // No `active_sessions.json` = no TUI clients, a real observation —
-            // NOT an enumeration failure. `None` here would freeze the
-            // negative-vouch ledger on every machine that never ran grok.
             let dir = tempfile::tempdir().unwrap();
             let snap =
                 live_grok_session_ids(dir.path()).expect("an absent registry is not a failure");
             assert!(snap.pid_of.is_empty());
         }
 
+        /// A registry that exists but cannot be READ is the enumeration failing
+        /// — the watcher must change nothing.
         #[test]
         fn binder_unreadable_registry_is_a_failure_not_an_empty() {
-            // A registry that exists but cannot be READ is the enumeration
-            // failing — the watcher must change nothing. A directory in its
-            // place makes `std::fs::read` fail with EISDIR on both platforms
-            // (chmod 000 would not fail for root, which CI sometimes is).
             let dir = tempfile::tempdir().unwrap();
+            // A directory in its place makes `std::fs::read` fail with EISDIR on
+            // both platforms (chmod 000 would not fail for root, which CI sometimes is).
             std::fs::create_dir(dir.path().join("active_sessions.json")).unwrap();
             assert!(
                 live_grok_session_ids(dir.path()).is_none(),
@@ -405,11 +405,11 @@ mod tests {
             );
         }
 
+        /// End-to-end through the real file read + the real liveness check: our
+        /// own pid is unquestionably alive, so it must bind. Falsifiable — a
+        /// binder stubbed to `Some(default)` returns an empty snapshot.
         #[test]
         fn binder_reads_a_real_registry_and_binds_our_own_live_pid() {
-            // End-to-end through the real file read + the real liveness check:
-            // our own pid is unquestionably alive, so it must bind. Falsifiable
-            // — a binder stubbed to `Some(default)` returns an empty snapshot.
             let dir = tempfile::tempdir().unwrap();
             let me = std::process::id();
             std::fs::write(

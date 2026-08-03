@@ -227,23 +227,26 @@ mod imp {
         Some(pids)
     }
 
+    /// Linux arm: absoluteness IS the vnode test. `/proc/<pid>/fd` resolves
+    /// non-file descriptors to synthetic NON-absolute targets
+    /// (`socket:[inode]`, `pipe:[inode]`, `anon_inode:[eventfd]`), so the
+    /// `is_absolute` filter matches this fn's name + doc AND the macOS arm's
+    /// `PROX_FDTYPE_VNODE`. Unfiltered, the two platform arms returned
+    /// DIFFERENT things under one name, and a caller that believed the doc got
+    /// a Linux-only false positive (pinned by
+    /// `open_vnode_paths_never_reports_a_unix_socket`).
+    ///
+    /// A deleted file's link ends with `" (deleted)"`, which simply never
+    /// matches a rollout path — no stripping needed.
     pub(super) fn open_vnode_paths(pid: i32) -> Vec<PathBuf> {
-        // Dead pid / EPERM → read_dir fails → empty, by design. A deleted
-        // file's link ends with " (deleted)", which simply never matches a
-        // rollout path — no stripping needed.
+        // Dead pid / EPERM → read_dir fails → empty, by design.
         let Ok(entries) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
             return Vec::new();
         };
         entries
             .flatten()
             .filter_map(|e| std::fs::read_link(e.path()).ok())
-            // VNODE only, matching this fn's name + doc AND the macOS arm's
-            // `PROX_FDTYPE_VNODE` filter. `/proc/<pid>/fd` links resolve
-            // non-file descriptors to synthetic NON-absolute targets —
-            // `socket:[inode]`, `pipe:[inode]`, `anon_inode:[eventfd]` — so
-            // absoluteness is exactly the vnode test here. Unfiltered, the two
-            // platform arms returned DIFFERENT things under one name, and a
-            // caller that believed the doc got a Linux-only false positive.
+            // VNODE only: absoluteness is the vnode test — see this fn's doc.
             .filter(|p| p.is_absolute())
             .collect()
     }

@@ -447,19 +447,19 @@ fn parentless_revival_start_of_an_ended_codex_child_relinks_via_ledger() {
     }
 }
 
+/// The OUTCOME the split clocks exist for, observed at the public seam —
+/// `scene.agents[child].parent_id` — not on the reducer-private ledger map.
+/// The sibling above fires its revival 20s after the stop, comfortably
+/// inside BOTH clocks, so it could never see the bug: gc used to drop the
+/// whole entry (parent link included) at `CHILD_END_LEDGER_TTL`, and the
+/// gap a multi-turn child must span is a TURN gap, which is unbounded.
+/// A child idle 91s between turns came back an ORPHAN — the exact phantom
+/// the #246 adoption exists to eliminate.
+///
+/// Teeth in BOTH directions: retaining on the 90s gate again fails the
+/// first assert, and never expiring the memory fails the second.
 #[test]
 fn a_multi_turn_child_idle_past_the_end_gate_still_revives_adopted_not_orphaned() {
-    // The OUTCOME the split clocks exist for, observed at the public seam —
-    // `scene.agents[child].parent_id` — not on the reducer-private ledger map.
-    // The sibling above fires its revival 20s after the stop, comfortably
-    // inside BOTH clocks, so it could never see the bug: gc used to drop the
-    // whole entry (parent link included) at `CHILD_END_LEDGER_TTL`, and the
-    // gap a multi-turn child must span is a TURN gap, which is unbounded.
-    // A child idle 91s between turns came back an ORPHAN — the exact phantom
-    // the #246 adoption exists to eliminate.
-    //
-    // Teeth in BOTH directions: retaining on the 90s gate again fails the
-    // first assert, and never expiring the memory fails the second.
     use pixtuoid_core::state::reducer::{CHILD_END_RELINK_TTL, EXIT_GRACE_WINDOW};
     use serde_json::json;
     for transport in [Transport::Jsonl, Transport::Hook] {

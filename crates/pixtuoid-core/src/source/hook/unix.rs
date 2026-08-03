@@ -478,13 +478,13 @@ mod tests {
         );
     }
 
+    /// The EEXIST match guard must not swallow OTHER create errors into the
+    /// validate branch. `DirBuilder` is non-recursive here, so a missing PARENT
+    /// fails ENOENT — with the guard widened to `true` this lands in the validate
+    /// arm, whose `symlink_metadata` then fails NotFound and misattributes a
+    /// create failure to a stat failure.
     #[test]
     fn ensure_private_dir_reports_a_non_eexist_create_failure_as_a_create_failure() {
-        // The EEXIST match guard must not swallow OTHER create errors into the
-        // validate branch. `DirBuilder` is non-recursive here, so a missing
-        // PARENT fails ENOENT — with the guard widened to `true` this lands in
-        // the validate arm, whose `symlink_metadata` then fails NotFound and
-        // misattributes a create failure to a stat failure.
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let dir = tmp.path().join("missing-parent").join("d");
         let err = ensure_private_dir(&dir, my_uid()).expect_err("ENOENT must fail");
@@ -494,11 +494,11 @@ mod tests {
         );
     }
 
+    /// The POSITIVE direction (#485): the guard is a path comparison, and a
+    /// second hand-copied literal disarms it with the whole suite green — so ask
+    /// about the REAL production endpoint, built from the same fn.
     #[test]
     fn is_owned_fallback_fires_for_the_dir_the_socket_path_is_built_from() {
-        // The POSITIVE direction (#485): the guard is a path comparison, and a
-        // second hand-copied literal disarms it with the whole suite green — so
-        // ask about the REAL production endpoint, built from the same fn.
         let owned = owned_socket_dir();
         assert!(is_owned_fallback_in(&owned.join(SOCKET_FILE_NAME), &owned));
         // Negative controls: a sibling dir and the flat pre-#485 form (the
@@ -510,12 +510,12 @@ mod tests {
         assert!(!is_owned_fallback_in(&owned.with_extension("sock"), &owned));
     }
 
+    /// An XDG-style / explicit-override socket path (parent is NOT the dir we
+    /// manage) must not create or touch anything. Also the `delete !` pin from the
+    /// OTHER side: an inverted guard hardens exactly the paths it should skip,
+    /// which shows up here as the owned dir being created anyway.
     #[test]
     fn ensure_owned_socket_dir_in_is_a_noop_for_non_fallback_parents() {
-        // An XDG-style / explicit-override socket path (parent is NOT the dir we
-        // manage) must not create or touch anything. Also the `delete !` pin from
-        // the OTHER side: an inverted guard hardens exactly the paths it should
-        // skip, which shows up here as the owned dir being created anyway.
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let owned = tmp.path().join("owned");
         let sock = tmp.path().join("elsewhere").join("pixtuoid.sock");

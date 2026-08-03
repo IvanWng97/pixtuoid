@@ -450,14 +450,20 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
     );
 }
 
-// White-box: the child ledger's BOUNDING contract (#244). An entry is
-// created with `ended_at: None` when a parent link is applied; a child
-// removed WITHOUT an as_child end (here: the parent's cascade) must get
-// ended_at stamped by `sweep_exited` — that both arms the #244-w2 gate
-// for those exits and starts the gc clock — and gc must prune it after
-// CHILD_END_LEDGER_TTL. Roots never enter the ledger. The public
-// behavioral pins live in tests/reducer/child_ledger.rs; the stamping/pruning
-// internals have no other observable.
+/// White-box: the child ledger's BOUNDING contract (#244). An entry is
+/// created with `ended_at: None` when a parent link is applied; a child
+/// removed WITHOUT an as_child end (here: the parent's cascade) must get
+/// ended_at stamped by `sweep_exited` — that both arms the #244-w2 gate
+/// for those exits and starts the gc clock — and gc must prune it after
+/// CHILD_END_RELINK_TTL. Roots never enter the ledger. The public
+/// behavioral pins live in tests/reducer/child_ledger.rs; the stamping/pruning
+/// internals have no other observable.
+///
+/// The two clocks are pinned separately: past the GATE's `CHILD_END_LEDGER_TTL`
+/// the entry is RETAINED, because the #246 parentless revival re-links through
+/// its `parent_id` and the turn gap that must span is unbounded, so the memory
+/// rides the longer relink budget. (Pruning at the gate's TTL is what made a
+/// multi-turn child idle >90s come back an orphan.)
 #[test]
 fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
     use crate::source::{AgentEvent, Transport};
@@ -524,10 +530,6 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
         "sweep_exited must stamp ended_at for a child whose end wasn't as_child"
     );
 
-    // Past the GATE's TTL the entry is RETAINED — the #246 parentless revival
-    // re-links through its `parent_id`, and the turn gap that must span is
-    // unbounded, so the memory rides the longer relink budget. (Pruning here
-    // is what made a multi-turn child idle >90s come back an orphan.)
     r.tick(
         &mut scene,
         swept + super::CHILD_END_LEDGER_TTL + Duration::from_secs(1),
@@ -565,12 +567,12 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
-    // Well ABOVE every map's steady-state working set (the widest window is now
-    // CHILD_END_RELINK_TTL = 300s at ~1 event/s ⇒ ~300 in `child_ledger`, past
-    // PROOF_OF_LIFE_TTL's 150s), and FAR below ITERS — so a per-event leak blows
-    // it while a healthy stream stays comfortably under. Raised with the relink
-    // budget to keep the original ~3× headroom over the widest window; a bound
-    // that merely clears the steady state proves nothing about a slow leak.
+    /// Well ABOVE every map's steady-state working set (the widest window is now
+    /// CHILD_END_RELINK_TTL = 300s at ~1 event/s ⇒ ~300 in `child_ledger`, past
+    /// PROOF_OF_LIFE_TTL's 150s), and FAR below ITERS — so a per-event leak blows
+    /// it while a healthy stream stays comfortably under. Raised with the relink
+    /// budget to keep the original ~3× headroom over the widest window; a bound
+    /// that merely clears the steady state proves nothing about a slow leak.
     const MAX_CORR_ENTRIES: usize = 1024;
     const ITERS: u64 = 3_000;
     const MAP_NAMES: [&str; 7] = [

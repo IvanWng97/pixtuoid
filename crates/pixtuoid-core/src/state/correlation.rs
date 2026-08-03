@@ -303,6 +303,16 @@ impl Correlation {
         entry.ended_at = None;
     }
 
+    /// TTL-prune every correlation map — the ONE pruning entry point named in
+    /// the module doc.
+    ///
+    /// [`Correlation::child_ledger`] is the odd retain: not-yet-ended entries
+    /// ride until an end/sweep stamps `ended_at` (every slot removal goes
+    /// through `sweep_exited`, which stamps it), so the map is bounded by live
+    /// children plus the TTL's trailing window. That TTL is the RELINK budget,
+    /// not the GATE's — dropping the entry at the gate's TTL also dropped the
+    /// `parent_id` the #246 revival reads, so a multi-turn child idle past it
+    /// re-registered as an orphan (see [`CHILD_END_RELINK_TTL`]).
     pub(super) fn gc(&mut self, now: SystemTime) {
         self.recent_hook_tool_uses
             .retain(|_, (ts, _)| is_fresh(now, *ts, HOOK_WINS_WINDOW));
@@ -312,12 +322,6 @@ impl Correlation {
             .retain(|_, ts| is_fresh(now, *ts, PROOF_OF_LIFE_TTL));
         self.recent_task_drains
             .retain(|_, ts| is_fresh(now, *ts, DRAINED_TASK_TOMBSTONE_TTL));
-        // Not-yet-ended entries ride until their end/sweep stamps ended_at
-        // (every slot removal goes through sweep_exited, which stamps it), so
-        // the map is bounded by live children + the TTL's trailing window.
-        // Retained on the RELINK budget, not the GATE's: dropping the entry at
-        // the gate's TTL also dropped the `parent_id` the #246 revival reads,
-        // so a multi-turn child idle past it re-registered as an orphan.
         self.child_ledger.retain(|_, e| match e.ended_at {
             None => true,
             Some(ts) => is_fresh(now, ts, CHILD_END_RELINK_TTL),
@@ -407,6 +411,9 @@ mod tests {
         );
     }
 
+    /// The re-link revive: the link is recorded AND `ended_at` is cleared, so
+    /// `gc` no longer prunes the entry and `child_recently_ended` goes false —
+    /// the invariant a bare `parent_id = Some(..)` (without the clear) breaks.
     #[test]
     fn link_applied_parent_sets_the_link_and_revives_an_ended_entry() {
         let child = AgentId::from_parts("claude-code", "child");
@@ -420,9 +427,6 @@ mod tests {
                 ended_at: Some(t0()),
             },
         );
-        // The re-link revive: the link is recorded AND ended_at is cleared, so
-        // gc no longer prunes the entry (child_recently_ended goes false) — the
-        // invariant a bare `parent_id = Some(..)` (without the clear) would break.
         corr.link_applied_parent(child, parent);
         let entry = &corr.child_ledger[&child];
         assert_eq!(entry.parent_id, Some(parent));
