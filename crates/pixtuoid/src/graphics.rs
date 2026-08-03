@@ -52,6 +52,15 @@ pub enum Profile {
 pub enum ClassicReason {
     /// `--graphics off`.
     Disabled,
+    /// The terminal was never asked — output is not a terminal, so the query
+    /// would have gone into a pipe and nothing could answer it.
+    ///
+    /// SEPARATE from [`Self::NoProtocol`] because collapsing them makes the
+    /// report assert something it never established. It reads as a verdict on
+    /// the terminal when the real cause is the pipe, and the first person it
+    /// misled was its author, running `doctor | grep graphics:` and believing
+    /// the answer.
+    NotQueried,
     /// The terminal answered, and it has no graphics protocol.
     NoProtocol,
     /// The terminal has a protocol but reports a cell too small to subdivide.
@@ -97,9 +106,11 @@ pub fn render_scale_for_cell(cell: CellSize) -> Option<RenderScale> {
 /// Decide what to paint. Pure — [`detect`] supplies the argument.
 ///
 /// `detected` is `None` when the query could not run at all (not a tty, or the
-/// terminal never answered). That is the same outcome as "no protocol" for
-/// what we paint, but a DIFFERENT fact, so it is not collapsed here: the
-/// caller keeps `Option` and this maps both to the classic profile.
+/// terminal never answered). Same PROFILE as "no protocol", different FACT —
+/// hence [`ClassicReason::NotQueried`] rather than one merged arm. The profile
+/// is all the renderer needs, but the reason is what the user reads, and a
+/// report that says the terminal answered when it was never asked sends them
+/// to fix the wrong thing.
 pub fn resolve(mode: GraphicsMode, detected: Option<Detected>) -> Plan {
     let classic = |reason| Plan {
         profile: Profile::Classic,
@@ -108,9 +119,12 @@ pub fn resolve(mode: GraphicsMode, detected: Option<Detected>) -> Plan {
     if mode == GraphicsMode::Off {
         return classic(ClassicReason::Disabled);
     }
-    let Some(d) = detected.filter(|d| d.has_protocol) else {
-        return classic(ClassicReason::NoProtocol);
+    let Some(d) = detected else {
+        return classic(ClassicReason::NotQueried);
     };
+    if !d.has_protocol {
+        return classic(ClassicReason::NoProtocol);
+    }
     match render_scale_for_cell(d.cell) {
         // A scale of 1 is the classic density by definition — going through
         // the image path to draw the same number of pixels would cost an
@@ -128,6 +142,9 @@ impl ClassicReason {
     pub fn describe(self) -> String {
         match self {
             Self::Disabled => "disabled by --graphics off".to_string(),
+            Self::NotQueried => "output is not a terminal, so nothing could answer the capability \
+                 query — run without a pipe to see what this terminal supports"
+                .to_string(),
             Self::NoProtocol => {
                 "terminal reports no graphics protocol (kitty/iterm2/sixel)".to_string()
             }
@@ -279,7 +296,10 @@ mod tests {
         // so it must never be silent. A user asking "why is it not the pretty
         // one" gets an answer in all four shapes.
         let cases = [
-            (None, ClassicReason::NoProtocol),
+            // Never asked vs asked-and-told-no are DIFFERENT facts. Collapsing
+            // them is what made a piped `doctor | grep` read as a verdict on
+            // the terminal, so they are pinned apart here.
+            (None, ClassicReason::NotQueried),
             (
                 Some(Detected {
                     has_protocol: false,
