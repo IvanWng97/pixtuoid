@@ -326,22 +326,65 @@ fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
     }
 }
 
+/// The cache is observed through a SEALED mask: `find_path` on a fully-blocked
+/// grid can only return the 2-point `[from, to]` fallback, so a multi-point
+/// answer proves the cached polyline was served instead of a fresh A* run.
+///
+/// `router.len()` cannot see this. The miss arm re-`insert`s the SAME `(from,
+/// to)` key, so deleting the cache-hit branch entirely leaves `len() == 1` — the
+/// old `assert_eq!(router.len(), 1, "should hit cache")` was green either way
+/// (#750). The mask is a sound probe because the cache is deliberately mask-BLIND:
+/// it keys on `(from, to)` and invalidates on the OVERLAY signature, the mask
+/// being static per layout.
 #[test]
-fn router_caches_until_overlay_changes() {
+fn router_serves_the_cached_path_instead_of_re_running_astar() {
+    let l = make_layout();
+    let mut router = AStarRouter::new();
+    let overlay = OccupancyOverlay::new();
+    let from = Point { x: 30, y: 80 };
+    let to = Point { x: 30, y: 120 };
+
+    let first = router.route(&l.walkable, &overlay, from, to);
+    assert!(
+        first.len() > 2,
+        "the fixture must CORNER, else a hit is indistinguishable from the \
+         straight-line fallback: {first:?}"
+    );
+
+    let sealed = WalkableMask::filled(l.walkable.width(), l.walkable.height(), false);
+    let second = router.route(&sealed, &overlay, from, to);
+    assert_eq!(
+        second, first,
+        "a repeat leg must be served from the cache — a re-route on the sealed \
+         mask could only yield the 2-point fallback"
+    );
+}
+
+/// The other half: an overlay rect laid ACROSS a cached path evicts that entry
+/// (`path_clear_under`), so the next call genuinely re-routes. Same sealed-mask
+/// oracle, opposite verdict — the fallback IS the evidence of a recompute.
+#[test]
+fn an_overlay_across_a_cached_path_forces_a_re_route() {
     let l = make_layout();
     let mut router = AStarRouter::new();
     let mut overlay = OccupancyOverlay::new();
     let from = Point { x: 30, y: 80 };
     let to = Point { x: 30, y: 120 };
-    let _ = router.route(&l.walkable, &overlay, from, to);
-    assert_eq!(router.len(), 1);
-    let _ = router.route(&l.walkable, &overlay, from, to);
-    assert_eq!(router.len(), 1, "should hit cache");
 
-    // Push an occupancy rect — cache should drop.
-    overlay.add(100, 100, 8, 8);
-    let _ = router.route(&l.walkable, &overlay, from, to);
-    assert_eq!(router.len(), 1, "cache rebuilt after overlay change");
+    let first = router.route(&l.walkable, &overlay, from, to);
+    assert!(first.len() > 2, "fixture must corner: {first:?}");
+
+    // Cover a waypoint of the path just taken, so `path_clear_under` drops it.
+    let mid = first[first.len() / 2];
+    overlay.add(mid.x.saturating_sub(4), mid.y.saturating_sub(4), 8, 8);
+
+    let sealed = WalkableMask::filled(l.walkable.width(), l.walkable.height(), false);
+    let after = router.route(&sealed, &overlay, from, to);
+    assert_eq!(
+        after,
+        vec![from, to],
+        "the crossed entry must be evicted and re-routed, not served stale"
+    );
 }
 
 #[test]
