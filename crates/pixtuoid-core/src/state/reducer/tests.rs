@@ -565,10 +565,13 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
-    // Well ABOVE every map's steady-state working set (the widest window is
-    // PROOF_OF_LIFE_TTL = 150s at ~1 event/s ⇒ ~150), and FAR below ITERS — so a
-    // per-event leak blows it while a healthy stream stays ~an order under.
-    const MAX_CORR_ENTRIES: usize = 512;
+    // Well ABOVE every map's steady-state working set (the widest window is now
+    // CHILD_END_RELINK_TTL = 300s at ~1 event/s ⇒ ~300 in `child_ledger`, past
+    // PROOF_OF_LIFE_TTL's 150s), and FAR below ITERS — so a per-event leak blows
+    // it while a healthy stream stays comfortably under. Raised with the relink
+    // budget to keep the original ~3× headroom over the widest window; a bound
+    // that merely clears the steady state proves nothing about a slow leak.
+    const MAX_CORR_ENTRIES: usize = 1024;
     const ITERS: u64 = 3_000;
     const MAP_NAMES: [&str; 7] = [
         "recent_hook_tool_uses",

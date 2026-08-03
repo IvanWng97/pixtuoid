@@ -161,27 +161,30 @@ exclude_re = [
     'tui/mod\.rs.*(run_tui|focus_clicked_agent|setup_terminal|teardown_terminal|resolve_version_popup)',
     'runtime/driver\.rs.*replace (run|run_async|headless_loop|compute_boot_capacities) ->',
     'runtime/driver\.rs.*replace reducer_task with',
-    # `hook::unix::ensure_owned_socket_dir` — the one-line BINDER that substitutes
-    # the real `/tmp/pixtuoid-{uid}` + our real uid into `ensure_owned_socket_dir_in`.
-    # Driving it means creating/validating the REAL per-user socket dir, which
-    # would race a live daemon on a dev box, so no test calls it (production
-    # callers only — the `driver.rs` rule above). The NOTE that matters: this
-    # exclusion is only honest because the fn is a pure substitution. Before the
-    # #485 guard was split, the decision logic lived HERE and both
-    # `-> Ok(())` and `delete !` survived the entire suite — a security guard that
-    # could be deleted invisibly. After the split, re-mutating the file scores
-    # 14 caught / 1 missed, that one being this line (measured, not assumed).
-    # So: keep this fn a pure substitution. Any logic added here becomes
-    # unmeasurable, and this exclusion silently starts hiding it.
+    #
+    # A THIRD class: one-line BINDERS that tests DO reach, but only on a branch
+    # where the mutation is unobservable. Distinct from the zero-call-site glue
+    # above — the admission test here is not "is it called" but "can any REACHABLE
+    # call distinguish the mutant", so re-check that, not the call graph, before
+    # trusting either entry.
+    #
+    # `hook::unix::ensure_owned_socket_dir` substitutes the real
+    # `/tmp/pixtuoid-{uid}` + our uid into `ensure_owned_socket_dir_in`. It IS
+    # called under test — `tests/transport/socket.rs` drives it via
+    # `HookSocketListener::bind` — but always with a tempdir endpoint, i.e. only
+    # on the no-op branch, where `-> Ok(())` is the correct answer. Reaching the
+    # FIRING branch means creating and validating the REAL per-user socket dir,
+    # which would race a live daemon on a dev box. Keep this fn a pure
+    # substitution: the decision logic and its six pins live in
+    # `ensure_owned_socket_dir_in`, and any logic added HERE becomes unmeasurable.
     'unix\.rs.*replace ensure_owned_socket_dir ->',
-    # `ProbeSnapshot::from_open_fds` — the SAME shape as the binder above, and
-    # found by the same run: the one line that substitutes the real
-    # `fd_probe::pids_by_name` / `open_vnode_paths` into `from_open_fds_with`.
-    # Killing it needs a live process holding a transcript open under a temp root
-    # (real FFI + real scheduling) — the flaky class `fd_probe.rs` is excluded
-    # wholesale for. Everything it used to hide is now measured: `_with` takes
-    # both enumerators, so canonicalize-or-`Some(empty)`, enumeration-failure-is-
-    # `None`, and the pid→path join are all killable, and re-mutating the file
-    # scores 8 caught / 1 missed — this line. Keep it a pure substitution.
+    # `ProbeSnapshot::from_open_fds` is the same shape: reached under test through
+    # the omp/codex probes, but only where the proc-table walk finds nothing, so
+    # `Some(Default::default())` is indistinguishable from the real answer.
+    # Distinguishing it needs a live process holding a transcript open under a
+    # temp root — the real-FFI-plus-scheduling flakiness `fd_probe.rs` is excluded
+    # wholesale for. The logic it used to hide is now measured: `_with` takes both
+    # enumerators, so canonicalize-or-`Some(empty)`, enumeration-failure-is-`None`,
+    # and the pid→path join are each killable.
     'liveness\.rs.*replace ProbeSnapshot::from_open_fds ->',
 ]

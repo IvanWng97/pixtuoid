@@ -521,6 +521,13 @@ mod tests {
     /// shim line's cap, well under the ceiling) must still decode; a
     /// `2*1024*1024` mutation to `(2+1024)*1024` (≈1.03 MiB) or
     /// `2*(1024+1024)` (4 KiB) truncates it mid-line and loses the event.
+    ///
+    /// The writer is SPAWNED because the payload is ~20× the duplex buffer, so
+    /// `write_all` only completes as `handle_conn` drains it: written inline,
+    /// any mutation that stops the drain parks the await forever and the test
+    /// fails by HANGING — which cargo-mutants scores as a 51s timeout, not a
+    /// kill. Spawning it and bounding the recv makes each such mutation a fast
+    /// assertion failure.
     #[tokio::test]
     async fn handle_conn_ceiling_leaves_headroom_over_the_shim_line_cap() {
         let (mut client, server) = tokio::io::duplex(64 * 1024);
@@ -531,14 +538,6 @@ mod tests {
             "{{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
              \"transcript_path\":\"/p/s1.jsonl\",\"pad\":\"{pad}\"}}\n"
         );
-        // The write must run CONCURRENTLY with the reader: the payload is ~20x the
-        // duplex buffer, so `write_all` only completes as `handle_conn` drains it.
-        // Written INLINE, any mutation that stops the drain — a shrunken
-        // `MAX_CONN_BYTES`, a no-op `handle_conn` — parks this await forever, so
-        // the test "fails" only by hanging: cargo-mutants scored all three as 51s
-        // TIMEOUTs rather than kills. Spawning the writer and bounding the recv
-        // turns each of them into a fast assertion failure instead, which is the
-        // difference between a pin that reports and a pin that stalls the run.
         let writer = tokio::spawn(async move {
             let _ = client.write_all(line.as_bytes()).await;
             drop(client);
@@ -732,13 +731,19 @@ mod tests {
         );
     }
 
-    // The pid-bind loop in handle_conn (line 263-268): a payload carrying a
-    // shim-stamped `_pid` that decodes to a SessionStart binds that agent to the
-    // pid through the LIVE HookPidWatch, so killing the pid ends the slot. The
-    // pid_watch.rs suite calls `note()` directly — this drives the bind THROUGH
-    // the socket loop end-to-end (peek `_pid` → decode → pid_bind_target →
-    // note). Platform-gated like the pid_watch test (no exit-watch backend on
-    // Windows / pre-5.3 Linux → spawn returns None → no-op).
+    /// The pid-bind loop in `handle_conn`: a payload carrying a shim-stamped
+    /// `_pid` that decodes to a SessionStart binds that agent to the pid through
+    /// the LIVE HookPidWatch, so killing the pid ends the slot. The pid_watch.rs
+    /// suite calls `note()` directly — this drives the bind THROUGH the socket
+    /// loop end-to-end (peek `_pid` → decode → pid_bind_target → note).
+    /// Platform-gated like the pid_watch test (no exit-watch backend on Windows
+    /// / pre-5.3 Linux → spawn returns None → no-op).
+    ///
+    /// Both `rx.recv()`s are BOUNDED because `HookPidWatch::spawn` holds a `tx`
+    /// clone, so this channel never closes on its own: an unbounded recv parks
+    /// forever whenever the payload decodes to nothing, and nextest cannot
+    /// finish cancelling while one test hangs — which is how three unrelated
+    /// mutants in this file scored as 51s timeouts instead of kills.
     #[tokio::test]
     async fn handle_conn_binds_pid_from_payload_so_killing_it_ends_the_agent() {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
@@ -763,14 +768,6 @@ mod tests {
         client.write_all(line.as_bytes()).await.unwrap();
 
         // Drain the SessionStart so it doesn't race the SessionEnd on the channel.
-        // BOUNDED on purpose: `HookPidWatch::spawn` holds a `tx` clone, so this
-        // channel never closes on its own — an unbounded `rx.recv()` parks FOREVER
-        // whenever the payload decodes to nothing, and this test then hangs rather
-        // than fails. That is measured, not theoretical: it is why three mutants in
-        // this file scored as 51s cargo-mutants TIMEOUTs instead of kills — every
-        // other hook test failed in ~0.01s, but nextest cannot finish cancelling
-        // while one test never returns. Killing the child on the failure path too,
-        // so a red here doesn't also leak a `sleep 60`.
         let ev = match tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await {
             Ok(Some((_, ev))) => ev,
             other => {

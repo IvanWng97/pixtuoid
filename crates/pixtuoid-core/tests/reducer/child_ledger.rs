@@ -448,6 +448,147 @@ fn parentless_revival_start_of_an_ended_codex_child_relinks_via_ledger() {
 }
 
 #[test]
+fn a_multi_turn_child_idle_past_the_end_gate_still_revives_adopted_not_orphaned() {
+    // The OUTCOME the split clocks exist for, observed at the public seam —
+    // `scene.agents[child].parent_id` — not on the reducer-private ledger map.
+    // The sibling above fires its revival 20s after the stop, comfortably
+    // inside BOTH clocks, so it could never see the bug: gc used to drop the
+    // whole entry (parent link included) at `CHILD_END_LEDGER_TTL`, and the
+    // gap a multi-turn child must span is a TURN gap, which is unbounded.
+    // A child idle 91s between turns came back an ORPHAN — the exact phantom
+    // the #246 adoption exists to eliminate.
+    //
+    // Teeth in BOTH directions: retaining on the 90s gate again fails the
+    // first assert, and never expiring the memory fails the second.
+    use pixtuoid_core::state::reducer::{CHILD_END_RELINK_TTL, EXIT_GRACE_WINDOW};
+    use serde_json::json;
+    for transport in [Transport::Jsonl, Transport::Hook] {
+        let mut scene = SceneState::uniform(4);
+        let mut r = Reducer::new();
+        let parent = AgentId::from_parts("codex", "parent-sess");
+        let child_uuid = "02000000-0000-7000-8000-0000000000ce";
+        let child = AgentId::from_parts("codex", child_uuid);
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+        apply_hook_payload(
+            &mut r,
+            &mut scene,
+            json!({
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "parent-sess",
+                "_pixtuoid_source": "codex",
+                "cwd": "/repo",
+            }),
+            t0,
+        );
+        apply_hook_payload(
+            &mut r,
+            &mut scene,
+            json!({
+                "hook_event_name": "SubagentStart",
+                "session_id": "parent-sess",
+                "agent_id": child_uuid,
+                "cwd": "/repo",
+                "_pixtuoid_source": "codex",
+            }),
+            t0 + Duration::from_secs(1),
+        );
+        let stop = t0 + Duration::from_secs(2);
+        apply_hook_payload(
+            &mut r,
+            &mut scene,
+            json!({
+                "hook_event_name": "SubagentStop",
+                "session_id": "parent-sess",
+                "agent_id": child_uuid,
+                "_pixtuoid_source": "codex",
+            }),
+            stop,
+        );
+        r.tick(
+            &mut scene,
+            stop + EXIT_GRACE_WINDOW + Duration::from_secs(1),
+        );
+        assert!(
+            !scene.agents.contains_key(&child),
+            "child GC'd ({transport:?})"
+        );
+
+        // Turn N+1 lands PAST the end gate — the gate no longer gates, but the
+        // re-link memory must still be there.
+        let revival = stop + CHILD_END_LEDGER_TTL + Duration::from_secs(1);
+        let start = |agent_id| AgentEvent::SessionStart {
+            agent_id,
+            source: "codex".into(),
+            session_id: child_uuid.into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        };
+        r.apply(&mut scene, start(child), revival, transport);
+        assert_eq!(
+            scene.agents.get(&child).map(|s| s.parent_id),
+            Some(Some(parent)),
+            "a child idle past the END GATE must revive ADOPTED, not orphaned ({transport:?})"
+        );
+
+        // ...and the memory is still a TTL, not a leak: past the relink budget
+        // the same revival registers parentless.
+        let mut scene2 = SceneState::uniform(4);
+        let mut r2 = Reducer::new();
+        apply_hook_payload(
+            &mut r2,
+            &mut scene2,
+            json!({
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "parent-sess",
+                "_pixtuoid_source": "codex",
+                "cwd": "/repo",
+            }),
+            t0,
+        );
+        apply_hook_payload(
+            &mut r2,
+            &mut scene2,
+            json!({
+                "hook_event_name": "SubagentStart",
+                "session_id": "parent-sess",
+                "agent_id": child_uuid,
+                "cwd": "/repo",
+                "_pixtuoid_source": "codex",
+            }),
+            t0 + Duration::from_secs(1),
+        );
+        apply_hook_payload(
+            &mut r2,
+            &mut scene2,
+            json!({
+                "hook_event_name": "SubagentStop",
+                "session_id": "parent-sess",
+                "agent_id": child_uuid,
+                "_pixtuoid_source": "codex",
+            }),
+            stop,
+        );
+        r2.tick(
+            &mut scene2,
+            stop + EXIT_GRACE_WINDOW + Duration::from_secs(1),
+        );
+        r2.apply(
+            &mut scene2,
+            start(child),
+            stop + CHILD_END_RELINK_TTL + Duration::from_secs(1),
+            transport,
+        );
+        assert_eq!(
+            scene2.agents.get(&child).map(|s| s.parent_id),
+            Some(None),
+            "past the relink budget the memory is gone, so the revival is parentless \
+             ({transport:?}) — the retention is bounded, not a leak"
+        );
+    }
+}
+
+#[test]
 fn parentless_session_start_enriching_a_parentless_child_slot_adopts_ledger_parent() {
     // The ENRICHMENT-path twin of the registration-path adoption above — the
     // self-heal of the hook-straggler residual: a dead child's hook

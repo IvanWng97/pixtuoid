@@ -311,7 +311,9 @@ mod tests {
     /// reports `proc_fdtype=2` (SOCKET, not VNODE=1) and its
     /// `PROC_PIDFDVNODEPATHINFO` query returns 0 bytes with an empty path.
     /// Detecting a socket's owner needs a socket-aware probe
-    /// (`PROC_PIDFDSOCKETINFO` / `/proc/net/unix`) — tracked separately.
+    /// (`PROC_PIDFDSOCKETINFO` on macOS, a `/proc/net/unix` inode join on
+    /// Linux) — see `grok::native::leader_socket_owner`, which is inert for
+    /// exactly this reason.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn open_vnode_paths_never_reports_a_unix_socket() {

@@ -109,8 +109,9 @@ SEAMS: tuple[Seam, ...] = (
     # branch of `hook-shim` (that one audits the shim's never-panic contract) or
     # of `reducer-liveness` (state-machine reasoning): this is endpoint creation
     # and arbitration, a security surface with its own questions. It matched NO
-    # seam at all until 2026-08 — measured, not assumed: feeding all four files
-    # to this script produced empty output while `crates/pixtuoid-hook/src/main.rs`
+    # seam at all until 2026-08 — measured, not assumed: feeding every
+    # `source/hook/` file to this script produced empty output while
+    # `crates/pixtuoid-hook/src/main.rs`
     # correctly fired. That blind spot sat on the highest fix-ratio directory in
     # the repo, and a broad mutation run then found the #485 private-dir guard
     # deletable with the whole suite green.

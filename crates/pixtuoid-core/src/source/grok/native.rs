@@ -132,6 +132,18 @@ fn augment_with_leader_vouch(snap: ProbeSnapshot, grok_root: &Path) -> ProbeSnap
 /// The pid holding `leader.sock` open, via the shared fd probe (macOS libproc /
 /// Linux /proc). BOTH installed comm names are probed — the installer links
 /// the binary as `grok` AND `agent` — plus the from-source artifact name.
+///
+/// **CURRENTLY INERT — this always returns `None`, so the #638 leader vouch
+/// never fires.** [`crate::source::fd_probe::open_vnode_paths`] reports VNODE
+/// descriptors only, and a unix socket is not one: on macOS its fd carries
+/// `PROX_FDTYPE_SOCKET`, and on Linux `/proc/<pid>/fd/N` resolves to the
+/// non-path `socket:[inode]`. Pinned by that module's
+/// `open_vnode_paths_never_reports_a_unix_socket`. Grok leader-mode sessions
+/// therefore keep the documented pre-#638 behaviour (mtime first-sight gate +
+/// short-idle reap + prompt resurrect); the vouch is additive-only, so nothing
+/// misbehaves — it simply does not help. Fixing it needs a socket-aware probe
+/// (`PROC_PIDFDSOCKETINFO` / a `/proc/net/unix` inode join) plus the injected-
+/// enumerator split the sibling binders got, so the fix is testable.
 #[cfg(unix)]
 fn leader_socket_owner(sock: &Path) -> Option<i32> {
     // Kernel-reported fd paths come back canonicalized (the /tmp →

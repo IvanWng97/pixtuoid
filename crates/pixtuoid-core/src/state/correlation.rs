@@ -131,7 +131,8 @@ pub(super) struct ChildLedgerEntry {
     pub(super) parent_id: Option<AgentId>,
     /// When the child ended (`as_child` SessionEnd) or its slot was removed,
     /// whichever came first; `None` while a registered life is still alive.
-    /// Starts the [`CHILD_END_LEDGER_TTL`] GC clock AND the #244-w2 gate.
+    /// Starts TWO clocks, deliberately different: the [`CHILD_END_RELINK_TTL`]
+    /// GC clock and the shorter [`CHILD_END_LEDGER_TTL`] #244-w2 gate.
     pub(super) ended_at: Option<SystemTime>,
 }
 
@@ -213,7 +214,9 @@ pub(super) struct Correlation {
     /// tombstoned child's flat first-sight registers parent-linked, #244-w1).
     /// Deliberately reducer-private like `recent_proof_of_life` — not an
     /// `AgentSlot` field, no semver surface; pruned by `gc` on
-    /// [`CHILD_END_LEDGER_TTL`] once ended.
+    /// [`CHILD_END_RELINK_TTL`] once ended — the GATE above rides the shorter
+    /// [`CHILD_END_LEDGER_TTL`], re-checked by `child_recently_ended`, so a
+    /// retained-but-stale entry keeps the adoption memory without gating.
     pub(super) child_ledger: HashMap<AgentId, ChildLedgerEntry>,
     /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`] (#220):
     /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
