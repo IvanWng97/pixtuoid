@@ -133,8 +133,8 @@ fn augment_with_leader_vouch(snap: ProbeSnapshot, grok_root: &Path) -> ProbeSnap
 /// Linux /proc). BOTH installed comm names are probed — the installer links
 /// the binary as `grok` AND `agent` — plus the from-source artifact name.
 ///
-/// **CURRENTLY INERT — this always returns `None`, so the #638 leader vouch
-/// never fires.** [`crate::source::fd_probe::open_vnode_paths`] reports VNODE
+/// **CURRENTLY INERT (#826) — this always returns `None`, so the #638 leader
+/// vouch never fires.** [`crate::source::fd_probe::open_vnode_paths`] reports VNODE
 /// descriptors only, and a unix socket is not one: on macOS its fd carries
 /// `PROX_FDTYPE_SOCKET`, and on Linux `/proc/<pid>/fd/N` resolves to the
 /// non-path `socket:[inode]`. Pinned by that module's
