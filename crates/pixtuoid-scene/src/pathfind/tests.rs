@@ -326,16 +326,17 @@ fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
     }
 }
 
-/// The cache is observed through a SEALED mask: `find_path` on a fully-blocked
-/// grid can only return the 2-point `[from, to]` fallback, so a multi-point
-/// answer proves the cached polyline was served instead of a fresh A* run.
+/// The cache is observed through a SEALED mask: on a fully-blocked grid
+/// `find_path` returns `None` and `route` mints the 2-point `[from, to]`
+/// fallback, so a multi-point answer proves the cached polyline was served
+/// instead of a fresh A* run.
 ///
-/// `router.len()` cannot see this. The miss arm re-`insert`s the SAME `(from,
-/// to)` key, so deleting the cache-hit branch entirely leaves `len() == 1` — the
-/// old `assert_eq!(router.len(), 1, "should hit cache")` was green either way
-/// (#750). The mask is a sound probe because the cache is deliberately mask-BLIND:
-/// it keys on `(from, to)` and invalidates on the OVERLAY signature, the mask
-/// being static per layout.
+/// `route`'s miss arm re-`insert`s the SAME `(from, to)` key, so deleting the
+/// cache-hit branch entirely leaves `len() == 1` — the old
+/// `assert_eq!(router.len(), 1, "should hit cache")` was green either way (#750).
+/// The mask is a sound probe because the cache is deliberately mask-BLIND: it
+/// keys on `(from, to)` and invalidates on the OVERLAY signature, the mask being
+/// static per layout.
 #[test]
 fn router_serves_the_cached_path_instead_of_re_running_astar() {
     let l = make_layout();
@@ -360,28 +361,41 @@ fn router_serves_the_cached_path_instead_of_re_running_astar() {
     );
 }
 
-/// The other half: an overlay rect laid ACROSS a cached path evicts that entry
-/// (`path_clear_under`), so the next call genuinely re-routes. Same sealed-mask
-/// oracle, opposite verdict — the fallback IS the evidence of a recompute.
+/// Invalidation is PER-PATH, not a global wipe: an overlay change that misses a
+/// cached polyline must leave it cached, and one laid across it must drop it.
+/// Both directions ride the same sealed-mask oracle — after a sealed re-route the
+/// cached answer and the 2-point fallback are distinguishable, so each assertion
+/// names which side of `path_clear_under` it exercises.
+///
+/// The MISS direction is what pins the optimisation itself (`retain`, not
+/// `clear`): swapping the per-path retain for a global wipe passes every other
+/// test in the crate.
 #[test]
-fn an_overlay_across_a_cached_path_forces_a_re_route() {
+fn an_overlay_evicts_only_the_paths_it_actually_crosses() {
     let l = make_layout();
     let mut router = AStarRouter::new();
     let mut overlay = OccupancyOverlay::new();
     let from = Point { x: 30, y: 80 };
     let to = Point { x: 30, y: 120 };
+    let sealed = WalkableMask::filled(l.walkable.width(), l.walkable.height(), false);
 
     let first = router.route(&l.walkable, &overlay, from, to);
     assert!(first.len() > 2, "fixture must corner: {first:?}");
 
-    // Cover a waypoint of the path just taken, so `path_clear_under` drops it.
+    // A rect far from the polyline changes the overlay SIGNATURE (so the
+    // invalidation branch runs) but crosses nothing.
+    overlay.add(0, 0, 8, 8);
+    assert_eq!(
+        router.route(&sealed, &overlay, from, to),
+        first,
+        "a rect clear of the polyline must leave its entry cached — `retain`, not `clear`"
+    );
+
+    // Now cover a waypoint of that same path, so `path_clear_under` drops it.
     let mid = first[first.len() / 2];
     overlay.add(mid.x.saturating_sub(4), mid.y.saturating_sub(4), 8, 8);
-
-    let sealed = WalkableMask::filled(l.walkable.width(), l.walkable.height(), false);
-    let after = router.route(&sealed, &overlay, from, to);
     assert_eq!(
-        after,
+        router.route(&sealed, &overlay, from, to),
         vec![from, to],
         "the crossed entry must be evicted and re-routed, not served stale"
     );
