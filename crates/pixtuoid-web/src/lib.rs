@@ -642,7 +642,7 @@ impl Office {
     /// Keep the reducer's desk capacity in lockstep with the office actually
     /// rendered at this buffer size — the authority is the layout's home-desk
     /// count, the same per-resize sync the TUI and the floating window run
-    /// (`sync_floor_caps`). Without it the two decouple: an admitted agent's
+    /// (`floating::offscreen::sync_floor_caps`). Without it the two decouple: an admitted agent's
     /// desk index can exceed the canvas layout's desk count, so it paints
     /// NOWHERE (its anchors return `None`) while staying alive in the scene —
     /// on narrow/portrait canvases that stranded every visitor hire (and on

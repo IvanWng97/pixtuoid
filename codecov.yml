@@ -69,6 +69,19 @@ ignore:
   # per-line coverage cannot - so that file excludes their glue by FUNCTION
   # (exclude_re) rather than by file, and records how far the measurements
   # actually reach. Keep the shared entries in sync.
+  #
+  # A file in the INTERSECTION of the two lists has zero line AND zero mutation
+  # coverage - nothing looks at it - so each one has to earn that twice over.
+  # Audited #827, all four re-read at the file level:
+  # - main.rs: build_run_config + warn_broken_installs are presenters/wiring over
+  #   config::resolve_* and doctor::diagnose, each unit-tested in its own module.
+  # - runtime/pipeline.rs: channel/spawn wiring, no conditionals.
+  # - floating/mod.rs: runtime + EventLoop build, PipelineBoot::spawn's proxy and
+  #   health consumers - all needing a live runtime and event-loop proxy.
+  # - floating/window.rs: the ApplicationHandler, redraw blit, persist_geometry,
+  #   and a 9-line ActiveEventLoop binding. Its two pure seams are OUT and counted
+  #   (geometry::window_visible_on_monitors, offscreen::sync_floor_caps) - when a
+  #   decision appears in here, move it out rather than widening this list.
   - "crates/pixtuoid/src/main.rs"               # binary entry: arg-parse + dispatch + terminal preflights
   - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (was main.rs; its pure helpers stay unit-tested)
   - "crates/pixtuoid/src/logging.rs"            # global tracing-subscriber init (once per process; was main.rs; pure helpers unit-tested)

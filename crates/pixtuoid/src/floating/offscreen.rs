@@ -11,10 +11,11 @@
 //! per-frame caches + persistent office state — coffee cups, group chitchat — plus the
 //! dual eviction) across frames so motion stays continuous.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
-use pixtuoid_core::state::SceneState;
+use pixtuoid_core::state::{SceneState, MAX_FLOORS};
 
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs};
 use pixtuoid_scene::footer::{
@@ -190,13 +191,10 @@ pub(crate) fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16)
 
 /// Per-floor desk capacities for an office buffer of `buf_w`×`buf_h` — the
 /// layout's own `home_desks` count per floor. THE one derivation: the boot seed
-/// ([`boot_capacities_for_window`]) and every redraw's `window::sync_floor_caps`
-/// both call it, so "the seed matches what the first redraw stores" is
-/// structural rather than a pair of loops that happen to agree.
-pub(crate) fn floor_caps_for_buffer(
-    buf_w: u16,
-    buf_h: u16,
-) -> [usize; pixtuoid_core::state::MAX_FLOORS] {
+/// ([`boot_capacities_for_window`]) and every redraw's [`sync_floor_caps`] both
+/// call it, so "the seed matches what the first redraw stores" is structural
+/// rather than a pair of loops that happen to agree.
+pub(crate) fn floor_caps_for_buffer(buf_w: u16, buf_h: u16) -> [usize; MAX_FLOORS] {
     std::array::from_fn(|i| {
         pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, pixtuoid_scene::floor::floor_seed(i))
     })
@@ -221,11 +219,31 @@ pub(crate) fn floor_caps_for_buffer(
 /// `store`s the honest 0 for a window too small to lay out, so a fallback here
 /// would be the last remaining boot-vs-steady-state divergence — and it points
 /// the WRONG way, admitting 16 agents onto desks that do not exist.
-pub(crate) fn boot_capacities_for_window(
-    size: PhysicalSize<u32>,
-) -> [usize; pixtuoid_core::state::MAX_FLOORS] {
+pub(crate) fn boot_capacities_for_window(size: PhysicalSize<u32>) -> [usize; MAX_FLOORS] {
     let (_scale, buf_w, buf_h) = window_buffer_geometry(size);
     floor_caps_for_buffer(buf_w, buf_h)
+}
+
+/// Publish [`floor_caps_for_buffer`]'s answer into the reducer's per-floor
+/// capacity atomics, keeping admission in lockstep with the office actually
+/// rendered at `buf_w`×`buf_h` (authority = the layout's `home_desks` count, the
+/// same per-resize sync the TUI and the web hero run).
+///
+/// `store`, NOT the TUI's monotone `fetch_max` (`tui/mod.rs`'s
+/// `FloorCapacitySweep::publish`): the floating window's pixel size is exact and
+/// authoritative on every redraw, so a shrink genuinely LOWERS capacity and the
+/// reducer must stop admitting agents onto desks that no longer exist (already-
+/// seated excess agents stay alive-but-invisible, like the TUI on a terminal
+/// shrink). Don't "harmonize" the two — the direction is deliberate, and
+/// `a_shrink_lowers_the_published_capacity_it_is_store_not_fetch_max` pins it.
+///
+/// Lives HERE rather than beside its `window::redraw` call site because
+/// `window.rs` is excluded from BOTH codecov and cargo-mutants (real OS window +
+/// softbuffer surface): a decision left in there is measured by nothing at all.
+pub(crate) fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u16) {
+    for (cap, capacity) in floor_caps.iter().zip(floor_caps_for_buffer(buf_w, buf_h)) {
+        cap.store(capacity, Ordering::Relaxed);
+    }
 }
 
 /// The bundled character sprite width (px), from the ONE cross-crate authority
@@ -650,6 +668,77 @@ mod tests {
             0,
             "the seed must agree with what the redraw stores, not invent desks"
         );
+    }
+
+    /// A SHRINK must LOWER the published capacity. This is the whole reason the
+    /// publish is a `store` and not the TUI's monotone `fetch_max` (`tui/mod.rs`'s
+    /// `FloorCapacitySweep::publish`): the floating window's pixel size is exact and
+    /// authoritative per redraw, so a smaller window really does hold fewer desks and
+    /// the reducer must stop admitting agents onto the ones that vanished.
+    ///
+    /// Under a `fetch_max` "harmonization" the second publish would be a no-op and
+    /// the atomics would keep the LARGER window's count — which is exactly the edit
+    /// `crates/pixtuoid/CLAUDE.md` forbids ("don't 'harmonize' it to `fetch_max`")
+    /// and which, before this test, nothing in the suite could see.
+    #[test]
+    fn a_shrink_lowers_the_published_capacity_it_is_store_not_fetch_max() {
+        let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
+        let (big, small) = ((360u16, 240u16), (240u16, 160u16));
+        let want_big = floor_caps_for_buffer(big.0, big.1);
+        let want_small = floor_caps_for_buffer(small.0, small.1);
+        // Fixture guard: the shrink must actually cost desks, else this asserts nothing.
+        assert!(
+            want_small[0] < want_big[0] && want_small[0] > 0,
+            "fixture must shrink floor 0 to a smaller NON-zero capacity: {} → {}",
+            want_big[0],
+            want_small[0]
+        );
+
+        sync_floor_caps(&caps, big.0, big.1);
+        for (floor, want) in want_big.iter().enumerate() {
+            assert_eq!(
+                caps[floor].load(Ordering::Relaxed),
+                *want,
+                "floor {floor} must publish the layout's own capacity at {big:?}"
+            );
+        }
+
+        sync_floor_caps(&caps, small.0, small.1);
+        for (floor, want) in want_small.iter().enumerate() {
+            assert_eq!(
+                caps[floor].load(Ordering::Relaxed),
+                *want,
+                "floor {floor} must FALL to the smaller window's capacity — a `fetch_max` \
+                 publish would strand it at the larger one"
+            );
+        }
+    }
+
+    /// The cross-module invariant three files assert in prose: the boot seed
+    /// (`resumed`) and the per-redraw publish agree. #833 made that structural by
+    /// routing both through [`floor_caps_for_buffer`]; this drives BOTH real
+    /// functions end-to-end so a future re-divergence (a fallback clause on one
+    /// side, a footer row on the other) reds instead of quietly falsifying the
+    /// prose in `offscreen.rs`, `floating/mod.rs` and `pixtuoid-web/src/lib.rs`.
+    #[test]
+    fn the_first_redraws_publish_agrees_with_the_boot_seed() {
+        // Both a layoutable window and one too small to lay out — the tiny case is
+        // where a re-introduced `cap == 0 → FALLBACK_DESKS` fallback would split them.
+        for window in [
+            PhysicalSize::new(1280u32, 720u32),
+            PhysicalSize::new(64, 48),
+        ] {
+            let seed = boot_capacities_for_window(window);
+            let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
+            let (_scale, buf_w, buf_h) = window_buffer_geometry(window);
+            sync_floor_caps(&caps, buf_w, buf_h);
+            let published: [usize; MAX_FLOORS] =
+                std::array::from_fn(|i| caps[i].load(Ordering::Relaxed));
+            assert_eq!(
+                published, seed,
+                "the first redraw's publish must store what {window:?} seeded"
+            );
+        }
     }
 
     #[test]
