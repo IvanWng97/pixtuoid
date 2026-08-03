@@ -88,6 +88,45 @@ fn version_popup_interrupt_continues_from_edge() {
     );
 }
 
+/// The RENDER-level twin of `version_popup::tests::
+/// the_shipped_release_notes_fit_the_classic_terminal_unwindowed`: that one pins
+/// the geometry arithmetic, this one proves the composed frame on the draw path
+/// a classic 80×24 terminal actually takes. The office needs 32×31, so 80×24
+/// falls through to `draw_footer_only_frame` — which paints overlays (#806) but
+/// had no popup CONTENT coverage at all, exactly where #820's near-miss lived.
+///
+/// Asserts on the LAST bullet's tail: windowing drops trailing rows, so the tail
+/// is the first thing to disappear and the `⋮` marker the first to appear.
+#[test]
+fn the_shipped_release_notes_render_whole_on_a_classic_terminal() {
+    let version = env!("CARGO_PKG_VERSION");
+    let notes = crate::version::release_notes(version).expect("the shipped version has notes");
+    let mut r = build(80, 24, vec![]);
+    r.set_version_popup(true, t0());
+    // Past the 200ms entrance ease, so the panel is at full scale.
+    let now = t0() + Duration::from_millis(250);
+    r.render(&scene_with(vec![], 16), &pack(), now).unwrap();
+    let text = frame_text(r.frame_buffer());
+
+    assert!(
+        !text.contains('\u{22ee}'),
+        "v{version}'s notes are windowed at 80×24 — the reader loses the tail behind \
+         `⋮ N more`:\n{text}"
+    );
+    // `frame_text` joins per terminal ROW, so match the last WORD — a phrase would
+    // straddle a wrap and read as missing.
+    let last_word = notes
+        .last()
+        .expect("a non-empty arm")
+        .split_whitespace()
+        .last()
+        .expect("a non-empty note");
+    assert!(
+        text.contains(last_word),
+        "the last bullet must reach the frame in full — {last_word:?} is missing:\n{text}"
+    );
+}
+
 // ===================================================================
 // Help overlay
 // ===================================================================

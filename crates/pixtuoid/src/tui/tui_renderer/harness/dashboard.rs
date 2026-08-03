@@ -524,15 +524,68 @@ fn dashboard_empty_scene_shows_placeholder() {
     );
 }
 
-// NOTE: a dedicated short-terminal clamp test isn't possible via the harness —
-// draw_scene footer-onlys (skips the popup) when the office layout can't fit
-// (terminal shorter than ~the office min height), and a 16-row popup (max 18
-// tall) always fits whenever the office DOES render. So the painter's
-// real-window re-clamp (clamp_scroll on visible = popup-inner-height) can only
-// fire with visible == DASHBOARD_VIEWPORT_ROWS in practice — exercised by
-// dashboard_scrolls_to_keep_a_deep_selection_visible above (scroll 0 → 3). The
-// visible < viewport arithmetic is covered directly by
-// dashboard::tests::clamp_scroll_* with small viewports.
+/// A terminal too short for the popup's own `DASHBOARD_VIEWPORT_ROWS` cap gets
+/// clamped by `PanelGeometry::compute` to `bounds.height - FOOTER_ROWS`, so
+/// `paint_panel` windows the list into a viewport SMALLER than that cap — and the
+/// selection has to stay inside it.
+///
+/// This case carried a NOTE calling it untestable here, on two premises that are
+/// both false since #806: that `draw_scene` footer-onlys and thereby "skips the
+/// popup" (the footer-only frame paints overlays), and that the popup "always
+/// fits whenever the office DOES render". Measured across heights at 80 cols:
+/// 44/24/22/20 paint 15 rows, 18 paints 13, 16 paints 11 — the clamp fires well
+/// before the office stops laying out. The NOTE also described a painter-side
+/// `clamp_scroll` re-clamp that no longer exists: `paint_panel` derives the
+/// viewport from the clamped `inner.height` and windows via `window_range`.
+#[test]
+fn a_short_terminal_windows_the_dashboard_below_its_row_cap() {
+    let mut agents = Vec::new();
+    for i in 0..20 {
+        let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
+        s.label = format!("row{i:02}").into();
+        agents.push(s);
+    }
+    let scene = scene_with(agents, 32);
+    let model = build_dashboard_rows(&scene, &DashboardFolds::default());
+    let deep = model[18].agent_id;
+
+    let painted = |rows: u16| -> (usize, String) {
+        let mut r = build(80, rows, vec![]);
+        r.set_dashboard_frame_parts(
+            true,
+            build_dashboard_rows(&scene, &DashboardFolds::default()),
+            Some(deep),
+            0,
+        );
+        r.render(&scene, &pack(), t0()).unwrap();
+        let text = frame_text(r.frame_buffer());
+        let n = (0..20)
+            .filter(|i| text.contains(&format!("row{i:02}")))
+            .count();
+        (n, text)
+    };
+
+    let (roomy_n, roomy) = painted(44);
+    let (tight_n, tight) = painted(18);
+    assert!(
+        tight_n < roomy_n,
+        "the band must track the CLAMPED inner height, not the {}-row cap: \
+         {tight_n} rows at 80×18 vs {roomy_n} at 80×44",
+        crate::tui::dashboard::DASHBOARD_VIEWPORT_ROWS,
+    );
+    // Selection-follow has to survive the clamp — a smaller viewport is exactly
+    // where a deep selection would fall out of the window.
+    for (label, text) in [("80×44", &roomy), ("80×18", &tight)] {
+        assert!(
+            text.contains("row18"),
+            "the selected row must stay in the window at {label}:\n{text}"
+        );
+        assert!(
+            text.contains('\u{22ee}'),
+            "20 rows overflow both viewports, so the cue must show at {label}:\n{text}"
+        );
+    }
+}
 
 #[test]
 fn dashboard_badge_text_present_for_cc_and_cx() {
