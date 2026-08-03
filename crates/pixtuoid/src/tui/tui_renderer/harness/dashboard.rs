@@ -529,12 +529,12 @@ fn dashboard_empty_scene_shows_placeholder() {
 /// `paint_panel` windows the list into a viewport SMALLER than that cap — and the
 /// selection has to stay inside it.
 ///
-/// This case carried a NOTE calling it untestable here, on two premises that are
-/// both false since #806: that `draw_scene` footer-onlys and thereby "skips the
-/// popup" (the footer-only frame paints overlays), and that the popup "always
-/// fits whenever the office DOES render". Measured across heights at 80 cols:
-/// 44/24/22/20 paint 15 rows, 18 paints 13, 16 paints 11 — the clamp fires well
-/// before the office stops laying out. The NOTE also described a painter-side
+/// This case carried a NOTE calling it untestable here, on ONE premise that is
+/// false since #806: that `draw_scene` footer-onlys and thereby "skips the
+/// popup" — the footer-only frame paints overlays. Its other premise held (the
+/// office needs 32×31, and at those heights `full_h` saturates so the viewport
+/// stays at the cap), which is exactly WHY the clamp is reachable ONLY on the
+/// footer-only path #806 made paintable. The NOTE also described a painter-side
 /// `clamp_scroll` re-clamp that no longer exists: `paint_panel` derives the
 /// viewport from the clamped `inner.height` and windows via `window_range`.
 #[test]
@@ -558,7 +558,9 @@ fn a_short_terminal_windows_the_dashboard_below_its_row_cap() {
             0,
         );
         r.render(&scene, &pack(), t0()).unwrap();
-        let text = frame_text(r.frame_buffer());
+        // `dash_popup`, NOT `frame_text`: at a roomy height the OFFICE also renders
+        // and paints agent name badges, which a whole-frame scan counts as rows.
+        let text = dash_popup(r.frame_buffer());
         let n = (0..20)
             .filter(|i| text.contains(&format!("row{i:02}")))
             .count();

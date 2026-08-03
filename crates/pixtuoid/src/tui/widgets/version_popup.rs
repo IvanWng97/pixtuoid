@@ -362,15 +362,17 @@ mod tests {
     /// present, i.e. they are green precisely in the truncating state. #820's
     /// first draft wrapped to 19 rows against the 17 an 80×24 popup holds, so the
     /// classic terminal hid three behind `⋮ 3 more` and cut the last bullet
-    /// mid-sentence; only a reviewer rendering the frame by hand caught it, and
-    /// every release edits this arm.
+    /// mid-sentence, and every release edits this arm.
     ///
-    /// 80×24 is the size that discriminates — where windowing starts. A wider
-    /// terminal cannot fail (the panel never grows past `VERSION_POPUP_W`), and a
-    /// NARROWER one legitimately windows: at 32×31 the shipped arm hides 8 rows,
-    /// which is the design working. So this pins ONE size on purpose.
+    /// 80×24 is the TIGHTEST size that must fit unwindowed: the panel never grows
+    /// past `VERSION_POPUP_W`, so any terminal at least this wide AND this tall
+    /// wraps identically or has more rows, while anything narrower or shorter
+    /// windows by design — that is the marker's job.
     #[test]
     fn the_shipped_release_notes_fit_the_classic_terminal_unwindowed() {
+        if crate::version::release_notes_are_uncurated() {
+            return; // `just bump`'s draft — see `release_notes_are_uncurated`
+        }
         let version = env!("CARGO_PKG_VERSION");
         let notes = crate::version::release_notes(version)
             .expect("the shipped version has notes — current_version_has_release_notes");
@@ -389,8 +391,12 @@ mod tests {
             wrapped.len(),
             body.len(),
         );
+        // Key on the marker's own GLYPH, and only on the row it can occupy. The
+        // body rows are release PROSE — an earlier `contains("more")` scan matched
+        // the 0.11.0 arm's "no more literal `~`" and reported a fitting arm as
+        // windowed.
         assert!(
-            !body.iter().any(|l| l.contains("more")),
+            !body.last().is_some_and(|l| l.contains('\u{22ee}')),
             "v{version}'s notes are windowed at 80×24: the tail sits behind the marker and \
              the last visible bullet reads mid-sentence — {:?}",
             body.last(),

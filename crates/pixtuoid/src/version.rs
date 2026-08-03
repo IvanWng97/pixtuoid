@@ -52,6 +52,28 @@ fn parse_semver(v: &str) -> Option<(u64, u64, u64, u8)> {
     Some((major, minor, patch_num, is_release))
 }
 
+/// The marker `just bump` leaves on a freshly drafted, UNCURATED notes arm.
+/// Assembled with `concat!` so this line is not itself a match: `just
+/// notes-curated` greps THIS FILE for the contiguous string, and a literal here
+/// would fail that gate forever.
+#[cfg(test)]
+pub(crate) const UNCURATED_MARKER: &str = concat!("TODO", ": curate");
+
+/// True while the shipped arm is still `just bump`'s draft — one bullet per
+/// commit since the last tag (140 for the 0.15.0→0.16.0 cycle), which no popup
+/// could frame.
+///
+/// The framing gates skip that window because `bump` runs `just preflight` at
+/// step 6, BEFORE the human curates at step 7, and its failure trap restores
+/// `version.rs` — so a gate that reds there discards the draft and breaks the
+/// documented release path. `just notes-curated` (a required CI job, and
+/// deliberately NOT in preflight for this same reason) is what stops an
+/// uncurated arm reaching main.
+#[cfg(test)]
+pub(crate) fn release_notes_are_uncurated() -> bool {
+    include_str!("version.rs").contains(UNCURATED_MARKER)
+}
+
 pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
     match version {
         // `just bump` injects the new version's arm right after the marker below;

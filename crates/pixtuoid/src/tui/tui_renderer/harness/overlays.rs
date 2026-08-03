@@ -99,6 +99,9 @@ fn version_popup_interrupt_continues_from_edge() {
 /// is the first thing to disappear and the `⋮` marker the first to appear.
 #[test]
 fn the_shipped_release_notes_render_whole_on_a_classic_terminal() {
+    if crate::version::release_notes_are_uncurated() {
+        return; // `just bump`'s draft — see `release_notes_are_uncurated`
+    }
     let version = env!("CARGO_PKG_VERSION");
     let notes = crate::version::release_notes(version).expect("the shipped version has notes");
     let mut r = build(80, 24, vec![]);
