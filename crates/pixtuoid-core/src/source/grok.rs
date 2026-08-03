@@ -82,9 +82,9 @@ pub const SOURCE_NAME: &str = "grok";
 ///   tool never reaches `post_tool_use`, and the End both closes the activity
 ///   and resolves the reducer's `gated_before_waiting` entry for that tool
 /// - `notification`         → `Waiting` for `permission_prompt` /
-///   `elicitation_dialog`; `idle_prompt` (the 60s-idle nudge — the session is
-///   merely idle, not blocked) and unknown types decode to NOTHING (unknown
-///   additionally drops a drift breadcrumb)
+///   `elicitation_dialog`; the non-blocked types (`idle_prompt`, `agent_error`,
+///   `task_complete`) and unknown types decode to NOTHING (unknown additionally
+///   drops a drift breadcrumb)
 /// - `stop` / `stop_failure` → `ActivityEnd` (turn end → idle debounce; NO
 ///   Identity — an end for an unknown agent proves nothing worth registering)
 /// - `subagent_start`       → child `SessionStart{parent_id}` + `Rename`
@@ -235,9 +235,12 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 // (the session is idle, not blocked — a Waiting would misrender
                 // every lunch break as a permission prompt); `agent_error` is
                 // the API-retry-exhausted error toast (hook_dispatch.rs) — an
-                // errored TURN, whose state signal is the `stop_failure` arm.
-                // Explicitly matched so neither spams the drift breadcrumb.
-                "idle_prompt" | "agent_error" => Ok(vec![]),
+                // errored TURN, whose state signal is the `stop_failure` arm;
+                // `task_complete` announces a BACKGROUND task finishing
+                // (tools/notification_bridge.rs), whose lifecycle already rides
+                // that task's own tool events. Explicitly matched so none of
+                // them spams the drift breadcrumb, which is undeduped here.
+                "idle_prompt" | "agent_error" | "task_complete" => Ok(vec![]),
                 other => {
                     // Sub-type drift breadcrumb (composed name — the event
                     // itself is known, the TYPE vocabulary drifted).
@@ -1029,7 +1032,12 @@ mod tests {
         // idle_prompt = the 60s-idle nudge and agent_error = the retry-
         // exhausted toast — neither is a blocked state; an unknown type must
         // not invent a Waiting either (drift breadcrumb only).
-        for kind in ["idle_prompt", "agent_error", "some_future_nudge"] {
+        for kind in [
+            "idle_prompt",
+            "agent_error",
+            "task_complete",
+            "some_future_nudge",
+        ] {
             let mut v = envelope("notification");
             v["notificationType"] = json!(kind);
             assert!(
@@ -1037,6 +1045,39 @@ mod tests {
                 "{kind} must decode to zero events"
             );
         }
+    }
+
+    /// Zero events is the SAME observable for a knowingly-ignored type and an
+    /// unrecognized one, so the test above cannot tell them apart — this one
+    /// does, on the drift breadcrumb. `task_complete` is dispatched by upstream
+    /// on every background-task completion (`tools/notification_bridge.rs`),
+    /// and `drift::unknown_event` is undeduped on the hook plane, so leaving it
+    /// unmatched turns routine background work into a recurring "the wire
+    /// changed" warning that `pixtuoid doctor` surfaces.
+    #[test]
+    fn known_notification_types_stay_silent_while_a_novel_one_breadcrumbs() {
+        for known in ["idle_prompt", "agent_error", "task_complete"] {
+            let mut v = envelope("notification");
+            v["notificationType"] = json!(known);
+            let logs = crate::test_capture::capture_logs(|| {
+                assert!(decode_all(v).is_empty());
+            });
+            assert!(
+                !logs.contains("unknown_event"),
+                "{known} is a KNOWN non-waiting type — it must not breadcrumb, got:\n{logs}"
+            );
+        }
+        // Control: the breadcrumb still fires for a genuinely new type, so the
+        // assertions above are silence-by-recognition, not a dead detector.
+        let mut novel = envelope("notification");
+        novel["notificationType"] = json!("some_future_nudge");
+        let logs = crate::test_capture::capture_logs(|| {
+            assert!(decode_all(novel).is_empty());
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("notification:some_future_nudge"),
+            "an unrecognized notificationType must still breadcrumb, got:\n{logs}"
+        );
     }
 
     // ---- subagents ----
