@@ -68,11 +68,17 @@ pub(crate) fn accept_all_paths(_p: &Path) -> bool {
 /// Narrow a raw JSON integer to a valid POSIX pid: in `i32` range AND strictly
 /// positive. The `> 0` reject is load-bearing — `kill(0)`/`kill(-n)` target
 /// process GROUPS, and a bogus/zero `_pid` would otherwise synthesize a phantom
-/// exit that flaps a LIVE gateway Down. The ONE narrowing every JSON `_pid`
-/// ingress rides (the hook peek, the openclaw decode, AND the CC
-/// sessions-registry probe in `cc_probe::parse_registry_entry`), so a new ingress
-/// can't ship the N-th unchecked pid — the sibling set the openclaw
+/// exit that flaps a LIVE gateway Down. The ONE narrowing every JSON pid
+/// ingress rides — the hook peek, the openclaw decode, and BOTH first-party
+/// session registries (`cc_probe::parse_registry_entry`,
+/// `grok::native::grok_ids_from_registry`) — so a new ingress can't ship the
+/// N-th unchecked pid; the sibling set the openclaw
 /// `nonpositive_pid_is_dropped_like_every_sibling_pid_ingest` test names.
+///
+/// Taking `i64` and narrowing HERE is what keeps an out-of-range value a
+/// per-entry skip: a caller that deserializes straight into `i32` fails its
+/// whole document instead, which the registry probes report as upstream SHAPE
+/// drift (#831).
 pub(crate) fn checked_pid(raw: i64) -> Option<i32> {
     i32::try_from(raw).ok().filter(|&p| p > 0)
 }
