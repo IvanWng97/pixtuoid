@@ -687,16 +687,9 @@ mod tests {
         );
     }
 
-    /// A SHRINK must LOWER the published capacity. This is the whole reason the
-    /// publish is a `store` and not the TUI's monotone `fetch_max` (`tui/mod.rs`'s
-    /// `FloorCapacitySweep::publish`): the floating window's pixel size is exact and
-    /// authoritative per redraw, so a smaller window really does hold fewer desks and
-    /// the reducer must stop admitting agents onto the ones that vanished.
-    ///
-    /// Under a `fetch_max` "harmonization" the second publish would be a no-op and
-    /// the atomics would keep the LARGER window's count — which is exactly the edit
-    /// `crates/pixtuoid/CLAUDE.md` forbids ("don't 'harmonize' it to `fetch_max`")
-    /// and which, before this test, nothing in the suite could see.
+    /// A SHRINK must LOWER the published capacity — the direction [`sync_floor_caps`]
+    /// documents. Under a `fetch_max` "harmonization" the second publish is a no-op
+    /// and the atomics keep the LARGER window's count.
     #[test]
     fn a_shrink_lowers_the_published_capacity_it_is_store_not_fetch_max() {
         let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
@@ -732,16 +725,20 @@ mod tests {
         }
     }
 
-    /// The cross-module invariant three files assert in prose: the boot seed
-    /// (`resumed`) and the per-redraw publish agree. #833 made that structural by
-    /// routing both through [`floor_caps_for_buffer`]; this drives BOTH real
-    /// functions end-to-end so a future re-divergence (a fallback clause on one
-    /// side, a footer row on the other) reds instead of quietly falsifying the
-    /// prose in `offscreen.rs`, `floating/mod.rs` and `pixtuoid-web/src/lib.rs`.
+    /// The invariant [`boot_capacities_for_window`] and `floating/mod.rs` assert in
+    /// prose: the `resumed` seed and the per-redraw publish agree. Both route through
+    /// [`floor_caps_for_buffer`], which makes agreement structural; this drives BOTH
+    /// real functions end-to-end so a re-divergence — a fallback clause returning on
+    /// one side, a footer row subtracted on the other — reds instead of quietly
+    /// falsifying that prose.
+    ///
+    /// One fixture per divergence class: 1280×720 and 64×48 catch a re-introduced
+    /// `cap == 0 → FALLBACK_DESKS` fallback, and 853×480 (`office_scale` 3) is the one
+    /// whose capacity moves under a few px of one-sided buffer drift — the other two
+    /// absorb it, so without this fixture the footer-row half of the claim above is
+    /// unpinned.
     #[test]
     fn the_first_redraws_publish_agrees_with_the_boot_seed() {
-        // Both a layoutable window and one too small to lay out — the tiny case is
-        // where a re-introduced `cap == 0 → FALLBACK_DESKS` fallback would split them.
         for window in [
             PhysicalSize::new(1280u32, 720u32),
             PhysicalSize::new(853, 480),

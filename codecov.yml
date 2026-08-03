@@ -84,12 +84,13 @@ ignore:
   # - runtime/pipeline.rs: channel/spawn wiring, no conditionals.
   # - floating/mod.rs: runtime + EventLoop build, PipelineBoot::spawn's proxy and
   #   health consumers - all needing a live runtime and event-loop proxy.
-  # - floating/window.rs: the ApplicationHandler, redraw blit, persist_geometry,
-  #   and a 9-line ActiveEventLoop binding. Its pure seams are OUT and counted
-  #   (geometry::window_visible_on_monitors, cadence::FrameClock::poll, and
-  #   offscreen::sync_floor_caps, which took its resize memo with it). What stays
-  #   inline is the `office_idle` predicate, a documented sharp edge. When a
-  #   decision appears in here, move it out rather than widening this list.
+  # - floating/window.rs: the ApplicationHandler, the redraw blit, persist_geometry,
+  #   and a thin ActiveEventLoop binding. Every pure seam it once held is OUT and
+  #   counted, in the four modules named below - the capacity publish took its
+  #   resize memo with it, so the guard deciding whether to republish is measured
+  #   too. What stays inline is the `office_idle` predicate, a documented sharp
+  #   edge. When a decision appears in here, move it out rather than widening this
+  #   list.
   - "crates/pixtuoid/src/main.rs"               # binary entry: arg-parse + dispatch + terminal preflights
   - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (was main.rs; its pure helpers stay unit-tested)
   - "crates/pixtuoid/src/logging.rs"            # global tracing-subscriber init (once per process; was main.rs; pure helpers unit-tested)
