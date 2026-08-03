@@ -38,17 +38,18 @@ use crate::source::{Source, TaggedSender};
 /// Windows: `None` — no validated pid liveness (CC-probe precedent; the
 /// ExitWatch backend is absent there anyway).
 ///
-/// **A leader-mode (`--leader`) session is deliberately NOT vouched (#826).**
-/// There the agent runs in a shared leader process while this registry records
-/// only each TUI CLIENT's pid, and #638's secondary vouch off `leader.sock` was
-/// deleted rather than repaired: the registry binding wins by construction, so
-/// the ExitWatch gets the CLIENT's pid and its death ends the session in
-/// milliseconds — a working socket probe never reached that symptom. Leader
-/// sessions ride the mtime gate + short-idle reap + prompt resurrect. The full
-/// WHY, including why repairing it was measurably net-negative, is the grok
-/// LEADER MODE entry in this crate's `CLAUDE.md` "Known sharp edges"; the
-/// behaviour is pinned by
-/// `tests::registry_join::a_present_leader_socket_binds_nothing_the_registry_did_not`.
+/// **Leader mode (`--leader`) reassigns ownership (#826).** There the agent
+/// runs in a shared LEADER process while this registry still records each TUI
+/// CLIENT's pid — so when a live leader is detected (an exclusive `flock` held
+/// on `leader{suffix}.lock`, whose contents are its pid), every listed session
+/// binds to the LEADER instead. Binding the client was the defect #638 set out
+/// to fix and did not: that binding is what reaches the `ExitWatch`, so a
+/// client disconnect ended a session the leader was still driving, in
+/// milliseconds. Accepted residual: a client that quits CLEANLY unregisters
+/// its entry, so a leader-kept session then leaves the snapshot and the
+/// negative vouch ends it in ~60-120s — the leader's session map lives only in
+/// its memory, so no disk artifact can close that. See the grok LEADER MODE
+/// entry in this crate's `CLAUDE.md`.
 #[cfg(unix)]
 pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     let path = grok_root.join("active_sessions.json");
@@ -58,9 +59,18 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(ProbeSnapshot::default()),
         Err(_) => return None,
     };
-    match grok_ids_from_registry(&bytes, crate::source::cc_probe::pid_alive, |pid| {
-        crate::source::cc_probe::pid_start_time_secs(pid)
-    }) {
+    let leader = live_leader_pid(&leader_lock_candidates(
+        grok_root,
+        std::env::var_os(LEADER_SOCKET_ENV)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from),
+    ));
+    match grok_ids_from_registry(
+        &bytes,
+        crate::source::cc_probe::pid_alive,
+        crate::source::cc_probe::pid_start_time_secs,
+        leader,
+    ) {
         Some(snap) => Some(snap),
         None => {
             // The registry is an undocumented first-party surface with no
@@ -91,6 +101,82 @@ pub fn live_grok_session_ids(_grok_root: &Path) -> Option<ProbeSnapshot> {
     None
 }
 
+/// The env var upstream honors to relocate the leader socket (and, by
+/// extension, its sibling lock). Set by `--leader-socket` or exported directly;
+/// when set it BYPASSES the WS-URL-derived name entirely, so a resolver that
+/// only globs `{grok_home}` would miss a sandboxed leader.
+#[cfg(unix)]
+const LEADER_SOCKET_ENV: &str = "GROK_LEADER_SOCKET";
+
+/// The lock files that could belong to a leader for this root, most specific
+/// first. Upstream names them `leader{suffix}.lock`, where `suffix` is a hash
+/// of the WS URL (empty for the production relay) — computed with
+/// `DefaultHasher`, whose output std explicitly does NOT guarantee stable, so
+/// we ENUMERATE rather than recompute it. `override_socket` is passed in (not
+/// read from the environment here) to keep the resolution unit-testable.
+#[cfg(unix)]
+fn leader_lock_candidates(grok_root: &Path, override_socket: Option<PathBuf>) -> Vec<PathBuf> {
+    if let Some(sock) = override_socket {
+        return vec![sock.with_extension("lock")];
+    }
+    let Ok(entries) = std::fs::read_dir(grok_root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("leader") && n.ends_with(".lock"))
+        })
+        .collect()
+}
+
+/// The pid of a LIVE grok leader, read from upstream's own first-party
+/// artifact: `run_leader` acquires an exclusive `flock` on
+/// `leader{suffix}.lock` and writes its pid into the file as decimal text,
+/// holding the lock for its entire lifetime (`LeaderLock::try_acquire` +
+/// `write_pid`, xai-grok-shell). So a failed SHARED lock IS the liveness
+/// proof — the same advisory-lock arbitration the hook socket already uses —
+/// and the contents are the identity. No process enumeration, no socket
+/// connect, no per-fd syscalls.
+///
+/// The lock is what proves life; the pid file alone would not. A killed leader
+/// releases the lock with the file's stale pid still in it, so a contents-only
+/// read would vouch a corpse.
+#[cfg(unix)]
+fn live_leader_pid(candidates: &[PathBuf]) -> Option<i32> {
+    use std::os::unix::fs::OpenOptionsExt;
+    for path in candidates {
+        // O_NOFOLLOW mirrors the hook socket's lock open: a symlink planted at
+        // the lock path must fail rather than have us probe an arbitrary file.
+        let Ok(file) = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+        else {
+            continue;
+        };
+        match file.try_lock_shared() {
+            // Acquired ⇒ nobody holds it exclusively ⇒ no live leader; this is
+            // residue from one that died. Dropping `file` releases ours.
+            Ok(()) => continue,
+            Err(std::fs::TryLockError::WouldBlock) => {
+                let pid = std::fs::read_to_string(path)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<i64>().ok())
+                    .and_then(crate::source::decoder::checked_pid);
+                if pid.is_some() {
+                    return pid;
+                }
+            }
+            Err(std::fs::TryLockError::Error(_)) => continue,
+        }
+    }
+    None
+}
+
 /// The pure join half of the probe (unit-testable with injected liveness
 /// fns): parse the registry array, keep entries whose pid is alive AND — when
 /// BOTH sides are available — whose `opened_at` matches the kernel-reported
@@ -100,11 +186,23 @@ pub fn live_grok_session_ids(_grok_root: &Path) -> Option<ProbeSnapshot> {
 /// an array of entries (format drift); junk VALUES inside an entry (pid <= 0)
 /// skip that entry silently, mirroring the CC registry's value-vs-shape
 /// distinction.
+///
+/// `leader` (#826) reassigns OWNERSHIP when a live leader is detected. In
+/// `--leader` mode the agent runs in a shared leader process while this
+/// registry still records each TUI CLIENT's pid, so binding to the client is
+/// simply wrong: that binding is what `ProbeLadder::fold` hands the
+/// `ExitWatch`, and the client's death then ends a session the leader is still
+/// driving — within MILLISECONDS. Binding to the leader instead makes death
+/// mean what it should (the leader owns the session, so its exit ends it), and
+/// the client's liveness stops being consulted at all, which is why the
+/// pid-recycle check is skipped on that path: it identifies a CLIENT process
+/// this vouch no longer depends on.
 #[cfg(unix)]
 fn grok_ids_from_registry(
     bytes: &[u8],
     alive: fn(i32) -> bool,
     start_time: impl Fn(i32) -> Option<u64>,
+    leader: Option<i32>,
 ) -> Option<ProbeSnapshot> {
     #[derive(serde::Deserialize)]
     struct Entry {
@@ -116,6 +214,14 @@ fn grok_ids_from_registry(
     let entries: Vec<Entry> = serde_json::from_slice(bytes).ok()?;
     let mut snap = ProbeSnapshot::default();
     for e in entries {
+        if let Some(leader_pid) = leader {
+            // A dead client is NOT a dead session here — the leader kept it.
+            // The entry's own pid is ignored beyond well-formedness.
+            if !e.session_id.is_empty() {
+                snap.bind_pid(e.session_id, leader_pid);
+            }
+            continue;
+        }
         if e.pid <= 0 || e.session_id.is_empty() || !alive(e.pid) {
             continue;
         }
@@ -325,25 +431,27 @@ mod tests {
 
         #[test]
         fn live_entries_bind_ids_to_pids() {
-            let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| None).unwrap();
+            let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| None, None).unwrap();
             assert_eq!(snap.pid_of.get("0197-a"), Some(&100));
             assert_eq!(snap.pid_of.get("0197-b"), Some(&200));
         }
 
         #[test]
         fn dead_pids_and_junk_values_are_skipped_not_failures() {
-            let snap = grok_ids_from_registry(REG.as_bytes(), alive_none, |_| None).unwrap();
+            let snap = grok_ids_from_registry(REG.as_bytes(), alive_none, |_| None, None).unwrap();
             assert!(snap.pid_of.is_empty(), "dead pids yield a healthy empty");
             let junk = r#"[{"session_id":"","pid":100,"cwd":"/r","opened_at":"x"},
                            {"session_id":"s","pid":0,"cwd":"/r","opened_at":"x"}]"#;
-            let snap = grok_ids_from_registry(junk.as_bytes(), alive_all, |_| None).unwrap();
+            let snap = grok_ids_from_registry(junk.as_bytes(), alive_all, |_| None, None).unwrap();
             assert!(snap.pid_of.is_empty(), "junk VALUES skip entries silently");
         }
 
         #[test]
         fn unparseable_document_is_format_drift_none() {
-            assert!(grok_ids_from_registry(b"not json", alive_all, |_| None).is_none());
-            assert!(grok_ids_from_registry(br#"{"an":"object"}"#, alive_all, |_| None).is_none());
+            assert!(grok_ids_from_registry(b"not json", alive_all, |_| None, None).is_none());
+            assert!(
+                grok_ids_from_registry(br#"{"an":"object"}"#, alive_all, |_| None, None).is_none()
+            );
         }
 
         #[test]
@@ -355,16 +463,19 @@ mod tests {
                 crate::source::decoder::rfc3339_to_epoch_secs("2026-07-16T12:00:05Z").unwrap();
             let tolerance = crate::source::cc_probe::PID_START_TOLERANCE_SECS;
             let recycled_start = opened + tolerance + 1;
-            let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(recycled_start));
+            let snap =
+                grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(recycled_start), None);
             assert_eq!(snap.unwrap().pid_of.get("0197-a"), None);
             // At exactly claim + tolerance the entry SURVIVES (boundary
             // derived from the shared const, both sides pinned).
             let boundary_start = opened + tolerance;
-            let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(boundary_start));
+            let snap =
+                grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(boundary_start), None);
             assert_eq!(snap.unwrap().pid_of.get("0197-a"), Some(&100));
             // A process started BEFORE the claim is the NORMAL welcome-screen
             // lag (session opened after process start) — never rejected.
-            let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(opened - 3600));
+            let snap =
+                grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(opened - 3600), None);
             assert_eq!(snap.unwrap().pid_of.get("0197-a"), Some(&100));
         }
 
@@ -376,60 +487,112 @@ mod tests {
                 r#"[{"session_id":"s","pid":200,"cwd":"/r","opened_at":"2026-01-01T00:00:00Z"},
                     {"session_id":"s","pid":100,"cwd":"/r","opened_at":"2026-01-01T00:00:00Z"}]"#,
             ] {
-                let snap = grok_ids_from_registry(reg.as_bytes(), alive_all, |_| None).unwrap();
+                let snap =
+                    grok_ids_from_registry(reg.as_bytes(), alive_all, |_| None, None).unwrap();
                 assert_eq!(snap.pid_of.get("s"), Some(&200));
             }
         }
 
-        /// grok's probe vouches ONLY what `active_sessions.json` binds: a
-        /// present, LIVE `leader.sock` must not add a session the registry did
-        /// not, however fresh that session's transcript is (#826).
+        /// A live leader OWNS the sessions the registry lists, so they bind to
+        /// ITS pid — not the TUI client's (#826). The client binding is what
+        /// reaches the `ExitWatch`, so binding it was the whole defect: the
+        /// client's death ended a session the leader was still driving.
         ///
-        /// The oracle is differential — the same tree read twice, once with a
-        /// real bound+listening `UnixListener` at the leader path — so it pins
-        /// the OBSERVABLE decision rather than any mechanism, and still fails if
-        /// a leader vouch is reintroduced by a different route. Proven red
-        /// before the #638 vouch was deleted, by stubbing its socket owner to
-        /// this process's own pid; without that step it would be a tautology
-        /// over absent code.
+        /// Drives the REAL detector end-to-end: this process holds an exclusive
+        /// `flock` on the lock file, exactly as `run_leader` does, and writes
+        /// its pid the way `write_pid` does. `flock` is per open-file
+        /// DESCRIPTION, so the detector's own `File` contends with ours inside
+        /// one process — which is what makes this testable on every platform
+        /// without spawning a leader.
         #[test]
-        fn a_present_leader_socket_binds_nothing_the_registry_did_not() {
-            let build = |with_socket: bool| {
-                let tmp = tempfile::tempdir().unwrap();
-                let me = std::process::id();
-                std::fs::write(
-                    tmp.path().join("active_sessions.json"),
-                    format!(r#"[{{"session_id":"client-1","pid":{me},"cwd":"/r"}}]"#),
-                )
-                .unwrap();
-                // A leader-kept session: no registry entry, transcript appended
-                // just now — the exact population the #638 vouch targeted.
-                let dir = tmp.path().join("sessions").join("%2Frepo").join("leader-1");
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(dir.join("updates.jsonl"), "{}\n").unwrap();
-                let listener = with_socket.then(|| {
-                    std::os::unix::net::UnixListener::bind(tmp.path().join("leader.sock"))
-                        .expect("bind leader.sock")
-                });
-                let snap =
-                    live_grok_session_ids(tmp.path()).expect("a readable registry is healthy");
-                drop(listener);
-                snap
-            };
-            let without = build(false);
-            let with = build(true);
-            assert_eq!(
-                with.pid_of, without.pid_of,
-                "a live leader.sock must not change what the probe vouches"
-            );
-            assert_eq!(
-                with.pid_of.get("leader-1"),
-                None,
-                "a leader-kept session is deliberately unvouched — see the sharp edge"
-            );
+        fn a_live_leader_owns_the_registrys_sessions_instead_of_the_client() {
+            let tmp = tempfile::tempdir().unwrap();
+            let me = std::process::id() as i32;
+            // A CRASHED client (pid 1 is alive but is not this session's owner;
+            // the point is that the entry's own pid stops being consulted).
+            std::fs::write(
+                tmp.path().join("active_sessions.json"),
+                r#"[{"session_id":"kept-1","pid":999999,"cwd":"/r"}]"#,
+            )
+            .unwrap();
+            let lock_path = tmp.path().join("leader.lock");
+            std::fs::write(&lock_path, format!("{me}")).unwrap();
+
+            // No leader holding it: the stale pid file alone must NOT vouch —
+            // the entry falls to the ordinary dead-client skip.
+            let snap = live_grok_session_ids(tmp.path()).expect("healthy");
             assert!(
-                with.pid_of.contains_key("client-1"),
-                "control: the registry's own live entry still binds"
+                snap.pid_of.is_empty(),
+                "an UNHELD lock file is residue from a dead leader, not a vouch"
+            );
+
+            // Now a live leader holds it, as run_leader does for its lifetime.
+            let held = std::fs::File::open(&lock_path).unwrap();
+            held.lock().expect("take the leader's exclusive lock");
+            let snap = live_grok_session_ids(tmp.path()).expect("healthy");
+            drop(held);
+            assert_eq!(
+                snap.pid_of.get("kept-1"),
+                Some(&me),
+                "a leader-kept session binds to the LEADER's pid, not the client's"
+            );
+        }
+
+        /// The lock name is `leader{suffix}.lock`, where suffix is a hash of the
+        /// WS URL — `DefaultHasher`, whose output std does not guarantee stable,
+        /// so the resolver enumerates instead of recomputing. `GROK_LEADER_SOCKET`
+        /// bypasses the naming entirely and wins.
+        #[test]
+        fn leader_lock_resolution_covers_the_suffix_and_env_override_forms() {
+            let tmp = tempfile::tempdir().unwrap();
+            for n in [
+                "leader.lock",
+                "leader-9f2a1c04.lock",
+                "active_sessions.lock",
+            ] {
+                std::fs::write(tmp.path().join(n), "1").unwrap();
+            }
+            let mut found: Vec<String> = leader_lock_candidates(tmp.path(), None)
+                .iter()
+                .filter_map(|p| p.file_name()?.to_str().map(str::to_owned))
+                .collect();
+            found.sort();
+            assert_eq!(
+                found,
+                vec!["leader-9f2a1c04.lock", "leader.lock"],
+                "both leader forms are candidates; the sibling active_sessions.lock is not"
+            );
+
+            let sock = PathBuf::from("/sandbox/run/leader-dev.sock");
+            assert_eq!(
+                leader_lock_candidates(tmp.path(), Some(sock)),
+                vec![PathBuf::from("/sandbox/run/leader-dev.lock")],
+                "the env override wins outright — its sibling .lock, not the root's"
+            );
+        }
+
+        /// Negative control for the detector: no candidates, and a candidate
+        /// that cannot be opened, are both "no leader" rather than a panic or a
+        /// false vouch.
+        #[test]
+        fn leader_detection_is_quiet_when_there_is_nothing_to_find() {
+            assert_eq!(live_leader_pid(&[]), None);
+            assert_eq!(
+                live_leader_pid(&[PathBuf::from("/nonexistent/leader.lock")]),
+                None
+            );
+            // Held, but the contents are junk rather than a pid — no identity,
+            // so no vouch (the `checked_pid` narrowing every ingress rides).
+            let tmp = tempfile::tempdir().unwrap();
+            let path = tmp.path().join("leader.lock");
+            std::fs::write(&path, "not-a-pid").unwrap();
+            let held = std::fs::File::open(&path).unwrap();
+            held.lock().unwrap();
+            let got = live_leader_pid(std::slice::from_ref(&path));
+            drop(held);
+            assert_eq!(
+                got, None,
+                "a held lock with no readable pid vouches nothing"
             );
         }
     }
