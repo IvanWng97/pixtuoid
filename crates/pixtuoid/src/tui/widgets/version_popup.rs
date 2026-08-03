@@ -354,6 +354,66 @@ mod tests {
         assert_eq!(wide_title, "What's new in v0.16.0 \u{2014} Enter to close");
     }
 
+    /// THE framing gate for the SHIPPED notes. Every other test here authors its
+    /// own fixture and asserts something about that same fixture, so none of them
+    /// can see the real arm outgrow the panel — and two
+    /// (`a_short_terminal_windows_the_notes_and_keeps_the_link`,
+    /// `the_notes_marker_offers_no_scroll_and_fits_its_row`) assert the marker IS
+    /// present, i.e. they are green precisely in the truncating state. #820's
+    /// first draft wrapped to 19 rows against the 17 an 80×24 popup holds, so the
+    /// classic terminal hid three behind `⋮ 3 more` and cut the last bullet
+    /// mid-sentence, and every release edits this arm.
+    ///
+    /// 80×24 is the TIGHTEST size that must fit unwindowed: the panel never grows
+    /// past `VERSION_POPUP_W`, so any terminal at least this wide AND this tall
+    /// wraps identically or has more rows, while anything narrower or shorter
+    /// windows by design — that is the marker's job.
+    #[test]
+    fn the_shipped_release_notes_fit_the_classic_terminal_unwindowed() {
+        if crate::version::release_notes_are_uncurated() {
+            return; // `just bump`'s draft — see `release_notes_are_uncurated`
+        }
+        let version = env!("CARGO_PKG_VERSION");
+        let notes = crate::version::release_notes(version)
+            .expect("the shipped version has notes — current_version_has_release_notes");
+        let bounds = Rect::new(0, 0, 80, 24);
+        let (geom, body) = version_geometry(bounds, notes, 1.0).expect("renders at 80×24");
+        let inner = geom.inner().expect("rendered ⇒ inner Some");
+        let inner_w = panel_inner_width(bounds, VERSION_POPUP_W, 1.0).expect("renders");
+        let wrapped = wrap_notes(notes, inner_w);
+        let band = inner.height as usize - CHROME_ROWS as usize;
+
+        assert_eq!(
+            body.len(),
+            wrapped.len(),
+            "v{version} wraps to {} rows but only {} reach an 80×24 popup (the band holds \
+             {band}) — trim the prose, don't raise the cap",
+            wrapped.len(),
+            body.len(),
+        );
+        // Key on the marker's own GLYPH, and only on the row it can occupy. The
+        // body rows are release PROSE — an earlier `contains("more")` scan matched
+        // the 0.11.0 arm's "no more literal `~`" and reported a fitting arm as
+        // windowed.
+        assert!(
+            !body.last().is_some_and(|l| l.contains('\u{22ee}')),
+            "v{version}'s notes are windowed at 80×24: the tail sits behind the marker and \
+             the last visible bullet reads mid-sentence — {:?}",
+            body.last(),
+        );
+        // A separate failure mode from the row count: `word_wrap` never splits
+        // mid-word, so an over-wide token overflows its row and `Paragraph` clips it.
+        assert!(
+            wrapped
+                .iter()
+                .all(|l| l.chars().count() <= inner_w as usize),
+            "a token wider than the {inner_w}-col measure clips silently: {:?}",
+            wrapped
+                .iter()
+                .find(|l| l.chars().count() > inner_w as usize),
+        );
+    }
+
     /// The windowed band's marker must not offer a scroll this modal has no key
     /// for: `dispatch_key`'s version tier maps Enter to dismiss and swallows
     /// everything else, so the shared `⋮ N more ▾` — whose `▾` is what the
