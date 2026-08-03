@@ -82,7 +82,7 @@ pub const SOURCE_NAME: &str = "grok";
 ///   tool never reaches `post_tool_use`, and the End both closes the activity
 ///   and resolves the reducer's `gated_before_waiting` entry for that tool
 /// - `notification`         → `Waiting` for `permission_prompt` /
-///   `elicitation_dialog`; the non-blocked types (`idle_prompt`, `agent_error`,
+///   `elicitation_dialog`; the non-Waiting types (`idle_prompt`, `agent_error`,
 ///   `task_complete`) and unknown types decode to NOTHING (unknown additionally
 ///   drops a drift breadcrumb)
 /// - `stop` / `stop_failure` → `ActivityEnd` (turn end → idle debounce; NO
@@ -236,10 +236,13 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 // every lunch break as a permission prompt); `agent_error` is
                 // the API-retry-exhausted error toast (hook_dispatch.rs) — an
                 // errored TURN, whose state signal is the `stop_failure` arm;
-                // `task_complete` announces a BACKGROUND task finishing
-                // (tools/notification_bridge.rs), whose lifecycle already rides
-                // that task's own tool events. Explicitly matched so none of
-                // them spams the drift breadcrumb, which is undeduped here.
+                // `task_complete` announces a BACKGROUNDED shell/monitor task
+                // finishing (tools/notification_bridge.rs) — not an agent
+                // transition, and it carries no `toolUseId`, so there is no
+                // activity to close: the spawning tool call already Ended at
+                // BACKGROUNDING time, the same fires-at-spawn fact the b1 trap
+                // turns on. Explicitly matched so none of them spams the drift
+                // breadcrumb, which is undeduped here.
                 "idle_prompt" | "agent_error" | "task_complete" => Ok(vec![]),
                 other => {
                     // Sub-type drift breadcrumb (composed name — the event
@@ -1025,26 +1028,6 @@ mod tests {
         v["notificationType"] = json!("permission_prompt");
         assert!(matches!(decode(v), AgentEvent::Waiting { reason, .. }
             if reason == "permission_prompt"));
-    }
-
-    #[test]
-    fn idle_prompt_and_unknown_notification_types_decode_to_nothing() {
-        // idle_prompt = the 60s-idle nudge and agent_error = the retry-
-        // exhausted toast — neither is a blocked state; an unknown type must
-        // not invent a Waiting either (drift breadcrumb only).
-        for kind in [
-            "idle_prompt",
-            "agent_error",
-            "task_complete",
-            "some_future_nudge",
-        ] {
-            let mut v = envelope("notification");
-            v["notificationType"] = json!(kind);
-            assert!(
-                decode_all(v).is_empty(),
-                "{kind} must decode to zero events"
-            );
-        }
     }
 
     /// Zero events is the SAME observable for a knowingly-ignored type and an
