@@ -89,9 +89,8 @@ fn ensure_owned_socket_dir(path: &Path) -> Result<()> {
 /// only when `path` actually lives inside it, else no-op. Taking `owned` + `uid`
 /// as parameters is what makes the FIRES direction reachable from a test — with
 /// the real dir hardcoded, deleting the whole guard body was invisible to the
-/// suite even though `ensure_private_dir` had six tests of its own and
-/// `is_owned_fallback_in` had three. The gap was never in a line you could read;
-/// it was in the wiring between two well-tested halves.
+/// suite even though both halves it composes were themselves well covered. The
+/// gap was never in a line you could read; it was in the wiring between them.
 #[cfg(unix)]
 fn ensure_owned_socket_dir_in(path: &Path, owned: &Path, uid: u32) -> Result<()> {
     if !is_owned_fallback_in(path, owned) {
