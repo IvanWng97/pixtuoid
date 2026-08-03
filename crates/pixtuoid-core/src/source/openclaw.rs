@@ -284,8 +284,9 @@ mod tests {
     fn nonpositive_pid_is_dropped_like_every_sibling_pid_ingest() {
         // kill(0)/kill(-n) target process GROUPS, and a bogus pid's ESRCH
         // receipt synthesizes an instant exit that flaps the LIVE gateway
-        // Down — cc_probe/fd_probe/the hook `_pid` peek all filter `> 0`;
-        // this decoder must too (the N-1-of-N guard gap).
+        // Down — every other JSON pid ingress (the hook `_pid` peek; both
+        // session registries, cc_probe + grok's active_sessions) narrows via
+        // `decoder::checked_pid`; this decoder must too (the N-1-of-N gap).
         assert_eq!(
             decode(json!({"type": "gateway_start", "_pid": -1})),
             vec![DaemonPresenceUpdate::GatewayUp { pid: None }]
