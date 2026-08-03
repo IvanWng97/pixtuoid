@@ -53,14 +53,9 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         .enable_all()
         .build()
         .context("building the floating tokio runtime")?;
-    // Enter the runtime on the main thread so the source set's internal `tokio::spawn`s
-    // (presence watch, source manager) have a runtime context. We never `block_on` here.
-    let _guard = rt.enter();
-
-    // --- the live pipeline: the SAME runtime::pipeline spine the TUI boots
-    //     (#714 — was a hand-mirrored copy of run_async's wiring). The
-    //     rt.enter() guard above provides the ambient runtime its spawns land
-    //     on; only the genuinely floating-specific pieces stay here. ---
+    // Pipeline INPUTS only `run` can resolve; the pipeline itself boots in
+    // `resumed` (`PipelineBoot::spawn`), which enters the runtime explicitly —
+    // nothing left on this path spawns, so `run` holds no `rt.enter()` guard.
     let connected = ConnectedSources::new(connected);
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
 
@@ -117,8 +112,9 @@ pub fn run(cfg: RunConfig) -> Result<()> {
 /// (#803). `run` genuinely cannot do better: winit 0.30 exposes `primary_monitor`
 /// only on `ActiveEventLoop`, which does not exist until `run_app` is already
 /// driving, and `office_scale` ROUNDS, so no conservative logical-side seed is
-/// sound either (360×240 logical yields buffers 360×240 / 225×150 / 315×210 /
-/// 240×160 at 1× / 1.25× / 1.75× / 2× — not monotone in the scale factor).
+/// sound either — the buffer for one logical size is NOT monotone in the scale
+/// factor (the measured table is the `measured` array in
+/// `the_boot_seed_tracks_the_physical_window_not_the_logical_config`).
 ///
 /// The accepted cost: the hook socket now binds AFTER window + surface creation
 /// rather than before the event loop. That is single-digit-to-tens of ms on

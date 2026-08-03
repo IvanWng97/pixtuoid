@@ -66,10 +66,13 @@ pub(crate) struct FloatingApp {
     /// (#803 — the `[floating]` config size is LOGICAL and would over-seed on
     /// HiDPI). `take`n exactly once; `None` afterwards.
     boot: Option<super::PipelineBoot>,
-    /// The live pipeline — `None` until `resumed` boots it. Both consumers guard
-    /// on it: `redraw` returns early, and `about_to_wait` reads `None` as an idle
-    /// office (with no pipeline nothing can be animating, so the ambient tick is
-    /// the right cadence, not the 30fps one).
+    /// The live pipeline — `None` until `resumed` boots it. `about_to_wait` DOES
+    /// fire before then, so it reads `None` as an idle office (with no pipeline
+    /// nothing can be animating, so the AMBIENT tick is the right cadence).
+    /// `redraw` cannot reach that state: `resumed` sets `live` BEFORE `window`,
+    /// and `redraw`'s window guard runs first — its `live` guard is
+    /// belt-and-braces, and the ORDER of those assignments is what makes it so.
+    /// Don't reorder them.
     live: Option<super::LivePipeline>,
     /// The buffer size the capacity atomics were last synced for — capacity only changes
     /// with the window size, so re-sync only on a size change (not every frame).
@@ -353,7 +356,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             }
         };
         // Seeded from the REAL window — the first physical size there is (#803).
-        // Past the surface `?`-arms, so a failed boot binds no socket.
+        // Past the window/surface failure arms, so a failed boot binds no socket.
         if let Some(boot) = self.boot.take() {
             self.live = Some(boot.spawn(window.inner_size()));
         }
