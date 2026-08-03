@@ -22,6 +22,7 @@ use pixtuoid_scene::footer::{
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
+use winit::dpi::PhysicalSize;
 
 /// Pack an `Rgb` into the softbuffer word format, `0x00RRGGBB` (XRGB) — the ONE
 /// definition of the floating painter's surface pixel format. The office blit
@@ -169,57 +170,62 @@ pub fn office_scale(win_h: u32) -> u32 {
     (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
 }
 
-/// The window→office-buffer projection for a `win_w`×`win_h` PHYSICAL-px window: the
-/// integer `office_scale` plus the downscaled buffer dims (`window / scale`,
-/// clamped non-zero, NO footer row). The ONE place this geometry lives — shared
-/// by `window::redraw` (which needs `scale` for the upscale blit and the buffer
+/// The window→office-buffer projection for a PHYSICAL-px window: the integer
+/// `office_scale` plus the downscaled buffer dims (`window / scale`, clamped
+/// non-zero, NO footer row). The ONE place this geometry lives — shared by
+/// `window::redraw` (which needs `scale` for the upscale blit and the buffer
 /// dims for `sync_floor_caps` + the render) and the boot seed
 /// (`boot_capacities_for_window`) — so the desk capacity they derive can't drift
 /// on an `office_scale`/clamp change.
-pub(crate) fn window_buffer_geometry(win_w: u32, win_h: u32) -> (u32, u16, u16) {
-    let scale = office_scale(win_h);
-    let buf_w = (win_w / scale).clamp(1, u16::MAX as u32) as u16;
-    let buf_h = (win_h / scale).clamp(1, u16::MAX as u32) as u16;
+///
+/// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is
+/// carried by the type: the `[floating]` config size is LOGICAL, and handing it
+/// here is now a compile error instead of a silent HiDPI over-seed (#803).
+pub(crate) fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
+    let scale = office_scale(size.height);
+    let buf_w = (size.width / scale).clamp(1, u16::MAX as u32) as u16;
+    let buf_h = (size.height / scale).clamp(1, u16::MAX as u32) as u16;
     (scale, buf_w, buf_h)
 }
 
-/// Per-floor boot desk-capacities for the FLOATING window, from a PHYSICAL-px
-/// window size. Uses the SAME
-/// `window_buffer_geometry` the first redraw's `window::sync_floor_caps` does —
-/// the office buffer is `window / office_scale` with NO footer row. The TUI's
-/// `runtime::boot_capacities_for`
-/// instead subtracts a footer row AND ignores the window upscale, so reusing it
-/// here OVER-seeds: in the sub-frame boot race before the first redraw, a
-/// `SessionStart` could land at a `desk_index` the smaller real layout lacks
-/// (immutable → invisible-but-alive until a resize). A floor whose layout rejects
-/// the size falls back to `FALLBACK_DESKS`, matching the TUI boot helper.
-///
-/// KNOWN RESIDUAL — see the boot-seed sharp edge in `crates/pixtuoid/CLAUDE.md`.
-/// The only caller, `floating::run`, has just the
-/// `[floating]` config size, which is LOGICAL — so on a HiDPI display the seed is
-/// still computed for a window the redraw will not measure (default 360×240
-/// logical seeds floor 0 at 70; at 2× the real 720×480 buffer holds 30). It
-/// cannot be fixed here: winit 0.30 exposes `primary_monitor` only on
-/// `ActiveEventLoop`, which does not exist until `run_app` is already driving the
-/// window, and no conservative logical-side seed is sound either — `office_scale`
-/// ROUNDS, so the buffer for one logical size is not monotone in the scale factor
-/// (360×240 logical yields buffers 360×240 / 225×150 / 315×210 / 240×160 at
-/// 1×/1.25×/1.75×/2×). The sound fix is to seed the pipeline from the real
-/// `window.inner_size()` in `resumed`, which means moving `spawn_pipeline` there.
-pub(crate) fn boot_capacities_for_window(
-    win_w: u32,
-    win_h: u32,
+/// Per-floor desk capacities for an office buffer of `buf_w`×`buf_h` — the
+/// layout's own `home_desks` count per floor. THE one derivation: the boot seed
+/// ([`boot_capacities_for_window`]) and every redraw's `window::sync_floor_caps`
+/// both call it, so "the seed matches what the first redraw stores" is
+/// structural rather than a pair of loops that happen to agree.
+pub(crate) fn floor_caps_for_buffer(
+    buf_w: u16,
+    buf_h: u16,
 ) -> [usize; pixtuoid_core::state::MAX_FLOORS] {
-    let (_scale, buf_w, buf_h) = window_buffer_geometry(win_w, win_h);
     std::array::from_fn(|i| {
-        let seed = pixtuoid_scene::floor::floor_seed(i);
-        let cap = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);
-        if cap == 0 {
-            crate::runtime::FALLBACK_DESKS
-        } else {
-            cap
-        }
+        pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, pixtuoid_scene::floor::floor_seed(i))
     })
+}
+
+/// Per-floor boot desk-capacities for the FLOATING window, from the REAL
+/// `window.inner_size()`. Uses the SAME `window_buffer_geometry` +
+/// [`floor_caps_for_buffer`] the first redraw's `window::sync_floor_caps` does —
+/// the office buffer is `window / office_scale` with NO footer row. The TUI's
+/// `runtime::boot_capacities_for` instead subtracts a footer row AND ignores the
+/// window upscale, so reusing it here OVER-seeds: in the sub-frame boot race
+/// before the first redraw, a `SessionStart` could land at a `desk_index` the
+/// smaller real layout lacks (immutable → invisible-but-alive until a resize).
+///
+/// The seed is taken in `window::resumed`, the first moment a real window
+/// exists — `floating::run` could offer only the `[floating]` config size, which
+/// is LOGICAL by design (`persist_geometry` saves `to_logical`, `resumed`
+/// restores a `LogicalSize`, so the config stays HiDPI-stable), and on any HiDPI
+/// display that described a window the redraw would never measure (#803).
+///
+/// There is deliberately NO `cap == 0 → FALLBACK_DESKS` clause: `sync_floor_caps`
+/// `store`s the honest 0 for a window too small to lay out, so a fallback here
+/// would be the last remaining boot-vs-steady-state divergence — and it points
+/// the WRONG way, admitting 16 agents onto desks that do not exist.
+pub(crate) fn boot_capacities_for_window(
+    size: PhysicalSize<u32>,
+) -> [usize; pixtuoid_core::state::MAX_FLOORS] {
+    let (_scale, buf_w, buf_h) = window_buffer_geometry(size);
+    floor_caps_for_buffer(buf_w, buf_h)
 }
 
 /// The bundled character sprite width (px), from the ONE cross-crate authority
@@ -469,6 +475,7 @@ pub fn paint_footer_into_surface(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use winit::dpi::LogicalSize;
 
     #[test]
     fn pack_xrgb_is_0x00rrggbb() {
@@ -542,18 +549,13 @@ mod tests {
         let scale = office_scale(h);
         let buf_w = (w / scale) as u16;
         let buf_h = (h / scale) as u16;
-        let boot = boot_capacities_for_window(w, h);
+        let boot = boot_capacities_for_window(PhysicalSize::new(w, h));
         for (i, &got) in boot.iter().enumerate() {
-            let cap = pixtuoid_scene::floor::floor_capacity(
+            let want = pixtuoid_scene::floor::floor_capacity(
                 buf_w,
                 buf_h,
                 pixtuoid_scene::floor::floor_seed(i),
             );
-            let want = if cap == 0 {
-                crate::runtime::FALLBACK_DESKS
-            } else {
-                cap
-            };
             assert_eq!(
                 got, want,
                 "floor {i} boot cap must match the rendered geometry"
@@ -567,6 +569,86 @@ mod tests {
             "TUI helper over-seeds ({} vs {})",
             overseed[0],
             boot[0]
+        );
+    }
+
+    /// The seed must describe the window the first redraw will MEASURE — physical
+    /// px — not the `[floating]` config size, which is LOGICAL by design
+    /// (`persist_geometry` saves `to_logical`, `resumed` restores a `LogicalSize`,
+    /// so the config stays HiDPI-stable).
+    ///
+    /// The test above feeds the SAME numbers to both sides, so it exercises the
+    /// function and can never see a UNITS mismatch — a coverage-TOPOLOGY gap, not
+    /// a missing test (#803). This one CROSSES the boundary using winit's own
+    /// conversion, at scale factors where the two disagree.
+    #[test]
+    fn the_boot_seed_tracks_the_physical_window_not_the_logical_config() {
+        let logical = LogicalSize::new(
+            crate::config::FLOATING_DEFAULT_W as f64,
+            crate::config::FLOATING_DEFAULT_H as f64,
+        );
+        // What `floating::run` used to pass: the logical size, read as physical.
+        let as_if_physical = boot_capacities_for_window(PhysicalSize::new(
+            logical.width as u32,
+            logical.height as u32,
+        ));
+
+        // MEASURED buffers for the default 360×240 logical window. `office_scale`
+        // ROUNDS, so this is NOT monotone in sf — no logical-side seed is sound.
+        let measured = [
+            (1.00_f64, (360u32, 240u32), 70usize),
+            (1.25, (225, 150), 24),
+            (1.50, (270, 180), 35),
+            (1.75, (315, 210), 48),
+            (2.00, (240, 160), 30),
+            (3.00, (270, 180), 35),
+        ];
+        for (sf, want_buf, want_floor0) in measured {
+            let physical: PhysicalSize<u32> = logical.to_physical(sf);
+            let (_scale, buf_w, buf_h) = window_buffer_geometry(physical);
+            assert_eq!(
+                (buf_w as u32, buf_h as u32),
+                want_buf,
+                "office buffer at {sf}× of {logical:?}"
+            );
+            assert_eq!(
+                boot_capacities_for_window(physical)[0],
+                want_floor0,
+                "floor-0 seed at {sf}×"
+            );
+        }
+        // The defect's DIRECTION: at 2× the honest seed admits FEWER agents than
+        // the logical-as-physical one, so the old call site over-seeded.
+        let at_2x = boot_capacities_for_window(logical.to_physical(2.0));
+        assert!(
+            at_2x[0] < as_if_physical[0],
+            "logical-as-physical over-seeds at 2×: {} vs the real {}",
+            as_if_physical[0],
+            at_2x[0],
+        );
+    }
+
+    /// A window too small for a floor to lay out seeds ZERO, exactly like the
+    /// first `sync_floor_caps` `store`s — the `cap == 0 → FALLBACK_DESKS` clause is
+    /// gone. It was the last boot-vs-steady-state divergence and pointed the wrong
+    /// way: 16 phantom desks where the redraw reports none.
+    #[test]
+    fn an_unlayoutable_window_seeds_zero_not_a_fallback() {
+        let tiny = PhysicalSize::new(64u32, 48u32);
+        let (_scale, buf_w, buf_h) = window_buffer_geometry(tiny);
+        assert_eq!(
+            pixtuoid_scene::floor::floor_capacity(
+                buf_w,
+                buf_h,
+                pixtuoid_scene::floor::floor_seed(0)
+            ),
+            0,
+            "fixture must actually be unlayoutable, else this asserts nothing"
+        );
+        assert_eq!(
+            boot_capacities_for_window(tiny)[0],
+            0,
+            "the seed must agree with what the redraw stores, not invent desks"
         );
     }
 

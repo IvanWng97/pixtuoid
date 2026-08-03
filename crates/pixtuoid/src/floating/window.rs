@@ -23,8 +23,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::{DaemonLiveness, SceneState, MAX_FLOORS};
-use tokio::sync::watch;
+use pixtuoid_core::state::{DaemonLiveness, MAX_FLOORS};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, MouseButton, WindowEvent};
@@ -63,8 +62,18 @@ pub(crate) struct FloatingApp {
     /// every-gesture): a mute toggle shows no transient overlay until a footer
     /// lands to display it — the accepted TUI-parity tradeoff.
     audio_ctl: crate::audio::AudioController,
-    scene_rx: watch::Receiver<Arc<SceneState>>,
-    floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
+    /// The pipeline inputs, held until `resumed` can supply the REAL window size
+    /// (#803 — the `[floating]` config size is LOGICAL and would over-seed on
+    /// HiDPI). `take`n exactly once; `None` afterwards.
+    boot: Option<super::PipelineBoot>,
+    /// The live pipeline — `None` until `resumed` boots it. `about_to_wait` DOES
+    /// fire before then, so it reads `None` as an idle office (with no pipeline
+    /// nothing can be animating, so the AMBIENT tick is the right cadence).
+    /// `redraw` cannot reach that state: `resumed` sets `live` BEFORE `window`,
+    /// and `redraw`'s window guard runs first — its `live` guard is
+    /// belt-and-braces, and the ORDER of those assignments is what makes it so.
+    /// Don't reorder them.
+    live: Option<super::LivePipeline>,
     /// The buffer size the capacity atomics were last synced for — capacity only changes
     /// with the window size, so re-sync only on a size change (not every frame).
     last_caps_size: Option<(u16, u16)>,
@@ -90,8 +99,7 @@ impl FloatingApp {
         pack: Pack,
         config_path: PathBuf,
         pets: Vec<pixtuoid_scene::pet::Pet>,
-        scene_rx: watch::Receiver<Arc<SceneState>>,
-        floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
+        boot: super::PipelineBoot,
         audio_muted: bool,
         audio_volume: f32,
     ) -> Self {
@@ -111,8 +119,8 @@ impl FloatingApp {
             pets,
             renderer,
             audio_ctl,
-            scene_rx,
-            floor_caps,
+            boot: Some(boot),
+            live: None,
             last_caps_size: None,
             cursor: PhysicalPosition::new(0.0, 0.0),
             clock: super::cadence::FrameClock::new(Instant::now()),
@@ -155,6 +163,15 @@ impl FloatingApp {
         let (Some(nw), Some(nh)) = (NonZeroU32::new(win_w), NonZeroU32::new(win_h)) else {
             return; // a 0-area window: nothing to draw
         };
+        // The scene + caps handle, cloned out so the `self.live` borrow ends before
+        // the `&mut self` writes below. `None` = `resumed` hasn't booted yet.
+        let Some((scene, floor_caps)) = self
+            .live
+            .as_ref()
+            .map(|l| (l.scene_rx.borrow().clone(), Arc::clone(&l.floor_caps)))
+        else {
+            return;
+        };
         // Audio state for the footer's ♩ suffix + the expiry-driven debounced
         // volume persist, both owned by the controller — resolved BEFORE the
         // surface borrow below. `audio_audible` mirrors the TUI's gate EXACTLY
@@ -168,15 +185,13 @@ impl FloatingApp {
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
         // Office buffer = window / SCALE (kept ~OFFICE_TARGET_H tall → chunky sprites).
         // The ONE projection helper, shared with the boot seed so the two can't drift.
-        let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(win_w, win_h);
+        let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(size);
         // Keep the reducer's desk capacity in lockstep with the office actually rendered at
         // this BUFFER size (authority = the layout's home-desk count, same as the TUI).
         if self.last_caps_size != Some((buf_w, buf_h)) {
-            sync_floor_caps(&self.floor_caps, buf_w, buf_h);
+            sync_floor_caps(&floor_caps, buf_w, buf_h);
             self.last_caps_size = Some((buf_w, buf_h));
         }
-        // Arc clone releases the watch borrow before the (mutable) renderer borrow.
-        let scene = self.scene_rx.borrow().clone();
         let floor_meta = FloorMeta::ground();
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
@@ -259,9 +274,8 @@ impl FloatingApp {
 /// `tui/mod.rs`). `store` (not `fetch_max`): floating tracks its window exactly, so a shrink
 /// lowers capacity (excess agents become invisible-but-alive, like the TUI on shrink).
 fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u16) {
-    for (floor_idx, cap) in floor_caps.iter().enumerate() {
-        let seed = pixtuoid_scene::floor::floor_seed(floor_idx);
-        let capacity = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);
+    let caps = super::offscreen::floor_caps_for_buffer(buf_w, buf_h);
+    for (cap, capacity) in floor_caps.iter().zip(caps) {
         cap.store(capacity, Ordering::Relaxed);
     }
 }
@@ -341,6 +355,11 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 return;
             }
         };
+        // Seeded from the REAL window — the first physical size there is (#803).
+        // Past the window/surface failure arms, so a failed boot binds no socket.
+        if let Some(boot) = self.boot.take() {
+            self.live = Some(boot.spawn(window.inner_size()));
+        }
         // `cfg.opacity` is parsed + clamped but NOT applied in v1: winit 0.30 exposes no
         // per-window opacity, and softbuffer writes opaque XRGB (no alpha). Honest no-op —
         // real translucency needs a native shim or a wgpu surface (deferred, see spec §11).
@@ -441,12 +460,13 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // — not slow ambient decor — so it keeps the 30fps path unless every daemon is Down
         // (a Down daemon is gone/leaving within MASCOT_LEAVE_MS, not a sustained wanderer, so
         // it stays on the ambient tick — same brief terminal transition as before this change).
-        let scene = self.scene_rx.borrow();
-        let office_idle = scene.agents.is_empty()
-            && scene
-                .daemons()
-                .all(|(_, _, d)| d.liveness == DaemonLiveness::Down);
-        drop(scene);
+        let office_idle = self.live.as_ref().is_none_or(|live| {
+            let scene = live.scene_rx.borrow();
+            scene.agents.is_empty()
+                && scene
+                    .daemons()
+                    .all(|(_, _, d)| d.liveness == DaemonLiveness::Down)
+        });
         // The redraw REQUEST rides the same deadline as the wait: requesting one
         // unconditionally here leaves winit a pending redraw, so `WaitUntil` never
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).
