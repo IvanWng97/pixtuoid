@@ -1,11 +1,6 @@
-//! The per-agent **FSM** (Layer A) — the legal single-slot state transitions.
-//!
-//! The reducer runs two stacked state machines: this Layer-A FSM (`Idle /
-//! Active / Waiting` plus the exit + Active→Idle debounce, here) and the
-//! Layer-B scope tree over `parent_id` (in [`super::scope`]). This module names
-//! each per-slot transition so it is individually testable and the reducer's
-//! `apply()` reads as a **coordinator** — event in, the right transition out —
-//! the mirror of how `scope.rs` named the tree ops.
+//! The per-agent **FSM** (Layer A) — the legal single-slot state transitions
+//! (`Idle / Active / Waiting` plus the exit + Active→Idle debounce). The Layer-B
+//! scope tree over `parent_id` lives in [`super::scope`].
 //!
 //! **Scope:** these fns mutate ONE `AgentSlot` only. The cross-slot correlation
 //! state — `active_tasks` (subagent-leak suppression), `gated_before_waiting`
@@ -19,11 +14,10 @@ use std::time::SystemTime;
 use crate::source::ToolDetail;
 use crate::state::{ActivityState, AgentSlot, ToolKind};
 
-/// Fold the time the slot has spent Active into `active_ms`, then it's safe to
-/// overwrite `state`/`state_started_at`. A no-op unless the slot is currently
-/// Active (Idle/Waiting spans aren't "active"). `until` is the instant the
+/// Fold the time the slot has spent Active into `active_ms`, after which it is
+/// safe to overwrite `state`/`state_started_at`. `until` is the instant the
 /// Active span ends — `now` for a live transition, the debounce `pending` mark
-/// for an idle-expiry (so the grace window isn't counted as work).
+/// for an idle-expiry, so the grace window isn't counted as work.
 fn accumulate_active_ms(slot: &mut AgentSlot, until: SystemTime) {
     if matches!(slot.state, ActivityState::Active { .. }) {
         let elapsed = until
@@ -35,9 +29,7 @@ fn accumulate_active_ms(slot: &mut AgentSlot, until: SystemTime) {
 }
 
 /// Enter `Active` with a concrete tool — the general `ActivityStart` path.
-/// Stamps `last_event_at` (this is the actor's own event). `kind` is the
-/// caller-derived semantic category (`ToolKind::from_detail`, computed once
-/// from the typed `ToolDetail` before it is erased to the display string).
+/// Stamps `last_event_at` (this is the actor's own event).
 pub(crate) fn enter_active(
     slot: &mut AgentSlot,
     tool_use_id: Option<Arc<str>>,
@@ -59,9 +51,7 @@ pub(crate) fn enter_active(
 /// Enter the `Active("Delegating")` state — a parent dispatched a Task, or a
 /// suppressed child event resumed a parent that was Waiting on the subagent's
 /// gate. Deliberately does NOT stamp `last_event_at`: both callers already
-/// refreshed lineage (the event is a child's, misattributed/Task), and the
-/// suppression-restore path comes from `Waiting` so `accumulate_active_ms` is a
-/// correct no-op there.
+/// refreshed lineage.
 pub(crate) fn enter_delegating(
     slot: &mut AgentSlot,
     tool_use_id: Option<Arc<str>>,
@@ -70,9 +60,7 @@ pub(crate) fn enter_delegating(
     accumulate_active_ms(slot, now);
     slot.state = ActivityState::Active {
         tool_use_id,
-        // The HUD text; reuse `ToolDetail::Task.display()` rather than
-        // re-spelling the literal. Semantics ride on `kind` — the stale-window
-        // policy and the glow tint match `ToolKind::Task`, never this string.
+        // HUD text only — semantics ride on `kind`, never on this string.
         detail: Some(Arc::<str>::from(ToolDetail::Task.display())),
         kind: ToolKind::Task,
     };
@@ -91,16 +79,15 @@ pub(crate) fn enter_waiting(slot: &mut AgentSlot, reason: Arc<str>, now: SystemT
 
 /// Arm the Active→Idle debounce: the slot stays visually Active until
 /// `settle_to_idle` fires `ACTIVE_GRACE_WINDOW` later (or a new `ActivityStart`
-/// cancels it). The caller decides whether arming is appropriate and owns
-/// `last_event_at` (it differs across the call sites).
+/// cancels it). The caller owns `last_event_at` — it differs per call site.
 pub(crate) fn arm_pending_idle(slot: &mut AgentSlot, now: SystemTime) {
     slot.pending_idle_at = Some(now);
 }
 
 /// Realize an armed debounce: settle an `Active` (normal tool end) or a
 /// `Waiting` slot whose gated permission resolved down to `Idle`. The Active
-/// span that ended at `pending` is folded into `active_ms`. `Idle` is a no-op.
-/// Always clears the pending mark. Caller checks the grace window first.
+/// span that ended at `pending` is folded into `active_ms`. The caller checks
+/// the grace window first.
 pub(crate) fn settle_to_idle(slot: &mut AgentSlot, pending: SystemTime, now: SystemTime) {
     match &slot.state {
         ActivityState::Active { .. } => {
@@ -127,11 +114,8 @@ pub(crate) fn mark_exiting(slot: &mut AgentSlot, now: SystemTime) {
 
 /// Resurrect an EXITING slot back to a live `Idle` state — a SessionStart
 /// landed on a slot mid-walkout (Reasonix `/new` fires SessionEnd+SessionStart
-/// on the same cwd-keyed id; a Codex resurrect prompt can land inside the exit
-/// grace window). Folds any in-flight Active span into `active_ms` FIRST, like
-/// every other Active-exit site, before clearing the exit + debounce marks. The
-/// reducer gates this to root agents so a late duplicate can't un-exit a
-/// cascaded subagent — see its SessionStart arm.
+/// on the same cwd-keyed id). The reducer gates this to root agents so a late
+/// duplicate can't un-exit a cascaded subagent.
 pub(crate) fn resurrect_in_place(slot: &mut AgentSlot, now: SystemTime) {
     accumulate_active_ms(slot, now);
     slot.exiting_at = None;
@@ -252,8 +236,8 @@ mod tests {
     #[test]
     fn settle_to_idle_folds_active_span_up_to_pending_not_now() {
         let t0 = SystemTime::now();
-        let pending = t0 + Duration::from_secs(1); // ActivityEnd time
-        let now = t0 + Duration::from_secs(3); // grace elapsed
+        let pending = t0 + Duration::from_secs(1);
+        let now = t0 + Duration::from_secs(3);
         let mut s = active(t0);
         s.pending_idle_at = Some(pending);
         settle_to_idle(&mut s, pending, now);
@@ -265,9 +249,6 @@ mod tests {
 
     #[test]
     fn settle_to_idle_resolves_a_waiting_slot_without_accumulating() {
-        // A Waiting slot only carries pending_idle_at after its gated permission
-        // tool resolved; settling goes Idle and folds NO active_ms (Waiting time
-        // isn't work). Mirror of the Active branch test above.
         let t0 = SystemTime::now();
         let pending = t0 + Duration::from_secs(1);
         let now = t0 + Duration::from_secs(3);
@@ -310,7 +291,7 @@ mod tests {
     fn rename_is_idempotent_but_always_refreshes_liveness() {
         let t0 = SystemTime::now();
         let mut s = active(t0);
-        rename(&mut s, "cc·repo".into(), t0 + Duration::from_secs(1)); // same label
+        rename(&mut s, "cc·repo".into(), t0 + Duration::from_secs(1));
         assert_eq!(&*s.label, "cc·repo");
         assert_eq!(s.last_event_at, t0 + Duration::from_secs(1));
         rename(&mut s, "code-explorer".into(), t0 + Duration::from_secs(2));

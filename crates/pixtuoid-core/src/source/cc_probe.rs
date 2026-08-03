@@ -1,46 +1,34 @@
-//! The CC `sessions/<pid>.json` registry probe — the `~/.claude/sessions`
-//! machinery behind `claude_code::live_cc_session_ids` (re-exported there;
-//! this module is the implementation home).
+//! The CC `sessions/<pid>.json` registry probe behind
+//! `claude_code::live_cc_session_ids`.
 
 use std::path::{Path, PathBuf};
 
 use crate::source::jsonl::ProbeSnapshot;
 
 /// CC's first-party live-process registry: `<claude_home>/sessions/<pid>.json`,
-/// one tiny JSON file per running CC process (`{pid, sessionId, cwd, status,
-/// startedAt, procStart, ...}` — undocumented; check_upstream_drift.py only
-/// watches for the registry APPEARING in the docs, so shape drift (#247) is
-/// detected HERE: an entry that parses as JSON but lacks a consumed key warns
-/// once per process run and yields no vouch — graceful mtime-only degradation
-/// with a breadcrumb instead of silence. Returns the session UUIDs (+ owning
-/// pid each) of entries whose pid is still ALIVE — a registry file can outlive
-/// a crashed CC, so each entry is verified with kill(pid, 0).
+/// one tiny undocumented JSON file per running CC process (`{pid, sessionId,
+/// cwd, status, startedAt, procStart, ...}`). Returns the session UUIDs (+
+/// owning pid each) of entries whose pid is still ALIVE — a registry file can
+/// outlive a crashed CC, so each entry is verified with kill(pid, 0).
 ///
 /// Failure is explicit (#223): an UNREADABLE-or-MISSING registry dir is
-/// `None` — on a machine where CC runs the dir's absence is ambiguous (older
-/// CC without the registry, a permissions problem), so the probe declares
-/// failure and the watcher changes nothing. An EMPTY but readable dir is
-/// `Some(empty)`: a healthy "no CC running" observation that the negative
+/// `None` — its absence is ambiguous (older CC without the registry, a
+/// permissions problem), so the watcher changes nothing. An EMPTY but readable
+/// dir is `Some(empty)`: a healthy "no CC running" observation the negative
 /// vouch may act on.
 ///
 /// PID-reuse guard (#220): kill(0) only proves SOME process owns the pid. When
-/// the entry carries `startedAt` (ms epoch, stamped by CC at startup) AND the
-/// kernel can report the process start time (`pid_start_time_secs` — macOS
-/// only today), the two must agree within `PID_START_TOLERANCE_SECS` or the
-/// pid was recycled by an unrelated process and the entry is skipped. Either
-/// side missing falls back to pid-alive-only (the previous behavior — the
-/// check is additive). This matters more now that the probe is ONGOING
-/// liveness (a recycled pid would hold a dead session's sweep exemption open,
-/// not just admit one transient sprite).
+/// the entry carries `startedAt` AND the kernel can report the process start
+/// time, the two must agree within `PID_START_TOLERANCE_SECS` or the pid was
+/// recycled and the entry is skipped. Either side missing falls back to
+/// pid-alive-only — the check is additive.
 pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
     #[cfg(unix)]
     {
         // session_id → winning entry. The fold (not direct inserts) exists for
-        // the pathological duplicate-id case (#252): two live entries claiming
-        // one sessionId would otherwise bind id→pid by unspecified read_dir
-        // order, flapping across refreshes — each flap churns the exit-watch
-        // rebind, and the losing pid dying first emits a spurious SessionEnd
-        // for the live session.
+        // the duplicate-id case (#252): binding id→pid by unspecified read_dir
+        // order flaps across refreshes, churning the exit-watch rebind, and the
+        // losing pid dying first emits a spurious SessionEnd for the live one.
         let mut winners: std::collections::HashMap<String, RegistryEntry> =
             std::collections::HashMap::new();
         let Ok(entries) = std::fs::read_dir(sessions_dir) else {
@@ -57,8 +45,7 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
             }
             // Regular files only, decided WITHOUT following symlinks (so a
             // symlink-to-FIFO is rejected too): reading a writer-less FIFO
-            // named `x.json` blocks forever, hanging the probe and silently
-            // killing the whole CC watcher task it runs inside.
+            // named `x.json` blocks forever, silently killing the watcher task.
             if !entry.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
@@ -69,16 +56,13 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
             };
             let reg = match parse_registry_entry(&bytes) {
                 RegistryParse::Entry(reg) => reg,
-                // Not JSON / corrupt value — likely a half-written file
-                // mid-write or junk, transient: skip silently, not drift.
                 RegistryParse::Skip => continue,
                 RegistryParse::ShapeDrift(key) => {
-                    // The registry is the one undocumented upstream surface
-                    // with no fetchable text to drift-diff (#247): a silent
+                    // Warn ONCE per process run, never per 250ms scan pass:
+                    // the registry is the one undocumented upstream surface
+                    // with no fetchable text to drift-diff (#247), so a silent
                     // key rename would degrade the probe to mtime-only gating
-                    // with zero signal. Warn ONCE per process run, never per
-                    // 250ms scan pass (FailureLatch spirit; no recovery
-                    // logging — drift doesn't un-happen mid-run).
+                    // with zero signal.
                     static SHAPE_DRIFT_WARNED: std::sync::Once = std::sync::Once::new();
                     SHAPE_DRIFT_WARNED.call_once(|| {
                         crate::source::drift::shape_drift(
@@ -115,10 +99,9 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
                     slot.insert(reg);
                 }
                 std::collections::hash_map::Entry::Occupied(mut slot) => {
-                    // Real registries are one-file-per-pid with unique ids —
-                    // a duplicate is upstream junk worth ONE breadcrumb per
-                    // process run (SHAPE_DRIFT_WARNED spirit), not a per-scan
-                    // log storm.
+                    // Real registries are one-file-per-pid with unique ids — a
+                    // duplicate is upstream junk worth ONE breadcrumb per
+                    // process run, not a per-scan log storm.
                     static DUPLICATE_ID_WARNED: std::sync::Once = std::sync::Once::new();
                     DUPLICATE_ID_WARNED.call_once(|| {
                         tracing::warn!(
@@ -142,29 +125,23 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
     }
     #[cfg(not(unix))]
     {
-        // Windows has no kill(0); pid liveness there needs OpenProcess +
-        // exit-code semantics we haven't validated against CC-on-Windows.
-        // The probe CANNOT enumerate → None (explicit failure): the watcher
-        // changes nothing — admission keeps today's pure-mtime behavior and
-        // the negative vouch never arms.
+        // Windows has no kill(0); pid liveness needs OpenProcess + exit-code
+        // semantics unvalidated against CC-on-Windows. Explicit failure keeps
+        // today's pure-mtime admission and never arms the negative vouch.
         let _ = sessions_dir;
         None
     }
 }
 
 /// Deterministic winner between two LIVE entries claiming one sessionId
-/// (#252). Scan-order independence is the whole point — read_dir order is
-/// unspecified and may differ between refreshes, and the binding must not
-/// flap. Newest `startedAt` wins (the genuinely newer CC owns a reused id);
-/// a `startedAt`-carrying entry beats one without (it also passed the pid
-/// identity check, so it's the better-attested binding); both absent or equal
-/// → larger pid — arbitrary, but stable for live processes, which is all
-/// stability needs.
+/// (#252): read_dir order is unspecified and the binding must not flap.
+/// Newest `startedAt` wins, a `startedAt`-carrying entry beats one without
+/// (better-attested), and both-absent-or-equal falls to the larger pid.
 #[cfg(unix)]
 fn prefer_candidate(incumbent: &RegistryEntry, candidate: &RegistryEntry) -> bool {
     // Guard-pair form rather than `if c != i => c > i`: behavior-identical,
-    // but the old shape's `c > i` could never see `c == i` (the guard
-    // excluded it), leaving a `>`→`>=` mutation equivalent-unkillable.
+    // but the old shape's `c > i` could never see `c == i`, leaving a `>`→`>=`
+    // mutation equivalent-unkillable.
     match (candidate.started_at_ms, incumbent.started_at_ms) {
         (Some(c), Some(i)) if c > i => true,
         (Some(c), Some(i)) if c < i => false,
@@ -174,10 +151,9 @@ fn prefer_candidate(incumbent: &RegistryEntry, candidate: &RegistryEntry) -> boo
     }
 }
 
-/// Read one registry entry, bounded to 64 KiB. Real entries are <1 KiB; the
-/// bound keeps junk dropped into the registry dir from ballooning a read that
-/// runs on every scan pass (truncated bytes just fail the JSON parse and are
-/// skipped silently).
+/// Read one registry entry, bounded to 64 KiB — real entries are <1 KiB, and
+/// the bound keeps junk in the registry dir from ballooning a per-scan read
+/// (truncated bytes just fail the JSON parse and are skipped silently).
 #[cfg(unix)]
 fn read_registry_entry_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
@@ -195,29 +171,24 @@ fn read_registry_entry_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
 struct RegistryEntry {
     pid: i32,
     session_id: String,
-    /// `startedAt` — ms-epoch CC stamps at startup (~1.2s after process start,
-    /// measured live). Optional: an older CC without the field still probes
-    /// pid-alive-only.
+    /// `startedAt` — ms-epoch CC stamps at startup. Optional: an older CC
+    /// without the field still probes pid-alive-only.
     started_at_ms: Option<u64>,
 }
 
 /// One registry-file parse outcome — the seam the #247 drift warn keys on.
-/// `ShapeDrift` carries WHICH consumed key vanished/changed type, so the
-/// warn-once can name it. Routing rule for future keys: a REQUIRED consumed
-/// key goes to `ShapeDrift("<key>")`; an additive key stays `Option` on the
-/// entry and its absence is never a parse fail nor drift (the `startedAt`
-/// precedent).
+/// Routing rule for future keys: a REQUIRED consumed key goes to
+/// `ShapeDrift("<key>")`; an additive key stays `Option` on the entry and its
+/// absence is never a parse fail nor drift.
 #[cfg(unix)]
 #[derive(Debug)]
 enum RegistryParse {
     Entry(RegistryEntry),
-    /// Skip silently: not JSON at all (a half-written file mid-write —
-    /// transient) or a value-level corruption (pid <= 0, empty sessionId) —
-    /// the keys are shaped right, so it's not format drift. A PERSISTENT
-    /// wholesale format replacement (registry no longer JSON at all) also
-    /// lands here, deliberately silent: indistinguishable from torn reads
-    /// per-file, and warning on it would let one startup transient consume
-    /// the once-per-run breadcrumb that a real key rename deserves.
+    /// Skip silently: not JSON at all (a half-written file mid-write) or a
+    /// value-level corruption (pid <= 0, empty sessionId) — the keys are
+    /// shaped right, so it is not format drift. A wholesale format replacement
+    /// lands here too, deliberately: warning on it would let one startup
+    /// transient consume the once-per-run breadcrumb a key rename deserves.
     Skip,
     /// Parses as JSON but a consumed key is missing or mistyped — the
     /// undocumented upstream shape changed (#247); the consumer warns once.
@@ -227,8 +198,6 @@ enum RegistryParse {
 /// Extract `{pid, sessionId, startedAt}` from one registry file.
 /// `serde_json::Value` on purpose — the format is undocumented, so we read
 /// only the fields the join needs and tolerate everything else changing.
-/// `startedAt` is optional (missing/malformed → `None`, never a parse fail
-/// nor drift): it only powers the additive PID-reuse identity check.
 #[cfg(unix)]
 fn parse_registry_entry(bytes: &[u8]) -> RegistryParse {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
@@ -237,9 +206,8 @@ fn parse_registry_entry(bytes: &[u8]) -> RegistryParse {
     let Some(pid) = v.get("pid").and_then(|p| p.as_i64()) else {
         return RegistryParse::ShapeDrift("pid");
     };
-    // The i32-range + strictly-positive narrowing every JSON pid ingress shares
-    // (the kill(0)/kill(-n)-targets-a-GROUP rationale lives on `checked_pid`; a
-    // corrupt entry must not probe our own group as "alive").
+    // The strictly-positive narrowing every JSON pid ingress shares (rationale
+    // on `checked_pid`): a corrupt entry must not probe our own group as alive.
     let Some(pid) = crate::source::decoder::checked_pid(pid) else {
         return RegistryParse::Skip;
     };
@@ -257,24 +225,20 @@ fn parse_registry_entry(bytes: &[u8]) -> RegistryParse {
     })
 }
 
-/// Tolerance for the `startedAt` ↔ kernel-start-time identity check. Measured
-/// live: CC writes `startedAt` ≈ 1.2s after `pbi_start_tvsec` (Node boot +
-/// module load before the stamp), so 10s is ~8× margin while still being far
-/// below any plausible pid-recycling interval.
+/// Tolerance for the `startedAt` ↔ kernel-start-time identity check. CC writes
+/// `startedAt` ≈ 1.2s after `pbi_start_tvsec` (Node boot + module load before
+/// the stamp), so 10s is generous margin while far below any plausible
+/// pid-recycling interval.
 #[cfg(unix)]
 pub(crate) const PID_START_TOLERANCE_SECS: u64 = 10;
 
 /// Kernel-reported process start time in epoch seconds — the identity half of
 /// the PID-reuse guard. macOS: `proc_pidinfo(PROC_PIDTBSDINFO)` →
-/// `pbi_start_tvsec` (same libproc family as `fd_probe.rs`). Linux:
-/// `/proc/<pid>/stat` field 22 is clock ticks since BOOT — epoch conversion
-/// needs boot time + ticks-per-sec, so the identity check is macOS-only for
-/// now and Linux returns `None` (pid-alive-only, today's behavior). `None` on
-/// failure (pid gone mid-probe, EPERM) — never an error: the check is additive.
+/// `pbi_start_tvsec`. Linux's `/proc/<pid>/stat` field 22 is clock ticks since
+/// BOOT, so the identity check is macOS-only for now and Linux returns `None`
+/// (pid-alive-only). `None` on failure — never an error: the check is additive.
 #[cfg(target_os = "macos")]
 pub(crate) fn pid_start_time_secs(pid: i32) -> Option<u64> {
-    // On macOS the shared start MARKER (`proc_start`) is exactly epoch
-    // seconds (pbi_start_tvsec), so this wall-clock check can ride it.
     super::proc_start::pid_start_marker(pid)
 }
 
@@ -285,10 +249,8 @@ pub(crate) fn pid_start_time_secs(_pid: i32) -> Option<u64> {
     None
 }
 
-/// `kill(pid, 0)` liveness via `rustix::process::test_kill_process`: Ok = alive
-/// and signalable; EPERM = alive but owned by another user; ESRCH (or anything
-/// else) = no such process. Registry pids are always > 0; a 0 pid (which
-/// `Pid::from_raw` rejects) short-circuits to `false` before reaching `kill`.
+/// `kill(pid, 0)` liveness: Ok = alive and signalable; EPERM = alive but owned
+/// by another user; anything else = no such process.
 #[cfg(unix)]
 pub(crate) fn pid_alive(pid: i32) -> bool {
     let Some(pid) = rustix::process::Pid::from_raw(pid) else {
@@ -300,8 +262,7 @@ pub(crate) fn pid_alive(pid: i32) -> bool {
     }
 }
 
-/// The sessions registry is a SIBLING of the projects root
-/// (`<claude_home>/sessions` vs `<claude_home>/projects`). Derive it only when
+/// The sessions registry is a SIBLING of the projects root. Derived only when
 /// the parent layout matches (the root's file_name is literally `projects`) —
 /// a custom `--projects-root /tmp/fixture` replay points at an arbitrary dir
 /// whose parent could hold an unrelated `sessions/`, so those runs get no
@@ -323,8 +284,7 @@ mod liveness_tests {
     #[cfg(unix)]
     use std::collections::HashSet;
 
-    // Only the cfg(unix) tests write registry entries (the Windows impl never
-    // reads them) — keep the helper gated too or it's dead code there.
+    // Gated with its only callers: on Windows this would be dead code.
     #[cfg(unix)]
     fn write_entry(dir: &Path, name: &str, pid: i64, session_id: &str) {
         std::fs::write(
@@ -338,9 +298,6 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn nonpositive_registry_pid_is_dropped_via_checked_pid() {
-        // cc_probe routes the registry `pid` through decoder::checked_pid, so a
-        // zero/negative pid (kill(0)/kill(-n) target a process GROUP) is Skipped
-        // like every other JSON pid ingress — the sibling of openclaw's drop.
         for bad in [0i64, -1, -12345] {
             let bytes =
                 serde_json::json!({ "pid": bad, "sessionId": "s", "status": "idle" }).to_string();
@@ -349,7 +306,6 @@ mod liveness_tests {
                 "pid {bad} must be dropped"
             );
         }
-        // Control: a valid positive pid still parses to an Entry.
         let ok = serde_json::json!({ "pid": 4321, "sessionId": "s", "status": "idle" }).to_string();
         assert!(matches!(
             parse_registry_entry(ok.as_bytes()),
@@ -361,7 +317,6 @@ mod liveness_tests {
     #[test]
     fn keeps_entry_whose_pid_is_alive_and_binds_its_pid() {
         let dir = tempfile::tempdir().unwrap();
-        // Our own pid is alive by construction.
         write_entry(
             dir.path(),
             "self.json",
@@ -373,8 +328,6 @@ mod liveness_tests {
             live.contains("alive-session"),
             "an entry with a live pid must be kept, got {live:?}"
         );
-        // #223: the snapshot binds each vouched id to its owning OS pid (the
-        // exit-watch half).
         assert_eq!(
             live.pid_of.get("alive-session"),
             Some(&(std::process::id() as i32)),
@@ -385,9 +338,7 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn drops_entry_whose_pid_is_dead() {
-        // Spawn-and-reap a real child: its pid is guaranteed dead once wait()
-        // returns (modulo an astronomically unlikely instant reuse — the
-        // accepted PID-reuse caveat, see live_cc_session_ids).
+        // Spawn-and-reap a real child: its pid is dead once wait() returns.
         let mut child = std::process::Command::new("true").spawn().unwrap();
         let dead_pid = child.id() as i64;
         child.wait().unwrap();
@@ -417,21 +368,17 @@ mod liveness_tests {
         let dir = tempfile::tempdir().unwrap();
         let own_pid = std::process::id() as i64;
         std::fs::write(dir.path().join("garbage.json"), "not json {{{").unwrap();
-        // Missing sessionId.
         std::fs::write(
             dir.path().join("nosid.json"),
             serde_json::json!({ "pid": own_pid }).to_string(),
         )
         .unwrap();
-        // pid <= 0 would kill(0) our own process GROUP — must be rejected.
         write_entry(dir.path(), "pid0.json", 0, "group-session");
-        // pid as a string (format drift) — not silently coerced.
         std::fs::write(
             dir.path().join("strpid.json"),
             serde_json::json!({ "pid": own_pid.to_string(), "sessionId": "str-pid" }).to_string(),
         )
         .unwrap();
-        // Non-.json files are not registry entries.
         write_entry(dir.path(), "notes.txt", own_pid, "txt-session");
         write_entry(dir.path(), "valid.json", own_pid, "valid-session");
 
@@ -446,10 +393,6 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn oversized_junk_json_entry_is_ignored() {
-        // Real registry entries are <1 KiB; a 256 KiB blob is junk (or drift
-        // we couldn't parse anyway). The bounded read keeps the per-scan
-        // probe cost flat — the truncated bytes just fail the JSON parse and
-        // land in the silent skip.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("huge.json"), vec![b'x'; 256 * 1024]).unwrap();
         write_entry(
@@ -469,11 +412,8 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn fifo_named_json_does_not_hang_the_probe() {
-        // A FIFO named like a registry entry must be skipped BEFORE any read:
-        // reading a writer-less FIFO blocks forever, which would hang the
-        // probe and silently kill the whole CC watcher task. The file_type()
-        // filter (which doesn't follow symlinks) rejects it without touching
-        // its contents.
+        // Reading a writer-less FIFO blocks forever, so the file_type() filter
+        // must reject it before any read.
         use std::os::unix::ffi::OsStrExt;
         let dir = tempfile::tempdir().unwrap();
         let fifo = dir.path().join("fifo.json");
@@ -497,18 +437,11 @@ mod liveness_tests {
 
     #[test]
     fn missing_dir_is_probe_failure_none() {
-        // #223: a MISSING registry dir on a machine where CC runs is
-        // ambiguous (older CC, permissions) — explicit failure, the watcher
-        // changes nothing. (On Windows the probe can't enumerate at all, so
-        // None holds there too.)
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist");
         assert!(live_cc_session_ids(&missing).is_none());
     }
 
-    /// #252 tie-break table, boundary-precise: newest `startedAt` wins over
-    /// any pid, attested beats unattested, and equal-on-everything keeps the
-    /// INCUMBENT (scan-order stability is the fn's whole point).
     #[cfg(unix)]
     #[test]
     fn prefer_candidate_orders_by_started_at_then_attestation_then_pid() {
@@ -517,28 +450,17 @@ mod liveness_tests {
             session_id: "s".to_string(),
             started_at_ms,
         };
-        // Newest startedAt wins regardless of pid order.
         assert!(prefer_candidate(&e(Some(1_000), 99), &e(Some(2_000), 1)));
         assert!(!prefer_candidate(&e(Some(2_000), 1), &e(Some(1_000), 99)));
-        // An attested entry beats an unattested one, both directions.
         assert!(prefer_candidate(&e(None, 99), &e(Some(1_000), 1)));
         assert!(!prefer_candidate(&e(Some(1_000), 1), &e(None, 99)));
-        // Equal timestamps (and both-absent) fall to the pid tie-break…
         assert!(prefer_candidate(&e(Some(1_000), 5), &e(Some(1_000), 9)));
         assert!(!prefer_candidate(&e(Some(1_000), 9), &e(Some(1_000), 5)));
         assert!(prefer_candidate(&e(None, 5), &e(None, 9)));
-        // …and a candidate equal on EVERY axis must not displace the
-        // incumbent (a `>`→`>=` flip here would flap the binding between
-        // refreshes on identical entries).
         assert!(!prefer_candidate(&e(Some(1_000), 7), &e(Some(1_000), 7)));
         assert!(!prefer_candidate(&e(None, 7), &e(None, 7)));
     }
 
-    /// `pbi_start_tvsec` is EPOCH SECONDS (not ticks, not relative to boot):
-    /// our own process started after 2014 and not in the future. Pins the
-    /// unit contract the #220 identity check divides `startedAt` (ms) down
-    /// to — a wrong unit would silently skip every registry entry as
-    /// "recycled".
     #[cfg(target_os = "macos")]
     #[test]
     fn pid_start_time_is_plausible_epoch_seconds_for_own_process() {
@@ -554,23 +476,12 @@ mod liveness_tests {
         );
     }
 
-    /// The non-macOS unix fallback deliberately returns `None` — Linux start
-    /// time is ticks-since-boot and the epoch conversion is deferred, so the
-    /// identity check must stay ADDITIVE (pid-alive-only) there. A mutant
-    /// `Some(0)` would flip it to "every entry looks recycled" and silently
-    /// blind the whole probe on Linux; this is the cfg-twin of the macOS
-    /// plausibility pin above.
     #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn pid_start_time_is_deliberately_unavailable_off_macos() {
         assert_eq!(pid_start_time_secs(std::process::id() as i32), None);
     }
 
-    /// The PID-reuse identity check is tolerance-INCLUSIVE: a `startedAt`
-    /// exactly `PID_START_TOLERANCE_SECS` from the kernel start time still
-    /// vouches (strict `>` rejection). CC stamps ~1.2s after process start,
-    /// so the boundary is headroom, not noise — a `>`→`>=` flip would
-    /// shave it.
     #[cfg(target_os = "macos")]
     #[test]
     fn started_at_exactly_at_tolerance_still_vouches() {
@@ -610,10 +521,6 @@ mod liveness_tests {
         );
     }
 
-    /// The per-entry read cap is 64 KiB — a real-shaped entry a few KiB
-    /// large (extra upstream keys) must still parse and vouch. A
-    /// `64*1024`→`64+1024` mutation collapses the cap to ~1 KiB and
-    /// truncates this entry into a parse failure.
     #[cfg(unix)]
     #[test]
     fn multi_kib_entry_still_parses_within_the_read_cap() {
@@ -637,8 +544,7 @@ mod liveness_tests {
 
     #[test]
     fn unreadable_dir_is_probe_failure_none() {
-        // A FILE where the sessions dir should be makes read_dir fail
-        // deterministically (no chmod games) — same explicit-failure path.
+        // A FILE where the dir should be makes read_dir fail deterministically.
         let dir = tempfile::tempdir().unwrap();
         let file_not_dir = dir.path().join("sessions");
         std::fs::write(&file_not_dir, b"not a dir").unwrap();
@@ -648,16 +554,11 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn empty_readable_dir_is_some_empty() {
-        // An empty but READABLE registry is a healthy observation: no CC is
-        // running (meaningful — the negative vouch may act on it), NOT a
-        // probe failure.
         let dir = tempfile::tempdir().unwrap();
         let snap = live_cc_session_ids(dir.path()).expect("empty readable dir is healthy");
         assert!(snap.is_empty());
         assert!(snap.pid_of.is_empty());
     }
-
-    // --- PID-reuse identity check (#220) -----------------------------------
 
     #[cfg(unix)]
     fn expect_entry(bytes: &[u8]) -> RegistryEntry {
@@ -677,26 +578,20 @@ mod liveness_tests {
         let entry = expect_entry(with.as_bytes());
         assert_eq!(entry.started_at_ms, Some(1_781_109_422_174));
 
-        // Older CC without the field — still a valid entry (pid-alive-only).
         let without = serde_json::json!({ "pid": 64924, "sessionId": "s" }).to_string();
         let entry = expect_entry(without.as_bytes());
         assert_eq!(entry.started_at_ms, None);
 
-        // Malformed startedAt (string / negative) degrades to None, never a
-        // parse failure — the identity check is additive.
         let junk =
             serde_json::json!({ "pid": 64924, "sessionId": "s", "startedAt": "soon" }).to_string();
         let entry = expect_entry(junk.as_bytes());
         assert_eq!(entry.started_at_ms, None);
     }
 
-    // --- registry shape pin (#247) ------------------------------------------
-
-    /// Pin of the CURRENT live `<claude_home>/sessions/<pid>.json` shape
-    /// (synthesized values, same keys as a real 2026-06 entry). The format is
+    /// Pin of the CURRENT live `<claude_home>/sessions/<pid>.json` shape —
+    /// synthesized values, but the same keys as a real entry. The format is
     /// undocumented with no upstream text to diff, so this fixture is the
-    /// shape's regression detector: if a consumed key is renamed upstream,
-    /// the drift tests below are what a maintainer updates against reality.
+    /// shape's only regression detector.
     #[cfg(unix)]
     fn live_shape_entry(pid: i64, session_id: &str) -> String {
         serde_json::json!({
@@ -729,8 +624,6 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn renamed_or_mistyped_required_key_is_shape_drift() {
-        // The warn predicate (#247), tested directly — the warn site itself is
-        // gated by a process-global Once, so the classification is the seam.
         let renamed_sid = serde_json::json!({ "pid": 64924, "session_id": "s" }).to_string();
         assert!(matches!(
             parse_registry_entry(renamed_sid.as_bytes()),
@@ -756,13 +649,10 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn non_json_and_corrupt_values_are_silent_skips_not_drift() {
-        // Half-written mid-write file — transient, never a drift warn.
         assert!(matches!(
             parse_registry_entry(b"{\"pid\": 64924, \"sessionI"),
             RegistryParse::Skip
         ));
-        // Value-level corruption (the keys exist with the right types): pid
-        // <= 0 targets a process GROUP, an empty sessionId vouches nothing.
         let pid_zero = serde_json::json!({ "pid": 0, "sessionId": "s" }).to_string();
         assert!(matches!(
             parse_registry_entry(pid_zero.as_bytes()),
@@ -778,8 +668,6 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn shape_drifted_entry_yields_no_vouch() {
-        // End-to-end through the probe: a key-renamed entry for a LIVE pid
-        // must not vouch (the degraded-to-mtime path #247 warns about).
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("drifted.json"),
@@ -806,10 +694,6 @@ mod liveness_tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn pid_start_time_secs_reports_a_fresh_child_as_just_started() {
-        // Hermetic: a child spawned NOW must have a kernel start time within a
-        // few seconds of the current wall clock (proves both the FFI call and
-        // the epoch-seconds unit — a ticks-since-boot misread would be off by
-        // decades).
         let mut child = std::process::Command::new("sleep")
             .arg("30")
             .spawn()
@@ -840,8 +724,6 @@ mod liveness_tests {
         let own_pid = std::process::id() as i32;
         let own_start = pid_start_time_secs(own_pid).expect("own start time");
         let dir = tempfile::tempdir().unwrap();
-        // Plausible recycling: the registry claims a start an hour before the
-        // process actually started — a dead CC whose pid was reused.
         std::fs::write(
             dir.path().join("recycled.json"),
             serde_json::json!({
@@ -852,8 +734,7 @@ mod liveness_tests {
             .to_string(),
         )
         .unwrap();
-        // Live measurement: CC stamps startedAt ~1.2s after process start —
-        // inside the 10s tolerance.
+        // CC stamps startedAt ~1.2s after process start — inside the tolerance.
         std::fs::write(
             dir.path().join("genuine.json"),
             serde_json::json!({
@@ -875,8 +756,6 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn entry_without_started_at_keeps_pid_alive_only_behavior() {
-        // Additive fallback: no startedAt → no identity check → the live pid
-        // alone vouches (exactly the pre-#220 behavior).
         let dir = tempfile::tempdir().unwrap();
         write_entry(
             dir.path(),
@@ -888,8 +767,6 @@ mod liveness_tests {
             .expect("readable dir is a healthy probe")
             .contains("legacy-session"));
     }
-
-    // --- duplicate sessionId across live entries (#252) ---------------------
 
     #[cfg(unix)]
     fn entry(pid: i32, started_at_ms: Option<u64>) -> RegistryEntry {
@@ -903,17 +780,15 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn duplicate_winner_rule_is_symmetric_and_total() {
-        // Newest startedAt wins, in BOTH presentation orders (the symmetry IS
-        // the scan-order independence).
+        // Every pair is asserted in BOTH presentation orders: the symmetry IS
+        // the scan-order independence.
         assert!(prefer_candidate(&entry(1, Some(100)), &entry(2, Some(200))));
         assert!(!prefer_candidate(
             &entry(2, Some(200)),
             &entry(1, Some(100))
         ));
-        // A startedAt-carrying entry beats one without, both orders.
         assert!(prefer_candidate(&entry(9, None), &entry(1, Some(100))));
         assert!(!prefer_candidate(&entry(1, Some(100)), &entry(9, None)));
-        // Both absent (or equal): larger pid wins, both orders.
         assert!(prefer_candidate(&entry(1, None), &entry(2, None)));
         assert!(!prefer_candidate(&entry(2, None), &entry(1, None)));
         assert!(prefer_candidate(&entry(1, Some(100)), &entry(2, Some(100))));
@@ -926,11 +801,9 @@ mod liveness_tests {
     #[cfg(unix)]
     #[test]
     fn duplicate_session_id_binds_a_stable_pid_regardless_of_scan_order() {
-        // Two LIVE pids claiming one sessionId (no startedAt → no identity
-        // check on either platform → the pid tiebreak decides). The same pair
-        // is presented under file names sorting in OPPOSITE orders; whatever
-        // order read_dir yields, the binding must come out identical — the
-        // flap in #252 was exactly this binding following dir order.
+        // The same pair is presented under file names sorting in OPPOSITE
+        // orders; whatever order read_dir yields, the binding must come out
+        // identical. No startedAt, so the pid tiebreak decides.
         let mut child_a = std::process::Command::new("sleep")
             .arg("30")
             .spawn()
@@ -943,8 +816,7 @@ mod liveness_tests {
         let expected = pid_a.max(pid_b) as i32;
 
         // Probe inside the loop, assert only after the children are reaped —
-        // a panicking assert here would leak two sleep-30s (the sibling
-        // pid_start_time test's kill-before-assert discipline).
+        // a panicking assert here would leak two `sleep 30`s.
         let mut snapshots = Vec::new();
         for (first, second) in [(pid_a, pid_b), (pid_b, pid_a)] {
             let dir = tempfile::tempdir().unwrap();
@@ -975,13 +847,10 @@ mod liveness_tests {
 
     #[test]
     fn sessions_dir_derives_only_from_the_standard_layout() {
-        // <claude_home>/projects → the sessions sibling.
         assert_eq!(
             cc_sessions_dir(Path::new("/home/u/.claude/projects")),
             Some(PathBuf::from("/home/u/.claude/sessions"))
         );
-        // A fixture replay (--projects-root /tmp/fixture) has no registry
-        // sibling — no probe, pure-mtime gate.
         assert_eq!(cc_sessions_dir(Path::new("/tmp/fixture")), None);
         assert_eq!(cc_sessions_dir(Path::new("projects")), None);
     }

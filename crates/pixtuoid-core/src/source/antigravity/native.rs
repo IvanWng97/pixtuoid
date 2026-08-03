@@ -1,9 +1,5 @@
-//! The `native`-only runtime half of the Antigravity source:
-//! `AntigravitySource` and its `JsonlWatcher` wiring (label deriver +
-//! session-ended checker included — only the watcher reads them). The pure
-//! decoder stays in the always-compiled parent module; this whole file sits
-//! behind the parent's ONE `#[cfg(feature = "native")] mod native;` gate and
-//! is re-exported there, so public paths don't move.
+//! The `native`-only runtime half of the Antigravity source: `AntigravitySource`
+//! and its `JsonlWatcher` wiring. The pure decoder stays in the parent module.
 
 use std::path::PathBuf;
 
@@ -14,20 +10,15 @@ use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};
 
 /// Source that watches Antigravity CLI conversation log directories.
-/// Uses JsonlWatcher with a custom decoder for the Antigravity JSONL
-/// format (step_index/PLANNER_RESPONSE/tool_calls schema).
 pub struct AntigravitySource {
     /// The watched Antigravity brain-dir root; conversation-log JSONL lives under it.
     pub brain_root: PathBuf,
 }
 
 impl AntigravitySource {
-    /// The Antigravity **CLI** (`agy`) brain dir, home-rooted on every platform:
-    /// `<home>/.gemini/antigravity-cli/brain` (Windows: `%USERPROFILE%\.gemini\…`
-    /// via `user_home()` — the brain is NOT under `%APPDATA%`/`%LOCALAPPDATA%`;
-    /// only the IDE's editor settings and the `agy.exe` binary live there).
-    /// Note `antigravity-cli` (the CLI), NOT `antigravity` (the IDE's brain at
-    /// `~/.gemini/antigravity/brain`) — don't "fix" this to the IDE path.
+    /// The Antigravity **CLI** (`agy`) brain dir, home-rooted on every platform
+    /// (never under `%APPDATA%`). Note `antigravity-cli` (the CLI), NOT
+    /// `antigravity` (the IDE's brain) — don't "fix" this to the IDE path.
     pub fn default_paths() -> Self {
         let home = crate::platform::user_home();
         Self {
@@ -65,7 +56,6 @@ mod tests {
 
     #[test]
     fn ag_session_ended_is_always_false() {
-        // Antigravity writes no end marker — defer to mtime + stale-sweep.
         assert!(!ag_session_ended(b"x"));
         assert!(!ag_session_ended(b""));
     }

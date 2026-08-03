@@ -29,9 +29,6 @@ fn start(reducer: &mut Reducer, scene: &mut SceneState, id: AgentId) {
     );
 }
 
-/// Delegation scaffold shared by the pre-pass ordering pins: parent created
-/// via Hook at `t0`, child created via Jsonl at `t0 + 100ms` with the parent
-/// link (the same two-transport shape the sibling lifecycle tests hand-roll).
 fn delegating_pair(
     r: &mut Reducer,
     scene: &mut SceneState,
@@ -66,15 +63,6 @@ fn delegating_pair(
     );
     (parent, child)
 }
-
-// ── The reducer-suite DSL ─────────────────────────────────────────────────
-// One terse applier per AgentEvent shape the suite hand-rolls the most. Each is
-// behavior-identical to the `r.apply(scene, AgentEvent::…, at, tp)` block it
-// replaces — pure test scaffolding, no reducer logic. `Some(&str)` args convert
-// through `.into()` exactly as the inline constructors did (`String` for ids/
-// reasons, `ToolDetail` for the tool detail). Calls the DSL can't express
-// verbatim (a `ToolDetail::` enum detail, a `SessionStart` with custom fields)
-// stay inline / use `start` + `delegating_pair`.
 
 fn act_start(
     r: &mut Reducer,

@@ -1,8 +1,6 @@
 //! The `native`-only runtime half of the grok source: the liveness probe over
 //! grok's own crash-recovery registry (`active_sessions.json`) + `GrokSource`
-//! and its `JsonlWatcher` wiring. The pure decoders stay in the always-compiled
-//! parent module; this whole file sits behind the parent's ONE
-//! `#[cfg(feature = "native")] mod native;` gate and is re-exported there.
+//! and its `JsonlWatcher` wiring.
 
 use std::path::{Path, PathBuf};
 
@@ -13,38 +11,25 @@ use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
 /// grok's liveness probe: the session ids of every entry in
-/// `{grok_home}/active_sessions.json` whose pid is alive, in
-/// `grok_id_from_path` id-space (the registry stores the bare session id ==
-/// the transcript's parent-dir name, so probe ids join the first-sight gate
-/// directly), plus the owning pid per id for the instant-exit watch.
+/// `{grok_home}/active_sessions.json` whose pid is alive, plus the owning pid
+/// per id for the instant-exit watch.
 ///
-/// The registry is grok's OWN crash-recovery design (active_sessions.rs):
-/// registered per TUI session with `std::process::id()`, removed on clean
-/// quit, left behind on crash — so pid-liveness over it is first-party, not
-/// heuristic. grok keeps NO long-lived fd on its session files (every append
-/// opens and drops the handle), so a Codex-style open-FD probe is impossible;
-/// this registry is the substitute. Headless (`-p`) sessions are NOT
-/// registered (only under the debug env `GROK_TRACK_HEADLESS`) — they are
-/// never vouched, and since the negative vouch only ends PREVIOUSLY-vouched
-/// ids, headless one-shots ride the mtime gate + short-idle reap instead.
+/// The registry is grok's OWN crash-recovery design: registered per TUI session
+/// with `std::process::id()`, removed on clean quit, left behind on crash. grok
+/// keeps NO long-lived fd on its session files, so a Codex-style open-FD probe
+/// is impossible. Headless (`-p`) sessions are NOT registered, so they ride the
+/// mtime gate + short-idle reap instead.
 ///
-/// Failure semantics (#223): an ABSENT registry file is `Some(empty)` — a
-/// healthy "nothing alive" observation (grok not running / never run; also
-/// the state after every session exits cleanly). An unreadable or unparseable
-/// file is `None` — the enumeration itself failed, the watcher changes
-/// nothing (grok rewrites the file atomically via temp+rename, so a torn read
-/// is not expected; a parse failure means format drift → one `shape_drift`
-/// breadcrumb per process run, the #247 non-fetchable-surface pattern).
-/// Windows: `None` — no validated pid liveness (CC-probe precedent; the
-/// ExitWatch backend is absent there anyway).
+/// Failure semantics: an ABSENT registry file is `Some(empty)` — a healthy
+/// "nothing alive" observation. An unreadable or unparseable file is `None` —
+/// the enumeration itself failed, so the watcher changes nothing.
 #[cfg(unix)]
 pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     let path = grok_root.join("active_sessions.json");
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
-        // Absent registry = healthy "no TUI clients"; the leader arm may
-        // still vouch (a headless-into-leader setup writes no registry
-        // entries at all — exactly the #638 gap).
+        // Absent registry = healthy "no TUI clients"; the leader arm may still
+        // vouch (a headless-into-leader setup writes no registry entries).
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Some(augment_with_leader_vouch(
                 ProbeSnapshot::default(),
@@ -58,9 +43,6 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     }) {
         Some(snap) => Some(augment_with_leader_vouch(snap, grok_root)),
         None => {
-            // The registry is an undocumented first-party surface with no
-            // fetchable upstream text to drift-diff — the consumer is the
-            // drift detector (#247). Warn ONCE per process run.
             static SHAPE_DRIFT_WARNED: std::sync::Once = std::sync::Once::new();
             SHAPE_DRIFT_WARNED.call_once(|| {
                 crate::source::drift::shape_drift(
@@ -78,38 +60,26 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     }
 }
 
-/// Non-Unix stub — grok's `active_sessions.json` liveness probe is Unix-only
-/// (the pid-liveness + kernel-start recycle check it needs), so on Windows it
-/// always returns `None` and grok liveness degrades to pure mtime gating.
+/// Non-Unix stub — the probe needs pid-liveness plus a kernel-start recycle
+/// check, so off Unix grok liveness degrades to pure mtime gating.
 #[cfg(not(unix))]
 pub fn live_grok_session_ids(_grok_root: &Path) -> Option<ProbeSnapshot> {
     None
 }
 
 /// A leader-mode session's transcript counts as fresh for this long after its
-/// last append — 2.5× the watcher's 60s poll (two missed polls + slack), the
-/// same derivation as the reducer's `PROOF_OF_LIFE_TTL` (a DISTINCT semantic —
-/// leader-session freshness vs vouch-emission TTL — that shares the rationale,
-/// hence a separate named const rather than a cross-layer reuse).
+/// last append — 2.5× the watcher's 60s poll (two missed polls + slack).
 #[cfg(unix)]
 const LEADER_SESSION_FRESH_SECS: u64 = 150;
 
-/// The #638 leader-mode secondary vouch. In opt-in `--leader` mode the AGENT
+/// The leader-mode secondary vouch. In opt-in `--leader` mode the AGENT
 /// (session-file writes + hook firing) runs in a shared LEADER process while
 /// `active_sessions.json` records only each TUI CLIENT's pid — so a client
 /// disconnect used to read as the session's exit even though the leader keeps
-/// it alive. When the leader's rendezvous socket (`{grok_home}/leader.sock`)
-/// has a LIVE owner (a grok process holding it open — the same open-fd
-/// evidence the Codex probe rides), every session whose `updates.jsonl` was
-/// appended within [`LEADER_SESSION_FRESH_SECS`] is vouched, bound to the
-/// LEADER's pid (leader death ⇒ its sessions exit via the ExitWatch —
-/// correct, the leader owns them). A registry (client-pid) binding wins where
-/// both exist. mtime is a weaker signal than the pid registry, bounded both
-/// ways: an idle-in-leader session's vouch lapses after the window (falls to
-/// the short-idle reap + prompt resurrect — the pre-#638 behavior), and a
-/// just-ended leader session stays vouched ≤ the window (the negative vouch
-/// ends it ~2 min later). Non-leader setups pay one `Path::exists` per probe
-/// refresh (no socket → no proc enumeration).
+/// it alive. When the leader's rendezvous socket has a LIVE owner, every
+/// session whose `updates.jsonl` was appended within
+/// [`LEADER_SESSION_FRESH_SECS`] is vouched, bound to the LEADER's pid. A
+/// registry (client-pid) binding wins where both exist.
 #[cfg(unix)]
 fn augment_with_leader_vouch(snap: ProbeSnapshot, grok_root: &Path) -> ProbeSnapshot {
     let sock = grok_root.join("leader.sock");
@@ -118,7 +88,7 @@ fn augment_with_leader_vouch(snap: ProbeSnapshot, grok_root: &Path) -> ProbeSnap
     }
     let Some(leader_pid) = leader_socket_owner(&sock) else {
         // Socket file exists but no live process holds it open — residue from
-        // a killed leader; the stale-file case, not a live leader.
+        // a killed leader, not a live one.
         return snap;
     };
     augment_with_fresh_sessions(
@@ -129,21 +99,15 @@ fn augment_with_leader_vouch(snap: ProbeSnapshot, grok_root: &Path) -> ProbeSnap
     )
 }
 
-/// The pid holding `leader.sock` open, via the shared fd probe (macOS libproc /
-/// Linux /proc). BOTH installed comm names are probed — the installer links
-/// the binary as `grok` AND `agent` — plus the from-source artifact name.
+/// The pid holding `leader.sock` open, via the shared fd probe. BOTH installed
+/// comm names are probed — the installer links the binary as `grok` AND `agent`
+/// — plus the from-source artifact name.
 ///
-/// **CURRENTLY INERT (#826) — this always returns `None`, so the #638 leader
-/// vouch never fires.** [`crate::source::fd_probe::open_vnode_paths`] reports VNODE
-/// descriptors only, and a unix socket is not one: on macOS its fd carries
-/// `PROX_FDTYPE_SOCKET`, and on Linux `/proc/<pid>/fd/N` resolves to the
-/// non-path `socket:[inode]`. Pinned by that module's
-/// `open_vnode_paths_never_reports_a_unix_socket`. Grok leader-mode sessions
-/// therefore keep the documented pre-#638 behaviour (mtime first-sight gate +
-/// short-idle reap + prompt resurrect); the vouch is additive-only, so nothing
-/// misbehaves — it simply does not help. Fixing it needs a socket-aware probe
-/// (`PROC_PIDFDSOCKETINFO` / a `/proc/net/unix` inode join) plus the injected-
-/// enumerator split the sibling binders got, so the fix is testable.
+/// **CURRENTLY INERT (#826) — this always returns `None`, so the leader vouch
+/// never fires.** [`crate::source::fd_probe::open_vnode_paths`] reports VNODE
+/// descriptors only, and a unix socket is not one (macOS `PROX_FDTYPE_SOCKET`;
+/// Linux's non-path `socket:[inode]`). The vouch is additive-only, so nothing
+/// misbehaves — it simply does not help. Fixing it needs a socket-aware probe.
 #[cfg(unix)]
 fn leader_socket_owner(sock: &Path) -> Option<i32> {
     // Kernel-reported fd paths come back canonicalized (the /tmp →
@@ -159,10 +123,8 @@ fn leader_socket_owner(sock: &Path) -> Option<i32> {
     None
 }
 
-/// The pure join half (unit-testable with a tempdir + injected `now`): walk
-/// `sessions/<enc-cwd>/<session-id>/updates.jsonl` and bind every id whose
-/// transcript was appended within the freshness window to `leader_pid` —
-/// without displacing an existing (registry/client) binding.
+/// Bind every id whose `updates.jsonl` was appended within the freshness window
+/// to `leader_pid`, without displacing an existing (registry/client) binding.
 #[cfg(unix)]
 fn augment_with_fresh_sessions(
     mut snap: ProbeSnapshot,
@@ -193,16 +155,13 @@ fn augment_with_fresh_sessions(
     snap
 }
 
-/// The pure join half of the probe (unit-testable with injected liveness
-/// fns): parse the registry array, keep entries whose pid is alive AND — when
-/// BOTH sides are available — whose `opened_at` matches the kernel-reported
-/// process start within [`cc_probe::PID_START_TOLERANCE_SECS`] (the #220
-/// pid-recycle identity check; either side missing → pid-alive-only, the
-/// check is additive). Returns `None` only when the DOCUMENT doesn't parse as
-/// an array of entries — a renamed or mistyped key, i.e. format drift; junk
-/// VALUES inside an entry (a pid `decoder::checked_pid` rejects — non-positive
-/// OR outside `i32` range — an empty `session_id`, a recycled pid) skip that
-/// entry silently, mirroring the CC registry's value-vs-shape distinction.
+/// Parse the registry array and keep entries whose pid is alive AND — when BOTH
+/// sides are available — whose `opened_at` matches the kernel-reported process
+/// start within `cc_probe::PID_START_TOLERANCE_SECS` (the pid-recycle identity
+/// check; either side missing → pid-alive-only). `None` ONLY when the DOCUMENT
+/// doesn't parse as an array of entries (format drift); junk VALUES inside an
+/// entry — a pid `decoder::checked_pid` rejects, an empty `session_id`, a
+/// recycled pid — skip that entry silently.
 #[cfg(unix)]
 fn grok_ids_from_registry(
     bytes: &[u8],
@@ -237,12 +196,9 @@ fn grok_ids_from_registry(
             start_time(pid),
         ) {
             // `opened_at` is stamped at session OPEN, which can lag process
-            // start by however long the user sat on the welcome screen — the
-            // tolerance only needs to catch RECYCLING (a pid reborn hours or
-            // days later), so it accepts claimed >= actual generously and
-            // rejects only a claim EARLIER than the process start beyond the
-            // shared tolerance (a session can't have opened before its
-            // process existed — that pid was recycled).
+            // start by however long the user sat on the welcome screen. Only a
+            // claim EARLIER than the process start is evidence of recycling —
+            // a session can't have opened before its process existed.
             if claimed_secs + crate::source::cc_probe::PID_START_TOLERANCE_SECS < actual_secs {
                 tracing::debug!(
                     pid,
@@ -254,25 +210,20 @@ fn grok_ids_from_registry(
             }
         }
         // Duplicate session_id across entries is upstream junk — keep the
-        // deterministic tiebreak winner (larger pid, the shared #252 rule).
+        // deterministic tiebreak winner (larger pid).
         snap.bind_pid(e.session_id, pid);
     }
     Some(snap)
 }
 
-/// Attach the probe ONLY for grok's first-party layout: the standard
-/// `~/.grok/sessions` shape (file_name `sessions` AND parent `.grok`) or the
-/// resolved `grok_home()/sessions` for THIS environment (a `GROK_HOME` user's
-/// real root). The registry file is a SIBLING of the sessions root
-/// (`{grok_home}/active_sessions.json`), so the probe root is the sessions
-/// root's PARENT. A `--grok-sessions-root /tmp/fixture` replay keeps the
-/// pure-mtime first-sight gate (codex_probe_root's rationale).
+/// Attach the probe ONLY for grok's first-party layout, so a
+/// `--grok-sessions-root /tmp/fixture` replay keeps the pure-mtime first-sight
+/// gate. The registry file is a SIBLING of the sessions root, so the probe root
+/// is the sessions root's PARENT.
 fn grok_probe_root(sessions_root: &Path) -> Option<PathBuf> {
     grok_probe_root_resolved(sessions_root, &grok_home())
 }
 
-/// The injectable core of [`grok_probe_root`] (mirrors
-/// `codex_probe_root_resolved`'s testable split).
 fn grok_probe_root_resolved(sessions_root: &Path, home: &Path) -> Option<PathBuf> {
     if sessions_root.file_name().and_then(|n| n.to_str()) != Some("sessions") {
         return None;
@@ -290,13 +241,9 @@ fn grok_probe_root_resolved(sessions_root: &Path, home: &Path) -> Option<PathBuf
 pub struct GrokSource {
     /// The watched grok session-transcript root; per-session `updates.jsonl` lives under it.
     pub sessions_root: PathBuf,
-    /// The #246 child-end un-claim side-channel — grok is consumer-only like
-    /// Codex: its `subagent_stop`/`subagent_end` hooks decode to Hook-transport
-    /// `SessionEnd{as_child:true}` (the tee's producer trigger), and THIS
-    /// watcher releases the ended child's flat-sibling transcript claim so a
-    /// `resume_from` / late-append revival re-registers cleanly. The runtime
-    /// shares ONE handle across the router + the CC/Codex/grok watchers;
-    /// `None` disables it (bare test construction).
+    /// The child-end un-claim side-channel: releases an ended child's
+    /// flat-sibling transcript claim so a `resume_from` / late-append revival
+    /// re-registers cleanly. `None` disables it (bare test construction).
     pub child_end_unclaims: Option<ChildEndUnclaims>,
 }
 
@@ -341,17 +288,15 @@ mod tests {
     #[test]
     fn probe_root_accepts_first_party_layouts_only() {
         let home = Path::new("/custom/grok-home");
-        // Standard dot-dir layout.
         assert_eq!(
             grok_probe_root_resolved(Path::new("/Users/u/.grok/sessions"), home),
             Some(PathBuf::from("/Users/u/.grok"))
         );
-        // Resolved GROK_HOME layout (parent == home even though not `.grok`).
+        // Resolved GROK_HOME layout: parent == home even though not `.grok`.
         assert_eq!(
             grok_probe_root_resolved(&home.join("sessions"), home),
             Some(home.to_path_buf())
         );
-        // Replay/fixture roots keep pure-mtime gating.
         assert_eq!(
             grok_probe_root_resolved(Path::new("/tmp/fixture"), home),
             None
@@ -378,20 +323,8 @@ mod tests {
             {"session_id":"0197-b","pid":200,"cwd":"/r/b","opened_at":"2026-07-16T12:01:00+00:00"}
         ]"#;
 
-        // --- the OS BINDER (`live_grok_session_ids`) ---
-        // The pure join above had six tests; the binder that decides
-        // `Some(empty)` vs `None` had ZERO, while BOTH sibling probes cover
-        // theirs (`live_omp_session_ids` has the same pair; `live_cc_session_ids`
-        // has ~14). The arms are load-bearing in opposite directions:
-        // `ProbeLadder::fold` is never called on a probe FAILURE ("failure
-        // changes nothing"), whereas a healthy `Some(empty)` puts every
-        // previously-vouched id into the miss window and confirms a
-        // `SessionEnd` two healthy misses later. Reading one as the other
-        // either freezes the ladder forever or ends live sessions.
-
-        /// No `active_sessions.json` = no TUI clients, a real observation — NOT
-        /// an enumeration failure. `None` here would freeze the negative-vouch
-        /// ledger on every machine that never ran grok.
+        /// `None` here would freeze the negative-vouch ledger on every machine
+        /// that never ran grok.
         #[test]
         fn binder_absent_registry_is_a_healthy_empty_not_a_failure() {
             let dir = tempfile::tempdir().unwrap();
@@ -400,13 +333,12 @@ mod tests {
             assert!(snap.pid_of.is_empty());
         }
 
-        /// A registry that exists but cannot be READ is the enumeration failing
-        /// — the watcher must change nothing.
         #[test]
         fn binder_unreadable_registry_is_a_failure_not_an_empty() {
             let dir = tempfile::tempdir().unwrap();
             // A directory in its place makes `std::fs::read` fail with EISDIR on
-            // both platforms (chmod 000 would not fail for root, which CI sometimes is).
+            // both platforms; chmod 000 would not fail for root, which CI
+            // sometimes is.
             std::fs::create_dir(dir.path().join("active_sessions.json")).unwrap();
             assert!(
                 live_grok_session_ids(dir.path()).is_none(),
@@ -414,9 +346,6 @@ mod tests {
             );
         }
 
-        /// End-to-end through the real file read + the real liveness check: our
-        /// own pid is unquestionably alive, so it must bind. Falsifiable — a
-        /// binder stubbed to `Some(default)` returns an empty snapshot.
         #[test]
         fn binder_reads_a_real_registry_and_binds_our_own_live_pid() {
             let dir = tempfile::tempdir().unwrap();
@@ -514,22 +443,18 @@ mod tests {
 
         #[test]
         fn recycled_pid_is_rejected_when_both_sides_agree_it_is() {
-            // opened_at 12:00:05Z = epoch 1784203205. A process started LATER
-            // than the claim + tolerance ⇒ the original process died and the
-            // pid was recycled — the entry must be skipped.
             let opened =
                 crate::source::decoder::rfc3339_to_epoch_secs("2026-07-16T12:00:05Z").unwrap();
             let tolerance = crate::source::cc_probe::PID_START_TOLERANCE_SECS;
             let recycled_start = opened + tolerance + 1;
             let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(recycled_start));
             assert_eq!(snap.unwrap().pid_of.get("0197-a"), None);
-            // At exactly claim + tolerance the entry SURVIVES (boundary
-            // derived from the shared const, both sides pinned).
+            // At exactly claim + tolerance the entry SURVIVES.
             let boundary_start = opened + tolerance;
             let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(boundary_start));
             assert_eq!(snap.unwrap().pid_of.get("0197-a"), Some(&100));
             // A process started BEFORE the claim is the NORMAL welcome-screen
-            // lag (session opened after process start) — never rejected.
+            // lag — never rejected.
             let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| Some(opened - 3600));
             assert_eq!(snap.unwrap().pid_of.get("0197-a"), Some(&100));
         }
@@ -561,7 +486,6 @@ mod tests {
             mk("%2Frepo", "fresh-b");
             let now = SystemTime::now();
 
-            // A registry (client) binding survives; fresh ids gain the leader pid.
             let mut seeded = ProbeSnapshot::default();
             seeded.pid_of.insert("fresh-a".into(), 111);
             let snap = augment_with_fresh_sessions(seeded, &root, 999, now);
@@ -572,9 +496,6 @@ mod tests {
             );
             assert_eq!(snap.pid_of.get("fresh-b"), Some(&999));
 
-            // BOTH sides of the freshness boundary, offsets derived from the
-            // const: at exactly the window the session is still vouched; one
-            // second past it is not.
             let at_edge = now + Duration::from_secs(LEADER_SESSION_FRESH_SECS);
             let past_edge = now + Duration::from_secs(LEADER_SESSION_FRESH_SECS + 1);
             let snap = augment_with_fresh_sessions(ProbeSnapshot::default(), &root, 7, at_edge);
@@ -582,7 +503,6 @@ mod tests {
             let snap = augment_with_fresh_sessions(ProbeSnapshot::default(), &root, 7, past_edge);
             assert_eq!(snap.pid_of.get("fresh-b"), None, "stale past the window");
 
-            // A missing sessions root is a quiet no-op (additive-only arm).
             let snap = augment_with_fresh_sessions(
                 ProbeSnapshot::default(),
                 &tmp.path().join("nope"),
@@ -594,8 +514,6 @@ mod tests {
 
         #[test]
         fn absent_leader_socket_is_a_no_op_augment() {
-            // No leader.sock → the snapshot passes through untouched (the
-            // non-leader common case pays one exists() only).
             let tmp = tempfile::tempdir().unwrap();
             let mut seeded = ProbeSnapshot::default();
             seeded.pid_of.insert("s".into(), 42);

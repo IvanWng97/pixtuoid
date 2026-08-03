@@ -1,19 +1,9 @@
-//! Pin: the `claude-code/proof-session` fixture's visible strings (the task
-//! prompt, every tool's file path / shell command) share nothing with the
-//! statusline ticker's canned `FALLBACK` corpus
-//! (`site/src/components/Statusline.astro`).
-//!
 //! The §3 proof panel and the statusline's agent-activity ticker are two
-//! agent-narration surfaces sharing one viewport at 4F (STATUSLINE-COLLISION
-//! handoff, `docs/superpowers/plans/2026-07-05-wb-4-proof.md`): a reused file
-//! name or task phrase would read as the same event narrated twice. An
-//! earlier fixture draft (a `reducer.rs` bugfix story) collided with the
-//! ticker's own "editing src/reducer.rs" line and was rejected for exactly
-//! this reason — this test gives that rejection teeth against regression.
+//! agent-narration surfaces sharing one viewport at 4F: a reused file name or
+//! task phrase would read as the same event narrated twice.
 //!
-//! Runtime read of `site/...` (NOT `include_str!`, for the same reason as
-//! `supported_sources_manifest.rs`): a published `.crate` tarball has no
-//! sibling `site/` tree, so this file is workspace-only and lives in
+//! Runtime read of `site/...`, NOT `include_str!`: a published `.crate` tarball
+//! has no sibling `site/` tree, so this file is workspace-only and lives in
 //! pixtuoid-core's `exclude` list.
 
 use std::path::{Path, PathBuf};
@@ -27,10 +17,8 @@ fn proof_session_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources/fixtures/claude-code/proof-session")
 }
 
-/// The fixture's user-visible narrative strings: the task prompt and every
-/// tool's file path / shell command — the same content a viewer reads off
-/// the proof panel (Task 2's `PanelLine::text`). JSON syntax/ids aren't
-/// "visible" in that sense and are deliberately excluded.
+/// The same content a viewer reads off the proof panel; JSON syntax and ids
+/// aren't "visible" in that sense and are deliberately excluded.
 fn fixture_visible_strings() -> Vec<String> {
     let path = proof_session_dir().join("01000000-0000-7000-8000-0000000000f4.jsonl");
     let transcript =
@@ -63,8 +51,6 @@ fn fixture_visible_strings() -> Vec<String> {
     out
 }
 
-/// The ticker's canned corpus: every FALLBACK row's `what` field — the task
-/// phrase shown when the live GitHub PR feed is unreachable at build.
 fn ticker_task_phrases() -> Vec<String> {
     let src = std::fs::read_to_string(STATUSLINE_PATH)
         .unwrap_or_else(|e| panic!("read {STATUSLINE_PATH}: {e}"));

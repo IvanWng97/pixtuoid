@@ -46,8 +46,6 @@ fn rejects_inconsistent_row_widths() {
     assert!(err.to_string().contains("row width"), "got: {err}");
 }
 
-// ---- malformed-input error bails (the guards the parser exists to enforce) --
-
 #[test]
 fn rejects_empty_source_with_no_frames() {
     let err = parse_sprite_file("", &palette()).unwrap_err();
@@ -59,7 +57,6 @@ fn rejects_empty_source_with_no_frames() {
 
 #[test]
 fn rejects_multi_char_pixel_token() {
-    // "AB" is two characters in one whitespace-delimited token.
     let err = parse_sprite_file("@frame 0\nAB . .", &palette()).unwrap_err();
     assert!(
         err.to_string().contains("single character"),
@@ -69,8 +66,7 @@ fn rejects_multi_char_pixel_token() {
 
 #[test]
 fn rejects_frame_block_with_no_rows() {
-    // Back-to-back @frame headers: the first block has zero rows, so the
-    // header-handling `rows_to_frame(vec![])` path bails with 'no rows'.
+    // Back-to-back @frame headers: the first block has zero rows.
     let err = parse_sprite_file("@frame 0\n@frame 1\nA", &palette()).unwrap_err();
     assert!(
         err.to_string().contains("no rows"),
@@ -80,7 +76,6 @@ fn rejects_frame_block_with_no_rows() {
 
 #[test]
 fn rejects_palette_key_longer_than_one_char() {
-    // build_palette is reached via load_pack_from_strings; key "AB" is 2 chars.
     let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
          [palette]\n\"AB\"=\"#010203\"\n\
          [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
@@ -105,8 +100,7 @@ fn rejects_palette_value_not_six_hex_digits() {
 
 #[test]
 fn validate_reports_insufficient_frames_for_single_frame_typing() {
-    // `typing` requires >= 2 frames (MULTI_FRAME_REQUIREMENTS). A 1-frame
-    // typing animation must populate insufficient_frames and set has_errors().
+    // `typing` requires >= 2 frames (MULTI_FRAME_REQUIREMENTS).
     let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
          [palette]\n\"A\"=\"#010203\"\n\
          [animations.typing]\nframes=[\"t.sprite\"]\nframe_ms=100\n";
@@ -195,9 +189,8 @@ fn robot_pack_passes_validation() {
         "insufficient frames: {:?}",
         report.insufficient_frames
     );
-    // The bridge the side_seated drift slipped through: every animation a
-    // bundled pack ships must be IN the registry, or validate-pack falsely
-    // reports it "unused by renderer" to every pack author.
+    // Every animation a bundled pack ships must be IN the registry, or
+    // validate-pack falsely reports it "unused by renderer" to pack authors.
     assert!(
         report.unknown.is_empty(),
         "bundled-pack animation missing from the registry: {:?}",
@@ -242,8 +235,6 @@ fn validation_detects_unknown_animations() {
     );
 }
 
-// ---- path-traversal guards (security-relevant) ----------------------------
-
 fn write_pack_files(dir: &Path, pack_toml: &str, frames: &[(&str, &str)]) {
     std::fs::write(dir.join("pack.toml"), pack_toml).unwrap();
     for (name, content) in frames {
@@ -270,8 +261,8 @@ fn load_pack_rejects_parent_dir_frame_path() {
 #[test]
 fn load_pack_rejects_absolute_frame_path_escaping_dir() {
     let dir = tempfile::TempDir::new().unwrap();
-    // `dir.join("/etc/hosts")` resolves to `/etc/hosts` (Path::join replaces on a
-    // leading '/'), which the '..'-component check does NOT catch — the
+    // `dir.join("/etc/hosts")` resolves to `/etc/hosts` (Path::join replaces on
+    // a leading '/'), which the '..'-component check does NOT catch — the
     // canonicalize + starts_with(canon_dir) guard is what must reject it.
     write_pack_files(
         dir.path(),
@@ -286,8 +277,6 @@ fn load_pack_rejects_absolute_frame_path_escaping_dir() {
         "an absolute path escaping the pack dir must be rejected; got: {msg}"
     );
 }
-
-// ---- Pack::merge_from (load-bearing for every custom pack) -----------------
 
 #[test]
 fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
@@ -306,7 +295,7 @@ fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
             ("s.sprite", "@frame 0\nA"),
         ],
     );
-    // custom: owns a 1-wide desk; lacks plant (furniture) and standing (character).
+    // custom: owns a 1-wide desk; lacks plant (furniture), standing (character).
     let custom_dir = tempfile::TempDir::new().unwrap();
     write_pack_files(
         custom_dir.path(),
@@ -321,19 +310,16 @@ fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
 
     custom.merge_from(&base);
 
-    // Own `desk` preserved (NOT clobbered by base's 2-wide desk).
     assert_eq!(
         custom.animation("desk").unwrap().frames[0].width(),
         1,
         "merge_from must not overwrite an animation the custom pack already defines"
     );
-    // Furniture anim absent from custom is inherited from base.
     assert!(
         custom.animation("plant").is_some(),
         "missing OPTIONAL_FURNITURE anim should be inherited"
     );
-    // REQUIRED_CHARACTER anim is NEVER inherited (a robot pack must not show
-    // human sprites for poses it lacks).
+    // A robot pack must not show human sprites for poses it lacks.
     assert!(
         custom.animation("standing").is_none(),
         "REQUIRED_CHARACTER anim must never be inherited via merge_from"
@@ -342,9 +328,9 @@ fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
 
 #[test]
 fn frame_wider_than_u16_max_errors_instead_of_truncating() {
-    // `rows_to_frame` casts the row width to u16; a 65536-wide row used to
-    // wrap to width 0 against an untruncated 65536-long pixels vec, silently
-    // violating Frame's `pixels.len() == width * height` contract.
+    // `rows_to_frame` casts the row width to u16; a 65536-wide row wraps to
+    // width 0 against an untruncated pixels vec, silently violating Frame's
+    // `pixels.len() == width * height` contract.
     let mut src = String::with_capacity(2 * (u16::MAX as usize + 2) + 16);
     src.push_str("@frame 0\n");
     for _ in 0..=u16::MAX as usize {
@@ -361,7 +347,7 @@ fn frame_wider_than_u16_max_errors_instead_of_truncating() {
 
 #[test]
 fn frame_taller_than_u16_max_errors_instead_of_truncating() {
-    // Same contract for the row count: 65536 rows wrapped height to 0.
+    // Same contract for the row count: 65536 rows wrap height to 0.
     let mut src = String::with_capacity(2 * (u16::MAX as usize + 2) + 16);
     src.push_str("@frame 0\n");
     for _ in 0..=u16::MAX as usize {

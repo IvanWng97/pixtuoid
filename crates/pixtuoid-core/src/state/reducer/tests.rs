@@ -1,12 +1,6 @@
 use super::source_label_prefix;
 use crate::source::registry;
 
-/// Every registered source needs a 2-char prefix. The unregistered-source
-/// fallback silently degrades a missing/short prefix to the long source
-/// name (e.g. "opencode·proj" instead of "oc·proj"), which then collides
-/// visually with another source sharing a cwd. End-to-end through the
-/// REAL `source_label_prefix` (registry lookup included) — stronger than
-/// the registry-local shape check, which can't see a name↔row mismatch.
 #[test]
 fn every_registered_source_has_two_char_label_prefix() {
     for src in registry::registered_source_names() {
@@ -19,27 +13,17 @@ fn every_registered_source_has_two_char_label_prefix() {
     }
 }
 
-/// The back-fill's clobber gate, now recorded at MINT time as
-/// [`LabelProvenance`]: only a derivation fallback (ordinal ghost /
-/// bare-prefix) may be upgraded; a cwd-basename- or Rename-derived label
-/// is real information and never is. Pins the Rename arm's mint-time
-/// classification (the one remaining string judgment — bare prefix vs
-/// real name) and the upgradability of each variant.
+/// Only a derivation fallback (ordinal ghost / bare prefix) may be upgraded by
+/// a later back-fill; a cwd- or Rename-derived label is real information.
 #[test]
 fn rename_classification_and_upgradability_cover_each_provenance() {
     use super::classify_rename;
     use crate::state::{LabelProvenance, SlotLabel};
     for (label, source, expect) in [
-        // Exactly the registry prefix = the LabelDeriver's empty-cwd
-        // fallback — still upgradable by a later cwd-bearing back-fill.
         ("cx", "codex", LabelProvenance::PrefixFallback),
-        // Everything else arriving via Rename is a real display name.
         ("cc·repo", "claude-code", LabelProvenance::Renamed),
         ("code-explorer", "claude-code", LabelProvenance::Renamed),
-        // No Rename ever mints an ordinal — even an ordinal-LOOKING name
-        // is treated as real (only `register_slot` mints OrdinalGhost).
         ("cc#3", "claude-code", LabelProvenance::Renamed),
-        // Degenerate: empty is not the prefix.
         ("", "claude-code", LabelProvenance::Renamed),
     ] {
         assert_eq!(
@@ -48,8 +32,6 @@ fn rename_classification_and_upgradability_cover_each_provenance() {
             "{label:?} under source {source:?} must classify as {expect:?}"
         );
     }
-    // The clobber gate per variant: the two derivation fallbacks may be
-    // upgraded, the two real-information provenances never.
     assert!(SlotLabel::ordinal_ghost("cc#3").is_upgradable());
     assert!(SlotLabel::ordinal_ghost("#1").is_upgradable());
     assert!(SlotLabel::prefix_fallback("cx").is_upgradable());
@@ -57,32 +39,9 @@ fn rename_classification_and_upgradability_cover_each_provenance() {
     assert!(!SlotLabel::renamed("code-explorer").is_upgradable());
 }
 
-// The `< → <=` (correlation.rs) and `> → >=` (sweep_stale/sweep_exited)
-// boundary mutants formerly documented here as accepted equivalents are
-// now PINNED: `apply`/`tick`/`gc` all take an injected `now`, so the
-// exact boundary is a hand-built SystemTime pair (deterministic, no wall
-// clock) — see correlation.rs's test mod and the two
-// `*_at_exactly_the_*` tests in tests/reducer/liveness.rs.
-//
-// The SessionStart arm's resurrect gate (`slot.exiting_at.is_some() &&
-// slot.parent_id.is_none() && parent_id.is_none()`) is NOT an equivalent:
-// BOTH `&&`→`||` flips are killed by
-// tests/reducer/lifecycle.rs::duplicate_root_session_start_does_not_resurrect_a_live_session
-// (verified by applying each mutant and running the suite). Either flip
-// makes a parentless start resurrect a LIVE root, and `resurrect_in_place`
-// has no exiting guard of its own — see the gate's own comment in mod.rs.
-// No accepted-equivalent residual remains here; if one ever surfaces as a
-// cargo-mutants survivor it belongs in `.cargo/mutants.toml`'s
-// `exclude_re` (mechanically re-checked), never in prose like this.
-
-/// Pin the deliberate stale-timeout DURATIONS. Every timing test correctly
-/// derives its offsets FROM these constants (hardcoded ms make leg tests
-/// vacuous), so mutating `10 * 60` also mutates each test's own
-/// expectation — leaving the literal value unguarded. A direct pin is the
-/// only thing that catches `*`→`/` collapsing a window to 0s (everything
-/// reaped on the next tick) or a typo'd minute count. The values ARE the
-/// product decision (see the doc comments on each const); change this test
-/// deliberately when a window changes, never to make it pass.
+/// Every timing test derives its offsets FROM these constants, so mutating a
+/// window also mutates each test's own expectation — only a direct pin catches
+/// a collapsed or typo'd duration. Change it deliberately, never to pass.
 #[test]
 fn stale_timeout_constants_have_their_intended_durations() {
     use super::{
@@ -90,21 +49,16 @@ fn stale_timeout_constants_have_their_intended_durations() {
         STALE_UNKNOWN_CWD_TIMEOUT, STALE_WAITING_TIMEOUT,
     };
     use std::time::Duration;
-    assert_eq!(STALE_ACTIVE_TIMEOUT, Duration::from_secs(600)); // 10 min
-    assert_eq!(STALE_IDLE_TIMEOUT, Duration::from_secs(1800)); // 30 min
-    assert_eq!(STALE_WAITING_TIMEOUT, Duration::from_secs(3600)); // 60 min
-    assert_eq!(STALE_UNKNOWN_CWD_TIMEOUT, Duration::from_secs(180)); // 3 min
-    assert_eq!(STALE_SHORT_IDLE_TIMEOUT, Duration::from_secs(300)); // 5 min
+    assert_eq!(STALE_ACTIVE_TIMEOUT, Duration::from_secs(600));
+    assert_eq!(STALE_IDLE_TIMEOUT, Duration::from_secs(1800));
+    assert_eq!(STALE_WAITING_TIMEOUT, Duration::from_secs(3600));
+    assert_eq!(STALE_UNKNOWN_CWD_TIMEOUT, Duration::from_secs(180));
+    assert_eq!(STALE_SHORT_IDLE_TIMEOUT, Duration::from_secs(300));
     assert_eq!(PROOF_OF_LIFE_TTL, Duration::from_secs(150)); // 2.5× the 60s poll
 }
 
-// The Delegating stale carve-out is caps-driven; pin the POLICY half with
-// a synthetic caps value so caps combinations beyond the registered rows
-// stay covered — that's what the lookup/policy split exists for. (The
-// registered path — reasonix is the row that sets
-// `delegations_are_hook_silent` — is pinned end-to-end by
-// `reasonix_delegating_slot_survives_the_active_timeout` in
-// tests/reducer/liveness.rs.)
+// Synthetic caps on an unregistered source, so the POLICY half stays covered
+// for caps combinations the registered rows don't happen to spell.
 #[test]
 fn delegating_slot_with_hook_silent_caps_gets_waiting_window() {
     use super::{stale_threshold_with_caps, STALE_ACTIVE_TIMEOUT, STALE_WAITING_TIMEOUT};
@@ -154,8 +108,6 @@ fn delegating_slot_with_hook_silent_caps_gets_waiting_window() {
         "without the cap, Delegating reaps on the normal Active timer"
     );
 
-    // Detail-gate negative: caps on + an ORDINARY tool active must stay on
-    // the Active timer — the cap widens the window for delegations only.
     r.apply(
         &mut scene,
         AgentEvent::ActivityStart {
@@ -176,11 +128,6 @@ fn delegating_slot_with_hook_silent_caps_gets_waiting_window() {
     );
 }
 
-// The delegation carve-out must key on the TYPED tool kind, not the
-// human-facing display string: a GENERIC tool whose display merely spells
-// "Delegating" is NOT a delegation and must reap on the normal Active
-// timer. (Before `ToolKind`, the policy string-compared the display and
-// this slot wrongly got the 60-min Waiting-class window.)
 #[test]
 fn generic_tool_displaying_delegating_keeps_the_active_window() {
     use super::{stale_threshold_with_caps, STALE_ACTIVE_TIMEOUT};
@@ -228,11 +175,6 @@ fn generic_tool_displaying_delegating_keeps_the_active_window() {
     );
 }
 
-// White-box: `gated_before_waiting` is reclaimed in TWO places — `tick`'s
-// retain and `sweep_exited`'s explicit remove (the apply path, where tick's
-// retain never runs). All existing reducer tests go through `tick`; this
-// pins the apply-path eviction so a future refactor can't silently drop it
-// and leak a swept Waiting slot's gated tool_use_id.
 #[test]
 fn gated_before_waiting_evicted_on_apply_path_sweep() {
     use crate::source::{AgentEvent, ToolDetail, Transport};
@@ -257,7 +199,6 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
         t0,
         Transport::Hook,
     );
-    // Active mid-tool, then a permission Waiting → gate records the tool id.
     r.apply(
         &mut scene,
         AgentEvent::ActivityStart {
@@ -282,8 +223,7 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
         "gate recorded while Waiting mid-tool"
     );
 
-    // End it; advance past the grace window; apply an UNRELATED event so
-    // sweep_exited runs on the APPLY path (not tick).
+    // The UNRELATED event below is what runs sweep_exited on the APPLY path.
     r.apply(
         &mut scene,
         AgentEvent::SessionEnd {
@@ -318,14 +258,6 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
     );
 }
 
-// White-box: the resurrect-in-place branch must evict the previous life's
-// entries from all three correlation maps while KEEPING the proof-of-life
-// vouch (the resurrecting slot's process is alive — that's what a vouch
-// asserts). The public pins (tests/reducer/) cover the active_tasks and
-// pending_b1_cascades harms behaviorally; a stale `gated_before_waiting`
-// entry has no public observable today (every path into Waiting rewrites
-// the gate first), so its eviction — and the vouch's survival — are
-// pinned directly here.
 #[test]
 fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
     use crate::source::{AgentEvent, ToolDetail, Transport};
@@ -346,7 +278,6 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
         parent_id: None,
     };
     r.apply(&mut scene, session_start("s"), t0, Transport::Hook);
-    // Gate: an ordinary tool mid-flight when a permission Waiting fires.
     r.apply(
         &mut scene,
         AgentEvent::ActivityStart {
@@ -366,8 +297,8 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
         t0 + Duration::from_secs(1),
         Transport::Hook,
     );
-    // Tasks: a dispatch that fully drains arms the b1 cascade and leaves
-    // an (empty) active_tasks entry behind.
+    // A dispatch that fully drains arms the b1 cascade and leaves an (empty)
+    // active_tasks entry behind.
     r.apply(
         &mut scene,
         AgentEvent::ActivityStart {
@@ -407,8 +338,8 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
         "vouch recorded"
     );
 
-    // End + resurrect inside the walkout window (and before the armed
-    // cascade's grace elapses).
+    // The resurrect must land inside the walkout window AND before the armed
+    // cascade's grace elapses.
     r.apply(
         &mut scene,
         AgentEvent::SessionEnd {
@@ -450,20 +381,10 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
     );
 }
 
-/// White-box: the child ledger's BOUNDING contract (#244). An entry is
-/// created with `ended_at: None` when a parent link is applied; a child
-/// removed WITHOUT an as_child end (here: the parent's cascade) must get
-/// ended_at stamped by `sweep_exited` — that both arms the #244-w2 gate
-/// for those exits and starts the gc clock — and gc must prune it after
-/// CHILD_END_RELINK_TTL. Roots never enter the ledger. The public
-/// behavioral pins live in tests/reducer/child_ledger.rs; the stamping/pruning
-/// internals have no other observable.
-///
-/// The two clocks are pinned separately: past the GATE's `CHILD_END_LEDGER_TTL`
-/// the entry is RETAINED, because the #246 parentless revival re-links through
-/// its `parent_id` and the turn gap that must span is unbounded, so the memory
-/// rides the longer relink budget. (Pruning at the gate's TTL is what made a
-/// multi-turn child idle >90s come back an orphan.)
+/// Past the GATE's `CHILD_END_LEDGER_TTL` the entry is deliberately RETAINED:
+/// a parentless revival re-links through its `parent_id` across an unbounded
+/// turn gap, so the link rides the longer relink budget. (Pruning at the gate's
+/// TTL is what made a multi-turn child idle >90s come back an orphan.)
 #[test]
 fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
     use crate::source::{AgentEvent, Transport};
@@ -508,8 +429,7 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
     assert_eq!(entry.parent_id, Some(parent));
     assert!(entry.ended_at.is_none(), "alive — no gc clock yet");
 
-    // The parent's clean exit cascades the child out; neither end was
-    // `as_child`, so only sweep_exited can stamp the clock.
+    // Neither end below is `as_child`, so only sweep_exited can stamp the clock.
     r.apply(
         &mut scene,
         AgentEvent::SessionEnd {
@@ -550,15 +470,9 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
     );
 }
 
-/// #748(c): the existing correlation tests assert a prune *ran*; none assert the
-/// maps stay BOUNDED across a long stream. Drive a synthetic ~1 event/s stream
-/// through the REAL reducer (`apply` + the interleaved `tick` — the only reaper
-/// of the two non-TTL maps `active_tasks`/`gated_before_waiting`, including their
-/// slot-less orphan retain) and assert every one of Correlation's 7 maps stays
-/// under a fixed bound. A per-event leak (a missed prune site — the class that
-/// hides in `active_tasks`/`gated_before_waiting`, which `gc` never touches)
-/// grows a map ~linearly and blows the bound; a healthy stream stays an order of
-/// magnitude under.
+/// A synthetic ~1 event/s stream through the REAL reducer: a per-event leak
+/// (a missed prune site) grows a map ~linearly and blows the bound, while a
+/// healthy stream stays an order of magnitude under.
 #[test]
 fn correlation_maps_stay_bounded_across_a_long_stream() {
     use crate::source::{AgentEvent, ToolDetail, Transport};
@@ -567,12 +481,9 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
-    /// Well ABOVE every map's steady-state working set (the widest window is now
-    /// CHILD_END_RELINK_TTL = 300s at ~1 event/s ⇒ ~300 in `child_ledger`, past
-    /// PROOF_OF_LIFE_TTL's 150s), and FAR below ITERS — so a per-event leak blows
-    /// it while a healthy stream stays comfortably under. Raised with the relink
-    /// budget to keep the original ~3× headroom over the widest window; a bound
-    /// that merely clears the steady state proves nothing about a slow leak.
+    /// ~3× the widest steady-state working set (CHILD_END_RELINK_TTL = 300s at
+    /// ~1 event/s ⇒ ~300 entries) and FAR below ITERS. A bound that merely
+    /// clears the steady state proves nothing about a slow leak.
     const MAX_CORR_ENTRIES: usize = 1024;
     const ITERS: u64 = 3_000;
     const MAP_NAMES: [&str; 7] = [
@@ -586,21 +497,18 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     ];
 
     let mut r = super::Reducer::new();
-    // Cap comfortably exceeds the un-swept working set: a slot lives from its
-    // SessionStart until `sweep_exited` removes it ~EXIT_GRACE_WINDOW (4.5s) after
-    // its end — a handful of concurrent slots at ~1s/iter.
+    // 32 desks comfortably exceeds the un-swept working set: a slot lives until
+    // `sweep_exited` removes it ~EXIT_GRACE_WINDOW after its end, so only a
+    // handful are concurrent at ~1s/iter.
     let mut scene = SceneState::uniform(32);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    // Peak length per map — a bound test where a map was never populated passes
-    // vacuously, so assert peak > 0 for all 7 at the end (negative-control).
     let mut peak = [0usize; 7];
 
     for i in 0..ITERS {
         let now = t0 + Duration::from_secs(i);
         let a = AgentId::from_parts("claude-code", &format!("s{i}"));
 
-        // 1. register the root slot.
         r.apply(
             &mut scene,
             AgentEvent::SessionStart {
@@ -613,7 +521,6 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             now,
             Transport::Hook,
         );
-        // 2. a subagent Task START → active_tasks + recent_hook_tool_uses.
         r.apply(
             &mut scene,
             AgentEvent::ActivityStart {
@@ -624,7 +531,6 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             now,
             Transport::Hook,
         );
-        // 3. its END → recent_task_drains (+ drains active_tasks to empty).
         r.apply(
             &mut scene,
             AgentEvent::ActivityEnd {
@@ -634,7 +540,6 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             now,
             Transport::Hook,
         );
-        // 4. a gated tool START → Active{tool_use_id}.
         r.apply(
             &mut scene,
             AgentEvent::ActivityStart {
@@ -647,7 +552,6 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             now,
             Transport::Hook,
         );
-        // 5. Waiting while Active-with-tuid → gated_before_waiting.
         r.apply(
             &mut scene,
             AgentEvent::Waiting {
@@ -657,14 +561,12 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             now,
             Transport::Hook,
         );
-        // 6. ProofOfLife (slot exists, not exiting) → recent_proof_of_life.
         r.apply(
             &mut scene,
             AgentEvent::ProofOfLife { agent_id: a },
             now,
             Transport::Hook,
         );
-        // 7. end as_child → child_ledger[a].ended_at + marks `a` exiting.
         r.apply(
             &mut scene,
             AgentEvent::SessionEnd {
@@ -674,8 +576,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             now,
             Transport::Hook,
         );
-        // 8. a hook SessionEnd for an UNREGISTERED id → recent_hook_session_ends
-        //    tombstone (needs Hook + no slot; fresh id each iter, 5s TTL).
+        // An UNREGISTERED id (fresh each iter) is what mints a tombstone.
         r.apply(
             &mut scene,
             AgentEvent::SessionEnd {
@@ -685,10 +586,8 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             now,
             Transport::Hook,
         );
-        // 9. an ORPHAN Task (no SessionStart → no slot) → an active_tasks entry
-        //    reaped ONLY by tick's slot-removal retain. If that retain regressed,
-        //    orphans would accumulate ~1/iter and blow the bound — the exact
-        //    active_tasks leak class the audit flagged.
+        // An ORPHAN Task (no SessionStart, so no slot) leaves an active_tasks
+        // entry reaped ONLY by tick's slot-removal retain.
         r.apply(
             &mut scene,
             AgentEvent::ActivityStart {
@@ -700,8 +599,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             Transport::Hook,
         );
 
-        // Interleave a tick — the ONLY reaper of the non-TTL orphan retains, and
-        // it re-runs gc/sweep, exactly as the runtime driver does on its ~1s cadence.
+        // The interleaved tick is the ONLY reaper of the non-TTL orphan retains.
         r.tick(&mut scene, now);
 
         let lens = [
@@ -716,7 +614,6 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
         for (p, &l) in peak.iter_mut().zip(lens.iter()) {
             *p = (*p).max(l);
         }
-        // In-loop bound check — a SLOW leak trips mid-stream, not only at the tail.
         for (l, name) in lens.iter().zip(MAP_NAMES) {
             assert!(
                 *l <= MAX_CORR_ENTRIES,
@@ -725,8 +622,6 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
         }
     }
 
-    // Negative-control: every map must have been exercised, else its bound check
-    // above passed vacuously.
     for (p, name) in peak.iter().zip(MAP_NAMES) {
         assert!(
             *p > 0,

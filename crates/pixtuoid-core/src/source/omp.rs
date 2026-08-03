@@ -1,52 +1,32 @@
 //! Oh My Pi (`omp`, omp.sh) source. Watches the omp session transcripts
 //! (`<omp_agent_dir>/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl`) via
-//! `JsonlWatcher`. TRANSCRIPT-ONLY (Copilot/Antigravity-class): omp has NO
-//! shell-hook seam (its "hooks" are in-process TS extension modules —
-//! upstream `docs/hooks.md`, `extensibility/extensions/loader.ts` filters
-//! discovered hook files to `.ts`/`.js`), so there is no install target; the
-//! Sources panel shows `om·` as a no-target flag-flip row.
-//!
-//! Grounded in the upstream source @ v16.3.12 (`can1357/oh-my-pi`, commit
-//! ff1fe5f) — pin comments below cite the upstream files —
-//! and byte-real anchored against a live omp 16.4.0 install:
-//! the conformance fixtures under `tests/sources/fixtures/omp/` are
-//! sanitized captures (a real `omp -p` run and a real `task`-subagent child
-//! file at 16.4.0; a real interactive ask round), and
-//! the registry row's `verified_version` is that install's `omp --version`.
+//! `JsonlWatcher`. TRANSCRIPT-ONLY: omp's "hooks" are in-process TS extension
+//! modules, so there is no shell-hook install target.
 //!
 //! Wire shape (upstream `packages/coding-agent/src/session/`):
-//! - **File**: `${fileSafeTimestamp}_${uuidv7}.jsonl` (`session-manager.ts`),
-//!   under a per-cwd encoded dir that always starts with `-`
-//!   (`session-paths.ts`). Line 1 is a fixed-width 256-byte `type:"title"`
-//!   slot rewritten IN PLACE on rename (pwrite at offset 0 — never re-decoded
-//!   by a tail cursor past it); line 2 the `type:"session"` header (id, cwd);
-//!   legacy files lack the slot (header first). Entries append via a
-//!   kept-open `O_APPEND` fd.
+//! - **File**: `${fileSafeTimestamp}_${uuidv7}.jsonl`, under a per-cwd encoded
+//!   dir that always starts with `-`. Line 1 is a fixed-width 256-byte
+//!   `type:"title"` slot rewritten IN PLACE on rename (pwrite at offset 0 —
+//!   the tail cursor sits past byte 256, so it is never re-read); line 2 the
+//!   `type:"session"` header (id, cwd); legacy files lack the slot.
 //! - **Turn**: `type:"message"` entries — `role:"assistant"` content carries
-//!   `type:"toolCall"` blocks (`{id,name,arguments}`, `pi-ai` types.ts);
-//!   `role:"toolResult"` closes one (`toolCallId`). A `custom` entry
+//!   `type:"toolCall"` blocks (`{id,name,arguments}`); `role:"toolResult"`
+//!   closes one (`toolCallId`). A `custom` entry
 //!   `customType:"tool_execution_start"` duplicates each toolCall right
 //!   before execution — deliberately NOT decoded (same `tool_use_id` would
 //!   double-count `tool_call_count`).
-//! - **Exit**: a `custom` entry `customType:"session_exit"` is appended +
-//!   flushed on every clean teardown incl. SIGINT/SIGTERM
-//!   (`agent-session.ts::#recordSessionExit`, `exit-diagnostics.ts`) — the
-//!   session-ended marker. Skipped when the session never produced an
-//!   assistant message; SIGKILL writes nothing → stale-sweep.
+//! - **Exit**: a `custom` entry `customType:"session_exit"` is appended on
+//!   every clean teardown incl. SIGINT/SIGTERM — the session-ended marker.
+//!   Skipped when the session never produced an assistant message; SIGKILL
+//!   writes nothing → stale-sweep.
 //! - **Subagents**: the `task` tool persists each child as a SEPARATE file
-//!   `<parent-path-minus-.jsonl>/<taskId>.jsonl` (`task/executor.ts`),
-//!   recursively — linkage is the PATH NESTING, not a header field (the
-//!   child header has no `parentSession`). `omp_id_from_path` keys the whole
-//!   chain; the header decode re-emits a parented SessionStart which enriches
-//!   the watcher's parentless first-sight registration.
+//!   `<parent-path-minus-.jsonl>/<taskId>.jsonl`, recursively — linkage is the
+//!   PATH NESTING, not a header field (the child header has no
+//!   `parentSession`).
 //!
-//! Sharp edges:
-//! - fork / branch / version-migration / tool-output pruning REWRITE the file
-//!   atomically (temp + rename → new inode); the watcher re-stats by path, so
-//!   a rewrite reads as a fresh transcript. Rare enough to live with.
-//! - The title-slot pwrite mutates line 1 of an already-cursored file; the
-//!   cursor sits past byte 256, so it is never re-read (and a `type:"title"`
-//!   line decodes to nothing anyway).
+//! Sharp edge: fork / branch / version-migration / tool-output pruning REWRITE
+//! the file atomically (temp + rename → new inode); the watcher re-stats by
+//! path, so a rewrite reads as a fresh transcript. Rare enough to live with.
 
 use std::path::{Path, PathBuf};
 
@@ -57,11 +37,6 @@ use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
-// The runtime half (`OmpSource` + its watcher wiring, the first-sight
-// session-ended checker, and the open-write-fd liveness probe) — ONE gate for
-// the whole `native` layer of this source; the re-export keeps
-// `source::omp::OmpSource` public. The probe fn stays module-private (no
-// focus point-query consumer — see its doc comment).
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
@@ -70,13 +45,10 @@ pub use native::OmpSource;
 /// The Oh My Pi (omp) source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "omp";
 
-/// omp's agent config dir: `$PI_CODING_AGENT_DIR` if set non-empty (omp's own
-/// relocation knob — upstream `packages/utils/src/dirs.ts` DirResolver), else
-/// `~/.omp/agent`. omp resolves home via Node's `os.homedir()` (USERPROFILE
-/// on Windows) → `user_home()`. The XDG split ($XDG_DATA_HOME/omp) engages
-/// only after an explicit `omp config init-xdg` migration, and `OMP_PROFILE`
-/// relocates to `~/.omp/profiles/<name>/agent` — both deliberately unmirrored
-/// (opt-in minority setups; the watcher just sees an empty default dir).
+/// omp's agent config dir: `$PI_CODING_AGENT_DIR` if set non-empty, else
+/// `~/.omp/agent`. The XDG split (`$XDG_DATA_HOME/omp`, opt-in via `omp config
+/// init-xdg`) and `OMP_PROFILE` are deliberately unmirrored — the watcher just
+/// sees an empty default dir for those minority setups.
 pub fn omp_agent_dir() -> PathBuf {
     match crate::platform::nonempty(std::env::var("PI_CODING_AGENT_DIR").ok()) {
         Some(v) => PathBuf::from(v),
@@ -86,14 +58,11 @@ pub fn omp_agent_dir() -> PathBuf {
     }
 }
 
-/// Does a path component look like a ROOT session file stem —
-/// `${fileSafeTimestamp}_${uuid}` (ISO date prefix + the `_` separator,
-/// upstream `session-manager.ts::fileSafeTimestamp`)? Subagent stems are task
-/// ids (`Alpha`, `GoodWolf`) and never date-shaped. The `T` check is
-/// case-insensitive: on Windows the per-line decoder receives the
-/// `normalize_path_key`'d path (LOWERCASED), so the on-disk `T` arrives as
-/// `t` — rejecting it broke the whole stem chain there (windows-test caught
-/// it; CC dodges the fold only because its UUIDs are already lowercase).
+/// Does a path component look like a ROOT session file stem
+/// (`${fileSafeTimestamp}_${uuid}`)? Subagent stems are task ids (`Alpha`,
+/// `GoodWolf`) and never date-shaped. The `T` check is case-insensitive: on
+/// Windows the per-line decoder receives the `normalize_path_key`'d path
+/// (LOWERCASED), so requiring an upper-case `T` breaks the whole stem chain.
 fn looks_like_session_stem(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() > 20
@@ -110,14 +79,10 @@ fn looks_like_session_stem(s: &str) -> bool {
 /// `["<ts>_<uuid>", "Alpha", "Child"]` for a nested subagent file
 /// `…/<ts>_<uuid>/Alpha/Child.jsonl`. A root transcript is `[stem]`.
 ///
-/// PURE and case-preserving: raw in → raw out on every platform (fixture-fed
-/// conformance goldens stay platform-invariant). The Windows case-fold
-/// happens at the WATCHER seam instead — walk.rs normalizes the path before
-/// BOTH the id-deriver and the per-line decoder, and the probe folds at its
-/// own boundary — so all runtime lanes mint ONE (folded) id per file there
-/// while this fn stays deterministic over whatever form it is given. The
-/// only fold-awareness HERE is `looks_like_session_stem`'s case-insensitive
-/// `T`, so an already-folded path still parses as a chain.
+/// PURE and case-preserving: raw in → raw out on every platform, so the
+/// fixture-fed conformance goldens stay platform-invariant. The Windows
+/// case-fold belongs at the WATCHER seam (walk.rs, and the probe's own
+/// boundary), never here.
 fn stem_chain(path: &Path) -> Vec<String> {
     let own = path
         .file_stem()
@@ -126,9 +91,6 @@ fn stem_chain(path: &Path) -> Vec<String> {
         .to_string();
     let mut chain = vec![own];
     let mut cur = path.parent();
-    // A root file's ancestors are the per-cwd encoded dirs (never
-    // date-shaped); a subagent file's ancestor chain ends at the root
-    // session's artifacts dir, whose name IS the root stem.
     while let Some(dir) = cur {
         let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
             break;
@@ -137,18 +99,16 @@ fn stem_chain(path: &Path) -> Vec<String> {
             chain.push(name.to_string());
             break;
         }
-        // Bound the climb at omp's own layout boundaries: the per-cwd encoded
-        // dir (always `-`-prefixed — session-paths.ts, all three branches) or
-        // the `sessions` root itself. Without this the walk continues into the
+        // Bound the climb at omp's layout boundaries (the `-`-prefixed per-cwd
+        // dir, the `sessions` root). Without this the walk continues into the
         // USER'S path above the watched root, where a date-shaped component
         // (`~/backups/2026-…_snap/agent/…`) would misclassify every root
         // transcript as a subagent chain.
         if name == "sessions" || name.starts_with('-') {
             break;
         }
-        // Only intermediate SUBAGENT dirs are collected — but we can't tell a
-        // task-id dir from a foreign dir until we see the root stem above it,
-        // so collect speculatively and discard below if no root was found.
+        // A task-id dir is indistinguishable from a foreign dir until the root
+        // stem shows up above it, so collect speculatively and discard below.
         chain.push(name.to_string());
         cur = dir.parent();
     }
@@ -156,8 +116,6 @@ fn stem_chain(path: &Path) -> Vec<String> {
         chain.reverse();
         chain
     } else {
-        // No root-stem ancestor → this IS a root transcript (or a foreign
-        // layout); key on the file stem alone.
         chain.truncate(1);
         chain
     }
@@ -170,25 +128,19 @@ pub fn omp_id_from_path(path: &Path) -> String {
     stem_chain(path).join("/")
 }
 
-/// The parent's key (the chain minus the last segment) for a subagent
-/// transcript; `None` for a root.
+/// The parent's key (the chain minus the last segment); `None` for a root.
 pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
     let chain = stem_chain(path);
     (chain.len() > 1).then(|| chain[..chain.len() - 1].join("/"))
 }
 
-/// The COMPLETE set of omp session-entry `type` discriminators — the
-/// `RawFileEntry` union in oh-my-pi's `session/session-entries.ts` (verified
-/// live), NOT just the ones we decode. The tail breadcrumbs a `type` OUTSIDE
-/// this set (a brand-new entry SHAPE = a structural wire change); a KNOWN type
-/// we don't decode (`model_change`, `title`, `compaction`, a `custom` line whose
-/// customType isn't the exit marker, …) stays SILENT — omp writes those
-/// routinely and `drift::unknown_event` has NO dedup, so breadcrumbing them would
-/// flood the warn-floor (drift.rs's anti-flood rule). The nested `customType`
-/// axis is deliberately NOT guarded (unbounded, extension-authored — the true
-/// flood axis). Kept honest by `read_omp_known_types` in
-/// `check_upstream_drift.py`: a new upstream entry type not listed here alarms in
-/// CI before it can flood.
+/// The COMPLETE `RawFileEntry` union of omp session-entry `type`
+/// discriminators (upstream `session/session-entries.ts`), NOT just the ones we
+/// decode: a `type` OUTSIDE this set breadcrumbs, a KNOWN-but-undecoded one
+/// stays silent, because `drift::unknown_event` has NO dedup and omp writes
+/// those routinely (drift.rs's anti-flood rule). The nested `customType` axis
+/// is deliberately NOT guarded — unbounded and extension-authored. Kept honest
+/// by `read_omp_known_types` in `check_upstream_drift.py`.
 const KNOWN_ENTRY_TYPES: &[&str] = &[
     "branch_summary",
     "compaction",
@@ -209,8 +161,7 @@ const KNOWN_ENTRY_TYPES: &[&str] = &[
 
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
-/// upstream reference loader is itself lenient (`parseJsonlLenient`), so a
-/// defensive skip mirrors the CLI's own posture.
+/// upstream loader is itself lenient (`parseJsonlLenient`).
 pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let path = Path::new(transcript_path);
     let acting = AgentId::from_parts(source, &omp_id_from_path(path));
@@ -220,10 +171,8 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
     let kind = obj.get("type").and_then(|s| s.as_str()).unwrap_or("");
 
     let out = match kind {
-        // The header (line 2, after the title slot). session_id = the SAME
-        // id-deriver key as the watcher's first-sight registration, so the
-        // two SessionStarts agree (`emit_first_sight` uses `id_derive`); the
-        // header's own uuid is embedded in that key anyway (the file stem).
+        // session_id must be the SAME id-deriver key the watcher's first-sight
+        // registration uses, so the two SessionStarts agree.
         "session" => {
             let cwd = obj.get("cwd").and_then(|c| c.as_str()).unwrap_or_else(|| {
                 crate::source::drift::missing_field(source, "session", "cwd");
@@ -243,16 +192,11 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 return Ok(vec![]);
             };
             match msg.get("role").and_then(|r| r.as_str()) {
-                // Assistant content blocks carry the tool CALLS.
                 Some("assistant") => {
                     let mut out = Vec::new();
-                    // Model identity rides EVERY assistant message (pi-ai
-                    // types.ts: AssistantMessage requires provider+model) —
-                    // the burn-tier carrier (#545). The BARE `model` field,
-                    // never the provider-prefixed `model_change` form, so
-                    // TOP_MODELS prefix matching sees the same vocabulary
-                    // CC/codex/copilot emit; the reducer's last-seen-wins
-                    // dedups the per-turn re-stamp.
+                    // The BARE `model` field, never the provider-prefixed
+                    // `model_change` form, so TOP_MODELS prefix matching sees
+                    // the same vocabulary CC/codex/copilot emit.
                     if let Some(model) = msg
                         .get("model")
                         .and_then(|m| m.as_str())
@@ -264,12 +208,10 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                             effort: None,
                         });
                     }
-                    // Token-meter usage observation (#632): assistant messages
-                    // carry per-turn `usage`. omp's `input` EXCLUDES the cache
-                    // share (fixture-verified: totalTokens = input + output +
-                    // cacheRead + cacheWrite), so fresh = input + cacheWrite +
-                    // output — cache READS are re-served context, excluded
-                    // like CC's. Zero readings skipped.
+                    // omp's `usage.input` EXCLUDES the cache share
+                    // (totalTokens = input + output + cacheRead + cacheWrite),
+                    // so fresh = input + cacheWrite + output — cache READS are
+                    // re-served context, not new spend.
                     if let Some(usage) = msg.get("usage").and_then(|u| u.as_object()) {
                         let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
                         let fresh = field("input")
@@ -282,30 +224,23 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                             });
                         }
                     }
-                    // A blocks-less/text-only turn still stamps the model.
                     let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else {
                         return Ok(out);
                     };
-                    // `ask` (the built-in user-question tool) BLOCKS on human
-                    // input: its Start is followed by a Waiting so the session
-                    // renders waiting, not active. The Start binds the
+                    // `ask` BLOCKS on human input: its Start binds the
                     // reducer's `gated_before_waiting` gate to the ask's own
-                    // tool_use_id, so the answer's toolResult (ActivityEnd,
-                    // same id) resolves the Wait — no separate clearing event.
-                    // Ask pairs are collected separately and appended LAST:
-                    // when an ask is batched with parallel toolCalls, a
-                    // sibling's later ActivityStart would flip the slot back
-                    // to Active and drop the gate, so the answered ask could
-                    // never resolve the Wait.
+                    // tool_use_id, so the answer's toolResult resolves the
+                    // Wait. Ask pairs are appended LAST because a sibling's
+                    // later ActivityStart would flip the slot back to Active
+                    // and drop the gate, stranding the Wait forever.
                     let mut asks = Vec::new();
                     for b in blocks
                         .iter()
                         .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("toolCall"))
                     {
-                        // Un-keyable calls are dropped (can't be closed) — but
-                        // breadcrumb it: `id` is a REQUIRED pairing key on a
-                        // toolCall block we're committed to decoding, so its
-                        // absence is upstream drift, not a line we ignore.
+                        // `id` is a REQUIRED pairing key on a block we decode,
+                        // so its absence is upstream drift, not a line we
+                        // ignore — breadcrumb before dropping.
                         let Some(id) = b.get("id").and_then(|i| i.as_str()) else {
                             crate::source::drift::missing_field(source, "toolCall", "id");
                             continue;
@@ -331,13 +266,10 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                     out.extend(asks);
                     out
                 }
-                // A tool result closes its call.
                 Some("toolResult") => {
                     let Some(tool_call_id) = msg.get("toolCallId").and_then(|i| i.as_str()) else {
-                        // The ActivityEnd pairing key — its absence is drift on a
-                        // lifecycle event we're committed to decoding (mirror of the
-                        // toolCall `id` gate above), and an unkeyable End can never
-                        // close its Start (leaks Active forever). Breadcrumb, then drop.
+                        // An unkeyable End can never close its Start (leaks
+                        // Active forever) — breadcrumb, then drop.
                         crate::source::drift::missing_field(source, "toolResult", "toolCallId");
                         return Ok(vec![]);
                     };
@@ -350,41 +282,33 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 _ => vec![],
             }
         }
-        // Clean teardown marker (`exit-diagnostics.ts`): reason/kind ignored —
-        // every kind ("normal"|"signal"|"fatal"|"process_exit") IS an end.
+        // Clean teardown marker: reason/kind ignored — every kind
+        // ("normal"|"signal"|"fatal"|"process_exit") IS an end.
         "custom" if obj.get("customType").and_then(|c| c.as_str()) == Some("session_exit") => {
             vec![AgentEvent::SessionEnd {
                 agent_id: acting,
                 as_child: omp_parent_key_from_path(path).is_some(),
             }]
         }
-        // An entry whose `type` is OUTSIDE KNOWN_ENTRY_TYPES is a structural wire
-        // change — breadcrumb it (defense #2, the live-stream signal for a
-        // brand-new omp entry SHAPE that CI's fetch-based defense can't see in a
-        // user's own stream). A KNOWN type we don't decode falls through to the
-        // silent `_` below (a `custom` line with a non-exit customType lands here
-        // too: `custom` is KNOWN, so it stays silent — the customType axis is the
-        // unbounded one we never guard). Empty type = a typeless line, skipped.
+        // A `type` OUTSIDE KNOWN_ENTRY_TYPES is a structural wire change — the
+        // live-stream signal for a brand-new omp entry SHAPE that CI's
+        // fetch-based defense can't see in a user's own stream.
         other if !other.is_empty() && !KNOWN_ENTRY_TYPES.contains(&other) => {
             crate::source::drift::unknown_event(source, other);
             vec![]
         }
-        // title / title_change / model_change / compaction / session_init /
-        // custom_message / thinking_level_change / … — KNOWN types that are not
-        // sprite-visible. (model_change stays undecoded even though the burn tier
-        // reads model: its value is the provider-prefixed combined form, and every
-        // assistant message re-stamps the bare `model` anyway — one turn's lag.)
+        // KNOWN types that are not sprite-visible, silent so they can't flood.
+        // (model_change stays undecoded even though the burn tier reads model:
+        // its value is the provider-prefixed combined form, and every assistant
+        // message re-stamps the bare `model` anyway — one turn's lag.)
         _ => vec![],
     };
     Ok(out)
 }
 
 /// omp's tool-detail dispatch. The subagent dispatch is the `task` tool,
-/// detected by NAME only (the Copilot/Reasonix spoof guard: `arguments` are
-/// model-authored, so a hallucinated `subagent_type` key must not flip an
-/// ordinary tool to Delegating). omp's builtin arg vocabulary keys targets
-/// under these names (bash→command, read/edit/write→path, grep/glob→pattern,
-/// web_search→query — upstream `src/tools/`).
+/// detected by NAME only: `arguments` are model-authored, so a hallucinated
+/// `subagent_type` key must not flip an ordinary tool to Delegating.
 fn omp_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     if tool == "task" {
         return ToolDetail::Task;
@@ -393,12 +317,8 @@ fn omp_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
 
-/// The Waiting reason for an `ask` round: the first question's text
-/// (`arguments.questions[0].question` — the ask schema requires one), falling
-/// back to the call's intent (`arguments.i`), then the bare tool name. Capped
-/// at the decode boundary like every other content-derived Waiting reason
-/// (copilot/opencode/reasonix) — the text is model-authored wire content and
-/// persists in the slot + headless summary.
+/// The Waiting reason for an `ask` round: the first question's text, falling
+/// back to the call's intent (`arguments.i`), then the bare tool name.
 fn omp_ask_reason(args: Option<&Value>) -> String {
     args.and_then(|a| {
         a.get("questions")
@@ -417,11 +337,8 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // Root session transcript path, real on-disk shape:
-    // <sessions>/<encoded-cwd>/<fileSafeTimestamp>_<uuidv7>.jsonl
     const ROOT: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001.jsonl";
     const ROOT_KEY: &str = "2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001";
-    // Subagent: <parent-path-minus-.jsonl>/<taskId>.jsonl (task/executor.ts).
     const CHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha.jsonl";
     const GRANDCHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha/GoodWolf.jsonl";
 
@@ -461,10 +378,6 @@ mod tests {
         );
     }
 
-    /// The per-cwd encoded dirs (`-dev-proj`, `-tmp-x`, legacy `--abs--`) are
-    /// never date-shaped, so a root file keys on its own stem even though the
-    /// chain walk climbs through them; a same-named task id under TWO
-    /// different sessions never collides (the chain is session-prefixed).
     #[test]
     fn same_task_id_under_two_sessions_keys_distinctly() {
         let other = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T09-00-00-000Z_0197f0bb-0000-7000-8000-000000000002/Alpha.jsonl";
@@ -474,14 +387,8 @@ mod tests {
         );
     }
 
-    /// The Windows decoder lane: walk.rs hands every derivation the
-    /// `normalize_path_key`'d path (LOWERCASED, forward-slashed there). The
-    /// deriver is pure, so the folded form must still parse as a stem chain
-    /// (the case-insensitive `T`) — pure string code, so the Windows arm is
-    /// pinned on every platform.
     #[test]
     fn stem_chain_survives_the_windows_case_fold() {
-        // The decoder-lane shape on Windows: already lowercased.
         let folded = "c:/users/u/.omp/agent/sessions/-dev-proj/2026-07-09t08-00-00-000z_0197f0aa-0000-7000-8000-000000000001/alpha.jsonl";
         assert_eq!(
             omp_id_from_path(Path::new(folded)),
@@ -495,10 +402,6 @@ mod tests {
         );
     }
 
-    /// The climb is BOUNDED at omp's layout boundaries (the `-`-prefixed
-    /// per-cwd dir / the `sessions` root): a date-shaped component in the
-    /// USER'S path above the watched root must not turn every root transcript
-    /// into a phantom subagent chain.
     #[test]
     fn date_shaped_dirs_above_the_sessions_root_do_not_misclassify() {
         let p = format!(
@@ -509,11 +412,8 @@ mod tests {
         assert_eq!(omp_parent_key_from_path(Path::new(&p)), None);
     }
 
-    // ── header / lifecycle ──
-
     #[test]
     fn session_header_registers_root_with_cwd_and_no_parent() {
-        // v3 header shape (session-entries.ts SessionHeader).
         let line = r#"{"type":"session","version":3,"id":"0197f0aa-0000-7000-8000-000000000001","timestamp":"2026-07-09T08:00:00.000Z","cwd":"/home/u/proj"}"#;
         match &decode(line)[..] {
             [AgentEvent::SessionStart {
@@ -557,7 +457,6 @@ mod tests {
 
     #[test]
     fn session_exit_ends_root_not_as_child() {
-        // exit-diagnostics.ts SessionExitData; every kind is an end.
         let line = r#"{"type":"custom","id":"a1b2c3d4","parentId":"e5f6a7b8","timestamp":"2026-07-09T08:10:00.000Z","customType":"session_exit","data":{"reason":"exit command","kind":"normal","recordedAt":"2026-07-09T08:10:00.000Z"}}"#;
         match &decode(line)[..] {
             [AgentEvent::SessionEnd { agent_id, as_child }] => {
@@ -583,13 +482,8 @@ mod tests {
         }
     }
 
-    // ── tool rounds ──
-
     #[test]
     fn assistant_usage_becomes_a_fresh_token_observation() {
-        // Fixture-verified shape (16.4.0): totalTokens = input + output +
-        // cacheRead + cacheWrite, so `input` EXCLUDES cache — fresh =
-        // input + cacheWrite + output = 122 + 1000 + 1491 = 2613.
         let line = r#"{"type":"message","id":"m1","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[],"usage":{"input":122,"output":1491,"cacheRead":1000,"cacheWrite":1000,"totalTokens":3613},"timestamp":1720512000000}}"#;
         let evs = decode(line);
         assert!(
@@ -602,7 +496,6 @@ mod tests {
             )),
             "expected fresh=2613 (cacheRead excluded), got {evs:?}"
         );
-        // A zero reading stays silent.
         let line = r#"{"type":"message","id":"m2","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[],"usage":{"input":0,"output":0,"cacheRead":500,"cacheWrite":0,"totalTokens":500},"timestamp":1720512000000}}"#;
         assert!(
             !decode(line)
@@ -614,7 +507,6 @@ mod tests {
 
     #[test]
     fn assistant_tool_calls_start_activity_keyed_on_block_id() {
-        // AssistantMessage content with a toolCall block (pi-ai types.ts).
         let line = r#"{"type":"message","id":"m1","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"text","text":"Reading."},{"type":"toolCall","id":"toolu_01AAA","name":"read","arguments":{"path":"/home/u/proj/main.rs"}}],"stopReason":"toolUse","timestamp":1720512000000}}"#;
         match &decode(line)[..] {
             [AgentEvent::ActivityStart {
@@ -635,12 +527,6 @@ mod tests {
 
     #[test]
     fn assistant_message_surfaces_model_info_for_the_burn_tier() {
-        // Every assistant message carries the BARE `model` (+ a separate
-        // `provider`) — pi-ai types.ts requires both. The bare field is the
-        // burn-tier carrier (#545): the same shape CC/codex/copilot emit, so
-        // TOP_MODELS prefix matching sees one vocabulary (the
-        // provider-prefixed `model_change` form is deliberately NOT decoded);
-        // the reducer's last-seen-wins dedups the per-turn re-stamp.
         let line = r#"{"type":"message","id":"m1","parentId":null,"timestamp":"t","message":{"role":"assistant","provider":"kimi-code","model":"kimi-for-coding","content":[{"type":"toolCall","id":"t1","name":"bash","arguments":{"command":"ls"}}],"timestamp":1}}"#;
         match &decode(line)[..] {
             [AgentEvent::ModelInfo {
@@ -653,7 +539,6 @@ mod tests {
             }
             other => panic!("expected ModelInfo then ActivityStart, got {other:?}"),
         }
-        // A text-only assistant turn still stamps the model.
         let text_only = r#"{"type":"message","id":"m2","parentId":null,"timestamp":"t","message":{"role":"assistant","provider":"anthropic","model":"claude-fable-5","content":[{"type":"text","text":"done"}],"timestamp":2}}"#;
         match &decode(text_only)[..] {
             [AgentEvent::ModelInfo { model: Some(m), .. }] => {
@@ -661,12 +546,11 @@ mod tests {
             }
             other => panic!("expected one ModelInfo, got {other:?}"),
         }
-        // An empty/missing model must not mint a phantom observation.
         let empty = r#"{"type":"message","id":"m3","timestamp":"t","message":{"role":"assistant","model":"","content":[],"timestamp":3}}"#;
         assert!(decode(empty).is_empty());
-        // A content-ABSENT message (defensive: pi-ai types.ts requires
-        // `content`, so this can't occur on real wire) still stamps the model
-        // — pins the let-else early return's `Ok(out)`, not `Ok(vec![])`.
+        // Defensive: pi-ai types.ts requires `content`, so a content-ABSENT
+        // message can't occur on real wire — this pins the let-else early
+        // return's `Ok(out)`, not `Ok(vec![])`.
         let no_content = r#"{"type":"message","id":"m4","timestamp":"t","message":{"role":"assistant","model":"claude-fable-5","timestamp":4}}"#;
         match &decode(no_content)[..] {
             [AgentEvent::ModelInfo { model: Some(m), .. }] => {
@@ -722,8 +606,6 @@ mod tests {
 
     #[test]
     fn spoofed_subagent_type_arg_does_not_make_a_task() {
-        // arguments are model-authored; only the `task` NAME delegates (the
-        // Copilot/Reasonix spoof-vector guard).
         let line = r#"{"type":"message","id":"m4","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"t4","name":"read","arguments":{"path":"x.rs","subagent_type":null}}],"timestamp":1}}"#;
         match &decode(line)[..] {
             [AgentEvent::ActivityStart {
@@ -736,15 +618,8 @@ mod tests {
         }
     }
 
-    // ── ask (user-question gate) ──
-
     #[test]
     fn ask_call_starts_activity_then_waits_on_the_question() {
-        // Byte-real shape (captured omp ask round): arguments carry an intent
-        // `i` + a `questions` array. The ORDER is load-bearing: the Start
-        // (applied first) makes the slot Active on the ask's tool_use_id, so
-        // the reducer's `gated_before_waiting` binds to it and the answer's
-        // toolResult (ActivityEnd, same id) resolves the Wait.
         let line = r#"{"type":"message","id":"m7","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK1","name":"ask","arguments":{"i":"Resolving packages/ui collision","questions":[{"id":"ui_collision","question":"packages/ui already exists. What should happen?","options":[{"label":"Replace"},{"label":"Merge"}]}]}}],"timestamp":1}}"#;
         match &decode(line)[..] {
             [AgentEvent::ActivityStart {
@@ -769,13 +644,11 @@ mod tests {
 
     #[test]
     fn ask_reason_falls_back_to_intent_then_bare_name() {
-        // No questions array → the call's intent `i`.
         let intent = r#"{"type":"message","id":"m8","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK2","name":"ask","arguments":{"i":"Confirming scope"}}],"timestamp":1}}"#;
         match &decode(intent)[..] {
             [_, AgentEvent::Waiting { reason, .. }] => assert_eq!(reason, "Confirming scope"),
             other => panic!("expected Start+Waiting, got {other:?}"),
         }
-        // No arguments at all → the bare tool name.
         let bare = r#"{"type":"message","id":"m9","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK3","name":"ask"}],"timestamp":1}}"#;
         match &decode(bare)[..] {
             [_, AgentEvent::Waiting { reason, .. }] => assert_eq!(reason, "ask"),
@@ -785,10 +658,6 @@ mod tests {
 
     #[test]
     fn ask_batched_with_parallel_tool_calls_decodes_last() {
-        // An ask batched BEFORE a sibling toolCall must still decode after
-        // it: a sibling's later ActivityStart would flip the slot back to
-        // Active and drop the `gated_before_waiting` gate, so the answered
-        // ask could never resolve the Wait.
         let line = r#"{"type":"message","id":"mB","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK5","name":"ask","arguments":{"i":"Confirming scope"}},{"type":"toolCall","id":"t7","name":"bash","arguments":{"command":"cargo check"}}],"timestamp":1}}"#;
         match &decode(line)[..] {
             [AgentEvent::ActivityStart {
@@ -805,8 +674,6 @@ mod tests {
 
     #[test]
     fn ask_reason_is_capped_at_the_decode_boundary() {
-        // The question is model-authored wire content and persists in the
-        // slot — cap where it enters, like every content-derived reason.
         let long = "q".repeat(MAX_DECODED_FIELD_CHARS * 10);
         let line = format!(
             r#"{{"type":"message","id":"mA","parentId":null,"timestamp":"t","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"tool_ASK4","name":"ask","arguments":{{"questions":[{{"id":"x","question":"{long}"}}]}}}}],"timestamp":1}}}}"#
@@ -822,9 +689,6 @@ mod tests {
 
     #[test]
     fn tool_call_without_id_is_dropped_and_without_name_still_starts() {
-        // No block id → un-keyable (its result could never close it) → drop,
-        // but the drop must leave a `missing_field` breadcrumb (`id` is a
-        // REQUIRED pairing key on a block we're committed to decoding).
         let no_id = r#"{"type":"message","id":"m5","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","name":"bash","arguments":{}}],"timestamp":1}}"#;
         let out = crate::test_capture::capture_logs(|| {
             assert!(decode(no_id).is_empty(), "un-keyable toolCall → no event");
@@ -835,7 +699,6 @@ mod tests {
                 "no id breadcrumb: missing {needle:?}\n{out}"
             );
         }
-        // Missing name → drift breadcrumb + empty name; "" is not "task".
         let no_name = r#"{"type":"message","id":"m6","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"t6","arguments":{}}],"timestamp":1}}"#;
         let out = crate::test_capture::capture_logs(|| match &decode(no_name)[..] {
             [AgentEvent::ActivityStart {
@@ -856,11 +719,6 @@ mod tests {
         }
     }
 
-    /// A `toolResult` missing its `toolCallId` (the ActivityEnd pairing key) is
-    /// dropped — an unkeyable End can't close its Start — but must leave a
-    /// `missing_field` breadcrumb, the mirror of the `toolCall` `id` gate above.
-    /// It is NOT an ignorable line (it's a lifecycle event we decode), so it does
-    /// not belong in the "ignored, not panicked" bundle.
     #[test]
     fn toolresult_without_id_drops_with_a_drift_breadcrumb() {
         let no_id = r#"{"type":"message","id":"m7","parentId":null,"timestamp":"t","message":{"role":"toolResult","toolName":"read","content":[],"timestamp":1}}"#;
@@ -877,8 +735,6 @@ mod tests {
 
     #[test]
     fn tool_execution_start_custom_entry_is_deliberately_ignored() {
-        // Duplicates the assistant toolCall block with the SAME toolCallId
-        // (exit-diagnostics.ts) — decoding both would double-count.
         let line = r#"{"type":"custom","id":"c1","parentId":null,"timestamp":"t","customType":"tool_execution_start","data":{"toolCallId":"toolu_01AAA","toolName":"read","startedAt":"t"}}"#;
         assert!(decode(line).is_empty());
     }
@@ -886,7 +742,6 @@ mod tests {
     #[test]
     fn non_lifecycle_entries_and_malformed_lines_are_ignored_not_panicked() {
         for line in [
-            // The 256-byte title slot (line 1 of every v3 file).
             r#"{"type":"title","v":1,"title":"Fix flaky test","source":"auto","updatedAt":"t","pad":"   "}"#,
             r#"{"type":"title_change","id":"x","parentId":null,"timestamp":"t","title":"New","source":"user"}"#,
             r#"{"type":"model_change","id":"x","parentId":null,"timestamp":"t","model":"anthropic/claude-opus-4-5"}"#,
@@ -894,9 +749,7 @@ mod tests {
             r#"{"type":"session_init","id":"x","parentId":null,"timestamp":"t","systemPrompt":"…","task":"…","tools":[]}"#,
             r#"{"type":"message","id":"x","parentId":null,"timestamp":"t","message":{"role":"user","content":"hi","timestamp":1}}"#,
             r#"{"type":"message","id":"x","parentId":null,"timestamp":"t","message":{"role":"bashExecution","command":"ls","output":"","exitCode":0,"timestamp":1}}"#,
-            // message entry with no message object.
             r#"{"type":"message","id":"x","parentId":null,"timestamp":"t"}"#,
-            // custom entry of an unrelated customType.
             r#"{"type":"custom","id":"x","parentId":null,"timestamp":"t","customType":"memory_write","data":{}}"#,
         ] {
             assert!(decode(line).is_empty(), "expected no events for {line}");
@@ -909,10 +762,6 @@ mod tests {
             .is_empty());
     }
 
-    /// The entry-type tail arm: a brand-new `type` breadcrumbs (the live-stream
-    /// signal for a new omp entry SHAPE), while a KNOWN type we don't decode —
-    /// including a `custom` line whose customType isn't the exit marker — stays
-    /// SILENT so the routine title/model_change/compaction churn can't flood.
     #[test]
     fn unknown_entry_type_breadcrumbs_but_known_types_stay_silent() {
         let novel = r#"{"type":"quantum_entry","id":"x","parentId":null,"timestamp":"t"}"#;
@@ -927,11 +776,6 @@ mod tests {
             "a brand-new omp entry type must fire the drift breadcrumb, got:\n{logs}"
         );
 
-        // silent-real: KNOWN types we don't decode fire routinely, so a
-        // KNOWN_ENTRY_TYPES omission would flood. All stay SILENT — the case
-        // `quantum_entry` can't catch. `custom`/non-exit customType is load-bearing:
-        // the customType axis is the unbounded one we keep silent on (only the entry
-        // `type` is guarded, never customType).
         for line in [
             r#"{"type":"title","v":1,"title":"t","source":"auto","updatedAt":"t","pad":"   "}"#,
             r#"{"type":"model_change","id":"x","parentId":null,"timestamp":"t","model":"m"}"#,
@@ -962,7 +806,6 @@ mod tests {
 
     #[test]
     fn omp_agent_dir_honors_non_empty_env_override() {
-        // Env-mutating → take the process-global guard and restore.
         let _env = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -971,8 +814,6 @@ mod tests {
         std::env::set_var("PI_CODING_AGENT_DIR", "/custom/agent");
         assert_eq!(omp_agent_dir(), PathBuf::from("/custom/agent"));
 
-        // Set-but-empty OR whitespace-only is treated as unset (trim-based, the
-        // #172 policy — a `"  "` value must not resolve the dir to a relative "  ").
         for blank in ["", "   "] {
             std::env::set_var("PI_CODING_AGENT_DIR", blank);
             let dflt = omp_agent_dir();
@@ -990,6 +831,4 @@ mod tests {
             None => std::env::remove_var("PI_CODING_AGENT_DIR"),
         }
     }
-
-    // The session-ended checker tests live with the runtime half in `native.rs`.
 }

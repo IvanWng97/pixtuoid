@@ -1,18 +1,13 @@
 //! Kernel process-start MARKERS — the identity half of pid-recycle guards.
 //!
 //! [`pid_start_marker`] returns an opaque per-OS value that is stable for a
-//! process's whole life and different for a recycled pid: macOS epoch seconds
-//! (`proc_pidinfo(PROC_PIDTBSDINFO)` → `pbi_start_tvsec`), Linux clock ticks
-//! since boot (`/proc/<pid>/stat` field 22, read RAW — equality needs no
-//! boot-time/ticks-per-sec conversion, the blocker that kept #220's epoch
-//! check macOS-only). The units DIFFER per OS: compare two markers from the
-//! SAME machine for equality, never across hosts and never as wall-clock.
-//! `None` on any failure (pid gone, EPERM, unsupported OS) — callers treat a
-//! missing marker as "no identity check available", never an error.
-//!
-//! Two consumers: the hook plane stamps `(pid, marker)` at `_pid` peek time
-//! (`PidIdentity`), and the binary's focus click re-reads the marker to
-//! refuse a recycled pid (#527).
+//! process's whole life and different for a recycled pid: macOS epoch seconds,
+//! Linux clock ticks since boot (read RAW — equality needs no
+//! boot-time/ticks-per-sec conversion). The units DIFFER per OS: compare two
+//! markers from the SAME machine for equality, never across hosts and never as
+//! wall-clock. `None` on any failure (pid gone, EPERM, unsupported OS) —
+//! callers treat a missing marker as "no identity check available", never an
+//! error.
 
 /// Opaque start marker for `pid`, or `None` when unreadable/unsupported.
 pub fn pid_start_marker(pid: i32) -> Option<u64> {
@@ -46,9 +41,9 @@ fn imp(pid: i32) -> Option<u64> {
 
 #[cfg(target_os = "linux")]
 fn imp(pid: i32) -> Option<u64> {
-    // /proc/<pid>/stat field 22 is starttime; the comm field (2) can contain
-    // spaces/parens, so count fields AFTER the last ')' (comm is field 2,
-    // so starttime is the 20th token past it).
+    // `/proc/<pid>/stat` field 22 is starttime, but the comm field (2) can
+    // contain spaces/parens — so count from after the LAST ')', where starttime
+    // is the 20th token.
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after = stat.rsplit_once(')')?.1;
     after.split_whitespace().nth(19)?.parse().ok()
@@ -75,7 +70,6 @@ mod tests {
         assert_eq!(first, second, "the marker never changes for one process");
         child.kill().expect("kill the child");
         child.wait().expect("reap so the pid leaves the table");
-        // A reaped pid has no /proc entry / bsdinfo — the read fails to None.
         assert_eq!(pid_start_marker(pid), None);
     }
 

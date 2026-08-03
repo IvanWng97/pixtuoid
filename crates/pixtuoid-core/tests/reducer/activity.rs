@@ -31,11 +31,6 @@ fn activity_start_sets_state_active() {
 
 #[test]
 fn activity_end_arms_debounce_then_tick_flips_to_idle() {
-    // After ActivityEnd the slot stays VISUALLY Active for
-    // ACTIVE_GRACE_WINDOW (1500ms) — this hides per-tool-call flicker
-    // from rapid CC tool chains. `pending_idle_at` is the debounce
-    // armed-flag; `reducer.tick` (or another event past the window)
-    // realizes the transition.
     use std::time::Duration;
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -60,19 +55,16 @@ fn activity_end_arms_debounce_then_tick_flips_to_idle() {
         Transport::Hook,
     );
 
-    // Immediately after ActivityEnd — still Active, debounce armed.
     let slot = scene.agents.get(&id).unwrap();
     assert!(matches!(slot.state, ActivityState::Active { .. }));
     assert!(slot.pending_idle_at.is_some());
 
-    // Tick before window expires — still Active.
     r.tick(&mut scene, t0 + Duration::from_millis(900));
     assert!(matches!(
         scene.agents.get(&id).unwrap().state,
         ActivityState::Active { .. }
     ));
 
-    // Tick past the window — flips to Idle.
     r.tick(&mut scene, t0 + Duration::from_millis(2000));
     assert_eq!(scene.agents.get(&id).unwrap().state, ActivityState::Idle);
     assert!(scene.agents.get(&id).unwrap().pending_idle_at.is_none());
@@ -80,9 +72,6 @@ fn activity_end_arms_debounce_then_tick_flips_to_idle() {
 
 #[test]
 fn activity_start_inside_grace_window_cancels_debounce() {
-    // A new tool starting before the debounce window expires must
-    // cancel the pending-idle so the slot reads as continuously
-    // Active for chained tool work (Read → Glob → Edit etc.).
     use std::time::Duration;
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -107,7 +96,7 @@ fn activity_start_inside_grace_window_cancels_debounce() {
         Transport::Hook,
     );
     assert!(scene.agents.get(&id).unwrap().pending_idle_at.is_some());
-    // Second tool starts 200ms later — well inside the grace window.
+    // A second tool starts well inside the grace window.
     act_start(
         &mut r,
         &mut scene,
@@ -123,7 +112,6 @@ fn activity_start_inside_grace_window_cancels_debounce() {
         slot.pending_idle_at.is_none(),
         "ActivityStart inside grace must cancel pending idle"
     );
-    // Tick well past the original ActivityEnd's grace — must still be Active.
     r.tick(&mut scene, t0 + Duration::from_millis(2500));
     assert!(matches!(
         scene.agents.get(&id).unwrap().state,
@@ -213,10 +201,8 @@ fn active_ms_accumulates_on_state_transitions() {
     );
     assert_eq!(scene.agents.get(&id).unwrap().active_ms, 0);
 
-    // End after 1 second, then tick past grace window to flush to Idle
     let t1 = t0 + Duration::from_secs(1);
     act_end(&mut r, &mut scene, id, Some("t1"), t1, Transport::Hook);
-    // active_ms not yet accumulated (happens on next ActivityStart or expire)
     r.tick(&mut scene, t1 + Duration::from_secs(3));
     let slot = scene.agents.get(&id).unwrap();
     assert!(
@@ -245,9 +231,8 @@ fn active_ms_does_not_double_count_on_duplicate_activity_end() {
     );
 
     let t1 = t0 + Duration::from_secs(2);
-    // First ActivityEnd (hook)
     act_end(&mut r, &mut scene, id, Some("t1"), t1, Transport::Hook);
-    // Second ActivityEnd (late JSONL, past dedup window)
+    // The 2nd end is deliberately PAST the hook-wins window, so it is NOT deduped.
     act_end(
         &mut r,
         &mut scene,
@@ -257,15 +242,10 @@ fn active_ms_does_not_double_count_on_duplicate_activity_end() {
         Transport::Jsonl,
     );
 
-    // Flush to idle
     r.tick(&mut scene, t1 + Duration::from_secs(3));
     let slot = scene.agents.get(&id).unwrap();
-    // EXACTLY 2600ms = ONE active span from t0 to the last end signal (t1+600).
-    // The 2nd ActivityEnd is deliberately PAST the hook-wins window (so NOT
-    // deduped): it re-arms pending-idle to t1+600, EXTENDING the single span —
-    // it must not fold a SECOND span (~4600ms), which is the double-count this
-    // test guards. The old `< 5000` bound accepted both the true 2600 AND a
-    // gross ~4600 double-fold, so it pinned nothing tight.
+    // 2600ms = the ONE span t0 → t1+600, EXTENDED by the late end; a second
+    // folded span would read ~4600.
     assert_eq!(
         slot.active_ms, 2600,
         "active_ms should be the single t0→t1+600 span (2600ms), not double-counted"
@@ -282,7 +262,6 @@ fn active_ms_preserved_when_task_arrives_during_active_tool() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     start(&mut r, &mut scene, id);
 
-    // Tool starts
     act_start(
         &mut r,
         &mut scene,
@@ -293,7 +272,7 @@ fn active_ms_preserved_when_task_arrives_during_active_tool() {
         Transport::Hook,
     );
 
-    // 2 seconds later, Task arrives while still Active (within grace window)
+    // Task arrives while still Active (within the grace window).
     let t1 = t0 + Duration::from_secs(2);
     r.apply(
         &mut scene,
@@ -343,14 +322,10 @@ fn active_ms_preserved_when_waiting_interrupts_active() {
     );
 }
 
-// A CC permission Notification fires while a tool (t1) is mid-flight:
-//   PreToolUse(t1)[Active] -> Notification[Waiting] -> PostToolUse(t1).
-// PostToolUse(t1) means t1 ran (permission granted) and finished, so the
-// Waiting is RESOLVED. Captured live (probe): the gated tool's ActivityEnd
-// carries the same tool_use_id that was Active when Waiting began. Resolving on
-// it clears the question-mark when the tool finishes instead of holding it
-// until the agent's *next* tool (~6 s later). Debounced through pending_idle
-// like a normal Active->Idle so a fast next tool doesn't flicker.
+// CC wire fact (captured live): when a permission Notification fires mid-tool
+// (PreToolUse(t1) → Notification → PostToolUse(t1)), the gated tool's
+// ActivityEnd carries the same tool_use_id that was Active when Waiting began —
+// so PostToolUse(t1) means the permission was granted and the Waiting resolved.
 #[test]
 fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
     use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
@@ -378,8 +353,7 @@ fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
         Transport::Hook,
     );
 
-    // The gated tool's own PostToolUse arrives — arms the idle debounce, still
-    // visually Waiting for the grace window (no instant flip).
+    // The gated tool's own PostToolUse arrives.
     let end = t0 + Duration::from_millis(1000);
     act_end(&mut r, &mut scene, id, Some("t1"), end, Transport::Hook);
     let slot = scene.agents.get(&id).unwrap();
@@ -393,7 +367,6 @@ fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
         "gated tool end must arm the resolve debounce"
     );
 
-    // After the grace window, the resolved Waiting settles to Idle.
     r.tick(
         &mut scene,
         end + ACTIVE_GRACE_WINDOW + Duration::from_millis(100),
@@ -405,9 +378,6 @@ fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
     );
 }
 
-// Protection (preserved): a PARALLEL tool (t2) ending while a DIFFERENT tool's
-// permission (t1) is still pending must NOT clear the Waiting — the id doesn't
-// match the gated tool, so the prompt stays up.
 #[test]
 fn parallel_tool_end_while_waiting_keeps_waiting() {
     use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
@@ -435,7 +405,7 @@ fn parallel_tool_end_while_waiting_keeps_waiting() {
         Transport::Hook,
     );
 
-    // A different tool ends — must be ignored (its permission isn't this one).
+    // A different tool ends.
     act_end(
         &mut r,
         &mut scene,
@@ -455,7 +425,6 @@ fn parallel_tool_end_while_waiting_keeps_waiting() {
         "parallel tool end must not arm the resolve debounce"
     );
 
-    // ...and it does NOT resolve even after the grace window passes.
     r.tick(
         &mut scene,
         t0 + Duration::from_millis(1000) + ACTIVE_GRACE_WINDOW + Duration::from_millis(100),
@@ -469,11 +438,9 @@ fn parallel_tool_end_while_waiting_keeps_waiting() {
     );
 }
 
-// A turn-end `Stop` (hook, no tool_use_id — Codex/Reasonix) resolves a stale
-// Waiting: an approval prompt BLOCKS those CLIs' turns, so Stop arriving while
-// Waiting means the prompt was denied/abandoned and already resolved upstream.
-// Without this, a denied Reasonix approval at turn end ghosts "waiting" until
-// the 60-min sweep (Reasonix has no second transport to self-heal it).
+// An approval prompt BLOCKS a Codex/Reasonix turn, so a turn-end `Stop` (hook,
+// no tool_use_id) arriving while Waiting means the prompt was already resolved
+// upstream — and Reasonix has no second transport to self-heal a stale one.
 #[test]
 fn turn_end_stop_hook_resolves_stale_waiting() {
     use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
@@ -496,7 +463,6 @@ fn turn_end_stop_hook_resolves_stale_waiting() {
         ActivityState::Waiting { .. }
     ));
 
-    // Turn ends (denied prompt): Stop → ActivityEnd with no id, Hook transport.
     let end = t0 + Duration::from_millis(800);
     act_end(&mut r, &mut scene, id, None, end, Transport::Hook);
     r.tick(
@@ -510,10 +476,9 @@ fn turn_end_stop_hook_resolves_stale_waiting() {
     );
 }
 
-// Protection (the Hook gate): a JSONL None-id end must NOT resolve a Waiting —
-// Codex's JSONL emits None-id ActivityEnds per tool (it opts out of dedup),
-// and one can race in just after a fresh PermissionRequest. Only the hook-side
-// turn-end signal is trustworthy.
+// Codex's JSONL emits None-id ActivityEnds per tool (it opts out of dedup), and
+// one can race in just after a fresh PermissionRequest — so only the HOOK-side
+// turn-end signal may resolve a Waiting.
 #[test]
 fn jsonl_none_id_end_while_waiting_keeps_waiting() {
     use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
@@ -524,7 +489,6 @@ fn jsonl_none_id_end_while_waiting_keeps_waiting() {
 
     start(&mut r, &mut scene, id);
     waiting(&mut r, &mut scene, id, "permission", t0, Transport::Hook);
-    // A late rollout line for the PREVIOUS tool races in after the prompt.
     act_end(
         &mut r,
         &mut scene,
@@ -548,9 +512,7 @@ fn jsonl_none_id_end_while_waiting_keeps_waiting() {
 
 #[test]
 fn codex_permission_then_jsonl_output_resumes_to_active() {
-    // Regression: a cx· agent stuck Waiting on a permission prompt must return
-    // to Active once the transcript's function_call_output (an ActivityStart)
-    // arrives. Hook and JSONL coalesce on the session UUID.
+    // The hook Waiting and the JSONL resume coalesce on the session UUID.
     let mut reducer = Reducer::new();
     let mut scene = SceneState::uniform(4);
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
@@ -598,11 +560,6 @@ fn codex_permission_then_jsonl_output_resumes_to_active() {
     );
 }
 
-// Copilot permission gate, decoder → reducer (cross-layer): a DENIED permission
-// must leave the sprite, not strand it in Waiting for the 60-min sweep. The
-// decoder emits ActivityStart{tool_use_id:None} on denial; this pins that the
-// reducer actually transitions Waiting→Active on it (the bot's PR #292 ask —
-// the decoder unit test only proved the event is emitted, not that it clears).
 #[test]
 fn copilot_denied_permission_clears_waiting_through_the_reducer() {
     use pixtuoid_core::source::copilot::decode_copilot_line;
@@ -621,8 +578,8 @@ fn copilot_denied_permission_clears_waiting_through_the_reducer() {
         &mut scene,
         r#"{"type":"session.start","data":{"sessionId":"sess","context":{"cwd":"/repo"}},"id":"a","parentId":null}"#,
     );
-    // BYTE-REAL (#294): a matched interactive permission round captured from a
-    // live `copilot` 1.0.62 session (requestId 954afe31…, the user pressed Reject).
+    // BYTE-REAL: a matched permission round captured from a live copilot session
+    // (the user pressed Reject) — do not hand-edit these payloads.
     feed(
         &mut r,
         &mut scene,
@@ -649,12 +606,7 @@ fn copilot_denied_permission_clears_waiting_through_the_reducer() {
     );
 }
 
-// omp ask gate, decoder → reducer (cross-layer, #519): the `ask` toolCall's
-// Start+Waiting pair must bind `gated_before_waiting` to the ask's OWN
-// tool_use_id, so the answer's toolResult (ActivityEnd, same id) resolves the
-// Wait — the decoder unit test only proves the pair is emitted, not that the
-// answer clears it. Line shapes follow a captured omp 16.4.0 ask round,
-// sanitized.
+// Line shapes follow a captured omp ask round, sanitized.
 #[test]
 fn omp_ask_round_waits_then_answer_clears_through_the_reducer() {
     use pixtuoid_core::source::omp::decode_omp_line;

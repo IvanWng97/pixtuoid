@@ -1,16 +1,13 @@
 //! Pins the hook shim's socket path EQUAL to the daemon's, branch by branch.
 //!
 //! The shim (producer) and `ClaudeCodeSource` (consumer) each compute the
-//! default socket path independently — they MUST agree or hook events
-//! silently never arrive. Each crate already unit-tests its own three
-//! branches against the same literals, but two parallel literal pins only
-//! hold if a reviewer notices the sibling when one side changes; this test
-//! compares the two implementations DIRECTLY, so a one-sided change fails
-//! regardless of which crate's unit test got updated (#93).
+//! default socket path independently — they MUST agree or hook events silently
+//! never arrive. Each crate unit-tests its own branches against the same
+//! literals, but two parallel literal pins only hold if a reviewer notices the
+//! sibling; this compares the two implementations DIRECTLY (#93).
 //!
-//! The shim source is included via `#[path]` — compile-time source inclusion,
-//! NOT a cargo dependency — because the hook crate must stay free of
-//! pixtuoid-core (workspace invariant #5: nothing may slow or bloat the shim).
+//! The shim source is included via `#[path]`, NOT a cargo dependency, because
+//! the hook crate must stay free of pixtuoid-core (workspace invariant #5).
 
 #[path = "../../pixtuoid-hook/src/paths.rs"]
 mod hook_paths;
@@ -27,23 +24,20 @@ fn both() -> (PathBuf, PathBuf) {
 }
 
 // All three branches in ONE test: env vars are process-global, and this is the
-// only test in this integration binary, so there is nothing to race (same
-// pattern as the per-crate branch tests).
+// only test in this integration binary, so there is nothing to race.
 #[cfg(unix)]
 #[test]
 fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
     let saved_socket = std::env::var_os("PIXTUOID_SOCKET");
     let saved_xdg = std::env::var_os("XDG_RUNTIME_DIR");
 
-    // Branch 1: PIXTUOID_SOCKET wins on both sides.
     std::env::set_var("PIXTUOID_SOCKET", "/explicit/parity.sock");
     std::env::set_var("XDG_RUNTIME_DIR", "/run/user/7");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "PIXTUOID_SOCKET branch diverged");
     assert_eq!(shim, PathBuf::from("/explicit/parity.sock"));
 
-    // Branch 1b: set-but-empty PIXTUOID_SOCKET = unset on BOTH sides (the
-    // #172 RUST_LOG policy) — falls through to XDG identically.
+    // Set-but-empty PIXTUOID_SOCKET = unset on BOTH sides.
     std::env::set_var("PIXTUOID_SOCKET", "");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "empty PIXTUOID_SOCKET branch diverged");
@@ -53,14 +47,13 @@ fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
     assert_eq!(shim, daemon, "whitespace PIXTUOID_SOCKET branch diverged");
     assert_eq!(shim, PathBuf::from("/run/user/7/pixtuoid.sock"));
 
-    // Branch 2: XDG_RUNTIME_DIR drives the path on both sides.
     std::env::remove_var("PIXTUOID_SOCKET");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "XDG_RUNTIME_DIR branch diverged");
     assert_eq!(shim, PathBuf::from("/run/user/7/pixtuoid.sock"));
 
-    // Branch 2b: set-but-empty / relative XDG_RUNTIME_DIR is invalid (XDG absolute-
-    // only) → BOTH ignore it, never `/pixtuoid.sock` (empty) or a cwd-relative path.
+    // XDG_RUNTIME_DIR is absolute-only per spec, so an empty/relative value must be
+    // ignored — never `/pixtuoid.sock` or a cwd-relative path.
     // Safety: getuid is always safe on Unix.
     let uid = unsafe { libc::getuid() };
     let tmp_fallback = PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"));
@@ -74,8 +67,8 @@ fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
         );
     }
 
-    // Branch 3: uid-scoped /tmp SUBDIR fallback on both sides (#485 — the
-    // per-user 0700 dir, not a flat squattable `pixtuoid-{uid}.sock`).
+    // The /tmp fallback is a per-user 0700 SUBDIR, not a flat squattable
+    // `pixtuoid-{uid}.sock` (#485).
     std::env::remove_var("XDG_RUNTIME_DIR");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "/tmp-uid fallback branch diverged");
@@ -83,8 +76,8 @@ fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
         shim,
         PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"))
     );
-    // The shim resolves its owned-dir (for the pre-connect ownership guard)
-    // from that same fallback endpoint — pin it here too (#485).
+    // The shim's pre-connect ownership guard derives its owned-dir from that same
+    // fallback endpoint.
     assert_eq!(
         hook_paths::owned_tmp_socket_dir(&shim.to_string_lossy()),
         Some(PathBuf::from(format!("/tmp/pixtuoid-{uid}"))),
@@ -100,23 +93,19 @@ fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
     }
 }
 
-// Only EXERCISED on a Windows runner (PR 3's CI job) — until then the
-// ubuntu cross-check job keeps it compiling. The windows CI job is part
-// of invariant #3 from that point on.
 #[cfg(windows)]
 #[test]
 fn shim_and_daemon_resolve_identical_pipe_names_in_all_branches() {
     let saved_socket = std::env::var_os("PIXTUOID_SOCKET");
     let saved_user = std::env::var_os("USERNAME");
 
-    // Branch 1: PIXTUOID_SOCKET (a pipe name on Windows) wins on both sides.
+    // PIXTUOID_SOCKET is a pipe name on Windows.
     std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\parity-explicit");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "PIXTUOID_SOCKET branch diverged");
     assert_eq!(shim, PathBuf::from(r"\\.\pipe\parity-explicit"));
 
-    // Branch 1b: set-but-empty PIXTUOID_SOCKET = unset on BOTH sides (the
-    // #172 RUST_LOG policy) — falls through to the USERNAME default.
+    // Set-but-empty PIXTUOID_SOCKET = unset on BOTH sides.
     std::env::set_var("PIXTUOID_SOCKET", "");
     std::env::set_var("USERNAME", "parity");
     let (shim, daemon) = both();
@@ -127,22 +116,19 @@ fn shim_and_daemon_resolve_identical_pipe_names_in_all_branches() {
     assert_eq!(shim, daemon, "whitespace PIXTUOID_SOCKET branch diverged");
     assert_eq!(shim, PathBuf::from(r"\\.\pipe\pixtuoid-parity"));
 
-    // Branch 2: USERNAME-keyed default pipe name on both sides.
     std::env::remove_var("PIXTUOID_SOCKET");
     std::env::set_var("USERNAME", "parity");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "USERNAME default branch diverged");
     assert_eq!(shim, PathBuf::from(r"\\.\pipe\pixtuoid-parity"));
 
-    // Branch 3: DOMAIN\user-form USERNAME is sanitized identically on both
-    // sides (backslashes are illegal in pipe names; enterprise boxes set
-    // USERNAME=DOMAIN\user).
+    // Backslashes are illegal in pipe names, and enterprise boxes set
+    // USERNAME=DOMAIN\user — both sides must sanitize identically.
     std::env::set_var("USERNAME", r"CORP\alice");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "USERNAME sanitize branch diverged");
     assert_eq!(shim, PathBuf::from(r"\\.\pipe\pixtuoid-CORP-alice"));
 
-    // Branch 4: USERNAME absent → the shared "default" fallback on both sides.
     std::env::remove_var("USERNAME");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "USERNAME-absent fallback branch diverged");

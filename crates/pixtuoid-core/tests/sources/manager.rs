@@ -23,8 +23,6 @@ impl Source for StaticSource {
     }
 }
 
-/// A source whose `run` returns Err immediately — exercises the manager's
-/// log-and-isolate Err arm.
 struct FailingSource;
 
 impl Source for FailingSource {
@@ -36,9 +34,6 @@ impl Source for FailingSource {
     }
 }
 
-// A source returning Err must be logged and isolated — it must NOT abort its
-// siblings. Register a FailingSource beside a good one and assert the good
-// source's event still arrives.
 #[tokio::test]
 async fn manager_isolates_a_failing_source_from_siblings() {
     let good_id = AgentId::from_parts("good", "1");
