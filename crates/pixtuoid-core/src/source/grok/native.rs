@@ -27,7 +27,13 @@ use crate::source::{Source, TaggedSender};
 /// this registry is the substitute. Headless (`-p`) sessions are NOT
 /// registered (only under the debug env `GROK_TRACK_HEADLESS`) — they are
 /// never vouched, and since the negative vouch only ends PREVIOUSLY-vouched
-/// ids, headless one-shots ride the mtime gate + short-idle reap instead.
+/// ids, headless one-shots ride the mtime gate + short-idle reap instead. That
+/// covers the headless-INTO-leader setup too (#826): a live leader is detected
+/// but binds nothing, because this probe reassigns the OWNER of registry-listed
+/// sessions rather than discovering ids. Unchanged from every shipped version —
+/// #638's id-discovering walk never ran — and deliberately not revived: it
+/// derived freshness from transcript mtime, which expires while the session
+/// lives and would hand the negative vouch a live id to confirm dead.
 ///
 /// Failure semantics (#223): an ABSENT registry file is `Some(empty)` — a
 /// healthy "nothing alive" observation (grok not running / never run; also
@@ -56,7 +62,11 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     let path = grok_root.join("active_sessions.json");
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
-        // Absent registry = healthy "no TUI clients".
+        // Absent registry = healthy "no TUI clients" — and nothing for a leader
+        // to own either: the leader arm reassigns the OWNER of registry-listed
+        // sessions, it does not discover ids, so with no entries there is
+        // nothing to reassign. Consulting the lock here would cost a syscall to
+        // reach the same empty snapshot.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(ProbeSnapshot::default()),
         Err(_) => return None,
     };
