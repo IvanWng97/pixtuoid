@@ -1,10 +1,9 @@
-//! macOS focus glue: `/bin/ps` for the ancestor walk (proc_pidinfo enforces
-//! same-user and the terminal chain crosses the setuid-root `login` — see
-//! `ppid`) + `NSRunningApplication` for the focusable test and activation. Zero TCC permissions: `activate()` is plain
+//! macOS focus glue: `/bin/ps` for the ancestor walk + `NSRunningApplication` for
+//! the focusable test and activation. Zero TCC permissions — `activate()` is plain
 //! Cocoa, not an Apple Event.
 //!
-//! codecov-ignored glue (needs a real GUI session — the `floating/window.rs`
-//! class); the walk logic itself is tested in `focus::tests` on mock tables.
+//! codecov-ignored glue (needs a real GUI session); the walk logic itself is
+//! tested in `focus::tests` on mock tables.
 
 use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication};
 
@@ -14,14 +13,12 @@ pub(crate) struct OsProcessTable;
 
 impl ProcessTable for OsProcessTable {
     fn ppid(&self, pid: i32) -> Option<i32> {
-        // `ps` (the system binary) rather than proc_pidinfo FFI: the terminal
-        // chain runs through the setuid-root `login` process, and
-        // proc_pidinfo enforces same-user — EPERM there stopped the walk one
-        // hop short of the terminal app (caught by the live dogfood test).
-        // ps reads any pid via sysctl KERN_PROC; libc doesn't bind
-        // kinfo_proc, and a hand-written 600-byte ABI struct for one field
-        // is a worse trade than one short-lived child per hop on a
-        // click-driven path (≤ ~10 hops, ms-scale).
+        // `ps` rather than proc_pidinfo FFI: the terminal chain runs through the
+        // setuid-root `login` process and proc_pidinfo enforces same-user, so
+        // EPERM there stopped the walk one hop short of the terminal app. ps
+        // reads any pid via sysctl KERN_PROC; libc doesn't bind kinfo_proc, and a
+        // hand-written 600-byte ABI struct for one field is a worse trade than one
+        // short-lived child per hop on a click-driven path.
         let out = std::process::Command::new("/bin/ps")
             .args(["-o", "ppid=", "-p", &pid.to_string()])
             .output()

@@ -32,11 +32,8 @@ fn coffee_machine_hit_test_returns_true_for_machine_area() {
 #[test]
 fn furniture_hit_test_returns_none_for_empty_space() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    // Open floor must report no furniture. Scan for an empty cell rather
-    // than hardcoding one — which mid-floor cells are open shifts when the
-    // pod aisle spacing is retuned (a hardcoded point goes stale and lands
-    // on a reflowed desk). If hit_test_furniture wrongly matched
-    // everywhere, no empty cell would be found and `.expect` would panic.
+    // Scan for an empty cell rather than hardcoding one: which mid-floor cells
+    // are open shifts whenever the pod aisle spacing is retuned.
     let empty = (0..(layout.buf_h / 2))
         .flat_map(|cy| (0..layout.buf_w).map(move |cx| (cx, cy)))
         .find(|&(cx, cy)| hit_test_furniture(&layout, cx, cy).is_none())
@@ -53,8 +50,6 @@ fn furniture_hit_test_finds_desk() {
         hit_test_furniture(&layout, desk.x + 2, cell_y),
         Some("Desk")
     );
-    // The east overhang column the OLD DESK_W+2 box CLIPPED — derive from the
-    // table so the test can't re-hardcode the width (desk.x + visual.w - 1).
     let vis_w = pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture::Desk)
         .visual
         .w;
@@ -78,10 +73,8 @@ fn furniture_hit_test_finds_elevator() {
 
 #[test]
 fn dense_room_1_has_coat_rack_and_doormat() {
-    // #555's second half: the meeting-decor painters + hover labels
-    // iterate ALL meeting_rooms — a dense floor's second room used to
-    // render sofas + table but NO coat rack / doormat / notice board
-    // (everything keyed room 0).
+    // Regression (#555): the meeting-decor painters and hover labels must iterate
+    // ALL meeting_rooms, not just room 0.
     let mut saw_dual = false;
     for seed in 0..10u64 {
         let layout = Layout::compute_with_seed(192, 160, Some(8), seed).expect("layout");
@@ -139,10 +132,7 @@ fn furniture_hit_test_respects_floor_seed() {
 #[test]
 fn cat_hit_test_inside_sit_sprite() {
     use pixtuoid_scene::layout::Point;
-    // cat_sit is 6x6. Center at (50, 80).
-    // Top-left pixel: (50-3, 80-3) = (47, 77).
-    // cell_y for my=39 → 78, which is inside [77..83).
-    // mx=50 inside [47..53).
+    // cat_sit is 6x6 centred at (50,80) → x[47..53), y[77..83); my=39 doubles to 78.
     let pos = Point { x: 50, y: 80 };
     assert!(hit_test_pet(PetKind::Cat, pos, "cat_sit", 50, 39));
 }
@@ -151,22 +141,17 @@ fn cat_hit_test_inside_sit_sprite() {
 fn cat_hit_test_outside_returns_false() {
     use pixtuoid_scene::layout::Point;
     let pos = Point { x: 50, y: 80 };
-    // Way outside the 6x6 sprite.
     assert!(!hit_test_pet(PetKind::Cat, pos, "cat_sit", 10, 10));
 }
 
 #[test]
 fn mascot_hit_test_inside_and_outside() {
     use pixtuoid_scene::layout::Point;
-    // 14x12 sprite centered at (50, 80) → top-left pixel (43, 74).
+    // The 14x12 sprite centred at (50,80) spans x[43..57), y[74..86); my=39 → 78.
     let pos = Point { x: 50, y: 80 };
-    // cell my=39 → pixel 78 ∈ [74..86); mx=50 ∈ [43..57).
     assert!(hit_test_mascot(pos, 14, 12, 50, 39));
-    // Far away.
     assert!(!hit_test_mascot(pos, 14, 12, 10, 10));
 }
-
-// --- hit_test_from_tui (click-to-pin, home-desk-only) -----------------
 
 fn scene_with_agent_at_desk(desk_index: usize) -> (SceneState, AgentId) {
     use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex};
@@ -207,9 +192,8 @@ fn from_tui_hits_agent_at_its_desk_anchor() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let (scene, id) = scene_with_agent_at_desk(0);
     let d = layout.home_desks[0];
-    // Computed FROM the painter's seated-anchor geometry (DESK_W-centered
-    // 8px sprite, 8px above the desk) — NOT a mirror of the impl's own
-    // literals, so a drift from the painted sprite reddens here.
+    // Derived from the painter's seated anchor (a DESK_W-centred 8px sprite 8px
+    // above the desk), not a mirror of the impl's own literals.
     let cx = d.x
         + pixtuoid_scene::layout::DESK_W.saturating_sub(pixtuoid_scene::layout::CHARACTER_SPRITE_W)
             / 2;
@@ -217,11 +201,9 @@ fn from_tui_hits_agent_at_its_desk_anchor() {
     assert_eq!(hit_test_from_tui(&scene, &layout, cx, cy), Some(id));
 }
 
-// The drift-pair guard: the click-to-pin box must cover EXACTLY the cells the
-// painter blits the seated sprite into. The oracle is `character_anchor` —
-// the SAME anchor the hover tooltip (hit_test_agent) and the sprite blit use
-// — so hover and click can't disagree on the same cells (the PANEL_PAD
-// pairing class: derive both sides from one geometry, pin with a test).
+// The click-to-pin box must cover EXACTLY the cells the painter blits the seated
+// sprite into. The oracle is `character_anchor` — the same anchor the hover
+// tooltip and the sprite blit use — so hover and click cannot disagree.
 #[test]
 fn from_tui_pin_box_matches_the_painted_seated_anchor() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
@@ -246,7 +228,6 @@ fn from_tui_pin_box_matches_the_painted_seated_anchor() {
         .expect("a seated agent has a painted anchor");
 
     let (ax, ay) = (anchor.x, anchor.y / 2);
-    // Every cell of the painted 8x6 sprite box pins…
     for dx in 0..pixtuoid_scene::layout::CHARACTER_SPRITE_W {
         for dy in 0..pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS {
             assert_eq!(
@@ -256,7 +237,6 @@ fn from_tui_pin_box_matches_the_painted_seated_anchor() {
             );
         }
     }
-    // …and the cells just outside it do not (no phantom pin).
     assert_eq!(
         hit_test_from_tui(&scene, &layout, ax.wrapping_sub(1), ay),
         None
@@ -295,28 +275,22 @@ fn from_tui_misses_empty_space() {
 #[test]
 fn from_tui_skips_agent_with_out_of_range_desk() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    // desk_index past the layout's home-desk count ⇒ `continue` arm.
     let (scene, _id) = scene_with_agent_at_desk(layout.home_desks.len() + 100);
-    // No agent occupies any cell — scan a few and confirm None everywhere.
     for &(mx, my) in &[(0u16, 0u16), (40, 20), (80, 40)] {
         assert_eq!(hit_test_from_tui(&scene, &layout, mx, my), None);
     }
 }
 
-// Regression for the bridge-choice bug: with the ARITHMETIC bridge
-// (`scene.floor_local_desk`), an OOB desk equal to the uniform scene's cap
-// wraps onto a synthetic floor 1 and lands back at local 0 — hit-testable
-// at desk 0 while the renderer skips it. The identity cast must keep it
-// OOB everywhere.
+// With the ARITHMETIC bridge (`scene.floor_local_desk`) an OOB desk equal to the
+// uniform scene's cap wrapped onto a synthetic floor 1 and landed back at local
+// 0 — hit-testable at desk 0 while the renderer skipped it. Hence `cap` below.
 #[test]
 fn from_tui_oob_desk_at_capacity_boundary_does_not_wrap_to_desk_zero() {
     use pixtuoid_core::state::GlobalDeskIndex;
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let (mut scene, id) = scene_with_agent_at_desk(0);
     let cap = scene.floor_capacities[0];
-    // Re-seat the agent at exactly `cap` — the wrap-prone value.
     scene.agents.get_mut(&id).expect("slot").desk_index = GlobalDeskIndex(cap);
-    // Scan desk 0's whole sprite box — the wrapped bridge would hit here.
     let desk0 = layout.home_desks[0];
     let (ax, ay) = (
         desk0.x
@@ -336,10 +310,8 @@ fn from_tui_oob_desk_at_capacity_boundary_does_not_wrap_to_desk_zero() {
     }
 }
 
-// --- hit_test_furniture: arms the real-layout loop may not reach --------
-// WallDecor::BulletinBoard is never emitted by compute_with_seed, and the
-// Ficus only appears on ROOMY-band floors — push them into the pub Vecs of
-// a computed layout and hit their centers, size-independent.
+// BulletinBoard is never emitted by compute_with_seed and Ficus only appears on
+// ROOMY-band floors, so both are placed synthetically below.
 
 #[test]
 fn furniture_hit_test_ficus_via_synthetic_plant() {
@@ -376,24 +348,15 @@ fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
 #[test]
 fn cat_hit_test_sleep_smaller_box() {
     use pixtuoid_scene::layout::Point;
-    // cat_sleep is 6x4. Center at (50, 80).
-    // Top-left: (47, 78). Bottom-right: (53, 82).
+    // cat_sleep is 6x4 centred at (50,80) → y[78..82): my=41 doubles to 82 (out),
+    // my=40 to 80 (in).
     let pos = Point { x: 50, y: 80 };
-    // cell_y for my=41 → 82, which is at the boundary (82 >= 82 is false for < check).
-    // Actually wait: tl_y = 80 - 2 = 78, h=4 so range is [78..82). cell_y=82 is OUT.
     assert!(!hit_test_pet(PetKind::Cat, pos, "cat_sleep", 50, 41));
-    // cell_y for my=40 → 80, inside [78..82).
     assert!(hit_test_pet(PetKind::Cat, pos, "cat_sleep", 50, 40));
 }
 
-// --- hit_test_coffee_machine: the missing-pantry guard + small-counter box --
-
-// The Pantry-waypoint early-return: with the Pantry waypoint removed,
-// `hit_test_coffee_machine` must be false EVERYWHERE — and specifically at
-// the coords that DO hit while the waypoint is present. That second probe
-// proves the false comes from the missing-pantry guard, not an off-counter
-// miss (it would pass even if the early return were deleted, were it any
-// other coordinate).
+// Probing coords that DO hit while the waypoint is present is what proves the
+// false comes from the missing-pantry guard rather than an off-counter miss.
 #[test]
 fn coffee_machine_returns_false_when_no_pantry_waypoint() {
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
@@ -402,7 +365,6 @@ fn coffee_machine_returns_false_when_no_pantry_waypoint() {
         .iter()
         .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
         .expect("pantry");
-    // Mirror the existing true-test geometry to land squarely on the machine.
     let Size { w: cw, h: ch } = layout.pantry_counter_size();
     let sprite_x = wp.pos.x.saturating_sub(cw / 2);
     let sprite_y = wp.pos.y.saturating_sub(ch / 2);
@@ -412,12 +374,10 @@ fn coffee_machine_returns_false_when_no_pantry_waypoint() {
         sprite_x + 10
     };
     let mid_cell_y = (sprite_y + ch / 2) / 2;
-    // Sanity: the chosen coords ARE a hit while the waypoint is present.
     assert!(
         hit_test_coffee_machine(&layout, mid_x, mid_cell_y),
         "precondition: coffee machine area should hit with the Pantry waypoint present"
     );
-    // Drop the Pantry waypoint → the early return must make EVERY probe false.
     layout
         .waypoints
         .retain(|w| !matches!(w.kind, pixtuoid_scene::layout::WaypointKind::Pantry));
@@ -428,12 +388,8 @@ fn coffee_machine_returns_false_when_no_pantry_waypoint() {
     assert!(!hit_test_coffee_machine(&layout, 0, 0));
 }
 
-// The small-counter box is derived from the shared `PANTRY_COFFEE_COLS_SMALL`
-// = [9,12). Pin the box endpoints to the const (col below/above the machine
-// must miss; the machine edges must hit) so the click target can't drift from
-// the painter — and keep the x+15 falsifier for the cw>=32 split (x+15 is
-// outside the small box but inside the large [11,18), so a hit there means the
-// split was dropped). The old [8,13) box false-positived counter cols 8 and 12.
+// x+15 is the falsifier for the cw>=32 split: outside the small box but inside
+// the large one, so a hit there means the split was dropped.
 #[test]
 fn coffee_machine_small_counter_uses_the_shared_coffee_cols() {
     let (lo, hi) = pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_SMALL;
@@ -448,9 +404,6 @@ fn coffee_machine_small_counter_uses_the_shared_coffee_cols() {
     let sprite_x = wp.pos.x.saturating_sub(20 / 2);
     let sprite_y = wp.pos.y.saturating_sub(h / 2);
     let cell_y = (sprite_y + h / 2) / 2;
-    // The machine edges (cols lo..hi-1) hit; the counter cols just outside
-    // (lo-1, hi) miss — pinning the box to the const, with teeth against the
-    // old wider [8,13) box (which hit at lo-1 and hi).
     assert!(
         !hit_test_coffee_machine(&layout, sprite_x + lo - 1, cell_y),
         "the counter col just left of the machine must miss"
@@ -473,19 +426,16 @@ fn coffee_machine_small_counter_uses_the_shared_coffee_cols() {
     );
 }
 
-// --- hit_test_furniture: Option/Vec arms not produced at harness sizes -----
-// couch_sprite_center, floor_lamp, the PodDecor::Tv label arm, and
-// lounge_side_table aren't all reachable from `compute_with_seed` at the
-// tested sizes, so place each synthetically in open floor (probed None first)
-// and hit its center; the +offset misses pin each box's literal width.
+// The lounge and pod-decor arms below aren't all reachable from
+// `compute_with_seed` at the tested sizes, so each is placed synthetically.
 
 #[test]
 fn furniture_hit_test_finds_lounge_sofa_via_synthetic_center() {
     use pixtuoid_scene::layout::Point;
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let c = Point { x: 40, y: 50 };
-    // The lounge is one aggregate now — place the tested piece at the probed
-    // point and park the co-present pieces far from every probe in this test.
+    // The lounge is one aggregate, so the co-present pieces are parked far from
+    // every probe in this test.
     let park = Point { x: 130, y: 6 };
     layout.lounge = Some(pixtuoid_scene::layout::Lounge {
         couch_center: c,
@@ -539,11 +489,9 @@ fn furniture_hit_test_finds_fish_tank_via_synthetic() {
 
 #[test]
 fn snack_shelf_hovers_across_its_whole_sprite_not_just_the_footprint() {
-    // The shelf sprite (7x10 visual) is CENTRED on the waypoint while the
-    // walkable footprint is the End-anchored 7x2 south strip. Hover must
-    // cover the sprite a user actually sees — the north (top shelf) row
-    // and the centre both label; a footprint-centred box leaves only a
-    // 2px mid-sprite band.
+    // The 7x10 shelf sprite is CENTRED on the waypoint while the walkable
+    // footprint is the End-anchored 7x2 south strip; hover must cover the sprite
+    // the user sees, not that strip.
     let layout = Layout::compute(192, 160, Some(12)).expect("layout");
     let shelf = layout
         .waypoints
@@ -570,8 +518,6 @@ fn snack_shelf_hovers_across_its_whole_sprite_not_just_the_footprint() {
 
 #[test]
 fn furniture_hit_test_finds_meeting_chairs_on_a_real_layout() {
-    // Both head-of-table chairs label on hover (the occupant's own hover
-    // wins when someone sits — the agent pass runs first).
     let layout = Layout::compute(192, 160, Some(12)).expect("layout");
     let chairs: Vec<_> = layout
         .waypoints

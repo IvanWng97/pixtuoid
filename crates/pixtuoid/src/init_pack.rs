@@ -25,10 +25,9 @@ pub fn init_pack(dest: &Path, force: bool) -> Result<()> {
         ),
     ];
 
-    // No per-file exists-skip here: with force=false a dest already containing
-    // pack.toml/placeholder.sprite would have tripped the non-empty guard above,
-    // and force=true overwrites by design — so the only reachable behavior is a
-    // plain write. (A per-file skip would be dead code; see init_pack tests.)
+    // A per-file exists-skip would be dead code: with force=false a dest already
+    // holding these files trips the non-empty guard above, and force=true
+    // overwrites by design.
     for (name, content) in files {
         let path = dest.join(name);
         std::fs::write(&path, content)?;

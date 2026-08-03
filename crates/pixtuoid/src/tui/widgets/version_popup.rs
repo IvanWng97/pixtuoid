@@ -6,32 +6,27 @@ use ratatui::widgets::Paragraph;
 use super::panel::window_range;
 use super::{borderless_panel, panel_inner_width, to_color, truncate, PanelGeometry};
 
-/// The project repository — opened when the board's ★ Star CTA is clicked.
-/// `pub` (not `pub(crate)`): the BIN crate's crash reporter derives its
-/// issue-report URL from this same authority — crash.rs is a `main.rs` module,
-/// a separate crate the lib's `pub(crate)` can't reach (and the pixtuoid lib
-/// target is not a semver surface, so the widening is free).
+/// The project repository. `pub`, not `pub(crate)`: the BIN crate's crash
+/// reporter derives its issue-report URL from this same authority, and
+/// `pub(crate)` in the lib can't reach a `main.rs` module.
 pub const REPO_URL: &str = "https://github.com/IvanWng97/pixtuoid";
 
-/// The releases page — opened when the version popup's link is clicked. Kept a
-/// full literal (const &str can't `concat!`); pinned to `REPO_URL/releases` by a
-/// test. The DISPLAY is the short `LINK_LABEL`; this is only the click target.
+/// The releases page. Kept a full literal because a `const &str` can't `concat!`;
+/// pinned to `REPO_URL/releases` by a test.
 pub(crate) const VERSION_POPUP_URL: &str = "https://github.com/IvanWng97/pixtuoid/releases";
 
-/// The clickable link's VISIBLE text — short so it fits any usable terminal. The
-/// raw URL is ~46 cols and was hard-clipped below ~66 cols (and every frame of the
-/// entrance animation); a compact label decouples display width from the link.
-/// Its screen rect is `version_popup_url_rect`; clicking opens `VERSION_POPUP_URL`.
+/// The clickable link's VISIBLE text — a compact label decouples display width
+/// from the link, so it fits any usable terminal and every entrance-animation
+/// frame where the raw URL hard-clipped.
 const LINK_LABEL: &str = "\u{2197} Release notes";
 
-/// Bullet + hanging-indent for a wrapped release note. `NOTE_CONT` aligns a
-/// continuation line under the note text (past the 4-col `NOTE_PREFIX`).
+/// Bullet + hanging-indent for a wrapped release note; `NOTE_CONT` aligns a
+/// continuation line under the note text.
 const NOTE_PREFIX: &str = "  \u{00b7} ";
 const NOTE_CONT: &str = "    ";
 
-/// Target content width — a comfortable reading measure the notes word-wrap to
-/// (clamped to the terminal by the geometry). Chosen over the old URL-driven 68
-/// so long notes wrap instead of clipping and the popup fits narrow terminals.
+/// Target content width — a comfortable reading measure the notes word-wrap to,
+/// clamped to the terminal by the geometry.
 const VERSION_POPUP_W: u16 = 52;
 
 /// The link is not clickable until the entrance animation is ≥70% scaled in —
@@ -40,8 +35,7 @@ const LINK_CLICKABLE_SCALE: f32 = 0.7;
 
 /// Greedy word-wrap `text` to `width` columns (char-count based — release-note
 /// prose is BMP text). A single word longer than `width` gets its own
-/// (overflowing) line rather than being split mid-word. `width == 0` or text that
-/// already fits → one line (so a short note is byte-identical to before).
+/// (overflowing) line rather than being split mid-word.
 fn word_wrap(text: &str, width: usize) -> Vec<String> {
     if width == 0 || text.chars().count() <= width {
         return vec![text.to_string()];
@@ -69,9 +63,6 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-/// Wrap every note to the inner width, formatted with the bullet + hanging
-/// indent. The returned strings are the content lines the painter styles AND the
-/// count the click-rect uses to place the link row.
 fn wrap_notes(notes: &[&str], inner_w: u16) -> Vec<String> {
     let budget = (inner_w as usize).saturating_sub(NOTE_PREFIX.chars().count());
     let mut out = Vec::new();
@@ -88,18 +79,15 @@ fn wrap_notes(notes: &[&str], inner_w: u16) -> Vec<String> {
 }
 
 /// The popup's fixed chrome rows around the notes band: a leading blank, a
-/// trailing blank, and the link row. The notes window into whatever the
-/// height-clamped inner rect leaves after these.
+/// trailing blank, and the link row.
 const CHROME_ROWS: u16 = 3;
 
 /// The windowed notes band's overflow marker. Deliberately NOT the shared
 /// `panel::overflow_cue`: its `▾` is the affordance the dashboard and Sources
-/// panels page with `j`/`k`, and this modal's only binding is dismiss
-/// (`dispatch_key`'s version tier maps Enter and swallows the rest), so the
-/// chevron promised rows no key could reach. The hidden notes ARE reachable, just
-/// not in the terminal, so the marker points at the `↗ Release notes` CTA that
-/// `CHROME_ROWS` keeps two rows below it. Truncated because the band is wrapped
-/// to `inner_w` and this row is not — a `Paragraph` would clip it silently.
+/// panels page with `j`/`k`, and this modal's only binding is dismiss, so the
+/// chevron would promise rows no key can reach — the marker points at the
+/// `↗ Release notes` CTA instead. Truncated because the band is wrapped to
+/// `inner_w` and this row is not, and a `Paragraph` would clip it silently.
 fn notes_marker(hidden: usize, inner_w: usize) -> String {
     truncate(
         &format!("  \u{22ee} {hidden} more \u{2014} see the link"),
@@ -107,18 +95,15 @@ fn notes_marker(hidden: usize, inner_w: usize) -> String {
     )
 }
 
-/// THE version-popup geometry authority: wrap the notes to the panel's inner
-/// width, window them to the inner height, then hand back the scaled/guarded
-/// envelope. BOTH `paint_version_popup` and `version_popup_url_rect` ride this
-/// with the same `(bounds, notes, scale)`, so the painted link and its click
-/// target are the SAME geometry and can't drift (the phantom-browser-launch
-/// class, killed structurally). `None` when the terminal is too small to render.
+/// THE version-popup geometry authority. BOTH `paint_version_popup` and
+/// `version_popup_url_rect` ride this with the same `(bounds, notes, scale)`, so
+/// the painted link and its click target can't drift apart.
 ///
 /// The WINDOWING is load-bearing: `PanelGeometry::compute` clamps the envelope to
 /// `bounds`, so a long note set on a short terminal asks for more rows than the
 /// inner rect has and ratatui silently drops the TRAILING lines — the blank and
-/// the `↗ Release notes` CTA. The notes are the band that may overflow (marked by
-/// [`notes_marker`], this modal's own non-scrolling one); the link is chrome.
+/// the `↗ Release notes` CTA. The notes are the band that may overflow; the link
+/// is chrome.
 fn version_geometry(
     bounds: Rect,
     notes: &[&str],
@@ -132,7 +117,7 @@ fn version_geometry(
     // The title TEXT is irrelevant to geometry — only the reserved title row
     // (is_some) matters here; the painter draws the real title into it.
     let geom = PanelGeometry::compute(bounds, VERSION_POPUP_W, content_rows, Some(""), scale);
-    let inner = geom.inner()?; // guarded away → nothing to paint or click
+    let inner = geom.inner()?;
     let viewport = (inner.height as usize).saturating_sub(CHROME_ROWS as usize);
     let win = window_range(wrapped.len(), None, 0, viewport);
     let mut body: Vec<String> = wrapped
@@ -154,9 +139,8 @@ fn link_row(body_len: usize) -> u16 {
 
 /// The popup's title, sized to the panel's real inner width. The dismiss hint
 /// outranks the prose: the title is the ONLY place the modal says how to close
-/// itself, and a hard cut mid-word (`… — Ente`) left a key-swallowing overlay
-/// with no exit instruction. A narrow panel therefore drops "What's new in"
-/// first, and elides with `…` only if even the short form overruns.
+/// itself, so a narrow panel drops "What's new in" first rather than cutting
+/// mid-word and leaving a key-swallowing overlay with no exit instruction.
 fn version_title(version: &str, inner_w: usize) -> String {
     let full = format!("What's new in v{version} \u{2014} Enter to close");
     if full.chars().count() <= inner_w {
@@ -175,7 +159,7 @@ pub(crate) fn paint_version_popup(
 ) {
     let scale = scale.clamp(0.0, 1.0);
     let Some((geom, body)) = version_geometry(bounds, notes, scale) else {
-        return; // fully dismissed / terminal too small
+        return;
     };
     let outer = geom
         .outer()
@@ -205,16 +189,15 @@ pub(crate) fn paint_version_popup(
     ]));
 
     let title = version_title(version, inner_w as usize);
-    // `borderless_panel(outer)` returns `inner_rect(outer, has_title)` — the SAME
-    // rect `geom.inner()` and `cell_rect` derive from, so paint and click agree.
+    // `borderless_panel(outer)` returns the SAME rect `geom.inner()` and
+    // `cell_rect` derive from, so paint and click agree.
     let inner = borderless_panel(f, outer, Some(&title), theme);
     f.render_widget(Paragraph::new(items), inner);
 }
 
-/// The screen rect of the clickable link inside the version popup, or `None` when
-/// it isn't rendered/clickable. Derived from the SAME `version_geometry` the
-/// painter uses (`cell_rect` off the shared `compute`), so a click can never land
-/// where the link isn't painted (the phantom-browser-launch regression class).
+/// The screen rect of the clickable link, or `None` when it isn't
+/// rendered/clickable. Derived from the SAME `version_geometry` the painter uses,
+/// so a click can never land where the link isn't painted.
 pub(crate) fn version_popup_url_rect(notes: &[&str], bounds: Rect, scale: f32) -> Option<Rect> {
     let scale = scale.clamp(0.0, 1.0);
     if scale < LINK_CLICKABLE_SCALE {
@@ -235,14 +218,11 @@ mod tests {
 
     #[test]
     fn version_popup_url_is_repo_releases() {
-        // The click opens the releases page; the ★ CTA opens the repo root.
         assert_eq!(VERSION_POPUP_URL, format!("{REPO_URL}/releases"));
     }
 
     #[test]
     fn link_click_rect_is_the_painted_link_cell() {
-        // The click rect is `cell_rect` off the SAME geometry the painter fills —
-        // pinned to the absolute screen cell so paint and click can't drift.
         let notes = &["one", "two", "three"];
         let (geom, wrapped) = version_geometry(wide(), notes, 1.0).expect("renders");
         let inner = geom.inner().expect("rendered ⇒ inner Some");
@@ -257,8 +237,7 @@ mod tests {
 
     #[test]
     fn link_fits_where_the_old_url_clipped() {
-        // A 50-col terminal hard-clipped the old ~46-char raw URL. The compact
-        // label fits in full — its rect spans the whole label, unclamped.
+        // 50 cols is where the old ~46-char raw URL hard-clipped.
         let rect = version_popup_url_rect(&["a note"], Rect::new(0, 0, 50, 30), 1.0).expect("fits");
         assert_eq!(rect.width, LINK_LABEL.chars().count() as u16);
     }
@@ -277,7 +256,6 @@ mod tests {
             wrapped[1].starts_with(NOTE_CONT),
             "continuation carries the hanging indent"
         );
-        // Every wrapped line fits the inner width — never clips.
         let inner_w = panel_inner_width(wide(), VERSION_POPUP_W, 1.0).unwrap() as usize;
         assert!(wrapped.iter().all(|l| l.chars().count() <= inner_w));
     }
@@ -292,14 +270,9 @@ mod tests {
     fn url_rect_none_below_clickable_scale_and_tiny_bounds() {
         assert!(version_popup_url_rect(&["a"], wide(), 0.5).is_none());
         assert!(version_popup_url_rect(&["a"], wide(), 0.0).is_none());
-        // 3-col terminal → geometry guards away → None (no phantom click).
         assert!(version_popup_url_rect(&["a"], Rect::new(0, 0, 3, 60), 1.0).is_none());
     }
 
-    /// A long release-note set on a short terminal used to overrun the panel's
-    /// height-clamped inner rect, and ratatui dropped the TRAILING lines — which
-    /// are the blank + the `↗ Release notes` CTA. The notes are the windowable
-    /// band; the link is chrome and must never be what falls off.
     #[test]
     fn a_short_terminal_windows_the_notes_and_keeps_the_link() {
         let notes: Vec<&str> = vec![
@@ -333,9 +306,6 @@ mod tests {
         );
     }
 
-    /// The title carries the ONLY dismiss instruction, so a narrow panel drops
-    /// the prose before it drops `Enter to close` — a mid-word cut left the user
-    /// with no way to know how to close a modal that swallows every key.
     #[test]
     fn a_narrow_title_keeps_the_dismiss_hint() {
         let inner_w = panel_inner_width(Rect::new(0, 0, 32, 31), VERSION_POPUP_W, 1.0)
@@ -349,25 +319,19 @@ mod tests {
             title.contains("Enter to close"),
             "the dismiss hint outranks the prose: {title:?}"
         );
-        // A wide panel still gets the full sentence.
         let wide_title = version_title("0.16.0", 60);
         assert_eq!(wide_title, "What's new in v0.16.0 \u{2014} Enter to close");
     }
 
-    /// THE framing gate for the SHIPPED notes. Every other test here authors its
-    /// own fixture and asserts something about that same fixture, so none of them
-    /// can see the real arm outgrow the panel — and two
-    /// (`a_short_terminal_windows_the_notes_and_keeps_the_link`,
-    /// `the_notes_marker_offers_no_scroll_and_fits_its_row`) assert the marker IS
-    /// present, i.e. they are green precisely in the truncating state. #820's
-    /// first draft wrapped to 19 rows against the 17 an 80×24 popup holds, so the
-    /// classic terminal hid three behind `⋮ 3 more` and cut the last bullet
-    /// mid-sentence, and every release edits this arm.
+    /// THE framing gate for the SHIPPED notes, which every release edits. Every
+    /// other test here authors its own fixture, and two of them are green
+    /// precisely in the truncating state, so none can see the real arm outgrow the
+    /// panel.
     ///
     /// 80×24 is the TIGHTEST size that must fit unwindowed: the panel never grows
     /// past `VERSION_POPUP_W`, so any terminal at least this wide AND this tall
-    /// wraps identically or has more rows, while anything narrower or shorter
-    /// windows by design — that is the marker's job.
+    /// wraps identically or has more rows, while anything smaller windows by
+    /// design.
     #[test]
     fn the_shipped_release_notes_fit_the_classic_terminal_unwindowed() {
         if crate::version::release_notes_are_uncurated() {
@@ -391,18 +355,16 @@ mod tests {
             wrapped.len(),
             body.len(),
         );
-        // Key on the marker's own GLYPH, and only on the row it can occupy. The
-        // body rows are release PROSE — an earlier `contains("more")` scan matched
-        // the 0.11.0 arm's "no more literal `~`" and reported a fitting arm as
-        // windowed.
+        // Key on the marker's own GLYPH, and only on the row it can occupy: the
+        // body rows are release PROSE, and a `contains("more")` scan matches it.
         assert!(
             !body.last().is_some_and(|l| l.contains('\u{22ee}')),
             "v{version}'s notes are windowed at 80×24: the tail sits behind the marker and \
              the last visible bullet reads mid-sentence — {:?}",
             body.last(),
         );
-        // A separate failure mode from the row count: `word_wrap` never splits
-        // mid-word, so an over-wide token overflows its row and `Paragraph` clips it.
+        // Separate from the row count: `word_wrap` never splits mid-word, so an
+        // over-wide token overflows its row and `Paragraph` clips it.
         assert!(
             wrapped
                 .iter()
@@ -414,12 +376,6 @@ mod tests {
         );
     }
 
-    /// The windowed band's marker must not offer a scroll this modal has no key
-    /// for: `dispatch_key`'s version tier maps Enter to dismiss and swallows
-    /// everything else, so the shared `⋮ N more ▾` — whose `▾` is what the
-    /// dashboard/connection panels page with j/k — promised content the reader
-    /// cannot reach. It also has to FIT: the band is wrapped to the inner width,
-    /// the marker is not, and a `Paragraph` clips silently.
     #[test]
     fn the_notes_marker_offers_no_scroll_and_fits_its_row() {
         let notes: Vec<String> = (0..40)

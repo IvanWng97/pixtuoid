@@ -1,26 +1,21 @@
-//! The floating window's PAINT CADENCE — pure, so the animation throttle is
-//! unit-testable (and coverage-counted) while `window.rs` stays codecov-ignored
-//! winit glue, the same split as `geometry.rs` and `input.rs`.
+//! The floating window's PAINT CADENCE, kept pure so the animation throttle is
+//! unit-testable while `window.rs` stays winit glue.
 //!
 //! The subtlety this module exists for: `ApplicationHandler::about_to_wait` runs
 //! on EVERY event-loop iteration, so an unconditional `Window::request_redraw()`
 //! there leaves a redraw pending whenever the loop reaches its wait — the
 //! `ControlFlow::WaitUntil` deadline set beside it then never sleeps, and the
-//! window renders + presents back-to-back at 100% of a CPU core in every office
-//! state. Gating the redraw REQUEST on a deadline (not just arming the wait) is
-//! what makes the FPS constants below take effect.
+//! window renders + presents back-to-back at 100% of a CPU core. Gating the
+//! redraw REQUEST on a deadline, not just arming the wait, is what makes the FPS
+//! constants below take effect.
 
 use std::time::{Duration, Instant};
 
-/// Animation tick rate WHILE agents (or a live gateway daemon) are present —
-/// motion (walk/breathe) is time-driven, so the office must repaint continuously.
+/// Motion is time-driven, so a populated office must repaint continuously.
 const ACTIVE_FPS: u32 = 30;
-/// Slow ambient tick when the office is EMPTY — keeps the time-driven ambient layer
-/// (clock/weather/lightning/day-night/pet) moving without the 30fps cost of the
-/// active path. Never 0fps: a frozen clock reads as a dead/broken window.
+/// Never 0fps: a frozen clock reads as a dead/broken window.
 const IDLE_AMBIENT_FPS: u32 = 1;
 
-/// The gap between animation frames for the current office state.
 fn tick(office_idle: bool) -> Duration {
     Duration::from_secs(1)
         / if office_idle {
@@ -30,7 +25,6 @@ fn tick(office_idle: bool) -> Duration {
         }
 }
 
-/// The next-paint deadline for the floating window's animation tick.
 pub(crate) struct FrameClock {
     next: Instant,
 }
@@ -61,7 +55,6 @@ impl FrameClock {
 mod tests {
     use super::*;
 
-    /// Drive `poll` at `step` intervals for `span` and count the paints.
     fn paints_over(office_idle: bool, span: Duration, step: Duration) -> usize {
         let t0 = Instant::now();
         let mut clock = FrameClock::new(t0);
@@ -85,8 +78,6 @@ mod tests {
 
     #[test]
     fn an_active_office_paints_at_active_fps_not_once_per_event_loop_iteration() {
-        // 1000 passes over one simulated second — an event loop that is never
-        // idle. Unthrottled (a `request_redraw` on every pass) this is 1000.
         let painted = paints_over(false, Duration::from_secs(1), Duration::from_millis(1));
         // 1ms poll quantization rounds each 33.3ms tick up to 34ms, so an exact
         // ACTIVE_FPS is not reachable — the teeth are the ORDER of magnitude.

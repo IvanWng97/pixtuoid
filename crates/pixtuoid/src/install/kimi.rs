@@ -2,41 +2,22 @@
 //!
 //! Writes the GLOBAL Kimi config (`<KIMI_CODE_HOME>/config.toml`, default
 //! `~/.kimi-code/config.toml`) — Kimi's documented hooks live in a top-level
-//! `[[hooks]]` array of tables:
+//! `[[hooks]]` array of tables.
 //!
-//! ```toml
-//! [[hooks]]
-//! event = "PreToolUse"
-//! command = "PIXTUOID_SOURCE=kimi '/abs/pixtuoid-hook'"
-//! timeout = 5
-//! ```
-//!
-//! Load-bearing details (all confirmed against the repo's raw docs):
+//! Load-bearing details:
 //! - **NO `_pixtuoid` sentinel.** Kimi's `[[hooks]]` allows EXACTLY four fields
-//!   (`event`/`matcher`/`command`/`timeout`) and *"extra fields will cause the
-//!   config file to fail to load"* (hooks.md). Every OTHER shared-config target
-//!   tags its entries with the `_pixtuoid` key; Kimi is the first that can't. So
-//!   managed-entry detection keys on the **command's source marker** instead
-//!   (`PIXTUOID_SOURCE=kimi` on Unix / ` --source kimi` on Windows — see
-//!   [`is_managed_command`]), which is path-independent so it still matches after
-//!   a shim-path change. `verify::shell_shim_ref` extracts the shim from the same
-//!   command shape the shared shell targets write.
-//! - **One command for all events.** Kimi's shim reads the event off stdin
-//!   (`hook_event_name` in the payload), like Claude/Codex/Cursor — NOT baked per
-//!   entry like CodeWhale — so every `[[hooks]]` entry carries the identical
-//!   command. `matcher` is OMITTED (match every tool).
-//! - **Shell execution.** Kimi runs the `command` under a shell (the doc's
-//!   `terminal-notifier … 'Task done'` example needs shell quote-parsing, and the
-//!   exit-code 0/2 + stdout/stderr contract is the shell-hook model), so the OS
-//!   forms mirror Codex/CodeWhale exactly via `hook_cmd::shell_hook_command`: Unix
-//!   env-prefix `PIXTUOID_SOURCE=kimi '<path>'`, Windows bare `<path> --source
-//!   kimi`. (CAPTURE-GATED, like Cursor: if a live run proves Kimi argv-execs the
-//!   command WITHOUT a shell, switch to `exec_hook_command` — the Hermes form.)
-//! - **`timeout`.** Bounds worst-case latency for the blocking-capable events
-//!   (`PreToolUse`/`Stop`); the shim exits within 200ms by contract, and Kimi
-//!   fails OPEN on a non-zero/timeout, so a hung shim never blocks the agent.
-//! - Comments/ordering are lost on the `toml::Value` round-trip (a backup is
-//!   taken) — same accepted caveat as Codex/CodeWhale.
+//!   (`event`/`matcher`/`command`/`timeout`) and extra fields fail the config
+//!   load, so managed-entry detection keys on the **command's source marker**
+//!   instead (see [`is_managed_command`]), which is path-independent so it still
+//!   matches after a shim-path change.
+//! - **One command for all events.** Kimi's shim reads the event off stdin, so
+//!   every `[[hooks]]` entry carries the identical command. `matcher` is OMITTED
+//!   (match every tool).
+//! - **Shell execution.** Kimi runs the `command` under a shell, so the OS forms
+//!   mirror Codex/CodeWhale via `hook_cmd::shell_hook_command`. (CAPTURE-GATED,
+//!   like Cursor: if a live run proves Kimi argv-execs the command WITHOUT a
+//!   shell, switch to `exec_hook_command` — the Hermes form.)
+//! - Comments/ordering are lost on the `toml::Value` round-trip (a backup is taken).
 
 use std::path::{Path, PathBuf};
 
@@ -47,15 +28,10 @@ use crate::install::io;
 use crate::install::target::MergeOutcome;
 use pixtuoid_core::source::kimi::SOURCE_NAME;
 
-/// Events we register == events we decode (`pixtuoid_core::source::kimi` + the
-/// shared CC-shaped arms), enforced by `every_registered_kimi_event_decodes`.
-/// The lifecycle core (`SessionStart`/`PreToolUse`/`PostToolUse`/`Stop`/
-/// `SessionEnd`) rides the shared arms; `PermissionRequest` gives the Waiting
-/// state; the two `*Failure` variants close a failed tool/turn via the source's
-/// custom `Extend` decoder (a failed tool fires `PostToolUseFailure`, which must
-/// still end the activity — the Cursor lesson). `UserPromptSubmit`/`Subagent*`/
-/// `PreCompact`/`Interrupt`/`Notification`/`PermissionResult` are deliberately
-/// unregistered (no lifecycle meaning here, or uncaptured payload shape).
+/// Events we register == events we decode, enforced by
+/// `every_registered_kimi_event_decodes`. The two `*Failure` variants close a
+/// failed tool/turn via the source's custom `Extend` decoder — a failed tool
+/// fires `PostToolUseFailure`, which must still end the activity.
 const KIMI_EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
@@ -67,18 +43,15 @@ const KIMI_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-/// Per-entry `timeout` (seconds). The shim's contract is a ≤200ms exit, and Kimi
-/// fails OPEN on a non-zero/timeout, so this only bounds a pathologically hung
-/// shim on the blocking-capable events (`PreToolUse`/`Stop`). Kimi's range is
-/// 1–600 (hooks.md); 5s is a generous ceiling over the 200ms bound.
+/// Per-entry `timeout` (seconds). Kimi fails OPEN on a non-zero/timeout, so this
+/// only bounds a pathologically hung shim on the blocking-capable events
+/// (`PreToolUse`/`Stop`). Kimi's accepted range is 1–600.
 const KIMI_HOOK_TIMEOUT_SECS: i64 = 5;
 
 /// The data-root dir Kimi actually reads: `$KIMI_CODE_HOME` verbatim (the ONE
-/// documented override — env-vars.md; no `KIMI_HOME`/`KIMI_CONFIG_DIR`), else
-/// `<home>/.kimi-code` (Node `os.homedir()`, USERPROFILE-first on Windows).
-/// `config.toml` lives directly in it (data-locations.md). Env is taken verbatim
-/// (no `~`-expand): the documented value is already shell-expanded/absolute, the
-/// CodeWhale/Reasonix trim-only posture (#342).
+/// documented override; no `KIMI_HOME`/`KIMI_CONFIG_DIR`), else
+/// `<home>/.kimi-code`. Env is taken verbatim (no `~`-expand): the documented
+/// value is already shell-expanded/absolute.
 fn kimi_config_dir() -> Option<PathBuf> {
     resolve_config_dir(
         io::nonempty_env("KIMI_CODE_HOME"),
@@ -86,7 +59,7 @@ fn kimi_config_dir() -> Option<PathBuf> {
     )
 }
 
-/// Pure core for [`kimi_config_dir`] — the env override and home are injected so
+/// Pure core for [`kimi_config_dir`], with the env override and home injected so
 /// both arms unit-test without env/FS mutation.
 fn resolve_config_dir(kimi_code_home_env: Option<String>, home: Option<String>) -> Option<PathBuf> {
     if let Some(h) = kimi_code_home_env {
@@ -106,17 +79,16 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 }
 
 /// Presence probe for auto-detection. Kimi may not create `config.toml` until the
-/// user configures a provider, but it creates its data root (`~/.kimi-code`, or
-/// `KIMI_CODE_HOME`) on first run — probe that dir, not the file we write (the
-/// Reasonix/CodeWhale rule).
+/// user configures a provider, but it creates its data root on first run — probe
+/// that dir, not the file we write.
 pub(crate) fn detect_installed() -> bool {
     kimi_config_dir().is_some_and(|d| d.exists())
 }
 
 /// Kimi runs the `command` under a shell (module doc), so the OS forms mirror
 /// Codex/CodeWhale: Unix env-prefix `PIXTUOID_SOURCE=kimi '<abs>'`, Windows bare
-/// `<abs> --source kimi` (8.3 short-name for a space/metacharacter path, else
-/// reject). Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
+/// `<abs> --source kimi`. Err on non-UTF-8 (prevents the to_string_lossy
+/// dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let p = crate::install::merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, SOURCE_NAME)
@@ -131,8 +103,6 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 /// The `PIXTUOID_SOURCE=kimi` env-prefix marker (Unix `shell_hook_command` form).
-/// Pinned to `shell_hook_command`'s spelling by the install round-trip tests
-/// (a managed entry we WRITE must be one we DETECT).
 fn env_marker() -> String {
     format!("PIXTUOID_SOURCE={SOURCE_NAME}")
 }
@@ -146,9 +116,8 @@ fn flag_marker() -> String {
 /// Kimi's config forbids the `_pixtuoid` sentinel (module doc), so this
 /// command-substring test replaces it. Both platform forms are checked so a
 /// config synced across OSes still round-trips. Keyed on the SOURCE-specific
-/// marker (`=kimi` / ` kimi`), not the shim basename, so it never removes a
-/// different pixtuoid source's entry (there is none in Kimi's config, but the
-/// specificity is free).
+/// marker, not the shim basename, so it never removes a different pixtuoid
+/// source's entry.
 fn is_managed_command(command: &str) -> bool {
     command.contains(&env_marker()) || command.contains(&flag_marker())
 }
@@ -176,13 +145,10 @@ fn toml_merge_install(doc: toml::Value, hook_cmd: &str) -> toml::Value {
     let arr = root
         .entry("hooks".to_string())
         .or_insert_with(|| toml::Value::Array(vec![]));
-    // Defensive: coerce a non-array `hooks` (a hand-edited scalar) to an array.
     if !arr.is_array() {
         *arr = toml::Value::Array(vec![]);
     }
     if let Some(arr) = arr.as_array_mut() {
-        // Replace prior managed entries (idempotent across path changes), keep
-        // the user's own hook entries untouched.
         arr.retain(|e| !is_managed_entry(e));
         for ev in KIMI_EVENTS {
             arr.push(managed_entry(ev, hook_cmd));
@@ -198,7 +164,6 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
     if let Some(arr) = root.get_mut("hooks").and_then(|h| h.as_array_mut()) {
         arr.retain(|e| !is_managed_entry(e));
     }
-    // Drop the array once ours were the only entries (a user's own hooks keep it).
     if root
         .get("hooks")
         .and_then(|h| h.as_array())
@@ -209,9 +174,9 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
     doc
 }
 
-/// Install-schema verification (#309): every `KIMI_EVENTS` event still has a
-/// managed `[[hooks]]` entry (detected by the command marker, not a sentinel),
-/// and the shim path extracted for `install::verify_target` to stat.
+/// Install-schema verification: every `KIMI_EVENTS` event still has a managed
+/// `[[hooks]]` entry (detected by the command marker, not a sentinel), and the
+/// shim path extracted for `install::verify_target` to stat.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
@@ -222,8 +187,8 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
         .and_then(|h| h.as_array())
         .map(|a| a.iter().filter(|e| is_managed_entry(e)).collect())
         .unwrap_or_default();
-    // No managed entries → give Kimi-accurate wording (the shared `assemble`
-    // no-managed message names the `_pixtuoid` sentinel Kimi can't carry).
+    // The shared `assemble` no-managed message names the `_pixtuoid` sentinel
+    // Kimi can't carry, so word this one here.
     if entries.is_empty() {
         return SchemaParse::broken(
             "no managed pixtuoid hook entries in [[hooks]] (the pixtuoid source marker \
@@ -265,17 +230,14 @@ mod tests {
 
     #[test]
     fn config_dir_honors_kimi_code_home_then_default() {
-        // KIMI_CODE_HOME wins verbatim (the documented override — env-vars.md).
         assert_eq!(
             resolve_config_dir(Some("/custom/kimi".into()), Some("/home/u".into())),
             Some(PathBuf::from("/custom/kimi"))
         );
-        // Else <home>/.kimi-code (data-locations.md default).
         assert_eq!(
             resolve_config_dir(None, Some("/home/u".into())),
             Some(PathBuf::from("/home/u").join(".kimi-code"))
         );
-        // No home + no override → None (installer surfaces "pass --config").
         assert_eq!(resolve_config_dir(None, None), None);
     }
 
@@ -287,16 +249,14 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("KIMI_CODE_HOME");
 
-        // KIMI_CODE_HOME set → <dir>/config.toml VERBATIM (no exists-gate, unlike
-        // codex). Unconditional (not `if let Ok`) so a mutation making
-        // default_config_path always-Err is CAUGHT, not skipped.
+        // Unconditional (not `if let Ok`) so a mutation making default_config_path
+        // always-Err is CAUGHT, not skipped.
         let custom = std::env::temp_dir().join("pixtuoid-kimi-home-cfg-test");
         std::env::set_var("KIMI_CODE_HOME", &custom);
         assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
 
-        // Empty → treated as unset (nonempty_env trims) → falls back to
-        // <home>/.kimi-code; assert only the filename when a home resolves (CI
-        // always has one, a stripped env legitimately errs).
+        // Assert only the filename when a home resolves — a stripped env
+        // legitimately errs.
         std::env::set_var("KIMI_CODE_HOME", "");
         if let Ok(p) = default_config_path() {
             assert_eq!(p.file_name().and_then(|n| n.to_str()), Some("config.toml"));
@@ -321,9 +281,6 @@ mod tests {
         std::env::set_var("KIMI_CODE_HOME", &root);
         assert!(!detect_installed(), "an absent data root must not detect");
 
-        // Create the data root WITHOUT a config.toml → still detected: Kimi
-        // creates the root on first run before any config is written, so we probe
-        // the dir, not the file we'd write (the Reasonix/CodeWhale rule).
         std::fs::create_dir_all(&root).unwrap();
         assert!(
             detect_installed(),
@@ -351,12 +308,10 @@ mod tests {
                 entry["timeout"].as_integer().unwrap(),
                 KIMI_HOOK_TIMEOUT_SECS
             );
-            // No sentinel field — Kimi's [[hooks]] rejects unknown fields.
             assert!(
                 entry.get("_pixtuoid").is_none(),
                 "must NOT write a sentinel (Kimi rejects extra fields)"
             );
-            // The command marker is what makes the entry detectable as ours.
             assert!(is_managed_entry(entry), "our entry must be self-detecting");
         }
     }
@@ -366,8 +321,6 @@ mod tests {
         let a = merge_install("", CMD).unwrap();
         let b = merge_install(&a.content, CMD).unwrap();
         assert!(!b.changed, "same-command re-install is a semantic no-op");
-        // A path change replaces (does not duplicate) the managed entries — the
-        // marker is path-independent, so the old entries are still detected.
         let c = merge_install(
             &a.content,
             "PIXTUOID_SOURCE=kimi '/usr/local/bin/pixtuoid-hook'",
@@ -401,7 +354,6 @@ command = "terminal-notifier -message done"
             "unrelated provider/key config survives"
         );
         let arr = v["hooks"].as_array().unwrap();
-        // user's 1 + every managed kimi event
         assert_eq!(arr.len(), 1 + KIMI_EVENTS.len());
         assert!(
             arr.iter()
@@ -442,8 +394,6 @@ command = "terminal-notifier -message done"
 
     #[test]
     fn merge_install_rejects_invalid_toml() {
-        // A malformed config must NOT be overwritten (it'd wipe the user's
-        // provider/key/hooks); refuse instead.
         assert!(merge_install("not = valid = toml", CMD).is_err());
     }
 
@@ -458,7 +408,6 @@ command = "terminal-notifier -message done"
     #[test]
     fn verify_schema_passes_full_install_and_flags_missing_and_absent() {
         use crate::install::verify::ShimRef;
-        // (1) A complete managed install verifies clean with a real shim ref.
         let full = merge_install("", CMD).unwrap().content;
         let sound = verify_schema(&full);
         assert!(sound.issues.is_empty(), "{:?}", sound.issues);
@@ -468,7 +417,6 @@ command = "terminal-notifier -message done"
             ShimRef::Absolute(PathBuf::from("/opt/bin/pixtuoid-hook"))
         );
 
-        // (2) A partial install (one event only) reports the rest missing.
         let partial = "[[hooks]]\nevent = \"SessionStart\"\ncommand = \"PIXTUOID_SOURCE=kimi '/x/pixtuoid-hook'\"\n";
         let p = verify_schema(partial);
         let joined = p.issues.join(" | ");
@@ -478,7 +426,6 @@ command = "terminal-notifier -message done"
             p.issues
         );
 
-        // (3) No managed entries at all → the Kimi-accurate no-marker message.
         let none = verify_schema("[[hooks]]\nevent = \"Notification\"\ncommand = \"echo hi\"\n");
         assert!(
             none.issues.iter().any(|i| i.contains("--source kimi")),
@@ -498,8 +445,6 @@ command = "terminal-notifier -message done"
             .any(|i| i.contains("no longer parses as TOML")));
     }
 
-    // Unix POSIX-form pin. Unix-only: on Windows hook_command emits the bare form
-    // and this spaced path would be REJECTED (8.3 unavailable on CI).
     #[cfg(unix)]
     #[test]
     fn hook_command_is_the_env_prefix_shell_form() {
@@ -538,21 +483,15 @@ command = "terminal-notifier -message done"
         assert!(is_managed_command(
             r"C:\bin\pixtuoid-hook.exe --source kimi"
         ));
-        // A different pixtuoid source's command is NOT ours (defensive specificity).
         assert!(!is_managed_command(
             "PIXTUOID_SOURCE=codex '/opt/pixtuoid-hook'"
         ));
         assert!(!is_managed_command(
             r"C:\bin\pixtuoid-hook.exe --source cursor"
         ));
-        // A user's own hook command is untouched.
         assert!(!is_managed_command("terminal-notifier -message done"));
     }
 
-    // Internal-consistency guard (mirror of CC/Codex/Cursor): every hook event we
-    // REGISTER with Kimi must have a decoder arm (shared or the custom Extend),
-    // else it arrives at the shared socket and the decoder bails — silently
-    // dropped.
     #[test]
     fn every_registered_kimi_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;
@@ -575,10 +514,7 @@ command = "terminal-notifier -message done"
 
     // MEMBERSHIP pin — the completeness half `every_registered_kimi_event_decodes`
     // can't see (it only proves registered ⊆ decodable, so silently DROPPING an
-    // event ships green: no clean reap if `SessionEnd` goes, a failed tool
-    // lingering Active if `PostToolUseFailure` goes — and the drift-watch reads
-    // this same const one-directionally, so it's blind too; cargo-mutants doesn't
-    // mutate `&[&str]` initializers). Pins the exact set so a drop is a LOUD diff.
+    // event ships green; cargo-mutants doesn't mutate `&[&str]` initializers).
     #[test]
     fn kimi_events_pins_the_exact_registered_set() {
         use std::collections::BTreeSet;

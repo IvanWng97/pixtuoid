@@ -1,8 +1,6 @@
-//! Integration coverage for the `init-pack` and `validate-pack` subcommand
-//! cores (`pixtuoid::init_pack::init_pack` / `pixtuoid::validate::validate_pack`).
-//! Both are plain synchronous filesystem code — no TTY, async, or socket — so we
-//! drive them directly through the public crate API rather than spawning the
-//! binary, which exercises more branches deterministically. Tests may unwrap.
+//! Integration coverage for the `init-pack` / `validate-pack` cores. Both are plain
+//! synchronous filesystem code — no TTY, async, or socket — so they are driven
+//! through the public crate API rather than by spawning the binary.
 
 use std::fs;
 use std::path::Path;
@@ -10,8 +8,6 @@ use std::path::Path;
 use pixtuoid::init_pack::init_pack;
 use pixtuoid::validate::validate_pack;
 use tempfile::TempDir;
-
-// --- init_pack ------------------------------------------------------------
 
 #[test]
 fn init_pack_writes_skeleton_into_fresh_dir() {
@@ -25,7 +21,6 @@ fn init_pack_writes_skeleton_into_fresh_dir() {
     assert!(pack_toml.exists(), "pack.toml written");
     assert!(placeholder.exists(), "placeholder.sprite written");
 
-    // Content matches the embedded skeleton assets.
     assert_eq!(
         fs::read_to_string(&pack_toml).unwrap(),
         include_str!("../sprites/skeleton/pack.toml")
@@ -40,10 +35,8 @@ fn init_pack_writes_skeleton_into_fresh_dir() {
 fn init_pack_into_populated_dir_without_force_errors() {
     let tmp = TempDir::new().unwrap();
     let dest = tmp.path().join("pack");
-    // Populate it with a real extraction first.
     init_pack(&dest, false).unwrap();
 
-    // A second call without --force must refuse rather than clobber.
     let err = init_pack(&dest, false).unwrap_err();
     assert!(
         err.to_string().contains("non-empty"),
@@ -70,7 +63,6 @@ fn init_pack_force_rewrites_populated_dir() {
     let dest = tmp.path().join("pack");
     init_pack(&dest, false).unwrap();
 
-    // Mutate the extracted file, then force re-extract restores the original.
     let pack_toml = dest.join("pack.toml");
     fs::write(&pack_toml, "# clobbered\n").unwrap();
 
@@ -83,33 +75,26 @@ fn init_pack_force_rewrites_populated_dir() {
     );
 }
 
-// --- validate_pack --------------------------------------------------------
-
 #[test]
 fn validate_pack_skeleton_is_ok_and_warns_on_optionals() {
     let tmp = TempDir::new().unwrap();
     let dest = tmp.path().join("skeleton");
     init_pack(&dest, false).unwrap();
 
-    // The skeleton defines exactly the required animations and no optionals, so
-    // validation succeeds (Ok) while exercising the missing-optional WARN loop.
     validate_pack(&dest).unwrap();
 }
 
 /// Write a deliberately-broken pack: it DROPS the required `seated` animation,
-/// gives `typing` only one frame (needs ≥2 → insufficient_frames), and declares
-/// a bogus `[animations.foo]` (unknown). Exercises the ERROR / INFO loops + bail.
+/// gives `typing` only one frame (needs ≥2 → insufficient_frames), and declares a
+/// bogus `[animations.foo]` (unknown).
 fn write_broken_pack(dir: &Path) {
     fs::create_dir_all(dir).unwrap();
-    // Reuse the embedded skeleton sprite as the frame for every animation.
     fs::write(
         dir.join("placeholder.sprite"),
         include_str!("../sprites/skeleton/placeholder.sprite"),
     )
     .unwrap();
 
-    // All required animations EXCEPT `seated`, with `typing` at a single frame,
-    // plus an unknown `foo`. Palette mirrors the skeleton's keys.
     let pack_toml = r##"
 [pack]
 name = "broken"

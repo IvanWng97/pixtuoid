@@ -1,15 +1,7 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
 //!
-//! This renders the office to a raw pixel `RgbBuffer` via the shared scene seam
-//! (`pixtuoid_scene::floor::render_floor`, #423) — NOT the half-block terminal emulation
-//! `examples/snapshot/` saves (snapshot writes the ratatui `TestBackend` → a ▀-compressed
-//! PNG via `save_backend_as_png`). A floating-only surface: no `draw_scene`, no `Terminal`,
-//! no shared output with snapshot. `floating::window` renders at a DOWNSCALED buffer
-//! (~window/SCALE) and nearest-neighbor upscales it, so the pixel-art office stays
-//! chunky/legible instead of 8×12-px-tiny at 1:1. This module just paints the buffer at
-//! whatever dims it's handed, owning one `pixtuoid_scene::floor::FloorSession` (the
-//! per-frame caches + persistent office state — coffee cups, group chitchat — plus the
-//! dual eviction) across frames so motion stays continuous.
+//! Paints the buffer at whatever dims it's handed, owning one
+//! `pixtuoid_scene::floor::FloorSession` across frames so motion stays continuous.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
@@ -26,28 +18,19 @@ use pixtuoid_scene::theme::Theme;
 use winit::dpi::PhysicalSize;
 
 /// Pack an `Rgb` into the softbuffer word format, `0x00RRGGBB` (XRGB) — the ONE
-/// definition of the floating painter's surface pixel format. The office blit
-/// (`window.rs`) and this label overlay write into the SAME surface, so they must
-/// agree on channel order / shift widths; a lone edit to one would color-swap the
-/// badges while the office renders correctly, with no compile error. (The test
-/// oracle re-derives the packing independently ON PURPOSE, so a bug here can't
-/// hide behind a shared helper — don't route it through this.)
+/// definition of the floating surface pixel format; the office blit (`window.rs`)
+/// and this label overlay write into the SAME surface, so a lone edit to one would
+/// color-swap the badges with no compile error. The test oracle re-derives the
+/// packing independently ON PURPOSE — don't route it through this.
 pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
     (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32
 }
 
-/// Owns everything needed to render the live office to a reusable `RgbBuffer`
-/// across frames: a [`FloorSession`] — the scene-owned painter session (sim
-/// stores + buffer + coffee + chitchat + the dual eviction, written once).
-/// One per window — keeping it alive across frames is what keeps motion/pose
-/// continuous (no walk-flash).
+/// Renders the live office to a reusable `RgbBuffer`. One per window — keeping it
+/// alive across frames is what keeps motion/pose continuous (no walk-flash).
 pub struct OfficeRenderer {
     session: FloorSession,
-    /// Ambient-audio gateway (#633). Inert unless installed. The per-frame
-    /// `AudioFrame` is composed through the session's shared `AudioObserver`
-    /// (`FloorSession::audio_frame`) — full TUI parity (stems + door + appliance
-    /// one-shots), with the floor-reprime handled automatically by the observer
-    /// (so floor nav, if ever added, needs no hand-mirrored guard).
+    /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
 }
 
@@ -63,12 +46,10 @@ impl OfficeRenderer {
         self.audio = audio;
     }
 
-    /// Render `scene`'s floor (per `floor_meta`) into the owned buffer at `buf_w`×`buf_h`
-    /// PIXELS — the caller maps window px → cells → pixels (`buf_w = cols`,
-    /// `buf_h = rows * 2`, the half-block 1:2 cell aspect; floating has no footer row to
-    /// subtract, unlike `draw_scene`). Returns the rendered buffer (a borrow of the
-    /// reused allocation). On a too-small / uncomputable layout it returns the buffer
-    /// unchanged — never panics.
+    /// Render `scene`'s floor into the owned buffer at `buf_w`×`buf_h` PIXELS — the
+    /// caller maps window px → cells → pixels (`buf_h = rows * 2`, the half-block 1:2
+    /// cell aspect; floating has no footer row to subtract, unlike `draw_scene`). On a
+    /// too-small / uncomputable layout it returns the buffer unchanged — never panics.
     #[allow(clippy::too_many_arguments)] // the render inputs are genuinely flat (scene/pack/theme/clock/size/floor)
     pub fn render(
         &mut self,
@@ -81,8 +62,7 @@ impl OfficeRenderer {
         floor_meta: FloorMeta,
         floor_pet: Option<&pixtuoid_scene::pet::Pet>,
     ) -> &RgbBuffer {
-        // active_pet stays None: click-to-pet needs window pointer hit-testing
-        // (deferred); the WANDERING floor pet is wired. The rest is the session's.
+        // active_pet stays None: click-to-pet needs window pointer hit-testing (deferred).
         self.session.render(FrameInputs {
             scene,
             pack,
@@ -94,11 +74,8 @@ impl OfficeRenderer {
             floor_pet,
             debug_walkable: false,
         });
-        // Ambient audio: compose via the session's shared observer EVERY
-        // frame (even muted) so its cue edges stay warm — re-enabling fires no
-        // volley; only DELIVERY is gated. Single-sourced with the TUI (was a
-        // hand-rolled block that re-inlined waypoint_kind — the floating-vs-web
-        // drift). Floor-reprime is automatic inside the observer.
+        // Compose EVERY frame, even muted, so the observer's cue edges stay warm —
+        // re-enabling then fires no volley; only DELIVERY is gated.
         let audio_frame = self.session.audio_frame(scene, floor_meta.floor_idx, now);
         if self.audio.is_enabled() {
             self.audio.frame(audio_frame);
@@ -106,9 +83,8 @@ impl OfficeRenderer {
         self.session.buf()
     }
 
-    /// Build the name-badge overlay for the LAST rendered frame (call right after `render`).
-    /// Uses the SAME layout + per-floor route state the sprite pass used, so labels align 1:1
-    /// with the painted characters. Floating has no agent-hover yet → `hovered = None`.
+    /// Build the name-badge overlay for the LAST rendered frame (call right after
+    /// `render`). Floating has no agent-hover yet → `hovered = None`.
     pub fn labels(
         &mut self,
         scene: &SceneState,
@@ -117,19 +93,15 @@ impl OfficeRenderer {
         self.session.overlay(scene, now, None)
     }
 
-    /// The neon wall-board model for the current scene — one floor, so `floor =
-    /// None`. Delegates to `FloorSession::board` (shared with the web painter).
+    /// The neon wall-board model for the current scene — one floor, so `floor = None`.
     pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
         self.session.board(scene, now, None)
     }
 
-    /// The status-footer model for the current scene — full TUI parity via the
-    /// shared [`build_footer`]. Single-floor, so `floor = None` (no breadcrumb).
-    /// `budget` is the caller's column budget ([`footer_budget`] at the live
-    /// width); `audio_audible`/`volume_flash` drive the ♩ suffix exactly as the
-    /// TUI's do. Source-death is deferred here (`source_warning: None`) — floating
-    /// doesn't thread the `SourceDeath` health channel yet; the seam is ready the
-    /// day it does.
+    /// The status-footer model for the current scene — single-floor, so `floor = None`
+    /// (no breadcrumb). `budget` is the caller's column budget ([`footer_budget`] at the
+    /// live width). Source-death is deferred (`source_warning: None`) — floating doesn't
+    /// thread the `SourceDeath` health channel yet.
     pub fn footer(
         &self,
         scene: &SceneState,
@@ -164,8 +136,6 @@ impl Default for OfficeRenderer {
 /// Integer upscale factor: render the office at `win_h / SCALE` so the buffer stays around
 /// `OFFICE_TARGET_H` px tall, keeping pixel-art sprites chunky + legible (a native 1:1 blit
 /// renders 8×12 sprites at 8×12 px — unreadably tiny). Min 1 (never downscale-and-blur).
-/// Shared by `window::redraw` and the `floating_snapshot` example so their downscale —
-/// and thus the label `anchor_px × scale` placement — can't drift.
 pub fn office_scale(win_h: u32) -> u32 {
     const OFFICE_TARGET_H: u32 = 180;
     (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
@@ -173,15 +143,12 @@ pub fn office_scale(win_h: u32) -> u32 {
 
 /// The window→office-buffer projection for a PHYSICAL-px window: the integer
 /// `office_scale` plus the downscaled buffer dims (`window / scale`, clamped
-/// non-zero, NO footer row). The ONE place this geometry lives — shared by
-/// `window::redraw` (which needs `scale` for the upscale blit and the buffer
-/// dims for `sync_floor_caps` + the render) and the boot seed
-/// (`boot_capacities_for_window`) — so the desk capacity they derive can't drift
-/// on an `office_scale`/clamp change.
+/// non-zero, NO footer row). The ONE place this geometry lives, so the desk capacity
+/// derived from it can't drift on an `office_scale`/clamp change.
 ///
-/// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is
-/// carried by the type: the `[floating]` config size is LOGICAL, and handing it
-/// here is now a compile error instead of a silent HiDPI over-seed (#803).
+/// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
+/// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
+/// error instead of a silent HiDPI over-seed (#803).
 pub(crate) fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
     let scale = office_scale(size.height);
     let buf_w = (size.width / scale).clamp(1, u16::MAX as u32) as u16;
@@ -189,11 +156,9 @@ pub(crate) fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16)
     (scale, buf_w, buf_h)
 }
 
-/// Per-floor desk capacities for an office buffer of `buf_w`×`buf_h` — the
-/// layout's own `home_desks` count per floor. THE one derivation: the boot seed
-/// ([`boot_capacities_for_window`]) and every redraw's [`sync_floor_caps`] both
-/// call it, so "the seed matches what the first redraw stores" is structural
-/// rather than a pair of loops that happen to agree.
+/// Per-floor desk capacities for an office buffer of `buf_w`×`buf_h`. THE one
+/// derivation: the boot seed and every redraw's [`sync_floor_caps`] both call it, so
+/// their agreement is structural rather than two loops that happen to agree.
 pub(crate) fn floor_caps_for_buffer(buf_w: u16, buf_h: u16) -> [usize; MAX_FLOORS] {
     std::array::from_fn(|i| {
         pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, pixtuoid_scene::floor::floor_seed(i))
@@ -201,52 +166,33 @@ pub(crate) fn floor_caps_for_buffer(buf_w: u16, buf_h: u16) -> [usize; MAX_FLOOR
 }
 
 /// Per-floor boot desk-capacities for the FLOATING window, from the REAL
-/// `window.inner_size()`. Uses the SAME `window_buffer_geometry` +
-/// [`floor_caps_for_buffer`] the first redraw's [`sync_floor_caps`] does —
-/// the office buffer is `window / office_scale` with NO footer row. The TUI's
-/// `runtime::boot_capacities_for` instead subtracts a footer row AND ignores the
-/// window upscale, so reusing it here OVER-seeds: in the sub-frame boot race
-/// before the first redraw, a `SessionStart` could land at a `desk_index` the
-/// smaller real layout lacks (immutable → invisible-but-alive until a resize).
-///
-/// The seed is taken in `window::resumed`, the first moment a real window
-/// exists — `floating::run` could offer only the `[floating]` config size, which
-/// is LOGICAL by design (`persist_geometry` saves `to_logical`, `resumed`
-/// restores a `LogicalSize`, so the config stays HiDPI-stable), and on any HiDPI
-/// display that described a window the redraw would never measure (#803).
+/// `window.inner_size()`. Do NOT reuse the TUI's `runtime::boot_capacities_for` — it
+/// subtracts a footer row AND ignores the window upscale, so it OVER-seeds: in the
+/// sub-frame boot race before the first redraw, a `SessionStart` could land at a
+/// `desk_index` the smaller real layout lacks (invisible-but-alive until a resize).
 ///
 /// There is deliberately NO `cap == 0 → FALLBACK_DESKS` clause: `sync_floor_caps`
-/// `store`s the honest 0 for a window too small to lay out, so a fallback here
-/// would be the last remaining boot-vs-steady-state divergence — and it points
-/// the WRONG way, admitting 16 agents onto desks that do not exist.
+/// `store`s the honest 0 for a window too small to lay out, and a fallback points the
+/// WRONG way, admitting 16 agents onto desks that do not exist.
 pub(crate) fn boot_capacities_for_window(size: PhysicalSize<u32>) -> [usize; MAX_FLOORS] {
     let (_scale, buf_w, buf_h) = window_buffer_geometry(size);
     floor_caps_for_buffer(buf_w, buf_h)
 }
 
-/// Publish [`floor_caps_for_buffer`]'s answer into the reducer's per-floor
-/// capacity atomics, keeping admission in lockstep with the office actually
-/// rendered at `buf_w`×`buf_h` (authority = the layout's `home_desks` count).
-/// Returns whether it recomputed — `false` means `last` already held this buffer
-/// size and the publish was skipped.
+/// Publish [`floor_caps_for_buffer`]'s answer into the reducer's per-floor capacity
+/// atomics, keeping admission in lockstep with the office actually rendered at
+/// `buf_w`×`buf_h`. Returns whether it recomputed — `false` means `last` already held
+/// this buffer size and the publish was skipped.
 ///
-/// `store`, NOT the TUI's monotone `fetch_max` (`tui/mod.rs`'s
-/// `FloorCapacitySweep::publish`): the floating window's pixel size is exact and
-/// authoritative on every redraw, so a shrink genuinely LOWERS capacity and the
-/// reducer must stop admitting agents onto desks that no longer exist (already-
-/// seated excess agents stay alive-but-invisible). Don't "harmonize" the two —
-/// the direction is deliberate, and
-/// `a_shrink_lowers_the_published_capacity_it_is_store_not_fetch_max` pins it.
+/// `store`, NOT the TUI's monotone `fetch_max`: the floating window's pixel size is
+/// exact and authoritative on every redraw, so a shrink genuinely LOWERS capacity and
+/// the reducer must stop admitting agents onto desks that no longer exist. Don't
+/// "harmonize" the two — the direction is deliberate.
 ///
-/// The resize DETECTION rides along with the publish, exactly as the TUI's
-/// `FloorCapacitySweep` bundles its own memo: capacity changes only with the
-/// buffer size, and `floor_capacity` runs a full layout compute per floor, so
-/// this must not run per frame. Splitting the two would strand the guard in
-/// `window.rs`, which is excluded from BOTH codecov and cargo-mutants — and a
-/// guard there is measured by nothing, so inverting it (never republishing after
-/// boot, so a resize silently stops updating admission) would stay green. That
-/// exclusion is also why the publish itself lives here rather than beside its
-/// `window::redraw` call site.
+/// The resize DETECTION rides along with the publish because `floor_capacity` runs a
+/// full layout compute per floor, so this must not run per frame. Both live here rather
+/// than at the `window::redraw` call site because `window.rs` is excluded from BOTH
+/// codecov and cargo-mutants, so a guard there is measured by nothing.
 pub(crate) fn sync_floor_caps(
     last: &mut Option<(u16, u16)>,
     floor_caps: &[AtomicUsize; MAX_FLOORS],
@@ -263,42 +209,37 @@ pub(crate) fn sync_floor_caps(
     true
 }
 
-/// The bundled character sprite width (px), from the ONE cross-crate authority
-/// `scene::layout::CHARACTER_SPRITE_W`. Labels only center ±half a glyph, so the
-/// default width (not a custom pack's real `frame.width`) is fine here — ±1px on
-/// a non-8-wide pack is cosmetically irrelevant (same rationale as `character_anchor`).
+/// The bundled character sprite width (px). Labels only center ±half a glyph, so the
+/// default width (not a custom pack's real `frame.width`) is fine here — ±1px on a
+/// non-8-wide pack is cosmetically irrelevant.
 const FLOATING_SPRITE_W: i32 = pixtuoid_scene::layout::CHARACTER_SPRITE_W as i32;
 
-/// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the
-/// office `scale`) so a badge stays a crisp fixed-height caption over the chunky
-/// sprites — the same "fixed px, not upscaled" intent the old 8px bitmap had, now
-/// anti-aliased. Tuned by eye against `examples/floating_snapshot`.
+/// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the office
+/// `scale`) so a badge stays a crisp fixed-height caption over the chunky sprites. Tuned
+/// by eye against `examples/floating_snapshot`.
 const LABEL_FONT_PX: f32 = 12.0;
-/// Near-black badge drop-shadow (`0x00RRGGBB`) — the AA text draws straight over
-/// the office (no TUI cell background), so a 1px offset shadow keeps it legible
-/// over bright windows / plants.
+/// Near-black badge drop-shadow — the AA text draws straight over the office (no TUI
+/// cell background), so a 1px offset shadow keeps it legible over bright windows/plants.
 const BADGE_SHADOW: u32 = 0x0000_0000;
-/// The near-white AA ink for foreground captions with no theme cell behind them
-/// — the hovered name badge AND the volume-flash readout share it (one
-/// definition so a future softening can't split them).
+/// The near-white AA ink for foreground captions with no theme cell behind them —
+/// shared by the hovered name badge and the volume-flash readout.
 const HOVER_INK: Rgb = Rgb {
     r: 240,
     g: 240,
     b: 240,
 };
 
-/// The floating footer's keybind-hint tail — floating's REAL controls (`m` mute,
-/// `+`/`-` volume; no terminal `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE
-/// painter-specific input to the shared footer model; the TUI supplies its own
-/// terminal tail. Everything else (stats/rungs/tools/gateway/♩) is TUI-identical.
+/// The floating footer's keybind-hint tail — floating's REAL controls (no terminal
+/// `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE painter-specific input to the shared
+/// footer model; everything else is TUI-identical.
 const FOOTER_KEYS: &str = " [m]ute [+/-]vol ";
-/// Breathing room from the window edges for the footer band (both the paint and
-/// the [`footer_budget`] column math read it, so they can't drift).
+/// Breathing room from the window edges for the footer band — both the paint and the
+/// [`footer_budget`] column math read it, so they can't drift.
 const FOOTER_MARGIN_PX: i32 = 6;
 
-/// Alpha-composite `color` over the surface pixel at `(x, y)` by `coverage` (the
-/// AA rasterizer's per-pixel strength), a straight linear blend in `0x00RRGGBB`
-/// space — the badge/board sit on opaque office pixels, no alpha channel to keep.
+/// Alpha-composite `color` over the surface pixel at `(x, y)` by `coverage` — a straight
+/// linear blend in `0x00RRGGBB` space; the badge/board sit on opaque office pixels, so
+/// there is no alpha channel to keep.
 fn blend_xrgb(
     sb: &mut [u32],
     win_w: usize,
@@ -313,15 +254,12 @@ fn blend_xrgb(
     }
     let idx = y as usize * win_w + x as usize;
     let bg = sb[idx];
-    // the ONE blend curve — see aa_text::blend_channel
     let chan = |v: u32, sh: u32| ((v >> sh) & 0xff) as u8;
     let mix =
         |sh: u32| crate::aa_text::blend_channel(chan(bg, sh), chan(color, sh), coverage) as u32;
     sb[idx] = (mix(16) << 16) | (mix(8) << 8) | mix(0);
 }
 
-/// Rasterize `text` at `(x, top_y)` in the shared AA face, `color` over a 1px
-/// down-right near-black shadow (shadow drawn first, both coverage-composited).
 #[allow(clippy::too_many_arguments)] // flat surface + placement + style inputs, like paint_labels
 fn draw_badge_text(
     sb: &mut [u32],
@@ -341,12 +279,10 @@ fn draw_badge_text(
     });
 }
 
-/// Paint name badges into the upscaled `u32` surface (`0x00RRGGBB`). Each label's `anchor_px`
-/// is office-buffer space → multiply by `scale` for screen space; the badge is centered
-/// horizontally over the anchor and sits just above the head. Crisp anti-aliased Monaspace
-/// Neon (drawn at native surface res, not upscaled) keeps it a sharp caption over the chunky
-/// sprites. Shared by the live window (`window::redraw`) and the `floating_snapshot` verify
-/// example, so both blit identically.
+/// Paint name badges into the upscaled `u32` surface (`0x00RRGGBB`). Each label's
+/// `anchor_px` is office-buffer space → multiply by `scale` for screen space; the badge
+/// is centered horizontally over the anchor and sits just above the head. Drawn at
+/// native surface res, not upscaled, so it stays a sharp caption over the chunky sprites.
 pub fn paint_labels_into_surface(
     sb: &mut [u32],
     win_w: usize,
@@ -359,26 +295,20 @@ pub fn paint_labels_into_surface(
         let rgb = if el.hovered {
             HOVER_INK
         } else {
-            // Tone→role map is single-sourced in `scene::overlay`.
             pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme)
         };
         let color = pack_xrgb(rgb);
-        // A ● state dot leads the badge (▸ when hovered — dead today: `labels()` passes
-        // `hovered: None`, floating has no agent-hover). The AA face renders any glyph, so
-        // ▸ needs no bitmap registration (unlike the old 8×8 font).
+        // The hovered ▸ is dead today: `labels()` passes `hovered: None`.
         let marker = if el.hovered { "\u{25b8}" } else { "\u{25cf}" };
         let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
-        // anchor_px is the sprite TOP-LEFT in office space; center the badge over the sprite
-        // and lift it a badge-height + gap above the head.
+        // anchor_px is the sprite TOP-LEFT in office space.
         const BADGE_LIFT_PX: i32 = 12;
         let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
-        // The CLI-identity split (#657, owner-ratified, all three painters):
-        // the ● dot keeps the activity tone (status), the name paints in the
-        // source's badge hue (identity) via the SAME SourceColors::by_prefix
-        // the dashboard badges ride. Unregistered prefix / hover → one run in
-        // the tone/hover ink, unchanged.
+        // The CLI-identity split: the ● dot keeps the activity tone (status), the name
+        // paints in the source's badge hue (identity). Unregistered prefix / hover →
+        // one run in the tone/hover ink.
         let badge = (!el.hovered)
             .then(|| pixtuoid_scene::overlay::badge_hue(&el.text, theme))
             .flatten();
@@ -403,12 +333,10 @@ pub fn paint_labels_into_surface(
 }
 
 /// Paint the neon wall-board text over the already-painted panel, into the upscaled
-/// surface. The panel interior is `NEON_PANEL_INNER_*` in office-buffer px, so the
-/// board text ANCHORS to it and SCALES with the office `scale` (unlike the fixed-height
-/// name badges) — the three rows always fit inside the glowing frame. At a very small
-/// office scale the rows would be sub-legible; there we leave the panel empty rather
-/// than paint mush (the footer/TUI carry nothing critical the board owns). Shared by
-/// the live window and the `floating_snapshot` verify example.
+/// surface. The panel interior is `NEON_PANEL_INNER_*` in office-buffer px, so the board
+/// text ANCHORS to it and SCALES with the office `scale` (unlike the fixed-height name
+/// badges) — the three rows always fit inside the glowing frame. At a very small office
+/// scale the rows would be sub-legible; there we leave the panel empty rather than mush.
 pub fn paint_wall_board_into_surface(
     sb: &mut [u32],
     win_w: usize,
@@ -434,11 +362,8 @@ pub fn paint_wall_board_into_surface(
     }
     // Fill ~85% of the row so descenders don't collide with the next row.
     let font_px = row_h as f32 * 0.85;
-    // Tone→role map is single-sourced in `scene::board`; the painter only packs
-    // the resolved `Rgb` into the surface's XRGB.
     let glow = |tone| pack_xrgb(pixtuoid_scene::board::tone_rgb(tone, theme));
 
-    // L1: brand left, ★ Star right-flushed to the interior's right edge.
     draw_badge_text(
         sb,
         win_w,
@@ -462,7 +387,6 @@ pub fn paint_wall_board_into_surface(
         glow(board.star.tone),
     );
 
-    // L2 (mood) + L3 (context): tone-mapped segments laid left-to-right on their row.
     for (row, segs) in [(1, &board.mood), (2, &board.context)] {
         let mut x = inner_x;
         let y = inner_y + row * row_h;
@@ -473,24 +397,19 @@ pub fn paint_wall_board_into_surface(
     }
 }
 
-/// Column budget for the floating footer at `win_w` px — how many monospace
-/// Monaspace advances fit between the margins. [`build_footer`] right-flushes to
-/// it, so the footer spans margin-to-margin; Monaspace is fixed-advance, so a
-/// column budget maps cleanly to pixels (the board's `chars().count()` discipline).
+/// Column budget for the floating footer at `win_w` px — how many monospace Monaspace
+/// advances fit between the margins. Monaspace is fixed-advance, so a column budget maps
+/// cleanly to pixels.
 pub fn footer_budget(win_w: usize) -> u16 {
     let advance = crate::aa_text::text_width("M", LABEL_FONT_PX).max(1);
     (((win_w as i32 - 2 * FOOTER_MARGIN_PX).max(0)) / advance) as u16
 }
 
-/// Paint the shared status footer as a bottom-overlay band — the floating twin of
-/// the TUI's status row, rendering the SAME [`build_footer`] model so the two
-/// can't drift. Each segment is toned via the ONE shared [`footer_tone_rgb`], then
-/// packed to the surface XRGB; laid left-to-right from the left margin, the model's
-/// baked right-flush padding pushes the ♩/keys suffix to the right edge. Fixed
-/// caption height like the name badges (crisp at any office scale); an OVERLAY over
-/// the office's bottom rows — it never insets the buffer (that would shift the
-/// desk-capacity lockstep). This carries the ♩/♩N% audio feedback the standalone
-/// volume flash used to (now TUI-consistent: silent when muted).
+/// Paint the shared status footer as a bottom-overlay band — the floating twin of the
+/// TUI's status row, rendering the SAME [`build_footer`] model so the two can't drift.
+/// An OVERLAY over the office's bottom rows: it never insets the buffer (that would
+/// shift the desk-capacity lockstep). Fixed caption height like the name badges, so it
+/// stays crisp at any office scale.
 pub fn paint_footer_into_surface(
     sb: &mut [u32],
     win_w: usize,
@@ -514,9 +433,6 @@ mod tests {
 
     #[test]
     fn pack_xrgb_is_0x00rrggbb() {
-        // Pin the surface pixel format (channel order + shift widths) so the two
-        // production packers (office blit + label overlay) can't re-drift. The
-        // per-tone label test below independently cross-checks it via `as_u32`.
         assert_eq!(
             pack_xrgb(Rgb {
                 r: 255,
@@ -531,8 +447,6 @@ mod tests {
 
     #[test]
     fn renders_a_sized_nonblank_office_buffer() {
-        // A fresh empty office still paints floor/walls/windows → never all-black, and the
-        // buffer is sized to the requested pixel dims. Pins the floating render seam end-to-end.
         let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let pack =
             pixtuoid_scene::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
@@ -550,10 +464,8 @@ mod tests {
             None,
         );
         assert_eq!((buf.width(), buf.height()), (160, 96));
-        // Assert PAINTED content, not the pre-fill: `ensure_size` fills the buffer with
-        // `bg_fallback` (non-black) BEFORE the painter runs, so "any non-black pixel" would
-        // pass even if the painter no-op'd. Require a pixel that is neither black NOR
-        // `bg_fallback` → the floor/walls/windows pass actually ran.
+        // `ensure_size` pre-fills with `bg_fallback` (non-black) BEFORE the painter runs,
+        // so "any non-black pixel" would pass even if the painter no-op'd.
         let bg = theme.surface.bg_fallback;
         assert!(
             buf.as_slice()
@@ -565,21 +477,16 @@ mod tests {
 
     #[test]
     fn office_scale_keeps_the_office_chunky_and_never_zero() {
-        // Downscale so the office buffer stays ~OFFICE_TARGET_H (180px) tall.
         assert_eq!(office_scale(180), 1);
         assert_eq!(office_scale(360), 2);
         assert_eq!(office_scale(720), 4);
-        // A short window still renders at scale 1 — never 0 (redraw divides by it).
+        // Never 0 — redraw divides by it.
         assert_eq!(office_scale(90), 1);
         assert_eq!(office_scale(0), 1);
     }
 
     #[test]
     fn boot_capacities_for_window_match_the_first_redraw_geometry_not_the_tui_overseed() {
-        // A 4x-upscaled window (720px tall → office_scale 4): the boot seed must
-        // match what the first redraw's `sync_floor_caps` stores — `floor_capacity`
-        // at the DOWNSCALED buffer (win/scale), no footer — not the full-window
-        // over-seed the TUI helper produces.
         let (w, h) = (1280u32, 720u32);
         let scale = office_scale(h);
         let buf_w = (w / scale) as u16;
@@ -596,8 +503,6 @@ mod tests {
                 "floor {i} boot cap must match the rendered geometry"
             );
         }
-        // The old TUI helper (footer subtraction + no office_scale) over-seeds the
-        // ground floor — the bug this fix removes.
         let overseed = crate::runtime::boot_capacities_for(w as u16, (h / 2) as u16);
         assert!(
             overseed[0] >= boot[0],
@@ -607,22 +512,16 @@ mod tests {
         );
     }
 
-    /// The seed must describe the window the first redraw will MEASURE — physical
-    /// px — not the `[floating]` config size, which is LOGICAL by design
-    /// (`persist_geometry` saves `to_logical`, `resumed` restores a `LogicalSize`,
-    /// so the config stays HiDPI-stable).
-    ///
-    /// The test above feeds the SAME numbers to both sides, so it exercises the
-    /// function and can never see a UNITS mismatch — a coverage-TOPOLOGY gap, not
-    /// a missing test (#803). This one CROSSES the boundary using winit's own
-    /// conversion, at scale factors where the two disagree.
+    /// Crosses the logical/physical boundary using winit's own conversion, at scale
+    /// factors where the two disagree — the test above feeds the SAME numbers to both
+    /// sides, so it can never see a UNITS mismatch (#803).
     #[test]
     fn the_boot_seed_tracks_the_physical_window_not_the_logical_config() {
         let logical = LogicalSize::new(
             crate::config::FLOATING_DEFAULT_W as f64,
             crate::config::FLOATING_DEFAULT_H as f64,
         );
-        // What `floating::run` used to pass: the logical size, read as physical.
+        // The logical size read as physical — the defect.
         let as_if_physical = boot_capacities_for_window(PhysicalSize::new(
             logical.width as u32,
             logical.height as u32,
@@ -652,8 +551,6 @@ mod tests {
                 "floor-0 seed at {sf}×"
             );
         }
-        // The defect's DIRECTION: at 2× the honest seed admits FEWER agents than
-        // the logical-as-physical one, so the old call site over-seeded.
         let at_2x = boot_capacities_for_window(logical.to_physical(2.0));
         assert!(
             at_2x[0] < as_if_physical[0],
@@ -663,10 +560,6 @@ mod tests {
         );
     }
 
-    /// A window too small for a floor to lay out seeds ZERO, exactly like the
-    /// first `sync_floor_caps` `store`s — the `cap == 0 → FALLBACK_DESKS` clause is
-    /// gone. It was the last boot-vs-steady-state divergence and pointed the wrong
-    /// way: 16 phantom desks where the redraw reports none.
     #[test]
     fn an_unlayoutable_window_seeds_zero_not_a_fallback() {
         let tiny = PhysicalSize::new(64u32, 48u32);
@@ -687,16 +580,12 @@ mod tests {
         );
     }
 
-    /// A SHRINK must LOWER the published capacity — the direction [`sync_floor_caps`]
-    /// documents. Under a `fetch_max` "harmonization" the second publish is a no-op
-    /// and the atomics keep the LARGER window's count.
     #[test]
     fn a_shrink_lowers_the_published_capacity_it_is_store_not_fetch_max() {
         let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
         let (big, small) = ((360u16, 240u16), (240u16, 160u16));
         let want_big = floor_caps_for_buffer(big.0, big.1);
         let want_small = floor_caps_for_buffer(small.0, small.1);
-        // Fixture guard: the shrink must actually cost desks, else this asserts nothing.
         assert!(
             want_small[0] < want_big[0] && want_small[0] > 0,
             "fixture must shrink floor 0 to a smaller NON-zero capacity: {} → {}",
@@ -725,18 +614,10 @@ mod tests {
         }
     }
 
-    /// The invariant [`boot_capacities_for_window`] and `floating/mod.rs` assert in
-    /// prose: the `resumed` seed and the per-redraw publish agree. Both route through
-    /// [`floor_caps_for_buffer`], which makes agreement structural; this drives BOTH
-    /// real functions end-to-end so a re-divergence — a fallback clause returning on
-    /// one side, a footer row subtracted on the other — reds instead of quietly
-    /// falsifying that prose.
-    ///
     /// One fixture per divergence class: 1280×720 and 64×48 catch a re-introduced
     /// `cap == 0 → FALLBACK_DESKS` fallback, and 853×480 (`office_scale` 3) is the one
     /// whose capacity moves under a few px of one-sided buffer drift — the other two
-    /// absorb it, so without this fixture the footer-row half of the claim above is
-    /// unpinned.
+    /// absorb it.
     #[test]
     fn the_first_redraws_publish_agrees_with_the_boot_seed() {
         for window in [
@@ -757,11 +638,6 @@ mod tests {
         }
     }
 
-    /// The resize memo must skip a REPEAT of the same buffer size and fire on a
-    /// CHANGE — including the very first call, whose `last` is `None`. Inverting the
-    /// guard to `==` makes the first redraw publish nothing and every later resize a
-    /// no-op, so admission silently freezes at the boot seed; the memo lived in
-    /// `window.rs` where neither codecov nor cargo-mutants could see that.
     #[test]
     fn the_resize_memo_publishes_on_a_change_and_skips_a_repeat() {
         let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
@@ -783,8 +659,6 @@ mod tests {
             sync_floor_caps(&mut last, &caps, 240, 160),
             "a resize must republish"
         );
-        // The skip must be a genuine no-op, not a stale-value publish: hand the memo a
-        // size it already holds while the atomics say something else, and they must stand.
         caps[0].store(999, Ordering::Relaxed);
         assert!(!sync_floor_caps(&mut last, &caps, 240, 160));
         assert_eq!(
@@ -808,9 +682,6 @@ mod tests {
                 hovered,
             }]
         };
-        // Each tone must paint its OWN theme color — not merely "some pixel". The
-        // leading ● disc reaches FULL AA coverage, so its exact tone color appears; a
-        // wrong match arm (e.g. Idle returning the Active color) would fail this.
         let badge_dot = |tone, hovered| {
             vec![LabelElement {
                 anchor_px: Point { x: 20, y: 20 },
@@ -833,10 +704,8 @@ mod tests {
                 "tone {tone:?} must paint its theme color {expected:?}"
             );
         }
-        // Hover OVERRIDES the tone color with white. AA curve strokes don't reach
-        // coverage EXACTLY 1.0 (the old 8×8 bitmap did), so assert via brightness:
-        // painting the SAME glyphs, the white hover ink must be brighter than the
-        // dim-grey Idle ink — which is only true if hover replaced the tone color.
+        // AA curve strokes don't reach coverage EXACTLY 1.0, so assert hover via
+        // brightness rather than an exact ink color.
         let brightness = |sb: &[u32]| {
             sb.iter()
                 .map(|&p| (p & 0xff) + ((p >> 8) & 0xff) + ((p >> 16) & 0xff))
@@ -869,15 +738,12 @@ mod tests {
 
     #[test]
     fn paint_labels_split_the_status_dot_tone_from_the_cli_name_hue() {
-        // #657 owner-ratified split: the ● dot keeps the activity tone while the
-        // NAME paints in the source's by_prefix badge hue. A registered prefix
-        // (`cc·`) exercises the `Some(hue)` arm the tone-only tests above skip.
+        // A registered prefix (`cc·`) exercises the `Some(hue)` arm the tone-only
+        // tests above skip.
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::{LabelElement, LabelTone};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let as_u32 = |c: Rgb| (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32;
-        // Idle grey dot vs the cc badge hue — deliberately distinct colors, so
-        // "both present" proves a genuine split, not one color bleeding into both.
         let tone_rgb = theme.ui.label_idle;
         let name_rgb = theme.source.claude_code;
         assert_ne!(tone_rgb, name_rgb, "premise: idle tone != cc badge hue");
@@ -904,9 +770,7 @@ mod tests {
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::{LabelElement, LabelTone};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        // Paint over a WHITE ground: an AA glyph's edges emit partial coverage, so
-        // some pixels land STRICTLY between white and any fully-lit ink — the exact
-        // thing the old all-or-nothing 8×8 bitmap font could never produce.
+        // A WHITE ground: AA edges land STRICTLY between the ground and any fully-lit ink.
         let white = 0x00FF_FFFFu32;
         let mut sb = vec![white; 200 * 60];
         let badge = vec![LabelElement {
@@ -923,7 +787,6 @@ mod tests {
             intermediate,
             "AA text must blend edge pixels between the ground and the ink"
         );
-        // And a fully-covered stroke interior still reaches the exact tone color.
         assert!(
             sb.contains(&ink),
             "glyph interior reaches full-coverage tone color"
@@ -933,9 +796,7 @@ mod tests {
     #[test]
     fn wall_board_paints_brand_and_mood_tones_into_the_panel() {
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        // 2 work + 1 wait + 1 idle, a busy gateway → the board carries the brand, a
-        // ●work mood segment, and the ⬢gw chip. Rendered at a generous scale so the
-        // full-coverage stroke interiors reach the exact tone colors.
+        // A generous scale, so full-coverage stroke interiors reach the exact tone colors.
         let counts = pixtuoid_scene::board::StateCounts {
             active: 2,
             waiting: 1,
@@ -956,7 +817,6 @@ mod tests {
             sb.contains(&pack_xrgb(theme.ui.label_active)),
             "the ● work mood segment paints the active hue"
         );
-        // Below the min row size the board leaves the panel empty (no mush).
         let mut tiny = vec![0u32; w * h];
         paint_wall_board_into_surface(&mut tiny, w, h, &board, 1, theme);
         assert!(
@@ -965,8 +825,8 @@ mod tests {
         );
     }
 
-    /// Local twin of the TUI harness's `active_on` — `tui` and `floating` are
-    /// sibling painters that don't share code, test helpers included.
+    /// Local twin of the TUI harness's `active_on` — `tui` and `floating` are sibling
+    /// painters that don't share code, test helpers included.
     fn active_on(path: &str, floor_idx: usize, desk: usize) -> pixtuoid_core::state::AgentSlot {
         use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, ToolKind};
         use std::sync::Arc;
@@ -1011,9 +871,6 @@ mod tests {
 
     #[test]
     fn floating_stems_count_only_the_rendered_floor() {
-        // The floating twin of the TUI harness's floor-scoping pin: 1 active on
-        // the rendered ground floor vs 3 on floor 1 must read MODERATE typing,
-        // not the BUSY a global count would produce.
         let cap = 16;
         let scene = scene_with(
             vec![
@@ -1062,11 +919,6 @@ mod tests {
 
     #[test]
     fn paint_footer_blits_into_the_bottom_band_and_tones_via_the_shared_authority() {
-        // The floating footer's parity with the TUI: it renders the SHARED
-        // build_footer model into the bottom band, toned through footer_tone_rgb
-        // (the same authority the TUI uses). The pure tier/policy is pinned in
-        // scene::footer; this pins the blit region + the tone routing — the
-        // phantom-feedback twin of the label/volume blit tests it replaces.
         use pixtuoid_scene::board::{per_floor_counts, scene_stats};
         use pixtuoid_scene::footer::{FooterTone, RungKind};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
@@ -1102,7 +954,6 @@ mod tests {
             changed.iter().all(|&i| i / w >= h / 2),
             "the footer stays in the bottom band"
         );
-        // The ●A rung tones via the shared authority (parity with the TUI adapter).
         assert!(
             sb.contains(&pack_xrgb(footer_tone_rgb(
                 FooterTone::Rung(RungKind::Active),
@@ -1114,12 +965,8 @@ mod tests {
 
     #[test]
     fn floating_appliance_cues_fire_from_the_sessions_occupancy() {
-        // TUI cue parity (#633 close-out): the tracker now receives the
-        // session's occupied_waypoints + this frame's waypoint kinds, so a
-        // wanderer standing at the printer / vending machine fires the
-        // appliance one-shot in the floating window too. Deterministic —
-        // fixed agent id + a hand-stepped clock; the loop bound mirrors the
-        // scene crate's occupancy sim pin.
+        // Deterministic: fixed agent id + a hand-stepped clock; the loop bound mirrors
+        // the scene crate's occupancy sim pin.
         use pixtuoid_scene::audio::OneShot;
         let pack =
             pixtuoid_scene::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
@@ -1191,7 +1038,6 @@ mod tests {
         );
         crate::audio::drain_frames(&rx); // discard the priming frames
 
-        // an arrival on ANOTHER floor: silent in the ground-floor window
         agents.push(active_on("/d/f1-new.jsonl", 1, cap));
         let scene = scene_with(agents.clone(), cap);
         now += std::time::Duration::from_millis(33);
@@ -1214,7 +1060,6 @@ mod tests {
             "a floor-1 walk-in must not chime the ground-floor window: {off_floor:?}"
         );
 
-        // an arrival on the rendered floor chimes
         agents.push(active_on("/d/f0-new.jsonl", 0, 1));
         let scene = scene_with(agents, cap);
         now += std::time::Duration::from_millis(33);
@@ -1248,8 +1093,7 @@ mod tests {
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
 
-        // One real agent, seeded the production way: a SessionStart through the reducer
-        // registers the slot and assigns it a desk on floor 0.
+        // Seeded the production way: a SessionStart through the reducer assigns the desk.
         let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let mut reducer = Reducer::new();
         reducer.apply(
@@ -1267,9 +1111,6 @@ mod tests {
 
         // No frame rendered yet → no cached layout → the guard returns empty.
         assert!(renderer.labels(&scene, now).is_empty());
-        // After a render, labels() builds the overlay off the cached layout → one badge for the
-        // seeded agent, anchored inside the rendered 160×96 office buffer (proves the seam wires
-        // render's geometry into build_overlay, not just that the line executed).
         renderer.render(
             &scene,
             &pack,

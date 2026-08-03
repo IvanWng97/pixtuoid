@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SourceStatus",
-  "description": "A serializable status row for `pixtuoid sources --json` — the STABLE wire\ncontract the Raycast extension parses (pinned by `source_status_json_shape`).\nDeliberately a flat DTO, NOT the internal `ConnectionRow` (whose shape is a\nUI concern free to change).",
+  "description": "The STABLE `pixtuoid sources --json` wire contract the Raycast extension\nparses. Deliberately a flat DTO, NOT the internal `ConnectionRow` (whose\nshape is a UI concern free to change).",
   "type": "object",
   "properties": {
     "id": {

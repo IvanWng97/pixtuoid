@@ -53,9 +53,8 @@ fn rows_are_tree_ordered_roots_by_desk_index_children_following_parent() {
     let a_sub = id("/p/a/subagents/agent-x.jsonl");
 
     let mut scene = SceneState::uniform(8);
-    // Insert out of desk order, and the child has a higher desk_index than
-    // root `b` — the tree order must still be a, a_sub, b (roots by desk_index,
-    // children glued under their parent), NOT BTreeMap/AgentId order.
+    // Inserted out of desk order, and the child has a HIGHER desk_index than root `b`
+    // — so BTreeMap/AgentId order would give a different answer.
     scene
         .agents
         .insert(b, mk_slot(b, "cc·b", 1, 0, None, ActivityState::Idle));
@@ -75,16 +74,13 @@ fn rows_are_tree_ordered_roots_by_desk_index_children_following_parent() {
     let depths: Vec<u8> = rows.iter().map(|r| r.depth).collect();
     assert_eq!(depths, [0, 1, 0]);
 
-    // The child carries its parent link + its own floor.
     assert_eq!(rows[1].parent_id, Some(a));
     assert_eq!(rows[1].floor_idx, 1);
-    // The root reports exactly one direct child.
     assert_eq!(rows[0].child_count, 1);
     assert_eq!(rows[2].child_count, 0);
 }
 
-/// A root plus `n` direct subagents (desks 1..=n, floor 1). Returns the scene,
-/// the root id, and `n`.
+/// A root plus `n` direct subagents (desks 1..=n, floor 1).
 fn root_with_children(n: usize) -> (SceneState, AgentId, usize) {
     let root = id("/p/root.jsonl");
     let mut scene = SceneState::uniform(16);
@@ -152,8 +148,6 @@ fn root_at_threshold_stays_expanded() {
 
 #[test]
 fn unfold_all_overrides_auto_collapse_and_sticks() {
-    // A root over the threshold auto-collapses; an explicit unfold (the `→`
-    // production path) pins it expanded, beating the auto rule.
     let (scene, root, n) = root_with_children(AUTO_COLLAPSE_THRESHOLD + 1);
     let mut folds = DashboardFolds::default();
     assert!(
@@ -179,8 +173,8 @@ fn fold_all_then_unfold_all_flip_every_root() {
     assert!(!build_dashboard_rows(&scene, &folds)[0].collapsed);
 }
 
-/// `n` flat root agents at desks/floors `0..n` (floor_idx == desk_index here so
-/// `resolve_floor` is checkable). Rows come back in desk order: rows[i] == i.
+/// `n` flat root agents at desks/floors `0..n` — `floor_idx == desk_index` here so
+/// `resolve_floor` is checkable, and rows come back in desk order (`rows[i] == i`).
 fn flat_rows(n: usize) -> Vec<DashboardRow> {
     let mut scene = SceneState::uniform(n.max(1));
     for i in 0..n {

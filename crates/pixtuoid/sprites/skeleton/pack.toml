@@ -1,12 +1,7 @@
 # Skeleton sprite pack — copy this directory and customize.
 #
-# Required animations: seated, typing (2 frames), standing,
-# walking (2 frames), walking_back (2 frames), seated_sleeping,
-# seated_sleeping_alt, holding_coffee, back_couch.
-#
-# Palette keys B/H/S are recolored per-agent for visual identity.
-# Each key MUST map to a unique RGB — recolor substitutes by RGB equality.
-# '.' is always transparent.
+# Palette keys B/H/S are recolored per-agent; each MUST map to a unique RGB, since
+# recolor substitutes by RGB equality. '.' is always transparent.
 
 [pack]
 name = "skeleton"
@@ -20,8 +15,7 @@ S = "#e8c090"       # Skin — recolored per agent
 P = "#334455"       # Pants
 W = "#ffffff"       # White accent
 
-# All required animations use the same placeholder sprite.
-# Replace each with a purpose-drawn sprite for your pack.
+# Every animation below is required, and each uses the same placeholder — replace them.
 
 [animations.seated]
 frames = ["placeholder.sprite"]

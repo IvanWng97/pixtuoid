@@ -1,9 +1,4 @@
 # Robot sprite pack — boxy retro robots for pixtuoid.
-#
-# B/H/S keys are recolored per-agent for visual identity:
-#   B = chassis (shirt equivalent)
-#   H = antenna/accent (hair equivalent)
-#   S = visor/face (skin equivalent)
 
 [pack]
 name = "robot"
@@ -11,9 +6,9 @@ version = "0.1.0"
 
 [palette]
 "." = "transparent"
-B = "#5588bb"       # Chassis / body — recolored per agent
-H = "#cc4444"       # Antenna / accent — recolored per agent
-S = "#44ddaa"       # Visor / face plate — recolored per agent
+B = "#5588bb"       # Chassis / body — the per-agent "shirt" slot
+H = "#cc4444"       # Antenna / accent — the per-agent "hair" slot
+S = "#44ddaa"       # Visor / face plate — the per-agent "skin" slot
 P = "#445566"       # Legs / lower body
 M = "#8899aa"       # Metal joints
 W = "#dddddd"       # Highlight / shine

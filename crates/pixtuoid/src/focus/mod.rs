@@ -1,26 +1,20 @@
-//! Focus-jump: click a sprite → the terminal app hosting that agent comes to
-//! the foreground. Spec: docs/superpowers/specs/2026-07-10-focus-jump-design.md.
-//!
-//! Pipeline: `resolve_pid` (slot cache → per-source probe) → `ancestor_walk`
-//! (pid → the first *focusable* ancestor, i.e. the terminal GUI app) →
-//! per-OS `activate`. App-level only, by design (v1) — no tab/pane precision.
+//! Focus-jump: click a sprite → the terminal app hosting that agent comes to the
+//! foreground. `resolve_pid` (slot cache → per-source probe) → `ancestor_walk`
+//! (pid → the first *focusable* ancestor, i.e. the terminal GUI app) → per-OS
+//! `activate`. App-level only by design — no tab/pane precision.
+//! Spec: docs/superpowers/specs/2026-07-10-focus-jump-design.md.
 //!
 //! ONE failure rule (user-directed, no fallbacks): any miss — no pid, walk
-//! reaches pid 1, remote agent, activation denied, unsupported compositor —
-//! is a SILENT no-op with a `tracing::debug!` breadcrumb. Success = the
-//! window comes forward; failure = nothing happens.
+//! reaches pid 1, remote agent, activation denied, unsupported compositor — is a
+//! SILENT no-op with a `tracing::debug!` breadcrumb.
 //!
-//! KNOWN common miss (#538): an agent inside a terminal MULTIPLEXER
-//! (tmux/screen/zellij). The multiplexer SERVER is daemonized (parent =
-//! launchd/init) and owns no GUI surface, so the walk dead-ends at pid 1 —
-//! live-verified. The fix (walk the CLIENT's chain via e.g.
-//! `tmux display -p '#{client_pid}'`) is backlog #538.
+//! KNOWN common miss (#538): an agent inside a terminal MULTIPLEXER. The
+//! multiplexer SERVER is daemonized and owns no GUI surface, so the walk
+//! dead-ends at pid 1.
 //!
-//! Lives in the BINARY (invariant #1: core/scene stay window-free). The
-//! walker is PURE over an injected [`ProcessTable`], so the logic is unit
-//! tested on mock tables; the per-OS glue (`macos`/`windows`/`linux`) is
-//! thin and codecov-ignored (needs a real session/display — the
-//! `floating/window.rs` class).
+//! Lives in the BINARY (invariant #1: core/scene stay window-free); the walker
+//! is PURE over an injected [`ProcessTable`], the per-OS glue thin and
+//! codecov-ignored.
 
 use std::path::Path;
 
@@ -35,23 +29,20 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
-/// The process-tree view `ancestor_walk` needs — injected so the walk is a
-/// pure function (mock tables in tests; the real per-OS impls query the
-/// kernel). Deliberately BUNDLES kernel reads (`ppid`/`start_time`) with the
-/// window-ownership probe (`focusable`): one trait = one mock across 3 OSes.
-/// Split it (ProcessTree vs WindowBackend, with `activate` moving onto the
-/// window half) only when tab-precision lands and forces a terminal
-/// classifier — not before (YAGNI).
+/// The process-tree view `ancestor_walk` needs — injected so the walk is a pure
+/// function. Deliberately BUNDLES the kernel reads (`ppid`/`start_time`) with
+/// the window-ownership probe (`focusable`): one trait = one mock across 3 OSes.
+/// Split it only when tab-precision lands and forces a terminal classifier — not
+/// before (YAGNI).
 pub(crate) trait ProcessTable {
     /// Parent pid, `None` when the process is gone / unreadable.
     fn ppid(&self, pid: i32) -> Option<i32>;
     /// Whether this pid owns a focusable surface (a regular GUI app on macOS,
     /// a top-level window on Windows/X11).
     fn focusable(&self, pid: i32) -> bool;
-    /// Kernel start marker for `pid` — the identity half of the recycle guard
-    /// (#527). The default rides the shared core read (the SAME source the
-    /// hook stamp used, so equality means "same incarnation"); mock tables
-    /// override it.
+    /// Kernel start marker for `pid` — the identity half of the recycle guard.
+    /// The default rides the SAME core read the hook stamp used, so equality
+    /// means "same incarnation"; mock tables override it.
     fn start_time(&self, pid: i32) -> Option<u64> {
         pixtuoid_core::source::pid_start_marker(pid)
     }
@@ -72,31 +63,27 @@ pub(crate) fn ancestor_walk(table: &impl ProcessTable, start: i32) -> Option<i32
     None
 }
 
-/// The per-source pid lookup roots the click-time resolution needs — built by
-/// the trigger site from its existing config (None disables that family).
+/// The per-source pid lookup roots click-time resolution needs; `None` disables
+/// that family.
 pub(crate) struct FocusPaths<'a> {
-    /// CC's projects root (`~/.claude/projects`); the sibling `sessions` pid
-    /// registry is derived inside the core seam (standard-layout-gated).
+    /// CC's projects root (`~/.claude/projects`).
     pub cc_projects_root: Option<&'a Path>,
     /// Codex's sessions root (rollout tree) for the fd probe.
     pub codex_sessions_root: Option<&'a Path>,
-    /// grok's home root (`active_sessions.json`'s parent). Unlike the CC/Codex
-    /// roots there is NO CLI override to thread from the driver — `focus_slot`
-    /// resolves it from the one `grok_home()` authority at click time; the
-    /// field exists so `resolve_pid` tests inject it like the other two.
+    /// grok's home root (`active_sessions.json`'s parent). No CLI override exists
+    /// — `focus_slot` resolves it from `grok_home()`; the field exists so tests
+    /// inject it like the other two.
     pub grok_root: Option<&'a Path>,
 }
 
 /// Resolve the agent's OS pid. Precedence: the slot's cached pid (hook-family
-/// sources — filled from the shim/plugin `_pid` riding each Identity) → the
-/// transcript-family point queries (CC registry / Codex fd probe, both
-/// recycle-guarded) → None. Two click-time recycle guards on the cached path:
-/// an EXITING slot refuses outright (its process is going or gone), and a
-/// cached start marker must match the kernel's CURRENT marker for that pid
-/// (#527) — a mismatch means the pid was recycled by an unrelated process
-/// after an abrupt death, and a missing current read means the process is
-/// gone. A cache stamped WITHOUT a marker (non-unix daemon) skips the
-/// identity check — additive, the #220 posture.
+/// sources) → the transcript-family point queries (CC registry / Codex fd probe)
+/// → None. Two click-time recycle guards on the cached path: an EXITING slot
+/// refuses outright (its process is going or gone), and a cached start marker
+/// must match the kernel's CURRENT marker for that pid — a mismatch means the
+/// pid was recycled by an unrelated process after an abrupt death, and a missing
+/// current read means the process is gone. A cache stamped WITHOUT a marker
+/// (non-unix daemon) skips the identity check.
 pub(crate) fn resolve_pid(
     slot: &AgentSlot,
     paths: &FocusPaths<'_>,
@@ -119,13 +106,10 @@ pub(crate) fn resolve_pid(
         }
         return Some(cached.pid);
     }
-    // The registry's FocusChannel capability decides WHETHER a probe applies;
-    // the probe FNS themselves stay here in the binary (deliberate: the
-    // registry const table compiles to wasm, a native-only fn pointer can't
-    // live in it). The name match uses the registry consts, not literals — a
-    // source rename must not silently drop an arm to `_ => None` — and the
-    // `transcript_probe_sources_all_have_a_resolve_arm` lockstep test pins
-    // that every `TranscriptProbe` row has an arm below.
+    // The probe FNS stay here in the binary: the registry const table compiles to
+    // wasm and cannot hold a native-only fn pointer. The name match uses the
+    // registry consts, not literals — a source rename must not silently drop an
+    // arm to `_ => None`.
     use pixtuoid_core::source::registry::FocusChannel;
     let channel = pixtuoid_core::source::registry::descriptor_for(&slot.source)
         .map_or(FocusChannel::Unsupported, |d| d.focus_channel());
@@ -146,19 +130,13 @@ pub(crate) fn resolve_pid(
     }
 }
 
-/// The painter-agnostic focus dispatch — ANY painter's trigger (the TUI's
-/// sprite click and dashboard `f` today; the floating window's future
-/// trigger) resolves + walks + activates through this ONE entry with the
-/// real OS table. `roots` = (CC projects root, Codex sessions root), the
-/// clone `runtime/driver.rs` takes BEFORE `build_source_set` consumes the
-/// originals.
+/// The painter-agnostic focus dispatch: ANY painter's trigger resolves + walks +
+/// activates through this ONE entry with the real OS table. `roots` = (CC
+/// projects root, Codex sessions root).
 pub(crate) fn focus_slot(
     slot: &AgentSlot,
     roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
 ) {
-    // grok's root has no CLI override (the tuple exists for --projects-root /
-    // --codex-sessions-root), so it resolves here from the one `grok_home()`
-    // authority instead of threading a third always-Some element through.
     let grok_home = pixtuoid_core::source::grok::grok_home();
     let paths = FocusPaths {
         cc_projects_root: roots.0.as_deref(),
@@ -168,8 +146,7 @@ pub(crate) fn focus_slot(
     focus_agent(slot, &paths, &OsProcessTable, activate_os);
 }
 
-/// The orchestration entry — the ONE caller of the per-OS glue. `activate`
-/// is injected (the `headless_loop` ctrl_c seam precedent) so dispatch tests
+/// The ONE caller of the per-OS glue. `activate` is injected so dispatch tests
 /// never touch the OS; production passes [`activate_os`].
 pub(crate) fn focus_agent(
     slot: &AgentSlot,
@@ -192,7 +169,6 @@ pub(crate) fn focus_agent(
 
 #[cfg(target_os = "linux")]
 pub(crate) use linux::{activate_os, OsProcessTable};
-/// The real per-OS process table.
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{activate_os, OsProcessTable};
 #[cfg(windows)]
@@ -206,9 +182,7 @@ mod tests {
     struct MockTable {
         parents: HashMap<i32, i32>,
         focusable: Vec<i32>,
-        /// pid → current kernel start marker; empty = "every pid reads None"
-        /// (gone), which the default-marker tests below never hit because a
-        /// markerless cache skips the check.
+        /// pid → current kernel start marker; empty = every pid reads `None`.
         started: HashMap<i32, u64>,
     }
     impl ProcessTable for MockTable {
@@ -247,14 +221,13 @@ mod tests {
 
     #[test]
     fn walk_terminates_on_a_cycle() {
-        // Corrupt/racing table: 300 → 200 → 300 → … must return None, not loop.
+        // Corrupt/racing table: 300 → 200 → 300 → …
         let t = MockTable {
             parents: HashMap::from([(300, 200), (200, 300)]),
             focusable: vec![],
             started: HashMap::new(),
         };
         assert_eq!(ancestor_walk(&t, 300), None);
-        // And the degenerate self-parent.
         let t2 = MockTable {
             parents: HashMap::from([(300, 300)]),
             focusable: vec![],
@@ -265,9 +238,6 @@ mod tests {
 
     #[test]
     fn walk_of_a_dead_pid_is_a_silent_miss() {
-        // A dead/recycled-away pid: the table knows nothing about it (the real
-        // per-OS reads fail → None/false), so the walk no-ops without any
-        // extra liveness check — the documented dead-pid posture.
         let t = MockTable {
             parents: HashMap::new(),
             focusable: vec![],
@@ -278,8 +248,6 @@ mod tests {
 
     #[test]
     fn walk_start_itself_can_be_the_focusable_app() {
-        // Alacritty-style: one window per process — the agent's own ancestor
-        // chain starts at a focusable pid immediately.
         let t = MockTable {
             parents: HashMap::new(),
             focusable: vec![300],
@@ -343,8 +311,7 @@ mod tests {
 
     #[test]
     fn resolve_pid_prefers_the_slot_cache() {
-        // Markerless cache (stamped where no marker was readable): the
-        // identity check is skipped — additive, the #220 posture.
+        // Markerless cache (no marker was readable): the identity check is skipped.
         let s = slot("opencode", "ses_a", Some(pid_id(4242, None)));
         assert_eq!(resolve_pid(&s, &NO_PATHS, &empty_table()), Some(4242));
     }
@@ -352,7 +319,6 @@ mod tests {
     #[test]
     fn resolve_pid_verifies_the_start_marker_when_stamped() {
         let s = slot("opencode", "ses_a", Some(pid_id(4242, Some(1_000))));
-        // Same incarnation: current marker matches the stamp.
         let mut t = empty_table();
         t.started.insert(4242, 1_000);
         assert_eq!(resolve_pid(&s, &NO_PATHS, &t), Some(4242));
@@ -360,13 +326,10 @@ mod tests {
 
     #[test]
     fn resolve_pid_refuses_a_recycled_or_dead_pid() {
-        // #527: an abruptly-dead agent's pid got recycled — the kernel's
-        // CURRENT start marker differs from the stamped one → refuse.
         let s = slot("opencode", "ses_a", Some(pid_id(4242, Some(1_000))));
         let mut t = empty_table();
         t.started.insert(4242, 2_000);
         assert_eq!(resolve_pid(&s, &NO_PATHS, &t), None, "recycled → refuse");
-        // Process gone entirely (marker unreadable) → refuse too.
         assert_eq!(
             resolve_pid(&s, &NO_PATHS, &empty_table()),
             None,
@@ -376,8 +339,6 @@ mod tests {
 
     #[test]
     fn resolve_pid_refuses_an_exiting_slot() {
-        // The first click-time guard: an exiting agent's process is going or
-        // gone — a recycled pid would focus a random app.
         let mut s = slot("opencode", "ses_a", Some(pid_id(4242, None)));
         s.exiting_at = Some(std::time::SystemTime::UNIX_EPOCH);
         assert_eq!(resolve_pid(&s, &NO_PATHS, &empty_table()), None);
@@ -385,24 +346,19 @@ mod tests {
 
     #[test]
     fn resolve_pid_misses_when_no_channel_exists() {
-        // Hook-family slot without a cached pid and no probe roots → None
-        // (the ONE failure rule: silent).
         let s = slot("cursor", "ses_b", None);
         assert_eq!(resolve_pid(&s, &NO_PATHS, &empty_table()), None);
-        // Unknown/remote source likewise.
         let r = slot("some-remote", "ses_c", None);
         assert_eq!(resolve_pid(&r, &NO_PATHS, &empty_table()), None);
-        // FocusChannel::Unsupported (transcript-only, no probe) likewise.
         let a = slot("antigravity", "ses_d", None);
         assert_eq!(resolve_pid(&a, &NO_PATHS, &empty_table()), None);
     }
 
     #[test]
     fn transcript_probe_sources_all_have_a_resolve_arm() {
-        // The registry's FocusChannel is DATA; the probe fns live here in the
-        // binary. This is the lockstep pin: marking a new source
-        // `TranscriptProbe` in the registry REQUIRES wiring a probe arm in
-        // `resolve_pid` — extend BOTH, then add its name here.
+        // Lockstep pin: marking a new source `TranscriptProbe` in the registry
+        // REQUIRES wiring a probe arm in `resolve_pid` — extend BOTH, then add
+        // its name here.
         use pixtuoid_core::source::registry::FocusChannel;
         let wired = [
             pixtuoid_core::source::claude_code::SOURCE_NAME,
@@ -441,7 +397,6 @@ mod tests {
         );
         assert_eq!(activated, Some(100), "the terminal app pid is activated");
 
-        // No pid → the activate seam is never reached.
         let mut called = false;
         focus_agent(&slot("cursor", "s", None), &NO_PATHS, &t, |_| {
             called = true;
@@ -452,10 +407,6 @@ mod tests {
 
     #[test]
     fn focus_agent_no_focusable_ancestor_never_activates() {
-        // resolve yields a pid but the walk finds NO focusable ancestor → the fn
-        // must return without activating. Teeth: a regression that activates the
-        // raw resolved pid (the agent's own process) instead of a walked terminal-
-        // app ancestor would call `activate` here.
         let t = MockTable {
             parents: HashMap::new(),
             focusable: vec![],
@@ -475,10 +426,8 @@ mod tests {
     }
 }
 
-/// Live dogfood (manual, `cargo test -p pixtuoid --lib focus -- --ignored`):
-/// walks THIS test process's own ancestor chain with the real OS table and
-/// activates the found terminal app — the exact path a sprite click runs.
-/// Ignored in CI: needs a real GUI session, and it yanks a window forward.
+/// Live dogfood (manual, `--ignored`): walks THIS test process's own ancestor
+/// chain with the real OS table and activates the terminal app it finds.
 #[cfg(all(test, target_os = "macos"))]
 mod live_dogfood {
     use super::*;

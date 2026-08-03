@@ -1,9 +1,5 @@
 use super::*;
 
-// ===================================================================
-// Hit-testing against a real rendered layout
-// ===================================================================
-
 #[test]
 fn furniture_hit_test_resolves_against_rendered_layout() {
     let scene = scene_with(vec![idle("/hit/0.jsonl", 0, t0())], 16);
@@ -31,8 +27,7 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
         .waypoints
         .iter()
         .find(|w| w.kind == WaypointKind::Pantry)
-        .expect("a 140×48 office must lay out a pantry"); // no silent skip
-                                                          // Scan the counter neighbourhood; the machine occupies part of it.
+        .expect("a 140×48 office must lay out a pantry");
     let cx = pantry.pos.x;
     let cy = pantry.pos.y / 2;
     let mut found = false;
@@ -63,17 +58,6 @@ fn pet_hit_test_resolves_at_pet_position() {
     );
 }
 
-// ===================================================================
-// hit_test_furniture — every per-kind label arm, against a REAL layout
-// ===================================================================
-
-// Drive a real production layout (the same `compute_with_seed` the renderer
-// calls) and hover the CENTER of each populated furniture field, asserting
-// hit_test_furniture returns that kind's label. This closes the waypoint loop
-// (Pantry/Phone Booth/Standing Desk/Vending/Printer), meeting sofas, pantry
-// table/chairs, plants, floor lamp, wall+pod decor, lounge couch + side table,
-// and the procedural meeting/pantry items. Ficus + BulletinBoard are covered
-// by synthetic-layout unit tests (compute never emits BulletinBoard; Ficus places since B-3).
 #[test]
 fn furniture_hit_test_covers_every_kind_on_real_layouts() {
     use crate::tui::hit_test::hit_test_furniture;
@@ -82,11 +66,9 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
     };
     use std::collections::HashSet;
 
-    // Scan the WHOLE cell grid and collect every label hit_test_furniture
-    // returns anywhere. Per-item shadowing (e.g. a floor lamp under the couch
-    // region, a chair under the pantry table) means a single center-probe is
-    // brittle, but an item's NON-shadowed cells still yield its label — so the
-    // returned-label SET reaches every arm that is geometrically reachable.
+    // Per-item shadowing (a floor lamp under the couch region, a chair under the
+    // pantry table) makes a single center-probe brittle, so scan the WHOLE grid:
+    // an item's non-shadowed cells still yield its label.
     let labels_on = |layout: &Layout| -> HashSet<&'static str> {
         let mut set = HashSet::new();
         for cy in 0..(layout.buf_h / 2) {
@@ -99,15 +81,14 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
         set
     };
 
-    // Seeds 0 and 3 between them populate every field (seed 3 brings the
-    // PhoneBooth/StandingDesk pod-decor + a coat-rack-only meeting room).
+    // Seeds 0 and 3 between them populate every field (3 brings the PhoneBooth/
+    // StandingDesk pod decor and a coat-rack-only meeting room).
     let mut covered: HashSet<&'static str> = HashSet::new();
     for seed in [0u64, 3] {
         let layout = Layout::compute_with_seed(160, 200, Some(TEST_DEFAULT_DESKS), seed)
             .unwrap_or_else(|| panic!("layout for seed {seed}"));
         let labels = labels_on(&layout);
 
-        // For every kind PRESENT in this layout, its label must be reachable.
         for wp in &layout.waypoints {
             let want = match wp.kind {
                 WaypointKind::Pantry => Some("Pantry Counter"),
@@ -191,14 +172,11 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
                 item.kind
             );
         }
-        // Procedural room items (coat rack / doormat / water cooler / trash bin)
-        // are emitted by hit_test_furniture from the room bounds, not a layout
-        // field, so just gather whatever resolved.
         covered.extend(labels);
     }
 
-    // The procedural meeting/pantry-room items must surface across the two
-    // seeds (seed 0 has both a meeting room and a pantry room at 160×200).
+    // The procedural room items come from room bounds, not a layout field; seed 0
+    // has both a meeting room and a pantry room at 160×200.
     for label in [
         "Coat Rack",
         "Doormat",
@@ -213,12 +191,6 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
     }
 }
 
-// ===================================================================
-// hit_test_agent + hover marker
-// ===================================================================
-
-// Hover an idle agent's own sprite cell → the label gains the '▸' hovered
-// marker (exercises hit_test_agent's Some-return + tooltip is_hovered branch).
 #[test]
 fn hovering_an_agent_marks_its_label() {
     let mut s = idle("/hov/0.jsonl", 0, t0() - Duration::from_secs(300));
@@ -239,8 +211,6 @@ fn hovering_an_agent_marks_its_label() {
     );
 }
 
-// FIND-22: the CLICK path (hit_test_agent_at) follows the LIVE walking sprite,
-// where the old home-desk-only hit_test_from_tui missed it (hoverable-not-clickable).
 #[test]
 fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/w/0.jsonl");
@@ -250,7 +220,6 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
     r.render(&scene, &pack(), t0()).unwrap();
     let desk = r.cached_layout().expect("layout").home_desks[0];
     let (dx, dy) = (desk.x + 2, desk.y.saturating_sub(4) / 2 + 1);
-    // Seated: click and hover hit-tests AGREE at the desk box (no seated regression).
     assert_eq!(r.hit_test_agent_at(&scene, t0(), dx, dy), Some(id));
     let layout = r.cached_layout().unwrap();
     assert_eq!(
@@ -258,15 +227,12 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
         Some(id)
     );
 
-    // Now the agent EXITS: its sprite walks off the desk toward the door.
     s.exiting_at = Some(t0());
     let scene = scene_with(vec![s], 16);
     // Mid-exit-walk (EXIT_GRACE_WINDOW is 4.5s) — off the desk box, not yet GC'd.
     let walk_now = t0() + Duration::from_millis(1500);
     r.render(&scene, &pack(), walk_now).unwrap();
 
-    // The click hit-test finds the LIVE sprite cell; scan for it (idempotent per
-    // `now`, so repeated calls are stable).
     let mut live = None;
     'scan: for my in 0..80u16 {
         for mx in 0..192u16 {
@@ -282,7 +248,6 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
         (dx, dy),
         "the sprite moved off its desk during the exit walk"
     );
-    // The GAP: at the sprite's LIVE cell the home-desk-only test MISSES it.
     let layout = r.cached_layout().unwrap();
     assert_eq!(
         crate::tui::hit_test::hit_test_from_tui(&scene, layout, lx, ly),
