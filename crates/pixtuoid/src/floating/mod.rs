@@ -3,7 +3,10 @@
 //!
 //! A binary-only front-end on the shared engine: it boots the SAME
 //! `runtime::pipeline::spawn_pipeline` spine the TUI uses (source → reducer →
-//! SceneState; #714), but presents each frame as a full-resolution
+//! SceneState; #714) — from `window::resumed` rather than [`run`], because the
+//! desk-capacity seed needs the REAL window size and `run` has only the LOGICAL
+//! `[floating]` config one (#803; see `PipelineBoot`) — but presents each frame
+//! as a full-resolution
 //! [`offscreen::OfficeRenderer`] `RgbBuffer` blitted into a `winit` +
 //! `softbuffer` window instead of half-block terminal cells. `pixtuoid-core` stays
 //! window-free (invariant #1) — all windowing lives here.
@@ -60,25 +63,6 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     //     on; only the genuinely floating-specific pieces stay here. ---
     let connected = ConnectedSources::new(connected);
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
-    // Boot capacity from the WINDOW at the SAME geometry the window renders (office
-    // buffer = window / office_scale, no footer) so the boot seed and the first redraw
-    // (window::sync_floor_caps) agree — reusing the TUI's footer-subtracting,
-    // scale-ignorant boot_capacities_for over-seeds and can strand a boot-race agent.
-    let boot_caps = offscreen::boot_capacities_for_window(floating_cfg.width, floating_cfg.height);
-    // The source tasks live on `rt` (kept alive to the end of `run`);
-    // `_source_handles` is an inert anchor (see Pipeline's doc).
-    let crate::runtime::pipeline::Pipeline {
-        scene_rx,
-        health_rx,
-        floor_caps,
-        _source_handles,
-    } = crate::runtime::pipeline::spawn_pipeline(
-        socket_path,
-        projects_root,
-        codex_sessions_root,
-        connected,
-        boot_caps,
-    );
 
     // --- the window event loop (main thread) ---
     let mut builder = EventLoop::<FloatingEvent>::with_user_event();
@@ -93,38 +77,6 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         .context("building the floating event loop")?;
     let proxy = event_loop.create_proxy();
 
-    // Bridge: a new scene → a repaint. Breaks cleanly when the window closes
-    // (`send_event` → `EventLoopClosed`) or the reducer drops its sender — never unwraps.
-    {
-        let mut scene_rx = scene_rx.clone();
-        rt.spawn(async move {
-            while scene_rx.changed().await.is_ok() {
-                if proxy.send_event(FloatingEvent::SceneChanged).is_err() {
-                    break;
-                }
-            }
-        });
-    }
-    // Source deaths are LOGGED here (the office partially freezes). The floating
-    // footer exists now but doesn't thread this health channel yet — it passes
-    // `source_warning: None` (the seam is ready; see `offscreen::footer`).
-    // Deduped by count exactly like headless_loop's consumer of the
-    // SAME channel: the watch value is a grow-only Vec, so logging the whole
-    // borrow on every change re-warns all prior deaths (N deaths → N(N+1)/2
-    // lines, reading as repeated crashes in log forensics).
-    {
-        let mut health_rx = health_rx;
-        rt.spawn(async move {
-            let mut deaths_seen = 0usize;
-            while health_rx.changed().await.is_ok() {
-                let deaths = health_rx.borrow_and_update().clone();
-                for death in crate::runtime::unseen_deaths(&deaths, &mut deaths_seen) {
-                    tracing::warn!("pixtuoid floating: source exited: {death:?}");
-                }
-            }
-        });
-    }
-
     // FloatingApp OWNS the audio device thread via its AudioController (boot-spawn
     // iff unmuted, Drop-teardown). Constructed HERE, after every fallible `?` boot
     // step (pack load, runtime + event-loop build), so a boot failure means no
@@ -138,8 +90,14 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         pack,
         config_path,
         pets,
-        scene_rx,
-        floor_caps,
+        PipelineBoot {
+            socket_path,
+            projects_root,
+            codex_sessions_root,
+            connected,
+            proxy,
+            rt: rt.handle().clone(),
+        },
         audio.muted,
         audio.volume,
     );
@@ -148,4 +106,110 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         .context("running the floating window event loop")
     // `app` drops here → AudioController Drop → device thread joined before we
     // return (and the process exits).
+}
+
+/// Everything the pipeline needs, held by [`FloatingApp`] until `resumed` can
+/// supply the one input `run` cannot: the REAL window size.
+///
+/// The pipeline used to boot in `run`, seeded from the `[floating]` config size
+/// — which is LOGICAL by design, while the seed helper needs PHYSICAL px, so on
+/// any HiDPI display it described a window the redraw would never measure
+/// (#803). `run` genuinely cannot do better: winit 0.30 exposes `primary_monitor`
+/// only on `ActiveEventLoop`, which does not exist until `run_app` is already
+/// driving, and `office_scale` ROUNDS, so no conservative logical-side seed is
+/// sound either (360×240 logical yields buffers 360×240 / 225×150 / 315×210 /
+/// 240×160 at 1× / 1.25× / 1.75× / 2× — not monotone in the scale factor).
+///
+/// The accepted cost: the hook socket now binds AFTER window + surface creation
+/// rather than before the event loop. That is single-digit-to-tens of ms on
+/// desktop (`resumed` fires right after `NewEvents(Init)`), and a hook landing
+/// inside it fails to connect and exits 0 silently — the shim's documented
+/// never-block contract. In exchange, a window-creation failure no longer leaves
+/// a bound socket and a live source set behind.
+pub(crate) struct PipelineBoot {
+    socket_path: std::path::PathBuf,
+    projects_root: Option<std::path::PathBuf>,
+    codex_sessions_root: Option<std::path::PathBuf>,
+    connected: ConnectedSources,
+    proxy: winit::event_loop::EventLoopProxy<FloatingEvent>,
+    /// The runtime lives in [`run`] for the whole call; this is a cheap handle
+    /// so `resumed` can `enter()` it explicitly instead of leaning on `run`'s
+    /// ambient guard surviving across `run_app` (it does — but a `tokio::spawn`
+    /// with no runtime PANICS, so the dependency belongs where the spawns are).
+    rt: tokio::runtime::Handle,
+}
+
+/// The pipeline handles, available only once [`PipelineBoot::spawn`] has run.
+pub(crate) struct LivePipeline {
+    pub(crate) scene_rx: tokio::sync::watch::Receiver<std::sync::Arc<pixtuoid_core::SceneState>>,
+    pub(crate) floor_caps:
+        std::sync::Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
+    /// Inert anchor — the tasks are kept alive by the RUNTIME, not by these
+    /// handles (dropping a tokio `JoinHandle` detaches). See `Pipeline`'s doc.
+    _source_handles: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl PipelineBoot {
+    /// Boot the source pipeline seeded from the REAL window size, and wire the
+    /// two background consumers that need the event-loop proxy.
+    pub(crate) fn spawn(self, window_size: winit::dpi::PhysicalSize<u32>) -> LivePipeline {
+        let _guard = self.rt.enter(); // spawn_pipeline's internal spawns need it
+        let boot_caps = offscreen::boot_capacities_for_window(window_size);
+        tracing::debug!(
+            ?window_size,
+            floor0_desks = boot_caps[0],
+            "pixtuoid floating: seeding desk capacity from the real window"
+        );
+        let crate::runtime::pipeline::Pipeline {
+            scene_rx,
+            health_rx,
+            floor_caps,
+            _source_handles,
+        } = crate::runtime::pipeline::spawn_pipeline(
+            self.socket_path,
+            self.projects_root,
+            self.codex_sessions_root,
+            self.connected,
+            boot_caps,
+        );
+
+        // Bridge: a new scene → a repaint. Breaks cleanly when the window closes
+        // (`send_event` → `EventLoopClosed`) or the reducer drops its sender — never unwraps.
+        {
+            let mut scene_rx = scene_rx.clone();
+            let proxy = self.proxy;
+            self.rt.spawn(async move {
+                while scene_rx.changed().await.is_ok() {
+                    if proxy.send_event(FloatingEvent::SceneChanged).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        // Source deaths are LOGGED here (the office partially freezes). The floating
+        // footer exists now but doesn't thread this health channel yet — it passes
+        // `source_warning: None` (the seam is ready; see `offscreen::footer`).
+        // Deduped by count exactly like headless_loop's consumer of the
+        // SAME channel: the watch value is a grow-only Vec, so logging the whole
+        // borrow on every change re-warns all prior deaths (N deaths → N(N+1)/2
+        // lines, reading as repeated crashes in log forensics).
+        {
+            let mut health_rx = health_rx;
+            self.rt.spawn(async move {
+                let mut deaths_seen = 0usize;
+                while health_rx.changed().await.is_ok() {
+                    let deaths = health_rx.borrow_and_update().clone();
+                    for death in crate::runtime::unseen_deaths(&deaths, &mut deaths_seen) {
+                        tracing::warn!("pixtuoid floating: source exited: {death:?}");
+                    }
+                }
+            });
+        }
+
+        LivePipeline {
+            scene_rx,
+            floor_caps,
+            _source_handles,
+        }
+    }
 }

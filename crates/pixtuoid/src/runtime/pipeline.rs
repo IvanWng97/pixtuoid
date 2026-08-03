@@ -10,7 +10,9 @@
 //!   cap-clamped, headless arms); floating measures its window pixels — a
 //!   documented sharp edge (reusing the TUI math over-seeds and strands
 //!   agents on non-existent desks), so the pipeline takes the seed as a
-//!   PARAMETER and must never compute it.
+//!   PARAMETER and must never compute it. It is also WHEN they diverge:
+//!   floating cannot seed until a real window exists, so it calls this from
+//!   `window::resumed` rather than at boot (#803).
 //! - **socket resolution + `ConnectedSources`**: both values outlive the
 //!   boot (the Sources panel displays the path and mutates the live set), so
 //!   the callers own them and hand in a clone.
