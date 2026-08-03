@@ -1,17 +1,8 @@
 ---
-// The pantry chitchat FAQ (§5): two coworkers at the water cooler answer the
-// audit's objections — every line contract-true (see faq.json's `cite`; the
-// spec's battery question is dropped: no citable code contract). The bubble
-// mirrors the PRODUCT's chitchat bubble (paint_chitchat_bubbles,
-// crates/pixtuoid/src/tui/widgets/tooltip.rs): a flat tooltip_bg-ground
-// one-liner, no border/radius — so it renders here as mono text on --screen
-// with sharp corners. The scene is the gen'd pantry still (space_pantry.png,
-// scripts/media.json — no new media). Mounted inside section#amenities,
-// directly after <ProofSplit /> (index.astro): no root <section>/.container
-// of its own — width comes from the shared 4F .container (ProofSplit's
-// eb12cce precedent), and role="region" restores the landmark a bare div's
-// generic role would otherwise drop its aria-label from (ProofSplit's
-// 4adf9916 precedent).
+// Every answer must stay contract-true — see faq.json's `cite`. Mounted INSIDE
+// section#amenities, so it has no root <section>/.container of its own: width comes
+// from the shared 4F .container, and role="region" restores the landmark a bare
+// div's generic role would drop its aria-label from.
 import faq from '../faq.json';
 import { asset } from '../consts';
 ---
@@ -44,10 +35,9 @@ import { asset } from '../consts';
             <p class="pantry__bubble pantry__bubble--a" style={`--turn:${i * 2 + 1}`}>
               {f.a}
             </p>
-            {/* same --turn as the answer above: a citation pops WITH its
-              answer, never before it (review-caught: an un-turned cite has no
-              delay — an unset var() in calc() computes to 0s — so it spoiled
-              the sequence from frame one) */}
+            {/* same --turn as the answer above, so the citation pops WITH it: an
+              unset var() in calc() computes to 0s, so an un-turned cite would
+              appear from frame one */}
             <p class="pantry__cite" style={`--turn:${i * 2 + 1}`}>
               — {f.cite}
             </p>
@@ -59,19 +49,13 @@ import { asset } from '../consts';
 </div>
 
 <script is:inline>
-  // Bubbles are >5s of auto-motion in aggregate → they JOIN the pix:paused set
-  // (consumer only; #office-pause stays the one dispatcher). Reduced motion
-  // never animates (CSS-gated below), so there's nothing to pause there.
+  // >5s of auto-motion in aggregate, so the bubbles JOIN the pix:paused set.
   (function () {
     const scene = document.querySelector('.pantry__scene');
     if (!scene) return;
-    // Toggle a class, NOT inline animationPlayState: freezing the pop at t=0
-    // paints its backwards-fill from-keyframe (opacity:0), so pausing BEFORE the
-    // pantry reveals would blank the whole FAQ. The CSS gates the pop on
-    // `:not(.is-paused)`, so a paused (or not-yet-revealed) bubble rests at its
-    // base opacity:1 — pause stops motion without ever hiding content (audit C9).
-    // (Trade-off: un-pausing after reveal restarts the pop — a brief replay, never
-    // a permanent hide; strictly better than the freeze-at-opacity:0 it replaces.)
+    // Toggle a class, NOT inline animationPlayState: freezing the pop at t=0 paints
+    // its backwards-fill from-keyframe (opacity:0), so pausing before the pantry
+    // reveals would blank the whole FAQ.
     document.addEventListener('pix:paused', function (e) {
       scene.classList.toggle('is-paused', !!(e.detail && e.detail.paused));
     });
@@ -79,14 +63,9 @@ import { asset } from '../consts';
 </script>
 
 <style>
-  /* margin-top only, not a symmetric padding-block: .pantry is a SECOND block
-     inside section#amenities, after ProofSplit (whose own bottom padding —
-     clamp(3rem, 8vh, 6rem) — already closes ITS side of the gap, and the
-     outer section's own padding-block closes the floor's bottom) — a second
-     full padding-block here would be pure double-spacing (measured cost:
-     ~0.49vh of the scroll-budget pin below). The remaining top margin reuses
-     .section-head's own "adjacent chunk in one section" scale (this floor's
-     eyebrow-to-content rhythm), not a new value. */
+  /* margin-top only, not a symmetric padding-block: .pantry is a SECOND block inside
+     section#amenities, and ProofSplit's bottom padding already closes its side of
+     the gap — a full padding-block here would be pure double-spacing. */
   .pantry {
     margin-top: var(--rhythm-adjacent);
   }
@@ -115,12 +94,10 @@ import { asset } from '../consts';
     flex-direction: column;
     gap: 1.1rem;
   }
-  /* the product's chitchat bubble: flat mono text on the hardware screen,
-     sharp corners (paint_chitchat_bubbles renders exactly this — a
-     tooltip_bg-ground one-liner, no border radius). --screen/--chip-bright
-     are THEME-INDEPENDENT (global.css never redefines them per theme,
-     same as the tenant board/plaque), so this clears WCAG AA identically
-     in day/night/dracula — one measured pair, not a per-theme retune. */
+  /* the product's own chitchat bubble: flat mono text on the hardware screen, sharp
+     corners, no border (paint_chitchat_bubbles renders exactly this). --screen and
+     --chip-bright are THEME-INDEPENDENT, so one measured pair clears WCAG AA in
+     day/night/dracula alike — no per-theme retune. */
   .pantry__bubble {
     width: max-content;
     max-width: 100%;
@@ -131,28 +108,21 @@ import { asset } from '../consts';
     font-family: var(--font-mono);
     font-size: 0.88rem;
   }
-  /* two speakers: questions hang left, answers step right */
   .pantry__bubble--a {
     margin-left: clamp(1.2rem, 8%, 2.4rem);
   }
-  /* bare text over the dimmed office (not on a bubble's --screen plate) —
-     the wb-3 class: --fg-muted measured 4.26:1 on the day dim, under the
-     4.5:1 floor; --office-ink is THE token for exactly this ground. */
+  /* bare text over the dimmed office (not on a bubble's --screen plate) — --fg-muted
+     falls under the 4.5:1 floor there; --office-ink is THE token for this ground. */
   .pantry__cite {
     margin: 0;
     font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--office-ink);
   }
-  /* sequential pop, armed by the section reveal ('in'), one turn per beat.
-     No-JS never adds .in → bubbles simply show (no opacity:0 base); reduced-
-     motion never enters this media block → static. fill-mode:backwards holds
-     pre-delay opacity 0 without leaving a permanently-hidden element behind
-     (the animation ends back at the base style, which is already opacity 1). */
+  /* sequential pop, armed by the section reveal ('in'). The base style has no
+     opacity:0, so a no-JS or paused scene simply shows the bubbles; fill-mode:
+     backwards holds the pre-delay opacity 0 without a permanently-hidden element. */
   @media (prefers-reduced-motion: no-preference) {
-    /* :not(.is-paused) — the office-pause consumer toggles .is-paused on the
-       scene; without the animation the bubble rests at base opacity:1 (visible)
-       rather than the backwards-fill's opacity:0 (audit C9). */
     .pantry__scene.in:not(.is-paused) .pantry__bubble,
     .pantry__scene.in:not(.is-paused) .pantry__cite {
       animation: pantry-pop 0.3s ease backwards;

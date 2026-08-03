@@ -1,21 +1,10 @@
 //! The hero's scripted cast — a deterministic, LOOPED event timeline fed
-//! through the REAL `Reducer`, so the web office behaves exactly like the app
-//! (walk-ins, desk assignment, Active debounce, waiting bubbles, walkouts)
-//! and can never drift from real behavior. No tokio, no sources — just the
-//! same `(Transport, AgentEvent)` stream a live CLI would produce.
-//!
-//! Beat structure (one `LOOP_MS` cycle):
-//! - staggered `SessionStart`s walk the cast in over the first ~2.5s (morning rush);
-//! - each agent runs chained tool bursts (`ActivityStart`→`ActivityEnd` with
-//!   gaps < the reducer's 1.5s Active debounce, so work reads continuous)
-//!   interleaved with idle stretches (wander/coffee/meetings emerge from the
-//!   engine, not the script);
-//! - one agent parks on a permission `Waiting` mid-loop;
-//! - one agent `SessionEnd`s and a "new hire" starts later (door traffic).
+//! through the REAL `Reducer`, so the web office can never drift from real
+//! behavior. Just the same `(Transport, AgentEvent)` stream a live CLI produces.
 //!
 //! On loop wrap the same events replay: a `SessionStart` for a live slot is
-//! a reducer no-op (backfill arm), the ended agent re-enters (resurrect /
-//! fresh registration), so the office stays coherent forever.
+//! a reducer no-op (backfill arm), the ended agent re-enters, so the office
+//! stays coherent forever.
 
 use std::path::PathBuf;
 
@@ -26,29 +15,19 @@ use pixtuoid_core::source::{
 };
 use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
 
-/// One scripted beat: fires `at_ms` into the current loop.
 pub(crate) struct Beat {
     pub at_ms: u64,
     pub transport: Transport,
     pub event: AgentEvent,
 }
 
-/// Loop length. Long enough that the cycle doesn't read as a loop (the
-/// ambient layer — wander, pets, weather — is unsynchronized with it anyway).
+/// Long enough that the cycle doesn't read as a loop.
 pub(crate) const LOOP_MS: u64 = 120_000;
 
 /// A cast member: a source CLI + a repo-ish cwd (drives the label AND the
-/// Team-Palette outfit, which keys on cwd). Sources reference the modules'
-/// `SOURCE_NAME` consts — a hand-typed string here silently misses the
-/// registry and the label falls back to the RAW string (`claude_code·api`
-/// instead of `cc·api` — a review-caught, test-invisible defect class).
-/// Every slot carries a DISTINCT CLI — ALL 11 of the registry's non-daemon
-/// sources (#655; OpenClaw is the 12th, rendered separately as the lobster
-/// mascot via `lobster_beats`, never a cast member): the hero's CLI-name
-/// chips and the badged sprites below are meant to ECHO each other ("we
-/// support these agents"), so the cast spans the full roster instead of
-/// repeating one CLI across most of the slots. Slots 0-6 are the morning
-/// rush, 7 the late visitor, 8-9 join the rush's tail, 10 a mid-loop joiner.
+/// Team-Palette outfit, which keys on cwd). Sources MUST reference the modules'
+/// `SOURCE_NAME` consts — a hand-typed string silently misses the registry and
+/// the label falls back to the RAW string (`claude_code·api` not `cc·api`).
 const CAST: &[(&str, &str, &str)] = &[
     // (source, session key, cwd)
     (claude_code::SOURCE_NAME, "hero-cc-api", "/work/api"),
@@ -64,10 +43,6 @@ const CAST: &[(&str, &str, &str)] = &[
     (omp::SOURCE_NAME, "hero-om-embedded", "/work/embedded"),
 ];
 
-/// The cast size — the one authority tests derive "is this id a cast member
-/// or a visitor hire" from (a hardcoded slot count silently rots when the
-/// cast grows, as the 8→11 extension proved). Test-only: production code
-/// iterates beats, never the cast roster.
 #[cfg(test)]
 pub(crate) const CAST_LEN: usize = CAST.len();
 
@@ -87,14 +62,9 @@ fn session_start(i: usize) -> AgentEvent {
     }
 }
 
-/// One tool burst's start→end span.
 const BURST_MS: u64 = 900;
-/// Start-to-start spacing of chained bursts inside a spell. The
-/// `BURST_SPACING_MS - BURST_MS` idle gap (300ms) must stay UNDER the
-/// reducer's `ACTIVE_GRACE_WINDOW` (1.5s) or the whole cast visibly flickers
-/// Active↔Idle — the pairing is pinned by
-/// `burst_gap_stays_under_the_reducer_debounce` below, so a core debounce
-/// change fails a test instead of silently degrading the hero.
+/// The `BURST_SPACING_MS - BURST_MS` idle gap must stay UNDER the reducer's
+/// `ACTIVE_GRACE_WINDOW` or the whole cast visibly flickers Active↔Idle.
 const BURST_SPACING_MS: u64 = 1200;
 
 fn tool(i: usize, at_ms: u64, tuid: &str, display: &str) -> [Beat; 2] {
@@ -121,9 +91,8 @@ fn tool(i: usize, at_ms: u64, tuid: &str, display: &str) -> [Beat; 2] {
     ]
 }
 
-/// A work SPELL: `n` chained bursts starting at `at_ms` (each 1.2s apart →
-/// continuously Active for ~1.2n seconds, then the agent settles Idle and the
-/// engine's wander takes over until the next spell).
+/// `n` chained bursts — continuously Active, then the agent settles Idle and
+/// the engine's wander takes over until the next spell.
 fn spell(beats: &mut Vec<Beat>, i: usize, at_ms: u64, n: u64, tools: &[&str]) {
     for k in 0..n {
         let display = tools[(k as usize) % tools.len()];
@@ -132,15 +101,10 @@ fn spell(beats: &mut Vec<Beat>, i: usize, at_ms: u64, n: u64, tools: &[&str]) {
     }
 }
 
-/// A token-usage reading (#632): the desk paper tower's wire. HONESTY RULE —
-/// only cast members whose REAL CLI carries a per-turn usage wire (cc, cx)
-/// get these; the hero must never show a tower the product can't produce for
-/// that CLI. Jsonl transport, matching production (usage is JSONL-only).
-/// Because the scene PERSISTS across loop replays, each reading re-applies
-/// per loop — the towers deliberately GROW the longer a visitor watches
-/// (cc crosses T2 on loop 2 and tops out T3 after ~8 loops ≈ 16 min; every
-/// reading clears the 25K sheet minimum, so a sheet drops onto the pile as
-/// each spell wraps). Pinned by `usage_beats_grow_only_wire_bearing_towers`.
+/// A token-usage reading: the desk paper tower's wire. HONESTY RULE — only
+/// cast members whose REAL CLI carries a per-turn usage wire (cc, cx) get
+/// these; the hero must never show a tower the product can't produce for that
+/// CLI. Jsonl transport, matching production (usage is JSONL-only).
 fn usage(i: usize, at_ms: u64, fresh_tokens: u64) -> Beat {
     Beat {
         at_ms,
@@ -152,19 +116,12 @@ fn usage(i: usize, at_ms: u64, fresh_tokens: u64) -> Beat {
     }
 }
 
-/// How long a visitor hire works before heading out (`SessionEnd`; the
-/// reducer's exit grace then walks them to the elevator).
 pub(crate) const HIRE_STAY_MS: u64 = 70_000;
 
-/// One visitor-hired coworker's lifecycle (#434), as offsets from the hire
-/// instant: walk in now, three short work spells, leave at
-/// [`HIRE_STAY_MS`]. Reuses the cast's burst shape — the SAME
-/// `BURST_MS`/`BURST_SPACING_MS` consts, so the 300ms idle gap stays under
-/// the reducer's Active debounce and the `burst_gap_stays_under_the_reducer_
-/// debounce` pin covers hires too (two copies of those literals would be the
-/// latent-drift class the workspace magic-number rule names). The cwd is the
-/// hire's own ("/work/yours") so Team Palette gives hires a distinct outfit
-/// family.
+/// One visitor-hired coworker's lifecycle, as offsets from the hire instant.
+/// Reuses the cast's `BURST_MS`/`BURST_SPACING_MS` so the idle gap stays under
+/// the reducer's Active debounce here too. The cwd is the hire's own
+/// ("/work/yours") so Team Palette gives hires a distinct outfit family.
 pub(crate) fn hire_beats(id: AgentId, session: String) -> Vec<(u64, AgentEvent)> {
     let mut out: Vec<(u64, AgentEvent)> = Vec::new();
     out.push((
@@ -177,8 +134,7 @@ pub(crate) fn hire_beats(id: AgentId, session: String) -> Vec<(u64, AgentEvent)>
             parent_id: None,
         },
     ));
-    // Three short work spells across the stay, spaced so the hire also
-    // idles/wanders like everyone else.
+    // Spaced so the hire also idles/wanders like everyone else.
     for (k, start) in [8_000u64, 28_000, 50_000].into_iter().enumerate() {
         for b in 0..4u64 {
             let at = start + b * BURST_SPACING_MS;
@@ -214,18 +170,15 @@ pub(crate) fn hire_beats(id: AgentId, session: String) -> Vec<(u64, AgentEvent)>
 
 /// One scripted presence beat for the OpenClaw gateway mascot. Presence is
 /// deliberately NOT a [`Beat`]/`AgentEvent` (invariant #2: the one event
-/// channel is `AgentId`-pure) — these ride their own lane and land through
-/// the REAL `source::daemon::apply_presence` state machine, so the lobster's
-/// enter/busy/degraded/leave motion is the app's, not a scripted fake.
+/// channel is `AgentId`-pure) — these ride their own lane and land through the
+/// REAL `source::daemon::apply_presence` state machine.
 pub(crate) struct PresenceBeat {
     pub at_ms: u64,
     pub update: DaemonPresenceUpdate,
 }
 
-/// The ONE gateway the hero scripts — OpenClaw's default port, so the authored
-/// timeline lands on exactly one lobster (the site shows the common
-/// single-gateway office; the multi-gateway capability is a runtime one, not a
-/// hero-loop feature).
+/// The ONE gateway the hero scripts, so the authored timeline lands on exactly
+/// one lobster.
 pub(crate) fn hero_gateway() -> pixtuoid_core::source::daemon::DaemonInstanceKey {
     pixtuoid_core::source::daemon::DaemonInstanceKey::new(
         pixtuoid_core::source::openclaw::SOURCE_NAME,
@@ -237,11 +190,10 @@ pub(crate) fn hero_gateway() -> pixtuoid_core::source::daemon::DaemonInstanceKey
 /// OpenClaw's documented default gateway port — the hero's single instance id.
 const HERO_GATEWAY_PORT: &str = "18789";
 
-/// The lobster's loop (#434): the OpenClaw mascot scuttles in from the
-/// elevator mid-loop, shuttles through two busy runs, and walks out before
-/// the wrap — so every loop replays a clean enter animation (GatewayUp after
-/// Down re-anchors `entered_at`). The wide poster's instant (100s) lands in
-/// the idle amble between run 2 ending (96s) and the walk-out (112s).
+/// The lobster's loop: the OpenClaw mascot scuttles in mid-loop, shuttles
+/// through two busy runs, and walks out before the wrap — so every loop
+/// replays a clean enter animation (GatewayUp after Down re-anchors
+/// `entered_at`).
 pub(crate) fn lobster_beats() -> Vec<PresenceBeat> {
     use DaemonPresenceUpdate::*;
     [
@@ -277,14 +229,11 @@ pub(crate) fn lobster_beats() -> Vec<PresenceBeat> {
     .collect()
 }
 
-/// Build one loop of the hero timeline, sorted by `at_ms`.
 pub(crate) fn hero_script() -> Vec<Beat> {
     let mut b: Vec<Beat> = Vec::new();
 
-    // Walk-ins — the MORNING RUSH (spec §1, audit top12 #3): the cast is
-    // through the door within ~2.5s of reveal, so scroll-0 never reads as an
-    // empty looping video. Loop-wrap replay is unchanged: a SessionStart for a
-    // live slot is a no-op.
+    // Walk-ins — the morning rush: the cast is through the door within ~2.5s
+    // of reveal, so scroll-0 never reads as an empty looping video.
     for (i, delay) in [0u64, 350, 750, 1_150, 1_600, 2_050, 2_500]
         .iter()
         .enumerate()
@@ -295,8 +244,8 @@ pub(crate) fn hero_script() -> Vec<Beat> {
             event: session_start(i),
         });
     }
-    // The rush's tail (#655): gk and rx trail the first seven in, keeping the
-    // door busy through ~3.5s without delaying the ≥4-monitors-by-3s pin.
+    // The rush's tail: gk and rx trail the first seven, keeping the door busy
+    // without delaying the ≥4-monitors-by-3s pin.
     b.push(Beat {
         at_ms: 2_900,
         transport: Transport::Jsonl,
@@ -307,17 +256,14 @@ pub(crate) fn hero_script() -> Vec<Beat> {
         transport: Transport::Jsonl,
         event: session_start(9),
     });
-    // om joins mid-loop — one more arrival beat spread into the loop's quiet
-    // middle (its replayed start is a no-op once seated, like the rush's).
     b.push(Beat {
         at_ms: 30_000,
         transport: Transport::Jsonl,
         event: session_start(10),
     });
 
-    // Opening spells: each agent starts working shortly after walking in —
-    // ≥4 monitors on by ~3s (pinned by morning_rush_populates_within_three_
-    // seconds). Offsets still interleave so wander/coffee/meetings emerge.
+    // Opening spells: ≥4 monitors on by ~3s; offsets interleave so
+    // wander/coffee/meetings emerge.
     spell(
         &mut b,
         0,
@@ -338,8 +284,6 @@ pub(crate) fn hero_script() -> Vec<Beat> {
     spell(&mut b, 5, 4_000, 6, &["Read index.ts", "Edit routes.ts"]);
     spell(&mut b, 8, 4_600, 8, &["Bash: pytest -q", "Edit agent.py"]);
     spell(&mut b, 9, 5_200, 6, &["Read planner.md", "Edit reason.rs"]);
-    // Fill spells: the openers now END early (~11s), so re-cover the 15–40s
-    // stretch the old 6–30s starts used to occupy.
     spell(
         &mut b,
         1,
@@ -399,12 +343,9 @@ pub(crate) fn hero_script() -> Vec<Beat> {
         &["Edit tests.rs", "Bash: cargo test"],
     );
 
-    // Token-meter readings (#632) — cc (0) and cx (1) only, the two cast
-    // CLIs whose real wires carry per-turn usage. cc opens with a big
-    // restore-sized reading so its first ream + falling sheet land within
-    // the first second of the reveal; the rest settle at each spell's wrap.
-    // Per-loop totals: cc +1.9M (T1 instantly, T2 on loop 2, T3 ~loop 8),
-    // cx +0.4M (T1 late in loop 1, T2 ~loop 5).
+    // Token-meter readings — cc (0) and cx (1) only, the two cast CLIs whose
+    // real wires carry per-turn usage. cc opens with a big restore-sized
+    // reading so its first ream lands within the first second of the reveal.
     b.push(usage(0, 500, 1_200_000));
     b.push(usage(0, 11_000, 180_000));
     b.push(usage(0, 54_000, 320_000));
@@ -413,8 +354,8 @@ pub(crate) fn hero_script() -> Vec<Beat> {
     b.push(usage(1, 25_000, 90_000));
     b.push(usage(1, 70_000, 160_000));
 
-    // A permission park: agent 6 hits a gate mid-loop, resolved ~12s later by
-    // the gated tool's completion (the reducer's gated_before_waiting path).
+    // A permission park: agent 6 hits a gate mid-loop, resolved by the gated
+    // tool's completion (the reducer's gated_before_waiting path).
     b.push(Beat {
         at_ms: 58_000,
         transport: Transport::Hook,
@@ -443,7 +384,6 @@ pub(crate) fn hero_script() -> Vec<Beat> {
         },
     });
 
-    // Door traffic: agent 5 wraps up and leaves; a late hire (7) walks in.
     b.push(Beat {
         at_ms: 104_000,
         transport: Transport::Hook,
@@ -458,9 +398,8 @@ pub(crate) fn hero_script() -> Vec<Beat> {
         event: session_start(7),
     });
     spell(&mut b, 7, 110_000, 6, &["Read main.rs", "Bash: just test"]);
-    // ...and 7 leaves near the wrap so the loop restart re-seats a stable cast
-    // (5 re-enters on the next loop's walk-in replay; 7's start replays too but
-    // lands AFTER its end below — the pair nets out to a periodic visitor).
+    // 7 leaves near the wrap: its replayed start lands AFTER this end, so the
+    // pair nets out to a periodic visitor.
     b.push(Beat {
         at_ms: LOOP_MS - 2_000,
         transport: Transport::Hook,
@@ -505,9 +444,6 @@ mod tests {
 
     #[test]
     fn burst_gap_stays_under_the_reducer_debounce() {
-        // The cross-crate pairing this script's whole "continuously Active"
-        // illusion rests on: the idle gap between chained bursts must sit
-        // inside the reducer's Active→Idle debounce, or every spell flickers.
         assert!(
             std::time::Duration::from_millis(BURST_SPACING_MS - BURST_MS)
                 < pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW,
@@ -520,16 +456,11 @@ mod tests {
     #[test]
     fn one_loop_populates_a_working_office() {
         let scene = run_script_through_reducer(1);
-        // 9 rush walk-ins + the mid-loop joiner + the late hire − the two
-        // walkouts still present as slots (exiting slots GC ~4.5s after their
-        // end; the loop's last end is 2s before wrap, so at wrap the cast is
-        // 9 seated + up to 2 exiting).
         assert!(
             scene.agents.len() >= 9,
             "expected a populated office, got {}",
             scene.agents.len()
         );
-        // Desk assignment happened through the real allocator.
         let desks: std::collections::HashSet<_> =
             scene.agents.values().map(|a| a.desk_index.0).collect();
         assert_eq!(
@@ -537,9 +468,6 @@ mod tests {
             scene.agents.len(),
             "each agent has its own desk"
         );
-        // Every cast source resolved a REGISTERED label prefix — a hand-typed
-        // source string that misses the registry falls back to the raw string
-        // (e.g. `claude_code·api`), which no real app session ever shows.
         for a in scene.agents.values() {
             let prefix = a.label.split('·').next().unwrap();
             assert!(
@@ -553,13 +481,8 @@ mod tests {
 
     #[test]
     fn usage_beats_grow_only_wire_bearing_towers() {
-        // #632 honesty rule: towers appear ONLY on cast members whose real
-        // CLI carries a per-turn usage wire (cc, cx) — a tower on any other
-        // cast desk would demo something the product never does for that CLI.
         let scene = run_script_through_reducer(1);
         let tokens_of = |i: usize| scene.agents.get(&cast_id(i)).map_or(0, |a| a.tokens_used);
-        // cc opens with the restore-sized reading → T1 from the first second,
-        // finishing loop 1 just under T2; cx crosses T1 late in loop 1.
         assert!(
             pixtuoid_scene::token_meter::token_tier(tokens_of(0)) >= 1,
             "cc must carry a tower after one loop, got {} tokens",
@@ -577,8 +500,6 @@ mod tests {
                 "cast {i} ({source}) has no per-turn usage wire — its desk must stay bare"
             );
         }
-        // The persistent scene makes towers GROW across loop replays — the
-        // leave-the-tab-open reward: cc reaches T2 by loop 2.
         let scene3 = run_script_through_reducer(3);
         let cc3 = scene3.agents.get(&cast_id(0)).map_or(0, |a| a.tokens_used);
         assert!(
@@ -589,9 +510,6 @@ mod tests {
 
     #[test]
     fn looping_stays_stable_across_wraps() {
-        // 3 loops: replayed SessionStarts must not duplicate agents or leak
-        // desks; the office converges to the steady cast (9 seated + up to 2
-        // exiting-slot stragglers at the wrap boundary).
         let scene = run_script_through_reducer(3);
         assert!(
             (9..=11).contains(&scene.agents.len()),
@@ -602,9 +520,6 @@ mod tests {
 
     #[test]
     fn morning_rush_populates_within_three_seconds() {
-        // Spec §1 (audit top12 #3): within ~3s of reveal the office must read
-        // as a working morning — most of the cast through the door and ≥4
-        // monitors on (the morning rush spec).
         let mut scene = SceneState::uniform(16);
         let mut reducer = Reducer::new();
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_millis(1_000_000);
@@ -624,12 +539,10 @@ mod tests {
             .values()
             .filter(|a| matches!(a.state, pixtuoid_core::state::ActivityState::Active { .. }))
             .count();
-        // WHY the exact-4 hairline is expected, not a regression: the current
-        // schedule lands `active` at exactly the >=4 floor with zero headroom
-        // — a spell-offset tweak that shifts one burst's start a beat later
-        // can drop this to 3 without the morning-rush SPEC actually regressing.
-        // This asserts the floor, not a margin; if it flips red, re-check the
-        // rendered office before assuming a real regression.
+        // The schedule lands `active` at exactly this floor with zero headroom:
+        // a spell-offset tweak can drop it to 3 without the morning-rush spec
+        // actually regressing, so re-check the rendered office before assuming
+        // a real regression.
         assert!(
             active >= 4,
             "morning rush: expected >=4 monitors on by 3s, got {active}"

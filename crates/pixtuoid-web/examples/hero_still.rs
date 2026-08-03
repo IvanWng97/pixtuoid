@@ -1,31 +1,16 @@
-//! Render ONE deterministic frame of the live-office hero to a PNG — the
-//! site backdrop's poster (#425), and the VIBING-playground poster (#468).
+//! Render ONE deterministic frame of the live-office hero to a PNG — the site
+//! backdrop's poster and the VIBING-playground poster. It renders the ACTUAL
+//! wasm hero (same `Office`, same layout, same looped script) so the
+//! poster→canvas crossfade dissolves in place rather than reframing.
 //!
-//! The poster used to be a terminal-cell render at a ~1.18:1 aspect; under
-//! `object-fit: cover` a wide viewport cropped ~60% of its height and the
-//! poster→canvas crossfade visibly reframed. This renders the ACTUAL wasm
-//! hero — same `Office`, same seed-0 layout, same looped script, at the
-//! 231×130 buffer a 16:9 viewport's canvas computes — so the fade dissolves
-//! in place.
+//! Determinism: a FIXED `--t0-ms` (or `--hour`, which maps onto a FIXED
+//! reference calendar date rather than "now") plus a fixed `--advance-ms` give
+//! the same bytes every run, so `gen-check` pixel-gates the committed poster
+//! like every still. Run under TZ=UTC, which `scripts/gen-media.py` pins
+//! process-wide.
 //!
-//! Determinism: a FIXED `--t0-ms` (calendar epoch — pins the wall clock,
-//! day/night, and the 10-min weather slot; run under TZ=UTC, which
-//! `scripts/gen-media.py` pins process-wide) + a fixed `--advance-ms` (the
-//! loop phase: which beats have fired, who is seated). Same args → the same
-//! bytes, so `gen-check` pixel-gates the committed poster like every still.
-//! `--hour <0-23>` is a convenience alternative to `--t0-ms`: it maps to a
-//! `t0_ms` on a FIXED reference calendar date (not "now"), so the same hour
-//! always resolves to the same epoch regardless of the machine or day the
-//! render runs — see `hour_to_t0_ms`. `--weather <name>` forces
-//! `Office::set_weather` before stepping, for a specific-condition poster
-//! (e.g. a clear dusk) independent of whatever the natural weather clock
-//! would pick at that instant.
-//!
-//! Driven by the `wasm-still` job kind in `scripts/media.json`; not part of
-//! the shipped wasm artifact (an example, native-only). The committed
-//! poster's manifest values decode to: t0 = 2026-01-15T17:30:00Z (evening —
-//! night skyline, city lights) and advance = 100s (the script's populated
-//! plateau: all 7 walk-ins land by ~2.5s, the working plateau holds from the opening burst).
+//! Driven by the `wasm-still` job kind in `scripts/media.json`; not part of the
+//! shipped wasm artifact (an example, native-only).
 
 use std::process::ExitCode;
 
@@ -36,10 +21,8 @@ const USAGE: &str = "usage: hero_still <out.png> [--width W] [--height H] \
 (--t0-ms EPOCH_MS | --hour 0-23) [--advance-ms MS] [--weather NAME] [--seed N] \
 (<out.png> and the flags may appear in any order)";
 
-// Recognized flags, each followed by one value token — used to skip past
-// flag/value pairs when hunting for the lone positional (<out.png>), since
-// callers put it first (the original contract) or last (the --hour/--weather
-// verify in the task brief) interchangeably.
+// Each takes one value token — skipped in pairs so the lone positional
+// (<out.png>) may appear first or last interchangeably.
 const FLAGS_WITH_VALUE: &[&str] = &[
     "--width",
     "--height",
@@ -65,26 +48,18 @@ fn positional_out(args: &[String]) -> Option<&str> {
     None
 }
 
-// The wasm hero's canvas buffer for a 16:9 viewport (see the module doc) —
-// the default so `--hour`/`--weather` runs don't have to spell out the same
-// dimensions the committed poster already uses.
+// The wasm hero's canvas buffer for a 16:9 viewport.
 const DEFAULT_WIDTH: u32 = 231;
 const DEFAULT_HEIGHT: u32 = 130;
-// Matches the committed poster's "populated plateau" advance (see the module
-// doc) — a reasonable default so an `--hour` render also shows a seated cast
-// rather than an empty office at t0.
+// Far enough into the loop that the cast has walked in and seated, rather than
+// an empty office at t0.
 const DEFAULT_ADVANCE_MS: u64 = 100_000;
-// Layout seed. The hero backdrop (OfficeBackdrop.astro) is seed 0, so the
-// default keeps `hero-wide.png` byte-identical; a caller passes `--seed` to
-// match a DIFFERENT live canvas (e.g. the VIBING channel is seed 11) so its
-// poster shows the same office layout the live office will paint.
+// The hero backdrop (OfficeBackdrop.astro) is seed 0, so this default keeps
+// `hero-wide.png` byte-identical; `--seed` matches a DIFFERENT live canvas.
 const DEFAULT_SEED: u32 = 0;
 
-// A fixed reference calendar date (arbitrary but FIXED — never "today") used
-// to turn `--hour` into a deterministic `t0_ms`. Only the hour-of-day drives
-// the poster's sun-disc height / sky color; pinning day/month/year keeps the
-// render byte-identical across machines and days, the same guarantee
-// `--t0-ms` gives callers who spell out the epoch by hand.
+// Arbitrary but FIXED — never "today": only the hour-of-day drives the sky, and
+// pinning the date keeps an `--hour` render byte-identical across machines.
 const T0_REFERENCE_YMD: (i32, u32, u32) = (2024, 6, 1);
 
 fn arg<T: std::str::FromStr>(args: &[String], name: &str) -> Option<T> {
@@ -95,9 +70,8 @@ fn arg<T: std::str::FromStr>(args: &[String], name: &str) -> Option<T> {
 }
 
 /// `hour` (0-23) → epoch millis on the fixed reference date, at `:00:00` UTC.
-/// The office's sky decodes `t0_ms` via `chrono::Local`
-/// (`pixtuoid_scene::pixel_painter::background`); the gen pipeline pins the
-/// process to `TZ=UTC`, so `Utc` here lands on that same local hour.
+/// The office's sky decodes `t0_ms` via `chrono::Local`, so this only lands on
+/// the same hour because the gen pipeline pins the process to `TZ=UTC`.
 fn hour_to_t0_ms(hour: u32) -> Option<f64> {
     let (y, m, d) = T0_REFERENCE_YMD;
     chrono::Utc
@@ -143,13 +117,11 @@ fn main() -> ExitCode {
     if let Some(name) = weather {
         office.set_weather(Some(name));
     }
-    // First step anchors the script epoch at t0 (only the at_ms=0 beat is due);
-    // the second advances the loop so the cast walks in / seats per the beats.
+    // The first step anchors the script epoch at t0 (only the at_ms=0 beat is
+    // due); the second advances the loop so the beats actually fire.
     office.step(t0_ms, width, height);
     office.step(t0_ms + advance_ms as f64, width, height);
 
-    // The same RGBA contract the JS canvas blit uses (w*h*4, opaque alpha) —
-    // via the safe native accessor; only the wasm-JS boundary reads ptr/len.
     let px = office.frame().to_vec();
     let Some(img) = image::RgbaImage::from_raw(width, height, px) else {
         eprintln!("frame length didn't match {width}x{height}*4");

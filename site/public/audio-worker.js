@@ -1,17 +1,14 @@
-// #705: audio synthesis OFF the main thread. This module worker loads its
-// OWN instance of the committed wasm build (memories can't be shared with the
-// page's instance), pumps the full SynthTake warmup — blocking is fine here —
-// then copies every buffer out and TRANSFERS them to the main thread, which
-// adopts them via Office.audio_adopt_* and uploads at the ♩ click. One
-// message in ({ wasmJsUrl, nowMs }), one message out, then the worker closes
-// so its wasm memory is reclaimed.
+// Audio synthesis OFF the main thread. This worker loads its OWN instance of
+// the committed wasm build (memories can't be shared with the page's instance),
+// pumps the full SynthTake warmup — blocking is fine here — then TRANSFERS
+// every buffer to the main thread. One message in, one out, then the worker
+// closes so its wasm memory is reclaimed.
 'use strict';
 
 // Belt-and-braces vs a non-terminating one-shot pool (mirrors POOL_MAX in
-// OfficeBackdrop's discovery loop; the Rust side pins every pool terminates).
+// OfficeBackdrop's discovery loop).
 const POOL_MAX = 1024;
-// = pool_from_wire's 0-4 domain (audio.rs) — mirrors OfficeBackdrop's list;
-// the wire values round-trip-pinned by the Rust commands_json test.
+// = pool_from_wire's 0-4 domain (audio.rs) — mirrors OfficeBackdrop's list.
 const ONESHOT_WIRES = [0, 1, 2, 3, 4];
 
 self.onmessage = async function (e) {
@@ -22,16 +19,15 @@ self.onmessage = async function (e) {
     while (take.step() > 0) {
       /* one bed per step; no main thread to yield to */
     }
-    // Copy out of wasm linear memory IMMEDIATELY after each ptr read — a
-    // wasm call between view and copy could memory.grow and detach the view
-    // (the audioMakeBuffer contract), so the buffer is re-read per piece.
+    // Copy out of wasm linear memory IMMEDIATELY after each ptr read — a wasm
+    // call between view and copy could memory.grow and detach the view.
     const copy = function (ptr, len) {
       return new Float32Array(w.memory.buffer, ptr, len).slice();
     };
     const loops = [];
     const transfers = [];
-    // loop_count() reads the ONE authority (LoopStem::ALL) — loops aren't
-    // self-terminating like the pools, so the bound can't be discovered
+    // Loops aren't self-terminating like the pools, so the bound can't be
+    // discovered — loop_count() reads the ONE authority (LoopStem::ALL).
     const loopCount = take.loop_count();
     for (let i = 0; i < loopCount; i++) {
       const t = copy(take.loop_ptr(i), take.loop_len(i));

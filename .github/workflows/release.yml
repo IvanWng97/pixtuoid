@@ -4,18 +4,15 @@ on:
   push:
     tags: ["v*"]
 
-# One lossless repository-wide release queue: different tags must not interleave
-# irreversible crates.io/npm publication. `queue: max` retains every waiting
-# tag; cancel-in-progress stays false because a publish must never be interrupted.
+# Lossless repo-wide release queue: different tags must not interleave irreversible
+# crates.io/npm publication, and a publish must never be interrupted.
 concurrency:
   group: pixtuoid-release
   queue: max
   cancel-in-progress: false
 
-# Least-privilege (#215): jobs inherit read-only; the `release` job alone
-# carries write + attestation scopes (it creates the GH release and attests
-# provenance), and `publish`/`npm` carry id-token for OIDC publishing. A
-# compromised action in any other job gets no repo-write.
+# Least-privilege (#215): jobs inherit read-only and widen scope per job, so a
+# compromised action anywhere else gets no repo-write.
 permissions:
   contents: read
 
@@ -33,12 +30,8 @@ jobs:
           # Full history for the tag-on-main ancestry check below.
           fetch-depth: 0
           persist-credentials: false
-      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD
-      # on Linux (#633) — alsa-sys's build script PANICS when pkg-config can't
-      # find them. The CI workflows install this in every Linux job that builds
-      # default features; this workflow had none, so `just clippy` below would
-      # have failed on the FIRST tag after #633 — in the one gate that only ever
-      # runs at tag time.
+      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD on
+      # Linux (#633) — alsa-sys's build script PANICS when pkg-config can't find them.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
@@ -50,9 +43,8 @@ jobs:
       - uses: taiki-e/install-action@cargo-nextest
       - uses: extractions/setup-just@v4
       - name: Validate tag commit is on main
-        # A release tag pushed at an arbitrary (unreviewed) commit must not
-        # build + publish (#215). Pre-release tester tags (v*-win.N / -rc.N)
-        # are deliberately exempt — they exist to test commits BEFORE merge.
+        # A release tag pushed at an arbitrary (unreviewed) commit must not build +
+        # publish (#215). Pre-release tester tags are exempt — they test pre-merge.
         if: ${{ !contains(github.ref_name, '-') }}
         run: |
           git fetch origin main --quiet
@@ -62,8 +54,8 @@ jobs:
           fi
       - name: Validate tag matches Cargo.toml version
         run: |
-          # Pre-release suffixes (-win.1, -rc.1) validate against the base version —
-          # the suffix is release-channel metadata, not a Cargo version.
+          # A pre-release suffix is release-channel metadata, not a Cargo version,
+          # so it validates against the base version.
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           TAG_VERSION="${TAG_VERSION%%-*}"
           CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
@@ -71,11 +63,9 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}"
             exit 1
           fi
-      # Single-sourced through the justfile (same recipes as PR CI + the hooks).
-      # Intentionally lighter than `just preflight` (which also runs lint + hack):
-      # the tag comes from main, which already passed the full CI matrix — here we
-      # re-verify fmt/clippy/tests against the exact tagged commit (`just test`
-      # uses nextest).
+      # Intentionally lighter than `just preflight` (no lint + hack): the tag comes
+      # from main, which already passed the full CI matrix — this re-verifies
+      # fmt/clippy/tests against the exact tagged commit.
       - run: just fmt-check
       - run: just clippy
       - run: just test
@@ -98,10 +88,9 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             cross: true
-          # aarch64 cross-links on the same x64 runner (Tier 1; VC ARM64 components preinstalled).
-          # windows-latest now the VS2026 migration has settled; unlike ci-tests.yml's windows-test
-          # this build is validated only at TAG time (release.yml doesn't run on PRs), so watch
-          # the first tagged run after this and re-pin to a dated label if it regresses.
+          # aarch64 cross-links on the same x64 runner (VC ARM64 components preinstalled).
+          # `windows-latest` is validated only at TAG time (release.yml doesn't run on
+          # PRs) — re-pin to a dated label if a runner-image bump regresses it.
           - target: x86_64-pc-windows-msvc
             os: windows-latest
           - target: aarch64-pc-windows-msvc
@@ -131,9 +120,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
-        # Linux artifacts build WITHOUT the audio feature: musl can't link
-        # ALSA statically and the aarch64 cross image has no ALSA headers.
-        # Prebuilt Linux = silent; from-source Linux gets audio (#633).
+        # Linux artifacts build WITHOUT the audio feature: musl can't link ALSA
+        # statically and the aarch64 cross image has no ALSA headers (#633).
         run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}" "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
 
       - name: Package (Unix)
@@ -152,7 +140,6 @@ jobs:
         shell: bash
         run: |
           # Flat zip — exes at zip root so Expand-Archive doesn't double-wrap.
-          # 7z is preinstalled on windows-latest runners.
           VERSION="${GITHUB_REF_NAME}"
           DIR="pixtuoid-${VERSION}-${{ matrix.target }}"
           mkdir "$DIR"
@@ -205,9 +192,8 @@ jobs:
         uses: taiki-e/install-action@cargo-deb
 
       - name: Build
-        # Linux artifacts build WITHOUT the audio feature: musl can't link
-        # ALSA statically and the aarch64 cross image has no ALSA headers.
-        # Prebuilt Linux = silent; from-source Linux gets audio (#633).
+        # Linux artifacts build WITHOUT the audio feature: musl can't link ALSA
+        # statically and the aarch64 cross image has no ALSA headers (#633).
         run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}" "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
 
       - name: Build .deb packages
@@ -274,32 +260,27 @@ jobs:
 
   publish:
     name: publish to crates.io
-    # Gate on the FULL build matrix, not just `check`: the crates.io publish is
-    # irreversible (a version can never be re-cut), so it must not fire for a tag
-    # whose binaries/debs don't build — otherwise crates.io gets 0.12.0 while the
-    # GH release (needs: [build, deb]) never ships. Matches the `release` job's gate.
+    # Gate on the FULL build matrix, not just `check`: a crates.io publish is
+    # irreversible, so it must not fire for a tag whose binaries/debs don't build.
     needs: [check, build, deb]
-    # Never publish a pre-release to crates.io — the publish is irreversible;
-    # tester pre-release tags (v*-win.N etc.) build artifacts only.
+    # Never publish a pre-release to crates.io — tester tags build artifacts only.
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
-      # crates.io Trusted Publishing (#216): cargo has NO native OIDC, so the
-      # auth step below exchanges this id-token claim for a short-lived,
-      # auto-revoked crates.io token. The standing CARGO_REGISTRY_TOKEN secret
-      # is gone — this claim is the only credential.
+      # crates.io Trusted Publishing (#216): the auth step below exchanges this
+      # claim for a short-lived token — it is the only credential, no standing
+      # CARGO_REGISTRY_TOKEN secret.
       id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      # `cargo publish` BUILDS each crate to verify it, and pixtuoid's default
-      # features pull rodio -> cpal -> ALSA headers. Without these the loop
-      # publishes pixtuoid-core, pixtuoid-scene and pixtuoid-hook — irreversibly
-      # — and only then fails to compile pixtuoid, stranding the release
+      # `cargo publish` BUILDS each crate to verify it, and default features pull
+      # rodio -> cpal -> ALSA headers. Without these the loop irreversibly publishes
+      # the earlier crates, then fails to compile pixtuoid — stranding the release
       # half-published at a version that can never be reused.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -314,11 +295,9 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -euo pipefail
-          # Publish in dependency order. Idempotent: swallow "already on crates.io"
-          # (safe re-run of a partially-published tag). Retry ONLY the index-
-          # propagation race (#111) — a just-published dep not yet visible to the
-          # sparse index when the dependent publishes. Every other failure (auth,
-          # validation, network) fails the job, never hidden.
+          # Idempotent: swallow "already on crates.io" so a partially-published tag
+          # can be re-run. Retry ONLY the index-propagation race (#111) — every
+          # other failure (auth, validation, network) fails the job, never hidden.
           publish_one() {
             local crate="$1" attempt out
             for attempt in 1 2 3; do
@@ -340,16 +319,10 @@ jobs:
 
   npm:
     name: publish to npm
-    # Same full-matrix gate as the crates.io `publish` job: npm consumes only the
-    # `build` tarballs, but an npm publish is also irreversible (no unpublish
-    # after 72h), so it must not ship a version whose full artifact set (incl.
-    # debs) didn't build — one gate for every irreversible publisher.
+    # Same full-matrix gate as the crates.io `publish` job — an npm publish is also
+    # irreversible (no unpublish after 72h), so one gate for every such publisher.
     needs: [check, build, deb]
-    # Never publish a pre-release to npm — like crates.io, an npm publish is
-    # effectively irreversible (no unpublish after 72h). Pre-release tags
-    # (v*-win.N / -rc) build artifacts only. Consumes the SAME build artifacts
-    # as the release job — npm is a third downstream consumer of the one build
-    # matrix, not a parallel build.
+    # Never publish a pre-release to npm — tester tags build artifacts only.
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -364,18 +337,11 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      # npm Trusted Publishing (#216): node 22 bundles npm 10.x, but native OIDC
-      # publishing needs npm >= 11.5.1. Now LOAD-BEARING — NODE_AUTH_TOKEN is
-      # gone, so OIDC is the only auth path; without this upgrade trusted
-      # publishing silently won't engage and the publish fails unauthenticated.
-      # (registry-url above STAYS: it sets the publish registry AND is what
-      # triggers npm's OIDC detection. setup-node writes an .npmrc authToken
-      # that's now empty — npm ignores it when a trusted publisher is
-      # configured; if OIDC ever fails to engage, drop registry-url so no
-      # token line is written at all.)
-      # Pinned EXACTLY (not @11): the publish path is irreversible, so what
-      # runs must not float with the registry at release time; bump
-      # deliberately (and drop this line once node's bundled npm >= 11.5.1).
+      # npm Trusted Publishing (#216): node 22 bundles npm 10.x but OIDC needs
+      # >= 11.5.1, and OIDC is the only auth path (no NODE_AUTH_TOKEN) — without
+      # this upgrade the publish silently fails unauthenticated. `registry-url`
+      # above STAYS: it is what triggers npm's OIDC detection. Pinned EXACTLY, not
+      # @11 — an irreversible publish must not float with the registry.
       - run: npm install -g npm@11.5.1 # zizmor: ignore[adhoc-packages] exact OIDC-capable npm bootstrap for trusted publishing
       - uses: extractions/setup-just@v4
 
@@ -389,9 +355,8 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          # Mirrors the `build` matrix + npm/generate.mjs TARGETS. Self-guards: a
-          # missing artifact fails loud below; the build↔npm full-set equality is
-          # pinned by npm/generate.test.mjs (`just npm-check`, run just above).
+          # Mirrors the `build` matrix + npm/generate.mjs TARGETS; that equality is
+          # pinned by npm/generate.test.mjs (`just npm-check`).
           for target in aarch64-apple-darwin x86_64-apple-darwin \
                         x86_64-unknown-linux-musl aarch64-unknown-linux-gnu \
                         x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
@@ -400,10 +365,8 @@ jobs:
             tgz="artifacts/pixtuoid-${TAG}-${target}.tar.gz"
             zip="artifacts/pixtuoid-${TAG}-${target}.zip"
             if [ -f "$tgz" ]; then
-              # tarball wraps everything in pixtuoid-<tag>-<target>/ — unwrap it
               tar xzf "$tgz" -C "$dest" --strip-components=1
             elif [ -f "$zip" ]; then
-              # windows zip is flat — exes at the root
               unzip -o "$zip" -d "$dest"
             else
               echo "::error::missing artifact for ${target} (${tgz} / ${zip})"
@@ -422,7 +385,7 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           # Idempotent: swallow "cannot publish over previously published" so a
-          # re-run of a partially-published tag is safe (mirrors the crates.io job).
+          # re-run of a partially-published tag is safe.
           publish_one() {
             local dir="$1" name out
             name=$(node -p "require('./${dir}/package.json').name")
@@ -430,17 +393,15 @@ jobs:
               printf '%s\n' "$out"; echo "::notice::${name} published"; return 0
             elif grep -qiE 'cannot publish over|previously published' <<<"$out"; then
               # Match ONLY the over-publish phrase — never a bare 403, which npm
-              # also emits for auth/scope/2FA failures we must NOT swallow (the
-              # crates.io job's "every other failure fails loudly" discipline).
+              # also emits for auth/scope/2FA failures we must NOT swallow.
               printf '%s\n' "$out"; echo "::warning::${name}@${VERSION} already on npm, skipping"; return 0
             else
               printf '%s\n' "$out"; echo "::error::${name} publish failed"; return 1
             fi
           }
           # Platform packages first so the launcher's optionalDependencies always
-          # resolve to already-live versions; the launcher publishes last.
-          # The `./` prefix is load-bearing: `npm publish npm/pixtuoid` parses the
-          # path as a GitHub `owner/repo` shorthand (npm/pixtuoid) and tries to
-          # `git ls-remote` it; `./npm/pixtuoid` forces folder interpretation.
+          # resolve to already-live versions. The `./` prefix is load-bearing:
+          # `npm publish npm/pixtuoid` parses the path as a GitHub `owner/repo`
+          # shorthand and tries to `git ls-remote` it.
           for dir in ./npm/@pixtuoid/cli-*; do publish_one "$dir"; done
           publish_one ./npm/pixtuoid

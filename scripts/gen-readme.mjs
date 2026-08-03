@@ -1,21 +1,8 @@
 #!/usr/bin/env node
-// Keep the README in sync with the site's single-source data files:
-//   • Features table          ← site/src/features.json  (GENERATED between markers)
-//   • Supported-tools glimpse ← site/src/sources.json   (GENERATED between markers)
-//   • Install block           ← site/src/install.json   (GENERATED — `readme:true` methods only)
-// The site (Showcase.astro / SupportedTools.astro / Install.astro) reads the same
-// JSON, so the README and the site can't drift. The supported-tools glimpse shows
-// only the FEATURED tools + a link to the full tool × OS matrix on the site, so the
-// README stays short as more agent CLIs are added. Run `just gen-readme` (or
-// `node scripts/gen-readme.mjs`) after editing any JSON. `--check` writes
-// nothing and exits non-zero on drift (used by CI's gen-check / `just gen-check`).
-//
-// NOTE: the manifest's *supported* set is pinned to the code's source registry
-// (`registered_source_names()`)
-// by a Rust test (crates/pixtuoid-core/tests/supported_sources_manifest.rs) that
-// runs in the main CI — so the marketing list can never claim "supported" for a
-// source that isn't actually wired (and a newly-wired source forces a manifest
-// update). This script only owns rendering + README/site parity.
+// Regenerate the README's marker-delimited blocks from the site's single-source
+// JSON (features.json, sources.json, install.json) — the same files
+// Showcase/SupportedTools/Install read, so README and site can't drift.
+// `--check` writes nothing and exits non-zero on drift.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -27,22 +14,17 @@ const features = JSON.parse(readFileSync(join(root, 'site', 'src', 'features.jso
 const sources = JSON.parse(readFileSync(join(root, 'site', 'src', 'sources.json'), 'utf8'));
 const install = JSON.parse(readFileSync(join(root, 'site', 'src', 'install.json'), 'utf8'));
 
-// MUST match `site` in site/astro.config.mjs. A repo-root Node script can't
-// cheaply import the astro config (it pulls @astrojs/*), so this is a
-// boundary-separated copy — gen-readme-check catches README drift, not a
-// mismatch against the config, so keep the two in lockstep by hand.
+// MUST match `site` in site/astro.config.mjs — a hand-kept copy (importing the
+// astro config here would pull @astrojs/*), and nothing gates the two.
 const SITE = 'https://pixtuoid.dev';
 const check = process.argv.includes('--check');
 let readme = readFileSync(readmePath, 'utf8');
 const errors = [];
 
-// Every feature `pix` must resolve to a committed pixel-icon PNG. The site's
-// PixIcon.astro throws at build ONLY for icons rendered through the roster
-// (no-channel rows); a channel-bearing feature reaches this README `<img>` but
-// never PixIcon, so a typo'd / ungenerated `pix` would ship a 404 image past
-// the site build, gen-pix-icons --check (ICONS-only), AND gen-readme-check
-// (README-vs-JSON, not img existence). One existsSync loop closes it for every
-// row regardless of channel routing.
+// Every feature `pix` must resolve to a committed pixel-icon PNG. PixIcon.astro
+// throws at build ONLY for roster-rendered icons; a channel-bearing feature
+// reaches this README `<img>` but never PixIcon, so a typo'd `pix` would ship a
+// 404 image past every other check.
 for (const f of features) {
   if (f.pix && !existsSync(join(root, 'docs', 'images', 'pix-icons', `${f.pix}.png`))) {
     errors.push(
@@ -52,17 +34,15 @@ for (const f of features) {
   }
 }
 
-// Neutralize only what breaks a GFM table row: `|` splits columns (use the
-// HTML entity — backslash-escaping would itself need backslash escaping first,
-// CodeQL js/incomplete-sanitization) and newlines split rows. Cell text is
-// intentionally markdown-bearing (backticks, `A\*`), so nothing else is touched.
+// Neutralize only what breaks a GFM table row. `|` uses the HTML entity —
+// backslash-escaping would itself need backslash escaping first (CodeQL
+// js/incomplete-sanitization). Cell text is intentionally markdown-bearing.
 const cell = (s) => String(s).replace(/\|/g, '&#124;').replace(/\r?\n/g, ' ');
 
-// Regenerate the block between `start`/`end` markers from `body`. () => block:
-// a replacer FUNCTION inserts the value literally — a plain string would expand
-// `$`-patterns ($$, $&, $') lurking in the text and silently corrupt the README
-// in a way --check can't see (both sides of its comparison would go through
-// the same mangling). Updates the in-memory `readme`; writes the file on change.
+// The `() => block` replacer must stay a FUNCTION: it inserts the value
+// literally, where a plain string would expand `$`-patterns ($$, $&, $') in the
+// text and corrupt the README in a way --check can't see (both sides of its
+// comparison would go through the same mangling).
 function regenSection(label, start, end, body) {
   const block = `${start}\n${body}\n${end}`;
   const re = new RegExp(`${escapeRe(start)}[\\s\\S]*?${escapeRe(end)}`);
@@ -84,22 +64,13 @@ function regenSection(label, start, end, body) {
   }
 }
 
-// --- Features table ---
-// The README lists the HEADLINE features only; the site's Features grid shows the
-// full set. A feature is README-featured by DEFAULT — opt a secondary one OUT with
-// `"featured": false` (the inverse of install.json's opt-IN `readme:true`, because
-// most features are headline and only a few are flavor). Edit the flag in
-// features.json, never this table.
-// Icon column: the office's own pixel PNGs (docs/images/pix-icons/). GitHub gives
-// this empty-header column almost no width and forces `max-width:100%` on the
-// <img>, so WITHOUT explicit dimensions the icon collapses to an illegible blob
-// when the table is width-starved (this is why they looked tiny). Pin width/height
-// from the PNG's own IHDR — GitHub keeps those attrs (it does on the 500px banner)
-// — so the column reserves real space and the art renders 1:1: crisp, undistorted,
-// sized by README_SCALE in gen-pix-icons.py (bump that const to resize).
-// [w, h] from the PNG's IHDR, or null if missing (a missing PNG is already
-// recorded by the existsSync guard above, which exits with a clean, actionable
-// message — don't pre-empt it with a raw ENOENT here).
+// A feature is README-featured by DEFAULT — opt a secondary one OUT with
+// `"featured": false` (the inverse of install.json's opt-IN `readme:true`).
+// GitHub gives the empty-header icon column almost no width and forces
+// `max-width:100%` on the <img>, so without explicit dimensions the icon
+// collapses to an illegible blob; pin width/height from the PNG's own IHDR.
+// Returns null if the PNG is missing — the existsSync guard above already
+// reports that with an actionable message, so don't pre-empt it with an ENOENT.
 const pngWH = (pix) => {
   const p = join(root, 'docs', 'images', 'pix-icons', `${pix}.png`);
   if (!existsSync(p)) return null;
@@ -117,14 +88,11 @@ const featureRows = featuredFeatures.map(
   (f) => `| ${iconCell(f)} | **${cell(f.name)}** | ${cell(f.desc)} |`
 );
 // GitHub ignores an <img>'s width/height when its table cell is "shorter" than
-// the image and collapses the column: Safari does this hard (the GitHub-injected
-// `max-width:100%` makes the img's min-content 0), so the icons rendered ~9px in
-// Safari while Chrome kept full size (verified in Playwright WebKit). The
-// documented GFM fix is non-breaking-space "glue" — real, text-measured cell
-// content the collapse can't undo. Pad the otherwise-empty icon HEADER (one cell,
-// so it doesn't inflate each row's max-content the way padding beside the img
-// would) to just clear the WIDEST icon, derived so it tracks README_SCALE.
-const NBSP_PX = 4; // a README-font &nbsp; ≈ 4px (empirically 20 cleared the 70px lobster in WebKit)
+// the image and collapses the column — hard in Safari, where the injected
+// `max-width:100%` makes the img's min-content 0. The GFM fix is
+// non-breaking-space "glue": real, text-measured content the collapse can't
+// undo. Pad the icon HEADER only, so it doesn't inflate each row's max-content.
+const NBSP_PX = 4; // a README-font &nbsp; ≈ 4px
 const maxIconW = Math.max(...featuredFeatures.map((f) => pngWH(f.pix)?.[0] ?? 0));
 const iconHeader = '&nbsp;'.repeat(Math.ceil(maxIconW / NBSP_PX) + 2);
 regenSection(
@@ -134,7 +102,6 @@ regenSection(
   [`| ${iconHeader} | Feature | Description |`, '|---|---|---|', ...featureRows].join('\n')
 );
 
-// --- Supported-tools glimpse (FEATURED only + a link to the full site matrix) ---
 const OS_LABELS = { macos: 'macOS', linux: 'Linux', windows: 'Windows' };
 const OS_ORDER = ['macos', 'linux', 'windows'];
 const runsOn = (s) =>
@@ -142,10 +109,8 @@ const runsOn = (s) =>
     .map((os) => (s.platforms[os] === 'experimental' ? `${OS_LABELS[os]}\\*` : OS_LABELS[os]))
     .join(' · ');
 const featured = sources.filter((s) => s.status === 'supported' && s.featured);
-// Compute over the population that actually RENDERS the `\*` marker (the
-// featured table, via runsOn), NOT all supported sources — else the footnote
-// could appear with no `\*` referent (a non-featured experimental source would
-// set the flag while the featured table shows no marker).
+// Over the population that actually RENDERS the `\*` marker, NOT all supported
+// sources — else the footnote could appear with no `\*` referent.
 const hasExperimental = featured.some((s) =>
   Object.values(s.platforms || {}).includes('experimental')
 );
@@ -174,10 +139,6 @@ regenSection(
   ].join('\n')
 );
 
-// --- Install block (GENERATED, like features/sources). The README shows only
-// the `readme: true` methods (brew, npm); the rest (Cargo, GitHub Releases) live
-// on the site's install tab. Single source: site/src/install.json — the same
-// file Install.astro renders, so the two can't drift. ---
 const installBody = install
   .filter((m) => m.readme)
   .map(

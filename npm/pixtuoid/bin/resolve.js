@@ -1,23 +1,19 @@
 "use strict";
 
-// Shared platform → native-binary resolution for the two launcher shims.
-//
-// Mirrors the esbuild / Biome / git-cliff pattern: npm installs exactly the ONE
-// `@pixtuoid/cli-<platform>-<arch>` optionalDependency that matches the host
-// (filtered by each platform package's `os`/`cpu`/`libc`), and we
-// `require.resolve` the native binary out of it. No postinstall, no download.
+// Shared platform → native-binary resolution for the two launcher shims: npm
+// installs exactly the ONE `@pixtuoid/cli-<platform>-<arch>` optionalDependency
+// that matches the host (filtered by each platform package's `os`/`cpu`/`libc`),
+// and we `require.resolve` the native binary out of it. No postinstall, no
+// download.
 
 const fs = require("fs");
 const path = require("path");
 
-// pixtuoid's matrix is ASYMMETRIC — exactly one package per (platform, arch),
-// so there is no runtime gnu-vs-musl choice to make here:
-//   • linux-x64   ships a STATIC musl build (portable to glibc too) — the
-//     package declares no `libc`, so it installs on every linux-x64 host.
-//   • linux-arm64 ships a glibc build — its package declares `libc:["glibc"]`,
-//     so npm skips it on musl/Alpine-arm64 (where it would crash) rather than
-//     installing a broken binary.
-// The os/cpu/libc filtering happens at npm INSTALL time; here we just map.
+// The matrix is ASYMMETRIC, so there is no runtime gnu-vs-musl choice here:
+// linux-x64 ships a STATIC musl build and declares no `libc`; linux-arm64 ships
+// a glibc build and declares `libc:["glibc"]`, so npm skips it on musl/Alpine
+// rather than installing a binary that would crash. The os/cpu/libc filtering
+// happens at npm INSTALL time; here we just map.
 const PACKAGE = {
   "darwin arm64": "@pixtuoid/cli-darwin-arm64",
   "darwin x64": "@pixtuoid/cli-darwin-x64",
@@ -31,14 +27,11 @@ function exeName(bin) {
   return bin + (process.platform === "win32" ? ".exe" : "");
 }
 
-// Resolve the absolute path to a named native binary ("pixtuoid" or
-// "pixtuoid-hook"). Returns null if this platform isn't shipped — callers
-// decide how to handle that (the TUI errors; the hook stays silent).
+// Returns null if this platform isn't shipped — callers decide how to handle
+// that (the TUI errors; the hook stays silent).
 function binaryPath(bin) {
   // Dev / CI override: PIXTUOID_BINARY points at a directory holding the
-  // binaries (or at the pixtuoid binary itself). Lets a local debug build be
-  // driven through the npm shim without publishing; composes with the Rust-side
-  // PIXTUOID_HOOK override used by the Connection panel's hook install.
+  // binaries, or at the pixtuoid binary itself.
   const override = process.env.PIXTUOID_BINARY;
   if (override) {
     // One guarded statSync (not existsSync + statSync) — the two-syscall form

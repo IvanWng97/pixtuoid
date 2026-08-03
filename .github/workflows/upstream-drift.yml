@@ -1,11 +1,9 @@
 name: upstream-drift
 
 # Weekly watch for upstream wire-format renames (hook event names, transcript
-# event types, the subagent-dispatch tool) across all registered sources. The
-# Task -> Agent rename shipped undocumented and
-# silently disabled subagent suppression; this surfaces the next one before a
-# user hits it. See scripts/check_upstream_drift.py and the "Keeping the decode
-# mapping current" section in crates/pixtuoid-core/CLAUDE.md.
+# event types, the subagent-dispatch tool) across all registered sources: they
+# ship undocumented and silently disable decoding, so surface the next one
+# before a user hits it.
 
 on:
   schedule:
@@ -26,9 +24,8 @@ jobs:
           persist-credentials: false
       - uses: extractions/setup-just@v4
 
-      # Guards the parsers before the live check trusts them. PR-time coverage is
-      # ci-lint.yml's required `hygiene` job (unconditional, no path list); this
-      # copy exists because ci-lint does not run on the cron.
+      # Guards the parsers before the live check trusts them. Duplicates
+      # ci-lint.yml's `hygiene` job because ci-lint does not run on the cron.
       - name: Self-test the watcher
         run: just drift-selftest
 
@@ -48,20 +45,17 @@ jobs:
           set -euo pipefail
           gh label create upstream-drift --color FBCA04 \
             --description "Upstream CLI wire-format drift" 2>/dev/null || true
-          # The checker owns the title and emits it as the report's H1; we read
-          # it back rather than re-deriving it here. A grep for the section
-          # headings would be an unpinned second copy of strings that live in
-          # check_upstream_drift.py, and rewording one there would silently
-          # title a confirmed rename "could not verify" — #793 inverted.
+          # The checker owns the title and emits it as the report's H1; read it
+          # back rather than re-deriving it. Re-deriving would be an unpinned
+          # second copy of strings in check_upstream_drift.py, and rewording one
+          # there would silently title a confirmed rename "could not verify".
           title=$(head -1 drift-report.md | sed 's/^# //')
           num=$(gh issue list --label upstream-drift --state open \
             --json number --jq '.[0].number // empty')
           if [ -n "$num" ]; then
-            # Retitle on the dedup path too. The title now carries the
-            # DISPOSITION, so leaving week 1's on a thread that week 2 turned
-            # into confirmed drift makes the issue list actively mis-signal —
-            # the failure this whole change is about. Weekly churn on one
-            # long-lived thread is the cheaper cost.
+            # Retitle on the dedup path too: the title carries the DISPOSITION,
+            # so leaving week 1's on a thread week 2 turned into confirmed drift
+            # makes the issue list actively mis-signal.
             gh issue edit "$num" --title "$title"
             gh issue comment "$num" --body-file drift-report.md
           else
@@ -76,19 +70,16 @@ jobs:
         run: echo "::warning::upstream-drift could not verify (transient network/HTTP); see report above."
 
       # Probe-health findings fail the run too, deliberately: a watch that cannot
-      # see its upstream is dark, and a dark watch that stays green is the #454
-      # fail-open class. The REPORT distinguishes them; the exit code only asks
-      # for a human.
+      # see its upstream is dark, and a dark watch that stays green fails open.
       - name: Fail the run on any actionable finding
         if: steps.check.outputs.exit == '1'
         run: exit 1
 
       - name: Fail on an unexpected checker exit
-        # exit 0 = no findings; 1 = actionable — verified drift, a review ping, or
-        # probe health (issue + fail above); 2 =
-        # transient fetch trouble (warn-only by design). ANY other code — 127
-        # (python missing), 137 (OOM-kill), a crash before the classifier ran —
-        # previously fell through GREEN: a dead watcher reading as healthy.
+        # exit 0 = no findings; 1 = actionable; 2 = transient fetch trouble
+        # (warn-only by design). ANY other code — 127 (python missing), 137
+        # (OOM-kill), a crash before the classifier ran — is a dead watcher, and
+        # without this it reads as healthy.
         if: ${{ !contains(fromJSON('["0","1","2"]'), steps.check.outputs.exit) }}
         env:
           CODE: ${{ steps.check.outputs.exit }}

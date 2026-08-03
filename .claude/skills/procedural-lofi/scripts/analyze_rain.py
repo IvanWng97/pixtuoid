@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Measure RainyMood's spectral fingerprint vs our synthesized stem_rain.
 
-Octave-band energy distribution + spectral centroid/rolloff — the tuning
-targets for mimicking the reference. ANALYSIS ONLY: the reference audio is
-copyrighted; we match measured parameters, never ship their bytes.
+ANALYSIS ONLY: the reference audio is copyrighted; we match measured
+parameters, never ship their bytes.
 """
 
 import sys

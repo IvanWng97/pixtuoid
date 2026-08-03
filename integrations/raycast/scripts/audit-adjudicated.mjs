@@ -1,12 +1,10 @@
-// `npm ci` here prints "N high severity vulnerabilities" and nothing reads it, so a
-// NEW advisory is indistinguishable from the adjudicated backlog. This gate turns the
-// backlog into data: it passes only while the LIVE advisory set equals the adjudicated
-// one below, so an unreviewed advisory reds CI, and an advisory that clears upstream
-// ALSO reds it — a refusal cannot outlive the condition it was written for.
+// Passes only while the LIVE advisory set equals the adjudicated one below: an
+// unreviewed advisory reds CI, and one that clears upstream ALSO reds it, so a
+// refusal cannot outlive the condition it was written for.
 import { spawnSync } from "node:child_process";
 
-// Verify a claim before trusting it: `npm audit`, `npm view <pkg>@<v> dependencies`,
-// and `gh api /advisories/<GHSA>` are the three commands behind every line here.
+// Verify before adjudicating: `npm audit`, `npm view <pkg>@<v> dependencies`, and
+// `gh api /advisories/<GHSA>` are the three commands behind every entry here.
 const ADJUDICATED = new Map([
   [
     "GHSA-mh99-v99m-4gvg",

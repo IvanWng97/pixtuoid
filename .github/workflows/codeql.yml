@@ -5,7 +5,6 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    # Weekly backstop at an off-peak minute; PRs and main pushes remain primary.
     - cron: '29 11 * * 3'
   workflow_dispatch:
 
@@ -27,8 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Keep this explicit: implicit detection can omit languages in a
-        # multi-language repository.
+        # Explicit: implicit detection can omit languages in a multi-language repo.
         language: [actions, javascript-typescript, python, rust]
     steps:
       - uses: actions/checkout@v7
@@ -36,8 +34,7 @@ jobs:
           persist-credentials: false
 
       # CodeQL's Rust no-build extractor embeds rust-analyzer, which can lag the
-      # runner's rolling stable toolchain. Use the workspace's declared MSRV as
-      # the compatible semantic floor and pass every verified input explicitly.
+      # runner's rolling stable toolchain — pin it to the workspace's declared MSRV.
       - name: Prepare Rust semantic analysis
         if: ${{ matrix.language == 'rust' }}
         shell: bash
@@ -72,8 +69,8 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          # Rust supports only the no-build extractor. The interpreted
-          # languages in this matrix use the same supported mode.
+          # Rust supports only the no-build extractor; the interpreted languages
+          # in this matrix use the same mode.
           build-mode: none
 
       - name: Analyze
@@ -81,17 +78,14 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
-          # Rust defers its upload until the extraction-health gate below has
-          # passed. A degraded extraction yields FEWER alerts, so uploading first
-          # publishes a security tab that looks CLEANER than reality — the job
-          # goes red, but the dashboard says fine. Only Rust defers: upstream
-          # notes `never` complicates debugging, and no other language here has a
-          # health gate to wait for.
+          # Rust defers its upload until the extraction-health gate below passes: a
+          # degraded extraction yields FEWER alerts, so uploading first publishes a
+          # security tab that looks CLEANER than reality. Only Rust defers —
+          # upstream notes `never` complicates debugging.
           upload: ${{ matrix.language == 'rust' && 'never' || 'always' }}
 
-      # The action can remain green when extractor diagnostics affect most
-      # files. Read CodeQL's own SARIF metrics and enforce this repository's
-      # conservative health threshold: diagnostics must not affect the majority.
+      # The action stays green even when extractor diagnostics affect most files,
+      # so enforce a threshold off CodeQL's own SARIF metrics.
       - name: Verify Rust extraction health
         if: ${{ matrix.language == 'rust' }}
         shell: bash
@@ -138,9 +132,8 @@ jobs:
             exit 1
           fi
 
-      # Only now — the SARIF the gate above just vouched for. If that gate failed
-      # this never runs, which is the point: no analysis reaches the security tab
-      # unless it was healthy enough to be worth trusting.
+      # Only the SARIF the gate above vouched for: a failed gate skips this step, so
+      # no analysis reaches the security tab unless it was healthy enough to trust.
       - name: Upload Rust analysis
         if: ${{ matrix.language == 'rust' }}
         uses: github/codeql-action/upload-sarif@v4

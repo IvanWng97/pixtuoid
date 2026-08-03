@@ -1,13 +1,11 @@
 paths:
   .github/workflows/claude-readonly-review.yml:
     ignore:
-      # anthropics/claude-code-action v1.0.182 exposes these WIF inputs, but
-      # actionlint v1.7.12's bundled action metadata predates them. Rego pins
+      # actionlint's bundled action metadata predates these WIF inputs; Rego pins
       # the exact supported names until actionlint refreshes its catalog.
       - 'input "anthropic_(federation_rule_id|organization_id|service_account_id)" is not defined in action "anthropics/claude-code-action@v1"'
   .github/workflows/release.yml:
     ignore:
-      # GitHub supports concurrency.queue, but actionlint v1.7.12 does not yet
-      # know the field. Keep this path- and diagnostic-specific until
-      # https://github.com/rhysd/actionlint/pull/654 is released.
+      # GitHub supports concurrency.queue; actionlint does not yet know the
+      # field. Drop when https://github.com/rhysd/actionlint/pull/654 ships.
       - 'unexpected key "queue" for "concurrency" section'

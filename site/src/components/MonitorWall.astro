@@ -5,12 +5,10 @@ const { channels, activeId } = Astro.props as {
   channels: EnrichedShowcaseChannel[];
   activeId: string;
 };
-// A `live` channel (vibing) carries variantGroups, not top-level variants, so
-// enriched `c.variants` is [] and the variant-set arm would deref undefined.src
-// → TypeError at build. It renders from its poster instead (audit C8; this
-// component is the currently-unmounted MonitorWall fallback, so the drift was
-// inert, but it breaks the build the moment it's re-mounted). `c.poster` is
-// build-guaranteed for a live channel by the astro.config poster check (audit C14).
+// A `live` channel carries variantGroups, not top-level variants, so enriched
+// `c.variants` is [] and the variant-set arm would deref undefined.src →
+// TypeError at build; it renders from its poster instead, which astro.config's
+// poster check build-guarantees for a live channel.
 const thumb = (c: EnrichedShowcaseChannel) =>
   c.kind === 'clip'
     ? `demos/${c.asset}-poster.png`
@@ -129,10 +127,9 @@ const thumb = (c: EnrichedShowcaseChannel) =>
   .mon[aria-pressed='true'] .mon__label {
     color: var(--fg);
   }
-  /* dim ONLY the dead-screen texture (mixed toward the page surface ≈ 0.55
-     opacity, theme-aware) — an element-level opacity would also dim the
-     label + "soon" badge text below WCAG 1.4.3 AA, and the badge lives
-     inside the screen so it can't be exempted from a subtree opacity */
+  /* Dim ONLY the texture, by mixing toward the page surface: an element-level
+     opacity would also dim the label + "soon" badge text below WCAG 1.4.3 AA,
+     and the badge lives inside the screen so a subtree opacity can't spare it */
   .mon__screen--static {
     aspect-ratio: 1600 / 1440;
     background: repeating-linear-gradient(
@@ -148,7 +145,6 @@ const thumb = (c: EnrichedShowcaseChannel) =>
     transform: translate(50%, 50%);
     letter-spacing: 0.08em;
   }
-  /* below the 2-col studio breakpoint the wall becomes a swipeable filmstrip */
   @media (max-width: 979px) {
     .wall {
       grid-template-columns: none;

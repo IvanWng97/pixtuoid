@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-"""Fingerprint the typing reference (yt 2BUNHd7ENZk) vs our typing track.
-
-Two fingerprints:
-  1. spectral — octave-band energies + centroid + rolloff (as analyze_rain)
-  2. temporal — onset rate, inter-onset intervals, per-stroke decay time
-Analysis only; reference bytes never ship.
+"""Fingerprint the typing reference (yt 2BUNHd7ENZk) vs our typing track, both
+spectrally and temporally. Analysis only; reference bytes never ship.
 """
 
 import wave
@@ -55,11 +51,9 @@ def spectral_fp(x, sr, label):
 
 
 def temporal_fp(x, sr, label):
-    # envelope: rectified, 2ms-smoothed
     env = np.abs(x)
     k = max(1, int(0.002 * sr))
     env = np.convolve(env, np.ones(k) / k, "same")
-    # onset = env crosses 4x its median with 40ms refractory
     thr = np.median(env) * 4 + 1e-6
     onsets = []
     refractory = int(0.04 * sr)
@@ -78,7 +72,6 @@ def temporal_fp(x, sr, label):
     if len(onsets) > 3:
         ioi = np.diff(onsets) / sr
         print(f"inter-onset: median {np.median(ioi)*1000:.0f}ms | p25 {np.percentile(ioi,25)*1000:.0f} | p75 {np.percentile(ioi,75)*1000:.0f}")
-        # per-stroke decay: time for env to fall to 20% of its local peak
         decays = []
         for o in onsets[:80]:
             seg = env[o:o + int(0.15 * sr)]

@@ -5,19 +5,13 @@ import { starText } from '../../config/plaque-stars.mjs';
 
 const floor = floorById('tools');
 
-// Build-time star count (wb-1 define; null when the GitHub API was
-// unreachable — the offline build ships the plaque without a number).
+// Build-time define; null when the GitHub API was unreachable, and the offline
+// build then ships the plaque without a number.
 const stars = __GH_STARS__;
 
-// Single source of truth → site/src/sources.json. The README "Supported Tools"
-// glimpse is generated from the SAME file (scripts/gen-readme.mjs), and the
-// `supported` set is pinned to the code's source registry (`registered_source_names()`) by a Rust test
-// (crates/pixtuoid-core/tests/supported_sources_manifest.rs) — so this matrix,
-// the README glimpse, and what's actually wired can't drift. The per-CLI
-// `badge` prefixes and `badge_color` hexes are likewise pinned: prefixes to
-// the registry (same core test), colors to the app's theme::NORMAL.source
-// palette (crates/pixtuoid-scene/tests/site_badge_colors.rs) — the hues the
-// wasm office behind this page actually renders with.
+// Single source of truth → site/src/sources.json, whose `supported` set, badge
+// prefixes and badge_color hexes are all pinned to the Rust side by tests, so
+// this matrix can't claim something the app doesn't actually do.
 
 type OsState = 'yes' | 'experimental' | 'planned' | 'no';
 const OSES = [
@@ -25,11 +19,8 @@ const OSES = [
   { key: 'linux', label: 'Linux' },
   { key: 'windows', label: 'Windows' },
 ] as const;
-// Tenant-board LEDs replace the pixel check/flask SVGs. The WCAG 1.4.1
-// shape-not-just-hue rule the old marks encoded SURVIVES: supported is a
-// FILLED glowing disc, experimental a HOLLOW ring — distinct silhouette, so
-// the distinction holds under colour-blindness / the dracula pink --amber.
-// The value still rides the sr-only sibling; the LEDs are aria-hidden.
+// WCAG 1.4.1 shape-not-just-hue: supported is a FILLED glowing disc,
+// experimental a HOLLOW ring, so the distinction survives colour-blindness.
 // PAIRED-COPY PIN: smoke.spec.ts's planned-row probe hand-copies the
 // 'planned'/'soon' branch's markup (this fn is unexported frontmatter it
 // can't call) — change that branch and the probe together.
@@ -41,9 +32,8 @@ const MARK = (s: string): string => {
   if (s === 'no') return '<span class="tools__mark tools__dash" aria-hidden="true">–</span>';
   return '<span class="tools__mark tools__soon" aria-hidden="true">soon</span>';
 };
-// Screen-reader text for each cell. The mark carries the value visually but is
-// aria-hidden (aria-label on a roleless <span> is naming-prohibited and gets
-// dropped), so the real value rides a visually-hidden sibling.
+// aria-label on a roleless <span> is naming-prohibited and gets dropped, so the
+// real value rides a visually-hidden sibling of the aria-hidden mark.
 const STATE_LABEL: Record<OsState, string> = {
   yes: 'supported',
   experimental: 'experimental',
@@ -55,8 +45,7 @@ const stateLabel = (s: string): string => STATE_LABEL[s as OsState] ?? s;
 const supported = sources.filter((s) => s.status === 'supported');
 const planned = sources.filter((s) => s.status === 'planned');
 
-// Legend derived from the states actually on screen — a hand-written legend
-// drifted (explained 🔜 with zero planned rows, omitted the nine 🧪 cells).
+// Derived from the states actually on screen — a hand-written legend drifted.
 const present = new Set<string>(supported.flatMap((s) => OSES.map((o) => s.platforms[o.key])));
 if (planned.length > 0) present.add('planned');
 const LEGEND_LABEL: Record<OsState, string> = { ...STATE_LABEL, no: 'n/a' };
@@ -158,8 +147,8 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
           {starText(stars)}<span class="sr-only">GitHub stars</span>
         </p>
         {
-          /* the engraving: the SAME claim showcase.json:9 already ships on the
-             AGENTS channel caption — one sourced sentence, two mounts */
+          /* the engraving: the same sourced claim showcase.json already ships
+             on the AGENTS channel caption — one sentence, two mounts */
         }
         <p class="tools__plaque-engraving">
           fleets of 100+ agents have run this repo through this very office.
@@ -177,8 +166,6 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     gap: 1.6rem;
     align-items: flex-start;
   }
-  /* the wall plaque: hardware (sharp + 1px edge via .hw-panel), star count in
-     the display face with the LED glow the statusline digits use */
   .tools__plaque {
     max-width: 240px;
     padding: 1rem 1.1rem;
@@ -203,9 +190,8 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
   }
   .tools__matrix {
     max-width: 760px;
-    /* left-align to the page rail (x=200), NOT centered: every other block on
-       the page (hero, studio, ledger, steps, install) hangs on the left rail, so
-       a centered table floats out from under its own left-aligned headline. */
+    /* left-align to the page rail, NOT centered: every other block hangs on the
+       left rail, so a centered table floats out from under its headline. */
     margin-inline: 0;
     padding: 0.4rem 0.4rem 0.2rem;
     overflow-x: auto;
@@ -234,14 +220,8 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 700;
-    /* the app's real per-CLI hue (sources.json badge_color, pinned to
-       theme::NORMAL.source by a scene bridge test); LED green fallback.
-       Lightened toward white so it clears WCAG AA (4.5:1) on this ALWAYS-dark
-       --screen ground — unlike the hero's day/night badge split, this table
-       renders on --screen regardless of page theme, so one lift covers every
-       theme. Same formula + measured worst case as the hero's night-mode arm
-       (DeepSeek-Reasonix #9c3cc0, 5.09:1 at 20% white); the e2e board-hue
-       sweep (smoke.spec.ts) pins every hue in both page themes. */
+    /* the app's real per-CLI hue, lightened toward white so the darkest badge
+       still clears WCAG AA on this ALWAYS-dark --screen ground. */
     color: color-mix(in srgb, var(--badge, var(--led)) 80%, white);
     background: var(--screen);
     padding: 0.1rem 0.35rem;
@@ -259,8 +239,7 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     opacity: 0.8;
   }
   /* td-qualified (0,2,1) so `text-align: center` beats the base `.tools td
-     { text-align: left }` (0,1,1) — bare `.tools__cell` (0,1,0) lost the type
-     selector and the LED discs hugged the left of each OS column (audit C4). */
+     { text-align: left }` (0,1,1) — bare `.tools__cell` (0,1,0) loses. */
   .tools td.tools__cell {
     text-align: center;
     font-size: 1.05rem;
@@ -268,8 +247,6 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
   .tools__cell[data-state='no'] {
     opacity: 0.35;
   }
-  /* the lobby directory board (§5): dark hardware screen — ink flips to the
-     chip palette (the statusline's --screen vocabulary) */
   .tools__board {
     padding: 0.9rem 0.9rem 0.4rem;
     color: var(--chip-ink);
@@ -281,20 +258,16 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
   .tools__board thead th {
     color: var(--chip-dim);
   }
-  /* row lights on hover — same hardware-hover ground as the statusline's
-     floor buttons (--hw-hover on --screen) */
   .tools__board tbody tr:hover {
     background: var(--hw-hover);
   }
   .tools__board .tools__badge {
     background: none;
-    /* the neon: the app's real per-CLI hue, glowing on the dark screen */
     text-shadow: 0 0 8px color-mix(in srgb, var(--badge, var(--led)) 55%, transparent);
   }
   /* `.tools ` prefix lifts this to (0,3,1) so `opacity: 1` beats the base
-     `.tools td.tools__how { opacity: .7 }` below (both were (0,2,1); the base
-     came later and won on order → the board's How column rendered double-dimmed
-     chip-dim×0.7 ≈ sub-AA) (audit C3). */
+     `.tools td.tools__how { opacity: .7 }` below — at equal (0,2,1) the base
+     wins on order and the board's How column renders double-dimmed, sub-AA. */
   .tools .tools__board td.tools__how {
     color: var(--chip-dim);
     opacity: 1;
@@ -304,38 +277,29 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
   .tools__board .tools__planned tr td,
   .tools__board .tools__legend,
   .tools__board .tools__legend-item:not(:first-child)::before {
-    /* the legend/planned muted ink is --fg-muted, tuned for the light PAGE
-       background — the board is now an ALWAYS-dark --screen ground
-       regardless of page theme, so it needs the same --chip-dim the rest of
-       this block already uses (measured 3.36:1 with --fg-muted, below the
-       4.5:1 AA floor; --chip-dim clears 5.34:1). */
+    /* --fg-muted is tuned for the light PAGE background and lands below the AA
+       floor on this ALWAYS-dark --screen board; --chip-dim clears it. */
     color: var(--chip-dim);
   }
   :global(.tools__led) {
     display: inline-block;
     vertical-align: -0.1em;
   }
-  /* the lit fill+glow is .led-dot.is-on's authority (global.css) — the
-     supported-state dot carries `is-on` in its class list (MARK()), so no
-     local override is needed; .tools__led--on stays as a selector hook for
-     the docs-lobby e2e count. */
-  /* hollow ring = the experimental SHAPE (vs the filled supported disc) */
+  /* the lit fill+glow is .led-dot.is-on's authority (global.css);
+     .tools__led--on stays only as a selector hook for the e2e lobby count. */
   :global(.tools__led--exp) {
     background: transparent;
     border: 2px solid var(--amber);
     box-shadow: none;
   }
   /* the marks are injected via set:html (MARK()), so they carry no scoped
-     data-astro hash — scoped selectors would miss them. Style them :global
-     (names are component-unique, no leak risk). */
+     data-astro hash — a scoped selector would miss them. */
   :global(.tools__mark) {
     width: 1.1em;
     height: 1.1em;
     fill: currentColor;
     vertical-align: -0.16em;
   }
-  /* same board-ink swap as the legend/planned block above — these marks
-     render on the always-dark .hw-panel board regardless of page theme. */
   :global(.tools__dash) {
     color: var(--chip-dim);
   }
@@ -357,8 +321,8 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    /* informative (the only shipped-vs-planned divider): a muted AA color, NOT
-       opacity — element opacity sat at ~3.6:1 in day, below WCAG 1.4.3. */
+    /* informative, so a muted AA color and NOT opacity — element opacity put
+       this below WCAG 1.4.3 in day theme. */
     color: var(--fg-muted);
     padding-top: 0.9rem;
     border-bottom: none;
@@ -366,14 +330,12 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
   .tools__planned tbody:last-child tr:last-child th,
   .tools__planned tr th,
   .tools__planned tr td {
-    /* de-emphasize planned rows with a muted color, not opacity (which dropped
-       the informative tool names below AA) */
+    /* muted color, not opacity — opacity dropped the tool names below AA */
     color: var(--fg-muted);
   }
   .tools__legend {
     margin: 0.7rem 0.2rem 0.3rem;
     font-size: 0.78rem;
-    /* the sole decode key for the marks — AA muted color, not opacity */
     color: var(--fg-muted);
   }
   .tools__legend-item {
@@ -384,7 +346,6 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     margin: 0 0.5rem;
     color: var(--fg-muted);
   }
-  /* The transport column is supplementary — drop it before the grid gets cramped. */
   @media (max-width: 560px) {
     .tools__how-col,
     .tools__how {

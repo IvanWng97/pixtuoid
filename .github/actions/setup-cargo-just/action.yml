@@ -23,9 +23,8 @@ runs:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
-    # v1 invalidates caches created before the workspace's dev-profile
-    # fingerprints changed. Keep this fixed so every Rust job shares one cache
-    # namespace and a future invalidation is a deliberate repository-wide edit.
+    # Keep this prefix fixed so every Rust job shares one cache namespace; a bump
+    # is a deliberate repository-wide invalidation.
     - if: ${{ inputs.enable-cache == 'true' }}
       uses: Swatinem/rust-cache@v2
       with:

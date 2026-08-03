@@ -1,13 +1,9 @@
 name: site
 
 on:
-  # PR-only gate. The on-main build + deploy is owned by pages.yml (which runs
-  # `npm run lint && npm run check` itself), so building here on a main push too
-  # was a redundant 2nd Astro build per push. Only `format:check` is unique to
-  # this workflow — auto-fixable + caught on every PR (everything lands via PR).
-  # site/ also renders ../Cargo.toml + ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING,KNOWLEDGE-ENGINEERING,PARALLEL-DELIVERY}.md
-  # (the mermaid block renders to an inline SVG at build). README drift from
-  # site/src/*.json is gated by ci-lint.yml's `readme` job — so README.md is NOT here.
+  # PR-only: pages.yml owns the on-main build + deploy, so a main push here would
+  # be a redundant 2nd Astro build. README drift is gated by ci-lint.yml's
+  # `readme` job instead, so README.md is deliberately absent from the paths.
   pull_request:
     paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
 
@@ -29,9 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # full history: the displayed version = latest release TAG
-          # (astro.config.mjs via config/released-version.mjs); a shallow
-          # tag-less checkout would silently fall back to Cargo.toml
+          # the displayed version is the latest release TAG — a shallow, tag-less
+          # checkout silently falls back to Cargo.toml
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7
@@ -39,63 +34,39 @@ jobs:
           node-version: 26
           cache: npm
           cache-dependency-path: site/package-lock.json
-      # Node 26's bundled npm predates the complete allowScripts toolchain.
-      # Match packageManager before npm ci so install-script policy is enforced.
+      # Node 26's bundled npm predates the complete allowScripts toolchain, so
+      # match packageManager before npm ci or install-script policy goes unenforced.
       - name: Install pinned npm
         working-directory: ${{ github.workspace }}
         run: npm install --global npm@12.0.1 # zizmor: ignore[adhoc-packages] exact packageManager bootstrap before the lockfile install
       - run: npm ci
       - run: npm run audit
-      # cache the ~92MB Chromium across runs (keyed on the lockfile) so the install
-      # below is a no-op on a hit
       - name: Cache Playwright Chromium
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
-      # the /architecture page renders its ```mermaid block to an inline SVG at
-      # build via rehype-mermaid (headless Playwright) — needs a headless Chromium,
-      # installed BEFORE `npm run check`/`build` below (both render it; check-then-
-      # install is what broke pages.yml). `install chromium` already pulls
-      # `chromium-headless-shell`; name it too so a cache holding chromium-but-not-
-      # the-shell can't skip it.
+      # rehype-mermaid needs a headless Chromium, installed BEFORE `check`/`build`
+      # (both render it; check-then-install is what broke pages.yml). The shell is
+      # named explicitly so a cache holding chromium-but-not-the-shell can't skip it.
       - run: npx playwright install --with-deps chromium chromium-headless-shell
       - run: npm run format:check
       - run: npm run lint
       - run: npm run check
-      # knip: unused files / exports / dependencies in the Astro project (catches
-      # an orphaned component or stale dep tsc/eslint can't see). Mirrors the
-      # `verify` script; runs before build for fast feedback.
       - run: npm run knip
-      # node:test unit tests (config/csp-hashes.test.mjs) — the CSP hash kernel's
-      # edge cases the e2e watchdog can only catch indirectly. Part of `verify`.
       - run: npm run test:unit
-      # deterministic ★ count for the e2e suite below (config/gh-stars.mjs
-      # GH_STARS_OVERRIDE seam) — this runner's unauthenticated GitHub API call
-      # would otherwise rate-limit to null and hide the star chip, silently
-      # no-op-ing its assertion.
+      # pin the ★ count: the runner's unauthenticated GitHub API call rate-limits
+      # to null, hiding the star chip and silently no-op-ing the e2e assertion.
       - run: npm run build
         env:
           GH_STARS_OVERRIDE: 842
-      # the empty-render guard runs in the PR-gating CI too — not only `verify` /
-      # the deploy — so a collapsed doc render is caught pre-merge (#680).
+      # the empty-render guard runs in the PR gate, not only `verify`/deploy, so a
+      # collapsed doc render is caught pre-merge (#680).
       - run: npm run check:docs
-      # e2e smoke suite vs the PRODUCTION build just produced (astro preview,
-      # the official Astro testing posture): pins the page's runtime contracts
-      # — wasm office goes live, statusline truth-light, digit-key scrollspy,
-      # dimmer release, Copy→hire wiring, docs-nav variant, reduced-motion
-      # fallback — plus a console-error watchdog (it caught the CSP-blocked
-      # inlined fonts on day one). Chromium is already installed above.
       - run: npm run e2e
-      # Lighthouse CI: hard-gate a11y / SEO / best-practices plus median
-      # performance budgets over three runs against the built pages. It serves
-      # dist via `astro preview` (root `/` base on the custom domain). Replaces
-      # the dropped eslint-plugin-jsx-a11y with a rendered-DOM a11y check
-      # (axe-powered). Uses the runner's pre-installed Chrome.
       - run: npm run lighthouse
-      # Keep the full HTML reports even when the gate fails (the run logs only
-      # carry the failing scores, not the element-level violations) — `path` is
-      # workspace-root-relative, so it's prefixed with site/ despite the job cwd.
+      # The run logs carry only failing scores, not element-level violations.
+      # `path` is workspace-root-relative, hence the site/ prefix despite the job cwd.
       - name: Upload Lighthouse reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7

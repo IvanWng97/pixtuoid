@@ -1,5 +1,3 @@
-// Unit tests for the callout promoter — the doc-blockquote → terminal-window
-// transform (spec §6). Pure hast in/out, same posture as csp-hashes.test.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import rehypeCallouts from './rehype-callouts.mjs';
@@ -29,7 +27,6 @@ test('a plain blockquote becomes a ~ note terminal window', () => {
   assert.deepEqual(bar.properties.className, ['callout__bar']);
   const title = bar.children.find((c) => c.properties?.className?.includes('callout__title'));
   assert.equal(title.children[0].value, '~ note');
-  // a note window carries NO red dot
   assert.ok(!JSON.stringify(bar).includes('terminal__dot--r'));
 });
 
@@ -45,9 +42,6 @@ test("a **Don't …** opener becomes the red-dot ~ warning window", () => {
 });
 
 test("astro's smartypants curly apostrophe (U+2019) still classifies as a warning", () => {
-  // docs/CONTRIBUTING.md's own "**Don't chain …**" idiom — the motivating
-  // example — comes out of remark as "Don’t" (typeset quote), not the
-  // ASCII "Don't" the source markdown was typed with.
   const tree = run([quote(p(strong('Don’t chain `cargo clippy && cargo test`')))]);
   assert.deepEqual(tree.children[0].properties.className, ['callout', 'callout--warn']);
 });

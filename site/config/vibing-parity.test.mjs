@@ -1,10 +1,6 @@
-// The VIBING channel's static poster must be a truthful still of the live
-// canvas it covers: same buffer dims (the "camera" — smaller buffer = closer
-// zoom), same layout seed. Those values necessarily live in three places —
-// showcase.json (the canvas), scripts/media.json (the poster render), and
-// Showcase.astro's VIBING_SEED (the Office constructor) — so this test pins
-// the copies together (the workspace magic-number rule: values that cross a
-// config boundary get a drift tooth, not trust).
+// The VIBING poster must be a truthful still of the live canvas it covers, and
+// the buffer dims ARE the camera (smaller buffer = closer zoom). The values
+// necessarily live in three files, so pin the copies together.
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -32,9 +28,7 @@ test('vibing poster job mirrors the live canvas (dims + seed)', () => {
     poster.seed,
     'poster layout seed == the live Office constructor seed'
   );
-  // The remaining two cross-boundary copies: the poster's hour must equal the
-  // time slider's SSR default, and its weather the default-active chip —
-  // else the crossfade reframes to a different sky/wetness.
+  // else the poster→canvas crossfade reframes to a different sky/wetness
   const hourMatch = stage.match(/value="(\d+)"/);
   assert.ok(hourMatch, "ChannelStage.astro declares the time slider's default value");
   assert.equal(Number(hourMatch[1]), poster.hour, 'poster hour == slider default hour');
