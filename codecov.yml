@@ -74,13 +74,21 @@ ignore:
   # coverage - nothing looks at it - so each one has to earn that twice over.
   # Audited #827, all four re-read at the file level:
   # - main.rs: build_run_config + warn_broken_installs are presenters/wiring over
-  #   config::resolve_* and doctor::diagnose, each unit-tested in its own module.
+  #   config::resolve_* / setup::is_first_run / doctor::diagnose, each unit-tested in
+  #   its own module. NOT decision-free, though: build_run_config's EAGER
+  #   `cli_max_desks.or(resolve_max_desks(..))` is load-bearing (the max-desks = 0
+  #   warning must fire even when the CLI flag wins, so `.or_else` would compile and
+  #   silently drop it), and config/tests.rs pins it only by RE-SPELLING the same
+  #   composition. Per the rule below that decision wants to move into `config::`;
+  #   tracked in #836, not waived.
   # - runtime/pipeline.rs: channel/spawn wiring, no conditionals.
   # - floating/mod.rs: runtime + EventLoop build, PipelineBoot::spawn's proxy and
   #   health consumers - all needing a live runtime and event-loop proxy.
   # - floating/window.rs: the ApplicationHandler, redraw blit, persist_geometry,
-  #   and a 9-line ActiveEventLoop binding. Its two pure seams are OUT and counted
-  #   (geometry::window_visible_on_monitors, offscreen::sync_floor_caps) - when a
+  #   and a 9-line ActiveEventLoop binding. Its pure seams are OUT and counted
+  #   (geometry::window_visible_on_monitors, cadence::FrameClock::poll, and
+  #   offscreen::sync_floor_caps, which took its resize memo with it). What stays
+  #   inline is the `office_idle` predicate, a documented sharp edge. When a
   #   decision appears in here, move it out rather than widening this list.
   - "crates/pixtuoid/src/main.rs"               # binary entry: arg-parse + dispatch + terminal preflights
   - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (was main.rs; its pure helpers stay unit-tested)

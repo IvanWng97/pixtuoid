@@ -186,11 +186,8 @@ impl FloatingApp {
         // The ONE projection helper, shared with the boot seed so the two can't drift.
         let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(size);
         // Keep the reducer's desk capacity in lockstep with the office actually rendered at
-        // this BUFFER size (authority = the layout's home-desk count, same as the TUI).
-        if self.last_caps_size != Some((buf_w, buf_h)) {
-            super::offscreen::sync_floor_caps(&floor_caps, buf_w, buf_h);
-            self.last_caps_size = Some((buf_w, buf_h));
-        }
+        // this BUFFER size. Owns its own resize memo — see `sync_floor_caps`.
+        super::offscreen::sync_floor_caps(&mut self.last_caps_size, &floor_caps, buf_w, buf_h);
         let floor_meta = FloorMeta::ground();
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
