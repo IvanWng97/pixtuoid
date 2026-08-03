@@ -2182,9 +2182,9 @@ async fn scan_pass_re_vouches_a_transiently_gated_live_file() {
 /// bypass exempts only the RECENCY half of the first-sight gate: a
 /// structural terminator is the source's own ground truth, which a
 /// liveness vouch (an mtime-independent PROXY for "the owning process is
-/// alive") must not outrank — grok's leader vouch outlives the session it
-/// vouches for, and omp's fd vouch fires for any bun tool merely READING
-/// an old transcript.
+/// alive") must not outrank — a vouch answers "is the owning process
+/// alive", never "is this session over"; omp's fd vouch fires for any bun
+/// tool merely READING an old transcript.
 #[tokio::test]
 async fn probe_live_ended_first_sight_stays_unregistered() {
     let dir = tempfile::tempdir().unwrap();

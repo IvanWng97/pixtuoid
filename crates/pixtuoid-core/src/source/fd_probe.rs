@@ -307,16 +307,18 @@ mod tests {
     ///
     /// This is the negative half the two platform arms disagreed on — macOS
     /// filtered `PROX_FDTYPE_VNODE` while Linux returned every `/proc/<pid>/fd`
-    /// link, `socket:[inode]` included — and it is load-bearing beyond hygiene:
-    /// `grok::leader_socket_owner` asks THIS fn whether a pid holds
-    /// `{grok_home}/leader.sock`, which is exactly the question it cannot
-    /// answer. Verified against the live syscalls: a bound+listening AF_UNIX fd
-    /// reports `proc_fdtype=2` (SOCKET, not VNODE=1) and its
-    /// `PROC_PIDFDVNODEPATHINFO` query returns 0 bytes with an empty path.
-    /// Detecting a socket's owner needs a socket-aware probe
-    /// (`PROC_PIDFDSOCKETINFO` on macOS, a `/proc/net/unix` inode join on
-    /// Linux) — see `grok::native::leader_socket_owner`, which is inert for
-    /// exactly this reason (#826).
+    /// link, `socket:[inode]` included — so it is the parity pin that keeps one
+    /// name from meaning two things. Verified against the live syscalls: a
+    /// bound+listening AF_UNIX fd reports `proc_fdtype=2` (SOCKET, not VNODE=1)
+    /// and its `PROC_PIDFDVNODEPATHINFO` query returns 0 bytes with an empty
+    /// path.
+    ///
+    /// A caller needing a socket's OWNER needs a socket-aware probe instead
+    /// (macOS `PROC_PIDFDSOCKETINFO`; on Linux a `/proc/net/unix` inode join —
+    /// NOT `stat(2)`'s `st_ino`, which is the path's filesystem inode, not the
+    /// sockfs inode `socket:[N]` names). grok's #638 leader vouch was this
+    /// crate's only such caller and was deleted rather than repaired (#826);
+    /// don't add a socket arm here on spec.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn open_vnode_paths_never_reports_a_unix_socket() {

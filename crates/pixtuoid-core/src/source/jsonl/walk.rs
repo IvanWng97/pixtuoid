@@ -50,9 +50,9 @@ pub(super) fn id_path(path: &Path) -> std::path::PathBuf {
 /// PROXY for liveness that a long-idle/delegating session falsifies, so ground
 /// truth about the owning process must win over it. It does NOT exempt the
 /// terminator half — a structural end marker is the SOURCE's own first-hand
-/// report that the session is over, which no vouch outranks (grok's leader
-/// vouch is mtime-derived and outlives the session it vouches for; omp's fd
-/// vouch fires for any bun tool merely READING an old transcript). The
+/// report that the session is over, which no vouch outranks: a vouch answers
+/// "is the owning process alive", never "is this session over" (omp's fd vouch
+/// fires for any bun tool merely READING an old transcript). The
 /// oversized arm below already makes exactly this call with its unconditional
 /// `ended_in_skip`.
 async fn should_seed_at_eof(
