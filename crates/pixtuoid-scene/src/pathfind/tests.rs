@@ -326,22 +326,79 @@ fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
     }
 }
 
+/// The cache is observed through a SEALED mask: on a fully-blocked grid
+/// `find_path` returns `None` and `route` mints the 2-point `[from, to]`
+/// fallback, so a multi-point answer proves the cached polyline was served
+/// instead of a fresh A* run.
+///
+/// `route`'s miss arm re-`insert`s the SAME `(from, to)` key, so deleting the
+/// cache-hit branch entirely leaves `len() == 1` — the old
+/// `assert_eq!(router.len(), 1, "should hit cache")` was green either way (#750).
+/// The mask is a sound probe because the cache is deliberately mask-BLIND: it
+/// keys on `(from, to)` and invalidates on the OVERLAY signature, the mask being
+/// static per layout.
 #[test]
-fn router_caches_until_overlay_changes() {
+fn router_serves_the_cached_path_instead_of_re_running_astar() {
+    let l = make_layout();
+    let mut router = AStarRouter::new();
+    let overlay = OccupancyOverlay::new();
+    let from = Point { x: 30, y: 80 };
+    let to = Point { x: 30, y: 120 };
+
+    let first = router.route(&l.walkable, &overlay, from, to);
+    assert!(
+        first.len() > 2,
+        "the fixture must CORNER, else a hit is indistinguishable from the \
+         straight-line fallback: {first:?}"
+    );
+
+    let sealed = WalkableMask::filled(l.walkable.width(), l.walkable.height(), false);
+    let second = router.route(&sealed, &overlay, from, to);
+    assert_eq!(
+        second, first,
+        "a repeat leg must be served from the cache — a re-route on the sealed \
+         mask could only yield the 2-point fallback"
+    );
+}
+
+/// Invalidation is PER-PATH, not a global wipe: an overlay change that misses a
+/// cached polyline must leave it cached, and one laid across it must drop it.
+/// Both directions ride the same sealed-mask oracle — after a sealed re-route the
+/// cached answer and the 2-point fallback are distinguishable, so each assertion
+/// names which side of `path_clear_under` it exercises.
+///
+/// The MISS direction is what pins the optimisation itself (`retain`, not
+/// `clear`): swapping the per-path retain for a global wipe passes every other
+/// test in the crate.
+#[test]
+fn an_overlay_evicts_only_the_paths_it_actually_crosses() {
     let l = make_layout();
     let mut router = AStarRouter::new();
     let mut overlay = OccupancyOverlay::new();
     let from = Point { x: 30, y: 80 };
     let to = Point { x: 30, y: 120 };
-    let _ = router.route(&l.walkable, &overlay, from, to);
-    assert_eq!(router.len(), 1);
-    let _ = router.route(&l.walkable, &overlay, from, to);
-    assert_eq!(router.len(), 1, "should hit cache");
+    let sealed = WalkableMask::filled(l.walkable.width(), l.walkable.height(), false);
 
-    // Push an occupancy rect — cache should drop.
-    overlay.add(100, 100, 8, 8);
-    let _ = router.route(&l.walkable, &overlay, from, to);
-    assert_eq!(router.len(), 1, "cache rebuilt after overlay change");
+    let first = router.route(&l.walkable, &overlay, from, to);
+    assert!(first.len() > 2, "fixture must corner: {first:?}");
+
+    // A rect far from the polyline changes the overlay SIGNATURE (so the
+    // invalidation branch runs) but crosses nothing.
+    overlay.add(0, 0, 8, 8);
+    assert_eq!(
+        router.route(&sealed, &overlay, from, to),
+        first,
+        "a rect clear of the polyline must leave its entry cached — `retain`, not `clear`"
+    );
+
+    // Now cover a waypoint of that same path, so `path_clear_under` drops it.
+    let mid = first[first.len() / 2];
+    overlay.add(mid.x.saturating_sub(4), mid.y.saturating_sub(4), 8, 8);
+    assert_eq!(
+        router.route(&sealed, &overlay, from, to),
+        vec![from, to],
+        "the crossed entry must be evicted and re-routed, not served stale"
+    );
 }
 
 #[test]
