@@ -11,10 +11,11 @@
 //! per-frame caches + persistent office state — coffee cups, group chitchat — plus the
 //! dual eviction) across frames so motion stays continuous.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
-use pixtuoid_core::state::SceneState;
+use pixtuoid_core::state::{SceneState, MAX_FLOORS};
 
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs};
 use pixtuoid_scene::footer::{
@@ -190,13 +191,10 @@ pub(crate) fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16)
 
 /// Per-floor desk capacities for an office buffer of `buf_w`×`buf_h` — the
 /// layout's own `home_desks` count per floor. THE one derivation: the boot seed
-/// ([`boot_capacities_for_window`]) and every redraw's `window::sync_floor_caps`
-/// both call it, so "the seed matches what the first redraw stores" is
-/// structural rather than a pair of loops that happen to agree.
-pub(crate) fn floor_caps_for_buffer(
-    buf_w: u16,
-    buf_h: u16,
-) -> [usize; pixtuoid_core::state::MAX_FLOORS] {
+/// ([`boot_capacities_for_window`]) and every redraw's [`sync_floor_caps`] both
+/// call it, so "the seed matches what the first redraw stores" is structural
+/// rather than a pair of loops that happen to agree.
+pub(crate) fn floor_caps_for_buffer(buf_w: u16, buf_h: u16) -> [usize; MAX_FLOORS] {
     std::array::from_fn(|i| {
         pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, pixtuoid_scene::floor::floor_seed(i))
     })
@@ -204,7 +202,7 @@ pub(crate) fn floor_caps_for_buffer(
 
 /// Per-floor boot desk-capacities for the FLOATING window, from the REAL
 /// `window.inner_size()`. Uses the SAME `window_buffer_geometry` +
-/// [`floor_caps_for_buffer`] the first redraw's `window::sync_floor_caps` does —
+/// [`floor_caps_for_buffer`] the first redraw's [`sync_floor_caps`] does —
 /// the office buffer is `window / office_scale` with NO footer row. The TUI's
 /// `runtime::boot_capacities_for` instead subtracts a footer row AND ignores the
 /// window upscale, so reusing it here OVER-seeds: in the sub-frame boot race
@@ -221,11 +219,48 @@ pub(crate) fn floor_caps_for_buffer(
 /// `store`s the honest 0 for a window too small to lay out, so a fallback here
 /// would be the last remaining boot-vs-steady-state divergence — and it points
 /// the WRONG way, admitting 16 agents onto desks that do not exist.
-pub(crate) fn boot_capacities_for_window(
-    size: PhysicalSize<u32>,
-) -> [usize; pixtuoid_core::state::MAX_FLOORS] {
+pub(crate) fn boot_capacities_for_window(size: PhysicalSize<u32>) -> [usize; MAX_FLOORS] {
     let (_scale, buf_w, buf_h) = window_buffer_geometry(size);
     floor_caps_for_buffer(buf_w, buf_h)
+}
+
+/// Publish [`floor_caps_for_buffer`]'s answer into the reducer's per-floor
+/// capacity atomics, keeping admission in lockstep with the office actually
+/// rendered at `buf_w`×`buf_h` (authority = the layout's `home_desks` count).
+/// Returns whether it recomputed — `false` means `last` already held this buffer
+/// size and the publish was skipped.
+///
+/// `store`, NOT the TUI's monotone `fetch_max` (`tui/mod.rs`'s
+/// `FloorCapacitySweep::publish`): the floating window's pixel size is exact and
+/// authoritative on every redraw, so a shrink genuinely LOWERS capacity and the
+/// reducer must stop admitting agents onto desks that no longer exist (already-
+/// seated excess agents stay alive-but-invisible). Don't "harmonize" the two —
+/// the direction is deliberate, and
+/// `a_shrink_lowers_the_published_capacity_it_is_store_not_fetch_max` pins it.
+///
+/// The resize DETECTION rides along with the publish, exactly as the TUI's
+/// `FloorCapacitySweep` bundles its own memo: capacity changes only with the
+/// buffer size, and `floor_capacity` runs a full layout compute per floor, so
+/// this must not run per frame. Splitting the two would strand the guard in
+/// `window.rs`, which is excluded from BOTH codecov and cargo-mutants — and a
+/// guard there is measured by nothing, so inverting it (never republishing after
+/// boot, so a resize silently stops updating admission) would stay green. That
+/// exclusion is also why the publish itself lives here rather than beside its
+/// `window::redraw` call site.
+pub(crate) fn sync_floor_caps(
+    last: &mut Option<(u16, u16)>,
+    floor_caps: &[AtomicUsize; MAX_FLOORS],
+    buf_w: u16,
+    buf_h: u16,
+) -> bool {
+    if *last == Some((buf_w, buf_h)) {
+        return false;
+    }
+    *last = Some((buf_w, buf_h));
+    for (cap, capacity) in floor_caps.iter().zip(floor_caps_for_buffer(buf_w, buf_h)) {
+        cap.store(capacity, Ordering::Relaxed);
+    }
+    true
 }
 
 /// The bundled character sprite width (px), from the ONE cross-crate authority
@@ -649,6 +684,113 @@ mod tests {
             boot_capacities_for_window(tiny)[0],
             0,
             "the seed must agree with what the redraw stores, not invent desks"
+        );
+    }
+
+    /// A SHRINK must LOWER the published capacity — the direction [`sync_floor_caps`]
+    /// documents. Under a `fetch_max` "harmonization" the second publish is a no-op
+    /// and the atomics keep the LARGER window's count.
+    #[test]
+    fn a_shrink_lowers_the_published_capacity_it_is_store_not_fetch_max() {
+        let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
+        let (big, small) = ((360u16, 240u16), (240u16, 160u16));
+        let want_big = floor_caps_for_buffer(big.0, big.1);
+        let want_small = floor_caps_for_buffer(small.0, small.1);
+        // Fixture guard: the shrink must actually cost desks, else this asserts nothing.
+        assert!(
+            want_small[0] < want_big[0] && want_small[0] > 0,
+            "fixture must shrink floor 0 to a smaller NON-zero capacity: {} → {}",
+            want_big[0],
+            want_small[0]
+        );
+
+        let mut last = None;
+        sync_floor_caps(&mut last, &caps, big.0, big.1);
+        for (floor, want) in want_big.iter().enumerate() {
+            assert_eq!(
+                caps[floor].load(Ordering::Relaxed),
+                *want,
+                "floor {floor} must publish the layout's own capacity at {big:?}"
+            );
+        }
+
+        sync_floor_caps(&mut last, &caps, small.0, small.1);
+        for (floor, want) in want_small.iter().enumerate() {
+            assert_eq!(
+                caps[floor].load(Ordering::Relaxed),
+                *want,
+                "floor {floor} must FALL to the smaller window's capacity — a `fetch_max` \
+                 publish would strand it at the larger one"
+            );
+        }
+    }
+
+    /// The invariant [`boot_capacities_for_window`] and `floating/mod.rs` assert in
+    /// prose: the `resumed` seed and the per-redraw publish agree. Both route through
+    /// [`floor_caps_for_buffer`], which makes agreement structural; this drives BOTH
+    /// real functions end-to-end so a re-divergence — a fallback clause returning on
+    /// one side, a footer row subtracted on the other — reds instead of quietly
+    /// falsifying that prose.
+    ///
+    /// One fixture per divergence class: 1280×720 and 64×48 catch a re-introduced
+    /// `cap == 0 → FALLBACK_DESKS` fallback, and 853×480 (`office_scale` 3) is the one
+    /// whose capacity moves under a few px of one-sided buffer drift — the other two
+    /// absorb it, so without this fixture the footer-row half of the claim above is
+    /// unpinned.
+    #[test]
+    fn the_first_redraws_publish_agrees_with_the_boot_seed() {
+        for window in [
+            PhysicalSize::new(1280u32, 720u32),
+            PhysicalSize::new(853, 480),
+            PhysicalSize::new(64, 48),
+        ] {
+            let seed = boot_capacities_for_window(window);
+            let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
+            let (_scale, buf_w, buf_h) = window_buffer_geometry(window);
+            sync_floor_caps(&mut None, &caps, buf_w, buf_h);
+            let published: [usize; MAX_FLOORS] =
+                std::array::from_fn(|i| caps[i].load(Ordering::Relaxed));
+            assert_eq!(
+                published, seed,
+                "the first redraw's publish must store what {window:?} seeded"
+            );
+        }
+    }
+
+    /// The resize memo must skip a REPEAT of the same buffer size and fire on a
+    /// CHANGE — including the very first call, whose `last` is `None`. Inverting the
+    /// guard to `==` makes the first redraw publish nothing and every later resize a
+    /// no-op, so admission silently freezes at the boot seed; the memo lived in
+    /// `window.rs` where neither codecov nor cargo-mutants could see that.
+    #[test]
+    fn the_resize_memo_publishes_on_a_change_and_skips_a_repeat() {
+        let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
+        let mut last = None;
+        assert!(
+            sync_floor_caps(&mut last, &caps, 360, 240),
+            "the FIRST call has no previous size, so it must publish"
+        );
+        assert_eq!(
+            last,
+            Some((360, 240)),
+            "the memo must record what it published"
+        );
+        assert!(
+            !sync_floor_caps(&mut last, &caps, 360, 240),
+            "an unchanged buffer size must skip the per-floor layout compute"
+        );
+        assert!(
+            sync_floor_caps(&mut last, &caps, 240, 160),
+            "a resize must republish"
+        );
+        // The skip must be a genuine no-op, not a stale-value publish: hand the memo a
+        // size it already holds while the atomics say something else, and they must stand.
+        caps[0].store(999, Ordering::Relaxed);
+        assert!(!sync_floor_caps(&mut last, &caps, 240, 160));
+        assert_eq!(
+            caps[0].load(Ordering::Relaxed),
+            999,
+            "a skipped publish must not touch the atomics"
         );
     }
 

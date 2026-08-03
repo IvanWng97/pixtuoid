@@ -241,9 +241,10 @@ fn live_leader_pid(candidates: &[PathBuf]) -> Option<i32> {
 /// process start within [`cc_probe::PID_START_TOLERANCE_SECS`] (the #220
 /// pid-recycle identity check; either side missing → pid-alive-only, the
 /// check is additive). Returns `None` only when the DOCUMENT doesn't parse as
-/// an array of entries (format drift); junk VALUES inside an entry (pid <= 0)
-/// skip that entry silently, mirroring the CC registry's value-vs-shape
-/// distinction.
+/// an array of entries — a renamed or mistyped key, i.e. format drift; junk
+/// VALUES inside an entry (a pid `decoder::checked_pid` rejects — non-positive
+/// OR outside `i32` range — an empty `session_id`, a recycled pid) skip that
+/// entry silently, mirroring the CC registry's value-vs-shape distinction.
 ///
 /// `leader` (#826) reassigns OWNERSHIP: `ProbeLadder::fold` hands the bound pid
 /// to the `ExitWatch`, so a live leader must be that pid. `alive` still gates
@@ -260,13 +261,21 @@ fn grok_ids_from_registry(
     #[derive(serde::Deserialize)]
     struct Entry {
         session_id: String,
-        pid: i32,
+        // `i64`: an out-of-`i32` value must skip its entry, not fail the
+        // document — see `decoder::checked_pid` (#831).
+        pid: i64,
         #[serde(default)]
         opened_at: Option<String>,
     }
     let entries: Vec<Entry> = serde_json::from_slice(bytes).ok()?;
     let mut snap = ProbeSnapshot::default();
     for e in entries {
+        // The i32-range + strictly-positive narrowing every JSON pid ingress
+        // shares (the `kill(0)`/`kill(-n)`-targets-a-GROUP rationale lives on
+        // `checked_pid`) — the same call `cc_probe::parse_registry_entry` makes.
+        let Some(pid) = crate::source::decoder::checked_pid(e.pid) else {
+            continue;
+        };
         if let Some(leader_pid) = leader {
             // `alive` still gates ADMISSION — it is the only filter this
             // registry has against crash residue (entries are "removed on clean
@@ -277,19 +286,19 @@ fn grok_ids_from_registry(
             // that is the pid whose death should end the session, so the
             // client's death now decays through the negative vouch (~60-120s)
             // instead of the ExitWatch's milliseconds.
-            if e.pid > 0 && !e.session_id.is_empty() && alive(e.pid) {
+            if !e.session_id.is_empty() && alive(pid) {
                 snap.bind_pid(e.session_id, leader_pid);
             }
             continue;
         }
-        if e.pid <= 0 || e.session_id.is_empty() || !alive(e.pid) {
+        if e.session_id.is_empty() || !alive(pid) {
             continue;
         }
         if let (Some(claimed_secs), Some(actual_secs)) = (
             e.opened_at
                 .as_deref()
                 .and_then(crate::source::decoder::rfc3339_to_epoch_secs),
-            start_time(e.pid),
+            start_time(pid),
         ) {
             // `opened_at` is stamped at session OPEN, which can lag process
             // start by however long the user sat on the welcome screen — the
@@ -300,7 +309,7 @@ fn grok_ids_from_registry(
             // process existed — that pid was recycled).
             if claimed_secs + crate::source::cc_probe::PID_START_TOLERANCE_SECS < actual_secs {
                 tracing::debug!(
-                    pid = e.pid,
+                    pid,
                     claimed_secs,
                     actual_secs,
                     "pid recycled — active_sessions opened_at predates process start; skipping"
@@ -310,7 +319,7 @@ fn grok_ids_from_registry(
         }
         // Duplicate session_id across entries is upstream junk — keep the
         // deterministic tiebreak winner (larger pid, the shared #252 rule).
-        snap.bind_pid(e.session_id, e.pid);
+        snap.bind_pid(e.session_id, pid);
     }
     Some(snap)
 }
@@ -500,10 +509,45 @@ mod tests {
         fn dead_pids_and_junk_values_are_skipped_not_failures() {
             let snap = grok_ids_from_registry(REG.as_bytes(), alive_none, |_| None, None).unwrap();
             assert!(snap.pid_of.is_empty(), "dead pids yield a healthy empty");
+            // Both halves of `checked_pid`'s narrowing — zero AND negative (a
+            // negative pid would make `kill(-n, 0)` probe a process GROUP).
             let junk = r#"[{"session_id":"","pid":100,"cwd":"/r","opened_at":"x"},
-                           {"session_id":"s","pid":0,"cwd":"/r","opened_at":"x"}]"#;
+                           {"session_id":"s","pid":0,"cwd":"/r","opened_at":"x"},
+                           {"session_id":"neg","pid":-42,"cwd":"/r","opened_at":"x"},
+                           {"session_id":"live","pid":77,"cwd":"/r","opened_at":"x"}]"#;
             let snap = grok_ids_from_registry(junk.as_bytes(), alive_all, |_| None, None).unwrap();
-            assert!(snap.pid_of.is_empty(), "junk VALUES skip entries silently");
+            assert_eq!(
+                snap.pid_of.get("live"),
+                Some(&77),
+                "a junk entry must not cost its healthy siblings"
+            );
+            assert_eq!(snap.pid_of.len(), 1, "junk VALUES skip entries silently");
+        }
+
+        /// A pid outside `i32` range skips ITS OWN entry, exactly like every
+        /// other junk value — it must not fail the whole document, because that
+        /// path emits a `shape_drift` breadcrumb claiming the registry's SHAPE
+        /// changed upstream and degrades all grok liveness to mtime (#831).
+        ///
+        /// The no-truncation assertion is the teeth: `4294967297 as i32` is
+        /// `1`, so an implementation that narrows by cast instead of
+        /// `checked_pid` would bind init's pid and vouch a session forever.
+        #[test]
+        fn out_of_i32_range_pid_skips_only_its_own_entry_and_never_truncates() {
+            let over = r#"{"session_id":"over","pid":4294967297,"cwd":"/r"}"#;
+            let ok = r#"{"session_id":"ok","pid":200,"cwd":"/r"}"#;
+            // BOTH orders: today the document fails whichever side the bad
+            // entry sits on, so ordering must not be what makes this pass.
+            for reg in [format!("[{over},{ok}]"), format!("[{ok},{over}]")] {
+                let snap = grok_ids_from_registry(reg.as_bytes(), alive_all, |_| None, None)
+                    .expect("one out-of-range VALUE is not document-level shape drift");
+                assert_eq!(snap.pid_of.get("ok"), Some(&200), "siblings still bind");
+                assert_eq!(snap.pid_of.get("over"), None, "the bad entry is skipped");
+                assert!(
+                    !snap.pid_of.values().any(|&p| p == 1),
+                    "narrowing must reject, never truncate ({over} casts to pid 1)"
+                );
+            }
         }
 
         #[test]
@@ -512,6 +556,26 @@ mod tests {
             assert!(
                 grok_ids_from_registry(br#"{"an":"object"}"#, alive_all, |_| None, None).is_none()
             );
+        }
+
+        /// The negative control for the test above: widening `pid` to `i64` must
+        /// not widen the entry's TYPE discipline. A string-typed or renamed pid
+        /// is still document-level drift, because the derive's strictness IS the
+        /// #247 upstream-rename detector — a later "simplify to `Vec<Value>`"
+        /// refactor would pass every other test in this module while silently
+        /// deleting it.
+        #[test]
+        fn a_mistyped_or_renamed_pid_is_still_document_level_drift() {
+            for reg in [
+                r#"[{"session_id":"s","pid":"100","cwd":"/r"}]"#,
+                r#"[{"session_id":"s","pid":100.5,"cwd":"/r"}]"#,
+                r#"[{"session_id":"s","processId":100,"cwd":"/r"}]"#,
+            ] {
+                assert!(
+                    grok_ids_from_registry(reg.as_bytes(), alive_all, |_| None, None).is_none(),
+                    "a mistyped/renamed pid key is SHAPE drift, not a junk value: {reg}"
+                );
+            }
         }
 
         #[test]
