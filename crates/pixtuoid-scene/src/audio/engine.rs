@@ -1,20 +1,14 @@
 //! The per-frame audio engine — the ONE place the office's sound is advanced
-//! each tick, so the native rodio gateway (`pixtuoid`) and the wasm WebAudio
-//! painter (`pixtuoid-web`) run byte-identical mixing/crossfade/scheduling
-//! logic instead of two hand-kept-in-sync copies (#633 web-audio deepened the
-//! shared surface from just [`TrackSwitch`] to the whole tick).
+//! each tick, so the native rodio gateway and the wasm WebAudio painter run
+//! byte-identical mixing/crossfade/scheduling logic.
 //!
-//! It owns ONLY per-tick STATE (mixer, schedulers, the switch machine). The
-//! BUILD — synthesizing a track's beds — stays caller-side, because that is the
-//! one thing the two backends genuinely do differently (native blocks the audio
-//! thread under the crossfade silence; web chunks it across `warmup_step` /
-//! rebuilds in one tick under the hold). So [`AudioEngine::tick`] SIGNALS a
-//! build via [`TickCommands::swap`]; the caller builds + registers the beds.
+//! It owns ONLY per-tick STATE. The BUILD — synthesizing a track's beds — stays
+//! caller-side, because that is the one thing the two backends genuinely do
+//! differently (native blocks the audio thread under the crossfade silence; web
+//! chunks it across `warmup_step`). So [`AudioEngine::tick`] SIGNALS a build via
+//! [`TickCommands::swap`]; the caller builds + registers the beds.
 //!
-//! Time is a PARAMETER: `tick` takes `dt` and never reads a clock. Each shell
-//! clamps `dt` to [`MAX_DT_S`] before calling, so a native track-build stall or
-//! a backgrounded wasm tab neither snaps the crossfade nor bursts the
-//! schedulers — the gap-immunity is identical on both backends.
+//! Time is a PARAMETER: `tick` takes `dt` and never reads a clock.
 
 use super::bank::{
     track_stems_silent, OneShotPool, DROP_GAIN, DROP_POOL, KEYSTROKE_GAIN, KEYSTROKE_POOL,
@@ -28,13 +22,11 @@ use super::{
 
 /// dt ceiling (s): a bigger inter-tick gap (a native track-build stall, a
 /// backgrounded wasm tab, a GC pause) is clamped so one tick can neither snap
-/// the crossfade nor burst-replay the schedulers. BOTH shells clamp to it, so
-/// the gap-immunity is identical on native and web.
+/// the crossfade nor burst-replay the schedulers. BOTH shells clamp to it.
 pub const MAX_DT_S: f32 = 0.10;
 
 /// One one-shot to spawn this tick: a fresh source from `(pool, index)` at
-/// `gain` (already master-scaled; the native sink drops `gain <= 0`, the wasm
-/// glue sends it to JS verbatim).
+/// `gain`, already master-scaled.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlayCmd {
     pub pool: OneShotPool,
@@ -43,15 +35,15 @@ pub struct PlayCmd {
 }
 
 /// What one [`AudioEngine::tick`] produces — the backend-agnostic result each
-/// shell flushes its own way (native → `device.*` calls, wasm → JSON for JS).
+/// shell flushes its own way.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TickCommands {
-    /// Target gain per LOOP stem, in `LoopStem::ALL` order (0=Pad … 5=Rain).
+    /// Target gain per LOOP stem, in `LoopStem::ALL` order.
     pub gains: [f32; LoopStem::ALL.len()],
-    /// One-shots to fire this tick (scene cues + typing/rain schedulers).
+    /// One-shots to fire this tick.
     pub plays: Vec<PlayCmd>,
     /// A mood-track change that just committed — the caller builds `swap`'s beds
-    /// and swaps them into the sink. `None` on an ordinary tick.
+    /// and swaps them into the sink.
     pub swap: Option<TrackId>,
 }
 
@@ -65,17 +57,14 @@ pub struct AudioEngine {
     pick: NoiseStream,
     switch: TrackSwitch,
     /// The last frame's target levels — held across a timeout tick (`None`).
-    /// The typing/rain schedulers read their spawn rate straight off this (they
-    /// always equalled the old `typing_level`/`rain_level` shadows, both set
-    /// from `f.stems` on the same tick).
     wanted: StemLevels,
     /// Monotonic scheduler clock (s), advanced by the passed (clamped) dt.
     sched_s: f64,
 }
 
 impl AudioEngine {
-    /// A fresh engine at `master` volume (native reads the config volume; wasm
-    /// passes the fixed 1.0 trimmed bus). Inert until [`AudioEngine::init_track`].
+    /// A fresh engine at `master` volume — inert until
+    /// [`AudioEngine::init_track`].
     pub fn new(master: f32) -> Self {
         Self {
             mixer: Mixer::new(master),
@@ -105,10 +94,8 @@ impl AudioEngine {
     }
 
     /// Advance one tick by `dt` seconds. `frame` is the scene's audio intent —
-    /// `None` on a native `recv_timeout` (no new levels/events; the ramp and
-    /// schedulers still advance from the held state). Returns the loop gains,
-    /// the one-shots to fire, and any committed track swap (whose beds the
-    /// caller then builds).
+    /// `None` on a native `recv_timeout`, where the ramp and schedulers still
+    /// advance from the held state.
     pub fn tick(&mut self, dt: f32, frame: Option<AudioFrame>) -> TickCommands {
         self.sched_s += dt as f64;
 
@@ -120,14 +107,12 @@ impl AudioEngine {
             Vec::new()
         };
 
-        // Inert until a caller has built the initial beds and called init_track
-        // (matches the wasm painter's empty command set before warmup completes).
         if self.switch.current().is_none() {
             return TickCommands::default();
         }
 
-        // Hold the five track stems silent while a switch settles; rain/typing
-        // keep following the scene (weather + activity are track-independent).
+        // Rain/typing keep following the scene through a switch — weather and
+        // activity are track-independent.
         let mut target = self.wanted;
         if self.switch.is_holding() {
             target.silence_track_stems();
@@ -135,8 +120,6 @@ impl AudioEngine {
         self.mixer.set_target(target);
         let gain_pairs = self.mixer.step(dt);
 
-        // Once the held track stems reach silence, commit the pending swap — the
-        // caller builds `to`'s beds and swaps them under the silence.
         let swap = self.switch.try_swap(track_stems_silent(&gain_pairs));
 
         let mut gains = [0.0f32; LoopStem::ALL.len()];
@@ -144,9 +127,8 @@ impl AudioEngine {
             gains[i] = *g;
         }
 
-        // One-shots: the scene's fired cues + the typing/rain schedulers. Muted
-        // rides through `one_shot_gain` = 0 (plays still enqueue at gain 0, the
-        // sink drops them) so the schedulers' clocks never desync on mute.
+        // Muted rides through `one_shot_gain` = 0 — plays still enqueue (the sink
+        // drops them) so the schedulers' clocks never desync on mute.
         let mut plays = Vec::new();
         let os_gain = self.mixer.one_shot_gain();
         for event in events {
@@ -197,7 +179,6 @@ mod tests {
         }
     }
 
-    /// Run `ticks` 50ms frames of the given track to settle the mix.
     fn settle(engine: &mut AudioEngine, track: TrackId, ticks: usize) {
         for _ in 0..ticks {
             engine.tick(0.05, Some(busy_frame(track)));
@@ -211,7 +192,6 @@ mod tests {
         assert!(cmd.gains.iter().all(|g| *g == 0.0), "no gains before init");
         assert!(cmd.plays.is_empty(), "no plays before init");
         assert!(cmd.swap.is_none(), "no swap before init");
-        // once inited, the same frame ramps
         e.init_track(TrackId::GenDay(0));
         let cmd = e.tick(0.05, Some(busy_frame(TrackId::GenDay(0))));
         assert!(cmd.gains[0] > 0.0, "pad ramps once inited");
@@ -272,8 +252,6 @@ mod tests {
 
     #[test]
     fn a_timeout_tick_advances_without_consuming_levels_or_events() {
-        // native passes None on a recv_timeout: no new levels, no scene events,
-        // but the ramp + schedulers still advance from the held state.
         let mut e = AudioEngine::new(1.0);
         e.init_track(TrackId::GenDay(0));
         settle(&mut e, TrackId::GenDay(0), 100);
@@ -324,8 +302,6 @@ mod tests {
             Some(TrackId::GenNight(0)),
             "the night switch swapped"
         );
-        // the ramp back is a slew, never a snap (the bot HIGH: a stalled clock
-        // once made dt cover the ~2s synth and snapped gains straight to target)
         let mut first_nonzero = 0.0;
         for _ in 0..200 {
             let g = e.tick(0.05, Some(busy_frame(TrackId::GenNight(0)))).gains[0];
@@ -342,10 +318,6 @@ mod tests {
 
     #[test]
     fn the_dt_clamp_ceiling_stays_a_slew_while_an_unclamped_gap_would_snap() {
-        // WHY both shells clamp dt to MAX_DT_S: one tick at the ceiling is a
-        // SLEW, but an unclamped multi-second gap (a native track-build stall, a
-        // backgrounded wasm tab) would snap the gains straight to target — the
-        // "bot HIGH" pop. Pins the ceiling VALUE, not just the shells' clamp.
         let one_tick = |dt: f32| {
             let mut e = AudioEngine::new(1.0);
             e.init_track(TrackId::GenDay(0));

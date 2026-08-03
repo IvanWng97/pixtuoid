@@ -1,14 +1,10 @@
 //! Pins the site manifest's per-CLI `badge_color` hexes to the NORMAL theme's
-//! `SourceColors` — the palette the site's live office actually renders with
-//! (`pixtuoid-web` constructs its `Office` on `ALL_THEMES[0]`, i.e. normal).
-//! The site chips are a cross-boundary COPY of these hues; copies are pinned,
-//! not trusted (workspace CLAUDE.md "no magic numbers" rule 2) — the
-//! `label_prefix` half of the same manifest is pinned by pixtuoid-core's
-//! `supported_sources_manifest.rs`.
+//! `SourceColors` — the palette the site's live office renders with, since
+//! `pixtuoid-web` constructs its `Office` on `ALL_THEMES[0]`.
 //!
-//! Runtime read for the same reason as that core test: `include_str!` of a
-//! path outside the crate breaks `cargo publish`'s verify. Workspace-only
-//! test, excluded from the published package (`Cargo.toml` `exclude`).
+//! Reads the manifest at RUNTIME because `include_str!` of a path outside the
+//! crate breaks `cargo publish`'s verify. Workspace-only test, excluded from the
+//! published package (`Cargo.toml` `exclude`).
 
 use pixtuoid_scene::theme::theme_by_name;
 

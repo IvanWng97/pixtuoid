@@ -340,9 +340,7 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 206,
             b: 106,
         },
-        // Tokyo Night teal #73daca (the palette's spare accent, and the same
-        // teal family catppuccin's `default` already uses). Was the blue
-        // #7dcfff, byte-identical to `read`.
+        // The palette's spare teal accent — its blue would collide with `read`.
         default: Rgb {
             r: 115,
             g: 218,
@@ -537,21 +535,21 @@ pub static TOKYO_NIGHT: Theme = Theme {
             r: 0x68,
             g: 0x58,
             b: 0xe0,
-        }, // Hermes/Nous indigo (brand-constant like openclaw marigold; clears reasonix-violet + cursor-slate + codex-blue on every theme, min Manhattan >=92)
+        }, // Hermes/Nous indigo (brand-constant; clears reasonix-violet + cursor-slate + codex-blue on every theme)
         omp: Rgb {
             r: 0x8a,
             g: 0xc8,
             b: 0x32,
-        }, // omp lime (brand-constant; clears antigravity-green + codewhale-teal + claude-amber on every theme)
+        }, // omp lime (brand-constant; clears antigravity-green + codewhale-teal + claude-amber)
         grok: Rgb {
             r: 0x30,
             g: 0xd0,
             b: 0xe8,
-        }, // grok cyan (brand-constant; nearest neighbor codewhale-teal at Manhattan 78 ≥ the 60 floor, and the SITE's chip transforms clear WCAG AA in both themes: ×0.55-on-day-chip 5.3:1, ×0.8+white-on-night-chip 11.6:1 — the silver e6e6e6 failed the day chip at 3.83:1, caught by the site e2e badge sweep)
+        }, // grok cyan (brand-constant; its nearest neighbour is codewhale-teal, and the site's chip transforms must clear WCAG AA in both themes — a silver failed the day chip)
         kimi: Rgb {
             r: 0xc4,
             g: 0x46,
             b: 0xfe,
-        }, // kimi electric violet (brand-constant like hermes/omp/grok; Kimi/Moonshot's purple, min Manhattan >=88 vs every source on every theme)
+        }, // kimi electric violet (brand-constant; Kimi/Moonshot's purple, clears every other source on every theme)
     },
 };

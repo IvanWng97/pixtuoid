@@ -38,7 +38,6 @@ pub(super) fn paint_screen_glow(
     for dx in 4..=9 {
         put(buf, dx, 3, frame_lit);
     }
-    // Screen scanline advances one column per this interval.
     const SCANLINE_STEP_MS: u64 = 120;
     let elapsed_ms = epoch_ms(now);
     let phase = (elapsed_ms / SCANLINE_STEP_MS) as u16 + desk_x;
@@ -55,11 +54,9 @@ pub(super) fn paint_sleep_z(
     theme: &Theme,
 ) {
     let z_color = theme.effects.sleep_z;
-    // One z drifts up from just above the head — brightest at the head, fading
-    // to nothing as it climbs. The height-coupled fade (`1.0 - t`) is what keeps
-    // it from reading as a solid mark parked over the sprite: it's only briefly
-    // visible near the head, then dissolves. RISE_MS is the visible rise+fade
-    // span; a short REST_MS gap separates one z from the next.
+    // The height-coupled fade (`1.0 - t`) is what keeps the z from reading as a
+    // solid mark parked over the sprite: it is only briefly visible near the
+    // head, then dissolves.
     const RISE_MS: u64 = 2000;
     const REST_MS: u64 = 400;
     const CYCLE_MS: u64 = RISE_MS + REST_MS;
@@ -71,8 +68,7 @@ pub(super) fn paint_sleep_z(
         return;
     }
     let t = phase_ms as f32 / RISE_MS as f32;
-    // Quick ramp-in over the first FADE_IN_MS avoids a hard pop when a fresh z
-    // spawns at the head; the `1.0 - t` term then fades it out as it rises.
+    // Ramp-in avoids a hard pop when a fresh z spawns at the head.
     let fade_in = (phase_ms as f32 / FADE_IN_MS).min(1.0);
     let alpha = PEAK_ALPHA * fade_in * (1.0 - t);
     if alpha < 0.06 {
@@ -89,7 +85,6 @@ pub(super) fn paint_sleep_z(
 
 pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTime, theme: &Theme) {
     let steam = theme.effects.coffee_steam;
-    // Each steam plume fades over one full cycle; 3 plumes staggered by cycle/3.
     const STEAM_CYCLE_MS: u64 = 1800;
     let elapsed_ms = epoch_ms(now);
     for offset in 0..3u64 {
@@ -122,10 +117,9 @@ pub(super) fn paint_walking_dust(
     blend_pixel(buf, foot_x, foot_y, dust, 0.45);
 }
 
-/// Floating heart particles for the "pet the cat" interaction.
-/// 4 hearts, staggered 150ms apart, each rising 6px over 1550ms and
-/// fading via alpha blend toward the background. Last heart starts at
-/// 450ms so all 4 complete within PET_DURATION_MS (2000ms).
+/// Floating heart particles for the "pet the cat" interaction. The stagger and
+/// lifetime are sized so the LAST heart still completes within
+/// `PET_DURATION_MS`.
 pub(super) fn paint_pet_hearts(buf: &mut RgbBuffer, cat_pos: Point, elapsed_ms: u64) {
     const STAGGER_MS: u64 = 150;
     const HEART_LIFE_MS: u64 = 1550;
@@ -149,11 +143,9 @@ pub(super) fn paint_pet_hearts(buf: &mut RgbBuffer, cat_pos: Point, elapsed_ms: 
         if alpha < 0.05 {
             continue;
         }
-        // Spread hearts horizontally: offsets -3, -1, +1, +3
         let dx: i16 = (i as i16) * 2 - 3;
         let hx = (cat_pos.x as i32 + dx as i32).max(0) as u16;
         let hy = cat_pos.y.saturating_sub(4 + rise);
-        // 2x2 pixel heart
         for dy in 0..2u16 {
             for ddx in 0..2u16 {
                 blend_pixel(buf, hx + ddx, hy + dy, heart_color, alpha * 0.8);
@@ -181,24 +173,17 @@ pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &T
     }
 }
 
-/// The Top-tier flame crown (`burn::BurnTier::Top`) — a 2-frame flicker above
-/// the sprite's hair, painted AFTER the character blit so it rides every pose
-/// (seated/walking/standing) through the one `paint_character_at` seam. The
-/// aesthetic is the user-ratified mockup: tips capped ≤2 px above
-/// the hair top so the flame never collides with the name-badge row; the
-/// asymmetric two-frame flicker is what reads as fire, not a hat. INTEGER
-/// phase division before any float (the epoch-ms-as-f32 freeze sharp edge).
-/// The flame gradient's deep-ember base — ONE literal shared with the
-/// Premium ember-hair recolor (`palette::agent_palette`), so a gradient
-/// tweak can't desync the hair from the crown.
+/// The flame gradient's deep-ember base — ONE literal shared with the Premium
+/// ember-hair recolor (`palette::agent_palette`), so a gradient tweak can't
+/// desync the hair from the crown.
 pub(crate) const FLAME_DEEP: Rgb = Rgb {
     r: 0xc2,
     g: 0x28,
     b: 0x12,
 };
 
-/// The flame gradient's yellow tip. `pub(crate)` alongside [`FLAME_DEEP`] so
-/// render tests assert the REAL painted colors instead of re-hardcoding them.
+/// The flame gradient's yellow tip. `pub(crate)` so render tests assert the REAL
+/// painted colors instead of re-hardcoding them.
 pub(crate) const FLAME_TIP: Rgb = Rgb {
     r: 0xff,
     g: 0xd2,
@@ -211,8 +196,9 @@ pub(super) fn paint_flame_crown(
     sprite_w: u16,
     now: SystemTime,
 ) {
-    // Ratified flame palette (deep ember → orange → yellow tip → hot core);
-    // the deep base is the shared FLAME_DEEP (also the Premium hair recolor).
+    // The asymmetric two-frame flicker is what reads as fire, not a hat, and the
+    // tips stay ≤2 px above the hair top so the flame never collides with the
+    // name-badge row.
     const MID: Rgb = Rgb {
         r: 0xe8,
         g: 0x64,
@@ -225,23 +211,20 @@ pub(super) fn paint_flame_crown(
         b: 0xa0,
     };
     const FLICKER_MS: u64 = 260;
+    // INTEGER phase division: epoch-ms as f32 loses precision and freezes it.
     let f2 = (epoch_ms(now) / FLICKER_MS) % 2 == 1;
 
-    // Head-center column; the crown hugs the hair's top row (anchor.y) and
-    // rises two rows above it. Pattern is (dx from center-left, dy up, color).
+    // Pattern entries are (dx from the head center, dy up from the hair top, color).
     let cx = anchor.x + sprite_w / 2;
     let frame_a: &[(i32, u16, Rgb)] = &[
-        // crown row over the hair top
         (-2, 0, MID),
         (-1, 0, MID),
         (0, 0, FLAME_DEEP),
         (1, 0, MID),
-        // first rise
         (-2, 1, MID),
         (-1, 1, CORE),
         (0, 1, MID),
         (1, 1, TIP),
-        // tips
         (-2, 2, TIP),
         (0, 2, TIP),
     ];
@@ -290,7 +273,6 @@ mod tests {
         c.r as u32 + c.g as u32 + c.b as u32
     }
 
-    // Topmost lit pixel in the z's column, if any (kept independent of MAX_RISE).
     fn top_lit(buf: &RgbBuffer, head: Point, bg: Rgb) -> Option<(u16, Rgb)> {
         let zx = head.x + 5;
         (0..head.y).find_map(|y| {
@@ -305,12 +287,10 @@ mod tests {
         let bg = Rgb { r: 0, g: 0, b: 0 };
         let zx = head.x + 5;
 
-        // Just spawned (rise 0 for any MAX_RISE): brightest, at the spawn row.
         let low = render(head, 200);
         let low_px = low.get(zx, head.y - 3);
         assert!(lum(low_px) > 0, "z near the head is visible");
 
-        // Later it has risen AND faded ("higher = blurrier").
         let high = render(head, 1600);
         let (top_y, top_px) = top_lit(&high, head, bg).expect("risen z still visible");
         assert!(top_y < head.y - 3, "z rose above its spawn row");
@@ -319,7 +299,7 @@ mod tests {
             "a higher z must be dimmer than one at the head"
         );
 
-        // During the rest gap (phase >= RISE_MS) nothing is painted at all.
+        // 2300 ms lands in the rest gap (phase >= RISE_MS).
         let resting = render(head, 2300);
         for y in 0..resting.height() {
             for x in 0..resting.width() {

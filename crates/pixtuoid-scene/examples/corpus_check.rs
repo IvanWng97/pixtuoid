@@ -1,26 +1,14 @@
 //! Corpus check — real transcripts in, "did we parse it AND would the UI show
-//! it" out.
-//!
-//! The committed fixtures answer that question for a dozen curated files. This
-//! answers it for the whole corpus on the machine, and it is the ONE shell of
-//! the four that closes the loop all the way to the render layer:
-//!
-//! ```text
-//!   harness::Drive (decode → reduce)  →  FloorSession::observe → SimFrame.characters
-//! ```
-//!
-//! The first half is the shared pipeline every other driver runs — same
-//! decoders, same first-sight seed, same reducer — so a difference here is a
-//! difference in the BYTES, never in the harness. `observe` is the documented
-//! headless seam: its `characters` are the fully resolved sprites the painter
-//! would draw, so a non-empty set is the honest "it reached the UI layer" — no
-//! pixel buffer, no terminal, no timing.
+//! it" out, for the whole corpus on the machine. The ONE shell that closes the
+//! loop to the render layer: `harness::Drive` (decode → reduce) →
+//! `FloorSession::observe`, whose `characters` are the fully resolved sprites
+//! the painter would draw. The first half is the shared pipeline every other
+//! driver runs, so a difference here is a difference in the BYTES.
 //!
 //! It REPORTS rather than asserts. Corpus content is unbounded and partly
 //! historical, so a failing file is not automatically a bug — the value is the
 //! census: decode errors and panics (which ARE bugs, always), how many
-//! transcripts register, how many actually render, and the provenance spread
-//! that the mtime-vs-newest-turn column exposes.
+//! transcripts register, how many render, and the provenance spread.
 //!
 //! Usage: `cargo run --release -p pixtuoid-scene --example corpus_check -- \
 //!         <source> <root> [--json]`
@@ -42,8 +30,7 @@ fn now() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000)
 }
 
-/// One transcript's verdict. Every field answers a piece of "did we parse it
-/// and would the UI show it".
+/// One transcript's verdict.
 #[derive(Default)]
 struct Verdict {
     lines: usize,
@@ -56,14 +43,9 @@ struct Verdict {
     panics: Vec<LineFailure>,
     /// Events the WIRE produced — the first-sight seed is NOT counted.
     events: usize,
-    /// Slots on the floor, reported only when the wire produced events (the
+    /// Slots on the floor, reported only when the wire produced events — the
     /// seed registers unconditionally, so counting it ungated made this read
-    /// 1/1 for a file of pure garbage). It does NOT establish that a wire event
-    /// landed on the SEEDED id — a row whose `id_from_path` disagreed with its
-    /// decoder would still report N/N here off the seed alone. `drove` is the
-    /// column that collapses in that case, and
-    /// `conformance::a_seeded_drive_coalesces_with_each_transcripts_own_decoder`
-    /// is what fails in CI for it.
+    /// 1/1 for a file of pure garbage.
     registered: usize,
     /// Did the wire drive the slot through a lifecycle class? The
     /// anti-tautology column — a transcript can decode and register while
@@ -91,14 +73,12 @@ fn epoch(t: SystemTime) -> Option<u64> {
         .map(|d| d.as_secs())
 }
 
-/// Drive one transcript through the production path.
-///
-/// Seeded, because the WATCHER is what registers a transcript in production and
-/// a JSONL event for an unknown id is a documented no-op — unseeded, every file
-/// would report "parsed but never rendered" for a reason that has nothing to do
-/// with the decoder. The seed's own events are then excluded from every count
-/// (`wire_events`), or the census would report a verdict on bytes that decoded
-/// to nothing.
+/// Drive one transcript through the production path. Seeded, because the
+/// WATCHER is what registers a transcript in production and a JSONL event for an
+/// unknown id is a documented no-op — unseeded, every file would report "parsed
+/// but never rendered" for a reason that has nothing to do with the decoder. The
+/// seed's own events are then excluded from every count, or the census would
+/// report a verdict on bytes that decoded to nothing.
 fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     let mut v = Verdict {
         mtime: std::fs::metadata(path)
@@ -122,7 +102,6 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     v.unparseable = driven.unparseable;
     v.decode_errors = driven.decode_errors.len();
     v.events = driven.wire_events();
-    // Garbage in, nothing out: see `check_file`'s doc.
     if v.events == 0 {
         v.panics = driven.panics;
         return v;
@@ -134,9 +113,8 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
         return v;
     }
 
-    // The UI-layer half: `observe` is the headless seam whose `characters` are
-    // the resolved sprites the painter would draw. One `FloorSession` per file
-    // so no cross-file render state can carry a verdict.
+    // One `FloorSession` per file so no cross-file render state can carry a
+    // verdict.
     let mut session = FloorSession::new();
     v.drawn = session
         .observe(&driven.scene, pack, 192, 80, FloorMeta::ground(), now())
@@ -146,15 +124,9 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
 
 /// The newest turn this file's SESSION wrote, epoch seconds — read with the
 /// source's own `ActivityRecency` over the raw bytes, exactly as the first-sight
-/// gate reads a tail (it returns the newest stamp across whatever buffer it is
-/// given, so the whole body yields the file's newest turn).
-///
-/// Only CC has a published answer today (its `ACTIVITY_TYPES`); every other
-/// source reports no stamp, which shows up as an empty provenance column rather
-/// than a wrong one. Kept in this shell rather than the registry because it has
-/// exactly one consumer besides the watcher and it feeds a REPORT, not a
-/// contract — when a second source publishes an activity clock, the row is the
-/// place for it (see `registry`'s header on what earns a column).
+/// gate reads a tail. Only CC has a published answer today; every other source
+/// reports no stamp, which shows up as an empty provenance column rather than a
+/// wrong one.
 fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
     if source != pixtuoid_core::source::claude_code::SOURCE_NAME {
         return None;
@@ -165,16 +137,12 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
     }
 }
 
-/// Collect the transcripts under `root` the WATCHER would walk — same
-/// extension gate, same registry `path_filter`, same refusal to follow a
-/// symlinked entry (`walk_jsonl`'s `symlink_metadata` guard, so a planted dir
-/// link can't recurse a loop or drag a foreign tree into the census).
-///
+/// Collect the transcripts under `root` the WATCHER would walk — same extension
+/// gate, same registry `path_filter`, same refusal to follow a symlinked entry
+/// (so a planted dir link can't recurse a loop or drag a foreign tree in).
 /// Walking the unfiltered set would make the census a superset of production:
-/// Antigravity's duplicate `transcript_full.jsonl` counts every conversation
-/// twice, grok's rewrite-on-resume siblings replay as fresh events, and CC's
-/// foreign-schema workflow `journal.jsonl` decodes as garbage — all reported
-/// as if the decoders had seen them in the field.
+/// duplicate transcripts counted twice, rewrite-on-resume siblings replayed as
+/// fresh events, foreign-schema journals decoded as garbage.
 fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
     let admits = registry::path_filter_for(source);
     let Ok(rd) = std::fs::read_dir(root) else {
@@ -206,8 +174,8 @@ fn main() {
     }
     let (source, root) = (positional[0].as_str(), PathBuf::from(positional[1]));
 
-    // Refuse up front for the same reason the fuzz shell does: a source with no
-    // transcript decoder would otherwise report a clean census of nothing.
+    // A source with no transcript decoder would otherwise report a clean census
+    // of nothing.
     if Drive::transcript(source, "/probe.jsonl").is_none() {
         let known: Vec<&str> = registry::registered_source_names().collect();
         eprintln!(
@@ -257,7 +225,6 @@ fn main() {
             panic_files.push((f.clone(), p.clone()));
         }
         totals.panics.extend(v.panics.iter().cloned());
-        // Provenance census: how far mtime runs ahead of the newest turn.
         let bucket = match v.provenance_gap_secs() {
             None => "no-stamp",
             Some(s) if s < 3600 => "<1h",
@@ -317,8 +284,7 @@ fn main() {
 
     // The ONLY hard failures: a decoder that PANICS on bytes its own source
     // wrote (it would take the whole watcher down), or one that returns Err
-    // there (the contract is log-and-continue). Everything else is a census,
-    // because corpus content is unbounded.
+    // there (the contract is log-and-continue).
     if totals.decode_errors > 0 || !totals.panics.is_empty() {
         std::process::exit(1);
     }

@@ -1,86 +1,68 @@
-//! The theory-constrained COMPOSER — generative lofi as constrained
-//! sampling ("the LLM feel", owner-directed): a pure function
-//! `seed -> GeneratedScore`. Harmony walks a vetted progression grammar,
-//! the lead obeys melody rules (strong-beat chord tones, diatonic passing
-//! tones, bounded leaps with stepwise resolution, two-phrase form with a
-//! peak and a loop-closing resolution), grooves come from the humanized
-//! templates the frozen takes ratified — so ANY seed is musically
-//! well-formed BY CONSTRUCTION (the seed-sweep property suite pins it),
-//! while WHICH song you get is the seed's draw.
+//! The theory-constrained COMPOSER — generative lofi as constrained sampling:
+//! a pure function `seed -> GeneratedScore`. Harmony walks a vetted progression
+//! grammar and the lead obeys melody rules (strong-beat chord tones, diatonic
+//! passing tones, bounded leaps with stepwise resolution, two-phrase form with a
+//! peak and a loop-closing resolution), so ANY seed is musically well-formed BY
+//! CONSTRUCTION.
 //!
-//! Quality contract: the frozen takes each passed a per-take LISTEN gate;
-//! a generator with unbounded output can't, so its gate is STATISTICAL —
-//! the owner blind-auditions a batch of seeds (`examples/lofi_audition`)
-//! and the generator as a whole is ratified (or its constraints
-//! tightened). The frozen takes are #[cfg(test)] fingerprint anchors,
-//! not a runtime fallback (ALL-GENERATIVE owner decision).
+//! Quality contract: a generator with unbounded output can't pass a per-take
+//! LISTEN gate, so its gate is STATISTICAL — the owner blind-auditions a batch
+//! of seeds (`examples/lofi_audition`) and the generator as a whole is ratified.
+//! The frozen takes are `#[cfg(test)]` fingerprint anchors, not a fallback.
 //!
-//! Runtime model: the seed is the [`super::track_epoch`] block (10-min
-//! cadence, owner-tuned for short agent sessions), so generation is
-//! DETERMINISTIC — the same block renders the same song everywhere
-//! (native, wasm, tests), and "never repeats" comes from the clock
-//! advancing, not from entropy.
+//! The seed is the [`super::track_epoch`] block, so generation is DETERMINISTIC
+//! — the same block renders the same song everywhere, and "never repeats" comes
+//! from the clock advancing, not from entropy.
 
 use super::dsp::NoiseStream;
 use super::score::DrumKind;
 
-/// Which mood grammar a generated score was drawn from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mood {
     Day,
     Night,
 }
 
-/// The lead-instrument registry — WHICH voice sings the sparkle lane.
-/// This is the add-an-instrument seam: a new timbre = one synth voice
-/// fn, one variant here, a draw weight in `compose`, a listen batch. The
-/// mix lanes (StemLevels/mixer/players) are instrument-blind by design.
+/// The add-an-instrument seam: a new timbre = one synth voice fn, one variant
+/// here, a draw weight in [`compose`], a listen batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LeadVoice {
     /// The velocity-keyed EP (the ratified night/day-take Rhodes).
     EpVel,
-    /// Plucked-string lead ("nylon" family): sharper attack, longer
-    /// fundamental ring, brighter early harmonics.
+    /// Plucked-string lead ("nylon" family).
     Pluck,
 }
 
 /// A generated 8-bar composition — the runtime-sized twin of the frozen
-/// `score` tables (same event vocabulary, `Vec` instead of `'static`).
+/// `score` tables.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneratedScore {
     pub(super) mood: Mood,
     pub bpm: f32,
     pub(super) chords: [[u8; 4]; 4],
-    /// The key as pitch classes — the lead's invariant home (chord tones
-    /// are a subset by template curation, pinned in tests).
+    /// The key as pitch classes — the lead's invariant home.
     pub(super) scale_pcs: [u8; 7],
-    /// The hand-written-lead slot: here, the rule-generated melody.
+    /// The lead melody (the sparkle lane).
     pub(super) sparkle: Vec<(f32, u8, f32)>,
     pub(super) keys: Vec<(f32, u8, f32)>,
     pub(super) drums: Vec<(f32, DrumKind, f32)>,
-    /// The sub-bass floor per template bar — ALWAYS derived (cheap);
-    /// only the night renderer reads it, so no Option and no fallback
-    /// (review finding: the old `unwrap_or` re-hardcoded a magic array).
+    /// The sub-bass floor per template bar — ALWAYS derived (cheap), so no
+    /// Option and no fallback; only the night renderer reads it.
     pub(super) bass_roots: [u8; 4],
-    /// Night only: kick timestamps for the texture's baked duck
-    /// (empty for day — the day texture free-runs).
+    /// Night only: kick timestamps for the texture's baked duck (empty for day).
     pub(super) kick_times: Vec<f32>,
-    /// Which instrument sings the lead (drawn LAST in the seed stream so
-    /// adding voices never redraws a blessed take's notes).
+    /// Which instrument sings the lead.
     pub(super) lead_voice: LeadVoice,
-    /// The 8-bar harmonic TIMELINE every stem reads: the template played
-    /// twice, with (day) bar 8 swapped for the turnaround dominant —
-    /// LOFI-BIBLE R4's hinge, the anti-monotony seam.
+    /// The 8-bar harmonic TIMELINE every stem reads: the template played twice,
+    /// with (day) bar 8 swapped for the turnaround dominant.
     pub(super) bar_chords: [[u8; 4]; 8],
-    /// Harmonic root per timeline bar (degree-aware: voicings may be
-    /// inversions) — the shell voicings and the turnaround derive here.
+    /// Harmonic root per timeline bar — voicings may be inversions, so this is
+    /// not `chord[0]`.
     pub(super) bar_roots: [u8; 8],
     /// The TEMPLATE's roots (night's sub-bass floor reads these).
     pub(super) roots_pc: [u8; 4],
 }
 
-/// Every generated take is 8 bars of 4/4 — the anti-fatigue loop length
-/// both ratified moods use.
 pub(super) const GEN_LOOP_BARS: usize = 8;
 
 impl GeneratedScore {
@@ -96,7 +78,6 @@ impl GeneratedScore {
         self.bar_s() * GEN_LOOP_BARS as f32
     }
 
-    /// The lead instrument's display name (audition listings).
     pub fn lead_voice_name(&self) -> &'static str {
         match self.lead_voice {
             LeadVoice::EpVel => "ep",
@@ -105,32 +86,28 @@ impl GeneratedScore {
     }
 }
 
-// ---------------------------------------------------------------- grammar
-
 /// One vetted progression template, pre-voiced in C in the ratified pad
-/// register. `roots_pc` carries the harmonic ROOT per chord (voicings may
-/// be inversions, so `chord[0]` is not authoritative) — night's sub-bass
-/// derives from it.
+/// register. `roots_pc` carries the harmonic ROOT per chord — voicings may be
+/// inversions, so `chord[0]` is not authoritative.
 struct Progression {
     chords: [[u8; 4]; 4],
     roots_pc: [u8; 4],
     scale_pcs: [u8; 7],
-    /// Carries ONE deliberate out-of-scale color move (secondary
-    /// dominant / borrowed chord) — exempt from the diatonic pin, which
-    /// instead asserts the color tone EXISTS. Read only by that pin.
+    /// Carries ONE deliberate out-of-scale color move — exempt from the
+    /// diatonic pin, which instead asserts the color tone EXISTS.
     #[cfg_attr(not(test), allow(dead_code))]
     chromatic: bool,
 }
 
 /// C major pitch classes.
 const C_MAJOR: [u8; 7] = [0, 2, 4, 5, 7, 9, 11];
-/// F major pitch classes (the day-1 modal set lives here: Dm7-Gm7-B♭-Am).
+/// F major pitch classes.
 const F_MAJOR: [u8; 7] = [0, 2, 4, 5, 7, 9, 10];
 
-/// The day grammar — every chord tone is in the template's scale
-/// (pinned by `template_chords_are_diatonic`).
+/// The day grammar — every chord tone is in the template's scale unless the
+/// row sets `chromatic`.
 const DAY_PROGRESSIONS: [Progression; 8] = [
-    // royal road: Fmaj7 G7 Em7 Am7 (the Day2 ratified changes)
+    // royal road: Fmaj7 G7 Em7 Am7
     Progression {
         chords: [
             [53, 57, 60, 64],
@@ -142,9 +119,8 @@ const DAY_PROGRESSIONS: [Progression; 8] = [
         scale_pcs: C_MAJOR,
         chromatic: false,
     },
-    // I-vi-ii-V turnaround with voice-led inversions (the Day3 changes;
-    // bar 2 is Am7/C as a TRUE 7th-chord pc set — C E G A — the original
-    // C-E-A-C voicing had no 7th and broke the shell derivation)
+    // I-vi-ii-V turnaround with voice-led inversions; bar 2 is Am7/C as a TRUE
+    // 7th-chord pc set — a voicing with no 7th breaks the shell derivation
     Progression {
         chords: [
             [48, 52, 55, 59],
@@ -156,7 +132,7 @@ const DAY_PROGRESSIONS: [Progression; 8] = [
         scale_pcs: C_MAJOR,
         chromatic: false,
     },
-    // the original day take's modal set: Dm7 Gm7 B♭maj7 Am7
+    // modal set: Dm7 Gm7 B♭maj7 Am7
     Progression {
         chords: [
             [50, 53, 57, 60],
@@ -204,8 +180,7 @@ const DAY_PROGRESSIONS: [Progression; 8] = [
         scale_pcs: C_MAJOR,
         chromatic: false,
     },
-    // V7/vi: Fmaj7 E7 Am7 G7 — the E7's G# pulls into Am (owner-adopted
-    // chromatic color, the composition critic's curated-template route)
+    // V7/vi: Fmaj7 E7 Am7 G7 — the E7's G# pulls into Am
     Progression {
         chords: [
             [53, 57, 60, 64],
@@ -217,8 +192,7 @@ const DAY_PROGRESSIONS: [Progression; 8] = [
         scale_pcs: C_MAJOR,
         chromatic: true,
     },
-    // borrowed iv: Cmaj7 Fmaj7 Fm7 Cmaj7 — the Ab/Eb minor-plagal fade,
-    // the single most beloved lofi cadence (owner-adopted)
+    // borrowed iv: Cmaj7 Fmaj7 Fm7 Cmaj7 — the minor-plagal fade
     Progression {
         chords: [
             [48, 52, 55, 59],
@@ -232,10 +206,9 @@ const DAY_PROGRESSIONS: [Progression; 8] = [
     },
 ];
 
-/// The night grammar — minor-leaning, root-position (the sub floor reads
-/// `roots_pc`), the sleepy register.
+/// The night grammar — minor-leaning, root-position, the sleepy register.
 const NIGHT_PROGRESSIONS: [Progression; 4] = [
-    // the ratified night changes: Am7 Fmaj7 Cmaj7 Em7
+    // Am7 Fmaj7 Cmaj7 Em7
     Progression {
         chords: [
             [57, 60, 64, 67],
@@ -285,14 +258,12 @@ const NIGHT_PROGRESSIONS: [Progression; 4] = [
     },
 ];
 
-/// Transposition window, semitones — keeps every template inside the
-/// ratified pad register after the shift.
+/// Transposition window, semitones — keeps every template inside the ratified
+/// pad register after the shift.
 const TRANSPOSE_MIN: i8 = -3;
 const TRANSPOSE_MAX: i8 = 2;
 
-/// Day tempo window (the ratified takes sit at 72/74/76).
 const DAY_BPM: (f32, f32) = (70.0, 82.0);
-/// Night tempo window (the ratified night take sits at 68).
 const NIGHT_BPM: (f32, f32) = (64.0, 72.0);
 
 /// Lead register clamps (MIDI).
@@ -301,16 +272,12 @@ const DAY_LEAD_HI: u8 = 81;
 const NIGHT_LEAD_LO: u8 = 60;
 const NIGHT_LEAD_HI: u8 = 79;
 
-/// v4 humanization (the constants every ratified take bakes in).
 const SWING_HATS_DAY: f32 = 0.56;
 const SWING_HATS_NIGHT: f32 = 0.58;
 const SWING_KICK: f32 = 0.53;
 const DRAG_KICK_S: f32 = 0.015;
-/// Night drags harder than day (the ratified night v4 value) — a
-/// separate lag on purpose, not a drifted copy of [`DRAG_KICK_S`].
+/// A separate lag on purpose, not a drifted copy of [`DRAG_KICK_S`].
 const DRAG_KICK_NIGHT_S: f32 = 0.018;
-
-// ------------------------------------------------------------- rng helpers
 
 fn pick(rng: &mut NoiseStream, n: usize) -> usize {
     ((rng.unit() * n as f32) as usize).min(n.saturating_sub(1))
@@ -324,9 +291,6 @@ fn chance(rng: &mut NoiseStream, p: f32) -> bool {
     rng.unit() < p
 }
 
-// ------------------------------------------------------------- pitch tools
-
-/// Transpose a template by `t` semitones (chords, roots, scale).
 fn transpose(p: &Progression, t: i8) -> ([[u8; 4]; 4], [u8; 4], [u8; 7]) {
     let mut chords = p.chords;
     for chord in &mut chords {
@@ -346,8 +310,7 @@ fn transpose(p: &Progression, t: i8) -> ([[u8; 4]; 4], [u8; 4], [u8; 7]) {
     (chords, roots, scale)
 }
 
-/// A root-position dominant 7th targeting `target_root_pc` (i.e. its V7),
-/// voiced inside the ratified pad register.
+/// The V7 of `target_root_pc`, voiced inside the ratified pad register.
 fn dominant7_of(target_root_pc: u8) -> [u8; 4] {
     let dom_pc = (target_root_pc + 7) % 12;
     let mut r = 48 + dom_pc;
@@ -357,8 +320,8 @@ fn dominant7_of(target_root_pc: u8) -> [u8; 4] {
     [r, r + 4, r + 7, r + 10]
 }
 
-/// The 8-bar harmonic timeline + per-bar roots: template ×2, with (day)
-/// bar 8 substituted by the dominant of the returning bar-1 root.
+/// The 8-bar harmonic timeline + per-bar roots: template ×2, with (day) bar 8
+/// substituted by the dominant of the returning bar-1 root.
 fn timeline(chords: &[[u8; 4]; 4], roots_pc: &[u8; 4], mood: Mood) -> ([[u8; 4]; 8], [u8; 8]) {
     let mut bars = [[0u8; 4]; 8];
     let mut roots = [0u8; 8];
@@ -373,9 +336,9 @@ fn timeline(chords: &[[u8; 4]; 4], roots_pc: &[u8; 4], mood: Mood) -> ([[u8; 4];
     (bars, roots)
 }
 
-/// The rootless comp shell: the chord's 3rd + 7th, found degree-aware
-/// from the harmonic root (voicings may be inversions). Every template
-/// chord is a 7th chord; the fallbacks only guard a future non-7th row.
+/// The rootless comp shell: the chord's 3rd + 7th, found degree-aware from the
+/// harmonic root. Every template chord is a 7th chord; the fallbacks only guard
+/// a future non-7th row.
 fn shell_of(chord: &[u8; 4], root_pc: u8) -> (u8, u8) {
     let find = |offsets: [u8; 2]| {
         chord
@@ -390,7 +353,7 @@ fn shell_of(chord: &[u8; 4], root_pc: u8) -> (u8, u8) {
     (third, seventh)
 }
 
-/// The pitch with class `pc` nearest to `around` (the 9th's realization).
+/// The pitch with class `pc` nearest to `around`.
 fn nearest_with_pc(around: u8, pc: u8) -> u8 {
     let a = around as i16;
     for d in 0..=6i16 {
@@ -403,8 +366,6 @@ fn nearest_with_pc(around: u8, pc: u8) -> u8 {
     around
 }
 
-/// The chord's tones realized across a register window (every octave
-/// copy inside `[lo, hi]`).
 fn chord_tones_in(chord: &[u8; 4], lo: u8, hi: u8) -> Vec<u8> {
     let mut out = Vec::new();
     for &c in chord {
@@ -422,8 +383,7 @@ fn chord_tones_in(chord: &[u8; 4], lo: u8, hi: u8) -> Vec<u8> {
     out
 }
 
-/// Nearest member of `pool` to `target` (ties resolve low — the mellower
-/// choice).
+/// Nearest member of `pool` to `target`; ties resolve low.
 fn nearest(pool: &[u8], target: u8) -> u8 {
     *pool
         .iter()
@@ -431,9 +391,8 @@ fn nearest(pool: &[u8], target: u8) -> u8 {
         .expect("pool is never empty within the register windows")
 }
 
-/// Nearest in-scale note to `n` inside `[lo, hi]` — a diatonic scale has
-/// no gap wider than a whole tone, so the outward search always lands
-/// within ±2 of any pitch.
+/// Nearest in-scale note to `n` inside `[lo, hi]` — a diatonic scale has no gap
+/// wider than a whole tone, so the outward search always lands within ±2.
 fn snap_to_scale(n: i16, scale: &[u8; 7], lo: u8, hi: u8) -> u8 {
     for d in 0..=6i16 {
         for cand in [n - d, n + d] {
@@ -451,14 +410,13 @@ fn snap_to_scale(n: i16, scale: &[u8; 7], lo: u8, hi: u8) -> u8 {
 /// Step `k` scale degrees from `note` (k may be negative), clamped to the
 /// register window. Stays in-scale by construction.
 fn scale_step(note: u8, k: i8, scale: &[u8; 7], lo: u8, hi: u8) -> u8 {
-    // walk semitone-by-semitone counting scale members
     let mut n = note as i16;
     let mut remaining = k.abs();
     let dir = if k >= 0 { 1 } else { -1 };
     while remaining > 0 {
         n += dir;
         if n < lo as i16 || n > hi as i16 {
-            n -= dir; // hit the clamp: stay
+            n -= dir;
             break;
         }
         if scale.contains(&((n.rem_euclid(12)) as u8)) {
@@ -468,16 +426,14 @@ fn scale_step(note: u8, k: i8, scale: &[u8; 7], lo: u8, hi: u8) -> u8 {
     snap_to_scale(n, scale, lo, hi)
 }
 
-// ------------------------------------------------------------- the lead
-
 /// One melody event before humanization: (bar, beat-in-bar, note, vel).
 type LeadEvent = (usize, f32, u8, f32);
 
 /// The friendly beat grid a lead note may land on (0.0 is the kick's).
 const LEAD_GRID: [f32; 6] = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
 
-/// Rule-generated lead melody: two 4-bar phrases — statement, then a
-/// varied answer with a peak — closing on a tone that resolves the loop.
+/// Rule-generated lead melody: two 4-bar phrases — statement, then a varied
+/// answer with a peak — closing on a tone that resolves the loop.
 fn lead_events(
     rng: &mut NoiseStream,
     bar_chords: &[[u8; 4]; 8],
@@ -489,7 +445,6 @@ fn lead_events(
         Mood::Night => (NIGHT_LEAD_LO, NIGHT_LEAD_HI, 0.5, 1usize),
     };
 
-    // rhythm skeleton for bars 0-3
     let mut phrase_rhythm: Vec<Vec<f32>> = Vec::new();
     for _ in 0..4 {
         if chance(rng, silent_bar_p) {
@@ -502,29 +457,23 @@ fn lead_events(
         let mut beats: Vec<f32> = (0..n)
             .map(|_| LEAD_GRID[pick(rng, LEAD_GRID.len())])
             .collect();
-        // the lofi push (R13): occasionally a note lands a 16th AHEAD of
-        // a strong beat — the anticipation the straight-8th grid lacked.
-        // (In the answer phrase, a ±0.5 mutation of an inherited push can
-        // land on x.25 — the anticipated OFF-8th, same push family, legal
-        // on the grid.)
+        // the lofi push: occasionally a note lands a 16th AHEAD of a strong beat
         for b in beats.iter_mut() {
             if max_per_bar > 1 && b.fract() == 0.0 && chance(rng, 0.15) {
                 *b -= 0.25;
             }
         }
         beats.sort_by(f32::total_cmp);
-        beats.dedup_by(|a, b| (*a - *b).abs() < 0.75); // breathe: min gap
+        beats.dedup_by(|a, b| (*a - *b).abs() < 0.75);
         phrase_rhythm.push(beats);
     }
-    // a take with (almost) no lead has lost its singable identity —
-    // night's 50% silent bars can conspire to empty the whole phrase
-    // (0.5^4 ≈ 6% of seeds); guarantee a minimal statement instead
+    // night's 50% silent bars can conspire to empty the whole phrase, and a take
+    // with no lead has lost its singable identity; guarantee a minimal statement
     if phrase_rhythm.iter().map(Vec::len).sum::<usize>() < 2 {
         phrase_rhythm[0] = vec![1.0];
         phrase_rhythm[2] = vec![2.0];
     }
 
-    // phrase 2 rhythm: the answer varies the statement
     let mut rhythm: Vec<Vec<f32>> = phrase_rhythm.clone();
     for statement in &phrase_rhythm {
         let mut beats = statement.clone();
@@ -544,12 +493,11 @@ fn lead_events(
         rhythm.push(beats);
     }
 
-    // pitch walk
     let mut out: Vec<LeadEvent> = Vec::new();
     let start_pool = chord_tones_in(&bar_chords[0], lo.max(hi.saturating_sub(12)), hi);
     let mut prev = nearest(&start_pool, (lo + hi) / 2 + 2);
     let mut last_leap: i16 = 0;
-    // bar 5: the answer's lift (bar 4 is reserved for the motif quote)
+    // bar 4 is reserved for the motif quote, so the lift lands on bar 5
     let peak_bar = 5;
     let total_bars = rhythm.len();
     let mut statement_head: Vec<u8> = Vec::new();
@@ -559,23 +507,19 @@ fn lead_events(
         let n_beats = beats.len();
         for (i, &beat) in beats.iter().enumerate() {
             let is_last_event = bar == total_bars - 1 && i == n_beats - 1;
-            // an anticipation (x.75) targets the COMING harmony's tone —
-            // it is a pushed strong beat, not a passing tone
+            // an anticipation (x.75) is a pushed strong beat, not a passing tone
             let strong = beat.fract() == 0.0 || (beat.fract() - 0.75).abs() < 1e-3;
             let note = if bar == 4 && i < statement_head.len() && !is_last_event {
-                // the answer QUOTES the statement's opening (call-and-
-                // answer): same pitches, whatever rhythm bar 4 drew
+                // the answer QUOTES the statement's opening (call-and-answer)
                 statement_head[i]
             } else if is_last_event {
-                // close the loop: a bar-3 chord tone near the opening note
                 let opening = out.first().map_or(prev, |&(_, _, n, _)| n);
                 nearest(&tones, opening)
             } else if bar == peak_bar && i == 0 {
-                // the peak: push up 3-5 semis, snapped to a chord tone
                 let target = (prev as i16 + 3 + pick(rng, 3) as i16).min(hi as i16) as u8;
                 nearest(&tones, target)
             } else if last_leap.abs() > 4 {
-                // resolve a leap: stepwise contrary motion, in-scale
+                // resolve a leap: stepwise contrary motion
                 let k = if last_leap > 0 { -1 } else { 1 };
                 scale_step(prev, k, scale, lo, hi)
             } else if strong || chance(rng, 0.55) {
@@ -589,7 +533,6 @@ fn lead_events(
                     n
                 }
             } else {
-                // diatonic passing step
                 let k = if chance(rng, 0.5) { 1 } else { -1 };
                 scale_step(prev, k * (1 + i8::from(chance(rng, 0.3))), scale, lo, hi)
             };
@@ -613,8 +556,6 @@ fn lead_events(
     out
 }
 
-// ------------------------------------------------------------- the groove
-
 struct GrooveTemplate {
     half_time: bool,
     kick2_even: f32,
@@ -626,7 +567,7 @@ struct GrooveTemplate {
 }
 
 const DAY_GROOVES: [GrooveTemplate; 3] = [
-    // boom-bap: backbeats on 2&4 (the Day2 ratified feel)
+    // boom-bap: backbeats on 2&4
     GrooveTemplate {
         half_time: false,
         kick2_even: 2.25,
@@ -636,7 +577,7 @@ const DAY_GROOVES: [GrooveTemplate; 3] = [
         open_hat_bar_mod: Some(4),
         kick_gain: (1.0, 0.75),
     },
-    // half-time: the lazy backbeat (the Day3 ratified feel)
+    // half-time: the lazy backbeat
     GrooveTemplate {
         half_time: true,
         kick2_even: 2.75,
@@ -646,7 +587,7 @@ const DAY_GROOVES: [GrooveTemplate; 3] = [
         open_hat_bar_mod: Some(4),
         kick_gain: (1.0, 0.7),
     },
-    // sparse: quiet-focus (the E-candidate feel)
+    // sparse: quiet-focus
     GrooveTemplate {
         half_time: true,
         kick2_even: 2.5,
@@ -662,12 +603,9 @@ fn swing_delay(s: f32, eighth_s: f32) -> f32 {
     (s - 0.5) * eighth_s
 }
 
-/// Place ONE humanized kick at bar-relative beat `at_beat` — applying the drag,
-/// the off-beat swing, the jitter, and a non-negative clamp — pushing it to `out`
-/// and its time to `kicks`. Shared by [`day_drums`]/[`night_drums`], which differ
-/// only in their `drag` const and beat/gain set. The RNG DRAW ORDER is LOAD-BEARING
-/// (frozen-seed fidelity — bank.rs "don't reorder the synth calls"): the jitter
-/// draw FIRST, then the gain-wobble draw, exactly as the inlined loops did.
+/// Place ONE humanized kick at bar-relative beat `at_beat`, pushing it to `out`
+/// and its time to `kicks`. The RNG DRAW ORDER is LOAD-BEARING (frozen-seed
+/// fidelity): the jitter draw FIRST, then the gain-wobble draw.
 #[allow(clippy::too_many_arguments)]
 fn push_kick(
     out: &mut Vec<(f32, DrumKind, f32)>,
@@ -695,8 +633,8 @@ fn push_kick(
     kicks.push(at);
 }
 
-/// The day kit from a groove template — humanized boom-bap/half-time,
-/// clamped non-negative (a bar-0 jitter can't leave the loop).
+/// The day kit from a groove template, clamped non-negative so a bar-0 jitter
+/// can't leave the loop.
 fn day_drums(
     rng: &mut NoiseStream,
     g: &GrooveTemplate,
@@ -764,8 +702,7 @@ fn day_drums(
     (out, kicks)
 }
 
-/// The night groove: kick + soft closed hats only (the sleepy register),
-/// the ratified night swing/drag values.
+/// The night groove: kick + soft closed hats only (the sleepy register).
 fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>, Vec<f32>) {
     let bar_s = beat_s * super::score::BEATS_PER_BAR;
     let eighth = beat_s / 2.0;
@@ -794,8 +731,6 @@ fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>
             }
             let mut at = b0 + e as f32 * eighth + swing_delay(SWING_HATS_NIGHT, eighth);
             at += (rng.unit() - 0.5) * 0.012;
-            // ×2 vs v1 (owner-adopted articulation fix: hats measured
-            // ~50dB under the sub — an inaudible tick, no groove)
             out.push((
                 at.max(0.0),
                 DrumKind::Hat,
@@ -805,8 +740,6 @@ fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>
     }
     (out, kicks)
 }
-
-// ------------------------------------------------------------- keys
 
 fn keys_events(
     rng: &mut NoiseStream,
@@ -835,11 +768,9 @@ fn keys_events(
             at += 0.010 + 0.020 * rng.unit();
             match mood {
                 Mood::Day => {
-                    // COMPING means chords: a rolled rootless SHELL
-                    // (3rd+7th; sometimes the 9th replaces the 7th, R6)
-                    // — the pad/bass own the low end, so two voices keep
-                    // the 250-500Hz band controlled while reading as a
-                    // real EP comp instead of a music box
+                    // COMPING means chords: a rolled rootless SHELL (3rd+7th,
+                    // sometimes the 9th for the 7th). The pad/bass own the low
+                    // end, so two voices keep 250-500Hz controlled.
                     let (third, seventh) = shell_of(&chord, bar_roots[bar]);
                     let upper = if chance(rng, 0.2) {
                         nearest_with_pc(seventh, (bar_roots[bar] + 2) % 12)
@@ -852,8 +783,7 @@ fn keys_events(
                     out.push((at + 0.012 + 0.008 * rng.unit(), upper, vel * 0.9));
                 }
                 Mood::Night => {
-                    // night stays single sparse tones — the sleepy
-                    // register must not thicken
+                    // the sleepy register must not thicken
                     let note = chord[pick(rng, chord.len())];
                     out.push((at, note, vel_base + vel_span * rng.unit()));
                 }
@@ -863,11 +793,8 @@ fn keys_events(
     out
 }
 
-// ------------------------------------------------------------- entry point
-
-/// Compose one full take from a seed — deterministic, allocation-only
-/// (no clock, no I/O): the pure composer both painters and every test
-/// share. Synthesis lives in `synth::gen_beds`.
+/// Compose one full take from a seed — deterministic, no clock and no I/O.
+/// Synthesis lives in `synth::gen_beds`.
 pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
     let mut rng = NoiseStream::new(pixtuoid_core::id::splitmix64(seed ^ 0x10F1_C0DE));
 
@@ -883,7 +810,6 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
     let beat_s = 60.0 / bpm;
     let bar_s = beat_s * super::score::BEATS_PER_BAR;
 
-    // lead: rule-walked melody, humanized played-not-sequenced lag
     let lead = lead_events(&mut rng, &bar_chords, &scale_pcs, mood);
     let sparkle: Vec<(f32, u8, f32)> = lead
         .into_iter()
@@ -916,9 +842,8 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         bass_roots[i] = b;
     }
 
-    // drawn AFTER every musical draw, so a voice-registry change can
-    // never silently recompose an already-blessed seed's notes. Night
-    // keeps the ratified EP (the sleepy identity); day draws variety.
+    // drawn AFTER every musical draw, so a voice-registry change can never
+    // silently recompose an already-blessed seed's notes
     let lead_voice = if mood == Mood::Day && chance(&mut rng, 0.35) {
         LeadVoice::Pluck
     } else {

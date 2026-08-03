@@ -1,18 +1,18 @@
 //! Request-based room walls: each room DECLARES the edges it needs enclosed
 //! (horizontal/vertical runs only) plus the doors it wants in them; the
-//! resolver merges duplicate requests (two stacked rooms both request their
-//! shared boundary — it renders as ONE wall), unions their door requests,
-//! trims vertical runs below crossing horizontal wall bodies, and cuts the
-//! gaps. Walls are therefore a FUNCTION of the room set — the old
-//! `compute_room_walls` derived them from the same scalars the rooms were
-//! computed from (parallel geometry, drift-prone; the #556 bookshelf-pierce
-//! bug was exactly a "decor can't see the wall" blind spot).
+//! resolver merges duplicate requests, unions their door requests, trims
+//! vertical runs below crossing horizontal wall bodies, and cuts the gaps.
+//! Walls are therefore a FUNCTION of the room set, never parallel geometry
+//! derived from the same scalars the rooms were.
 //!
-//! Door policy is the ROOMS' (owner call, #557 grill): a meeting room opens
-//! a centered door in its east (corridor) wall; the pantry opens the
-//! meeting↔pantry door at 60% of the shared wall; two stacked meeting rooms
-//! declare NO door on their shared wall — it renders solid (each room has
-//! its own corridor door, so connectivity holds; pinned by the sweep's BFS).
+//! Door policy is the ROOMS' (owner call): a meeting room opens a centered door
+//! in its east (corridor) wall; the pantry opens the meeting↔pantry door at 60%
+//! of the shared wall; two stacked meeting rooms declare NO door on their shared
+//! wall — each already has its own corridor door, so connectivity holds.
+//!
+//! The render half (glass + occlusion) lives one layer up in `pixel_painter`:
+//! `layout` stays render-agnostic. The mask stamps these rects; the painter
+//! paints the SAME joints via the shared `stitch_vertical_wall`.
 
 use crate::layout::decor::GroundAlign;
 use crate::layout::mask::ground_rect;
@@ -20,92 +20,60 @@ use crate::layout::{
     pct, Anchor, Bounds, MeetingRoom, Point, Size, WallSegment, WALL_BAND_TO_TOP_MARGIN,
 };
 
-// ─── Wall geometry: dimensions + footprint (the collision half of a wall) ───
-// A wall is modelled as a linear furniture piece — this module owns BOTH where
-// its segments are (`derive_room_walls`, below) AND how thick / where-blocked
-// each segment is (`WallDef` + `wall_segment_rect`, here). The render half (glass
-// + occlusion) lives one layer up in `pixel_painter` (crate boundary: `layout`
-// stays render-agnostic). The mask stamps these rects; the painter paints the
-// SAME joints via the shared `stitch_vertical_wall`.
-
 /// Walkable footprint (and render face height) of a horizontal (E-W) interior
-/// wall, in px. The renderer derives `WALL_THICK_H_PX` from this so the visible
-/// glass face and the blocked ground footprint can never drift apart.
+/// wall, in px. The renderer derives `WALL_THICK_H_PX` from this so the glass
+/// face and the blocked ground can never drift apart.
 pub const WALL_THICK_H: u16 = 6;
 /// Thickness of a vertical (N-S) interior wall, in px — its blocked footprint
-/// width AND its drawn width (they are EQUAL: seen edge-on, the width you draw
-/// IS the wall's real floor thickness, so a walker collides with what they see).
-/// The renderer's `WALL_THICK_V_PX` derives from this — ONE source, exactly like
-/// `WALL_THICK_H`. (Was 1px "edge-on line" + a symmetric routing pad; that
-/// footprint decoupled from the visual and DRIFTED when #559 widened the visual
-/// to 4px — feet-in-wall on the east, phantom blocked floor on the west. The
-/// coarse-router clearance the old pad bought is now the X-only
-/// `mask::WALL_ROUTING_MARGIN_X` stamped at mask time, not baked into the footprint.)
+/// width AND its drawn width. They are EQUAL by design: seen edge-on, the width
+/// you draw IS the wall's real floor thickness, so a walker collides with what
+/// they see. Do NOT reintroduce a thinner footprint plus a symmetric routing
+/// pad — that decoupling drifted into feet-in-wall on the east and phantom
+/// blocked floor on the west. The coarse-router clearance is now the X-only
+/// `mask::WALL_ROUTING_MARGIN_X`, stamped at mask time.
 pub const WALL_THICK_V: u16 = 4;
 
 /// North-end walk-behind overhang for a FREE vertical terminus (a segment whose
-/// north end is NOT on a joint — e.g. the run below a door): the top
-/// `WALL_TOP_OVERHANG_PX` rows of the glass are visual-only (walkable), so a
-/// character parked behind the wall's top cap is occluded by the y-sorted
-/// `RoomWallV` drawable — the furniture walk-behind shape (`GroundAlign::End`,
-/// invariant #6), now that the vertical wall joins the y-sort. Sized to match the
-/// E-W wall's `GLASS_CAP_PX` (`WALL_THICK_H`): a 2px cap only grazed a walker's
-/// feet, so a walk-behind past the wall's top read as clipping, not depth — 6px
-/// reaches the lower body. A JOINTED top (window band OR a crossing horizontal
-/// wall — anything `stitch` raised, so `y_top != seg_top`) is EXEMPT (cap 0, full
-/// coverage): it has a wall/the band above it (no free floor behind), and a trim
-/// there reopens either the A*-threads-the-wall-top gap or the divider corner
-/// hole. A door-terminus segment shorter than the cap keeps `WALL_THICK_V` rows
-/// blocked (the `min` guard in `wall_segment_rect`) so the divider never vanishes.
+/// north end is NOT on a joint — e.g. the run below a door): the top rows of the
+/// glass are visual-only, so a character parked behind the wall's top cap is
+/// occluded by the y-sorted `RoomWallV`. Sized to the E-W wall's cap: a 2px cap
+/// only grazed a walker's feet, so the walk-behind read as clipping, not depth.
 pub(crate) const WALL_TOP_OVERHANG_PX: u16 = WALL_THICK_H;
 
 /// A linear wall's geometry policy — the wall analog of a `FurnitureDef` row.
-/// A wall is not a point-centred fixed-size piece (its length is per-SEGMENT,
-/// set by the room), so it can't be a `Furniture` enum row; but its BLOCKED-AREA
-/// LOGIC is identical to furniture's — `footprint ⊆ visual`, the far-side (north)
-/// `cap` visual-only (the wall's height projected up-screen = a walk-behind
-/// overhang), south-anchored (`GroundAlign::End`), stamped through the SAME
-/// `ground_rect`. Each segment builds its own rect from this policy + its own
-/// length, so a door gap is just the ABSENCE of a segment — no monolithic-wall
-/// special-casing.
+/// Its length is per-SEGMENT so it can't be a `Furniture` enum row, but its
+/// blocked-area logic is identical: `footprint ⊆ visual`, the north `cap`
+/// visual-only, south-anchored, stamped through the SAME `ground_rect`. A door
+/// gap is therefore just the ABSENCE of a segment.
 #[derive(Clone, Copy)]
 pub(crate) struct WallDef {
-    /// Blocked thickness — the wall's real floor depth (the short axis).
     pub(crate) thickness: u16,
     /// Visual-only overhang toward the far (north) side: `footprint = visual −
-    /// cap`. For the E-W wall it is the height back-cap; for a FREE N-S terminus
-    /// it is the walk-behind top cap (a BAND-connected N-S top overrides it to 0).
+    /// cap`. A BAND-connected N-S top overrides it to 0.
     pub(crate) cap: u16,
 }
 
-/// E-W divider: a `WALL_THICK_H` face + an equal north height back-cap.
 pub(crate) const WALL_H: WallDef = WallDef {
     thickness: WALL_THICK_H,
     cap: WALL_THICK_H,
 };
-/// N-S divider: `WALL_THICK_V` edge-on thickness; a FREE terminus reserves a
-/// `WALL_TOP_OVERHANG_PX` north walk-behind cap (band-connected ⇒ cap 0).
 pub(crate) const WALL_V: WallDef = WallDef {
     thickness: WALL_THICK_V,
     cap: WALL_TOP_OVERHANG_PX,
 };
 
 /// How far BELOW a horizontal wall's row a vertical segment's north end may sit
-/// and still bridge UP to it (`derive_room_walls` offsets a lower segment
-/// ~`WALL_THICK_H` px to clear the cross wall's body; the slack absorbs the
-/// off-by-one of that offset). Named ONCE so the stitch and the placement sweep's
-/// bridge re-derivation can't drift apart (two copies of a bridge tolerance is
-/// the magic-number-drift class this repo hunts).
+/// and still bridge UP to it — slack absorbing the off-by-one in the
+/// `~WALL_THICK_H` offset `derive_room_walls` applies. Named ONCE so the stitch
+/// and the placement sweep's bridge re-derivation can't drift apart.
 pub(crate) const WALL_BRIDGE_SLACK_PX: u16 = 2;
 
 /// The horizontal-wall rows that CROSS a vertical run at column `x` — the
-/// `h_rows` stitch INPUT. Shared by the mask footprint (`wall_segment_rect`) and
+/// `h_rows` stitch INPUT, shared by the mask footprint (`wall_segment_rect`) and
 /// the painter (`enqueue_room_walls_v`) so "shared `stitch_vertical_wall`" also
-/// means shared INPUTS: without the x-filter on BOTH sides, a future multi-column
-/// layout would bridge/extend the painted glass off a crossing wall in ANOTHER
-/// column that the mask footprint ignores — the exact glass-vs-footprint drift
-/// this refactor kills, reopened in the painter direction. Today the office is
-/// single-column so the filter is a no-op; the sharing keeps it honest.
+/// means shared INPUTS. Today the office is single-column so the x-filter is a
+/// no-op; without it on BOTH sides a multi-column layout would extend the
+/// painted glass off a crossing wall the mask footprint ignores.
 pub(crate) fn crossing_h_rows(x: u16, room_walls: &[WallSegment]) -> Vec<u16> {
     room_walls
         .iter()
@@ -116,25 +84,18 @@ pub(crate) fn crossing_h_rows(x: u16, room_walls: &[WallSegment]) -> Vec<u16> {
         .collect()
 }
 
-/// Stitch a vertical (N-S) wall segment's raw `[seg_top, seg_bot]` to its joints
-/// — the terminal-agnostic layout emits raw geometry; the thicknesses/offsets
-/// that plug the render AND the mask gaps live HERE, so the painted glass and the
-/// blocked footprint meet the SAME joints (one source, no drift — the pixel
+/// Stitch a vertical (N-S) wall segment's raw `[seg_top, seg_bot]` to its joints,
+/// so the painted glass and the blocked footprint meet the SAME ones (the
 /// painter's `enqueue_room_walls_v` and this module's `wall_segment_rect` both
-/// call it, over the SAME `crossing_h_rows` input):
-///   • Top: a segment starting at `top_margin` abuts the north window band, which
-///     ends `WALL_BAND_TO_TOP_MARGIN` px higher at `top_wall_h` — raise it so no
-///     floor shows between window and wall (and A* can't thread the top). A
-///     segment sitting just below a horizontal wall (the dual-meeting layout
-///     offsets its lower segment ~`WALL_THICK_H` px to clear the cross wall — see
-///     `derive_room_walls`) is bridged up to meet it.
+/// call it over the SAME `crossing_h_rows` input):
+///   • Top: a segment starting at `top_margin` is raised to the north window
+///     band so no floor shows between window and wall (and A* can't thread the
+///     top); one sitting just below a horizontal wall is bridged up to meet it.
 ///   • Bottom: where the vertical meets a horizontal wall, extend it down by the
-///     horizontal's thickness to fill the inside corner (else its east columns
-///     leave an L-notch — a walkable bite out of the divider in the mask, a
-///     floor sliver in the render).
-/// A caller detects a stitched (jointed) top as `y_top != seg_top`: that is
-/// exactly when the walk-behind cap must be DROPPED (a jointed top has a wall or
-/// the band above it, no free floor for a walker to stand behind).
+///     horizontal's thickness to fill the inside corner, else its east columns
+///     leave an L-notch — a walkable bite out of the divider.
+/// A caller detects a stitched (jointed) top as `y_top != seg_top`: exactly when
+/// the walk-behind cap must be DROPPED (no free floor above to stand behind).
 pub(crate) fn stitch_vertical_wall(
     seg_top: u16,
     seg_bot: u16,
@@ -162,11 +123,9 @@ pub(crate) fn stitch_vertical_wall(
 
 /// A wall segment's PHYSICAL blocked rect (origin + size), shared by the mask
 /// stamp and the placement sweep so the two can't disagree on wall geometry.
-/// Each segment is a `WallDef` piece: `footprint = visual − north cap`,
-/// south-anchored, through the SAME `ground_rect` furniture rides. The vertical
-/// visual box is `stitch_vertical_wall`'s `[y_top, y_bot]` — the SAME joints the
-/// glass paints — so the blocked footprint and the drawn wall meet the band /
-/// crossing walls identically (no drift, no corner hole).
+/// The vertical visual box is `stitch_vertical_wall`'s `[y_top, y_bot]` — the
+/// SAME joints the glass paints — so footprint and drawn wall meet the band and
+/// crossing walls identically.
 pub(crate) fn wall_segment_rect(
     seg: &WallSegment,
     top_margin: u16,
@@ -174,13 +133,10 @@ pub(crate) fn wall_segment_rect(
 ) -> (Point, Size) {
     let (start, end) = (seg.start, seg.end);
     if start.x == end.x {
-        // VERTICAL (N-S): run along Y, edge-on. `WALL_V` policy — `footprint =
-        // visual − north cap`, south-anchored. The cap is reserved ONLY for a
-        // FREE north terminus (a run below a door, half-space above it): a top
-        // that `stitch` raised to a joint (the window band OR a crossing
-        // horizontal wall) has no free floor behind it, so `y_top != seg_top`
-        // ⇒ cap 0 (else the overhang leaves a walkable notch BETWEEN the two
-        // walls' footprints — a hole straight through the divider).
+        // The cap is reserved ONLY for a FREE north terminus: a top that
+        // `stitch` raised to a joint has no free floor behind it, so
+        // `y_top != seg_top` ⇒ cap 0, else the overhang leaves a walkable notch
+        // BETWEEN the two walls' footprints — a hole through the divider.
         let def = WALL_V;
         let seg_top = start.y.min(end.y);
         let seg_bot = start.y.max(end.y);
@@ -192,16 +148,15 @@ pub(crate) fn wall_segment_rect(
             w: def.thickness,
             h: visual_bot - visual_top + 1,
         };
-        // Free top ⇒ reserve the walk-behind cap, but never eat the whole
-        // segment: keep at least `WALL_THICK_V` rows blocked so a short run below
-        // a door stays a divider, not a second opening.
+        // Never eat the whole segment: a short run below a door keeps at least
+        // `WALL_THICK_V` rows blocked so it stays a divider, not a second opening.
         let cap = if visual_top == seg_top {
             def.cap.min(visual.h.saturating_sub(WALL_THICK_V))
         } else {
             0
         };
         let fp = Size {
-            w: def.thickness, // footprint == visual in X (edge-on, no x overhang)
+            w: def.thickness,
             h: visual.h.saturating_sub(cap),
         };
         ground_rect(
@@ -213,14 +168,12 @@ pub(crate) fn wall_segment_rect(
             fp,
             visual,
             GroundAlign::Start,
-            GroundAlign::End, // south-anchored → north cap overhangs (walk-behind)
+            GroundAlign::End,
         )
     } else {
-        // HORIZONTAL (E-W): run along X, face-on. `WALL_H` policy — the visual
-        // rises `cap` px NORTH of the blocked face (the glass height back-cap);
-        // `footprint = the south `thickness` face`, south-anchored. The returned
-        // blocked rect is byte-identical to the pre-WallDef hand-rolled face
-        // (the cap only positions the footprint, it is never blocked).
+        // HORIZONTAL (E-W): the visual rises `cap` px NORTH of the blocked face
+        // (the glass height back-cap); the cap only positions the footprint, it
+        // is never blocked.
         let def = WALL_H;
         let visual = Size {
             w: start.x.abs_diff(end.x) + 1,
@@ -244,44 +197,37 @@ pub(crate) fn wall_segment_rect(
     }
 }
 
-/// An opening the resolver CUT into a wall run. The resolver is the one
-/// place that knows every door (it holds the `DoorAt` requests), so it hands the
-/// openings to the renderer instead of the painter re-inferring them from
-/// segment adjacency (#559 — door frames + future doorway dressing draw
-/// from this). Axis is implicit: `start.x == end.x` ⇒ a vertical wall's
-/// doorway (the span is in y), else horizontal (span in x).
+/// An opening the resolver CUT into a wall run. The resolver is the one place
+/// that knows every door, so it hands the openings to the renderer instead of
+/// the painter re-inferring them from segment adjacency. Axis is implicit:
+/// `start.x == end.x` ⇒ a vertical wall's doorway (the span is in y), else
+/// horizontal (span in x).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Doorway {
     /// One endpoint of the opening (pixel-space).
     pub start: Point,
-    /// The other endpoint (pixel-space; the span axis is implicit — see the
-    /// type doc).
+    /// The other endpoint (pixel-space).
     pub end: Point,
 }
 
-/// Doorway width in ABSOLUTE pixels — a percentage shrinks to zero on small
-/// terminals, which after the 2-px wall padding leaves no walkable cell for
-/// A* and disconnects the room (the documented lesson behind the old
-/// `DOOR_GAP_V`/`DOOR_GAP_H` pair; one value, one name). 14 opens a 13-px gap
-/// (the segment cuts are endpoint-inclusive, so the opening is `ge-gs-1`), and
-/// after the 2-px vertical-wall padding each side that's a 9-px effective gap —
-/// still wide enough that the coarse 4×4 router keeps ≥1 walkable row through it.
+/// Doorway width in ABSOLUTE pixels — NOT a percentage, which shrinks to zero on
+/// small terminals and, after the 2-px wall padding, leaves no walkable cell for
+/// A* and disconnects the room. 14 opens a 13-px gap (the segment cuts are
+/// endpoint-inclusive), a 9-px effective gap after the padding on each side —
+/// still wide enough for the coarse 4×4 router to keep a walkable row through it.
 const DOOR_GAP: u16 = 14;
 
 /// Where along its wall run a door sits.
 enum DoorAt {
-    /// Midpoint of the (trimmed) run — the meeting room's corridor door.
     Centered,
-    /// `pct(run length, p)` from the run's start — the pantry's 60% door.
+    /// `pct(run length, p)` from the run's start.
     Pct(u16),
 }
 
-/// One straight enclosure run a room asks for. Axis-aligned only — the
-/// office has no diagonal walls (owner-stated simplification).
+/// One straight enclosure run a room asks for. Axis-aligned only — the office
+/// has no diagonal walls (owner-stated simplification).
 enum Run {
-    /// Vertical wall at `x`, spanning `y0..y1`.
     V { x: u16, y0: u16, y1: u16 },
-    /// Horizontal wall at `y`, spanning `x0..x1`.
     H { y: u16, x0: u16, x1: u16 },
 }
 
@@ -290,20 +236,15 @@ struct WallRequest {
     doors: Vec<DoorAt>,
 }
 
-/// Derive every interior wall from the rooms themselves. `pantry` is the
-/// pantry's BOUNDS (the wall pass runs before the island is placed, so the
-/// full `PantryRoom` doesn't exist yet — walls only need geometry).
+/// Derive every interior wall from the rooms themselves. `pantry` is only the
+/// pantry's BOUNDS: the wall pass runs before the island is placed, so the full
+/// `PantryRoom` doesn't exist yet.
 pub(crate) fn derive_room_walls(
     meeting_rooms: &[MeetingRoom],
     pantry: Option<Bounds>,
 ) -> (Vec<WallSegment>, Vec<Doorway>) {
     let mut requests: Vec<WallRequest> = Vec::new();
 
-    // Each meeting room: an east (corridor) wall with a centered door, and —
-    // when another room sits directly below — its half of the shared
-    // boundary. The pantry requests the OTHER half plus the 60% door; a
-    // lower MEETING room requests its half with NO door (owner rule: two
-    // meeting rooms don't interconnect).
     for (i, room) in meeting_rooms.iter().enumerate() {
         let b = room.bounds;
         requests.push(WallRequest {
@@ -353,25 +294,22 @@ pub(crate) fn derive_room_walls(
             });
         }
         // No east wall request AT ALL — "the counter is the boundary" is the
-        // pantry's honest shape, not a special case in the wall code.
+        // pantry's honest shape.
     }
 
     resolve(requests)
 }
 
-/// `below` sits directly under `above` (same column, touching edges) — the
-/// shared-boundary adjacency test.
+/// `below` sits directly under `above` (same column, touching edges).
 fn stacked(above: Bounds, below: Bounds) -> bool {
     below.y == above.y + above.height && below.x == above.x && below.width == above.width
 }
 
 fn resolve(requests: Vec<WallRequest>) -> (Vec<WallSegment>, Vec<Doorway>) {
-    // 1. Merge duplicate/overlapping collinear runs, unioning their doors.
-    //    Runs that merely TOUCH end-to-end stay separate: each keeps its own
-    //    door (two stacked meeting rooms' east walls touch at the split line
-    //    but are two walls with two corridor doors, matching the old
-    //    geometry). Only same-span duplicates — the shared boundary
-    //    requested from both sides — collapse.
+    // Merge duplicate collinear runs, unioning their doors. Runs that merely
+    // TOUCH end-to-end stay SEPARATE so each keeps its own door (two stacked
+    // meeting rooms' east walls touch at the split line but are two walls with
+    // two corridor doors). Only same-span duplicates collapse.
     let mut merged: Vec<WallRequest> = Vec::new();
     'outer: for req in requests {
         for m in &mut merged {
@@ -383,11 +321,10 @@ fn resolve(requests: Vec<WallRequest>) -> (Vec<WallSegment>, Vec<Doorway>) {
         merged.push(req);
     }
 
-    // 2. Trim: a vertical run STARTING on a horizontal wall's line begins
-    //    below that wall's stamped body instead (horizontal walls stamp
-    //    WALL_THICK_H rows downward with pad 0; starting inside them would
-    //    double-stamp and de-sync the renderer's stitch-up tolerance, which
-    //    is defined AS WALL_THICK_H — see `stitch_vertical_wall`).
+    // Trim: a vertical run STARTING on a horizontal wall's line begins below
+    // that wall's stamped body instead — starting inside it would double-stamp
+    // and de-sync the renderer's stitch-up tolerance, which is defined AS
+    // WALL_THICK_H.
     let h_runs: Vec<(u16, u16, u16)> = merged
         .iter()
         .filter_map(|r| match r.run {
@@ -397,10 +334,8 @@ fn resolve(requests: Vec<WallRequest>) -> (Vec<WallSegment>, Vec<Doorway>) {
         .collect();
     for req in &mut merged {
         if let Run::V { x, y0, .. } = &mut req.run {
-            // Same line AND the horizontal run actually reaches this
-            // column — a coincidental same-y wall in another column must
-            // not trim (single-column today, so this is the honest form
-            // of "crossing", not a behavior change).
+            // Same line AND the horizontal run actually reaches this column: a
+            // coincidental same-y wall in another column must not trim.
             if h_runs
                 .iter()
                 .any(|&(y, x0, x1)| y == *y0 && (x0..=x1).contains(x))
@@ -410,8 +345,7 @@ fn resolve(requests: Vec<WallRequest>) -> (Vec<WallSegment>, Vec<Doorway>) {
         }
     }
 
-    // 3. Cut door gaps and emit, vertical runs first (the render/mask order
-    //    the old fn produced).
+    // Vertical runs first — the render/mask order.
     let (vs, hs): (Vec<_>, Vec<_>) = merged
         .into_iter()
         .partition(|r| matches!(r.run, Run::V { .. }));
@@ -446,19 +380,15 @@ fn same_run(a: &Run, b: &Run) -> bool {
 }
 
 /// Cut the run's door gaps and push the remaining wall pieces. Degenerate
-/// (zero-length) pieces are pushed too — the mask stamp of an empty segment
-/// is a no-op and the old fn emitted them unconditionally (kept for exact
-/// behavior equality).
+/// (zero-length) pieces are pushed too: an empty segment's mask stamp is a no-op.
 fn emit(req: &WallRequest, out: &mut Vec<WallSegment>, doorways: &mut Vec<Doorway>) {
     let (start, end) = match req.run {
         Run::V { x: _, y0, y1 } => (y0, y1),
         Run::H { y: _, x0, x1 } => (x0, x1),
     };
     let len = end.saturating_sub(start);
-    // Today a run carries at most ONE door (meeting east / pantry north);
-    // a doorless run emits whole. Fail LOUD if a future policy unions a
-    // second door onto a shared run — silently dropping a requested
-    // opening would read as a sealed room.
+    // Fail LOUD if a future policy unions a second door onto a shared run —
+    // silently dropping a requested opening would read as a sealed room.
     debug_assert!(
         req.doors.len() <= 1,
         "multi-door runs are not implemented; a request was dropped"
@@ -510,10 +440,6 @@ mod tests {
 
     #[test]
     fn vertical_wall_free_terminus_reserves_a_north_walk_behind_cap() {
-        // FREE terminus (north end NOT on the band — e.g. the run below a door):
-        // full 4px width (no phantom floor west, no feet-in-wall east), but the
-        // north `WALL_TOP_OVERHANG_PX` rows are a visual-only walk-behind cap —
-        // south-anchored footprint, composited over by the y-sorted `RoomWallV`.
         let top_margin = 20;
         let seg = WallSegment {
             start: Point { x: 56, y: 60 },
@@ -536,10 +462,6 @@ mod tests {
 
     #[test]
     fn vertical_wall_on_the_window_band_is_full_height_and_plugged() {
-        // A north end AT top_margin plugs into the window band: raised UP by
-        // WALL_BAND_TO_TOP_MARGIN so no routable floor shows between the band and
-        // the glass (else A* threads the wall top). Full height, like every
-        // vertical segment.
         let top_margin = 20;
         let seg = WallSegment {
             start: Point {
@@ -565,13 +487,6 @@ mod tests {
 
     #[test]
     fn vertical_wall_below_a_crossing_wall_drops_its_north_cap() {
-        // Regression (walkable-map hole): a vertical segment whose north end
-        // butts a crossing horizontal wall must NOT reserve the walk-behind cap —
-        // it starts WALL_THICK_H below the H-wall's line (the `resolve` trim), so
-        // a cap would leave WALL_TOP_OVERHANG_PX walkable rows BETWEEN the two
-        // walls' footprints: a hole straight through the divider. `stitch` bridges
-        // the blocked top UP to the H-wall row (fully overlapping it, capless), so
-        // the divider is solid across the join.
         let hwall = WallSegment {
             start: Point { x: 40, y: 50 },
             end: Point { x: 56, y: 50 },
@@ -589,7 +504,6 @@ mod tests {
             capless.y, 50,
             "north end abuts the H wall ⇒ no cap, blocked top BRIDGED onto the H wall row"
         );
-        // Same segment with NO crossing wall keeps its free-terminus cap.
         let (capped, _) = wall_segment_rect(&vseg, 20, &[vseg]);
         assert_eq!(
             capped.y,
@@ -600,11 +514,6 @@ mod tests {
 
     #[test]
     fn vertical_wall_meeting_a_horizontal_at_its_bottom_extends_to_fill_the_corner() {
-        // The `y_bot` stitch — the mirror of the north-cap test above. A vertical
-        // divider whose SOUTH end lands on a crossing H-wall row must extend its
-        // blocked footprint DOWN by WALL_THICK_H-1 to fill the inside corner, else
-        // its east columns leave an L-notch (a walkable bite through the divider).
-        // Only the TOP join was under test; this pins the bottom join.
         let hwall = WallSegment {
             start: Point { x: 40, y: 80 },
             end: Point { x: 56, y: 80 },
@@ -620,7 +529,6 @@ mod tests {
             80 + (WALL_THICK_H - 1),
             "south edge extends WALL_THICK_H-1 below seg_bot to fill the inside corner"
         );
-        // The same segment with NO crossing wall at the bottom stops at seg_bot.
         let (o2, s2) = wall_segment_rect(&vseg, 20, &[vseg]);
         assert_eq!(
             o2.y + s2.h - 1,
@@ -631,8 +539,6 @@ mod tests {
 
     #[test]
     fn horizontal_wall_rect_is_full_face_unchanged() {
-        // Routed through the same ground_rect for uniformity — geometry must be
-        // byte-identical to the pre-refactor hand-rolled rect.
         let seg = WallSegment {
             start: Point { x: 20, y: 50 },
             end: Point { x: 60, y: 50 },
@@ -654,9 +560,6 @@ mod tests {
         }
     }
 
-    /// The owner-named constraint: two stacked meeting rooms' shared
-    /// boundary is requested from BOTH sides but resolves to ONE wall — and
-    /// per the door policy it is SOLID (no gap).
     #[test]
     fn dense_shared_wall_resolves_once_and_solid() {
         let rooms = [room(0, 20, 40, 30), room(0, 50, 40, 30)];
@@ -670,9 +573,6 @@ mod tests {
         );
     }
 
-    /// Meeting + pantry: the shared wall keeps the pantry's 60% door, and
-    /// every ENCLOSED room keeps at least one door (the meeting room's
-    /// centered east door) — the connectivity floor of the door policy.
     #[test]
     fn pantry_door_survives_and_every_enclosed_room_has_a_door() {
         let rooms = [room(0, 20, 40, 30)];
@@ -697,8 +597,6 @@ mod tests {
             v[0].end.y < v[1].start.y,
             "a real gap exists — the meeting room is never sealed"
         );
-        // The resolver HANDS both openings to the renderer (#559): one per
-        // cut, spans exactly matching the segment gaps above.
         assert_eq!(doorways.len(), 2, "one Doorway per cut opening");
         let v_door = doorways
             .iter()
@@ -712,9 +610,6 @@ mod tests {
         assert_eq!((h_door.start.x, h_door.end.x), gap);
     }
 
-    /// A vertical run starting ON a horizontal wall's line starts below its
-    /// stamped body (WALL_THICK_H), and its centered door re-centers on the
-    /// TRIMMED run — the dense room-1 east wall's exact legacy geometry.
     #[test]
     fn vertical_run_trims_below_crossing_horizontal_wall() {
         let rooms = [room(0, 20, 40, 30), room(0, 50, 40, 30)];
@@ -734,7 +629,6 @@ mod tests {
         );
     }
 
-    /// No rooms, or a pantry with nothing above it (open-plan) → no walls.
     #[test]
     fn open_plan_requests_nothing() {
         assert!(derive_room_walls(&[], None).0.is_empty());

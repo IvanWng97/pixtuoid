@@ -1,22 +1,12 @@
-//! Sprite pack loader.
+//! Sprite pack loader: the user-config path (XDG-style) first, falling back to
+//! the embedded default pack (`include_str!`) so the binary ships standalone.
+//! A custom pack is a directory at
+//! `${XDG_CONFIG_HOME:-~/.config}/pixtuoid/sprites/` holding `pack.toml` + each
+//! `.sprite` file it references (`sprites/default/` is the canonical example).
 //!
-//! Tries the user-config path first (XDG-style) so power users can drop in a
-//! custom pack without recompiling. Falls back to the embedded default pack
-//! (compile-time `include_str!`) so the binary ships standalone.
-//!
-//! ## Custom pack layout
-//!
-//! Drop a directory at `${XDG_CONFIG_HOME:-~/.config}/pixtuoid/sprites/`
-//! containing `pack.toml` + each `.sprite` file referenced from the TOML.
-//! See `crates/pixtuoid-scene/sprites/default/` for the canonical example.
-//!
-//! ## Sharp edge — palette RGB uniqueness
-//!
-//! The per-agent recolor (`recolor_frame` in `pixel_painter::palette`)
-//! substitutes the H/S/B palette colors by RGB equality. If a custom pack
-//! reuses the same RGB for two palette keys, the recolor pass will substitute
-//! both, producing visual artifacts. Each palette key MUST map to a unique
-//! RGB triple.
+//! Sharp edge: the per-agent recolor (`recolor_frame`) substitutes palette
+//! colors by RGB equality, so each palette key MUST map to a UNIQUE RGB triple
+//! or the pass substitutes both keys and produces artifacts.
 
 use std::path::PathBuf;
 
@@ -25,9 +15,8 @@ use pixtuoid_core::sprite::format::{
     load_pack, load_pack_from_strings, validate_pack_animations, Pack, ValidationReport,
 };
 
-/// Resolve the user's sprite-pack directory if XDG settings point at one.
-/// Returns the directory only when `pack.toml` exists inside it — otherwise
-/// the caller falls back to the embedded pack.
+/// The user's sprite-pack directory, if XDG settings point at one holding a
+/// `pack.toml`.
 fn xdg_pack_dir() -> Option<PathBuf> {
     let base = xdg_config_base(
         std::env::var_os("XDG_CONFIG_HOME"),
@@ -41,31 +30,24 @@ fn xdg_pack_dir() -> Option<PathBuf> {
     }
 }
 
-/// Resolve the XDG config base: the env value when set to a NON-EMPTY path, else
-/// `<home>/.config`. Per the XDG basedir spec, an EMPTY **or RELATIVE**
-/// `XDG_CONFIG_HOME` is invalid and counts as unset — `is_absolute()` rejects
-/// both. Without it a `Some("")`/`Some("rel")` skips the fallback and yields a
-/// CWD-RELATIVE `pixtuoid/sprites` path, silently loading an untrusted pack from
-/// the launch directory while ignoring the user's real `~/.config`. Pure (the env
-/// value is passed in) so the precedence is unit-testable without mutating env.
-/// Mirrors the binary's `install::io::nonempty_abs_env` `is_absolute()` rule,
-/// kept inline per the per-crate-copy convention (scene can't depend on the
-/// binary; core's `platform::nonempty` is `pub(crate)`).
+/// Resolve the XDG config base: the env value when set to a NON-EMPTY ABSOLUTE
+/// path, else `<home>/.config`. Per the XDG basedir spec an EMPTY **or
+/// RELATIVE** `XDG_CONFIG_HOME` is invalid and counts as unset; without
+/// `is_absolute()` a `Some("rel")` yields a CWD-RELATIVE `pixtuoid/sprites`
+/// path, silently loading an untrusted pack from the launch directory. Pure (the
+/// env value is passed in) so the precedence is testable without mutating env.
 fn xdg_config_base(xdg: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
     xdg.filter(|v| std::path::Path::new(v).is_absolute())
         .map(PathBuf::from)
         .or_else(|| home.map(|h| h.join(".config")))
 }
 
-/// Log a custom pack's animation-validation gaps at load time. A pack missing
-/// a required character pose — or carrying an empty `frames = []` entry —
-/// LOADS fine and then renders those poses as NOTHING (`paint_character_at`
-/// early-returns on an absent/empty animation), so without this the only
-/// signal is agents silently vanishing whenever they sleep / sit on a couch.
-/// `pixtuoid validate-pack` reports the same facts, but nothing forces a pack
-/// author to run it. Warn, don't fail: a partially-authored pack still
-/// renders every pose it does carry. Runs AFTER `merge_from` so furniture
-/// inherited from the embedded default isn't misreported as missing.
+/// Log a custom pack's animation-validation gaps at load time: a pack missing a
+/// required pose LOADS fine and then renders it as NOTHING, so without this the
+/// only signal is agents silently vanishing. Warn, don't fail — a
+/// partially-authored pack still renders every pose it does carry. Must run
+/// AFTER `merge_from`, or furniture inherited from the embedded default is
+/// misreported as missing.
 fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
     let report = validate_pack_animations(pack);
     for name in &report.missing_required {
@@ -124,11 +106,10 @@ pub fn load_sprite_pack(pack_dir: Option<PathBuf>) -> Result<Pack> {
 
 /// Test-only default-pack loader: takes the crate's `TEST_ENV_LOCK` around the
 /// `XDG_CONFIG_HOME` read inside [`load_sprite_pack`], so an env-READING pack
-/// load can't race the env-MUTATING test
-/// (`load_sprite_pack_resolves_then_falls_back_via_xdg`) under plain
-/// `cargo test` — one test binary, many threads (nextest's per-process
-/// isolation masks the race). Every unit test resolving the default pack must
-/// come through here, never a bare `load_sprite_pack(None)`.
+/// load can't race the env-MUTATING XDG test under plain `cargo test` (one
+/// binary, many threads; nextest's per-process isolation masks the race). Every
+/// unit test resolving the default pack MUST come through here, never a bare
+/// `load_sprite_pack(None)`.
 #[cfg(test)]
 pub(crate) fn test_default_pack() -> Pack {
     let _env = crate::TEST_ENV_LOCK
@@ -144,12 +125,10 @@ fn load_embedded_pack() -> Result<Pack> {
     )
 }
 
-/// Every default sprite as `(filename, source)`. The macro expands each entry to
-/// `("<name>", include_str!(concat!("../sprites/default/", "<name>")))`, so a new
-/// sprite is a SINGLE line — not a `let`-binding AND a matching tuple entry that
-/// can silently drift. Extracted (vs inlined in [`load_embedded_pack`]) so the
-/// wide-pack test fixture ([`test_wide_pack`]) reuses the EXACT sprite set and
-/// only overrides `standing.sprite`; `build.rs` still emits per-file rerun-if-changed.
+/// Every default sprite as `(filename, source)`. The macro keeps a new sprite to
+/// a SINGLE line — not a `let`-binding AND a matching tuple entry that can
+/// silently drift. Extracted so [`test_wide_pack`] reuses the EXACT sprite set
+/// and only overrides `standing.sprite`.
 fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     macro_rules! embedded_sprites {
         ($($name:literal),+ $(,)?) => {
@@ -208,17 +187,17 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// The default pack with a 10px-wide `standing` frame (robot packs go up to 10)
-/// so the pack-resolved `char_w` differs from the bundled 8-wide `CHARACTER_SPRITE_W`
-/// — the only way to drive `sim_step`/`resolve_characters` occupancy + anchors
-/// end-to-end at a non-default width (#609). Reuses the FULL default sprite set
-/// so `resolve_characters` still finds every pose; only `standing.sprite` is swapped.
+/// The default pack with a 10px-wide `standing` frame so the pack-resolved
+/// `char_w` differs from the bundled 8-wide `CHARACTER_SPRITE_W` — the only way
+/// to drive `sim_step`/`resolve_characters` occupancy + anchors end-to-end at a
+/// non-default width. Reuses the FULL default sprite set so `resolve_characters`
+/// still finds every pose; only `standing.sprite` is swapped.
 #[cfg(test)]
 pub(crate) fn test_wide_pack() -> Pack {
-    // No TEST_ENV_LOCK: unlike test_default_pack, this builds via the pure
+    // No TEST_ENV_LOCK: unlike test_default_pack this builds via the pure
     // load_pack_from_strings and never reads XDG_CONFIG_HOME.
     // The bundled 8x12 standing pose padded to 10 wide with transparent columns
-    // (same palette keys). char_w = this frame's width = 10.
+    // (same palette keys).
     const WIDE_STANDING: &str = "\
 @frame 0
 . . n H H H H n . .
@@ -252,8 +231,6 @@ mod tests {
 
     #[test]
     fn xdg_config_base_treats_empty_or_relative_as_unset() {
-        // XDG spec: an EMPTY or RELATIVE XDG_CONFIG_HOME is invalid → unset, else
-        // the pack dir resolves CWD-relative (an untrusted pack from the launch dir).
         for invalid in ["", "   ", "rel/config", "~/config"] {
             assert_eq!(
                 xdg_config_base(
@@ -268,8 +245,7 @@ mod tests {
 
     #[test]
     fn xdg_config_base_prefers_a_set_value_over_home() {
-        // An ABSOLUTE value wins over home. The absolute form is platform-specific
-        // — a leading-slash path is NOT absolute on Windows (no drive prefix).
+        // A leading-slash path is NOT absolute on Windows (no drive prefix).
         let abs = if cfg!(windows) { "C:/xdg" } else { "/xdg" };
         assert_eq!(
             xdg_config_base(
@@ -297,12 +273,11 @@ mod tests {
         assert_eq!(xdg_config_base(None, None), None);
     }
 
-    /// Copy this crate's char-only pack fixture (a valid, loadable character
-    /// pack with NO furniture — so the merge-from-embedded-default assertion
-    /// isn't tautological) into `dst`. The fixture lives INSIDE pixtuoid-scene
-    /// (`tests/fixtures/charpack/`) and ships in the published tarball, so the
-    /// test stays self-contained — `cargo test` passes from an extracted .crate
-    /// (it must NOT reach into the sibling `pixtuoid` binary crate's skeleton).
+    /// Copy this crate's char-only pack fixture into `dst`. It carries NO
+    /// furniture, so the merge-from-embedded-default assertion isn't
+    /// tautological, and it lives INSIDE pixtuoid-scene so `cargo test` passes
+    /// from an extracted .crate — it must NOT reach into the sibling `pixtuoid`
+    /// binary crate's skeleton.
     fn copy_skeleton_pack(dst: &Path) {
         fs::create_dir_all(dst).expect("mkdir pack dir");
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
@@ -323,8 +298,6 @@ mod tests {
         copy_skeleton_pack(&pack_dir);
 
         let pack = load_sprite_pack(Some(pack_dir)).expect("custom pack loads");
-        // The custom pack supplies character poses; furniture is merged from the
-        // embedded default, so both must be present.
         assert!(
             pack.animation("seated").is_some(),
             "custom pack must carry the seated character pose"
@@ -335,7 +308,6 @@ mod tests {
         );
     }
 
-    /// Counts WARN-level tracing events emitted inside `with_default`.
     #[derive(Clone)]
     struct WarnCounter(std::sync::Arc<std::sync::atomic::AtomicUsize>);
     impl tracing::Subscriber for WarnCounter {
@@ -356,9 +328,8 @@ mod tests {
 
     #[test]
     fn embedded_default_pack_animations_are_all_in_the_registry() {
-        // The scene-side half of the registry bridge: every animation the
-        // EMBEDDED pack ships must be registry-known, or validate-pack
-        // falsely reports it "unused by renderer" (the side_seated drift).
+        // An animation the EMBEDDED pack ships but the registry doesn't know is
+        // falsely reported "unused by renderer" by validate-pack.
         let pack = load_sprite_pack(None).expect("embedded pack");
         let report = pixtuoid_core::sprite::format::validate_pack_animations(&pack);
         assert!(
@@ -370,10 +341,6 @@ mod tests {
 
     #[test]
     fn custom_pack_missing_required_pose_loads_with_a_load_time_warning() {
-        // A --pack-dir pack missing a required character pose must (a) still
-        // LOAD — warn, not fail — and (b) be LOUD about the gap at load time:
-        // the pose renders as nothing (paint_character_at early-returns), so
-        // without the warning the only signal is agents silently vanishing.
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let pack_dir = tmp.path().join("gappy");
         copy_skeleton_pack(&pack_dir);
@@ -402,7 +369,6 @@ mod tests {
             warns.load(std::sync::atomic::Ordering::SeqCst) >= 1,
             "load_sprite_pack must warn about the missing required pose at load time"
         );
-        // The gap report names exactly the stripped pose.
         assert_eq!(
             warn_pack_validation_gaps(&pack, "test").missing_required,
             vec!["back_couch".to_string()]
@@ -419,14 +385,10 @@ mod tests {
         );
     }
 
-    // The XDG path mutates a process-global env var. The TEST_ENV_LOCK
-    // serializes this mutator against the crate's env-READING pack loads —
-    // every `test_default_pack()` caller (floor / pixel_painter / the
-    // embedded-pack tests below resolve the default pack through the same
-    // XDG_CONFIG_HOME read) — so a reader can't observe the temp dirs set
-    // here under plain `cargo test` (nextest's per-process isolation masks
-    // the race). This test calls `load_sprite_pack` DIRECTLY, not the locked
-    // helper: it already holds the (non-reentrant) lock.
+    // Mutates a process-global env var, so it takes TEST_ENV_LOCK to serialize
+    // against every env-READING `test_default_pack()` caller. It calls
+    // `load_sprite_pack` DIRECTLY, not the locked helper: it already holds the
+    // (non-reentrant) lock.
     #[test]
     fn load_sprite_pack_resolves_then_falls_back_via_xdg() {
         let _env = crate::TEST_ENV_LOCK
@@ -434,7 +396,6 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("XDG_CONFIG_HOME");
 
-        // (a) Valid XDG pack at $XDG/pixtuoid/sprites/ → loaded.
         let good = tempfile::TempDir::new().expect("tempdir");
         let good_sprites = good.path().join("pixtuoid").join("sprites");
         copy_skeleton_pack(&good_sprites);
@@ -445,15 +406,13 @@ mod tests {
             "the valid XDG pack must be loaded (xdg Ok arm)"
         );
 
-        // (b) Malformed pack.toml at the XDG path → warn + fall back to embedded.
+        // A malformed pack.toml at the XDG path takes the Err arm.
         let bad = tempfile::TempDir::new().expect("tempdir");
         let bad_sprites = bad.path().join("pixtuoid").join("sprites");
         fs::create_dir_all(&bad_sprites).expect("mkdir bad sprites");
         fs::write(bad_sprites.join("pack.toml"), b"this is not valid toml {{{")
             .expect("write malformed pack.toml");
         std::env::set_var("XDG_CONFIG_HOME", bad.path());
-        // The malformed pack triggers the Err arm → falls back to embedded (Ok),
-        // which still carries the embedded character poses.
         let fallback = load_sprite_pack(None).expect("malformed pack falls back, never errors");
         assert!(
             fallback.animation("seated").is_some(),
@@ -467,11 +426,9 @@ mod tests {
         }
     }
 
-    // The recolor invariant applies to EVERY palette key, not just the 4
-    // recolor targets: recolor_frame matches by RGB equality, so two keys
-    // sharing a color are indistinguishable (a recolor — or any future
-    // per-key logic — swaps both). Transparent (None) keys are exempt. Caught
-    // the e/q = #1a1a1a dup that the B/H/S/P-only check below missed.
+    // Wider than the recolor-key check below: EVERY palette key must be a
+    // distinct RGB, because recolor_frame matches by equality. Transparent
+    // (None) keys are exempt.
     #[test]
     fn embedded_pack_all_palette_keys_are_distinct_rgbs() {
         let pack = test_default_pack();
@@ -491,15 +448,9 @@ mod tests {
         }
     }
 
-    // recolor_frame (pixel_painter/palette.rs) substitutes agent colors by RGB
-    // equality against the base pack's B/H/S/P entries. If any two share an RGB,
-    // the recolor pass swaps both and produces artifacts. No validate-pack check
-    // enforces it, so this guards the documented uniqueness invariant for the
-    // shipped embedded pack.
     #[test]
     fn embedded_pack_recolor_keys_are_distinct_rgbs() {
         let pack = test_default_pack();
-        // The single source of truth — same set recolor_frame + the load guard use.
         let keys = pixtuoid_core::sprite::format::RECOLOR_KEYS;
         let rgbs: Vec<_> = keys
             .iter()
@@ -521,12 +472,6 @@ mod tests {
         }
     }
 
-    // `layout::CHARACTER_SPRITE_W` is the width every out-of-pixel_painter site
-    // (hit-test pin box, decor walk-offset, floating label centering) hard-codes
-    // its geometry on, as the width-unknown fallback for the pack's real
-    // `frame.width`. If the embedded pack's character sprite ever grows/shrinks,
-    // the const must move with it — else the pin box drifts off the painted
-    // sprite. `sim.rs` resolves the SAME "standing" reference pose per frame.
     #[test]
     fn character_sprite_w_matches_the_embedded_pack() {
         let pack = test_default_pack();
@@ -542,8 +487,8 @@ mod tests {
              update the const so hit-test/decor/label geometry tracks the pack",
             crate::layout::CHARACTER_SPRITE_W
         );
-        // The px sprite is `CHARACTER_SPRITE_H_CELLS` half-block rows tall (2 px per cell); pin
-        // the cell const too so the hit-test box height can't drift from the pack.
+        // The px sprite is `CHARACTER_SPRITE_H_CELLS` half-block rows tall, 2 px
+        // per cell.
         assert_eq!(
             h,
             crate::layout::CHARACTER_SPRITE_H_CELLS * 2,
@@ -554,13 +499,9 @@ mod tests {
         );
     }
 
-    // The desk sprite's row width is a THIRD copy of `DESK_W + 4` (baked into the
-    // `.sprite` asset rows), alongside the FurnitureDef `visual.w` the renderer
-    // blits from and the mask/z-key/anchor read. `DESK_W`'s doc invites future
-    // laptop-density edits; such an edit moves `visual.w` but NOT the asset rows,
-    // silently desyncing render vs mask/occlusion/collision. Pin the asset width
-    // to `visual.w` so that drift fails loud (mirrors
-    // `character_sprite_w_matches_the_embedded_pack` above).
+    // The desk sprite's row width is a THIRD copy of `DESK_W + 4`, baked into the
+    // `.sprite` asset rows: a `DESK_W` edit moves `visual.w` but NOT the asset,
+    // silently desyncing render vs mask/occlusion/collision.
     #[test]
     fn desk_sprite_width_tracks_the_footprint_overhang() {
         let pack = test_default_pack();
@@ -580,10 +521,6 @@ mod tests {
 
     #[test]
     fn pet_hitboxes_track_the_embedded_pack() {
-        // PetKind::hitbox returns a hardcoded Size per pose that MUST match the
-        // embedded pet sprite frames — nothing else pins it (unlike the desk
-        // width above). hitbox drives hit_test_pet (click-to-pet); a resized
-        // *_walk/*_sit/*_sleep sprite would drift the click target off the pet.
         use crate::pet::PetKind;
         let pack = test_default_pack();
         for &kind in PetKind::ALL {

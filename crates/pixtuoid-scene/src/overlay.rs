@@ -1,12 +1,8 @@
-//! Backend-agnostic name-badge overlay model.
+//! Backend-agnostic name-badge overlay model — the SINGLE source of truth for
+//! "what label, what tone, where", shared by the TUI and floating painters.
 //!
-//! The SINGLE source of truth for "what label, what tone, where" so both
-//! painters — the TUI (ratatui `Paragraph`) and the floating window (AA
-//! Monaspace Neon via the binary's `aa_text`) — render the same name badges
-//! from one model and can't drift.
-//! `scene` has no terminal/window deps (invariant #1), so the per-painter color
-//! mapping (ratatui `Color` vs `Rgb`) stays in each painter; the model only
-//! carries an activity-derived `LabelTone`.
+//! `scene` has no terminal/window deps (invariant #1), so the model carries an
+//! activity-derived `LabelTone` and each painter maps it to its own color type.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -21,16 +17,12 @@ use crate::pose::RouteCtx;
 use crate::theme::Theme;
 
 /// The separator between a label's source prefix and its cwd/disambiguation
-/// tail (`cc·repo`, `cc·repo·1a2b`). This is the SCENE-side READ authority
-/// (`badge_hue`'s prefix split + `truncate_label`'s suffix-preserving cut) plus
-/// `build_overlay`'s own disambig join. The label's `prefix·cwd` itself is
-/// WRITTEN core-side as a bare `·` (`reducer::source_label_prefix` join) — a
-/// crate boundary this const can't reach — so it must MATCH that char; pinned
-/// by `badge_hue_resolves_a_registered_prefix` (reds if this drifts from `·`).
+/// tail (`cc·repo`, `cc·repo·1a2b`). The label itself is WRITTEN core-side as a
+/// bare `·` (`reducer::source_label_prefix`) — a crate boundary this const can't
+/// reach — so it must MATCH that char.
 const LABEL_SEP: char = '\u{b7}';
 
-/// Activity-derived label tone — backend-agnostic. Each painter maps it to its own
-/// color (ratatui `Color` in tui, `Rgb` in floating). Mirrors the TUI's color tiers.
+/// Activity-derived label tone — backend-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelTone {
     Active,
@@ -40,10 +32,8 @@ pub enum LabelTone {
 }
 
 /// Resolve a `LabelTone` to its theme color role — the SINGLE authority every
-/// label painter shares, so the tui (`to_color`), floating (`pack_xrgb`), and
-/// wasm (`#hex`) surfaces can't disagree on which role a tone maps to; only the
-/// output color TYPE differs per surface. The `hovered` near-white highlight is
-/// NOT a `LabelTone`, so it stays a per-painter surface choice.
+/// label painter shares. The `hovered` near-white highlight is deliberately NOT
+/// a `LabelTone`; it stays a per-painter surface choice.
 pub fn label_tone_rgb(tone: LabelTone, theme: &Theme) -> Rgb {
     match tone {
         LabelTone::Exiting => theme.ui.label_exiting,
@@ -55,21 +45,15 @@ pub fn label_tone_rgb(tone: LabelTone, theme: &Theme) -> Rgb {
 
 /// The source's badge hue for a name-badge label, or `None` when the label has
 /// no `LABEL_SEP` prefix (a bare-prefix / cwd-less label like `cx`) or the
-/// prefix is unregistered. THE single definition of the CLI-identity split all
-/// three painters share — split on `LABEL_SEP`, resolve the pre-separator
-/// prefix via the registry-pinned `SourceColors::by_prefix` — so the
-/// tui/floating/wasm badge decomposition can't drift. Resolver-beside-resolver
-/// with `label_tone_rgb`: both are `(input, &Theme) -> color` resolved at paint
-/// time, neither baked into `LabelElement`, so the model stays unresolved.
+/// prefix is unregistered.
 pub fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
     text.split_once(LABEL_SEP)
         .and_then(|(prefix, _)| theme.source.by_prefix(prefix))
 }
 
-/// One agent name-badge to paint above its sprite. `anchor_px` is the character anchor in
-/// SCENE-buffer pixel space (what `character_anchor` returns); each painter converts to its
-/// own coords. `text` is the final string WITHOUT the ●/▸ marker (the painter adds its own),
-/// already disambiguated + truncated.
+/// One agent name-badge to paint above its sprite. `anchor_px` is in SCENE-buffer
+/// pixel space; `text` is already disambiguated + truncated and carries NO ●/▸
+/// marker (each painter adds its own).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelElement {
     pub anchor_px: Point,
@@ -78,10 +62,8 @@ pub struct LabelElement {
     pub hovered: bool,
 }
 
-/// Build one `LabelElement` per VISIBLE agent (those `character_anchor` places on this
-/// layout — off-floor agents return `None` and are skipped, so labels align 1:1 with the
-/// rendered sprites). The SINGLE source of truth for "what label, what tone, where," so the
-/// tui and floating surfaces can't drift.
+/// Build one `LabelElement` per VISIBLE agent — off-floor agents get no
+/// `character_anchor` and are skipped, so labels align 1:1 with the sprites.
 pub fn build_overlay(
     scene: &SceneState,
     layout: &Layout,
@@ -106,7 +88,6 @@ pub fn build_overlay(
         } else {
             std::borrow::Cow::Borrowed(&*agent.label)
         };
-        // Label width budget: the desk width plus this much slack before truncation.
         const LABEL_BUDGET_PAD: u16 = 4;
         let text = truncate_label(&raw, (DESK_W + LABEL_BUDGET_PAD) as usize).into_owned();
         let tone = if agent.exiting_at.is_some() {
@@ -129,12 +110,9 @@ pub fn build_overlay(
 }
 
 /// Fit a label into `budget` chars without losing the `·xxxx` session-id
-/// disambiguation suffix that the reducer appends to colliding cwds.
-/// Truncates from the base (left side of the `·`), not from the suffix —
-/// otherwise the disambig becomes useless ("TikTok-Android·a" tells us
-/// nothing the base alone wouldn't). Budget: fits to EXACTLY `budget` chars,
-/// and the no-`·` fallback plain-truncates with NO ellipsis — distinct from
-/// `decoder::ellipsize` (N+1) and `widgets::truncate` (N, ellipsis-included).
+/// disambiguation suffix. Truncates from the base (left of the `·`), not the
+/// suffix — otherwise the disambig becomes useless ("TikTok-Android·a" tells us
+/// nothing the base alone wouldn't).
 pub(crate) fn truncate_label(label: &str, budget: usize) -> std::borrow::Cow<'_, str> {
     use std::borrow::Cow;
     if label.chars().count() <= budget {
@@ -153,16 +131,10 @@ pub(crate) fn truncate_label(label: &str, budget: usize) -> std::borrow::Cow<'_,
     Cow::Owned(label.chars().take(budget).collect())
 }
 
-/// 4-hex-char disambiguation suffix, hashed from the whole `session_id` —
-/// shape-agnostic where any SLICE of the id is not: a session_id can be a
-/// UUID (CC/Codex — head and tail both unique), a normalized full transcript
-/// path (Antigravity — constant head, varying stem tail), or a raw cwd
-/// (Reasonix — labels collide exactly when BASENAMES collide, so head AND
-/// tail are both constant: `/x/app` vs `/y/app`). Only a digest of the full
-/// string distinguishes every shape. Hashing also sidesteps byte-slice
-/// panics on multi-byte ids (e.g. `/naïveté/app`) by construction.
-/// (`DefaultHasher` is deterministic within a process — the suffix is a
-/// per-frame display aid, not a persisted identifier.)
+/// 4-hex-char disambiguation suffix, hashed from the WHOLE `session_id` —
+/// shape-agnostic where any slice of the id is not (a raw-cwd id collides on
+/// both head and tail: `/x/app` vs `/y/app`), and multi-byte-safe by
+/// construction. `DefaultHasher` is per-process: a display aid, not an id.
 pub fn disambig_suffix(session_id: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -238,7 +210,6 @@ mod tests {
         s
     }
 
-    /// Drive `build_overlay` with a real router/history/motion/overlay stack.
     fn overlay_of(scene: &SceneState, hovered: Option<AgentId>) -> Vec<LabelElement> {
         let l = layout();
         let mut router = AStarRouter::new();
@@ -266,8 +237,6 @@ mod tests {
 
     #[test]
     fn badge_hue_resolves_a_registered_prefix() {
-        // `cc·repo` splits to `cc`, which by_prefix maps to the claude_code hue —
-        // pins that the split extracts the prefix before the FIRST separator.
         let theme = &crate::theme::NORMAL;
         assert!(badge_hue("cc·repo", theme).is_some());
         assert_eq!(badge_hue("cc·repo", theme), theme.source.by_prefix("cc"));
@@ -275,9 +244,6 @@ mod tests {
 
     #[test]
     fn badge_hue_is_none_for_a_bare_prefix_without_separator() {
-        // codex/antigravity fall back to a bare prefix (`cx`, `ag`) when cwd has
-        // no basename; with no separator there is nothing to split, so no badge
-        // (the label renders whole in its activity tone — the fallback path).
         assert_eq!(badge_hue("cx", &crate::theme::NORMAL), None);
     }
 
@@ -294,7 +260,6 @@ mod tests {
         let s = scene_of(vec![a, b]);
         let els = overlay_of(&s, None);
         assert_eq!(els.len(), 2);
-        // Both carry a `·<id4>` suffix derived from their distinct session ids.
         let want_a = format!("cc\u{00b7}{}", disambig_suffix(&ida));
         let want_b = format!("cc\u{00b7}{}", disambig_suffix(&idb));
         let texts: Vec<&str> = els.iter().map(|e| e.text.as_str()).collect();
@@ -327,7 +292,6 @@ mod tests {
             },
         );
         let idle = slot("id", "sess-i", 1, ActivityState::Idle);
-        // Active state but `exiting_at` set ⇒ Exiting tone (override).
         let mut exiting = slot("ex", "sess-e", 2, active());
         exiting.exiting_at = Some(now());
 
@@ -360,9 +324,6 @@ mod tests {
 
     #[test]
     fn truncate_label_plain_take_when_suffix_exceeds_budget() {
-        // The disambig suffix ("·abcdefgh") is longer than budget=4, so the
-        // suffix-preserving branch can't fit and it falls through to a plain
-        // budget-char take from the front.
         let out = truncate_label("x\u{00b7}abcdefgh", 4);
         assert_eq!(out.chars().count(), 4);
         assert_eq!(out, "x\u{00b7}ab");
@@ -378,8 +339,6 @@ mod tests {
 
     #[test]
     fn ag_full_path_ids_get_distinct_suffixes() {
-        // Antigravity session_ids are normalized full transcript paths: two
-        // same-cwd sessions share the whole prefix; only the stem differs.
         let a = disambig_suffix("/users/me/.gravity/sessions/proj/alpha-01.jsonl");
         let b = disambig_suffix("/users/me/.gravity/sessions/proj/beta-02.jsonl");
         assert_ne!(a, b);
@@ -387,9 +346,6 @@ mod tests {
 
     #[test]
     fn rx_cwd_ids_with_colliding_basenames_get_distinct_suffixes() {
-        // The Reasonix shape that defeats ANY slice of the id: labels collide
-        // exactly when basenames collide, so both the head and the tail are
-        // constant across the collision (`/work/client-x/app` vs `-y/app`).
         let a = disambig_suffix("/work/client-x/app");
         let b = disambig_suffix("/work/client-y/app");
         assert_ne!(a, b);
