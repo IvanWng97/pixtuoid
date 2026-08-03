@@ -701,6 +701,7 @@ pub pixtuoid_core::sprite::format::Pack::version: alloc::string::String
 impl pixtuoid_core::sprite::format::Pack
 pub fn pixtuoid_core::sprite::format::Pack::animation(&self, &str) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
 pub fn pixtuoid_core::sprite::format::Pack::animation_names(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> u16
 pub fn pixtuoid_core::sprite::format::Pack::merge_from(&mut self, &pixtuoid_core::sprite::format::Pack)
 impl core::clone::Clone for pixtuoid_core::sprite::format::Pack
 pub fn pixtuoid_core::sprite::format::Pack::clone(&self) -> pixtuoid_core::sprite::format::Pack

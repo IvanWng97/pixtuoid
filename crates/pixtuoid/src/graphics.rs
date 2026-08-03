@@ -89,7 +89,7 @@ pub struct Detected {
     pub cell: CellSize,
 }
 
-/// Real pixels per logical office unit, for a terminal with this cell size.
+/// The largest scale the CELL alone allows, before the pack gets a say.
 ///
 /// Classic paints ONE buffer pixel per half-block, so a logical unit is one
 /// cell wide and half a cell tall. Drawing the SAME logical office into real
@@ -99,8 +99,31 @@ pub struct Detected {
 /// so the SMALLER of the two wins: a non-1:2 cell letterboxes the office
 /// rather than stretching it, and stretched pixel art is the one outcome worth
 /// ruling out by construction.
-pub fn render_scale_for_cell(cell: CellSize) -> Option<RenderScale> {
-    RenderScale::new(cell.w.min(cell.h / 2))
+///
+/// [`render_scale_for_cell`] is what callers want — this is half the answer.
+fn raw_scale_for_cell(cell: CellSize) -> u16 {
+    cell.w.min(cell.h / 2)
+}
+
+/// Real pixels per logical office unit, for this terminal and this pack.
+pub fn render_scale_for_cell(cell: CellSize, max_density: u16) -> Option<RenderScale> {
+    let raw = raw_scale_for_cell(cell);
+    // Round DOWN to a multiple of the densest art the pack has, because a
+    // variant is only usable at a scale its density divides. Found on a real
+    // Retina Ghostty: a 17px cell makes 17 the natural scale, 17 is PRIME, and
+    // every density variant in the pack sits unused while the base art
+    // block-scales 17x. Giving up at most `max_density - 1` px of office (17 ->
+    // 16, ~6%) to make the richer art reachable is the trade, and it is not
+    // close — the whole point of the variants is to not be upscaled.
+    //
+    // A pack with no variants reports 1 and this is the identity, so the
+    // classic-density path is untouched.
+    let usable = if max_density >= 2 && raw >= max_density {
+        (raw / max_density) * max_density
+    } else {
+        raw
+    };
+    RenderScale::new(usable)
 }
 
 /// Decide what to paint. Pure — [`detect`] supplies the argument.
@@ -111,7 +134,7 @@ pub fn render_scale_for_cell(cell: CellSize) -> Option<RenderScale> {
 /// is all the renderer needs, but the reason is what the user reads, and a
 /// report that says the terminal answered when it was never asked sends them
 /// to fix the wrong thing.
-pub fn resolve(mode: GraphicsMode, detected: Option<Detected>) -> Plan {
+pub fn resolve(mode: GraphicsMode, detected: Option<Detected>, max_density: u16) -> Plan {
     let classic = |reason| Plan {
         profile: Profile::Classic,
         reason: Some(reason),
@@ -125,7 +148,7 @@ pub fn resolve(mode: GraphicsMode, detected: Option<Detected>) -> Plan {
     if !d.has_protocol {
         return classic(ClassicReason::NoProtocol);
     }
-    match render_scale_for_cell(d.cell) {
+    match render_scale_for_cell(d.cell, max_density) {
         // A scale of 1 is the classic density by definition — going through
         // the image path to draw the same number of pixels would cost an
         // encode per frame and buy nothing.
@@ -163,8 +186,12 @@ impl ClassicReason {
 ///
 /// Pure, so the wording is unit-tested; `doctor` supplies the probe result the
 /// same way it does for the truecolor row beside it.
-pub fn graphics_diagnostic_row(mode: GraphicsMode, detected: Option<Detected>) -> String {
-    let plan = resolve(mode, detected);
+pub fn graphics_diagnostic_row(
+    mode: GraphicsMode,
+    detected: Option<Detected>,
+    max_density: u16,
+) -> String {
+    let plan = resolve(mode, detected, max_density);
     match plan.profile {
         Profile::Cutaway { scale } => {
             let cell = detected.map_or_else(
@@ -238,9 +265,12 @@ mod tests {
         // The ~1:2 cell the whole half-block technique assumes: 8 wide, 16
         // tall, so a logical unit is 8px either way and the office keeps its
         // proportions exactly.
-        assert_eq!(render_scale_for_cell(CELL_8X16).map(|s| s.get()), Some(8));
         assert_eq!(
-            render_scale_for_cell(CellSize { w: 10, h: 20 }).map(|s| s.get()),
+            render_scale_for_cell(CELL_8X16, 1).map(|s| s.get()),
+            Some(8)
+        );
+        assert_eq!(
+            render_scale_for_cell(CellSize { w: 10, h: 20 }, 1).map(|s| s.get()),
             Some(10)
         );
     }
@@ -249,14 +279,14 @@ mod tests {
     fn a_non_standard_cell_letterboxes_rather_than_stretching() {
         // Taller than 1:2 — the width is the binding constraint.
         assert_eq!(
-            render_scale_for_cell(CellSize { w: 8, h: 24 }).map(|s| s.get()),
+            render_scale_for_cell(CellSize { w: 8, h: 24 }, 1).map(|s| s.get()),
             Some(8)
         );
         // WIDER than 1:2 — now the height binds. Picking the width here would
         // draw an office taller than the rows it was given, which the image
         // widget silently refuses to render at all (measured in the spike).
         assert_eq!(
-            render_scale_for_cell(CellSize { w: 12, h: 16 }).map(|s| s.get()),
+            render_scale_for_cell(CellSize { w: 12, h: 16 }, 1).map(|s| s.get()),
             Some(8)
         );
     }
@@ -266,23 +296,23 @@ mod tests {
         // A terminal that answers the protocol query but not the pixel-size
         // one reports these. `RenderScale` cannot be zero, so the Option is
         // the honest return rather than a clamp to 1.
-        assert_eq!(render_scale_for_cell(CellSize { w: 0, h: 0 }), None);
-        assert_eq!(render_scale_for_cell(CellSize { w: 8, h: 1 }), None);
-        assert_eq!(render_scale_for_cell(CellSize { w: 0, h: 16 }), None);
+        assert_eq!(render_scale_for_cell(CellSize { w: 0, h: 0 }, 1), None);
+        assert_eq!(render_scale_for_cell(CellSize { w: 8, h: 1 }, 1), None);
+        assert_eq!(render_scale_for_cell(CellSize { w: 0, h: 16 }, 1), None);
     }
 
     #[test]
     fn off_beats_a_capable_terminal() {
         // The flag is the user's, not a hint — a capable terminal must not
         // override it.
-        let plan = resolve(GraphicsMode::Off, capable(CELL_8X16));
+        let plan = resolve(GraphicsMode::Off, capable(CELL_8X16), 1);
         assert_eq!(plan.profile, Profile::Classic);
         assert_eq!(plan.reason, Some(ClassicReason::Disabled));
     }
 
     #[test]
     fn auto_takes_the_cutaway_on_a_capable_terminal() {
-        let plan = resolve(GraphicsMode::Auto, capable(CELL_8X16));
+        let plan = resolve(GraphicsMode::Auto, capable(CELL_8X16), 1);
         let Profile::Cutaway { scale } = plan.profile else {
             panic!("expected the cutaway, got {:?}", plan.profile);
         };
@@ -317,7 +347,7 @@ mod tests {
             ),
         ];
         for (detected, want) in cases {
-            let plan = resolve(GraphicsMode::Auto, detected);
+            let plan = resolve(GraphicsMode::Auto, detected, 1);
             assert_eq!(plan.profile, Profile::Classic, "for {detected:?}");
             assert_eq!(plan.reason, Some(want), "for {detected:?}");
             assert!(!plan.reason.expect("set").describe().is_empty());
@@ -326,7 +356,7 @@ mod tests {
 
     #[test]
     fn the_doctor_row_names_the_profile_and_never_leaves_a_fallback_unexplained() {
-        let row = graphics_diagnostic_row(GraphicsMode::Auto, capable(CELL_8X16));
+        let row = graphics_diagnostic_row(GraphicsMode::Auto, capable(CELL_8X16), 1);
         assert!(row.starts_with("graphics: cutaway at 8x"), "{row}");
         assert!(row.contains("8x16 cell"), "{row}");
 
@@ -338,7 +368,7 @@ mod tests {
             (GraphicsMode::Auto, None),
             (GraphicsMode::Auto, capable(CellSize { w: 0, h: 0 })),
         ] {
-            let row = graphics_diagnostic_row(mode, detected);
+            let row = graphics_diagnostic_row(mode, detected, 1);
             assert!(row.starts_with("graphics: classic half-blocks — "), "{row}");
             assert!(
                 row.len() > "graphics: classic half-blocks — ".len(),
@@ -348,15 +378,47 @@ mod tests {
     }
 
     #[test]
+    fn the_scale_rounds_down_so_the_packs_densest_art_can_actually_land() {
+        // The real case, from a Retina Ghostty: a 17x41 cell. 17 is PRIME, so
+        // with the natural scale every 4x variant in the pack is unusable and
+        // the base art block-scales 17x — the mixed-density work would be inert
+        // on this machine while reporting success.
+        let retina = CellSize { w: 17, h: 41 };
+        assert_eq!(raw_scale_for_cell(retina), 17, "the cell alone says 17");
+        assert_eq!(
+            render_scale_for_cell(retina, 4).map(|s| s.get()),
+            Some(16),
+            "4x art must divide the scale, so 17 rounds to 16"
+        );
+
+        // A pack with no variants must be untouched — this rule may only ever
+        // COST office area when there is richer art to spend it on.
+        assert_eq!(render_scale_for_cell(retina, 1).map(|s| s.get()), Some(17));
+
+        // Already a multiple: nothing to give up.
+        assert_eq!(
+            render_scale_for_cell(CELL_8X16, 4).map(|s| s.get()),
+            Some(8)
+        );
+
+        // Art DENSER than the whole scale can never land however we round, so
+        // rounding to zero (no office at all) must not be the answer.
+        assert_eq!(
+            render_scale_for_cell(CellSize { w: 3, h: 8 }, 4).map(|s| s.get()),
+            Some(3)
+        );
+    }
+
+    #[test]
     fn the_cutoff_is_where_the_image_path_starts_buying_something() {
         // Exactly 1 real pixel per logical unit IS the classic density, so an
         // image encode every frame would cost the encode and draw the identical
         // picture. 2 is the first scale that buys anything, and the boundary is
         // pinned from BOTH sides so a future `>=` typo cannot slip through.
-        let plan = resolve(GraphicsMode::Auto, capable(CellSize { w: 1, h: 2 }));
+        let plan = resolve(GraphicsMode::Auto, capable(CellSize { w: 1, h: 2 }), 1);
         assert_eq!(plan.profile, Profile::Classic, "1px per unit buys nothing");
 
-        let plan = resolve(GraphicsMode::Auto, capable(CellSize { w: 2, h: 4 }));
+        let plan = resolve(GraphicsMode::Auto, capable(CellSize { w: 2, h: 4 }), 1);
         assert_eq!(
             plan.profile,
             Profile::Cutaway {

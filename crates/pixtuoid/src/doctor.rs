@@ -745,6 +745,11 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     out.push_str(&crate::graphics::graphics_diagnostic_row(
         crate::graphics::GraphicsMode::default(),
         probe_ok.then(crate::graphics::detect).flatten(),
+        // The bundled pack, which is what a default `run` paints with. A
+        // `--pack-dir` run could differ; doctor reports the default rather
+        // than loading a pack it was not pointed at.
+        pixtuoid_scene::embedded_pack::load_sprite_pack(None)
+            .map_or(1, |p| p.max_density_variant()),
     ));
     out.push('\n');
     // Surface config-load warnings IN the report — a malformed config makes every

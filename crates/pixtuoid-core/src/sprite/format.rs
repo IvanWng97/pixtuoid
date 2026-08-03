@@ -213,6 +213,21 @@ impl Pack {
         self.animations.keys().cloned().collect()
     }
 
+    /// The highest density any of this pack's variants is drawn at, or 1 when
+    /// it ships none.
+    ///
+    /// A painter picks its render scale from the TERMINAL, but a variant is
+    /// only usable at a scale its density divides — so the scale has to be
+    /// chosen knowing this. A Retina cell 17px wide makes 17 the natural
+    /// scale, 17 is prime, and every variant in the pack would sit unused.
+    pub fn max_density_variant(&self) -> u16 {
+        self.animations
+            .keys()
+            .filter_map(|n| split_density_variant(n).map(|(_, d)| d))
+            .max()
+            .unwrap_or(1)
+    }
+
     /// Merge furniture/environment animations from `base` into self.
     /// Only fills animations listed in OPTIONAL_FURNITURE_ANIMATIONS (and their
     /// density variants) — character animations are never inherited so a robot
@@ -755,6 +770,38 @@ mod validation_floor_tests {
             "an empty variant must be caught: {:?}",
             report.insufficient_frames
         );
+    }
+
+    #[test]
+    fn the_packs_max_density_is_the_scale_a_painter_has_to_round_to() {
+        // A painter picks its scale from the TERMINAL, but a variant only lands
+        // at a scale its density divides — so it needs ONE number from the pack
+        // to round against, and it must be the MAX because one scale serves
+        // every piece at once.
+        let plain = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        assert_eq!(
+            plain.max_density_variant(),
+            1,
+            "a pack with no variants must not push a painter off the cell's own scale"
+        );
+
+        let mixed = pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"plant@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        );
+        assert_eq!(mixed.max_density_variant(), 4);
+
+        // The bundled pack is what a default run paints with, so the number a
+        // real terminal rounds against is pinned here rather than assumed.
+        let bundled = load_pack_from_strings(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+             [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+            &[("f.sprite", "@frame 0\nA")],
+        )
+        .expect("pack builds");
+        assert_eq!(bundled.max_density_variant(), 4);
     }
 
     #[test]
