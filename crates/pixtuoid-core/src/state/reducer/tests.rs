@@ -524,13 +524,27 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
         "sweep_exited must stamp ended_at for a child whose end wasn't as_child"
     );
 
+    // Past the GATE's TTL the entry is RETAINED — the #246 parentless revival
+    // re-links through its `parent_id`, and the turn gap that must span is
+    // unbounded, so the memory rides the longer relink budget. (Pruning here
+    // is what made a multi-turn child idle >90s come back an orphan.)
     r.tick(
         &mut scene,
         swept + super::CHILD_END_LEDGER_TTL + Duration::from_secs(1),
     );
+    assert_eq!(
+        r.corr.child_ledger.get(&child).and_then(|e| e.parent_id),
+        Some(parent),
+        "the parent link must outlive the end GATE it does not share a purpose with"
+    );
+
+    r.tick(
+        &mut scene,
+        swept + super::CHILD_END_RELINK_TTL + Duration::from_secs(1),
+    );
     assert!(
         !r.corr.child_ledger.contains_key(&child),
-        "gc must prune an ended entry past CHILD_END_LEDGER_TTL"
+        "gc must prune an ended entry past CHILD_END_RELINK_TTL"
     );
 }
 

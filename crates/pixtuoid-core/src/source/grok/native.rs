@@ -357,6 +357,62 @@ mod tests {
             {"session_id":"0197-b","pid":200,"cwd":"/r/b","opened_at":"2026-07-16T12:01:00+00:00"}
         ]"#;
 
+        // --- the OS BINDER (`live_grok_session_ids`) ---
+        // The pure join above had six tests; the binder that decides
+        // `Some(empty)` vs `None` had ZERO, while BOTH sibling probes cover
+        // theirs (`live_omp_session_ids` has the same pair; `live_cc_session_ids`
+        // has ~14). The arms are load-bearing in opposite directions:
+        // `ProbeLadder::fold` is never called on a probe FAILURE ("failure
+        // changes nothing"), whereas a healthy `Some(empty)` puts every
+        // previously-vouched id into the miss window and confirms a
+        // `SessionEnd` two healthy misses later. Reading one as the other
+        // either freezes the ladder forever or ends live sessions.
+
+        #[test]
+        fn binder_absent_registry_is_a_healthy_empty_not_a_failure() {
+            // No `active_sessions.json` = no TUI clients, a real observation —
+            // NOT an enumeration failure. `None` here would freeze the
+            // negative-vouch ledger on every machine that never ran grok.
+            let dir = tempfile::tempdir().unwrap();
+            let snap =
+                live_grok_session_ids(dir.path()).expect("an absent registry is not a failure");
+            assert!(snap.pid_of.is_empty());
+        }
+
+        #[test]
+        fn binder_unreadable_registry_is_a_failure_not_an_empty() {
+            // A registry that exists but cannot be READ is the enumeration
+            // failing — the watcher must change nothing. A directory in its
+            // place makes `std::fs::read` fail with EISDIR on both platforms
+            // (chmod 000 would not fail for root, which CI sometimes is).
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join("active_sessions.json")).unwrap();
+            assert!(
+                live_grok_session_ids(dir.path()).is_none(),
+                "an unreadable registry must be None, never a healthy empty"
+            );
+        }
+
+        #[test]
+        fn binder_reads_a_real_registry_and_binds_our_own_live_pid() {
+            // End-to-end through the real file read + the real liveness check:
+            // our own pid is unquestionably alive, so it must bind. Falsifiable
+            // — a binder stubbed to `Some(default)` returns an empty snapshot.
+            let dir = tempfile::tempdir().unwrap();
+            let me = std::process::id();
+            std::fs::write(
+                dir.path().join("active_sessions.json"),
+                format!(r#"[{{"session_id":"live-1","pid":{me},"cwd":"/r"}}]"#),
+            )
+            .unwrap();
+            let snap = live_grok_session_ids(dir.path()).expect("a readable registry is healthy");
+            assert_eq!(
+                snap.pid_of.get("live-1"),
+                Some(&(me as i32)),
+                "a live registry entry must bind its id to its pid"
+            );
+        }
+
         #[test]
         fn live_entries_bind_ids_to_pids() {
             let snap = grok_ids_from_registry(REG.as_bytes(), alive_all, |_| None).unwrap();

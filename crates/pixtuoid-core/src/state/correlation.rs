@@ -67,6 +67,30 @@ pub const HOOK_SESSION_END_TOMBSTONE_TTL: Duration = Duration::from_secs(5);
 #[doc(hidden)]
 pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
 
+/// How long the ledger entry itself is RETAINED after the child ended — the
+/// `parent_id` memory the #246 parentless-revival re-link reads
+/// ([`Reducer::apply`]'s `SessionStart` arm: `parent_id.or_else(|| ledger…)`).
+///
+/// Deliberately LONGER than [`CHILD_END_LEDGER_TTL`], because the two clocks
+/// answer different questions and only one of them is bounded. The GATE asks
+/// "did this child end so recently that a parented Start must be its late
+/// echo?" — bounded by the watcher's 60s poll backstop, hence 90s. The MEMORY
+/// asks "when this child's transcript appends again, who was its parent?" —
+/// and the gap it must span is a TURN gap, which is unbounded: a multi-turn
+/// child idle between turns re-registers whenever the user next prompts.
+/// Sharing one clock meant a child idle >90s came back an ORPHAN, the exact
+/// phantom the #246 adoption exists to eliminate.
+///
+/// Aligned with `jsonl::unclaim::CHILD_END_UNCLAIM_TTL` (300s), the sibling
+/// half of this same flow: the un-claim side-channel already budgets five
+/// minutes so the owning watcher gets several drain passes, and the re-link it
+/// feeds cannot outlive the memory it depends on. The gate is unaffected —
+/// [`Correlation::child_recently_ended`] applies its OWN
+/// [`CHILD_END_LEDGER_TTL`] freshness check, so a retained-but-stale entry
+/// gates nothing.
+#[doc(hidden)]
+pub const CHILD_END_RELINK_TTL: Duration = Duration::from_secs(300);
+
 /// How long a drained Task `tool_use_id` is remembered so a lagged JSONL
 /// replay of its Start cannot re-fire `enter_delegating`. A fast Task (both
 /// hooks delivered) drains `active_tasks` and its hook-End dedup record is
@@ -288,9 +312,12 @@ impl Correlation {
         // Not-yet-ended entries ride until their end/sweep stamps ended_at
         // (every slot removal goes through sweep_exited, which stamps it), so
         // the map is bounded by live children + the TTL's trailing window.
+        // Retained on the RELINK budget, not the GATE's: dropping the entry at
+        // the gate's TTL also dropped the `parent_id` the #246 revival reads,
+        // so a multi-turn child idle past it re-registered as an orphan.
         self.child_ledger.retain(|_, e| match e.ended_at {
             None => true,
-            Some(ts) => is_fresh(now, ts, CHILD_END_LEDGER_TTL),
+            Some(ts) => is_fresh(now, ts, CHILD_END_RELINK_TTL),
         });
     }
 
@@ -479,9 +506,55 @@ mod tests {
         // A never-ended entry rides regardless of age.
         let alive = AgentId::from_parts("claude-code", "alive");
         corr.child_ledger.insert(alive, ChildLedgerEntry::default());
-        corr.gc(t0() + CHILD_END_LEDGER_TTL);
+        // Retention is the RELINK budget, not the gate's TTL.
+        corr.gc(t0() + CHILD_END_RELINK_TTL);
         assert!(!corr.child_ledger.contains_key(&old));
         assert!(corr.child_ledger.contains_key(&young));
         assert!(corr.child_ledger.contains_key(&alive));
+    }
+
+    /// The #246 revival's memory must outlive the #244-w2 GATE, because the two
+    /// clocks bound different things: the gate spans the watcher's 60s poll
+    /// backstop, the memory spans an UNBOUNDED turn gap. Sharing one clock made
+    /// a multi-turn child idle >90s come back an ORPHAN — precisely the phantom
+    /// the adoption exists to eliminate.
+    ///
+    /// Falsifiable in BOTH directions on purpose: retaining on
+    /// `CHILD_END_LEDGER_TTL` drops the parent link (first assert), and never
+    /// expiring it would keep the gate armed forever (second assert).
+    #[test]
+    fn the_parent_link_outlives_the_end_gate_that_stops_gating() {
+        let child = AgentId::from_parts("claude-code", "child");
+        let parent = AgentId::from_parts("claude-code", "parent");
+        let mut corr = Correlation::default();
+        corr.child_ledger.insert(
+            child,
+            ChildLedgerEntry {
+                parent_id: Some(parent),
+                ended_at: Some(t0()),
+            },
+        );
+
+        // Past the GATE's TTL: it no longer gates a parented re-registration...
+        let after_gate = t0() + CHILD_END_LEDGER_TTL + Duration::from_secs(1);
+        corr.gc(after_gate);
+        assert!(
+            !corr.child_recently_ended(child, after_gate),
+            "the end gate must have lapsed"
+        );
+        // ...but the parent link the parentless revival re-links through is
+        // still there, so the child comes back ADOPTED, not orphaned.
+        assert_eq!(
+            corr.child_ledger.get(&child).and_then(|e| e.parent_id),
+            Some(parent),
+            "the re-link memory must survive the gate it does not share a purpose with"
+        );
+
+        // And it is still bounded — the memory is a TTL, not a leak.
+        corr.gc(t0() + CHILD_END_RELINK_TTL);
+        assert!(
+            !corr.child_ledger.contains_key(&child),
+            "the relink memory must still expire at its own budget"
+        );
     }
 }
