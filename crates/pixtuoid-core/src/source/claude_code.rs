@@ -247,7 +247,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         // only checked the PRE-split value, so without re-checking here it would
         // emit `Rename { label: "" }` and blank the sprite label for the whole
         // session (the exact harm the empty-string guard exists to prevent).
-        let seg = name.rsplit(':').next().unwrap_or(name);
+        let seg = name.rsplit_once(':').map_or(name, |(_, tail)| tail);
         if !seg.is_empty() {
             // Capped at decode (CONTRIBUTING pitfall 3): `attributionAgent` is
             // transcript content, and the label persists in slot state for the

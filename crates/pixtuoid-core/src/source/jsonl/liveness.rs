@@ -75,6 +75,37 @@ impl ProbeSnapshot {
         recognize: impl Fn(&Path) -> bool,
         id_derive: super::IdDeriver,
     ) -> Option<Self> {
+        Self::from_open_fds_with(
+            root,
+            comm_names,
+            recognize,
+            id_derive,
+            fd_probe::pids_by_name,
+            fd_probe::open_vnode_paths,
+        )
+    }
+
+    /// [`from_open_fds`](Self::from_open_fds) with the two proc-table calls
+    /// INJECTED, so the shell's own decisions — canonicalize-or-`Some(empty)`,
+    /// enumeration-failure-is-`None` (#223), and the pid→path fan-out — are
+    /// reachable from a test without any FFI.
+    ///
+    /// The split exists because the un-injected shell was measurably unpinned:
+    /// replacing the whole of `from_open_fds` with `Some(Default::default())` —
+    /// i.e. "nothing is ever alive", which silently disables Codex + omp
+    /// liveness — survived the entire suite. Its pure join half
+    /// ([`from_open_fd_pairs`](Self::from_open_fd_pairs)) had five tests; the
+    /// shell wrapping it had none, because reaching it meant walking the real
+    /// process table. Same shape as `hook::unix::ensure_owned_socket_dir`: two
+    /// well-tested halves joined by an untestable line.
+    pub(crate) fn from_open_fds_with(
+        root: &Path,
+        comm_names: &[&str],
+        recognize: impl Fn(&Path) -> bool,
+        id_derive: super::IdDeriver,
+        pids_by_name: impl Fn(&str) -> Option<Vec<i32>>,
+        open_vnode_paths: impl Fn(i32) -> Vec<PathBuf>,
+    ) -> Option<Self> {
         // Canonicalize once per call: kernel-reported fd paths are fully
         // resolved (/tmp → /private/tmp on macOS), so the under-root compare
         // must run against the canonical root or every match misses.
@@ -87,10 +118,10 @@ impl ProbeSnapshot {
         };
         let mut pids = Vec::new();
         for name in comm_names {
-            pids.extend(fd_probe::pids_by_name(name)?);
+            pids.extend(pids_by_name(name)?);
         }
         let pairs = pids.into_iter().flat_map(|pid| {
-            fd_probe::open_vnode_paths(pid)
+            open_vnode_paths(pid)
                 .into_iter()
                 .map(move |path| (pid, path))
         });

@@ -105,6 +105,28 @@ SEAMS: tuple[Seam, ...] = (
         ),
         source=(".github/prompts/pr_review_rules.md", "liveness ladder"),
     ),
+    # The DAEMON side of the hook plane. Deliberately its own seam rather than a
+    # branch of `hook-shim` (that one audits the shim's never-panic contract) or
+    # of `reducer-liveness` (state-machine reasoning): this is endpoint creation
+    # and arbitration, a security surface with its own questions. It matched NO
+    # seam at all until 2026-08 — measured, not assumed: feeding every
+    # `source/hook/` file to this script produced empty output while
+    # `crates/pixtuoid-hook/src/main.rs`
+    # correctly fired. That blind spot sat on the highest fix-ratio directory in
+    # the repo, and a broad mutation run then found the #485 private-dir guard
+    # deletable with the whole suite green.
+    Seam(
+        key="hook-endpoint",
+        title="🔌 Hook endpoint (daemon side) — socket/pipe creation + arbitration",
+        match=lambda p: "/source/hook/" in p,
+        audit=(
+            "The endpoint must never be reachable with looser-than-owner-only modes: create-restricted-then-rename, **never** a process-global umask (it races every other task's file creation).",
+            "Liveness arbitration must not be able to steal a LIVE owner's socket, and a hostile pre-squat must fail the bind LOUDLY rather than silently degrade.",
+            "Check the guard is actually PINNED, not merely present — the whole #485 dir guard was once deletable (`-> Ok(())`) with a green suite. Mutate it; don't read it.",
+            "`unix.rs` / `windows.rs`: the Windows arm is excluded from mutation testing and only ever runs in CI, so changes there need explicit reasoning.",
+        ),
+        source=(".github/prompts/pr_review_rules.md", "the daemon side"),
+    ),
     Seam(
         key="visual",
         title="🎨 Sprite / painter / scene-look (visual — changes the rendered office)",
@@ -241,6 +263,21 @@ def _selftest() -> int:
     # name that is NOT under state/ or jsonl/ must NOT fire reducer-liveness.
     assert keys(["crates/pixtuoid-core/src/source/copilot.rs"]) == []
     assert keys(["crates/x/src/reinstate.rs"]) == []
+
+    # hook-endpoint covers the DAEMON side of the hook plane, which matched no
+    # seam at all until 2026-08 — the shim was covered, its counterpart was not.
+    for p in (
+        "crates/pixtuoid-core/src/source/hook/mod.rs",
+        "crates/pixtuoid-core/src/source/hook/unix.rs",
+        "crates/pixtuoid-core/src/source/hook/windows.rs",
+        "crates/pixtuoid-core/src/source/hook/router.rs",
+        "crates/pixtuoid-core/src/source/hook/pid_watch.rs",
+    ):
+        assert keys([p]) == ["hook-endpoint"], p
+    # It is the DAEMON side only: the shim keeps its own (different) escalation,
+    # and the slash-anchored match must not swallow a same-named sibling file.
+    assert keys(["crates/pixtuoid-hook/src/main.rs"]) == ["hook-shim"]
+    assert keys(["crates/pixtuoid-core/src/source/hook.rs"]) == []
     # visual fires on the office-look SOURCE dirs, not just sprites/painter:
     for p in (
         "crates/pixtuoid-scene/src/theme/cyberpunk.rs",

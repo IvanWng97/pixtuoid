@@ -67,12 +67,36 @@ impl AcceptBackoff {
 /// once it exists, so the validated `lstat` result can't be swapped before the lock
 /// open. The create-side half of #485 — the shim closes the read side with a
 /// connected-peer-uid check (`transport::peer_is_us`).
+///
+/// This fn is the one-line BINDER that substitutes the real `/tmp/pixtuoid-{uid}`
+/// and our real uid into [`ensure_owned_socket_dir_in`]; all the decision logic
+/// lives there so it is testable against a `TempDir`. Nothing can kill a mutation
+/// of this line — driving it means creating/validating the REAL per-user socket
+/// dir, which would race a live daemon — so it is excluded by function in
+/// `.cargo/mutants.toml`. Keep it a pure substitution: any logic added HERE
+/// becomes unmeasurable, which is exactly how the whole guard once sat unpinned
+/// (a `-> Ok(())` mutation of the pre-split fn survived the entire suite).
 #[cfg(unix)]
 fn ensure_owned_socket_dir(path: &Path) -> Result<()> {
-    if !is_owned_fallback(path) {
+    ensure_owned_socket_dir_in(
+        path,
+        &owned_socket_dir(),
+        rustix::process::getuid().as_raw(),
+    )
+}
+
+/// The testable COMPOSITION behind [`ensure_owned_socket_dir`]: harden `owned`
+/// only when `path` actually lives inside it, else no-op. Taking `owned` + `uid`
+/// as parameters is what makes the FIRES direction reachable from a test — with
+/// the real dir hardcoded, deleting the whole guard body was invisible to the
+/// suite even though both halves it composes were themselves well covered. The
+/// gap was never in a line you could read; it was in the wiring between them.
+#[cfg(unix)]
+fn ensure_owned_socket_dir_in(path: &Path, owned: &Path, uid: u32) -> Result<()> {
+    if !is_owned_fallback_in(path, owned) {
         return Ok(());
     }
-    ensure_private_dir(&owned_socket_dir(), rustix::process::getuid().as_raw())
+    ensure_private_dir(owned, uid)
 }
 
 /// The socket file name inside [`owned_socket_dir`]. Shared with
@@ -95,12 +119,13 @@ pub(crate) fn owned_socket_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(format!("/tmp/pixtuoid-{uid}"))
 }
 
-/// Whether `path` is the socket endpoint inside the dir we manage — the pure
-/// decision half of [`ensure_owned_socket_dir`], so the FIRES direction is
-/// testable without touching the real `/tmp/pixtuoid-{uid}`.
+/// Whether `path` is the socket endpoint directly inside `owned` — the pure
+/// decision half of [`ensure_owned_socket_dir_in`]. `owned` is a parameter so
+/// the composition above can be driven against a `TempDir`; pass
+/// [`owned_socket_dir`] to ask the production question.
 #[cfg(unix)]
-fn is_owned_fallback(path: &Path) -> bool {
-    path.parent() == Some(owned_socket_dir().as_path())
+fn is_owned_fallback_in(path: &Path, owned: &Path) -> bool {
+    path.parent() == Some(owned)
 }
 
 /// Create `dir` as a `0700` directory owned by `uid`, or — if it already exists —
@@ -145,6 +170,25 @@ fn ensure_private_dir(dir: &Path, uid: u32) -> Result<()> {
     }
 }
 
+/// A sibling of the FINAL socket path, named `<sock>.<suffix>`.
+///
+/// Both siblings `bind` derives — the arbitration lock and the pre-rename temp
+/// endpoint — MUST be built from the same base, because both bind branches have
+/// to arbitrate on one lock file (see the lock's own note below). That was two
+/// hand-copied copies of the same `file_name()` expression: precisely the drift
+/// shape this file already warns about for the `#485` guard, where "a second
+/// hand-copied literal" is named as the thing that disarms an invariant while
+/// every test stays green. One fn, so the two cannot drift apart.
+#[cfg(unix)]
+fn socket_sibling(path: &Path, suffix: &str) -> std::path::PathBuf {
+    path.with_file_name(format!(
+        "{}.{suffix}",
+        path.file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default()
+    ))
+}
+
 pub(super) struct Listener {
     listener: UnixListener,
     // Held (never unlocked) for the daemon's lifetime: the kernel releases
@@ -172,12 +216,7 @@ impl Listener {
         // ConfigLock) and is derived from the FINAL socket path so both bind
         // branches (temp-rename and the sun_path>100 fallback below — a
         // regular file has no sun_path cap) arbitrate on the same file.
-        let lock_path = path.with_file_name(format!(
-            "{}.lock",
-            path.file_name()
-                .map(|n| n.to_string_lossy())
-                .unwrap_or_default()
-        ));
+        let lock_path = socket_sibling(path, "lock");
         let lock = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
@@ -242,13 +281,7 @@ impl Listener {
         // touching the process-global umask, which raced every other tokio
         // worker's concurrent file creation (e.g. a JsonlWatcher's
         // create_dir_all) for the duration of the bind.
-        let tmp = path.with_file_name(format!(
-            "{}.{}.tmp",
-            path.file_name()
-                .map(|n| n.to_string_lossy())
-                .unwrap_or_default(),
-            std::process::id()
-        ));
+        let tmp = socket_sibling(path, &format!("{}.tmp", std::process::id()));
         // sun_path caps at 104 bytes (macOS; 108 Linux). A custom
         // PIXTUOID_SOCKET whose FINAL path fits but whose `.<pid>.tmp` twin
         // doesn't must not fail the bind — fall back to a direct bind +
@@ -445,30 +478,87 @@ mod tests {
         );
     }
 
+    /// The EEXIST match guard must not swallow OTHER create errors into the
+    /// validate branch. `DirBuilder` is non-recursive here, so a missing PARENT
+    /// fails ENOENT — with the guard widened to `true` this lands in the validate
+    /// arm, whose `symlink_metadata` then fails NotFound and misattributes a
+    /// create failure to a stat failure.
     #[test]
-    fn is_owned_fallback_fires_for_the_dir_the_socket_path_is_built_from() {
-        // The missing POSITIVE direction (#485): the guard is a path comparison,
-        // and a second hand-copied literal disarms it with the whole suite green.
-        assert!(is_owned_fallback(
-            &owned_socket_dir().join(SOCKET_FILE_NAME)
-        ));
-        // Negative controls: a sibling dir and the flat pre-#485 form (the
-        // exact shape whose reintroduction used to silently disarm it).
-        assert!(!is_owned_fallback(Path::new("/tmp/pixtuoid.sock")));
-        let flat = owned_socket_dir().with_extension("sock");
-        assert!(!is_owned_fallback(&flat));
+    fn ensure_private_dir_reports_a_non_eexist_create_failure_as_a_create_failure() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let dir = tmp.path().join("missing-parent").join("d");
+        let err = ensure_private_dir(&dir, my_uid()).expect_err("ENOENT must fail");
+        assert!(
+            format!("{err:#}").contains("creating hook socket dir"),
+            "a non-EEXIST create error must be reported as a CREATE failure: {err:#}"
+        );
     }
 
+    /// The POSITIVE direction (#485): the guard is a path comparison, and a
+    /// second hand-copied literal disarms it with the whole suite green — so ask
+    /// about the REAL production endpoint, built from the same fn.
     #[test]
-    fn ensure_owned_socket_dir_is_a_noop_for_non_fallback_parents() {
-        // An XDG-style / explicit-override socket path (parent is NOT our
-        // `/tmp/pixtuoid-{uid}` fallback) must not create or touch anything.
+    fn is_owned_fallback_fires_for_the_dir_the_socket_path_is_built_from() {
+        let owned = owned_socket_dir();
+        assert!(is_owned_fallback_in(&owned.join(SOCKET_FILE_NAME), &owned));
+        // Negative controls: a sibling dir and the flat pre-#485 form (the
+        // exact shape whose reintroduction used to silently disarm it).
+        assert!(!is_owned_fallback_in(
+            Path::new("/tmp/pixtuoid.sock"),
+            &owned
+        ));
+        assert!(!is_owned_fallback_in(&owned.with_extension("sock"), &owned));
+    }
+
+    /// An XDG-style / explicit-override socket path (parent is NOT the dir we
+    /// manage) must not create or touch anything. Also the `delete !` pin from the
+    /// OTHER side: an inverted guard hardens exactly the paths it should skip,
+    /// which shows up here as the owned dir being created anyway.
+    #[test]
+    fn ensure_owned_socket_dir_in_is_a_noop_for_non_fallback_parents() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
+        let owned = tmp.path().join("owned");
         let sock = tmp.path().join("elsewhere").join("pixtuoid.sock");
-        ensure_owned_socket_dir(&sock).expect("non-fallback parent is a no-op");
+        ensure_owned_socket_dir_in(&sock, &owned, my_uid())
+            .expect("non-fallback parent is a no-op");
         assert!(
             !sock.parent().expect("parent").exists(),
             "a non-fallback parent must not be created"
+        );
+        assert!(
+            !owned.exists(),
+            "a no-op must not create the managed dir either"
+        );
+    }
+
+    // THE fires-direction pin. Until the owned dir became a parameter this was
+    // unwritable — driving it meant creating the REAL `/tmp/pixtuoid-{uid}`,
+    // racing any live daemon — so nothing drove it, and a 214-mutant run found
+    // BOTH `ensure_owned_socket_dir -> Ok(())` and `delete !` surviving the
+    // entire suite. `ensure_private_dir` had six tests and `is_owned_fallback_in`
+    // three; the untested part was the line WIRING them together.
+    #[test]
+    fn ensure_owned_socket_dir_in_hardens_the_dir_the_socket_lives_in() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let owned = tmp.path().join("pixtuoid-42");
+        let sock = owned.join(SOCKET_FILE_NAME);
+        ensure_owned_socket_dir_in(&sock, &owned, my_uid()).expect("must harden");
+        let md = std::fs::symlink_metadata(&owned).expect("the managed dir must now exist");
+        assert!(md.is_dir());
+        assert_eq!(md.mode() & 0o777, 0o700, "created private");
+    }
+
+    #[test]
+    fn ensure_owned_socket_dir_in_refuses_a_squatted_dir_the_socket_lives_in() {
+        // The whole POINT of the guard: a hostile pre-squat fails the bind
+        // LOUDLY rather than silently locking the hook plane out.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let owned = tmp.path().join("squatted");
+        std::fs::create_dir(&owned).expect("mkdir");
+        std::fs::set_permissions(&owned, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        assert!(
+            ensure_owned_socket_dir_in(&owned.join(SOCKET_FILE_NAME), &owned, my_uid()).is_err(),
+            "a group/other-accessible dir at the socket's parent must refuse the bind"
         );
     }
 }

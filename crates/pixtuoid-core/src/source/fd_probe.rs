@@ -227,16 +227,27 @@ mod imp {
         Some(pids)
     }
 
+    /// Linux arm: absoluteness IS the vnode test. `/proc/<pid>/fd` resolves
+    /// non-file descriptors to synthetic NON-absolute targets
+    /// (`socket:[inode]`, `pipe:[inode]`, `anon_inode:[eventfd]`), so the
+    /// `is_absolute` filter matches this fn's name + doc AND the macOS arm's
+    /// `PROX_FDTYPE_VNODE`. Unfiltered, the two platform arms returned
+    /// DIFFERENT things under one name, and a caller that believed the doc got
+    /// a Linux-only false positive (pinned by
+    /// `open_vnode_paths_never_reports_a_unix_socket`).
+    ///
+    /// A deleted file's link ends with `" (deleted)"`, which simply never
+    /// matches a rollout path — no stripping needed.
     pub(super) fn open_vnode_paths(pid: i32) -> Vec<PathBuf> {
-        // Dead pid / EPERM → read_dir fails → empty, by design. A deleted
-        // file's link ends with " (deleted)", which simply never matches a
-        // rollout path — no stripping needed.
+        // Dead pid / EPERM → read_dir fails → empty, by design.
         let Ok(entries) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
             return Vec::new();
         };
         entries
             .flatten()
             .filter_map(|e| std::fs::read_link(e.path()).ok())
+            // VNODE only: absoluteness is the vnode test — see this fn's doc.
+            .filter(|p| p.is_absolute())
             .collect()
     }
 }
@@ -289,6 +300,36 @@ mod tests {
     fn open_vnode_paths_for_dead_pid_is_empty_not_panic() {
         // Far above any real pid range on macOS/Linux.
         assert!(open_vnode_paths(999_999_999).is_empty());
+    }
+
+    /// A UNIX SOCKET this process holds open must NOT be reported: the fn is
+    /// vnode-only on both arms, so a socket path can never come back from it.
+    ///
+    /// This is the negative half the two platform arms disagreed on — macOS
+    /// filtered `PROX_FDTYPE_VNODE` while Linux returned every `/proc/<pid>/fd`
+    /// link, `socket:[inode]` included — and it is load-bearing beyond hygiene:
+    /// `grok::leader_socket_owner` asks THIS fn whether a pid holds
+    /// `{grok_home}/leader.sock`, which is exactly the question it cannot
+    /// answer. Verified against the live syscalls: a bound+listening AF_UNIX fd
+    /// reports `proc_fdtype=2` (SOCKET, not VNODE=1) and its
+    /// `PROC_PIDFDVNODEPATHINFO` query returns 0 bytes with an empty path.
+    /// Detecting a socket's owner needs a socket-aware probe
+    /// (`PROC_PIDFDSOCKETINFO` on macOS, a `/proc/net/unix` inode join on
+    /// Linux) — see `grok::native::leader_socket_owner`, which is inert for
+    /// exactly this reason (#826).
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn open_vnode_paths_never_reports_a_unix_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("leader.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&sock).expect("bind");
+        let canonical = sock.canonicalize().unwrap();
+        let open = open_vnode_paths(std::process::id() as i32);
+        drop(listener);
+        assert!(
+            !open.contains(&canonical),
+            "a unix socket is not a vnode path; got {open:?}"
+        );
     }
 
     #[test]

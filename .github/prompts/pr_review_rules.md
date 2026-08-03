@@ -62,6 +62,16 @@ review in #198), NOT a replacement for the judgement below:
   read, and route every error path to a silent `exit(0)`. Invariant #5 is the
   most-documented contract here, yet a prod `env::args()` once slipped both the
   bot and local review (#198).
+- **`crates/pixtuoid-core/src/source/hook/**` (the daemon side)** → the shim's
+  counterpart, and a DIFFERENT risk: this is where the rendezvous endpoint is
+  created and arbitrated. Check the endpoint is never reachable with looser than
+  owner-only modes (create-restricted-then-rename, never a process-global umask),
+  that liveness arbitration cannot steal a live owner's socket, and that the
+  `unix.rs` / `windows.rs` split kept both arms honest — the Windows arm is
+  excluded from mutation testing entirely and only ever runs in CI. Above all,
+  check the guard you are reading is actually PINNED: a 214-mutant run found the
+  whole `#485` private-dir guard deletable (`-> Ok(())`) with the entire suite
+  green, because its two well-tested halves were joined by an untested line.
 - **`motion/` / `pose/` / walk-leg behavior** → not diff-readable. State in your
   summary that a human must render and WATCH it (an animation via the snapshot
   example, or `scripts/replay-fixture.sh` for resume/lifecycle motion) before

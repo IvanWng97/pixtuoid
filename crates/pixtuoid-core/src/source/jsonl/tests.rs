@@ -55,9 +55,6 @@ fn from_open_fd_pairs_filters_under_root_then_recognizes_and_derives() {
     // MECHANICS (under-root filter + #252 bind), not any source's format.
     let root = std::path::Path::new("/root");
     let recognize = |p: &std::path::Path| p.extension().and_then(|e| e.to_str()) == Some("jsonl");
-    fn stem_id(p: &std::path::Path) -> String {
-        p.file_stem().unwrap().to_string_lossy().into_owned()
-    }
     let pairs = [
         (7, std::path::PathBuf::from("/root/a/keep.jsonl")), // under root, recognized
         (9, std::path::PathBuf::from("/elsewhere/keep.jsonl")), // outside root
@@ -72,6 +69,113 @@ fn from_open_fd_pairs_filters_under_root_then_recognizes_and_derives() {
         got.pid_of.get("keep"),
         Some(&7),
         "only the under-root .jsonl vouches, bound to its pid"
+    );
+}
+
+/// A stem-keyed `IdDeriver` for the shell tests below — the fold via
+/// `walk::id_path` is identity on Unix, so this pins MECHANICS, not a format.
+fn stem_id(p: &std::path::Path) -> String {
+    p.file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
+// ---- the fd-probe SHELL (`from_open_fds_with`) ----
+// The pure join above had five tests; the shell wrapping it had none, because
+// reaching it meant walking the real process table. A 214-mutant run over
+// hook/ + jsonl/ found the consequence: replacing the whole of `from_open_fds`
+// with `Some(Default::default())` — "nothing is ever alive", which silently
+// disables Codex + omp liveness — survived the entire suite. Injecting the two
+// proc-table calls is what makes these three reachable.
+
+#[test]
+fn from_open_fds_with_reports_an_enumeration_failure_as_none() {
+    // #223's load-bearing distinction: `None` = the probe ITSELF failed, so
+    // callers must change nothing (no negative vouch may advance off it).
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let got = ProbeSnapshot::from_open_fds_with(
+        tmp.path(),
+        &["codex"],
+        |_| true,
+        default_id_from_path,
+        |_| None, // proc-table enumeration failed
+        |_| Vec::new(),
+    );
+    assert!(
+        got.is_none(),
+        "an enumeration failure must be None, never a healthy empty"
+    );
+}
+
+/// The OTHER side of #223's distinction: an absent / un-canonicalizable root is
+/// not a failure (the source may simply never have run), so it is a healthy
+/// `Some(empty)` — and the enumeration is skipped entirely.
+#[test]
+fn from_open_fds_with_reports_an_absent_root_as_a_healthy_empty() {
+    let got = ProbeSnapshot::from_open_fds_with(
+        std::path::Path::new("/definitely/not/here"),
+        &["codex"],
+        |_| true,
+        default_id_from_path,
+        |_| panic!("an absent root must short-circuit before enumerating"),
+        |_| Vec::new(),
+    )
+    .expect("an absent root is a healthy observation, not a probe failure");
+    assert!(
+        got.is_empty(),
+        "nothing is alive under a root that does not exist"
+    );
+}
+
+#[test]
+fn from_open_fds_with_joins_each_pid_to_the_transcripts_it_holds_open() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let root = tmp.path().canonicalize().expect("canonical root");
+    let held = [(7, root.join("a.jsonl")), (9, root.join("b.jsonl"))];
+    let got = ProbeSnapshot::from_open_fds_with(
+        tmp.path(),
+        &["codex"],
+        |p| p.extension().and_then(|e| e.to_str()) == Some("jsonl"),
+        stem_id,
+        |_| Some(vec![7, 9]),
+        move |pid| {
+            held.iter()
+                .filter(|(held_pid, _)| *held_pid == pid)
+                .map(|(_, path)| path.clone())
+                .collect()
+        },
+    )
+    .expect("a healthy enumeration");
+    // The NEGATIVE direction of `is_empty` — the only direction any test asserted
+    // was the true one, so `is_empty -> true` survived too.
+    assert!(
+        !got.is_empty(),
+        "a probe that found live sessions is not empty"
+    );
+    assert_eq!(got.pid_of.get("a"), Some(&7));
+    assert_eq!(
+        got.pid_of.get("b"),
+        Some(&9),
+        "each pid keeps its own rollout"
+    );
+}
+
+/// This seam's failure mode is SILENT: with its body a no-op, every watcher
+/// integration test quietly falls back to the native FSEvents backend and still
+/// PASSES — just far slower. Measured under exactly that mutation, the workspace
+/// suite's test phase went 10s → 34s and stayed green, so nothing in the tree
+/// could catch it. Asserting the effect is the whole fix.
+///
+/// Safe to call from a unit test: no lib unit test constructs a `JsonlWatcher`
+/// (they drive walk/ladder directly), so this process-wide `OnceLock` changes
+/// nothing else in this binary.
+#[test]
+fn force_polling_backend_for_tests_actually_sets_the_override() {
+    force_polling_backend_for_tests(Duration::from_millis(25));
+    assert!(
+        TEST_POLL_OVERRIDE.get().is_some(),
+        "the seam must actually install the polling override"
     );
 }
 
@@ -895,6 +999,63 @@ async fn gated_file_oversized_ended_append_stays_unregistered() {
             .iter()
             .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
         "an ended oversized span must not register a ghost, got {events:?}"
+    );
+}
+
+/// The `!metadata_only` half of the #204 oversized registration guard. The
+/// POSITIVE direction is covered above; this is the negative one, and without it
+/// `!registered && !metadata_only` could be mutated to `||` with the whole suite
+/// green. Only THIS combination can tell the two spellings apart: when
+/// `registered` is true the mutation is absorbed anyway (`emit_first_sight`
+/// early-returns on a held claim), so unregistered-AND-metadata-only is the
+/// single observable case. Its ≤1 MiB twin is
+/// `a_turnless_tail_gates_even_though_the_newest_turn_is_off_window`.
+#[tokio::test]
+async fn gated_file_oversized_metadata_only_append_stays_unregistered() {
+    use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gated-big-sidecar.jsonl");
+    let initial = "{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n";
+    let (cursors, seen) = gated_fixture(&path, initial).await;
+
+    let mut full = String::from(initial);
+    // The oversized span itself...
+    full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
+    // ...ending in a metadata run longer than the tail window, so the tail holds
+    // NOTHING but sidecars — positive metadata evidence, not an absence of evidence.
+    let sidecar = "{\"type\":\"custom-title\",\"sessionId\":\"s\"}\n";
+    full.push_str(&sidecar.repeat((super::walk::TAIL_BYTES as usize / sidecar.len()) + 8));
+    tokio::fs::write(&path, &full).await.unwrap();
+    assert!(
+        (full.len() - initial.len()) as u64 > super::walk::MAX_PENDING_BYTES,
+        "the appended span must exceed MAX_PENDING_BYTES"
+    );
+
+    let events = walk_once_with_recency(
+        &path,
+        Duration::from_secs(60),
+        decode_cc_line,
+        cc_session_ended,
+        cc_activity_recency,
+        &cursors,
+        &seen,
+    )
+    .await;
+    assert!(
+        !events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+        "an oversized span whose tail is pure metadata must not register, got {events:?}"
+    );
+    assert!(
+        !seen.lock().await.contains_key(&path),
+        "and it must not claim `seen` either"
+    );
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(full.len() as u64),
+        "the cursor must still advance to EOF"
     );
 }
 
@@ -3314,6 +3475,169 @@ async fn revouch_pass_prunes_deleted_files_from_cursors() {
         !cursors.lock().await.contains_key(&gone),
         "a NotFound re-vouch candidate must be pruned from cursors"
     );
+}
+
+/// Property tests for the #223 probe ladder under INTERLEAVED rungs.
+///
+/// Every ladder test above scripts ONE scenario. These generate sequences
+/// instead, because the ladder's failure mode is an ORDERING — an instant exit
+/// crossing a miss window, a rebind crossing a confirm, a re-vouch cancelling a
+/// window mid-flight — and the ordering nobody thought to script is exactly the
+/// one that breaks. The properties are deliberately WEAKER than the
+/// implementation: no model of the miss ledger is rebuilt here, because a model
+/// that mirrors the algorithm reproduces its bugs and passes with them.
+mod ladder_props {
+    use super::*;
+    use proptest::prelude::*;
+    use std::collections::HashSet;
+
+    const IDS: [&str; 3] = ["s0", "s1", "s2"];
+    const PIDS: [i32; 3] = [11, 22, 33];
+    const SPAN: Duration = Duration::from_secs(60);
+
+    fn snap_of(live: &[(usize, usize)]) -> ProbeSnapshot {
+        let mut s = ProbeSnapshot::default();
+        for (id, pid) in live {
+            s.bind_pid(IDS[*id].to_string(), PIDS[*pid]);
+        }
+        s
+    }
+
+    #[derive(Debug, Clone)]
+    enum Op {
+        /// A HEALTHY probe observation, `advance_ms` after the previous op.
+        Fold {
+            live: Vec<(usize, usize)>,
+            advance_ms: u64,
+        },
+        /// The instant-exit rung: a watched OS process died.
+        PidDied(usize),
+    }
+
+    fn arb_live() -> impl Strategy<Value = Vec<(usize, usize)>> {
+        proptest::collection::vec((0usize..3, 0usize..3), 0..4)
+    }
+
+    fn arb_ops() -> impl Strategy<Value = Vec<Op>> {
+        // Deltas straddle the confirm boundary on BOTH sides, so a window can
+        // open, age partway, and cross `min_span` mid-sequence.
+        let advance = prop_oneof![Just(0u64), Just(30_000), Just(60_000), Just(120_000)];
+        let fold =
+            (arb_live(), advance).prop_map(|(live, advance_ms)| Op::Fold { live, advance_ms });
+        let died = (0usize..3).prop_map(Op::PidDied);
+        proptest::collection::vec(prop_oneof![3 => fold, 1 => died], 1..14)
+    }
+
+    proptest! {
+        /// The hysteresis is a TIME gate, not a count gate: however many healthy
+        /// snapshots miss an id, none may confirm its exit while the clock stands
+        /// still. A counter-based rewrite of the ladder passes every scripted
+        /// test above and fails this one.
+        #[test]
+        fn no_exit_is_confirmed_while_the_clock_stands_still(
+            snaps in proptest::collection::vec(arb_live(), 1..14)
+        ) {
+            let mut ladder = ProbeLadder::new(SPAN);
+            let t = Instant::now();
+            for live in &snaps {
+                let out = ladder.fold(&snap_of(live), t);
+                prop_assert!(
+                    out.exits.is_empty(),
+                    "confirmed {:?} with zero elapsed time", out.exits
+                );
+            }
+        }
+
+        /// An id every snapshot vouches for is never missing, so no sequence of
+        /// rungs may confirm it dead — the false-positive direction, which is the
+        /// one that kills a LIVE session's sprite.
+        #[test]
+        fn a_continuously_vouched_id_never_exits(
+            others in proptest::collection::vec(arb_live(), 1..14)
+        ) {
+            let mut ladder = ProbeLadder::new(SPAN);
+            let mut now = Instant::now();
+            for (i, extra) in others.iter().enumerate() {
+                now += SPAN * (i as u32 % 3 + 1);
+                let mut live = vec![(0usize, 0usize)]; // "s0" is in EVERY snapshot
+                live.extend(extra.iter().copied());
+                let out = ladder.fold(&snap_of(&live), now);
+                prop_assert!(
+                    !out.exits.iter().any(|id| id == IDS[0]),
+                    "a continuously vouched id was confirmed dead: {:?}", out.exits
+                );
+            }
+        }
+
+        /// The instant-exit ↔ negative-vouch handshake as ONE property: an id may
+        /// not be reported dead twice unless a healthy snapshot vouched for it
+        /// again in between. `forget`/`unbind` exist precisely to hold this, and
+        /// an interleaved SEQUENCE is what exercises them against each other —
+        /// a duplicate here is a duplicate `SessionEnd` on the wire.
+        #[test]
+        fn no_id_exits_twice_without_a_re_vouch(ops in arb_ops()) {
+            let mut ladder = ProbeLadder::new(SPAN);
+            let mut now = Instant::now();
+            let mut dead: HashSet<String> = HashSet::new();
+            for op in &ops {
+                match op {
+                    Op::Fold { live, advance_ms } => {
+                        now += Duration::from_millis(*advance_ms);
+                        let snap = snap_of(live);
+                        // Being vouched again REVIVES the id (a resumed session).
+                        for id in snap.pid_of.keys() {
+                            dead.remove(id);
+                        }
+                        for id in ladder.fold(&snap, now).exits {
+                            prop_assert!(
+                                dead.insert(id.clone()),
+                                "{id} exited twice without a re-vouch"
+                            );
+                        }
+                    }
+                    Op::PidDied(p) => {
+                        for id in ladder.pid_died(PIDS[*p]) {
+                            prop_assert!(
+                                dead.insert(id.clone()),
+                                "{id} exited twice without a re-vouch"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        /// `ProbeLadder`'s stated bindings invariant — "an id is bound under at
+        /// most ONE pid" — observed through the interface: drain every pid and no
+        /// id may surface twice. A rebind migration that failed to unbind the OLD
+        /// pid shows up here as a duplicate, and that stale binding is exactly
+        /// what would instant-exit a session that is still alive under the new one.
+        #[test]
+        fn an_id_is_bound_under_at_most_one_pid(ops in arb_ops()) {
+            let mut ladder = ProbeLadder::new(SPAN);
+            let mut now = Instant::now();
+            for op in &ops {
+                match op {
+                    Op::Fold { live, advance_ms } => {
+                        now += Duration::from_millis(*advance_ms);
+                        ladder.fold(&snap_of(live), now);
+                    }
+                    Op::PidDied(p) => {
+                        ladder.pid_died(PIDS[*p]);
+                    }
+                }
+            }
+            let mut seen: HashSet<String> = HashSet::new();
+            for pid in PIDS {
+                for id in ladder.pid_died(pid) {
+                    prop_assert!(
+                        seen.insert(id.clone()),
+                        "{id} was bound under more than one pid"
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// A cheap unique-ish suffix for nonexistent-path fixtures (no uuid dep here).

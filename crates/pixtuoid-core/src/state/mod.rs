@@ -163,9 +163,8 @@ impl ToolKind {
     /// glow to this.
     pub fn from_display(display: &str) -> Self {
         match display
-            .split(|c: char| !c.is_alphanumeric())
-            .next()
-            .unwrap_or("")
+            .split_once(|c: char| !c.is_alphanumeric())
+            .map_or(display, |(head, _)| head)
         {
             "Edit" | "Write" | "MultiEdit" => ToolKind::Edit,
             "Read" => ToolKind::Read,

@@ -132,6 +132,18 @@ fn augment_with_leader_vouch(snap: ProbeSnapshot, grok_root: &Path) -> ProbeSnap
 /// The pid holding `leader.sock` open, via the shared fd probe (macOS libproc /
 /// Linux /proc). BOTH installed comm names are probed — the installer links
 /// the binary as `grok` AND `agent` — plus the from-source artifact name.
+///
+/// **CURRENTLY INERT (#826) — this always returns `None`, so the #638 leader
+/// vouch never fires.** [`crate::source::fd_probe::open_vnode_paths`] reports VNODE
+/// descriptors only, and a unix socket is not one: on macOS its fd carries
+/// `PROX_FDTYPE_SOCKET`, and on Linux `/proc/<pid>/fd/N` resolves to the
+/// non-path `socket:[inode]`. Pinned by that module's
+/// `open_vnode_paths_never_reports_a_unix_socket`. Grok leader-mode sessions
+/// therefore keep the documented pre-#638 behaviour (mtime first-sight gate +
+/// short-idle reap + prompt resurrect); the vouch is additive-only, so nothing
+/// misbehaves — it simply does not help. Fixing it needs a socket-aware probe
+/// (`PROC_PIDFDSOCKETINFO` / a `/proc/net/unix` inode join) plus the injected-
+/// enumerator split the sibling binders got, so the fix is testable.
 #[cfg(unix)]
 fn leader_socket_owner(sock: &Path) -> Option<i32> {
     // Kernel-reported fd paths come back canonicalized (the /tmp →
@@ -356,6 +368,62 @@ mod tests {
             {"session_id":"0197-a","pid":100,"cwd":"/r/a","opened_at":"2026-07-16T12:00:05Z"},
             {"session_id":"0197-b","pid":200,"cwd":"/r/b","opened_at":"2026-07-16T12:01:00+00:00"}
         ]"#;
+
+        // --- the OS BINDER (`live_grok_session_ids`) ---
+        // The pure join above had six tests; the binder that decides
+        // `Some(empty)` vs `None` had ZERO, while BOTH sibling probes cover
+        // theirs (`live_omp_session_ids` has the same pair; `live_cc_session_ids`
+        // has ~14). The arms are load-bearing in opposite directions:
+        // `ProbeLadder::fold` is never called on a probe FAILURE ("failure
+        // changes nothing"), whereas a healthy `Some(empty)` puts every
+        // previously-vouched id into the miss window and confirms a
+        // `SessionEnd` two healthy misses later. Reading one as the other
+        // either freezes the ladder forever or ends live sessions.
+
+        /// No `active_sessions.json` = no TUI clients, a real observation — NOT
+        /// an enumeration failure. `None` here would freeze the negative-vouch
+        /// ledger on every machine that never ran grok.
+        #[test]
+        fn binder_absent_registry_is_a_healthy_empty_not_a_failure() {
+            let dir = tempfile::tempdir().unwrap();
+            let snap =
+                live_grok_session_ids(dir.path()).expect("an absent registry is not a failure");
+            assert!(snap.pid_of.is_empty());
+        }
+
+        /// A registry that exists but cannot be READ is the enumeration failing
+        /// — the watcher must change nothing.
+        #[test]
+        fn binder_unreadable_registry_is_a_failure_not_an_empty() {
+            let dir = tempfile::tempdir().unwrap();
+            // A directory in its place makes `std::fs::read` fail with EISDIR on
+            // both platforms (chmod 000 would not fail for root, which CI sometimes is).
+            std::fs::create_dir(dir.path().join("active_sessions.json")).unwrap();
+            assert!(
+                live_grok_session_ids(dir.path()).is_none(),
+                "an unreadable registry must be None, never a healthy empty"
+            );
+        }
+
+        /// End-to-end through the real file read + the real liveness check: our
+        /// own pid is unquestionably alive, so it must bind. Falsifiable — a
+        /// binder stubbed to `Some(default)` returns an empty snapshot.
+        #[test]
+        fn binder_reads_a_real_registry_and_binds_our_own_live_pid() {
+            let dir = tempfile::tempdir().unwrap();
+            let me = std::process::id();
+            std::fs::write(
+                dir.path().join("active_sessions.json"),
+                format!(r#"[{{"session_id":"live-1","pid":{me},"cwd":"/r"}}]"#),
+            )
+            .unwrap();
+            let snap = live_grok_session_ids(dir.path()).expect("a readable registry is healthy");
+            assert_eq!(
+                snap.pid_of.get("live-1"),
+                Some(&(me as i32)),
+                "a live registry entry must bind its id to its pid"
+            );
+        }
 
         #[test]
         fn live_entries_bind_ids_to_pids() {

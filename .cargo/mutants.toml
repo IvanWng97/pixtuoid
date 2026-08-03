@@ -133,6 +133,21 @@ exclude_re = [
     # single_pod_band + the boundary scan), so only the unobservable culprit-vs-
     # blanket distinction survives — an equivalent mutant within reach today.
     'compute\.rs.*plant_ground_in_bounds',
+    # `ProbeSnapshot::bind_pid`'s #252 tiebreak, `if pid > *bound { *bound = pid }`.
+    # `>=` differs only when `pid == *bound`, and the body then writes the value
+    # that is ALREADY there — `pid_of` is a `HashMap<String, i32>`, so there is no
+    # identity an observer could distinguish. Equivalent by construction, not
+    # merely untested (the ordering behavior itself IS pinned, both directions, by
+    # `bind_pid_keeps_the_larger_pid_in_both_orders`).
+    'liveness\.rs.*replace > with >= in ProbeSnapshot::bind_pid',
+    # `no_cwd_from_path` is the DEFAULT `CwdDeriver` ("no opinion"), and its sole
+    # consumer collapses both spellings one line later:
+    #     cwd.or_else(|| (decoders.cwd_derive)(path)).unwrap_or_default()
+    # `None` and `Some(PathBuf::new())` both leave `unwrap_or_default()` with the
+    # same empty PathBuf, and walk.rs:540 is the only call site in the tree
+    # (grep-verified) — so no observer exists. The grok OVERRIDE that makes this
+    # seam matter is separately pinned by the `with_cwd_deriver` test.
+    'jsonl/mod\.rs.*replace no_cwd_from_path ->',
     #
     # A SECOND class, deliberately kept apart from the equivalent mutants above:
     # untestable GLUE inside two files that are otherwise mutated. These are the
@@ -146,4 +161,30 @@ exclude_re = [
     'tui/mod\.rs.*(run_tui|focus_clicked_agent|setup_terminal|teardown_terminal|resolve_version_popup)',
     'runtime/driver\.rs.*replace (run|run_async|headless_loop|compute_boot_capacities) ->',
     'runtime/driver\.rs.*replace reducer_task with',
+    #
+    # A THIRD class: one-line BINDERS that tests DO reach, but only on a branch
+    # where the mutation is unobservable. Distinct from the zero-call-site glue
+    # above — the admission test here is not "is it called" but "can any REACHABLE
+    # call distinguish the mutant", so re-check that, not the call graph, before
+    # trusting either entry.
+    #
+    # `hook::unix::ensure_owned_socket_dir` substitutes the real
+    # `/tmp/pixtuoid-{uid}` + our uid into `ensure_owned_socket_dir_in`. It IS
+    # called under test — `tests/transport/socket.rs` drives it via
+    # `HookSocketListener::bind` — but always with a tempdir endpoint, i.e. only
+    # on the no-op branch, where `-> Ok(())` is the correct answer. Reaching the
+    # FIRING branch means creating and validating the REAL per-user socket dir,
+    # which would race a live daemon on a dev box. Keep this fn a pure
+    # substitution: the decision logic and its six pins live in
+    # `ensure_owned_socket_dir_in`, and any logic added HERE becomes unmeasurable.
+    'unix\.rs.*replace ensure_owned_socket_dir ->',
+    # `ProbeSnapshot::from_open_fds` is the same shape: reached under test through
+    # the omp/codex probes, but only where the proc-table walk finds nothing, so
+    # `Some(Default::default())` is indistinguishable from the real answer.
+    # Distinguishing it needs a live process holding a transcript open under a
+    # temp root — the real-FFI-plus-scheduling flakiness `fd_probe.rs` is excluded
+    # wholesale for. The logic it used to hide is now measured: `_with` takes both
+    # enumerators, so canonicalize-or-`Some(empty)`, enumeration-failure-is-`None`,
+    # and the pid→path join are each killable.
+    'liveness\.rs.*replace ProbeSnapshot::from_open_fds ->',
 ]
