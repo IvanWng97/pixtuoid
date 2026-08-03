@@ -199,9 +199,10 @@ fn augment_with_fresh_sessions(
 /// process start within [`cc_probe::PID_START_TOLERANCE_SECS`] (the #220
 /// pid-recycle identity check; either side missing → pid-alive-only, the
 /// check is additive). Returns `None` only when the DOCUMENT doesn't parse as
-/// an array of entries (format drift); junk VALUES inside an entry (pid <= 0)
-/// skip that entry silently, mirroring the CC registry's value-vs-shape
-/// distinction.
+/// an array of entries — a renamed or mistyped key, i.e. format drift; junk
+/// VALUES inside an entry (a pid `decoder::checked_pid` rejects — non-positive
+/// OR outside `i32` range — an empty `session_id`, a recycled pid) skip that
+/// entry silently, mirroring the CC registry's value-vs-shape distinction.
 #[cfg(unix)]
 fn grok_ids_from_registry(
     bytes: &[u8],
@@ -211,10 +212,8 @@ fn grok_ids_from_registry(
     #[derive(serde::Deserialize)]
     struct Entry {
         session_id: String,
-        // `i64`, narrowed below rather than deserialized as `i32`: an
-        // out-of-range VALUE must skip its own entry like every other junk
-        // value, not fail the whole document into the `shape_drift` arm that
-        // claims the registry's SHAPE changed upstream (#831).
+        // `i64`: an out-of-`i32` value must skip its entry, not fail the
+        // document — see `decoder::checked_pid` (#831).
         pid: i64,
         #[serde(default)]
         opened_at: Option<String>,

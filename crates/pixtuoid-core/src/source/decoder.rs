@@ -72,8 +72,10 @@ pub(crate) fn accept_all_paths(_p: &Path) -> bool {
 /// ingress rides — the hook peek, the openclaw decode, and BOTH first-party
 /// session registries (`cc_probe::parse_registry_entry`,
 /// `grok::native::grok_ids_from_registry`) — so a new ingress can't ship the
-/// N-th unchecked pid; the sibling set the openclaw
-/// `nonpositive_pid_is_dropped_like_every_sibling_pid_ingest` test names.
+/// N-th unchecked pid. That four-site roster is THIS doc's, not a test's:
+/// openclaw's `nonpositive_pid_is_dropped_like_every_sibling_pid_ingest` pins
+/// only its own arm. `fd_probe` is deliberately NOT a rider — it filters `> 0`
+/// over kernel-enumerated `pid_t`, where the `i32`-range half is vacuous.
 ///
 /// Taking `i64` and narrowing HERE is what keeps an out-of-range value a
 /// per-entry skip: a caller that deserializes straight into `i32` fails its
