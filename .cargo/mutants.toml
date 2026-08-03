@@ -37,6 +37,15 @@ exclude_globs = [
     # their mutants stay IN), this file also excludes the pixtuoid-core probe
     # files below, and tui/mod.rs + driver.rs are ignored THERE but mutated HERE
     # (see the note under this list). Edit shared entries together.
+    #
+    # These four ARE the intersection of the two lists — the paths no instrument
+    # looks at AT ALL — so each has to earn its exclusion twice over. Audited
+    # #827; the per-file findings live in the matching note in `codecov.yml`.
+    # The standing rule that came out of it: when a DECISION turns up in one of
+    # these, move it out to a counted module rather than leaving it here.
+    # `floating::offscreen::sync_floor_caps` is the worked example — a
+    # `store`-not-`fetch_max` capacity publish that sat in `window.rs` with a
+    # "don't harmonize this" doc comment and nothing able to enforce it.
     "crates/pixtuoid/src/main.rs",
     "crates/pixtuoid/src/runtime/pipeline.rs",
     "crates/pixtuoid/src/floating/mod.rs",

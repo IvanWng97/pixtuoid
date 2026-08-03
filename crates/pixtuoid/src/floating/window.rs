@@ -18,12 +18,11 @@
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::{DaemonLiveness, MAX_FLOORS};
+use pixtuoid_core::state::DaemonLiveness;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, MouseButton, WindowEvent};
@@ -187,11 +186,8 @@ impl FloatingApp {
         // The ONE projection helper, shared with the boot seed so the two can't drift.
         let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(size);
         // Keep the reducer's desk capacity in lockstep with the office actually rendered at
-        // this BUFFER size (authority = the layout's home-desk count, same as the TUI).
-        if self.last_caps_size != Some((buf_w, buf_h)) {
-            sync_floor_caps(&floor_caps, buf_w, buf_h);
-            self.last_caps_size = Some((buf_w, buf_h));
-        }
+        // this BUFFER size. Owns its own resize memo — see `sync_floor_caps`.
+        super::offscreen::sync_floor_caps(&mut self.last_caps_size, &floor_caps, buf_w, buf_h);
         let floor_meta = FloorMeta::ground();
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
@@ -266,17 +262,6 @@ impl FloatingApp {
         super::offscreen::paint_footer_into_surface(&mut sb, win_w, win_h, &footer, self.theme);
         window.pre_present_notify();
         let _ = sb.present();
-    }
-}
-
-/// Sync the per-floor desk-capacity atomics to the office layout at `buf_w`×`buf_h` —
-/// the authority is the layout's `home_desks` count (mirrors the TUI's per-frame sync,
-/// `tui/mod.rs`). `store` (not `fetch_max`): floating tracks its window exactly, so a shrink
-/// lowers capacity (excess agents become invisible-but-alive, like the TUI on shrink).
-fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u16) {
-    let caps = super::offscreen::floor_caps_for_buffer(buf_w, buf_h);
-    for (cap, capacity) in floor_caps.iter().zip(caps) {
-        cap.store(capacity, Ordering::Relaxed);
     }
 }
 
