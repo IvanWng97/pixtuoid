@@ -60,6 +60,8 @@ use crate::AgentId;
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
+pub(crate) use native::grok_client_pid_for_session;
+#[cfg(feature = "native")]
 pub use native::{live_grok_session_ids, GrokSource};
 
 /// The Grok Build source's registry name (its `SourceDescriptor.name`).

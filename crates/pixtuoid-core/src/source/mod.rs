@@ -372,12 +372,13 @@ pub fn codex_pid_for_session(sessions_root: &std::path::Path, uuid: &str) -> Opt
 /// against grok's own `active_sessions.json` registry under `grok_root`
 /// (= `grok_home()`, the registry file's parent) — recycle-guarded by the
 /// `opened_at` identity check inside the probe.
+///
+/// Resolves the CLIENT pid even in leader mode, where the liveness probe binds
+/// sessions to the LEADER instead (#826): a click must raise the window the
+/// user types in, not the process whose death ends the session.
 #[cfg(feature = "native")]
 pub fn grok_pid_for_session(grok_root: &std::path::Path, session_id: &str) -> Option<i32> {
-    grok::live_grok_session_ids(grok_root)?
-        .pid_of
-        .get(session_id)
-        .copied()
+    grok::grok_client_pid_for_session(grok_root, session_id)
 }
 
 /// Shared ACP (Agent Client Protocol) wire-vocabulary decode — reused by any
