@@ -133,6 +133,21 @@ exclude_re = [
     # single_pod_band + the boundary scan), so only the unobservable culprit-vs-
     # blanket distinction survives — an equivalent mutant within reach today.
     'compute\.rs.*plant_ground_in_bounds',
+    # `ProbeSnapshot::bind_pid`'s #252 tiebreak, `if pid > *bound { *bound = pid }`.
+    # `>=` differs only when `pid == *bound`, and the body then writes the value
+    # that is ALREADY there — `pid_of` is a `HashMap<String, i32>`, so there is no
+    # identity an observer could distinguish. Equivalent by construction, not
+    # merely untested (the ordering behavior itself IS pinned, both directions, by
+    # `bind_pid_keeps_the_larger_pid_in_both_orders`).
+    'liveness\.rs.*replace > with >= in ProbeSnapshot::bind_pid',
+    # `no_cwd_from_path` is the DEFAULT `CwdDeriver` ("no opinion"), and its sole
+    # consumer collapses both spellings one line later:
+    #     cwd.or_else(|| (decoders.cwd_derive)(path)).unwrap_or_default()
+    # `None` and `Some(PathBuf::new())` both leave `unwrap_or_default()` with the
+    # same empty PathBuf, and walk.rs:540 is the only call site in the tree
+    # (grep-verified) — so no observer exists. The grok OVERRIDE that makes this
+    # seam matter is separately pinned by the `with_cwd_deriver` test.
+    'jsonl/mod\.rs.*replace no_cwd_from_path ->',
     #
     # A SECOND class, deliberately kept apart from the equivalent mutants above:
     # untestable GLUE inside two files that are otherwise mutated. These are the
@@ -146,4 +161,27 @@ exclude_re = [
     'tui/mod\.rs.*(run_tui|focus_clicked_agent|setup_terminal|teardown_terminal|resolve_version_popup)',
     'runtime/driver\.rs.*replace (run|run_async|headless_loop|compute_boot_capacities) ->',
     'runtime/driver\.rs.*replace reducer_task with',
+    # `hook::unix::ensure_owned_socket_dir` — the one-line BINDER that substitutes
+    # the real `/tmp/pixtuoid-{uid}` + our real uid into `ensure_owned_socket_dir_in`.
+    # Driving it means creating/validating the REAL per-user socket dir, which
+    # would race a live daemon on a dev box, so no test calls it (production
+    # callers only — the `driver.rs` rule above). The NOTE that matters: this
+    # exclusion is only honest because the fn is a pure substitution. Before the
+    # #485 guard was split, the decision logic lived HERE and both
+    # `-> Ok(())` and `delete !` survived the entire suite — a security guard that
+    # could be deleted invisibly. After the split, re-mutating the file scores
+    # 14 caught / 1 missed, that one being this line (measured, not assumed).
+    # So: keep this fn a pure substitution. Any logic added here becomes
+    # unmeasurable, and this exclusion silently starts hiding it.
+    'unix\.rs.*replace ensure_owned_socket_dir ->',
+    # `ProbeSnapshot::from_open_fds` — the SAME shape as the binder above, and
+    # found by the same run: the one line that substitutes the real
+    # `fd_probe::pids_by_name` / `open_vnode_paths` into `from_open_fds_with`.
+    # Killing it needs a live process holding a transcript open under a temp root
+    # (real FFI + real scheduling) — the flaky class `fd_probe.rs` is excluded
+    # wholesale for. Everything it used to hide is now measured: `_with` takes
+    # both enumerators, so canonicalize-or-`Some(empty)`, enumeration-failure-is-
+    # `None`, and the pid→path join are all killable, and re-mutating the file
+    # scores 8 caught / 1 missed — this line. Keep it a pure substitution.
+    'liveness\.rs.*replace ProbeSnapshot::from_open_fds ->',
 ]

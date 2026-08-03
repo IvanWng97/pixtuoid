@@ -531,15 +531,26 @@ mod tests {
             "{{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
              \"transcript_path\":\"/p/s1.jsonl\",\"pad\":\"{pad}\"}}\n"
         );
-        client.write_all(line.as_bytes()).await.unwrap();
-        drop(client);
-        let (transport, ev) = rx
-            .recv()
+        // The write must run CONCURRENTLY with the reader: the payload is ~20x the
+        // duplex buffer, so `write_all` only completes as `handle_conn` drains it.
+        // Written INLINE, any mutation that stops the drain — a shrunken
+        // `MAX_CONN_BYTES`, a no-op `handle_conn` — parks this await forever, so
+        // the test "fails" only by hanging: cargo-mutants scored all three as 51s
+        // TIMEOUTs rather than kills. Spawning the writer and bounding the recv
+        // turns each of them into a fast assertion failure instead, which is the
+        // difference between a pin that reports and a pin that stalls the run.
+        let writer = tokio::spawn(async move {
+            let _ = client.write_all(line.as_bytes()).await;
+            drop(client);
+        });
+        let (transport, ev) = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
             .await
-            .expect("a 1.25 MiB line sits inside the 2 MiB conn ceiling");
+            .expect("a 1.25 MiB line must decode well inside the 2 MiB conn ceiling")
+            .expect("one decoded event");
         assert_eq!(transport, Transport::Hook);
         assert!(matches!(ev, AgentEvent::SessionStart { .. }));
-        task.await.unwrap();
+        writer.abort();
+        task.abort();
     }
 
     // The daemon demux is registry-DRIVEN (no source named in handle_conn): an
@@ -752,7 +763,22 @@ mod tests {
         client.write_all(line.as_bytes()).await.unwrap();
 
         // Drain the SessionStart so it doesn't race the SessionEnd on the channel.
-        let (_, ev) = rx.recv().await.expect("the SessionStart from the payload");
+        // BOUNDED on purpose: `HookPidWatch::spawn` holds a `tx` clone, so this
+        // channel never closes on its own — an unbounded `rx.recv()` parks FOREVER
+        // whenever the payload decodes to nothing, and this test then hangs rather
+        // than fails. That is measured, not theoretical: it is why three mutants in
+        // this file scored as 51s cargo-mutants TIMEOUTs instead of kills — every
+        // other hook test failed in ~0.01s, but nextest cannot finish cancelling
+        // while one test never returns. Killing the child on the failure path too,
+        // so a red here doesn't also leak a `sleep 60`.
+        let ev = match tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await {
+            Ok(Some((_, ev))) => ev,
+            other => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("expected the SessionStart from the payload, got {other:?}");
+            }
+        };
         assert!(matches!(ev, AgentEvent::SessionStart { .. }), "got {ev:?}");
 
         drop(client); // EOF ends the conn loop
