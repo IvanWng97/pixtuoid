@@ -28,20 +28,14 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     let path = grok_root.join("active_sessions.json");
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
-        // Absent registry = healthy "no TUI clients"; the leader arm may still
-        // vouch (a headless-into-leader setup writes no registry entries).
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Some(augment_with_leader_vouch(
-                ProbeSnapshot::default(),
-                grok_root,
-            ))
-        }
+        // Absent registry = healthy "no TUI clients".
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(ProbeSnapshot::default()),
         Err(_) => return None,
     };
     match grok_ids_from_registry(&bytes, crate::source::cc_probe::pid_alive, |pid| {
         crate::source::cc_probe::pid_start_time_secs(pid)
     }) {
-        Some(snap) => Some(augment_with_leader_vouch(snap, grok_root)),
+        Some(snap) => Some(snap),
         None => {
             static SHAPE_DRIFT_WARNED: std::sync::Once = std::sync::Once::new();
             SHAPE_DRIFT_WARNED.call_once(|| {
@@ -65,94 +59,6 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
 #[cfg(not(unix))]
 pub fn live_grok_session_ids(_grok_root: &Path) -> Option<ProbeSnapshot> {
     None
-}
-
-/// A leader-mode session's transcript counts as fresh for this long after its
-/// last append — 2.5× the watcher's 60s poll (two missed polls + slack).
-#[cfg(unix)]
-const LEADER_SESSION_FRESH_SECS: u64 = 150;
-
-/// The leader-mode secondary vouch. In opt-in `--leader` mode the AGENT
-/// (session-file writes + hook firing) runs in a shared LEADER process while
-/// `active_sessions.json` records only each TUI CLIENT's pid — so a client
-/// disconnect used to read as the session's exit even though the leader keeps
-/// it alive. When the leader's rendezvous socket has a LIVE owner, every
-/// session whose `updates.jsonl` was appended within
-/// [`LEADER_SESSION_FRESH_SECS`] is vouched, bound to the LEADER's pid. A
-/// registry (client-pid) binding wins where both exist.
-#[cfg(unix)]
-fn augment_with_leader_vouch(snap: ProbeSnapshot, grok_root: &Path) -> ProbeSnapshot {
-    let sock = grok_root.join("leader.sock");
-    if !sock.exists() {
-        return snap;
-    }
-    let Some(leader_pid) = leader_socket_owner(&sock) else {
-        // Socket file exists but no live process holds it open — residue from
-        // a killed leader, not a live one.
-        return snap;
-    };
-    augment_with_fresh_sessions(
-        snap,
-        &grok_root.join("sessions"),
-        leader_pid,
-        std::time::SystemTime::now(),
-    )
-}
-
-/// The pid holding `leader.sock` open, via the shared fd probe. BOTH installed
-/// comm names are probed — the installer links the binary as `grok` AND `agent`
-/// — plus the from-source artifact name.
-///
-/// **CURRENTLY INERT (#826) — this always returns `None`, so the leader vouch
-/// never fires.** [`crate::source::fd_probe::open_vnode_paths`] reports VNODE
-/// descriptors only, and a unix socket is not one (macOS `PROX_FDTYPE_SOCKET`;
-/// Linux's non-path `socket:[inode]`). The vouch is additive-only, so nothing
-/// misbehaves — it simply does not help. Fixing it needs a socket-aware probe.
-#[cfg(unix)]
-fn leader_socket_owner(sock: &Path) -> Option<i32> {
-    // Kernel-reported fd paths come back canonicalized (the /tmp →
-    // /private/tmp class) — compare against the canonical socket path.
-    let sock = sock.canonicalize().ok()?;
-    for comm in ["grok", "agent", "xai-grok-pager"] {
-        for pid in crate::source::fd_probe::pids_by_name(comm)? {
-            if crate::source::fd_probe::open_vnode_paths(pid).contains(&sock) {
-                return Some(pid);
-            }
-        }
-    }
-    None
-}
-
-/// Bind every id whose `updates.jsonl` was appended within the freshness window
-/// to `leader_pid`, without displacing an existing (registry/client) binding.
-#[cfg(unix)]
-fn augment_with_fresh_sessions(
-    mut snap: ProbeSnapshot,
-    sessions_root: &Path,
-    leader_pid: i32,
-    now: std::time::SystemTime,
-) -> ProbeSnapshot {
-    let Ok(groups) = std::fs::read_dir(sessions_root) else {
-        return snap;
-    };
-    for group in groups.flatten() {
-        let Ok(sessions) = std::fs::read_dir(group.path()) else {
-            continue;
-        };
-        for session in sessions.flatten() {
-            let updates = session.path().join("updates.jsonl");
-            let fresh = std::fs::metadata(&updates)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|mtime| now.duration_since(mtime).ok())
-                .is_some_and(|age| age.as_secs() <= LEADER_SESSION_FRESH_SECS);
-            if fresh {
-                let id = super::grok_id_from_path(&updates);
-                snap.pid_of.entry(id).or_insert(leader_pid);
-            }
-        }
-    }
-    snap
 }
 
 /// Parse the registry array and keep entries whose pid is alive AND — when BOTH
@@ -472,54 +378,55 @@ mod tests {
             }
         }
 
+        /// grok's probe vouches ONLY what `active_sessions.json` binds: a
+        /// present, LIVE `leader.sock` must not add a session the registry did
+        /// not, however fresh that session's transcript is (#826).
+        ///
+        /// Differential — the same tree read twice, once with a real bound and
+        /// listening `UnixListener` at the leader path — so it pins the
+        /// OBSERVABLE decision rather than any mechanism, and still fails if a
+        /// leader vouch is reintroduced by a different route. Proven red before
+        /// the deletion by stubbing the socket owner to this process's pid;
+        /// without that step it is a tautology over absent code.
         #[test]
-        fn leader_vouch_binds_fresh_sessions_without_displacing_client_pids() {
-            use std::time::{Duration, SystemTime};
-            let tmp = tempfile::tempdir().unwrap();
-            let root = tmp.path().join("sessions");
-            let mk = |group: &str, sid: &str| {
-                let d = root.join(group).join(sid);
-                std::fs::create_dir_all(&d).unwrap();
-                std::fs::write(d.join("updates.jsonl"), "{}\n").unwrap();
+        fn a_present_leader_socket_binds_nothing_the_registry_did_not() {
+            let build = |with_socket: bool| {
+                let tmp = tempfile::tempdir().unwrap();
+                let me = std::process::id();
+                std::fs::write(
+                    tmp.path().join("active_sessions.json"),
+                    format!(r#"[{{"session_id":"client-1","pid":{me},"cwd":"/r"}}]"#),
+                )
+                .unwrap();
+                // A leader-kept session: no registry entry, transcript appended
+                // just now — the population the deleted vouch targeted.
+                let dir = tmp.path().join("sessions").join("%2Frepo").join("leader-1");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("updates.jsonl"), "{}\n").unwrap();
+                let listener = with_socket.then(|| {
+                    std::os::unix::net::UnixListener::bind(tmp.path().join("leader.sock"))
+                        .expect("bind leader.sock")
+                });
+                let snap =
+                    live_grok_session_ids(tmp.path()).expect("a readable registry is healthy");
+                drop(listener);
+                snap
             };
-            mk("%2Frepo", "fresh-a");
-            mk("%2Frepo", "fresh-b");
-            let now = SystemTime::now();
-
-            let mut seeded = ProbeSnapshot::default();
-            seeded.pid_of.insert("fresh-a".into(), 111);
-            let snap = augment_with_fresh_sessions(seeded, &root, 999, now);
+            let without = build(false);
+            let with = build(true);
             assert_eq!(
-                snap.pid_of.get("fresh-a"),
-                Some(&111),
-                "client-pid binding must win over the leader's"
+                with.pid_of, without.pid_of,
+                "a live leader.sock must not change what the probe vouches"
             );
-            assert_eq!(snap.pid_of.get("fresh-b"), Some(&999));
-
-            let at_edge = now + Duration::from_secs(LEADER_SESSION_FRESH_SECS);
-            let past_edge = now + Duration::from_secs(LEADER_SESSION_FRESH_SECS + 1);
-            let snap = augment_with_fresh_sessions(ProbeSnapshot::default(), &root, 7, at_edge);
-            assert_eq!(snap.pid_of.get("fresh-b"), Some(&7), "edge-inclusive");
-            let snap = augment_with_fresh_sessions(ProbeSnapshot::default(), &root, 7, past_edge);
-            assert_eq!(snap.pid_of.get("fresh-b"), None, "stale past the window");
-
-            let snap = augment_with_fresh_sessions(
-                ProbeSnapshot::default(),
-                &tmp.path().join("nope"),
-                7,
-                now,
+            assert_eq!(
+                with.pid_of.get("leader-1"),
+                None,
+                "a leader-kept session is deliberately unvouched — see the sharp edge"
             );
-            assert!(snap.pid_of.is_empty());
-        }
-
-        #[test]
-        fn absent_leader_socket_is_a_no_op_augment() {
-            let tmp = tempfile::tempdir().unwrap();
-            let mut seeded = ProbeSnapshot::default();
-            seeded.pid_of.insert("s".into(), 42);
-            let snap = augment_with_leader_vouch(seeded, tmp.path());
-            assert_eq!(snap.pid_of.get("s"), Some(&42));
-            assert_eq!(snap.pid_of.len(), 1);
+            assert!(
+                with.pid_of.contains_key("client-1"),
+                "control: the registry's own live entry still binds"
+            );
         }
     }
 }
