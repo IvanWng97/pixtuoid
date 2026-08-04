@@ -345,11 +345,17 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   `the_drawn_size_is_the_same_whichever_density_the_art_came_from`).
 │                   VARIANT ART IS EMBEDDED FOR EVERY TARGET, INCLUDING WASM, WHERE NOTHING
 │                   CAN SELECT IT — `pixtuoid-web` paints at `RenderScale::ONE` by design (the
-│                   chunky look), and only `densest_art` reads variants. `desk@4x` is ~4 KB of
-│                   the ~46 KB left under `gen-wasm-check`'s 1 MiB cap, so ONE variant is
-│                   affordable and the remaining ~27 pieces are NOT: budget the art phase
-│                   against that headroom, or gate the embed first. Gating is not a one-liner —
-│                   `pack.toml` declares the variant, so dropping the `include_str!` alone makes
+│                   chunky look), and only `densest_art` reads variants. Before budgeting the
+│                   art phase against `gen-wasm-check`'s 1 MiB, read what that cap IS: a RAW
+│                   proxy for wire bytes, set at ~350-400 KB gzipped (justfile, above the
+│                   recipe). Sprite files are palette-key text and compress ~10:1 — `desk@4x`
+│                   is 4,087 raw but 388 brotli — so the proxy diverges hardest on exactly this
+│                   payload. MEASURED: ~27 more pieces would be ~110 KB raw (blows the cap) and
+│                   ~10 KB brotli, landing the artifact near 309 KB against a 350-400 KB
+│                   target. So the art phase is blocked by the PROXY, not by the goal: raise
+│                   the raw cap, or move the gate onto compressed bytes — decide that before
+│                   gating the embed. If gating is chosen it is not a one-liner: `pack.toml`
+│                   declares the variant, so dropping the `include_str!` alone makes
 │                   `build_pack` fail on a missing frame; the LOADER has to skip variant
 │                   animations too.
 │                   The bundled `desk@4x` also records two ART decisions made against the
