@@ -40,10 +40,10 @@ fn frame_bytes(term: &mut Terminal<TestBackend>, draw: impl FnOnce(&mut ratatui:
         .collect()
 }
 
+/// A REAL font size, or the cell<->pixel mapping is a fiction and every byte
+/// count below measures the wrong image. `halfblocks()` sets a half-block
+/// cell, which is not what a kitty terminal has.
 fn main() {
-    // A REAL font size, or the cell<->pixel mapping is a fiction and every byte
-    // count below measures the wrong image. `halfblocks()` sets a half-block
-    // cell, which is not what a kitty terminal has.
     #[allow(deprecated)]
     let mut picker = Picker::from_fontsize((8, 16).into());
     picker.set_protocol_type(ProtocolType::Kitty);

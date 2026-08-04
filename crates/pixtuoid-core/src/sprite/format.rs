@@ -631,12 +631,12 @@ mod validation_floor_tests {
         load_pack_from_strings(&toml, &[("f.sprite", "@frame 0\nA")]).expect("pack builds")
     }
 
+    /// The whole point of deriving: authoring `<piece>@<N>x` is a sprite
+    /// file and nothing else. A second registry list would have to be kept
+    /// in step with the first, and every entry someone forgets is a silent
+    /// downgrade for `--pack-dir` users.
     #[test]
     fn a_density_variant_is_known_by_derivation_not_by_its_own_row() {
-        // The whole point of deriving: authoring `<piece>@<N>x` is a sprite
-        // file and nothing else. A second registry list would have to be kept
-        // in step with the first, and every entry someone forgets is a silent
-        // downgrade for `--pack-dir` users.
         assert!(is_optional_furniture_animation("desk"));
         assert!(is_optional_furniture_animation("desk@4x"));
         assert!(is_optional_furniture_animation("phone_booth@2x"));
@@ -664,13 +664,13 @@ mod validation_floor_tests {
         assert_eq!(split_density_variant("desk@-2x"), None);
     }
 
+    /// THE failure this derivation exists to prevent, and it is invisible
+    /// from inside the bundled pack: a `--pack-dir` pack that ships its own
+    /// `desk` but no `_hi` variant must still inherit the default's, or the
+    /// custom pack silently renders block-upscaled while the bundled one
+    /// does not.
     #[test]
     fn merge_from_inherits_a_density_variant_so_a_custom_pack_keeps_the_richer_art() {
-        // THE failure this derivation exists to prevent, and it is invisible
-        // from inside the bundled pack: a `--pack-dir` pack that ships its own
-        // `desk` but no `_hi` variant must still inherit the default's, or the
-        // custom pack silently renders block-upscaled while the bundled one
-        // does not.
         let base = pack_with(
             "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
              [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
@@ -687,12 +687,12 @@ mod validation_floor_tests {
         );
     }
 
+    /// Neither "missing" nor "unknown": a density variant is authored or it
+    /// is not, and every pack that has not been redrawn is the normal case.
+    /// Listing them as missing optionals would put ~28 permanent lines in
+    /// every `validate-pack` run.
     #[test]
     fn an_unauthored_density_variant_is_not_reported_missing() {
-        // Neither "missing" nor "unknown": a density variant is authored or it
-        // is not, and every pack that has not been redrawn is the normal case.
-        // Listing them as missing optionals would put ~28 permanent lines in
-        // every `validate-pack` run.
         let report = validate_pack_animations(&pack_with(
             "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
         ));
@@ -707,11 +707,11 @@ mod validation_floor_tests {
         assert!(!report.unknown.contains(&"desk".to_string()));
     }
 
+    /// An empty `desk@4x` is the WORSE shadow: `contains_key` is true, so
+    /// `merge_from` skips the default's real art and the piece renders
+    /// nothing at the density it claims to serve.
     #[test]
     fn an_empty_density_variant_still_fails_the_frame_floor() {
-        // An empty `desk@4x` is the WORSE shadow: `contains_key` is true, so
-        // `merge_from` skips the default's real art and the piece renders
-        // nothing at the density it claims to serve.
         let report = validate_pack_animations(&pack_with(
             "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
              [animations.\"desk@4x\"]\nframes=[]\nframe_ms=100\n",
@@ -726,12 +726,12 @@ mod validation_floor_tests {
         );
     }
 
+    /// A painter picks its scale from the TERMINAL, but a variant only lands
+    /// at a scale its density divides — so it needs ONE number from the pack
+    /// to round against, and it must be the MAX because one scale serves
+    /// every piece at once.
     #[test]
     fn the_packs_max_density_is_the_scale_a_painter_has_to_round_to() {
-        // A painter picks its scale from the TERMINAL, but a variant only lands
-        // at a scale its density divides — so it needs ONE number from the pack
-        // to round against, and it must be the MAX because one scale serves
-        // every piece at once.
         let plain = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         assert_eq!(
             plain.max_density_variant(),
@@ -758,12 +758,12 @@ mod validation_floor_tests {
         assert_eq!(bundled.max_density_variant(), 4);
     }
 
+    /// The name is a CLAIM and the size is the proof. Without this check the
+    /// claim is only ever tested by whichever renderer happens to look for
+    /// that density — silently, at paint time, on someone else's terminal —
+    /// and the piece draws at the wrong size when it is.
     #[test]
     fn a_variant_that_lies_about_its_density_is_a_hard_error() {
-        // The name is a CLAIM and the size is the proof. Without this check the
-        // claim is only ever tested by whichever renderer happens to look for
-        // that density — silently, at paint time, on someone else's terminal —
-        // and the piece draws at the wrong size when it is.
         let pack = load_pack_from_strings(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
              [animations.desk]\nframes=[\"one.sprite\"]\nframe_ms=100\n\

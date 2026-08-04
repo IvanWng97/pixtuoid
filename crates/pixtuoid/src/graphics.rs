@@ -106,18 +106,19 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 }
 
 /// Real pixels per logical office unit, for this terminal and this pack.
+///
+/// Rounded DOWN to a multiple of `max_density`, because a density variant is
+/// only usable at a scale its density divides. Found on a real Retina Ghostty:
+/// a 17px cell makes 17 the natural scale, 17 is PRIME, and every variant in
+/// the pack sits unused while the base art block-scales 17x. Giving up at most
+/// `max_density - 1` px of office (17 -> 16, ~6%) to make the richer art
+/// reachable is not a close call — not being upscaled is the whole point of
+/// the variants.
+///
+/// A pack with no variants reports 1, so this is the identity there and the
+/// classic-density path is untouched.
 pub fn render_scale_for_cell(cell: CellSize, max_density: u16) -> Option<RenderScale> {
     let raw = raw_scale_for_cell(cell);
-    // Round DOWN to a multiple of the densest art the pack has, because a
-    // variant is only usable at a scale its density divides. Found on a real
-    // Retina Ghostty: a 17px cell makes 17 the natural scale, 17 is PRIME, and
-    // every density variant in the pack sits unused while the base art
-    // block-scales 17x. Giving up at most `max_density - 1` px of office (17 ->
-    // 16, ~6%) to make the richer art reachable is the trade, and it is not
-    // close — the whole point of the variants is to not be upscaled.
-    //
-    // A pack with no variants reports 1 and this is the identity, so the
-    // classic-density path is untouched.
     let usable = if max_density >= 2 && raw >= max_density {
         (raw / max_density) * max_density
     } else {
@@ -149,9 +150,8 @@ pub fn resolve(mode: GraphicsMode, detected: Option<Detected>, max_density: u16)
         return classic(ClassicReason::NoProtocol);
     }
     match render_scale_for_cell(d.cell, max_density) {
-        // A scale of 1 is the classic density by definition — going through
-        // the image path to draw the same number of pixels would cost an
-        // encode per frame and buy nothing.
+        // Scale 1 IS the classic density: an encode per frame that draws the
+        // identical picture.
         Some(scale) if scale.get() > 1 => Plan {
             profile: Profile::Cutaway { scale },
             reason: None,
@@ -238,10 +238,8 @@ pub fn detect() -> Option<Detected> {
     let font = picker.font_size();
     let (w, h) = (font.width, font.height);
     Some(Detected {
-        // `Halfblocks` is ratatui-image's OWN fallback for "no protocol here",
-        // so it is the negative answer rather than a fourth backend to drive:
-        // taking it would hand our half-block office to a second half-block
-        // renderer.
+        // `Halfblocks` is ratatui-image's OWN "no protocol here" fallback, so
+        // driving it would hand our half-block office to a second one.
         has_protocol: picker.protocol_type() != ProtocolType::Halfblocks,
         cell: CellSize { w, h },
     })
@@ -260,11 +258,11 @@ mod tests {
         })
     }
 
+    /// The ~1:2 cell the whole half-block technique assumes: 8 wide, 16
+    /// tall, so a logical unit is 8px either way and the office keeps its
+    /// proportions exactly.
     #[test]
     fn a_standard_cell_yields_its_width_as_the_scale() {
-        // The ~1:2 cell the whole half-block technique assumes: 8 wide, 16
-        // tall, so a logical unit is 8px either way and the office keeps its
-        // proportions exactly.
         assert_eq!(
             render_scale_for_cell(CELL_8X16, 1).map(|s| s.get()),
             Some(8)
@@ -282,20 +280,19 @@ mod tests {
             render_scale_for_cell(CellSize { w: 8, h: 24 }, 1).map(|s| s.get()),
             Some(8)
         );
-        // WIDER than 1:2 — now the height binds. Picking the width here would
-        // draw an office taller than the rows it was given, which the image
-        // widget silently refuses to render at all (measured in the spike).
+        // WIDER than 1:2 — height binds. Picking width overflows the rows given,
+        // which the image widget silently refuses to draw (spike-measured).
         assert_eq!(
             render_scale_for_cell(CellSize { w: 12, h: 16 }, 1).map(|s| s.get()),
             Some(8)
         );
     }
 
+    /// A terminal that answers the protocol query but not the pixel-size
+    /// one reports these. `RenderScale` cannot be zero, so the Option is
+    /// the honest return rather than a clamp to 1.
     #[test]
     fn a_degenerate_cell_has_no_scale_at_all() {
-        // A terminal that answers the protocol query but not the pixel-size
-        // one reports these. `RenderScale` cannot be zero, so the Option is
-        // the honest return rather than a clamp to 1.
         assert_eq!(render_scale_for_cell(CellSize { w: 0, h: 0 }, 1), None);
         assert_eq!(render_scale_for_cell(CellSize { w: 8, h: 1 }, 1), None);
         assert_eq!(render_scale_for_cell(CellSize { w: 0, h: 16 }, 1), None);
@@ -320,15 +317,14 @@ mod tests {
         assert_eq!(plan.reason, None, "a cutaway run has nothing to explain");
     }
 
+    /// The fallback is the common path — most terminals have no protocol —
+    /// so it must never be silent. A user asking "why is it not the pretty
+    /// one" gets an answer in all four shapes.
     #[test]
     fn every_way_of_lacking_graphics_falls_back_with_a_reason() {
-        // The fallback is the common path — most terminals have no protocol —
-        // so it must never be silent. A user asking "why is it not the pretty
-        // one" gets an answer in all four shapes.
         let cases = [
-            // Never asked vs asked-and-told-no are DIFFERENT facts. Collapsing
-            // them is what made a piped `doctor | grep` read as a verdict on
-            // the terminal, so they are pinned apart here.
+            // Never-asked vs asked-and-told-no are different facts — collapsing
+            // them made a piped `doctor | grep` read as a verdict on the terminal.
             (None, ClassicReason::NotQueried),
             (
                 Some(Detected {
@@ -360,9 +356,8 @@ mod tests {
         assert!(row.starts_with("graphics: cutaway at 8x"), "{row}");
         assert!(row.contains("8x16 cell"), "{row}");
 
-        // The common case is the fallback — most terminals have no protocol —
-        // so every classic row must carry its reason. A bare "classic" line
-        // reads as a verdict on the office rather than on the terminal.
+        // The fallback is the COMMON path, so every classic row must carry its
+        // reason — a bare "classic" reads as a verdict on the office.
         for (mode, detected) in [
             (GraphicsMode::Off, capable(CELL_8X16)),
             (GraphicsMode::Auto, None),
@@ -377,12 +372,12 @@ mod tests {
         }
     }
 
+    /// The real case, from a Retina Ghostty: a 17x41 cell. 17 is PRIME, so
+    /// with the natural scale every 4x variant in the pack is unusable and
+    /// the base art block-scales 17x — the mixed-density work would be inert
+    /// on this machine while reporting success.
     #[test]
     fn the_scale_rounds_down_so_the_packs_densest_art_can_actually_land() {
-        // The real case, from a Retina Ghostty: a 17x41 cell. 17 is PRIME, so
-        // with the natural scale every 4x variant in the pack is unusable and
-        // the base art block-scales 17x — the mixed-density work would be inert
-        // on this machine while reporting success.
         let retina = CellSize { w: 17, h: 41 };
         assert_eq!(raw_scale_for_cell(retina), 17, "the cell alone says 17");
         assert_eq!(
@@ -409,12 +404,12 @@ mod tests {
         );
     }
 
+    /// Exactly 1 real pixel per logical unit IS the classic density, so an
+    /// image encode every frame would cost the encode and draw the identical
+    /// picture. 2 is the first scale that buys anything, and the boundary is
+    /// pinned from BOTH sides so a future `>=` typo cannot slip through.
     #[test]
     fn the_cutoff_is_where_the_image_path_starts_buying_something() {
-        // Exactly 1 real pixel per logical unit IS the classic density, so an
-        // image encode every frame would cost the encode and draw the identical
-        // picture. 2 is the first scale that buys anything, and the boundary is
-        // pinned from BOTH sides so a future `>=` typo cannot slip through.
         let plan = resolve(GraphicsMode::Auto, capable(CellSize { w: 1, h: 2 }), 1);
         assert_eq!(plan.profile, Profile::Classic, "1px per unit buys nothing");
 

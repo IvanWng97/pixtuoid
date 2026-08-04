@@ -1166,12 +1166,12 @@ mod tests {
         assert_eq!(buf.get(9, 8), bg, "one row north of the frame stays bg");
     }
 
+    /// The sibling of the test above, at scale. Centring must happen in
+    /// LOGICAL space and convert ONCE: centring in buffer space would halve
+    /// the already-scaled width, drifting the sprite off the footprint its
+    /// mask stamped — a drift no single-scale test can see.
     #[test]
     fn a_centred_blit_scales_both_its_position_and_its_art() {
-        // The sibling of the test above, at scale. Centring must happen in
-        // LOGICAL space and convert ONCE: centring in buffer space would halve
-        // the already-scaled width, drifting the sprite off the footprint its
-        // mask stamped — a drift no single-scale test can see.
         let bg = Rgb { r: 0, g: 0, b: 0 };
         let marker = Rgb { r: 9, g: 8, b: 7 };
         let two = crate::render_scale::RenderScale::new(2).expect("2 is nonzero");

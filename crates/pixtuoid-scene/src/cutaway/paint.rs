@@ -295,10 +295,10 @@ const WINDOW_INSET_NUMER: u16 = 1;
 /// Denominator of [`WINDOW_INSET_NUMER`].
 const WINDOW_INSET_DENOM: u16 = 4;
 
+/// The layout's own derivation, not a re-guess: the wall band ends
+/// `WALL_BAND_TO_TOP_MARGIN` above `top_margin`, and the rows between are
+/// floor the agents walk on.
 fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
-    // The layout's own derivation, not a re-guess: the wall band ends
-    // `WALL_BAND_TO_TOP_MARGIN` above `top_margin`, and the rows between are
-    // floor the agents walk on.
     let band_h = layout
         .top_margin
         .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
@@ -882,14 +882,14 @@ fn paint_chair(
 mod tests {
     use super::*;
 
+    /// THE cutaway occlusion decision, and the one place it diverges from
+    /// classic. Classic sorts a desk on its visual base so the monitor hides
+    /// the occupant; the reference draws the head OVER the surface, so the
+    /// cutaway sorts on the surface plane instead. The classic sim seats an
+    /// occupant at desk.y + 4 (its documented seated z-key), so that value is
+    /// the real input this rule has to beat.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_surface() {
-        // THE cutaway occlusion decision, and the one place it diverges from
-        // classic. Classic sorts a desk on its visual base so the monitor hides
-        // the occupant; the reference draws the head OVER the surface, so the
-        // cutaway sorts on the surface plane instead. The classic sim seats an
-        // occupant at desk.y + 4 (its documented seated z-key), so that value is
-        // the real input this rule has to beat.
         let desk = Piece::Desk {
             at: crate::layout::Point { x: 0, y: 10 },
             lit: false,
@@ -904,12 +904,12 @@ mod tests {
         );
     }
 
+    /// The visible difference between the two profiles for the same agent.
+    /// Classic raises the sprite above the desk (monitor overhangs, lower
+    /// body hidden); the cutaway drops it onto the surface so the head reads
+    /// over the desk, which is what the reference shows.
     #[test]
     fn the_cutaway_seats_an_occupant_lower_than_the_classic_painter_does() {
-        // The visible difference between the two profiles for the same agent.
-        // Classic raises the sprite above the desk (monitor overhangs, lower
-        // body hidden); the cutaway drops it onto the surface so the head reads
-        // over the desk, which is what the reference shows.
         let desk = crate::layout::Point { x: 40, y: 30 };
         let classic = crate::layout::Point { x: 41, y: 30 - 8 };
         let cut = cutaway_seat_anchor(desk, classic);
@@ -923,12 +923,12 @@ mod tests {
         assert_eq!(cut.y, desk.y, "the head lands on the desk's own row");
     }
 
+    /// The badge has to follow the CUTAWAY's body, not the classic one:
+    /// `overlay::build_overlay` anchors off the classic projection, which
+    /// for a seated agent is eight rows higher. Pin the two properties a
+    /// painter depends on — centred, and clear of the head.
     #[test]
     fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
-        // The badge has to follow the CUTAWAY's body, not the classic one:
-        // `overlay::build_overlay` anchors off the classic projection, which
-        // for a seated agent is eight rows higher. Pin the two properties a
-        // painter depends on — centred, and clear of the head.
         let scale = RenderScale::new(3).expect("nonzero");
         let at = crate::layout::Point { x: 10, y: 20 };
         let (w, gap) = (8u16, LABEL_GAP_PX);
@@ -943,11 +943,11 @@ mod tests {
         );
     }
 
+    /// The band is derived from the layout's OWN `top_margin` minus its own
+    /// constant, never re-guessed — the rows between are floor the agents
+    /// walk on, so a band drawn to `top_margin` would paint over walkers.
     #[test]
     fn the_wall_band_stops_where_the_layout_says_the_floor_begins() {
-        // The band is derived from the layout's OWN `top_margin` minus its own
-        // constant, never re-guessed — the rows between are floor the agents
-        // walk on, so a band drawn to `top_margin` would paint over walkers.
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let band_h = layout
             .top_margin
@@ -986,14 +986,14 @@ mod tests {
         (f.width(), f.height())
     }
 
+    /// THE property the whole mixed-density contract rests on: a `_hi`
+    /// variant must change how a piece is DRAWN, never how big it is. The two
+    /// branches return different (frame, factor) pairs whose PRODUCT has to
+    /// agree, and getting that wrong is silent — the desk still renders, just
+    /// with its front face a whole desk below the surface (which is exactly
+    /// what shipped before this test existed).
     #[test]
     fn the_drawn_size_is_the_same_whichever_density_the_art_came_from() {
-        // THE property the whole mixed-density contract rests on: a `_hi`
-        // variant must change how a piece is DRAWN, never how big it is. The two
-        // branches return different (frame, factor) pairs whose PRODUCT has to
-        // agree, and getting that wrong is silent — the desk still renders, just
-        // with its front face a whole desk below the surface (which is exactly
-        // what shipped before this test existed).
         let pack = pack();
         let (bw, bh) = base_size(&pack, "desk");
         for s in 1..=12u16 {
@@ -1007,12 +1007,12 @@ mod tests {
         }
     }
 
+    /// `desk@4x` must WIN at 4x and blit 1:1 (the upscale is what richer art
+    /// exists to remove), must HALVE the upscale at 8x rather than being
+    /// discarded for not matching exactly, and must LOSE at 3x — 4 does not
+    /// divide 3, so blitting it would draw a desk a third too wide.
     #[test]
     fn the_hi_variant_is_taken_only_at_the_density_it_was_authored_for() {
-        // `desk@4x` must WIN at 4x and blit 1:1 (the upscale is what richer art
-        // exists to remove), must HALVE the upscale at 8x rather than being
-        // discarded for not matching exactly, and must LOSE at 3x — 4 does not
-        // divide 3, so blitting it would draw a desk a third too wide.
         let pack = pack();
         let (bw, bh) = base_size(&pack, "desk");
         let (hi_w, hi_h) = base_size(&pack, "desk@4x");
@@ -1043,11 +1043,11 @@ mod tests {
         );
     }
 
+    /// The other half of "the asset work lands one piece at a time": every
+    /// piece the pack has NOT redrawn must be untouched by the lookup, or
+    /// adding one `_hi` sprite would be a flag day for all of them.
     #[test]
     fn a_piece_with_no_hi_variant_renders_exactly_as_it_did_before() {
-        // The other half of "the asset work lands one piece at a time": every
-        // piece the pack has NOT redrawn must be untouched by the lookup, or
-        // adding one `_hi` sprite would be a flag day for all of them.
         let pack = pack();
         assert!(
             pack.animation("plant@4x").is_none(),

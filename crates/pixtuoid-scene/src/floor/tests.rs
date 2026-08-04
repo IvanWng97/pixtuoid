@@ -970,14 +970,14 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
     );
 }
 
+/// THE decoupling property, at the frame seam. Before `RenderScale`, `size`
+/// was both the buffer's extent AND the office's, so doubling the buffer
+/// built an office with ~4x the desks (measured: 25 at 192x160, 1554 at
+/// 1536x1280). The seam exists so a richer visual profile buys detail per
+/// object instead of more objects — which is only true if the SAME logical
+/// size yields the SAME desks however many pixels it is painted into.
 #[test]
 fn a_render_scale_grows_the_buffer_without_growing_the_office() {
-    // THE decoupling property, at the frame seam. Before `RenderScale`, `size`
-    // was both the buffer's extent AND the office's, so doubling the buffer
-    // built an office with ~4x the desks (measured: 25 at 192x160, 1554 at
-    // 1536x1280). The seam exists so a richer visual profile buys detail per
-    // object instead of more objects — which is only true if the SAME logical
-    // size yields the SAME desks however many pixels it is painted into.
     let pack = crate::embedded_pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
