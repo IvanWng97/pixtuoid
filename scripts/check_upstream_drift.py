@@ -113,6 +113,7 @@ CC_KNOWN_OMITTED = {
     "InstructionsLoaded",
     "ConfigChange",
     "CwdChanged",
+    "DirectoryAdded",
     "FileChanged",
     "WorktreeCreate",
     "WorktreeRemove",
