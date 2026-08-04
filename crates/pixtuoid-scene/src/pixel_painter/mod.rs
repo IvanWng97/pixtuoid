@@ -235,14 +235,9 @@ pub struct PixelCtx<'a> {
     /// SEPARATE field: it is a sibling of the `FloorCtx` on a `PerFloor`,
     /// borrowed disjointly by a multi-floor painter's `split_at_mut`.
     pub store: &'a mut crate::floor::FloorCtx,
-    /// The RGB pixel buffer this pass paints into — sized in BUFFER pixels,
-    /// which `scale` relates to the `layout`'s logical units.
+    /// The RGB pixel buffer this pass paints into. Its pixels ARE `layout`'s
+    /// logical units — this pass has no scale of its own.
     pub buf: &'a mut RgbBuffer,
-    /// How many buffer pixels one layout unit paints as.
-    ///
-    /// `layout` is in LOGICAL units and `buf` in pixels; this is the conversion
-    /// between them. At `RenderScale::ONE` they coincide and the pass paints
-    /// exactly as it did before the seam existed.
     /// The live scene state to render.
     pub scene: &'a SceneState,
     /// The computed office geometry for this frame.

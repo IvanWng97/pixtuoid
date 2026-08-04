@@ -372,10 +372,11 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   pre-seam behaviour. `floor::floor_capacity_scaled` is the seam-aware twin of
 │                   `floor_capacity` — deliberately a SECOND fn, not a defaulted param: every
 │                   existing caller means "buffer pixels ARE layout units" and must keep meaning
-│                   it, so a painter adopting a scale opts in at its own call site. `FrameInputs`
-│                   carries `scale` as a COMPILE-FORCED field (the `Target.post_install_hint`
-│                   pattern): `size` alone is ambiguous once the spaces differ, so every painter
-│                   states which it means. `render_floor` is where they part — the buffer sizes
+│                   it, so a painter adopting a scale opts in at its own call site. The scale is an
+│                   explicit PARAMETER of the one entry point that has one (`render_cutaway`), not
+│                   a field on `FrameInputs`/`PixelCtx`/`DrawableCtx`: those describe the classic
+│                   pass, where buffer pixels ARE layout units, and a field they all default to ONE
+│                   is a question every painter answers identically. `render_floor` is where they part — the buffer sizes
 │                   in PIXELS, the layout computes at `scale.logical(size)`. Density is the core
 │                   blitter's `blit_frame_scaled` for art authored BELOW the render scale, and
 │                   the pack's `<piece>@<N>x` variants for art authored AT it (`cutaway::paint::
@@ -400,9 +401,9 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
                     sky.rs, lighting.rs, celestial.rs [sun/moon disc + night stars, #469]),
                     ambient.rs (sun spot + dust motes + ceiling halos),
                     drawable.rs (y-sort Drawable enum + paint dispatch via `DrawableCtx` — the
-                                  param BUNDLE {buf, pack, cache, now, theme, scale}: this was six
-                                  positional params and the render scale would have made seven, the
-                                  growth PixelCtx/PaintCtx already answered the same way. `blit_centered`
+                                  param BUNDLE {buf, pack, cache, now, theme}: this was five
+                                  positional params, the growth PixelCtx/PaintCtx already answered
+                                  the same way. `blit_centered`
                                   is THE density-aware centring seam every centred sprite rides — it
                                   centres in LOGICAL space then converts ONCE (centring in buffer space
                                   halves the already-scaled width and drifts odd-width art off the

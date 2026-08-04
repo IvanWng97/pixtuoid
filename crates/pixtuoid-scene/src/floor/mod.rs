@@ -311,15 +311,9 @@ pub struct FrameInputs<'a> {
     pub theme: &'static Theme,
     /// This frame's wall-clock time.
     pub now: SystemTime,
-    /// Target pixel-buffer size — BUFFER pixels, which `scale` converts to the
-    /// logical extent the office is laid out in.
+    /// Target pixel-buffer size. Buffer pixels ARE layout units in this pass,
+    /// so this is also the office's logical extent.
     pub size: Size,
-    /// How many buffer pixels one layout unit paints as.
-    ///
-    /// A compile-forced field rather than a defaulted one: `size` alone is
-    /// ambiguous once the two spaces differ, so every painter states which it
-    /// means. `RenderScale::ONE` is the classic path and keeps `size` the
-    /// office's extent exactly as before.
     /// This floor's index, altitude, and layout seed.
     pub floor_meta: FloorMeta,
     /// The pet's live interaction state, if a pet is present.

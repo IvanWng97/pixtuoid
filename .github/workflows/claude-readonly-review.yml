@@ -250,7 +250,7 @@ jobs:
               and length > 0
               and length <= 512
               and (startswith("/") | not)
-              and test("^[A-Za-z0-9._/-]+$")
+              and test("^[A-Za-z0-9._/@-]+$")
               and (split("/") | all(. != "" and . != ".."));
             type == "object"
             and ((keys | sort) == ["findings", "summary"])

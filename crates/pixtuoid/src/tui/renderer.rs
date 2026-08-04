@@ -251,8 +251,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let pixel_result = render_to_rgb_buffer(&mut PixelCtx {
         store: &mut *ctx.store,
         buf: &mut *ctx.buf,
-        // The half-block flush is the classic profile: buffer pixels ARE
-        // layout units, so the terminal painter stays at ONE.
         scene,
         layout: &layout,
         pack,

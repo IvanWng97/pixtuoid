@@ -3,9 +3,11 @@
 # monitor bezel, readable screen content, individual keycaps, and the key
 # light's top edge baked in.
 #
-# OPTIONAL. The cutaway prefers a `<name>_hi` frame ONLY when its size is
-# exactly the render scale times the base frame's, and blits it 1:1 instead of
-# block-scaling `desk`. A pack without this file renders exactly as before.
+# OPTIONAL, and the name is the contract: `<base>@<N>x` declares art authored at
+# N times `desk`'s size, so this file must stay exactly 4x `desk.sprite`'s
+# dimensions or the painter skips it. The cutaway picks the densest variant whose
+# N DIVIDES the render scale — this one at scale 4 (blitted 1:1) or 8 (block-scaled
+# the remaining 2x), never at 2. A pack with no variants renders exactly as before.
 @frame 0
 . . . . . . . . . . . . n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n . . . . . . . . . . . .
 . . . . . . . . . . . . M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M . . . . . . . . . . . .

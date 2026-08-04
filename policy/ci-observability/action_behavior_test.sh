@@ -384,6 +384,27 @@ expected_location="\`src/lib.rs:7\`"
 [[ "$published_content" == *"$expected_location"* ]] ||
     fail "Claude publisher omitted a finding location"
 
+# A finding against a density-variant sprite (`<base>@<N>x.sprite`) must publish.
+# The path allowlist is the FIRST thing the publisher runs, and it exits without
+# a `::error` annotation — so a rejected character reads in the checks table as
+# "the bot never posted", not "the bot was blocked", and the merge gate silently
+# becomes unsatisfiable for every finding on those files.
+variant_review='{"summary":"One finding on a density variant.","findings":[{"severity":"MEDIUM","path":"crates/pixtuoid-scene/sprites/default/desk@4x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
+PATH="$fake_bin:$PATH" \
+    FAKE_PR_HEAD="abc123" \
+    PUBLISHED_COMMENT="$published_comment" \
+    EXPECTED_HEAD_SHA="abc123" \
+    PR_NUMBER="42" \
+    REPOSITORY="owner/repo" \
+    REVIEW_JSON="$variant_review" \
+    REVIEW_MARKER="claude-auto-review" \
+    REVIEW_TITLE="Claude Review" \
+    bash -c "$publisher_script" ||
+    fail "Claude publisher rejected a finding on an '@' density-variant path"
+published_content="$(<"$published_comment")"
+[[ "$published_content" == *"\`crates/pixtuoid-scene/sprites/default/desk@4x.sprite:6\`"* ]] ||
+    fail "Claude publisher omitted the density-variant finding location"
+
 if PATH="$fake_bin:$PATH" \
     FAKE_PR_HEAD="new-head" \
     PUBLISHED_COMMENT="$published_comment" \
