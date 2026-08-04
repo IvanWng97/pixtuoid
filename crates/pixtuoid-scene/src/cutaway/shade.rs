@@ -13,6 +13,8 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::render_scale::RenderScale;
+
 /// A material's three tones under the cutaway's single key light.
 ///
 /// Every surface in the profile carries one. Uniformity is the point: the room
@@ -80,20 +82,37 @@ fn toward(c: Rgb, target: u8, pct: u8) -> Rgb {
     }
 }
 
-/// Fill a rect as a top-lit mass: one `lit` row at the top, one `shade` row at
-/// the bottom, `base` between.
+/// Fill a rect as a top-lit mass: one LOGICAL `lit` row at the top, one
+/// `shade` row at the bottom, `base` between.
 ///
-/// A mass shorter than two rows is painted `base` only — at one row the top and
-/// bottom edges are the same pixels, and picking either tone would make a 1px
+/// The edges are `scale` buffer pixels thick, not one. Every caller passes a
+/// height already multiplied by the scale, so a fixed 1px edge shrank to a
+/// hairline as the render got denser: the same desk read as a light band over a
+/// dark band at 1x and as solid brown at 16x. That is the inverse of what the
+/// render-scale seam exists for — richer art, not finer-and-finer detail — and
+/// it is the same buffer-space-vs-logical-space drift the centring rule warns
+/// about, one level down.
+///
+/// A mass shorter than two logical rows is painted `base` only: its top and
+/// bottom edges would be the same pixels, and either tone would make a thin
 /// detail read as a highlight or a shadow rather than as the material.
-pub(crate) fn slab(buf: &mut RgbBuffer, x: u16, y: u16, w: u16, h: u16, ramp: &Ramp) {
+pub(crate) fn slab(
+    buf: &mut RgbBuffer,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    ramp: &Ramp,
+    scale: RenderScale,
+) {
     if w == 0 || h == 0 {
         return;
     }
     fill(buf, x, y, w, h, ramp.base);
-    if h >= 2 {
-        fill(buf, x, y, w, 1, ramp.lit);
-        fill(buf, x, y + h - 1, w, 1, ramp.shade);
+    let edge = scale.get();
+    if h >= edge.saturating_mul(2) {
+        fill(buf, x, y, w, edge, ramp.lit);
+        fill(buf, x, y + h - edge, w, edge, ramp.shade);
     }
 }
 
@@ -125,16 +144,34 @@ const BAYER_4X4: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [
 ///
 /// The transition an indexed palette cannot express as a blend. `y1` is
 /// exclusive; a band with no height paints nothing.
-pub(crate) fn dither_band(buf: &mut RgbBuffer, y0: u16, y1: u16, dark: Rgb, light: Rgb) {
+///
+/// One matrix cell is one LOGICAL pixel — `scale` buffer pixels square. A fixed
+/// 1px cell made the pattern finer as the render got denser, so the floor went
+/// from a bold checker matching the art's granularity at 1x to a sub-sprite
+/// stipple at 16x: dirt on a deliberately chunky office, and the class most
+/// likely to moiré once a terminal composites the image.
+///
+/// The indices stay ABSOLUTE (`/ cell % 4`, not relative to `y0`) so the
+/// pattern tiles seamlessly across every band and object that shares the
+/// buffer, which is what stops a seam appearing at each boundary.
+pub(crate) fn dither_band(
+    buf: &mut RgbBuffer,
+    y0: u16,
+    y1: u16,
+    dark: Rgb,
+    light: Rgb,
+    scale: RenderScale,
+) {
     if y1 <= y0 {
         return;
     }
+    let cell = scale.get();
     let span = u32::from(y1 - y0);
     for y in y0..y1.min(buf.height()) {
         // How far through the transition this row sits, on the matrix's scale.
         let level = (u32::from(y - y0) * 16 / span) as u8;
         for x in 0..buf.width() {
-            let threshold = BAYER_4X4[usize::from(y % 4)][usize::from(x % 4)];
+            let threshold = BAYER_4X4[usize::from((y / cell) % 4)][usize::from((x / cell) % 4)];
             buf.put(x, y, if threshold < level { dark } else { light });
         }
     }
@@ -172,7 +209,7 @@ mod tests {
     #[test]
     fn a_slab_is_lit_on_top_and_shaded_at_its_base() {
         let mut buf = RgbBuffer::filled(8, 8, BG);
-        slab(&mut buf, 1, 1, 4, 4, &ramp());
+        slab(&mut buf, 1, 1, 4, 4, &ramp(), RenderScale::ONE);
         assert_eq!(buf.get(1, 1), LIT, "top row catches the key light");
         assert_eq!(buf.get(1, 2), BASE, "the body is the material itself");
         assert_eq!(buf.get(1, 3), BASE);
@@ -237,16 +274,76 @@ mod tests {
         // Top and bottom are the same pixels here, so either tone would make a
         // 1px detail read as a highlight or a shadow instead of as the material.
         let mut buf = RgbBuffer::filled(4, 4, BG);
-        slab(&mut buf, 0, 0, 4, 1, &ramp());
+        slab(&mut buf, 0, 0, 4, 1, &ramp(), RenderScale::ONE);
         for x in 0..4 {
             assert_eq!(buf.get(x, 0), BASE);
+        }
+    }
+
+    /// THE property the whole render-scale seam exists for, at the shading
+    /// level: give the office more pixels and its VOCABULARY keeps the same
+    /// apparent weight, rather than thinning to a hairline.
+    ///
+    /// Before this, the edge rows were a fixed 1 buffer pixel while every
+    /// caller passed an already-scaled height, so the same desk read as a light
+    /// band over a dark band at 1x and as solid material at 16x.
+    #[test]
+    fn a_slabs_edges_are_one_logical_row_at_every_scale() {
+        for n in [1u16, 2, 4, 8, 16] {
+            let scale = RenderScale::new(n).expect("nonzero");
+            let h = 6 * n;
+            let mut buf = RgbBuffer::filled(4, h + 4, BG);
+            slab(&mut buf, 0, 0, 4, h, &ramp(), scale);
+
+            let lit_rows = (0..h).filter(|&y| buf.get(0, y) == LIT).count();
+            let shade_rows = (0..h).filter(|&y| buf.get(0, y) == SHADE).count();
+            assert_eq!(
+                lit_rows,
+                usize::from(n),
+                "scale {n}: lit edge is 1 logical row"
+            );
+            assert_eq!(
+                shade_rows,
+                usize::from(n),
+                "scale {n}: shade edge is 1 logical row"
+            );
+            // ...and the edges are still AT the edges, not floating.
+            assert_eq!(buf.get(0, 0), LIT, "scale {n}");
+            assert_eq!(buf.get(0, h - 1), SHADE, "scale {n}");
+        }
+    }
+
+    /// The dither's cell is one logical pixel too, so the floor keeps the
+    /// art's granularity instead of becoming sub-sprite noise on a chunky
+    /// office. Absolute indexing keeps it tiling seamlessly across bands.
+    #[test]
+    fn a_dither_cell_is_one_logical_pixel_at_every_scale() {
+        for n in [1u16, 4, 8] {
+            let scale = RenderScale::new(n).expect("nonzero");
+            let w = 16 * n;
+            let mut buf = RgbBuffer::filled(w, 8 * n, BG);
+            dither_band(&mut buf, 0, 8 * n, SHADE, LIT, scale);
+            // Within one logical pixel every buffer pixel is the same tone —
+            // that is what "the cell scales" means.
+            let row = 4 * n;
+            for cell in 0..4u16 {
+                let x0 = cell * n;
+                let first = buf.get(x0, row);
+                for dx in 0..n {
+                    assert_eq!(
+                        buf.get(x0 + dx, row),
+                        first,
+                        "scale {n}: cell {cell} is not solid across its width"
+                    );
+                }
+            }
         }
     }
 
     #[test]
     fn a_slab_clips_at_the_buffer_edge_instead_of_wrapping() {
         let mut buf = RgbBuffer::filled(4, 4, BG);
-        slab(&mut buf, 3, 3, 8, 8, &ramp());
+        slab(&mut buf, 3, 3, 8, 8, &ramp(), RenderScale::ONE);
         // The one in-bounds pixel is the slab's OWN top row, so it is lit — the
         // shade row sits at y+h-1, far outside, and is dropped rather than
         // wrapping back into the buffer.
@@ -257,15 +354,15 @@ mod tests {
     #[test]
     fn an_empty_slab_paints_nothing() {
         let mut buf = RgbBuffer::filled(4, 4, BG);
-        slab(&mut buf, 0, 0, 0, 4, &ramp());
-        slab(&mut buf, 0, 0, 4, 0, &ramp());
+        slab(&mut buf, 0, 0, 0, 4, &ramp(), RenderScale::ONE);
+        slab(&mut buf, 0, 0, 4, 0, &ramp(), RenderScale::ONE);
         assert!(buf.as_slice().iter().all(|&c| c == BG));
     }
 
     #[test]
     fn a_dither_band_runs_light_at_the_top_to_dark_at_the_bottom() {
         let mut buf = RgbBuffer::filled(16, 32, BG);
-        dither_band(&mut buf, 0, 32, SHADE, LIT);
+        dither_band(&mut buf, 0, 32, SHADE, LIT, RenderScale::ONE);
 
         let dark_in = |y0: u16, y1: u16| {
             (y0..y1)
@@ -292,15 +389,15 @@ mod tests {
         // The whole point of a dither under an indexed palette: it introduces
         // no third colour, so it costs no extra slot.
         let mut buf = RgbBuffer::filled(8, 8, BG);
-        dither_band(&mut buf, 0, 8, SHADE, LIT);
+        dither_band(&mut buf, 0, 8, SHADE, LIT, RenderScale::ONE);
         assert!(buf.as_slice().iter().all(|&c| c == SHADE || c == LIT));
     }
 
     #[test]
     fn an_inverted_or_empty_band_paints_nothing() {
         let mut buf = RgbBuffer::filled(4, 4, BG);
-        dither_band(&mut buf, 3, 3, SHADE, LIT);
-        dither_band(&mut buf, 3, 1, SHADE, LIT);
+        dither_band(&mut buf, 3, 3, SHADE, LIT, RenderScale::ONE);
+        dither_band(&mut buf, 3, 1, SHADE, LIT, RenderScale::ONE);
         assert!(buf.as_slice().iter().all(|&c| c == BG));
     }
 }

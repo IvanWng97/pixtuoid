@@ -370,7 +370,7 @@ fn paint_wall_seg(
     );
     let (x, y) = (scale.to_buffer(at.x), scale.to_buffer(at.y));
     if w > h {
-        slab(buf, x, y, w * s, h * s, &glass);
+        slab(buf, x, y, w * s, h * s, &glass, scale);
     } else {
         fill(buf, x, y, w * s, h * s, glass.base);
     }
@@ -481,7 +481,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
     let s = scale.get();
     let w = scale.to_buffer(layout.buf_w);
     let wall = Ramp::from_base(theme.surface.wall, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-    slab(buf, 0, 0, w, band_h * s, &wall);
+    slab(buf, 0, 0, w, band_h * s, &wall, scale);
 
     // One glass run inset inside the band, with a lit sill under it — the sill
     // is what sells the light as coming THROUGH rather than being painted on.
@@ -489,7 +489,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
     let glass_h = band_h.saturating_sub(inset * 2);
     if glass_h > 0 {
         let glass = Ramp::from_base(theme.lighting.night_sky_a, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-        slab(buf, 0, inset * s, w, glass_h * s, &glass);
+        slab(buf, 0, inset * s, w, glass_h * s, &glass, scale);
         paint_skyline(layout, theme, scale, inset, glass_h, buf);
         fill(buf, 0, (inset + glass_h) * s, w, s, theme.surface.wall_trim);
     }
@@ -609,12 +609,28 @@ fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut Rgb
     let w = scale.to_buffer(layout.buf_w);
     fill(buf, 0, 0, w, h, base);
 
-    // North third lit, then dither down to base, then a final fall to dark at
-    // the south edge — the falloff that says where the light comes from.
-    let lit_h = h * FLOOR_LIT_NUMER / FLOOR_LIT_DENOM;
-    fill(buf, 0, 0, w, lit_h / 2, lit);
-    dither_band(buf, lit_h / 2, lit_h, base, lit);
-    dither_band(buf, h.saturating_sub(lit_h / 2), h, dark, base);
+    // The falloff is measured from where the FLOOR starts, not from buffer row
+    // 0. The wall band occupies everything above `top_margin`, so anchoring at
+    // the top put the whole lit zone and most of the dither behind it —
+    // measured at 6% of the visible floor carrying any light at all, with the
+    // south dark falloff four times larger. The room read base-to-dark, the
+    // exact inverse of "the falloff says where the light comes from".
+    let floor_top = scale.to_buffer(layout.top_margin);
+    let floor_h = h.saturating_sub(floor_top);
+
+    // North sixth solid lit, dithering to base by the end of the north third,
+    // then a final fall to dark at the south edge.
+    let lit_h = floor_h * FLOOR_LIT_NUMER / FLOOR_LIT_DENOM;
+    fill(buf, 0, floor_top, w, lit_h / 2, lit);
+    dither_band(
+        buf,
+        floor_top + lit_h / 2,
+        floor_top + lit_h,
+        base,
+        lit,
+        scale,
+    );
+    dither_band(buf, h.saturating_sub(lit_h / 2), h, dark, base, scale);
 }
 
 fn paint_desk(
@@ -650,6 +666,13 @@ fn paint_desk(
     // An occupied desk spills its screen light onto the surface in front of it.
     // The office is lit by two things — the windows and the monitors — and this
     // is the only place the second one shows.
+    //
+    // Full desk WIDTH, not the middle half. The occupant is 8 logical columns
+    // centred on a 14-column desk, and a half-width band is a strict subset of
+    // them on both axes — while `lit` means "someone is seated here", so the
+    // occluder is present exactly when the glow is drawn. The band rendered
+    // zero visible pixels. The wings either side of the body are where a spill
+    // actually reads, and they are also where it belongs physically.
     if lit {
         let glow = Ramp::from_base(
             theme.effects.monitor_frame_lit,
@@ -658,9 +681,9 @@ fn paint_desk(
         );
         fill(
             buf,
-            x + art.width() * blit_at.get() / 4,
+            x,
             top_y + art.height() * blit_at.get() * GLOW_ROW_NUMER / GLOW_ROW_DENOM,
-            art.width() * blit_at.get() / 2,
+            art.width() * blit_at.get(),
             s,
             glow.lit,
         );
@@ -674,7 +697,7 @@ fn paint_desk(
     let drawn_h = art.height() * blit_at.get();
     let base_y = top_y + drawn_h;
     let w = drawn_w;
-    slab(buf, x, base_y, w, desk_front_h() * s, &ramp);
+    slab(buf, x, base_y, w, desk_front_h() * s, &ramp, scale);
 
     // Contact occlusion hugs the front face; a wide pool reads as a stain.
     fill(
@@ -919,6 +942,7 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         w * s,
         h * s,
         &ramp,
+        scale,
     );
     // The same front face every solid in this profile gets.
     slab(
@@ -928,6 +952,7 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         w * s,
         desk_front_h() * s,
         &Ramp::from_base(theme.furniture.wood_trim, RAMP_TINT_PCT, RAMP_SHADE_PCT),
+        scale,
     );
 }
 
@@ -962,6 +987,7 @@ fn paint_appliance(
         w * s,
         h * s,
         &Ramp::from_base(body, RAMP_TINT_PCT, RAMP_SHADE_PCT),
+        scale,
     );
     // The lit face — a vending display or a printer's glass — is what stops
     // these reading as anonymous blocks in a dark corridor.
@@ -1070,6 +1096,7 @@ fn paint_chair(
         (sprite_w + 2) * s,
         CHAIR_BACK_H * s,
         &ramp,
+        scale,
     );
 }
 
