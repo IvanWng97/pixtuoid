@@ -141,7 +141,9 @@ pub(super) async fn drain_child_end_unclaims(
             .map(|(p, &held)| {
                 (
                     p.clone(),
-                    AgentId::from_parts(ctx.source, &(decoders.id_derive)(p)),
+                    // Folded via `walk::id_path` like every other derivation
+                    // seam — a raw path computes an id in a different space.
+                    AgentId::from_parts(ctx.source, &decoders.id_derive.id_for(p)),
                     held,
                 )
             })

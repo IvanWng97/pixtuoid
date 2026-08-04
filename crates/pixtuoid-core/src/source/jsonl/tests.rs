@@ -393,7 +393,7 @@ async fn walk_once_with_recency(
         derive_label: t_label,
         check_ended,
         activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -431,7 +431,7 @@ async fn first_sight_cwd_falls_back_to_the_path_deriver_when_content_has_none() 
             derive_label: t_label,
             check_ended: t_ended,
             activity_recency: super::no_activity_recency,
-            id_derive: default_id_from_path,
+            id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
             path_filter: accept_all_paths,
             cwd_derive: derived_cwd,
         };
@@ -482,7 +482,7 @@ async fn walk_once_live(
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: crate::source::claude_code::cc_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(crate::source::claude_code::cc_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -753,7 +753,7 @@ async fn walk_jsonl_honors_the_path_filter() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: skip_full,
         cwd_derive: no_cwd_from_path,
     };
@@ -979,7 +979,7 @@ async fn session_exit_drains_pending_bytes_so_a_straggler_walk_cannot_resurrect(
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1055,7 +1055,7 @@ async fn session_exit_purges_live_so_a_probe_failure_pass_cannot_revouch() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1110,7 +1110,7 @@ fn t_decoders() -> SourceDecoders {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     }
@@ -1308,7 +1308,7 @@ async fn decoded_terminator_release_is_not_revouched_into_a_full_replay() {
         derive_label: t_label,
         check_ended: never_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1553,7 +1553,7 @@ async fn known_oversized_tail_emits_session_end_if_the_skipped_span_ended() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1819,7 +1819,7 @@ async fn scan_pass_re_vouches_a_transiently_gated_live_file() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: crate::source::claude_code::cc_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(crate::source::claude_code::cc_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1929,7 +1929,7 @@ async fn revouch_does_not_replay_a_probe_vouched_ended_transcript() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: crate::source::claude_code::cc_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(crate::source::claude_code::cc_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -2978,7 +2978,7 @@ async fn revouch_pass_prunes_deleted_files_from_cursors() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -3141,4 +3141,46 @@ fn uuid_like() -> String {
         .unwrap()
         .as_nanos();
     format!("{nanos}-{:p}", &nanos)
+}
+
+/// Pins that `id_for` derives from `id_path(path)` rather than the raw path.
+///
+/// This arm CANNOT fail on Unix — the fold is identity there, so a
+/// pass-through `id_for` returns the same string. It pins the shape; the
+/// discriminating assertion is the `cfg(windows)` twin below, which runs in the
+/// `windows-test` job (the same split as
+/// `claude_code::detect_parent_id_handles_backslash_paths`).
+#[test]
+fn folded_deriver_applies_the_id_path_fold() {
+    fn echo(p: &std::path::Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+    let d = super::folded::FoldedDeriver::new(echo);
+    for raw in [
+        "/Users/me/.claude/projects/repo/abc.jsonl",
+        r"C:\Users\Me\.claude\Projects\Repo\ABC.jsonl",
+    ] {
+        assert_eq!(
+            d.id_for(std::path::Path::new(raw)),
+            crate::id::normalize_path_key(raw),
+            "id_for must derive from the FOLDED path, not the raw one"
+        );
+    }
+}
+
+/// The discriminating half: on Windows the fold is not identity, so a
+/// pass-through `id_for` would return the raw backslash/mixed-case form. Mirrors
+/// `claude_code::detect_parent_id_handles_backslash_paths`.
+#[cfg(windows)]
+#[test]
+fn folded_deriver_folds_separators_and_case_on_windows() {
+    fn echo(p: &std::path::Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+    let d = super::folded::FoldedDeriver::new(echo);
+    let id = d.id_for(std::path::Path::new(r"C:\Users\Me\Repo\ABC.jsonl"));
+    assert!(
+        !id.contains('\\') && id == id.to_lowercase(),
+        "the Windows fold must normalize separators AND case, got {id:?}"
+    );
 }

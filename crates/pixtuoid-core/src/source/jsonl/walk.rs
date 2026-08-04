@@ -95,8 +95,25 @@ pub(super) async fn scan_root(
             if root_health.on_success() {
                 tracing::info!("watched root {} is readable again", root.display());
             }
-            while let Ok(Some(entry)) = read.next_entry().await {
-                walk_jsonl(&entry.path(), decoders, ctx).await;
+            loop {
+                match read.next_entry().await {
+                    Ok(Some(entry)) => walk_jsonl(&entry.path(), decoders, ctx).await,
+                    Ok(None) => break,
+                    Err(e) => {
+                        // The ROOT's twin of the subdirectory arm below, but
+                        // through the latch: truncation here hides every
+                        // remaining PROJECT, not one project's transcripts, and
+                        // there is exactly one root, so this cannot flood.
+                        if root_health.on_failure() {
+                            warn!(
+                                "listing of watched root {} truncated ({e}); some \
+                                 sessions will not be discovered this pass",
+                                root.display()
+                            );
+                        }
+                        break;
+                    }
+                }
             }
         }
         Err(e) => {
@@ -150,10 +167,25 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         return;
     }
     if meta.is_dir() {
-        if let Ok(mut read) = tokio::fs::read_dir(path).await {
-            while let Ok(Some(entry)) = read.next_entry().await {
-                Box::pin(walk_jsonl(&entry.path(), decoders, ctx)).await;
-            }
+        match tokio::fs::read_dir(path).await {
+            Ok(mut read) => loop {
+                match read.next_entry().await {
+                    Ok(Some(entry)) => Box::pin(walk_jsonl(&entry.path(), decoders, ctx)).await,
+                    Ok(None) => break,
+                    Err(e) => {
+                        // Split from `Ok(None)` for the LOG only — the listing
+                        // still stops here, so every later transcript in this
+                        // dir waits for the next rescan. `break` not `continue`:
+                        // a sticky error that never advances would spin.
+                        debug!("listing of {} truncated: {e}", path.display());
+                        break;
+                    }
+                }
+            },
+            // `debug!`, not the latched `warn!` `scan_root` gives the ROOT: a
+            // subdirectory is re-walked every 250ms rescan, and there is one
+            // root but unboundedly many subdirs, so a warn here floods.
+            Err(e) => debug!("skipping unreadable directory {}: {e}", path.display()),
         }
         return;
     }
@@ -223,7 +255,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             // A span that itself ENDED stays unregistered and unscanned — a
             // SessionStart or a seeded Task after the SessionEnd just sent
             // would resurrect/animate a ghost.
-            let id = AgentId::from_parts(source, &(decoders.id_derive)(&id_path(path)));
+            let id = AgentId::from_parts(source, &decoders.id_derive.id_for(path));
             let _ = tx
                 .send((
                     Transport::Jsonl,
@@ -323,7 +355,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         emit_first_sight(path, source, decoders, seen, tx, first_sight_cwd).await;
     }
 
-    let path_agent_id = AgentId::from_parts(source, &(decoders.id_derive)(&id_path(path)));
+    let path_agent_id = AgentId::from_parts(source, &decoders.id_derive.id_for(path));
     let mut session_ended = false;
     for line in new_bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
@@ -413,7 +445,7 @@ async fn emit_first_sight(
     // transport's slots carry the bare session UUID and `backfill_identity`
     // never heals a non-empty session_id, so a raw file-stem here would leave a
     // JSONL-created slot permanently disagreeing with its hook-created twin.
-    let session_id = (decoders.id_derive)(&id_path(path));
+    let session_id = decoders.id_derive.id_for(path);
     let id = AgentId::from_parts(source, &session_id);
     // Content-derived cwd wins; the PATH deriver is the fallback for sources
     // whose content carries none — an empty cwd would put the slot on the

@@ -41,7 +41,7 @@ fn resolve_hermes_home(
     hermes_home_env: Option<String>,
     user_home: Option<String>,
 ) -> Option<PathBuf> {
-    if let Some(h) = hermes_home_env.filter(|s| !s.trim().is_empty()) {
+    if let Some(h) = crate::platform::nonempty(hermes_home_env) {
         return Some(PathBuf::from(h));
     }
     user_home.map(|h| PathBuf::from(h).join(".hermes"))

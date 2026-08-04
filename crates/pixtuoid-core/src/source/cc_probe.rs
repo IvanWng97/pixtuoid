@@ -51,7 +51,8 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
             }
             // An unreadable file is usually a CC exiting and removing its own
             // entry mid-scan — not format drift; skip silently.
-            let Ok(bytes) = read_registry_entry_bounded(&path) else {
+            let Ok(bytes) = crate::source::read_bounded_bytes(&path, MAX_REGISTRY_ENTRY_BYTES)
+            else {
                 continue;
             };
             let reg = match parse_registry_entry(&bytes) {
@@ -151,19 +152,11 @@ fn prefer_candidate(incumbent: &RegistryEntry, candidate: &RegistryEntry) -> boo
     }
 }
 
-/// Read one registry entry, bounded to 64 KiB — real entries are <1 KiB, and
-/// the bound keeps junk in the registry dir from ballooning a per-scan read
-/// (truncated bytes just fail the JSON parse and are skipped silently).
+/// Bounds ONE registry entry — real entries are <1 KiB, and the bound keeps
+/// junk in the registry dir from ballooning a per-scan read (truncated bytes
+/// just fail the JSON parse and are skipped silently).
 #[cfg(unix)]
-fn read_registry_entry_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
-    const MAX_REGISTRY_ENTRY_BYTES: u64 = 64 * 1024;
-    let file = std::fs::File::open(path)?;
-    let mut bytes = Vec::new();
-    file.take(MAX_REGISTRY_ENTRY_BYTES)
-        .read_to_end(&mut bytes)?;
-    Ok(bytes)
-}
+const MAX_REGISTRY_ENTRY_BYTES: u64 = 64 * 1024;
 
 /// One parsed registry entry — the fields the liveness join needs.
 #[cfg(unix)]

@@ -318,6 +318,21 @@ pub mod antigravity;
 // runtime half in a `source/<cli>/native.rs` sub-module.
 #[cfg(feature = "native")]
 pub(crate) mod cc_probe;
+
+/// Read a first-party file, bounded to `cap` bytes — the one spelling for every
+/// probe/registry read in `source/`; the `.cwd` sidecar keeps its own
+/// String-returning `grok::read_bounded`. These files are re-read on every probe
+/// refresh, so an unbounded read lets a junk or runaway file balloon a per-scan
+/// allocation; truncated bytes just fail the caller's parse. The CAP stays at
+/// the call site, where its sizing rationale lives.
+#[cfg(all(unix, feature = "native"))]
+pub(crate) fn read_bounded_bytes(path: &std::path::Path, cap: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(cap).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
 /// Claude Code transcript source: line/hook decoders + the `Source` adapter.
 pub mod claude_code;
 pub mod codewhale;

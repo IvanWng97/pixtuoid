@@ -58,9 +58,12 @@ fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 fn copilot_child_key<'a>(v: &'a Value, data: Option<&'a Value>) -> Option<&'a str> {
+    // BOTH branches filter empty: an empty `toolCallId` would otherwise mint a
+    // child `AgentId` keyed on "", colliding every such child onto one slot.
     str_at(v, "agentId")
         .filter(|s| !s.is_empty())
         .or_else(|| data.and_then(|d| str_at(d, "toolCallId")))
+        .filter(|s| !s.is_empty())
 }
 
 /// First-sight cwd extractor for the walker's head scan. Without it a copilot
@@ -632,6 +635,39 @@ mod tests {
             }
             other => panic!("expected child SessionEnd, got {other:?}"),
         }
+    }
+
+    /// BOTH `copilot_child_key` branches must reject an empty string. The
+    /// primary (`agentId`) always did; the `data.toolCallId` fallback did not,
+    /// so an empty id minted a child `AgentId` keyed on "" — every such child
+    /// colliding onto one slot.
+    #[test]
+    fn an_empty_child_key_is_rejected_on_both_branches() {
+        for line in [
+            r#"{"type":"subagent.completed","agentId":"","data":{"toolCallId":""}}"#,
+            r#"{"type":"subagent.completed","data":{"toolCallId":""}}"#,
+            r#"{"type":"subagent.failed","agentId":"","data":{"toolCallId":""}}"#,
+            // The STARTED arm is the other `copilot_child_key` call site, and
+            // `data.toolCallId` is the documented key for a spawn — the
+            // existing started-arm test omits the key entirely, so the
+            // empty-string shape was unpinned there.
+            r#"{"type":"subagent.started","data":{"toolCallId":"","agentName":"x"}}"#,
+        ] {
+            assert!(
+                decode(line).is_empty(),
+                "an empty child key must emit nothing, not a \"\"-keyed child: {line}"
+            );
+        }
+        // The FIRST filter's whole job, and nothing else pins it: an empty
+        // envelope `agentId` must FALL THROUGH to `data.toolCallId` rather than
+        // short-circuit the `or_else` into `None`. Delete it and the assertions
+        // above still pass, while every real child silently stops registering.
+        let line = r#"{"type":"subagent.completed","agentId":"","data":{"toolCallId":"call_1"}}"#;
+        assert_eq!(
+            decode(line).len(),
+            1,
+            "an empty agentId must fall back to toolCallId, not drop the child"
+        );
     }
 
     #[test]
