@@ -370,6 +370,27 @@ mod tests {
     }
     use serde_json::json;
 
+    #[test]
+    fn a_shutdown_with_no_fresh_tokens_emits_no_usage_reading() {
+        // `tokenDetails` present but every FRESH bucket zero (a cache-read-only
+        // turn): a `Usage { fresh_tokens: 0 }` would be a reading of nothing,
+        // pushed into a monotone accumulator.
+        let line = r#"{"type":"session.shutdown","data":{"tokenDetails":{"input":{"tokenCount":0},"cache_read":{"tokenCount":900}}},"id":"e9","timestamp":"ts","parentId":null}"#;
+        let evs = decode_copilot_line(
+            "/p/11111111-2222-3333-4444-555555555555/events.jsonl",
+            "copilot",
+            serde_json::from_str(line).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !evs.iter().any(|e| matches!(e, AgentEvent::Usage { .. })),
+            "zero fresh tokens must not surface a Usage, got {evs:?}"
+        );
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, AgentEvent::SessionEnd { .. })));
+    }
+
     const PATH: &str = "/p/session-state/65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3/events.jsonl";
 
     fn root() -> AgentId {

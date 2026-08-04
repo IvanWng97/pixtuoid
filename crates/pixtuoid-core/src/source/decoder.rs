@@ -613,6 +613,63 @@ mod tests {
     }
 
     #[test]
+    fn rfc3339_shape_gate_rejects_each_separator_independently() {
+        for bad in [
+            "2026x07-16T12:00:05Z",
+            "2026-07x16T12:00:05Z",
+            "2026-07-16 12:00:05Z",
+        ] {
+            assert_eq!(rfc3339_to_epoch_secs(bad), None, "{bad:?}");
+        }
+        // A lower-case `t` is the OTHER accepted date/time separator, so the
+        // gate must not reject it — grok's normalize_path_key'd stamps arrive
+        // lowercased.
+        assert_eq!(
+            rfc3339_to_epoch_secs("2026-07-16t12:00:05Z"),
+            Some(1_784_203_205)
+        );
+    }
+
+    #[test]
+    fn rfc3339_field_ranges_admit_the_last_valid_value_and_stop_at_the_next() {
+        for (ok, bad) in [
+            ("2026-07-31T12:00:05Z", "2026-07-32T12:00:05Z"),
+            ("2026-07-16T23:00:05Z", "2026-07-16T24:00:05Z"),
+            ("2026-07-16T12:59:05Z", "2026-07-16T12:60:05Z"),
+            // 60 is the LEAP second, still in range; 61 never is.
+            ("2026-07-16T12:00:60Z", "2026-07-16T12:00:61Z"),
+        ] {
+            assert!(rfc3339_to_epoch_secs(ok).is_some(), "{ok:?} must parse");
+            assert_eq!(rfc3339_to_epoch_secs(bad), None, "{bad:?} must not");
+        }
+        assert_eq!(rfc3339_to_epoch_secs("2026-07-00T12:00:05Z"), None);
+    }
+
+    #[test]
+    fn rfc3339_offset_grammar_is_exact_and_the_sign_moves_the_instant() {
+        // `Z` terminates the string; an offset is EXACTLY `±HH:MM`.
+        for bad in [
+            "2026-07-16T12:00:05Zjunk",
+            "2026-07-16T12:00:05+02-00",
+            "2026-07-16T12:00:05+02:00extra",
+            "2026-07-16T12:00:05+0200",
+        ] {
+            assert_eq!(rfc3339_to_epoch_secs(bad), None, "{bad:?}");
+        }
+        // Same instant three ways: the sign inverts, and the offset MINUTES
+        // carry weight (the `+05:30` class real wire stamps actually use).
+        let utc = rfc3339_to_epoch_secs("2026-07-16T12:00:05Z").unwrap();
+        assert_eq!(
+            rfc3339_to_epoch_secs("2026-07-16T09:00:05-03:00"),
+            Some(utc)
+        );
+        assert_eq!(
+            rfc3339_to_epoch_secs("2026-07-16T17:30:05+05:30"),
+            Some(utc)
+        );
+    }
+
+    #[test]
     fn parsed_tail_lines_yields_only_complete_parseable_lines() {
         // A tail byte-window can begin mid-line (torn leading partial), carry
         // CRLF terminators, and hold empty/torn segments.

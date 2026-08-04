@@ -408,4 +408,38 @@ mod focus_pid_tests {
         let root = tempfile::tempdir().unwrap();
         assert_eq!(codex_pid_for_session(root.path(), "0000-none"), None);
     }
+
+    #[test]
+    fn cc_registry_dir_derives_the_sibling_only_for_the_standard_layout() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(
+            cc_registry_dir(&home.path().join("projects")),
+            Some(home.path().join("sessions")),
+            "the standard layout derives the SIBLING sessions dir"
+        );
+        // A custom --projects-root replay (file_name != "projects") derives
+        // nothing, so those runs keep the pure-mtime gate.
+        assert_eq!(cc_registry_dir(&home.path().join("fixture")), None);
+    }
+
+    #[test]
+    fn grok_pid_for_session_binds_a_live_registry_pid_and_misses_otherwise() {
+        let root = tempfile::tempdir().unwrap();
+        let me = std::process::id();
+        // No `opened_at`: a fixed stamp would predate this process's kernel
+        // start and the recycle guard would (correctly) drop the entry, so the
+        // binder is exercised on the pid-alive-only path.
+        std::fs::write(
+            root.path().join("active_sessions.json"),
+            format!(r#"[{{"session_id":"focus-grok","pid":{me},"cwd":"/r/a"}}]"#),
+        )
+        .unwrap();
+
+        assert_eq!(
+            grok_pid_for_session(root.path(), "focus-grok"),
+            Some(me as i32),
+            "hit: the session's own live registry pid"
+        );
+        assert_eq!(grok_pid_for_session(root.path(), "unknown-sess"), None);
+    }
 }

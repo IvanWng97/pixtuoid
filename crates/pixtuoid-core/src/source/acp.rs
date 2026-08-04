@@ -137,6 +137,22 @@ mod tests {
     }
 
     #[test]
+    fn an_absent_or_empty_session_update_tag_never_breadcrumbs() {
+        // A missing/blank tag is a MALFORMED notification, not an upstream
+        // vocabulary addition — breadcrumbing it would flood `unknown_event`
+        // (which has no dedup) with a name that names nothing.
+        for update in [json!({}), json!({"sessionUpdate": ""})] {
+            let logs = crate::test_capture::capture_logs(|| {
+                assert!(decode(update.clone()).is_empty());
+            });
+            assert!(
+                !logs.contains("unknown_event"),
+                "an empty tag must stay silent, got:\n{logs}"
+            );
+        }
+    }
+
+    #[test]
     fn unknown_tag_breadcrumbs_but_known_tags_stay_silent() {
         let logs = crate::test_capture::capture_logs(|| {
             assert!(
