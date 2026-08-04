@@ -142,7 +142,6 @@ mod tests {
         std::fs::create_dir_all(&impostor).unwrap();
         assert_eq!(omp_probe_root_resolved(&impostor, &elsewhere), None);
 
-        // Grandparent `.omp` but the parent is not `agent`.
         let wrong_parent = home.path().join(".omp").join("other").join("sessions");
         std::fs::create_dir_all(&wrong_parent).unwrap();
         assert_eq!(omp_probe_root_resolved(&wrong_parent, &elsewhere), None);

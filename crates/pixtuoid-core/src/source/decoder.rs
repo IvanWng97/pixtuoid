@@ -647,7 +647,6 @@ mod tests {
 
     #[test]
     fn rfc3339_offset_grammar_is_exact_and_the_sign_moves_the_instant() {
-        // `Z` terminates the string; an offset is EXACTLY `±HH:MM`.
         for bad in [
             "2026-07-16T12:00:05Zjunk",
             "2026-07-16T12:00:05+02-00",
