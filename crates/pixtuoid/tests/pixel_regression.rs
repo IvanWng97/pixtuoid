@@ -1,10 +1,3 @@
-//! Image regression tests for the pixel painter.
-//!
-//! These tests render deterministic scenes through `draw_scene` and compare
-//! pixel-buffer hashes. They complement `snapshot_regression.rs` (which
-//! already covers determinism and time-of-day sensitivity) by exercising
-//! floor variants, weather cycles, and theme switching.
-
 mod common;
 
 use std::collections::hash_map::DefaultHasher;
@@ -79,8 +72,6 @@ fn fixture_scene(now: SystemTime) -> SceneState {
     s
 }
 
-/// Render a scene and return a hash of the pixel buffer. Parameterised over
-/// theme and floor metadata so tests can compare across configurations.
 fn render_hash(scene: &SceneState, now: SystemTime, theme: &Theme, floor: FloorMeta) -> u64 {
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).unwrap();
@@ -98,12 +89,8 @@ fn render_hash(scene: &SceneState, now: SystemTime, theme: &Theme, floor: FloorM
     hasher.finish()
 }
 
-// --- Floor variant visual difference -----------------------------------------
-
 #[test]
 fn floor_seed_affects_render() {
-    // Different floor seeds produce different room layouts / decoration
-    // rotations. Seed 0 (ground) vs seed from floor_idx=2 should differ.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
     let scene = fixture_scene(now);
 
@@ -119,17 +106,10 @@ fn floor_seed_affects_render() {
     );
 }
 
-// --- Weather affects render --------------------------------------------------
-
 #[test]
 fn weather_cycle_affects_render() {
-    // Force two DISTINCT weather variants at ONE timestamp and assert the render
-    // differs — this isolates the weather render path. (The old version compared
-    // two timestamps 20 min apart, but the analog clock + continuous time-of-day
-    // lighting move the hash regardless of weather, so it passed even if the
-    // weather render were no-oped — no real tooth.) `force_weather` is a
-    // thread-local override; reset it BEFORE the assert so a failing assert can't
-    // leak the override into a reused harness thread.
+    // `force_weather` is a thread-local override; reset it BEFORE the assert so a
+    // failing assert can't leak the override into a reused harness thread.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
     let scene = fixture_scene(now);
 
@@ -144,8 +124,6 @@ fn weather_cycle_affects_render() {
         "clear vs storm produced identical pixels -- weather render path appears no-oped"
     );
 }
-
-// --- Theme affects render ----------------------------------------------------
 
 #[test]
 fn theme_affects_render() {
@@ -164,8 +142,6 @@ fn theme_affects_render() {
 
 #[test]
 fn all_themes_render_distinctly() {
-    // Verify every built-in theme produces a unique pixel hash. Guards
-    // against a copy-paste theme that is visually identical to another.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
     let scene = fixture_scene(now);
     let floor = FloorMeta::ground();

@@ -1,20 +1,12 @@
-//! Backend-agnostic ambient-audio MODEL — the sound twin of [`crate::overlay`]
-//! / [`crate::board`]: the scene emits semantic stem levels + one-shot events,
-//! and each painter's audio system (the binary's mixer today, WebAudio later)
-//! renders them its own way. NO audio dependencies live in this crate — the
-//! crate boundary is the compiler tooth, exactly like the terminal/window ban.
-//!
-//! Every level constant below is an owner-ratified mix gain from the Phase 0
-//! audition (docs/superpowers/specs/2026-07-16-ambient-sound-phase0/, #633):
-//! `demo_1_empty` / `demo_2_moderate` (THE taste anchor) / `demo_3_busy`.
+//! Backend-agnostic ambient-audio MODEL: the scene emits semantic stem levels +
+//! one-shot events, and each painter's audio system renders them its own way.
+//! NO audio dependencies live in this crate — the crate boundary is the
+//! compiler tooth, exactly like the terminal/window ban.
 
-// The PURE synthesis + direction stack (#633 web-audio): dsp kernels, the
-// frozen lofi compositions, the per-voice synth recipes, and the runtime
-// mixer/schedulers. Moved here from the binary so BOTH the native device
-// gateway (rodio, in `pixtuoid`) AND the wasm WebAudio painter (`pixtuoid-web`)
-// build the SAME sample buffers — the sound twin of `render_to_rgb_buffer`.
-// NO audio-device deps live here (pure math; the rodio/cpal ban still holds).
-// `#[doc(hidden)]`: workspace-internal, not stable engine API (overlay/board pattern).
+// The PURE synthesis stack: dsp kernels, frozen lofi compositions, per-voice
+// synth recipes, runtime mixer/schedulers. Shared so the native device gateway
+// and the wasm WebAudio painter build the SAME sample buffers, with no
+// audio-device deps (pure math; the rodio/cpal ban still holds).
 #[doc(hidden)]
 pub mod bank;
 #[doc(hidden)]
@@ -25,28 +17,24 @@ pub mod dsp;
 pub mod engine;
 #[doc(hidden)]
 pub mod mixer;
-// `score` is the one module with no bare `pub` item — the frozen takes are
-// `#[cfg(test)]` fingerprint ANCHORS, read only by its sibling `synth`/`compose`,
-// so it stays private rather than offering a publicly reachable empty path.
+// Private, not `pub`: the frozen takes are `#[cfg(test)]` fingerprint ANCHORS
+// read only by the sibling `synth`/`compose`, so a `pub mod` would offer a
+// publicly reachable empty path.
 mod score;
 #[doc(hidden)]
 pub mod synth;
 
 // The shared per-tick engine surface — both audio painters build on these, so
-// they can't drift (the whole point of the #633 shared stack). Re-exported at
-// `pixtuoid_scene::audio::*` so consumers don't reach into the submodule.
+// they can't drift.
 pub use bank::OneShotPool;
 pub use engine::{AudioEngine, PlayCmd, TickCommands, MAX_DT_S};
 
 use crate::board::StateCounts;
 
 /// Fixed RNG seeds for the four ambient-synth voices, in ONE place because both
-/// painters MUST seed identically: the native rodio gateway and the wasm
-/// WebAudio painter synthesize the SAME frozen buffers (the whole point of the
-/// shared synth stack), so a per-crate copy silently desyncs the two soundtracks
-/// on the next edit. `#[doc(hidden)]`: workspace-internal, like the synth modules.
-/// `BUILD_SEED` seeds the build-time noise (AssetBank + beds); the rest seed the
-/// per-tick keystroke / rain-drop schedulers and the keystroke/drop picker.
+/// painters MUST seed identically — a per-crate copy silently desyncs the two
+/// soundtracks on the next edit. `BUILD_SEED` seeds the build-time noise; the
+/// rest seed the per-tick keystroke / rain-drop schedulers and their picker.
 #[doc(hidden)]
 pub const BUILD_SEED: u64 = 0xC0FF_EE01;
 #[doc(hidden)]
@@ -60,9 +48,9 @@ pub const PICK_SEED: u64 = 0xDEAD;
 /// typing). 1..BUSY_ACTIVE_MIN is the moderate anchor tier; 0 is empty.
 const BUSY_ACTIVE_MIN: usize = 3;
 
-/// The rain stem's gain at full precipitation (re-ratified 2026-07-20: ~11 dB
-/// under the tier-1 music — the old 0.55's ~6 dB let the broadband rain mask
-/// the mix). The drop one-shots derive from this via DROP_GAIN × wanted.rain.
+/// The rain stem's gain at full precipitation — tuned well under the tier-1
+/// music, or the broadband rain masks the mix. The drop one-shots derive from
+/// this via `DROP_GAIN × wanted.rain`.
 const RAIN_GAIN: f32 = 0.30;
 
 /// Per-tier stem gains, `[empty, moderate, busy]` — the ratified demo mixes.
@@ -70,16 +58,14 @@ const PAD_GAIN: [f32; 3] = [0.75, 0.70, 0.65];
 const SPARKLE_GAIN: [f32; 3] = [0.70, 0.0, 0.0];
 const KEYS_GAIN: [f32; 3] = [0.0, 0.60, 0.70];
 const DRUMS_GAIN: [f32; 3] = [0.0, 0.35, 0.60];
-// ×2.8 vs the Phase-0 ratification: the hiss+crackle layer measured
-// 15-40dB under the bible's spec and was inaudible. Rate stays
-// CRACKLE_POPS_PER_SEC.
+// Boosted far past the Phase-0 ratification: the hiss+crackle layer was
+// inaudible at the ratified level.
 const TEXTURE_GAIN: [f32; 3] = [0.78, 0.84, 0.78];
 const TYPING_GAIN: [f32; 3] = [0.0, 0.50, 0.80];
 
-/// Target mix levels (0..=1) for every stem, derived once per frame. A VALUE
-/// snapshot like [`crate::board::BoardModel`] — no identity, never persisted,
-/// not a wire contract. `typing` is a PROCEDURAL stem: the consumer owns
-/// burst scheduling; the scene only says how much typing the office holds.
+/// Target mix levels (0..=1) for every stem, derived once per frame. `typing`
+/// is a PROCEDURAL stem: the consumer owns burst scheduling; the scene only says
+/// how much typing the office holds.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct StemLevels {
     pub pad: f32,
@@ -91,8 +77,7 @@ pub struct StemLevels {
     pub typing: f32,
 }
 
-/// A fire-once audio event. Emitted on state EDGES by the cue tracker —
-/// consumers play it exactly once per emission.
+/// A fire-once audio event, emitted on state EDGES by the cue tracker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OneShot {
     DoorChime,
@@ -105,22 +90,16 @@ pub enum OneShot {
 pub struct AudioFrame {
     pub stems: StemLevels,
     pub events: Vec<OneShot>,
-    /// Which mood track the musical beds should play (#644) — selected
-    /// scene-side from the SAME day/night boundary the lighting renders
-    /// plus the weather. The binary's audio thread crossfades on change.
+    /// Which mood track the musical beds should play — selected scene-side from
+    /// the SAME day/night boundary the lighting renders, plus the weather.
     pub track: TrackId,
 }
 
-/// The soundtrack ids — ALL-GENERATIVE by owner decision: every
-/// [`TRACK_EPOCH_SECS`] block COMPOSES a
-/// fresh take through the ratified production chain. The payload is the
-/// compose seed (= the [`track_epoch`] block), so the id changing IS the
-/// song change and the [`TrackSwitch`] crossfade machinery needs no new
-/// state. Deterministic everywhere: the same block renders the same
-/// song on native, wasm, and in tests. (The frozen owner-blessed takes — Day/Day2/Day3/Night —
-/// left the runtime with this decision; their tables + synth recipes
-/// stay as the TEST ANCHORS whose fingerprint pins guard the shared
-/// cores the generator renders through.)
+/// The soundtrack ids — ALL-GENERATIVE: every [`TRACK_EPOCH_SECS`] block
+/// COMPOSES a fresh take. The payload is the compose seed (the [`track_epoch`]
+/// block), so the id changing IS the song change and the [`TrackSwitch`]
+/// crossfade machinery needs no new state. Deterministic everywhere: the same
+/// block renders the same song on native, wasm, and in tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TrackId {
     /// The block's generated day-mood take.
@@ -135,28 +114,24 @@ impl Default for TrackId {
     }
 }
 
-/// One song per this many wall-clock seconds. 10 minutes, owner-tuned:
-/// agent sessions are usually SHORT — an hourly rotation meant most
-/// sessions never heard the song change. Coincidentally the
-/// weather's own re-roll cadence (its 600 lives in `sky.rs`, a separate
-/// domain — deliberately not shared).
+/// One song per this many wall-clock seconds, owner-tuned: agent sessions are
+/// usually SHORT, and an hourly rotation meant most sessions never heard the
+/// song change. The weather's matching re-roll cadence lives in `sky.rs` — a
+/// separate domain, deliberately not shared.
 pub const TRACK_EPOCH_SECS: u64 = 600;
 
-/// The soundtrack epoch (10-minute blocks since UNIX epoch) — the
-/// compose-seed input, derived ONCE here so the native observer and the
-/// wasm painter can't drift on the derivation. (Pre-epoch clocks read
-/// as block 0.)
+/// The soundtrack epoch (blocks since UNIX epoch) — the compose-seed input,
+/// derived ONCE here so the native observer and the wasm painter can't drift.
+/// Pre-epoch clocks read as block 0.
 pub fn track_epoch(now: std::time::SystemTime) -> u64 {
     now.duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() / TRACK_EPOCH_SECS)
 }
 
-/// Pure track selection: night hours (the painter's OWN sun window via
-/// `pixel_painter::hour_is_day`/`is_day_at`) or any precipitation pick
-/// the night MOOD; the [`track_epoch`] block is the compose seed. Pure
-/// in its inputs so wasm can feed its parametric clock and tests need
-/// none; within a block the pick is stable, so the crossfade fires at
-/// most once per [`TRACK_EPOCH_SECS`] (the radio "next song" moment).
+/// Pure track selection: night hours or any precipitation pick the night MOOD,
+/// and the [`track_epoch`] block is the compose seed. Pure in its inputs so wasm
+/// can feed its parametric clock and tests need none; within a block the pick is
+/// stable, so the crossfade fires at most once per [`TRACK_EPOCH_SECS`].
 pub fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -> TrackId {
     if !is_day || precipitation > 0.0 {
         TrackId::GenNight(track_epoch)
@@ -166,9 +141,8 @@ pub fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -> Track
 }
 
 /// Decode a [`TrackId`] to its composed score — the ONE
-/// `TrackId → (Mood, seed) → compose` bridge both build shells call (native
-/// [`crate::audio::bank::TrackBeds::build`] + the wasm `WebAudioDriver`), so the
-/// mood decode lives once instead of a hand-synced match per shell.
+/// `TrackId → (Mood, seed) → compose` bridge both build shells call, so the mood
+/// decode lives once instead of a hand-synced match per shell.
 pub fn compose_track(track: TrackId) -> compose::GeneratedScore {
     let (mood, seed) = match track {
         TrackId::GenDay(seed) => (compose::Mood::Day, seed),
@@ -178,13 +152,11 @@ pub fn compose_track(track: TrackId) -> compose::GeneratedScore {
 }
 
 impl StemLevels {
-    /// Zero the five TRACK-owned musical stems (pad/sparkle/keys/drums/
-    /// texture), leaving rain + typing (weather + activity, track-independent).
-    /// The "hold silent" half of the mood-track crossfade — a player calls it
-    /// on the target while a switch is [`TrackSwitch::is_holding`].
+    /// Zero the TRACK-owned musical stems, leaving rain + typing (weather +
+    /// activity, track-independent). The "hold silent" half of the mood-track
+    /// crossfade, called while a switch is [`TrackSwitch::is_holding`].
     pub fn silence_track_stems(&mut self) {
-        // Derived from the ONE track-owned set (`bank::TRACK_STEMS`) via the
-        // mixer's field accessor, so a forgotten new music stem's zero is
+        // Driven off the ONE track-owned set so a forgotten new music stem is
         // compiler-caught rather than a silently un-zeroed field here.
         for stem in crate::audio::bank::TRACK_STEMS {
             *stem.field_mut(self) = 0.0;
@@ -192,17 +164,15 @@ impl StemLevels {
     }
 }
 
-/// The mood-track switch machine (#644) — the PURE state half both players
-/// run (the native rodio thread AND the wasm WebAudio driver, #633 web-audio),
-/// so the latch/hold/silent-gate can't drift between them. It owns ONLY the
-/// state: the BUILD (blocking synth on native, chunked warmup on web) stays
-/// caller-side, since that's the one thing the two backends do differently.
+/// The mood-track switch machine — the PURE state half both players run, so the
+/// latch/hold/silent gate can't drift between them. It owns ONLY the state: the
+/// BUILD stays caller-side, since that's the one thing the two backends do
+/// differently.
 ///
-/// Lifecycle: `init` on the first frame (build + register the right mood) →
-/// `request` a switch on a changed [`TrackId`] (LATCHED — a hour/weather
-/// flap at a boundary can't thrash the synths) → while `is_holding`, the
-/// caller silences the track stems → once they reach silence, `try_swap`
-/// hands back the new track to build + swap in and releases the hold.
+/// Lifecycle: `init` on the first frame → `request` a switch on a changed
+/// [`TrackId`] (LATCHED, so an hour/weather flap at a boundary can't thrash the
+/// synths) → while `is_holding`, the caller silences the track stems → once they
+/// reach silence, `try_swap` hands back the new track and releases the hold.
 #[derive(Debug, Default)]
 pub struct TrackSwitch {
     current: Option<TrackId>,
@@ -220,8 +190,8 @@ impl TrackSwitch {
     }
 
     /// First frame ONLY: adopt `track` as current and return `Some(track)` to
-    /// build + register its beds. Returns `None` once initialized (use
-    /// [`TrackSwitch::request`] thereafter).
+    /// build + register its beds. `None` once initialized — use
+    /// [`TrackSwitch::request`] thereafter.
     pub fn init(&mut self, track: TrackId) -> Option<TrackId> {
         if self.current.is_none() {
             self.current = Some(track);
@@ -246,9 +216,8 @@ impl TrackSwitch {
         self.pending.is_some()
     }
 
-    /// When the held track stems have reached silence (`track_silent`),
-    /// commit the pending switch: adopt it as current, clear the latch, and
-    /// return `Some(to)` to build + swap in. `None` until then.
+    /// Once the held track stems have reached silence, commit the pending
+    /// switch and return `Some(to)` to build + swap in. `None` until then.
     pub fn try_swap(&mut self, track_silent: bool) -> Option<TrackId> {
         if let Some(to) = self.pending {
             if track_silent {
@@ -261,12 +230,9 @@ impl TrackSwitch {
     }
 }
 
-/// Cross-frame cue state — the audio twin of the painter session halves
-/// (`PerOffice` pattern). Diffs identity/occupancy sets frame-to-frame and
-/// emits each [`OneShot`] exactly once on the EDGE (a 30fps rebuild never
-/// re-fires; state updates as frames arrive — never derived by scanning
-/// backward). The FIRST observe only primes: attaching to a full office
-/// must not fire a door-chime volley.
+/// Cross-frame cue state: diffs identity/occupancy sets frame-to-frame and
+/// emits each [`OneShot`] exactly once on the EDGE. The FIRST observe only
+/// primes — attaching to a full office must not fire a door-chime volley.
 #[derive(Debug, Default)]
 pub struct AudioCueTracker {
     primed: bool,
@@ -280,11 +246,10 @@ impl AudioCueTracker {
     }
 
     /// Feed one frame's observations; returns the events that fired on this
-    /// frame's edges. `waypoint_kind` resolves an occupied-waypoint index to
-    /// its kind (painters pass a closure over `layout.waypoints`) so the
-    /// tracker never holds a `Layout` borrow and tests need no layout at all.
-    /// Purely EDGE-triggered — it takes no clock, so a caller can't read it as
-    /// time-dependent (a timed cue would reintroduce one where it has a consumer).
+    /// frame's edges. `waypoint_kind` resolves an occupied-waypoint index to its
+    /// kind so the tracker never holds a `Layout` borrow and tests need no
+    /// layout at all. Purely EDGE-triggered — it takes no clock, so a caller
+    /// can't read it as time-dependent.
     pub fn observe<'a>(
         &mut self,
         agent_ids: impl IntoIterator<Item = &'a pixtuoid_core::AgentId>,
@@ -305,17 +270,15 @@ impl AudioCueTracker {
 
         let mut events = Vec::new();
 
-        // Door chime: an id we have never seen walked in. Capped at ONE per
-        // frame — a workflow fleet arriving together is one door moment, not
-        // a chime chord.
+        // Capped at ONE per frame — a workflow fleet arriving together is one
+        // door moment, not a chime chord.
         if ids.difference(&self.seen_agents).next().is_some() {
             events.push(OneShot::DoorChime);
         }
         self.seen_agents = ids;
 
-        // Appliance cues: a waypoint BECOMING occupied is the moment the
-        // matching feedback animation starts (sim.rs keys the printer-eject /
-        // vending-drop anims on this same set).
+        // A waypoint BECOMING occupied is the moment the matching feedback
+        // animation starts — `sim.rs` keys its anims on this same set.
         for &idx in occupied_waypoints.difference(&self.occupied) {
             match waypoint_kind(idx) {
                 Some(WaypointKind::Printer) => events.push(OneShot::PrinterWhir),
@@ -340,9 +303,8 @@ fn tier(counts: &StateCounts) -> usize {
     }
 }
 
-/// Map the office's activity + weather onto target stem levels — the ratified
-/// tier profiles, with rain scaling on the precipitation scalar (0 clear …
-/// 1 storm, from `pixel_painter::precipitation_level`).
+/// Map the office's activity + weather onto target stem levels, with rain
+/// scaling on the precipitation scalar (0 clear … 1 storm).
 pub fn stem_levels(counts: &StateCounts, precipitation: f32) -> StemLevels {
     let t = tier(counts);
     StemLevels {
@@ -362,9 +324,6 @@ mod tests {
 
     #[test]
     fn select_track_composes_the_hour_by_mood() {
-        // day + dry = the hour's generated day take; night hours OR any
-        // rain = the hour's generated night take — every id carries its
-        // compose seed, so the hourly id change IS the song change
         for h in 0..48 {
             assert_eq!(select_track(true, 0.0, h), TrackId::GenDay(h));
             assert_eq!(select_track(false, 0.0, h), TrackId::GenNight(h));
@@ -412,7 +371,6 @@ mod tests {
             track_epoch(UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
             1_700_000_000 / TRACK_EPOCH_SECS
         );
-        // pre-epoch clocks fail safe to block 0, not a panic
         assert_eq!(track_epoch(UNIX_EPOCH - Duration::from_secs(10)), 0);
     }
 
@@ -420,7 +378,6 @@ mod tests {
     fn track_switch_inits_then_latches_a_change_until_silence() {
         let mut sw = TrackSwitch::new();
         assert_eq!(sw.current(), None);
-        // first frame builds+registers, does NOT request
         assert_eq!(sw.init(TrackId::GenDay(0)), Some(TrackId::GenDay(0)));
         assert_eq!(sw.current(), Some(TrackId::GenDay(0)));
         assert_eq!(
@@ -430,18 +387,14 @@ mod tests {
         );
         assert!(!sw.is_holding());
 
-        // an unchanged request is a no-op; a real change latches the hold
         sw.request(TrackId::GenDay(0));
         assert!(!sw.is_holding());
         sw.request(TrackId::GenNight(0));
         assert!(sw.is_holding(), "a changed track holds the stems silent");
 
-        // a SECOND change mid-flight is ignored (the settling latch)
         sw.request(TrackId::GenDay(0));
-        // not silent yet → no swap
         assert_eq!(sw.try_swap(false), None);
         assert!(sw.is_holding());
-        // silence reached → swap to the FIRST-latched target, release the hold
         assert_eq!(sw.try_swap(true), Some(TrackId::GenNight(0)));
         assert_eq!(sw.current(), Some(TrackId::GenNight(0)));
         assert!(!sw.is_holding());
@@ -483,7 +436,6 @@ mod tests {
 
     #[test]
     fn stem_levels_map_the_busyness_tiers() {
-        // empty: pad + sparkle + texture only (demo_1)
         let empty = stem_levels(&counts(0), 0.0);
         assert_eq!(empty.pad, PAD_GAIN[0]);
         assert_eq!(empty.sparkle, SPARKLE_GAIN[0]);
@@ -491,12 +443,10 @@ mod tests {
         assert_eq!(empty.drums, 0.0);
         assert_eq!(empty.typing, 0.0);
 
-        // both sides of the empty→moderate edge (1 = first moderate value)
         let moderate = stem_levels(&counts(1), 0.0);
         assert_eq!(moderate.keys, KEYS_GAIN[1]);
         assert_eq!(moderate.sparkle, 0.0);
 
-        // both sides of the moderate→busy edge, offsets from the const
         let last_moderate = stem_levels(&counts(BUSY_ACTIVE_MIN - 1), 0.0);
         assert_eq!(last_moderate.drums, DRUMS_GAIN[1]);
         let busy = stem_levels(&counts(BUSY_ACTIVE_MIN), 0.0);
@@ -520,7 +470,6 @@ mod tests {
         assert_eq!(stem_levels(&counts(0), 1.0).rain, RAIN_GAIN);
         let half = stem_levels(&counts(0), 0.5).rain;
         assert!((half - RAIN_GAIN * 0.5).abs() < 1e-6);
-        // out-of-range precipitation is clamped, both sides
         assert_eq!(stem_levels(&counts(0), -1.0).rain, 0.0);
         assert_eq!(stem_levels(&counts(0), 2.0).rain, RAIN_GAIN);
     }
@@ -548,19 +497,15 @@ mod tests {
         let none = HashSet::new();
         // priming frame: an already-full office fires NOTHING (mid-attach)
         assert!(tr.observe(&[aid(1)], &none, kinds).is_empty());
-        // a new agent walks in → exactly one chime…
         assert_eq!(
             tr.observe(&[aid(1), aid(2)], &none, kinds),
             vec![OneShot::DoorChime]
         );
-        // …and the same roster next frame re-fires nothing
         assert!(tr.observe(&[aid(1), aid(2)], &none, kinds).is_empty());
-        // THREE simultaneous arrivals = one door moment, not a chord
         assert_eq!(
             tr.observe(&[aid(1), aid(2), aid(3), aid(4), aid(5)], &none, kinds),
             vec![OneShot::DoorChime]
         );
-        // an exit fires nothing; the SAME id returning chimes again
         assert!(tr.observe(&[aid(1)], &none, kinds).is_empty());
         assert_eq!(
             tr.observe(&[aid(1), aid(2)], &none, kinds),
@@ -578,10 +523,8 @@ mod tests {
             tr.observe(&ids, &at_printer, kinds),
             vec![OneShot::PrinterWhir]
         );
-        // still standing there N frames later → silence
         assert!(tr.observe(&ids, &at_printer, kinds).is_empty());
         assert!(tr.observe(&ids, &at_printer, kinds).is_empty());
-        // leaves, comes back → the animation restarts → a second whir
         assert!(tr.observe(&ids, &HashSet::new(), kinds).is_empty());
         assert_eq!(
             tr.observe(&ids, &at_printer, kinds),
@@ -594,7 +537,6 @@ mod tests {
         let mut tr = AudioCueTracker::new();
         let ids = [aid(1)];
         tr.observe(&ids, &HashSet::new(), kinds); // prime
-                                                  // couch (idx 2) is not an appliance; vending (idx 7) drops a can
         let occupied: HashSet<usize> = [2, 7].into();
         assert_eq!(
             tr.observe(&ids, &occupied, kinds),
@@ -604,7 +546,6 @@ mod tests {
 
     #[test]
     fn waiting_and_idle_agents_do_not_raise_the_tier() {
-        // an office full of WAITING agents is quiet company, not a busy band
         let c = StateCounts {
             active: 0,
             waiting: 5,

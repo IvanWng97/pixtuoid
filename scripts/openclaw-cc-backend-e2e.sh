@@ -1,33 +1,14 @@
 #!/usr/bin/env bash
-# OpenClaw + Claude-Code-backend COMBINED live-e2e — the REAL end-to-end proof of
-# the OpenClaw daemon design premise (`source/openclaw.rs` module doc): the
-# gateway DAEMON renders as the wandering lobster mascot (presence), WHILE its
-# bundled `claude-cli` backend coding session renders as a full-fidelity `cc·`
-# desk sprite. One headless scene, two sources, two sprites:
+# OpenClaw + Claude-Code-backend COMBINED live-e2e: the gateway DAEMON renders as
+# the wandering lobster mascot while its bundled `claude-cli` backend coding
+# session renders as a full-fidelity `cc·` desk sprite, in one headless scene:
 #
 #   agents=[… cc·<workspace>@N …] daemons=[openclaw@<port>:busy]
 #
-# Flow:
-#   1. headless pixtuoid binds an ISOLATED socket + watches ~/.claude/projects
-#   2. `openclaw gateway run` (PIXTUOID_SOCKET pointed at that socket so its
-#      pixtuoid plugin reaches THIS instance) -> gateway_start -> the lobster idle
-#   3. `openclaw agent --message …` routes ONE turn to the claude-cli backend ->
-#      before_agent_run -> the lobster busy AND a real `claude` writes ~/.claude/projects
-#      -> a NEW `cc·` sprite (label = the openclaw workspace cwd basename)
-#   4. assert a backend cc· label (absent from the pre-gateway baseline) AND
-#      the gateway instance busy were both observed; then tear the gateway down
-#
-# The daemon rows are keyed `openclaw@<gatewayPort>` (the mascot's instance
-# identity), so every assertion below matches the `openclaw@` PREFIX rather than a
-# literal port — this script starts the gateway from the user's own config, whose
-# resolved port need not be the default.
-#
-# ⚠ REAL side effects — UNLIKE the synthetic shim-driven `openclaw-live-e2e.sh`,
-# this is NOT hermetic and NOT a CI test. It starts YOUR gateway (the iMessage
-# channel connects and could auto-reply to an inbound text during the ~30s
-# window) and makes ONE real model turn on your Anthropic auth (the agent reply
-# is NOT delivered to any channel — `--deliver` is omitted). Requires `openclaw`
-# (with the pixtuoid plugin installed + a claude-cli backend agent) and `claude`.
+# ⚠ REAL side effects — NOT hermetic, NOT a CI test. It starts YOUR gateway (the
+# iMessage channel connects and could auto-reply to an inbound text during the
+# ~30s window) and makes ONE real model turn on your Anthropic auth. Requires
+# `openclaw` (with the pixtuoid plugin + a claude-cli backend agent) and `claude`.
 #
 # Build first:  just build --release
 # Run:          scripts/openclaw-cc-backend-e2e.sh
@@ -38,10 +19,9 @@ PIX="$REPO/target/release/pixtuoid"
 PROJECTS="$HOME/.claude/projects"
 CFGDIR="$(mktemp -d)"
 # The socket lives inside a PRIVATE 0700 dir, never as a fixed name in the shared
-# temp dir: a fixed name makes two concurrent runs bind/`rm` each other's socket,
-# and on a shared /tmp it is pre-plantable by another user (nothing downstream
-# polices it — `ensure_owned_socket_dir` in hook/unix.rs deliberately leaves an
-# explicit PIXTUOID_SOCKET path alone).
+# temp dir: a fixed name lets concurrent runs clobber each other's socket, and on
+# a shared /tmp it is pre-plantable by another user — nothing downstream polices
+# it, since `ensure_owned_socket_dir` leaves an explicit PIXTUOID_SOCKET alone.
 SOCKDIR="$(mktemp -d)"
 SOCK="$SOCKDIR/pixtuoid.sock"
 PIXLOG="$(mktemp)"
@@ -64,15 +44,10 @@ done
     echo "no $PROJECTS — has Claude Code ever run on this machine?" >&2
     exit 2
 }
-# The port THIS run's gateway will bind. The assertions below deliberately match
-# the `openclaw@` prefix because the user's config need not resolve the default —
-# so the conflict guard and the cleanup reap have to resolve it the same way
-# instead of pinning the default, or on a non-default box the guard passes while a
-# gateway IS running and the reap leaks the one we started. Falls back to the ONE
-# in-repo copy of OpenClaw's default (the plugin template's DEFAULT_GATEWAY_PORT,
-# the same literal check_upstream_drift.py compares against upstream) rather than
-# a second hardcoded number. Env overrides are NOT mirrored — that would mean
-# re-implementing upstream's `parseGatewayPortEnvValue` in shell.
+# The user's config need not resolve the default, so the conflict guard and the
+# cleanup reap must resolve the port the same way — pinning the default means the
+# guard passes while a gateway IS running and the reap leaks the one we started.
+# Env overrides are NOT mirrored: that re-implements `parseGatewayPortEnvValue`.
 PORT="$(openclaw config get gateway.port 2>/dev/null | tr -d '" ' | tail -1)"
 case "$PORT" in
 '' | *[!0-9]*)
@@ -92,11 +67,10 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     exit 2
 fi
 
-# Reaps the gateway by job pid AND by listening port: `$!` is the listener on
-# openclaw 2026.7.1, so the pid kill normally suffices, but a version that
-# daemonises — or a kill that failed — would leak the port. The port reap is
-# scoped to OUR resolved port, never `pkill -f 'openclaw gateway run'`, which
-# would kill a gateway this script never started.
+# Reaps by job pid AND by listening port: a version that daemonises — or a kill
+# that failed — would leak the port. The port reap is scoped to OUR resolved port,
+# never `pkill -f 'openclaw gateway run'`, which would kill a gateway this script
+# never started.
 cleanup() {
     [ -n "$GWPID" ] && kill "$GWPID" 2>/dev/null
     local port_pids
@@ -113,17 +87,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The backend's `cc·` label is the openclaw agent WORKSPACE's cwd basename (the
-# claude-cli backend runs there → its transcript keys on that cwd). Naming the
-# backend directly is robust to OTHER live cc· sessions (yours) lingering in the
-# scene — a baseline label-diff would miss it whenever a prior backend run is
-# still within the watcher's first-sight window.
+# The backend's `cc·` label is the openclaw agent WORKSPACE's cwd basename, since
+# the claude-cli backend runs there. Naming it directly, rather than diffing a
+# baseline, stays correct when OTHER live cc· sessions linger in the scene.
 WS_PATH="$(openclaw config get agents.defaults.workspace 2>/dev/null | tr -d '"' | tail -1)"
 WS_LABEL="cc·$(basename "${WS_PATH:-workspace}")"
 
-# Isolated config: openclaw + claude-code both connected (the presence/agent
-# connection-gates drop deltas for a disconnected source). Don't touch the dev's
-# real ~/.config/pixtuoid.
+# Both sources must be connected — the presence/agent connection-gates drop
+# deltas for a disconnected source. Isolated so the dev's real config is untouched.
 mkdir -p "$CFGDIR/pixtuoid"
 printf '[sources]\nopenclaw = true\nclaude-code = true\n' >"$CFGDIR/pixtuoid/config.toml"
 
@@ -170,12 +141,9 @@ echo "[3] openclaw agent --message (routes to the claude-cli backend)"
     echo "AGENT_TURN_EXIT=$?" >>"$AGENTLOG"
 ) &
 
-# Watch for BOTH the backend cc· sprite (the workspace label) AND the gateway
-# instance busy — ideally in the SAME line (the literal both-sources coexistence
-# the demo proves). The two-wildcard globs below would also match a `:busy` that
-# belongs to a DIFFERENT daemon row (`openclaw@N:idle, otherd@1:busy`); harmless
-# because openclaw is the only daemon source, and an agent row's `:busy` can't
-# reach them either since `agents=` always precedes `daemons=` on the line.
+# The two-wildcard globs below would also match a `:busy` belonging to a DIFFERENT
+# daemon row; harmless while openclaw is the only daemon source, and an agent row's
+# `:busy` can't reach them since `agents=` always precedes `daemons=` on the line.
 saw_backend=0
 saw_busy=0
 saw_both=0
@@ -185,8 +153,8 @@ for _ in $(seq 1 480); do
     case "$line" in *"openclaw@"*":busy"*) saw_busy=1 ;; esac
     case "$line" in *"$WS_LABEL"*"openclaw@"*":busy"*) saw_both=1 ;; esac
     [ "$saw_both" = 1 ] && break
-    # Turn done + both seen (possibly across frames) is enough — the backend can
-    # first-sight a beat after before_agent_run, so don't require same-line.
+    # Both seen across frames is enough: the backend can first-sight a beat after
+    # before_agent_run, so don't require same-line.
     grep -q AGENT_TURN_EXIT "$AGENTLOG" 2>/dev/null && [ "$saw_backend" = 1 ] && [ "$saw_busy" = 1 ] && break
     sleep 0.25
 done

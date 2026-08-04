@@ -1,7 +1,6 @@
 //! The pre-rendered sample banks — the ONE place the office's sounds are
-//! synthesized into buffers, so the native rodio gateway (`pixtuoid`) and the
-//! wasm WebAudio painter (`pixtuoid-web`) build byte-identical audio from one
-//! source (#633 web-audio). Pure: no device deps, `Arc<Vec<f32>>` buffers only.
+//! synthesized into buffers, so the native rodio gateway and the wasm WebAudio
+//! painter build byte-identical audio. Pure: no device deps.
 //!
 //! The `rng` DRAW ORDER is the sound — `AssetBank::build` then
 //! `TrackBeds::build` continue ONE stream in the ratified order, so every
@@ -12,21 +11,20 @@ use std::sync::Arc;
 use super::mixer::LoopStem;
 use super::{dsp, synth, OneShot, TrackId};
 
-/// Per-key / per-drop pre-rendered variant pool sizes: playback picks randomly
-/// so typing/rain never sound repeated, while runtime stays synthesis-free.
+/// Per-key / per-drop variant pool sizes: playback picks randomly so
+/// typing/rain never sound repeated, while runtime stays synthesis-free.
 pub const KEYSTROKE_POOL: usize = 16;
 pub const DROP_POOL: usize = 12;
 
-/// One-shot playback gains relative to master — the loudness-matched Phase 0
-/// unit levels (±2.2dB across the set), with typing under the beds.
+/// One-shot playback gains relative to master — loudness-matched unit levels.
 pub const KEYSTROKE_GAIN: f32 = 0.35;
 pub const ONE_SHOT_GAIN: f32 = 0.5;
-/// Foreground raindrops sit 12-14dB ABOVE the wash per the reference — the
-/// bed peaks well under 1.0, so drops ride at the rain level itself.
+/// Foreground raindrops sit well ABOVE the wash per the reference; the bed
+/// peaks under 1.0, so drops ride at the rain level itself.
 pub const DROP_GAIN: f32 = 0.9;
 
 /// The five TRACK-OWNED loop stems, in registration order. Rain is not here —
-/// it is weather, shared by every mood track (#644).
+/// it is weather, shared by every mood track.
 pub const TRACK_STEMS: [LoopStem; 5] = [
     LoopStem::Pad,
     LoopStem::Sparkle,
@@ -36,10 +34,8 @@ pub const TRACK_STEMS: [LoopStem; 5] = [
 ];
 
 /// Which one-shot pool a play draws from — the ONE vocabulary both backends
-/// share. The native gateway resolves it to an [`Arc<Vec<f32>>`] via
-/// [`AssetBank::sample`]; the wasm painter sends `(wire, index)` to JS (which
-/// holds one `AudioBuffer` per pool slot). Moved here from the wasm crate so
-/// the engine that emits it and the bank that resolves it agree by construction.
+/// share: the native gateway resolves it to a buffer via [`AssetBank::sample`],
+/// the wasm painter sends `(wire, index)` to JS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OneShotPool {
     Keystroke,
@@ -70,9 +66,7 @@ impl OneShotPool {
         }
     }
 
-    /// Every pool in wire order — the one-shot mirror of [`LoopStem::ALL`].
-    /// [`OneShotPool::from_wire`] and the wasm round-trip test both derive from
-    /// it, so a new pool is declared in exactly one place.
+    /// Every pool in wire order — a new pool is declared in exactly one place.
     pub const ALL: [OneShotPool; 5] = [
         OneShotPool::Keystroke,
         OneShotPool::Drop,
@@ -81,21 +75,15 @@ impl OneShotPool {
         OneShotPool::VendingDrop,
     ];
 
-    /// The inverse of [`OneShotPool::wire`] — decode a wasm-wire pool index back
-    /// to the pool (`None` for an unknown wire). Derived from [`OneShotPool::ALL`]
-    /// and [`OneShotPool::wire`], so the whole `u8`↔pool bijection lives beside
-    /// the enum and can't drift across the crate seam (was a hand-synced
-    /// `pool_from_wire` in the wasm crate whose `_ => None` let a new pool decode
-    /// to silence with no structural failure).
+    /// The inverse of [`OneShotPool::wire`] (`None` for an unknown wire).
     pub fn from_wire(wire: u8) -> Option<Self> {
         OneShotPool::ALL.into_iter().find(|p| p.wire() == wire)
     }
 }
 
-/// The ONE-SHOT pools a player keeps for its whole life, synthesized once at
-/// spawn/warmup. The loop beds live in [`TrackBeds`] instead — handed to the
-/// sink at registration and NOT retained (`RodioSink` copies each into its own
-/// `SamplesBuffer`, so retaining the Arcs would double the bed RAM).
+/// The ONE-SHOT pools a player keeps for its whole life. The loop beds live in
+/// [`TrackBeds`] instead and are NOT retained — `RodioSink` copies each into its
+/// own `SamplesBuffer`, so holding the Arcs would double the bed RAM.
 pub struct AssetBank {
     pub keystrokes: Vec<Arc<Vec<f32>>>,
     pub drops: Vec<Arc<Vec<f32>>>,
@@ -105,9 +93,6 @@ pub struct AssetBank {
 }
 
 impl AssetBank {
-    /// `rng` is the ONE asset stream — rain then `TrackBeds::build` continue
-    /// it, so the draw order (and thus every buffer) is byte-identical to the
-    /// LISTEN-ratified renders. Don't reorder the synth calls.
     pub fn build(rng: &mut dsp::NoiseStream) -> Self {
         Self {
             keystrokes: (0..KEYSTROKE_POOL)
@@ -122,12 +107,9 @@ impl AssetBank {
         }
     }
 
-    /// Resolve an [`AudioEngine`](super::engine::AudioEngine)-emitted
-    /// `(pool, index)` play to its buffer — the native gateway's counterpart to
-    /// the wasm painter's zero-copy `(wire, index)` JS export. `index` is
-    /// modulo the pool size (the engine already picks in-range; the guard keeps
-    /// a future caller from panicking). The single-sample appliance pools
-    /// ignore `index`.
+    /// Resolve an engine-emitted `(pool, index)` play to its buffer. `index` is
+    /// taken modulo the pool size so an out-of-range caller can't panic; the
+    /// single-sample appliance pools ignore it.
     pub fn sample(&self, pool: OneShotPool, index: usize) -> Arc<Vec<f32>> {
         match pool {
             OneShotPool::Keystroke => Arc::clone(&self.keystrokes[index % self.keystrokes.len()]),
@@ -140,22 +122,16 @@ impl AssetBank {
 }
 
 /// One mood track's loop beds — built per [`TrackId`], registered (or swapped
-/// in) with the sink, then DROPPED. Within a track the four musical beds share
-/// ONE sample count and register together (phase-locked); the NIGHT texture
-/// shares it too (its kick-duck is baked at frozen kick times); the DAY texture
-/// keeps its free-running power-of-two length.
+/// in) with the sink, then DROPPED. The four musical beds and the NIGHT texture
+/// share ONE sample count (phase-locked); the DAY texture keeps its
+/// free-running power-of-two length.
 pub struct TrackBeds {
     beds: [Arc<Vec<f32>>; TRACK_STEMS.len()],
 }
 
 impl TrackBeds {
     /// Compose the id's take (the seed is the track-epoch block) and render it
-    /// through the SAME cores the owner-ratified takes were built on —
-    /// ALL-GENERATIVE runtime (owner decision). Identity is
-    /// the generated score + the cores' fingerprint pins (the frozen
-    /// tables in `score`/`synth` remain as those pins' test anchors);
-    /// noise content draws from wherever `rng` stands, like every
-    /// non-boot build always did.
+    /// through the SAME cores the owner-ratified takes were built on.
     pub fn build(rng: &mut dsp::NoiseStream, track: TrackId) -> Self {
         let score = super::compose_track(track);
         Self {
@@ -163,8 +139,8 @@ impl TrackBeds {
         }
     }
 
-    /// Assemble from beds already built lane-by-lane (the wasm driver's
-    /// chunked rebuild) — `TRACK_STEMS` order, like [`TrackBeds::build`].
+    /// Assemble from beds already built lane-by-lane (the wasm driver's chunked
+    /// rebuild) — `TRACK_STEMS` order.
     pub fn from_arcs(beds: [Arc<Vec<f32>>; TRACK_STEMS.len()]) -> Self {
         Self { beds }
     }
@@ -174,8 +150,7 @@ impl TrackBeds {
     }
 
     /// The bed samples as a borrow tied to `&self` — for a consumer that reads
-    /// (not retains) the buffer (the wasm driver's zero-copy JS export), where
-    /// an `Arc` clone's slice would dangle.
+    /// but does not retain the buffer, where an `Arc` clone's slice would dangle.
     pub fn bed_slice(&self, stem: LoopStem) -> &[f32] {
         &self.beds[self.index(stem)]
     }
@@ -188,10 +163,9 @@ impl TrackBeds {
     }
 }
 
-/// Whether every TRACK-owned stem's live gain (from a mixer step) has reached
-/// exactly 0.0 — the silence gate a player checks before swapping a mood
-/// track's beds (`TrackSwitch::try_swap`). Rain/typing gains are ignored
-/// (track-independent).
+/// Whether every TRACK-owned stem's live gain has reached exactly 0.0 — the
+/// silence gate a player checks before swapping a mood track's beds. Rain/typing
+/// gains are ignored (track-independent).
 pub fn track_stems_silent(gains: &[(LoopStem, f32)]) -> bool {
     gains
         .iter()
@@ -205,13 +179,6 @@ mod tests {
 
     #[test]
     fn track_beds_wire_each_lane_to_the_right_synth() {
-        // Generated takes vary per seed, so the frozen take's exact
-        // centroid ORDER no longer holds — the lane-wiring pin becomes
-        // structural: the lead (sparkle) is the brightest musical bed by
-        // register + voice design, the day texture free-runs the 2^19
-        // noise loop, and the four musical beds phase-lock. (A bed() arm
-        // swap still fails: pad↔sparkle flips the centroid gap, and a
-        // texture mixup breaks the length contract.)
         let mut rng = dsp::NoiseStream::new(crate::audio::BUILD_SEED);
         let day = TrackBeds::build(&mut rng, TrackId::GenDay(0));
         let rain = synth::rain_bed(&mut rng);
@@ -236,17 +203,11 @@ mod tests {
 
     #[test]
     fn a_mood_swap_never_touches_the_rain_stem() {
-        // Rain is weather, shared by every track — TRACK_STEMS (the set a swap
-        // rebuilds) must exclude it, so a mood change can't cut the rain.
         assert!(!TRACK_STEMS.contains(&LoopStem::Rain));
     }
 
     #[test]
     fn the_night_arm_builds_a_bed_distinct_from_day() {
-        // A Day->Night swap must install a genuinely different bed (68 vs 72 BPM
-        // → different pad loop length), not a silent Day clone. Pins the
-        // TrackBeds::build Night arm — relocated from the retired native
-        // track-switch thread test, which asserted `night_pad_len != day_pad_len`.
         let mut rng = dsp::NoiseStream::new(crate::audio::BUILD_SEED);
         let day = TrackBeds::build(&mut rng, TrackId::GenDay(0));
         let night = TrackBeds::build(&mut rng, TrackId::GenNight(0));

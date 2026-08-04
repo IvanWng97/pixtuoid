@@ -1,27 +1,22 @@
 //! Shared coarse routing-grid primitives — the ONE definition of the cell
 //! coarsening the A\* router (`crate::pathfind`) and the reachability BFS
-//! (`super::reach`) both ride. Coarsening both against the SAME cell size,
-//! walkability threshold, 8-neighbour set, and snap is what makes "reachable
-//! here" (`ReachSet`) agree with "routable here" (A\*) — an agreement that used
-//! to be pinned only by a 2-const compile assert across two hand-kept copies of
-//! this logic.
+//! (`super::reach`) both ride. Sharing the cell size, walkability threshold,
+//! 8-neighbour set and snap is what makes "reachable here" (`ReachSet`) agree
+//! with "routable here" (A\*).
 
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 /// Coarse-cell edge in px. Smaller = more accurate paths, more work per query.
-/// 4 px gives a ~40×60 grid on a typical 160×240 buffer — A\* finishes well under
-/// 1 ms uncached. `pathfind::CELL_SIZE` re-exports this value.
+/// `pathfind::CELL_SIZE` re-exports this value.
 pub(crate) const COARSE_CELL_SIZE: u16 = 4;
 
-/// Min walkable px (of `COARSE_CELL_SIZE²` = 16) for a coarse cell to count as
-/// walkable. At 8 (50%) the coarsened grid can squeeze through 2px corridors,
-/// which the meeting-room interior needs after furniture padding; tighter (12 =
-/// 75%) made the meeting room unreachable, looser (4 = 25%) grazed furniture
-/// edges. 50% is the sweet spot.
+/// Min walkable px (of `COARSE_CELL_SIZE²`) for a coarse cell to count as
+/// walkable. At 50% the grid squeezes through the 2px corridors the meeting-room
+/// interior needs after furniture padding; tighter made the meeting room
+/// unreachable, looser grazed furniture edges.
 const COARSE_CELL_WALKABLE_MIN: u16 = 8;
 
-/// The 8-connected neighbour offsets both the A\* expansion and the reach BFS
-/// step over.
+/// The 8-connected neighbour offsets shared by the A\* expansion and the reach BFS.
 pub(crate) const NEIGHBORS_8: [(i32, i32); 8] = [
     (1, 0),
     (-1, 0),
@@ -34,9 +29,9 @@ pub(crate) const NEIGHBORS_8: [(i32, i32); 8] = [
 ];
 
 /// Is coarse cell `(cx, cy)` walkable — ≥ `COARSE_CELL_WALKABLE_MIN` of its
-/// `COARSE_CELL_SIZE²` pixels open on the static `mask` AND clear of the per-frame
-/// `overlay`? The reach BFS passes an EMPTY overlay (static geometry only); the
-/// router passes the live occupancy overlay.
+/// pixels open on the static `mask` AND clear of the per-frame `overlay`? The
+/// reach BFS passes an EMPTY overlay (static geometry only); the router passes
+/// the live occupancy overlay.
 pub(crate) fn cell_walkable(
     mask: &WalkableMask,
     overlay: &OccupancyOverlay,
@@ -60,8 +55,7 @@ pub(crate) fn cell_walkable(
 
 /// Snap coarse `cell` to the nearest walkable coarse cell within `max_radius`
 /// rings (Chebyshev), or `None` when none is walkable in range (or the cell is
-/// out of the `cell_w × cell_h` grid). The A\* start/goal snap passes
-/// `MAX_SNAP_RADIUS`; the reach seed snap passes its shorter `SEED_SNAP_CELLS`.
+/// out of the `cell_w × cell_h` grid).
 pub(crate) fn snap(
     mask: &WalkableMask,
     overlay: &OccupancyOverlay,

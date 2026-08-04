@@ -10,13 +10,8 @@ use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::character_anchor;
 use pixtuoid_scene::pose;
 
-/// Hit-test the mouse cursor against each agent's current sprite footprint.
-/// Returns the agent under `(mx, my)` (in terminal cell coordinates), or
-/// `None` if no agent occupies that cell.
-///
-/// The character sprite is 8×12 pixels, which in cell space is 8 cells
-/// wide × 6 cells tall (one cell = 2 vertical pixels). We test against
-/// that exact bounding box anchored on the agent's `character_anchor`.
+/// Hit-test the mouse cursor against each agent's current sprite footprint,
+/// anchored on `character_anchor`. `(mx, my)` is in terminal cell coordinates.
 pub(crate) fn hit_test_agent(
     scene: &SceneState,
     layout: &Layout,
@@ -25,10 +20,9 @@ pub(crate) fn hit_test_agent(
     mx: u16,
     my: u16,
 ) -> Option<AgentId> {
-    // Width-in-cells: the sprite width in px IS the cell width — we don't divide
-    // x by 2, since each pixel column is one cell column in the half-block grid.
+    // x is NOT halved: in the half-block grid each pixel column is one cell
+    // column, while each cell is 2 pixel ROWS.
     const SPRITE_W_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_W;
-    // Height-in-cells: the 12 px sprite is 6 half-block cells.
     const SPRITE_H_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS;
     for agent in scene.agents.values() {
         let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
@@ -47,20 +41,13 @@ pub(crate) fn hit_test_agent(
     None
 }
 
-/// Home-desk-only agent hit-test (no router/overlay state). The production CLICK
-/// path now uses `TuiRenderer::hit_test_agent_at` (live-sprite — follows a walking
-/// agent, FIND-22); this is RETAINED as the deterministic seated-agent locator for
-/// the test harness (`harness::hover_agent`) + its unit tests: a seated agent's
-/// `character_anchor` == its desk box, so the harness finds the hover cell without
-/// a populated `route_ctx`. Uses home desk positions only (no walking agents).
+/// Home-desk-only agent hit-test (no router/overlay state) — the deterministic
+/// seated-agent locator for the test harness, which has no populated `route_ctx`.
+/// A seated agent's `character_anchor` == its desk box, so the two agree.
 ///
-/// `scene` must be a SINGLE-FLOOR scene matching `layout` — the caller
-/// projects the live scene via `project_floor_scene(scene, current_floor)`
-/// first, so only the visible floor's agents are tested, with their
-/// re-projected desk indices. (Indexing `layout.home_desks` with a raw
-/// multi-floor `desk_index` was exactly the global/local confusion the
-/// `GlobalDeskIndex` newtype exists to prevent: while viewing floor ≥ 1 it
-/// could pin an invisible agent from another floor.)
+/// `scene` must be a SINGLE-FLOOR scene matching `layout` (the caller projects via
+/// `project_floor_scene` first): indexing `layout.home_desks` with a raw
+/// multi-floor `desk_index` can pin an invisible agent from another floor.
 #[cfg(test)]
 pub(crate) fn hit_test_from_tui(
     scene: &SceneState,
@@ -71,21 +58,14 @@ pub(crate) fn hit_test_from_tui(
     const SPRITE_W: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_W;
     const SPRITE_H_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS;
     for agent in scene.agents.values() {
-        // `single_floor_local()` (the projected-scene identity), NOT the
-        // arithmetic bridge: on an out-of-range desk the bridge would wrap onto
-        // a synthetic later floor of the uniform projection and could land back
-        // in `[0..len)` — hit-testable while invisible to the renderer. The
-        // identity keeps the OOB index OOB, so `home_desk` skips it like the
-        // render path does.
+        // `single_floor_local()`, NOT the arithmetic bridge: on an out-of-range
+        // desk the bridge would wrap onto a synthetic later floor and could land
+        // back in `[0..len)` — hit-testable while invisible to the renderer.
         let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
-        // The painter's seated anchor (pixtuoid_scene pixel_painter::anchors::
-        // seated_anchor): the 8px sprite centered on DESK_W, 8px above the desk.
-        // Derived from the SAME DESK_W the painter centers on — the pairing is
-        // pinned against `character_anchor` by
-        // `from_tui_pin_box_matches_the_painted_seated_anchor`, so the pin box
-        // can't drift from the hover/blit geometry again.
+        // The painter's seated anchor: the 8px sprite centered on the SAME DESK_W
+        // the painter centers on, 8px above the desk.
         let ax = desk.x + pixtuoid_scene::layout::DESK_W.saturating_sub(SPRITE_W) / 2;
         let ay = desk.y.saturating_sub(8);
         let cell_x = ax;
@@ -101,9 +81,8 @@ pub(crate) fn hit_test_from_tui(
     None
 }
 
-/// Hit-test whether the mouse is over the pantry coffee machine.
-/// Returns true if `(mx, my)` (terminal cell coords) falls on the coffee
-/// machine section of the pantry counter sprite.
+/// Whether `(mx, my)` (terminal cell coords) falls on the coffee-machine section
+/// of the pantry counter sprite.
 pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     let pantry_wp = layout
         .waypoints
@@ -116,9 +95,7 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     let sprite_x = wp.pos.x.saturating_sub(cw / 2);
     let sprite_y = wp.pos.y.saturating_sub(ch / 2);
     // Derive the machine box from the painter's shared column source so the click
-    // target can't drift from the painted machine (the version-popup / seated-
-    // anchor pinning discipline). The small-case previously used a wider [8,13)
-    // that false-positived counter cells 8 and 12.
+    // target can't drift from the painted machine.
     let (dx0, dx1) = if cw >= pixtuoid_scene::layout::PANTRY_COUNTER_LARGE_W {
         pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_LARGE
     } else {
@@ -131,18 +108,17 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     mx >= coffee_x0 && mx < coffee_x1 && cell_y >= coffee_y0 && cell_y < coffee_y1
 }
 
-/// Hit-test all furniture items in the office. Returns a short label
-/// if `(mx, my)` (terminal cell coords) falls on any known item.
-/// The coffee machine is handled separately for its click-to-open
-/// behavior — this function covers the remaining decorations.
+/// A short label if `(mx, my)` (terminal cell coords) falls on any known
+/// furniture item. The coffee machine is handled separately for its
+/// click-to-open behavior.
 pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static str> {
     use pixtuoid_scene::layout::{
         furniture_def, Furniture, PlantItem, PlantKind, PodDecor, PodDecorItem, WallDecor,
         WallDecorItem, WaypointKind, ELEVATOR_H, ELEVATOR_W,
     };
     // Hover boxes derive from the one furniture table — `.visual` (the visible
-    // sprite) for what the user points at, `.footprint` where the obstacle is
-    // the thing — so a geometry edit can't leave a stale hit box behind.
+    // sprite) for what the user points at, `.footprint` where the obstacle is the
+    // thing — so a geometry edit can't leave a stale hit box behind.
     let visual = |f| furniture_def(f).visual;
     let px = mx;
     let py = my * 2;
@@ -151,8 +127,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         px >= x && px < x.saturating_add(w) && py >= y && py < y.saturating_add(h)
     };
 
-    // Home desks: derive the box from the table's `visual` like every sibling arm
-    // (top-left-anchored at desk.{x,y}); the old hardcoded DESK_W+2 clipped 2px.
+    // Home desks are top-left-anchored, unlike the center-anchored arms below.
     let desk_vis = visual(Furniture::Desk);
     for desk in &layout.home_desks {
         if hit(desk.x, desk.y, desk_vis.w, desk_vis.h) {
@@ -160,33 +135,30 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Lounge couch: one 20px hover region centred on the sofa. It's 3 seat
-    // waypoints now, so per-seat boxes would over-cover and multi-fire — hit
-    // it once at couch_sprite_center, mirroring the single furniture paint.
+    // ONE hover region centred on the sofa: it's 3 seat waypoints, so per-seat
+    // boxes would over-cover and multi-fire.
     if let Some(c) = layout.couch_sprite_center() {
         if hit(c.x.saturating_sub(10), c.y.saturating_sub(3), 20, 7) {
             return Some("Lounge Sofa");
         }
     }
 
-    // Waypoints
     for wp in &layout.waypoints {
         let Size { w, h } = match wp.kind {
-            // Couch hovers via the one-time region above (3 seat waypoints).
+            // Hovers via the one-time region above.
             WaypointKind::Couch => continue,
             WaypointKind::Pantry => layout.pantry_counter_size(),
-            // Meeting slots hover via the dedicated meeting_sofas loop below;
-            // island stands are footprint-less slots on the island body,
-            // which has its own hover region — skip.
+            // Meeting slots hover via the meeting_sofas loop below; island stands
+            // are footprint-less slots on the island body, which has its own
+            // hover region.
             WaypointKind::MeetingSofa | WaypointKind::MeetingChair | WaypointKind::Island => {
                 continue
             }
-            // The shelf's sprite is CENTRED on the waypoint (7x10 visual) while
-            // its walkable footprint is the End-anchored 7x2 south strip — a
-            // footprint hover box would leave only a 2px band mid-sprite, so
-            // hover the visual, like the fish tank and island bodies.
+            // The shelf's sprite is CENTRED on the waypoint while its walkable
+            // footprint is the End-anchored south strip, so a footprint hover box
+            // would leave only a 2px band mid-sprite.
             WaypointKind::SnackShelf => furniture_def(Furniture::SnackShelf).visual,
-            // Footprint owned by furniture_def — same shape the mask + stand
+            // Footprint owned by furniture_def — the same shape the mask + stand
             // point use, so the hover box can't drift from them.
             other => match furniture_def(other.furniture()).footprint {
                 Some(fp) => fp,
@@ -203,11 +175,9 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
                 WaypointKind::VendingMachine => "Vending Machine",
                 WaypointKind::Printer => "Printer",
                 WaypointKind::SnackShelf => "Snack Shelf",
-                // Proven unreachable today (couch + meeting/island slots
-                // `continue` above), but this is a per-frame mouse path: skip an
-                // unexpected kind rather than panic the whole TUI if a future
-                // refactor adds a WaypointKind or drops one of those earlier
-                // `continue`s.
+                // Unreachable today (those kinds `continue` above), but this is a
+                // per-frame mouse path: skip an unexpected kind rather than panic
+                // the whole TUI.
                 WaypointKind::Couch
                 | WaypointKind::MeetingSofa
                 | WaypointKind::MeetingChair
@@ -216,10 +186,9 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Meeting sofas (20px sprite, centred on the sofa point) + tables, per room.
     for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
         for sofa in trio.sofas {
-            let Size { w, h } = visual(Furniture::MeetingSofaBody); // full 20px sprite, not the 16px footprint
+            let Size { w, h } = visual(Furniture::MeetingSofaBody); // full sprite, not the footprint
             if hit(
                 sofa.x.saturating_sub(w / 2),
                 sofa.y.saturating_sub(h / 2),
@@ -240,7 +209,6 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Kitchen island (the pantry's centre piece; hover the full sprite).
     if let Some(p) = layout.pantry.and_then(|p| p.kitchen_island) {
         let Size { w, h } = visual(Furniture::KitchenIsland);
         if hit(p.x.saturating_sub(w / 2), p.y.saturating_sub(h / 2), w, h) {
@@ -248,9 +216,8 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Plants
     for &PlantItem { kind, pos } in &layout.plants {
-        let Size { w, h } = visual(kind.furniture()); // hover the whole visible plant, not just its ground base
+        let Size { w, h } = visual(kind.furniture());
         if hit(
             pos.x.saturating_sub(w / 2),
             pos.y.saturating_sub(h / 2),
@@ -266,7 +233,6 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Fish tank — center-anchored like its mask stamp.
     if let Some(tank) = layout.fish_tank() {
         let Size { w, h } = visual(Furniture::FishTank);
         if hit(
@@ -279,8 +245,8 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Head-of-table meeting chairs (the occupant's own hover wins when
-    // someone sits — the agent pass runs before furniture).
+    // Head-of-table meeting chairs; an occupant's own hover wins, because the
+    // agent pass runs before furniture.
     for wp in &layout.waypoints {
         if wp.kind == pixtuoid_scene::layout::WaypointKind::MeetingChair {
             let Size { w, h } = visual(Furniture::MeetingChair);
@@ -295,9 +261,8 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Floor lamp
     if let Some(lamp) = layout.floor_lamp() {
-        let Size { w, h } = visual(Furniture::FloorLamp); // full 4×10 lamp sprite
+        let Size { w, h } = visual(Furniture::FloorLamp);
         if hit(
             lamp.x.saturating_sub(w / 2),
             lamp.y.saturating_sub(h / 2),
@@ -308,7 +273,6 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Wall decor
     for &WallDecorItem { kind, pos } in &layout.wall_decor {
         let Size { w, h } = furniture_def(kind.furniture()).visual;
         if hit(pos.x, pos.y, w, h) {
@@ -322,7 +286,6 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Pod decor (aisle items)
     for &PodDecorItem { kind, pos } in &layout.pod_decor {
         let Size { w, h } = furniture_def(kind.furniture()).visual;
         if hit(
@@ -341,18 +304,14 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Lounge side table
     if let Some(t) = layout.lounge_side_table() {
         if hit(t.x.saturating_sub(3), t.y.saturating_sub(2), 7, 4) {
             return Some("Side Table");
         }
     }
 
-    // Meeting room procedural items (coat rack, doormat) — EVERY room
-    // (#555: room 1 used to render bare of decor, keyed room 0 only). Both the
-    // rack (coat_rack_pos, incl. the narrow-fitted-room yield) and the doormat
-    // (doormat_rect) come from the SAME room-aggregate authority the painter
-    // draws from, so a geometry edit can't leave a stale hover box behind.
+    // EVERY room, not just room 0 (#555 left room 1 bare of decor). Rack and
+    // doormat come from the SAME room-aggregate authority the painter draws from.
     for room in &layout.meeting_rooms {
         if let Some(rack) = room.coat_rack_pos() {
             if hit(rack.x.saturating_sub(2), rack.y, 5, 8) {
@@ -366,8 +325,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Pantry room procedural items (water cooler, trash bin) — placement +
-    // fit-gate from the PantryRoom aggregate, shared with the scene painter.
+    // Placement + fit-gate from the PantryRoom aggregate, shared with the painter.
     if let Some(pantry) = layout.pantry {
         if let Some(cooler) = pantry.water_cooler_rect() {
             if hit(cooler.x, cooler.y, cooler.width, cooler.height) {
@@ -381,7 +339,6 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Door / elevator
     if let Some(d) = layout.door {
         if hit(d.x, d.y, ELEVATOR_W, ELEVATOR_H) {
             return Some("Elevator");
@@ -391,13 +348,9 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     None
 }
 
-/// Hit-test whether the mouse is over the office pet.
-/// `pet_pos` is the pet's center anchor in pixel coordinates.
-/// `kind` selects the species; `anim_name` selects the bounding box size
-/// via `PetKind::hitbox`.
-///
-/// Returns true if `(mx, my)` (terminal cell coords) falls inside
-/// the sprite's footprint.
+/// Whether `(mx, my)` (terminal cell coords) falls inside the office pet's
+/// sprite. `pet_pos` is its center anchor in pixel coordinates; `anim_name`
+/// selects the bounding-box size via `PetKind::hitbox`.
 pub fn hit_test_pet(
     kind: PetKind,
     pet_pos: pixtuoid_scene::layout::Point,
@@ -409,10 +362,8 @@ pub fn hit_test_pet(
 }
 
 /// Whether cell `(mx, my)` falls on a `size`-px sprite CENTER-anchored at `pos`
-/// (pixel coords). Owns the half-block `my * 2` sub-pixel conversion, the
-/// `pos − size/2` top-left, and the saturating box test — the idiom every
-/// center-anchored hover box (pet, gateway mascot) shares, so the `* 2` can't be
-/// dropped at one site.
+/// (pixel coords). Owns the half-block `my * 2` conversion for every
+/// center-anchored hover box, so the `* 2` can't be dropped at one site.
 fn center_hit(pos: pixtuoid_scene::layout::Point, size: Size, mx: u16, my: u16) -> bool {
     let tl_x = pos.x.saturating_sub(size.w / 2);
     let tl_y = pos.y.saturating_sub(size.h / 2);
@@ -424,10 +375,9 @@ fn center_hit(pos: pixtuoid_scene::layout::Point, size: Size, mx: u16, my: u16) 
 }
 
 /// True if `(mx, my)` (terminal cell coords) falls on the gateway mascot's
-/// `w`×`h`-px sprite, centered at `pos` (pixel coords). `w`/`h` come from the
-/// PAINTED frame (`MascotFrame`, which reads the pack's real size) — the derive-
-/// from-source discipline every other hit-test uses, so a re-tuned or custom-pack
-/// lobster keeps its click box aligned with what's drawn (was a hardcoded 14×12).
+/// `w`×`h`-px sprite, centered at `pos` (pixel coords). `w`/`h` must come from the
+/// PAINTED frame (`MascotFrame`, which reads the pack's real size), so a re-tuned
+/// or custom-pack mascot keeps its click box aligned with what's drawn.
 pub fn hit_test_mascot(
     pos: pixtuoid_scene::layout::Point,
     w: u16,

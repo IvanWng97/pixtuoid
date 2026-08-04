@@ -1,9 +1,8 @@
 use super::*;
 
-// Task 4's headline invariant for the golden-hour blaze: it must be
-// SUN-only. Uses hand-built SkyState/Atmo values (not real clock times) so
-// even a maximally warm/lit MOON — which a real moon's low altitude/luminance
-// could never actually produce — still proves the gate is absolute.
+// Hand-built SkyState/Atmo values, not real clock times: a real moon's low
+// altitude/luminance could never produce these, so a maximally warm/lit MOON
+// proves the gate is absolute rather than merely well-behaved in practice.
 #[test]
 fn golden_hour_blaze_is_sun_only() {
     let full_atmo = sky::Atmo {
@@ -59,8 +58,6 @@ fn weather_floor_tint_clear_is_near_neutral() {
 
 #[test]
 fn fog_floor_tint_is_brighter_than_overcast() {
-    // Regression for the "fog read as dark mist" bug — fog must be the
-    // brighter (luminous white-out) of the two.
     let fog = weather_floor_tint(Weather::Fog);
     let oc = weather_floor_tint(Weather::Overcast);
     let lum = |c: Rgb| c.r as u16 + c.g as u16 + c.b as u16;
@@ -72,7 +69,6 @@ fn fog_floor_tint_is_brighter_than_overcast() {
 
 #[test]
 fn skyline_haze_obscures_fog_and_storm_only_when_expected() {
-    // Fog is the heaviest veil; clear/windy/snow leave the skyline crisp.
     let fog = skyline_haze(Weather::Fog).expect("fog hazes").1;
     let storm = skyline_haze(Weather::Storm).expect("storm hazes").1;
     assert!(fog > storm, "fog should obscure more than storm");
@@ -164,28 +160,20 @@ fn lightning_strikes_are_jittered_not_metronomic() {
         distinct > 12,
         "strike offsets should vary across buckets, got {offsets:?}"
     );
-    // Every offset keeps the whole flash inside its own bucket.
     assert!(offsets
         .iter()
         .all(|&o| o < LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS));
 }
 
-// The Storm window arm paints rain streaks plus a bright on-glass bolt that
-// fires only inside the ~90 ms lightning flash. Drive the painter directly
-// with Weather::Storm at a `now` inside a low-offset strike window (same
-// technique as lightning_flash_storm_only) and assert the glass interior is
-// markedly brighter than the same window painted one second later (no flash).
 #[test]
 fn storm_window_bolt_brightens_glass_during_the_flash() {
     use std::time::{Duration, UNIX_EPOCH};
+    // Low-offset bucket for the same reason as `lightning_flash_storm_only`.
     let bucket = (0u64..)
         .find(|&b| strike_offset(b) < 500)
         .expect("a low-offset bucket exists");
     let off = strike_offset(bucket);
     let at = |ms: u64| UNIX_EPOCH + Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + ms);
-    // Sanity: the chosen instant has a positive flash level, the next-second
-    // probe does not — so the only difference between the two renders is the
-    // bolt block.
     assert!(
         lightning_flash_level(at(off)) > 0.0,
         "flash at strike offset"
@@ -218,7 +206,6 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             None,
             0.0,
         );
-        // Sum luminance over the glass interior (inside the 1px frame).
         let mut sum = 0u64;
         for y in 1..29u16 {
             for x in 1..(WINDOW_W - 1) {
@@ -237,10 +224,6 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     );
 }
 
-// The spill/window bounds clamps: a buffer barely taller than the wall band
-// forces the window-light spill trapezoid AND the floor-to-ceiling window to
-// run off the bottom edge, exercising the `break` / `continue` guards. The
-// render must not panic and the in-bounds rows must still paint.
 #[test]
 fn short_buffer_clamps_spill_and_window_without_panic() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
@@ -250,8 +233,8 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     let buf_h = top_wall_h + 2;
     let buf_w = 60u16;
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
-    // Construct the look directly with a positive spill so the spill path
-    // runs regardless of the local clock.
+    // A hand-built look with positive spill, so the spill path runs regardless
+    // of the local clock.
     let look = TimeOfDayLook {
         glass_a: theme.office.building_light,
         glass_b: theme.office.building_dark,
@@ -263,8 +246,8 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     paint_floor_and_walls(
         &mut buf, buf_w, buf_h, now, &look, top_wall_h, None, theme, 0.0,
     );
-    // No panic reaching here is the primary assertion (RgbBuffer::put has no
-    // bounds guard). The wall band's in-bounds rows must still be painted.
+    // Reaching here without a panic IS the primary assertion — `RgbBuffer::put`
+    // has no bounds guard.
     assert_ne!(
         buf.get(0, 0),
         Rgb { r: 5, g: 5, b: 5 },
@@ -272,9 +255,8 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     );
 }
 
-/// Build a `SystemTime` for local `h:mi` on a fixed date — mirrors
-/// `sky.rs`'s private `at_hour`, TZ-independent since every derivation
-/// (`sky::emitter`/`weather_state`) decodes back into `chrono::Local`.
+/// Build a `SystemTime` for local `h:mi` on a fixed date. TZ-independent, since
+/// every derivation decodes back into `chrono::Local`.
 fn at_local(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> SystemTime {
     use chrono::TimeZone;
     chrono::Local
@@ -284,11 +266,8 @@ fn at_local(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> SystemTime {
         .into()
 }
 
-/// Render a full office wall (via the real `paint_floor_and_walls` path —
-/// exercises `compute_disc` + the sky-branch blend exactly as production
-/// does) at a forced January `day` + local `hour` + weather. Resets the
-/// weather override on drop so a mid-test panic can't leak into a
-/// sibling test's thread.
+/// Render a full office wall through the real `paint_floor_and_walls` path at a
+/// forced January `day` + local `hour` + weather.
 fn render_office_on(
     day: u32,
     hour: u32,
@@ -303,6 +282,8 @@ fn render_office_on(
 /// [`render_office_on`] with the theme as a parameter — the weather/light
 /// invariants hold per THEME (each ships its own night-sky + glass colours), so
 /// their pins sweep `ALL_THEMES` rather than trusting `normal` to be worst-case.
+/// The `Reset` guard clears the weather override even on a mid-test panic, which
+/// would otherwise leak into a sibling test's thread.
 fn render_office_themed(
     day: u32,
     hour: u32,
@@ -329,20 +310,15 @@ fn render_office_themed(
     buf
 }
 
-/// `render_office_on` pinned to January 1st — the fixed date every
-/// existing hour/weather-only test uses (the moon-phase tests below are
-/// the ones that vary the day).
+/// `render_office_on` pinned to January 1st, for the hour/weather-only tests.
 fn render_office_at(hour: u32, weather: Weather, buf_w: u16, top_wall_h: u16) -> RgbBuffer {
     render_office_on(1, hour, weather, buf_w, top_wall_h)
 }
 
-/// Count "warm bright" pixels (the sun disc's signature — its core color
-/// fully replaces the sky pixel at full atmo visibility) in the sky-only
-/// top third of the window band. Restricted to the top third (not the
-/// full `1..top_wall_h`) so it can never pick up the SKYLINE's own lit
-/// city-window dots (`theme.office.city_lit_windows`), which live in the
-/// glass's bottom half regardless of time of day and would otherwise
-/// false-positive as a "disc".
+/// Count "warm bright" pixels (the sun disc's signature) in the sky-only top
+/// third of the window band. Restricted to the top third so it can never pick up
+/// the SKYLINE's own lit city-window dots, which live in the glass's bottom half
+/// regardless of time of day and would false-positive as a "disc".
 fn count_warm_bright(buf: &RgbBuffer, top_wall_h: u16) -> usize {
     (1..(top_wall_h / 3).max(2))
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
@@ -353,12 +329,10 @@ fn count_warm_bright(buf: &RgbBuffer, top_wall_h: u16) -> usize {
         .count()
 }
 
-/// Count "cool bright" pixels (the moon disc's signature) in the same
-/// sky-only region. Per-theme `moon_core` values sit closer to neutral
-/// white than each theme's warm `sun_core`, so the blue-over-red margin
-/// is smaller than `count_warm_bright`'s (10 vs 40) — still well clear of
-/// the base night-sky gradient (`theme.lighting.night_sky_a/b`), whose
-/// blue channel never approaches 200.
+/// Count "cool bright" pixels (the moon disc's signature) in the same sky-only
+/// region. `moon_core` sits closer to neutral white than the warm `sun_core`, so
+/// the blue-over-red margin is smaller than `count_warm_bright`'s — still well
+/// clear of the base night-sky gradient, whose blue never approaches 200.
 fn count_cool_bright(buf: &RgbBuffer, top_wall_h: u16) -> usize {
     (1..(top_wall_h / 3).max(2))
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
@@ -369,11 +343,9 @@ fn count_cool_bright(buf: &RgbBuffer, top_wall_h: u16) -> usize {
         .count()
 }
 
-/// Count faint-white STAR pixels in the same sky-only top-third band as
-/// `count_warm_bright`/`count_cool_bright` (so it can't pick up the
-/// skyline's lit city-window dots). The base night sky (`night_sky_a/b`,
-/// (18,26,52)/(28,36,70)) never gets close to this threshold on its own —
-/// only a `STAR_COLOR` blend lifts a pixel this bright.
+/// Count faint-white STAR pixels in the same sky-only top-third band. The base
+/// night sky never gets close to this threshold on its own — only a `STAR_COLOR`
+/// blend lifts a pixel this bright.
 fn count_faint_white(buf: &RgbBuffer, top_wall_h: u16) -> usize {
     (1..(top_wall_h / 3).max(2))
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
@@ -386,9 +358,8 @@ fn count_faint_white(buf: &RgbBuffer, top_wall_h: u16) -> usize {
 
 #[test]
 fn disc_appears_low_in_the_sky_at_a_low_sun_hour() {
-    // 07:00: the sun sits low (altitude ≈0.41, well under the
-    // HORIZON_FRAC/ARC_RISE_FRAC ≈0.69 clip threshold), so its disc
-    // lands inside the glass rather than climbing off the top.
+    // 07:00: the sun sits low, under the HORIZON_FRAC/ARC_RISE_FRAC clip
+    // threshold, so its disc lands inside the glass rather than off the top.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let clear = render_office_at(7, Weather::Clear, buf_w, top_wall_h);
@@ -408,10 +379,6 @@ fn disc_appears_low_in_the_sky_at_a_low_sun_hour() {
 
 #[test]
 fn rain_hides_the_disc_like_overcast() {
-    // Thick cloud hides the disc UNIFORMLY: Rain's disc channel (0.05,
-    // same as Overcast/Storm) must hide it entirely too, not just dim it
-    // — regression guard for the old 0.20 value that let Rain out-show
-    // Overcast.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let clear = render_office_at(7, Weather::Clear, buf_w, top_wall_h);
@@ -436,17 +403,13 @@ fn rain_hides_the_disc_like_overcast() {
 
 #[test]
 fn disc_clips_above_the_glass_at_the_arc_apex() {
-    // Hold `top_wall_h` CONSTANT and vary only the hour, so the only
-    // difference between the two renders is the sun's altitude:
-    // `compute_disc`'s `cy` is `top_wall_h * (HORIZON_FRAC -
-    // altitude*ARC_RISE_FRAC)`, and at the apex (12:00, altitude ≈0.99)
-    // the bracket is solidly negative — the disc has climbed entirely
-    // above the glass, regardless of `top_wall_h`'s size ("real low
-    // window": the apex ALWAYS clips, by construction).
+    // `top_wall_h` is CONSTANT across both renders so the only difference is the
+    // sun's altitude: at the apex `compute_disc`'s `cy` bracket goes negative
+    // whatever the wall height, so the apex ALWAYS clips by construction.
     let buf_w = 96u16;
-    let top_wall_h = 40u16; // same height for both renders — only the HOUR varies
-    let low = render_office_at(7, Weather::Clear, buf_w, top_wall_h); // altitude ~0.41, in-glass
-    let apex = render_office_at(12, Weather::Clear, buf_w, top_wall_h); // altitude ~0.99, clipped
+    let top_wall_h = 40u16;
+    let low = render_office_at(7, Weather::Clear, buf_w, top_wall_h);
+    let apex = render_office_at(12, Weather::Clear, buf_w, top_wall_h);
     let low_n = count_warm_bright(&low, top_wall_h);
     let apex_n = count_warm_bright(&apex, top_wall_h);
     assert!(low_n >= 3, "low sun should show a disc: {low_n}");
@@ -458,22 +421,17 @@ fn disc_clips_above_the_glass_at_the_arc_apex() {
 
 #[test]
 fn short_window_apex_does_not_panic() {
-    // A SHORT window at the apex shrinks `window_h`/`glass_h` to their
-    // floor while the disc's `cy` is solidly negative — must not panic.
+    // top_wall_h=10 shrinks `window_h`/`glass_h` to their floor while the apex
+    // disc's `cy` is solidly negative.
     let _ = render_office_at(12, Weather::Clear, 96, 10);
 }
 
 #[test]
 fn disc_lands_in_a_window_never_on_the_wall_margin() {
-    // Regression guard for the original wall-margin-vanish bug (the OLD
-    // linear `cx` overshot the last painted pane onto blank wall). Now that
-    // `compute_disc` maps azimuth across the real tiled span AND the disc is
-    // gated to the window its centre is over, the disc can legitimately hide
-    // behind an inter-window pillar at some hours — so it is NOT visible at
-    // every hour. Across a sweep of low-sun hours it must, for every buffer
-    // width: (a) appear inside a real window at least once (not perpetually
-    // lost), and (b) NEVER paint a pixel past the last painted window (the
-    // wall margin — the bug this guards).
+    // The disc can legitimately hide behind an inter-window pillar at some hours,
+    // so it is NOT visible at every hour — hence the two-part sweep: it must
+    // appear inside a real window at least once, and NEVER paint past the last
+    // painted window (the wall margin, which is the bug this guards).
     let top_wall_h = 40u16;
     let stride = (WINDOW_W + WINDOW_GAP) as f32;
     for buf_w in [76u16, 96, 120, 150, 192, 220, 300] {
@@ -506,13 +464,9 @@ fn disc_lands_in_a_window_never_on_the_wall_margin() {
 
 #[test]
 fn disc_sweeps_across_a_single_window_buffer() {
-    // Regression guard for the old center-to-center mapping: with only
-    // ONE window painted, `first_center == last_center` (both the same
-    // window's centre), so `cx` was CONSTANT regardless of azimuth — the
-    // disc froze on the shared mullion column instead of sweeping. The
-    // new inset-span mapping must still sweep even on a single-window
-    // buffer. buf_w=40 paints exactly one window (WINDOW_W=22 + a margin
-    // too narrow for a second 22+3px pane).
+    // buf_w=40 paints EXACTLY one window (too narrow for a second pane) — the
+    // degenerate case where a center-to-center azimuth mapping has zero span and
+    // freezes `cx` on the mullion.
     let buf_w = 40u16;
     let top_wall_h = 40u16;
     let morning = render_office_at(7, Weather::Clear, buf_w, top_wall_h);
@@ -543,10 +497,8 @@ fn disc_sweeps_across_a_single_window_buffer() {
 
 #[test]
 fn moon_disc_shows_at_night() {
-    // 21:00: one hour past dusk, the moon's night-arc altitude is still
-    // low (≈0.59, under the clip threshold) — unlike the small hours
-    // (00:00-02:00), which sit near the night arc's OWN apex (the
-    // dusk-to-dawn span's midpoint) and clip exactly like a midday sun.
+    // 21:00, not the small hours: those sit near the night arc's OWN apex and
+    // clip above the glass exactly like a midday sun.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let clear = render_office_at(21, Weather::Clear, buf_w, top_wall_h);
@@ -566,10 +518,8 @@ fn moon_disc_shows_at_night() {
 
 #[test]
 fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
-    // 02:00: deep night, near the moon's own night-arc apex, so its disc
-    // clips (near-)entirely above the glass (see `moon_disc_shows_at_night`'s
-    // doc comment on why THAT test uses 21:00 instead) — the only bright
-    // thing left to find in the upper sky band is a star.
+    // 02:00 sits near the moon's night-arc apex, so its disc clips above the
+    // glass — the only bright thing left in the upper sky band is a star.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let clear = render_office_at(2, Weather::Clear, buf_w, top_wall_h);
@@ -589,25 +539,19 @@ fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
 
 #[test]
 fn stars_gate_on_night_not_darkness_alone() {
-    // The star gate must key on the sun being BELOW the horizon (night), not
-    // on `darkness`. At 07:00 the sun is up but low, so a HIGH darkness (0.6)
-    // is passed — yet stars must be OFF (else a full field wrongly shows at
-    // dawn). Counting rendered pixels can't test this (the pale dawn sky is
-    // itself "faint-white"), so assert the pure gate directly.
+    // Counting rendered pixels can't test this — the pale dawn sky is itself
+    // "faint-white" — so assert the pure gate directly, with a HIGH darkness
+    // passed at an hour when the sun is up.
     let at = |h: u32| at_local(2026, 1, 1, h, 0);
-    // Dawn: sun up (emitter is the Sun) → no stars regardless of darkness.
     assert_eq!(
         night_star_strength(at(7), 0.6, Weather::Clear),
         0.0,
         "no stars at 7am while the sun is up"
     );
-    // Deep night, clear: sun down (emitter is the Moon) → stars visible.
     assert!(
         night_star_strength(at(2), 0.9, Weather::Clear) > STAR_MIN,
         "a clear night should light the stars"
     );
-    // Night but overcast: the clear-sky factor (atmo.disc≈0.05) drops it
-    // below STAR_MIN → the thick cloud hides the stars.
     assert!(
         night_star_strength(at(2), 0.9, Weather::Overcast) < STAR_MIN,
         "overcast should hide the stars even at night"
@@ -616,21 +560,17 @@ fn stars_gate_on_night_not_darkness_alone() {
 
 #[test]
 fn disc_never_bleeds_across_a_window_pillar() {
-    // Physics-audit repro: a disc whose `cx` lands near an inter-window gap
-    // is wide enough (radius + glow) to reach the glass on BOTH sides of the
-    // solid wall pillar (frame + WINDOW_GAP + frame). Before the per-window
-    // gate it painted in both panes at once — the sun/moon showing THROUGH a
-    // wall. The disc must light at most ONE window at any instant. A wide
-    // buffer has many internal gaps; sweep the low-sun hours so `cx` passes
-    // over one.
+    // A disc whose `cx` lands near an inter-window gap is wide enough (radius +
+    // glow) to reach the glass on BOTH sides of the solid wall pillar — the
+    // sun/moon showing THROUGH a wall. A wide buffer has many internal gaps;
+    // sweeping the low-sun hours makes `cx` pass over one.
     let buf_w = 280u16;
     let top_wall_h = 40u16;
     let stride = (WINDOW_W + WINDOW_GAP) as i32;
     for h in [5u32, 6, 7, 17, 18, 19] {
         let buf = render_office_at(h, Weather::Clear, buf_w, top_wall_h);
         let mut wins = std::collections::HashSet::new();
-        // Upper sky band only (top third) so the skyline's own lit city dots
-        // can't masquerade as disc-core pixels.
+        // Top third only, so the skyline's lit city dots can't pose as disc pixels.
         for y in 1..(top_wall_h / 3).max(2) {
             for x in 0..buf.width() {
                 let p = buf.get(x, y);
@@ -657,13 +597,10 @@ fn disc_never_bleeds_across_a_window_pillar() {
 
 #[test]
 fn crescent_moon_leaves_the_dark_limb_unlit() {
-    // At 21:00 the moon disc sits low & in-glass at FULL atmo visibility
-    // under Clear (`vis == atmo(Clear).disc == 1.0`), so every
-    // disc-interior pixel becomes EXACTLY `theme.lighting.moon_core` (lit)
-    // or EXACTLY `MOON_SHADOW` (the dark limb) — no partial blend to
-    // muddy the count. The disc's (cx, cy, r) depend only on the hour
-    // (not the date), so one `compute_disc` call gives the shared
-    // bounding box for every day.
+    // 21:00 Clear puts the disc in-glass at FULL atmo visibility, so every
+    // disc-interior pixel is EXACTLY `moon_core` or EXACTLY `MOON_SHADOW` — no
+    // partial blend to muddy the count. (cx, cy, r) depend only on the hour, not
+    // the date, so one `compute_disc` call gives the bounding box for every day.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
@@ -683,7 +620,6 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
         .find(|&d| sky::moon_phase(at_local(2026, 1, d, 21, 0)) > 0.9)
         .expect("a near-full night exists in January 2026");
 
-    // (dark-limb count, lit-bright count) within the disc proper.
     let count_dark_and_bright = |day: u32| -> (usize, usize) {
         let buf = render_office_on(day, 21, Weather::Clear, buf_w, top_wall_h);
         let r = geom.r.ceil() as i32;
@@ -740,10 +676,6 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
 
 #[test]
 fn moon_glow_dims_at_new_moon() {
-    // The glow halo must track the phase: a new moon's near-dark core
-    // should cast (almost) no ring, unlike a full moon's bright one.
-    // Search January 2026 at 21:00 for the min/max illuminated fraction
-    // (mirrors `moon_luminance_tracks_phase` in sky.rs).
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let (mut new_moon_day, mut new_moon_frac) = (1u32, f32::MAX);
@@ -760,9 +692,8 @@ fn moon_glow_dims_at_new_moon() {
         }
     }
 
-    // Count faint cool "glow ring" pixels — a softer bar than
-    // `count_cool_bright`'s core threshold, catching the halo blend
-    // around the disc rather than requiring a fully-opaque core hit.
+    // A softer bar than `count_cool_bright`'s core threshold, so it catches the
+    // halo blend rather than requiring a fully-opaque core hit.
     let count_glow_ring = |buf: &RgbBuffer| -> usize {
         (1..(top_wall_h / 3).max(2))
             .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
@@ -787,8 +718,6 @@ fn moon_glow_dims_at_new_moon() {
 
 #[test]
 fn window_columns_tiles_from_the_start_and_keeps_absolute_idx_across_a_skip() {
-    // Wide enough for several panes: start at FIRST_WINDOW_X, stride
-    // WINDOW_W+WINDOW_GAP while x + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w.
     let buf_w = FIRST_WINDOW_X + 4 * (WINDOW_W + WINDOW_GAP) + WINDOW_W + WINDOW_EDGE_MARGIN;
     let all: Vec<_> = window_columns(buf_w, None).collect();
     assert!(all.len() >= 3, "expected several panes, got {}", all.len());
@@ -802,9 +731,7 @@ fn window_columns_tiles_from_the_start_and_keeps_absolute_idx_across_a_skip() {
         assert!(w.x_left + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w);
     }
 
-    // Skip the SECOND pane's x-range (the elevator door): it drops out, but every
-    // surviving pane keeps its ABSOLUTE idx — the pane after the door is STILL 2,
-    // not renumbered (the load-bearing nuance the floor pass relies on).
+    // Skip the SECOND pane's x-range — what the elevator door does to the wall.
     let doomed = all[1];
     let skip = Some((doomed.x_left, doomed.x_left + WINDOW_W));
     let kept: Vec<_> = window_columns(buf_w, skip).collect();
@@ -823,12 +750,11 @@ fn window_columns_tiles_from_the_start_and_keeps_absolute_idx_across_a_skip() {
     );
 }
 
-/// Mean channel value over every PAINTED window pane's glass interior — what a
-/// viewer actually reads as "how bright is the window". The day-over-night
-/// invariant is asserted on THIS, not on `time_of_day_look().darkness`: the
-/// weather veils (`skyline_haze` + the Fog/Overcast/Smog washes) are painted
-/// onto the glass AFTER the light model has produced `sky_row`, so a
-/// `darkness`-only assertion is structurally blind to them.
+/// Mean channel value over every PAINTED window pane's glass interior. The
+/// day-over-night invariant is asserted on THIS, not on
+/// `time_of_day_look().darkness`: the weather veils are painted onto the glass
+/// AFTER the light model produced `sky_row`, so a `darkness`-only assertion is
+/// structurally blind to them.
 fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
     let window_y: u16 = 1;
     let window_h: u16 = top_wall_h.saturating_sub(2).max(8);
@@ -849,9 +775,7 @@ fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
     (sum / f64::from(n)) as f32
 }
 
-/// The brightest night January 2026 can offer — the sky guard's own
-/// methodology (`solar_noon_outshines_the_brightest_night` picks the fullest
-/// moon), transposed onto the rendered pane.
+/// The brightest night January 2026 can offer.
 fn fullest_moon_day() -> u32 {
     (1..=31u32)
         .max_by(|&a, &b| {
@@ -863,10 +787,8 @@ fn fullest_moon_day() -> u32 {
         .expect("January has days")
 }
 
-/// The pane-luminance rig every weather/time invariant below shares: the
-/// glass mean at the FULLEST moon of January 2026 (the brightest night the
-/// year offers — `solar_noon_outshines_the_brightest_night`'s own worst case),
-/// for one theme × hour × weather.
+/// The pane-luminance rig every weather/time invariant below shares: the glass
+/// mean for one theme × hour × weather, at the year's brightest night.
 fn pane(theme: &'static crate::theme::Theme, hour: u32, w: Weather) -> f32 {
     const BUF_W: u16 = 120;
     const TOP_WALL_H: u16 = 26;
@@ -876,11 +798,10 @@ fn pane(theme: &'static crate::theme::Theme, hour: u32, w: Weather) -> f32 {
     )
 }
 
-/// Local midnight — the moon arc's apex hour, and the instant
-/// `fog_still_glows_over_the_midnight_sky` reads. It is NOT the brightest
-/// RENDERED night pane (the pre-dawn twilight tint reads brighter on every
-/// theme), which is why the two ordering pins below sweep [`night_hours`]
-/// rather than sampling this one.
+/// Local midnight — the moon arc's apex hour. It is NOT the brightest RENDERED
+/// night pane (the pre-dawn twilight tint reads brighter on every theme), which
+/// is why the two ordering pins below sweep [`night_hours`] instead of sampling
+/// this one.
 const NIGHT_HOUR: u32 = 0;
 /// Solar noon — the daytime reference the pane orderings measure against.
 const NOON_HOUR: u32 = 12;
@@ -893,23 +814,17 @@ fn night_hours() -> impl Iterator<Item = u32> {
 }
 
 /// The most of its OWN solar-noon brightness a pane may still show at any night
-/// hour. A bare `night < noon` has NO teeth against the veil defect: the
-/// absolute-grey veils left each weather's night pane just barely under its own
-/// noon pane, so `night < noon` held everywhere pre-fix. Measured over the whole
-/// night band × `ALL_THEMES`, the five VEILED weathers ran 0.865..0.956 (worst:
-/// cyberpunk Fog at 01:00) — the rendered day/night cycle had collapsed to a few
-/// percent while the ordering still technically held. Emitter-lit veils bring
-/// the worst case to 0.655 (dracula Rain, 01:00), and the three UNVEILED
-/// weathers (Clear/Snow/Windy) are unchanged either way at 0.44..0.65. This
-/// floor sits in the gap between those two populations.
+/// hour. A bare `night < noon` has NO teeth against the veil defect: an
+/// absolute-grey veil leaves each weather's night pane just barely under its own
+/// noon pane, so the ordering holds while the rendered day/night cycle has
+/// collapsed to a few percent. This floor sits in the gap between the veiled and
+/// unveiled weather populations.
 const MAX_NIGHT_PANE_FRACTION: f32 = 0.75;
 
-// The rendered twin of `solar_noon_outshines_the_brightest_night`: the day/night
-// CONTRAST the light model produces has to survive the weather VEIL the painter
-// lays over the glass afterwards. It did not — `skyline_haze` and the
-// Fog/Overcast/Smog washes were absolute daylight-grey constants with no time
-// input, so a foggy 01:00 pane rendered 94% as bright as a foggy solar noon and
-// a night-lit room sat behind daylight-white windows.
+// The day/night CONTRAST the light model produces has to survive the weather
+// VEIL the painter lays over the glass afterwards — the veils were absolute
+// daylight-grey constants with no time input, so a night-lit room sat behind
+// daylight-white windows.
 #[test]
 fn no_weather_flattens_the_glass_day_night_contrast() {
     for theme in crate::theme::ALL_THEMES {
@@ -930,12 +845,10 @@ fn no_weather_flattens_the_glass_day_night_contrast() {
     }
 }
 
-// The cross-weather half of the same defect, and the finding's headline
-// measurement: a foggy small-hours pane out-shone a CLEAR solar noon one. Note
-// the reference is clear noon, not the DIMMEST noon: how bright a snowy/stormy
-// noon pane renders is a theme-palette choice (cyberpunk's day sky is
-// deliberately dark), so "the dimmest noon of any weather" is not a property of
-// the light model and is not asserted here.
+// The cross-weather half of the same defect. The reference is CLEAR noon, not
+// the dimmest noon: how bright a snowy/stormy noon pane renders is a
+// theme-palette choice, so "the dimmest noon of any weather" is not a property
+// of the light model and is deliberately not asserted.
 #[test]
 fn no_night_pane_outshines_the_clear_solar_noon_pane() {
     for theme in crate::theme::ALL_THEMES {
@@ -955,14 +868,10 @@ fn no_night_pane_outshines_the_clear_solar_noon_pane() {
     }
 }
 
-// The counter-pin: night-adapting the veil must not ERASE it. Fog after dark is
-// still a lit murk (city light scattering in the cloud) — brighter than a clear
-// night, just no longer brighter than the day. A veil scaled to zero at night,
-// or deleted outright, passes the two tests above and fails this one.
+// The counter-pin: night-adapting the veil must not ERASE it. A veil scaled to
+// zero at night, or deleted outright, passes the two tests above and fails this.
 #[test]
 fn fog_still_glows_over_the_midnight_sky() {
-    // Measured margin is 1.5x (normal) .. 2.2x (cyberpunk); this floor pins
-    // "still clearly a fog" without pinning the exact tuning.
     const FOG_NIGHT_GLOW_MIN: f32 = 1.25;
     for theme in crate::theme::ALL_THEMES {
         let clear = pane(theme, NIGHT_HOUR, Weather::Clear);

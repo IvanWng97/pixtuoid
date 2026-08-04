@@ -3,9 +3,6 @@ use serde_json::json;
 
 #[test]
 fn stdin_cap_plus_headroom_equals_the_pipe_quota() {
-    // The daemon's Windows pipe in-buffer (hook/windows.rs IN_BUFFER_SIZE)
-    // is 1 MiB; the wire line is capped stdin + stamps + newline. Pin the
-    // arithmetic the "one payload always fits the quota" claim rests on.
     assert_eq!(STDIN_CAP + STAMP_HEADROOM, 1 << 20);
 }
 
@@ -13,9 +10,7 @@ fn stdin_cap_plus_headroom_equals_the_pipe_quota() {
 fn stamp_headroom_covers_worst_case_stamps() {
     let mut p = json!({});
     let map = p.as_object_mut().unwrap();
-    // Worst realistic stamps: a 20-digit u64::MAX timestamp + a source
-    // name far longer than any registered CLI name (claude-code / codex /
-    // reasonix / antigravity are all ≤ 11 chars; allow 64 for custom ones).
+    // 64 is far longer than any registered CLI name — headroom for custom ones.
     enrich_payload(map, Some("x".repeat(64)), u64::MAX, Some(u32::MAX));
     let stamped = serde_json::to_vec(&p).unwrap();
     // minus the bare `{}` baseline, plus the trailing '\n' main appends.
@@ -36,9 +31,6 @@ fn stamps_parent_pid_under_pid_when_absent() {
 
 #[test]
 fn an_upstream_pid_is_kept_never_overwritten() {
-    // opencode's plugin / CodeWhale's env-mode supply their own `_pid` —
-    // more authoritative than the shim's getppid (which under a plugin
-    // runtime may be an intermediary). The shim only fills the gap.
     let mut p = json!({ "_pid": 777 });
     let map = p.as_object_mut().unwrap();
     enrich_payload(map, Some("opencode".into()), 1, Some(4242));
@@ -47,12 +39,9 @@ fn an_upstream_pid_is_kept_never_overwritten() {
 
 #[test]
 fn now_ms_narrowing_saturates_instead_of_wrapping() {
-    // Real magnitude: 2024-01-01 in ms passes through unchanged.
+    // 1_704_067_200_000 is 2024-01-01 in ms — a real-magnitude value.
     assert_eq!(ms_u128_to_u64(1_704_067_200_000), 1_704_067_200_000);
     assert!(now_ms() > 1_704_067_200_000);
-    // TEETH: a value past u64::MAX must SATURATE to u64::MAX. A truncating
-    // `as u64` cast would WRAP these to small numbers — this assertion fails
-    // the moment `unwrap_or(u64::MAX)` regresses to `as u64`.
     assert_eq!(ms_u128_to_u64(u64::MAX as u128), u64::MAX);
     assert_eq!(ms_u128_to_u64(u64::MAX as u128 + 1), u64::MAX);
     assert_eq!(ms_u128_to_u64(u128::MAX), u64::MAX);
@@ -60,7 +49,6 @@ fn now_ms_narrowing_saturates_instead_of_wrapping() {
 
 #[test]
 fn stamps_cli_source_under_private_key_and_leaves_public_source_untouched() {
-    // A CC SessionStart payload's `source` is the start *reason* — must survive.
     let mut p = json!({ "hook_event_name": "SessionStart", "source": "startup" });
     let map = p.as_object_mut().unwrap();
     enrich_payload(map, Some("claude-code".into()), 123, None);
@@ -79,8 +67,8 @@ fn no_source_env_omits_private_key_so_decoder_defaults_to_claude() {
 
 #[test]
 fn empty_source_env_is_ignored() {
-    // Seeded with a spoofed inbound key: the empty-source path must strip
-    // it too, not just decline to insert.
+    // Seeded with an inbound key: the empty-source path must strip it too,
+    // not merely decline to insert.
     let mut p = json!({ "_pixtuoid_source": "codex" });
     let map = p.as_object_mut().unwrap();
     enrich_payload(map, Some(String::new()), 1, None);
@@ -89,9 +77,6 @@ fn empty_source_env_is_ignored() {
 
 #[test]
 fn inbound_spoofed_private_key_is_stripped_when_no_source_resolves() {
-    // `_pixtuoid_source` is shim-OWNED: the daemon trusts it exclusively
-    // for CLI attribution (AgentId namespacing), so a spoofed/replayed
-    // inbound key must never pass through on the bare-CC (no source) path.
     let mut p = json!({ "hook_event_name": "Stop", "_pixtuoid_source": "codex" });
     let map = p.as_object_mut().unwrap();
     enrich_payload(map, None, 1, None);
@@ -136,7 +121,6 @@ fn source_from_argv_absent_is_none() {
 
 #[test]
 fn source_from_argv_missing_value_is_none() {
-    // `--source` as the final arg → no value → None (env fallback).
     assert_eq!(
         source_from_argv(&argv(&["pixtuoid-hook", "--source"])),
         None
@@ -182,8 +166,6 @@ fn event_from_argv_reads_both_forms_and_rejects_empty() {
 
 #[test]
 fn env_payload_folds_codewhale_env_into_the_envelope() {
-    // The live-captured shape: cwd (the AgentId key), tool, tool_args (raw
-    // JSON string). Pure getter — no process-global env mutation.
     let env: std::collections::HashMap<&str, &str> = [
         ("DEEPSEEK_WORKSPACE", "/repo"),
         ("DEEPSEEK_TOOL_NAME", "exec_shell"),
@@ -207,8 +189,6 @@ fn env_payload_folds_codewhale_env_into_the_envelope() {
 
 #[test]
 fn env_payload_omits_missing_and_empty_env() {
-    // session_start carries only DEEPSEEK_WORKSPACE (no tool) — empty/absent
-    // tool fields must be omitted, not written as "".
     let env: std::collections::HashMap<&str, &str> =
         [("DEEPSEEK_WORKSPACE", "/repo"), ("DEEPSEEK_TOOL_NAME", "")]
             .into_iter()
@@ -231,11 +211,7 @@ fn env_payload_omits_missing_and_empty_env() {
 
 #[test]
 fn env_payload_caps_oversized_fields_at_a_char_boundary() {
-    // A large DEEPSEEK_TOOL_ARGS (e.g. a big write/edit tool's input) must be
-    // capped so the serialized line stays under the daemon's 1 MiB pipe quota
-    // — extending the stdin arm's STDIN_CAP guarantee to env-mode, so a large
-    // tool's tool_call_before still delivers instead of being watchdog-dropped.
-    // Multi-byte value: a byte-slice cap would split a UTF-8 scalar.
+    // Multi-byte fixture: a byte-slice cap would split a UTF-8 scalar.
     let huge = "é".repeat(ENV_FIELD_CAP); // ~2·CAP bytes, well over the cap
     let env: std::collections::HashMap<&str, String> = [
         ("DEEPSEEK_WORKSPACE", "/repo".to_string()),
@@ -267,12 +243,9 @@ fn env_payload_caps_oversized_fields_at_a_char_boundary() {
 
 #[test]
 fn cap_never_exceeds_the_bound_when_a_multibyte_scalar_straddles_it() {
-    // A 4-byte scalar (U+1D11E) STARTING inside the cap but ENDING past
-    // it: the bound is on the char's END, so the straddler is dropped —
-    // floor to the previous char boundary, never up to 3 bytes OVER the
-    // documented `<= ENV_FIELD_CAP` contract. The é fixture above can't
-    // catch this (2-byte chars over an even cap always end exactly ON a
-    // boundary), so this pins the straddle case specifically.
+    // A 4-byte scalar STARTING inside the cap but ENDING past it. The é fixture
+    // above can't catch this: 2-byte chars over an even cap always end exactly
+    // ON a boundary.
     let mut val = "a".repeat(ENV_FIELD_CAP - 1);
     val.push('\u{1D11E}');
     let capped = cap_env_field(val);
@@ -292,9 +265,7 @@ fn cap_never_exceeds_the_bound_when_a_multibyte_scalar_straddles_it() {
 #[test]
 fn env_payload_falls_back_to_cwd_when_workspace_unset() {
     // A fresh `codewhale` without `-C` has no DEEPSEEK_WORKSPACE at
-    // session_start, so a cwd-less envelope would be dropped (no sprite).
-    // CodeWhale runs the hook with current_dir = its working dir, so the
-    // shim must fall back to that.
+    // session_start.
     let no_ws: std::collections::HashMap<&str, String> =
         [("DEEPSEEK_TOOL_NAME", "exec_shell".to_string())]
             .into_iter()
@@ -308,7 +279,6 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
         "cwd must fall back to the hook child's working dir when DEEPSEEK_WORKSPACE is unset"
     );
 
-    // DEEPSEEK_WORKSPACE remains authoritative over the fallback when present.
     let ws: std::collections::HashMap<&str, String> = [("DEEPSEEK_WORKSPACE", "/ws".to_string())]
         .into_iter()
         .collect();
@@ -321,7 +291,6 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
         "DEEPSEEK_WORKSPACE wins over the fallback"
     );
 
-    // Neither present → no cwd (the decoder drops it; nothing to key on).
     let map = env_payload_from("session_start", None, None, |_| None);
     assert!(
         !map.contains_key("cwd"),
@@ -330,35 +299,30 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
 }
 
 // Env vars are process-global. This is the ONLY env-touching test in this
-// crate (the integration suite in tests/shim.rs runs in a separate binary
-// and sets PIXTUOID_SOCKET in the spawned child, not in-process), so it can
-// save/restore both vars and drive all three branches without serial_test.
+// crate, so it can save/restore both vars and drive every branch without
+// serial_test — adding a second one breaks that.
 #[cfg(unix)]
 #[test]
 fn default_socket_path_branches() {
     let prior_socket = std::env::var("PIXTUOID_SOCKET").ok();
     let prior_xdg = std::env::var("XDG_RUNTIME_DIR").ok();
 
-    // Arm 1: PIXTUOID_SOCKET set -> returned verbatim, wins over XDG.
     std::env::set_var("PIXTUOID_SOCKET", "/explicit/path.sock");
     std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
     assert_eq!(default_socket_path(), "/explicit/path.sock");
 
-    // Arm 1b: set-but-empty/whitespace PIXTUOID_SOCKET = unset (the #172
-    // RUST_LOG policy) -> falls through to XDG.
+    // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
     std::env::set_var("PIXTUOID_SOCKET", "");
     std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
     assert_eq!(default_socket_path(), "/run/user/0/pixtuoid.sock");
     std::env::set_var("PIXTUOID_SOCKET", "   ");
     assert_eq!(default_socket_path(), "/run/user/0/pixtuoid.sock");
 
-    // Arm 2: no PIXTUOID_SOCKET, XDG_RUNTIME_DIR set -> "{dir}/pixtuoid.sock".
     std::env::remove_var("PIXTUOID_SOCKET");
     std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
     assert_eq!(default_socket_path(), "/run/user/1000/pixtuoid.sock");
 
-    // Arm 2b: invalid (empty/whitespace/relative) XDG_RUNTIME_DIR is unset
-    // per the XDG absolute-only spec -> /tmp subdir (parity with native.rs).
+    // A relative XDG_RUNTIME_DIR counts as unset per the XDG absolute-only spec.
     // Safety: getuid is always safe on Unix.
     let uid = unsafe { libc::getuid() };
     let tmp_fallback = format!("/tmp/pixtuoid-{uid}/pixtuoid.sock");
@@ -367,8 +331,7 @@ fn default_socket_path_branches() {
         assert_eq!(default_socket_path(), tmp_fallback);
     }
 
-    // Arm 3: neither set -> "/tmp/pixtuoid-{uid}/pixtuoid.sock" (#485: the
-    // per-user 0700 SUBDIR, not a flat squattable name).
+    // #485: the per-user 0700 SUBDIR, not a flat squattable name.
     std::env::remove_var("PIXTUOID_SOCKET");
     std::env::remove_var("XDG_RUNTIME_DIR");
     assert_eq!(
@@ -386,8 +349,6 @@ fn default_socket_path_branches() {
     }
 }
 
-// #485: the shim only validates dir ownership for the `/tmp` fallback it
-// owns — never for an XDG or explicit-override endpoint (someone else's dir).
 #[cfg(unix)]
 #[test]
 fn owned_tmp_socket_dir_matches_only_the_tmp_fallback() {
@@ -409,15 +370,13 @@ fn owned_tmp_socket_dir_matches_only_the_tmp_fallback() {
         None,
         "an explicit PIXTUOID_SOCKET override is the user's, not ours"
     );
-    // A different uid's tmp dir is NOT ours either (belt: parent must match).
+    // A different uid's tmp dir is not ours either.
     assert_eq!(
         paths::owned_tmp_socket_dir(&format!("/tmp/pixtuoid-{}/pixtuoid.sock", uid + 1)),
         None
     );
 }
 
-// The Windows twin only RUNS on a Windows runner (PR 3 turns that CI
-// job on); until then the ubuntu cross-check job keeps it compiling.
 #[cfg(windows)]
 #[test]
 fn default_socket_path_branches_windows() {
@@ -427,8 +386,7 @@ fn default_socket_path_branches_windows() {
     std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\explicit");
     assert_eq!(default_socket_path(), r"\\.\pipe\explicit");
 
-    // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy) ->
-    // USERNAME default.
+    // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
     std::env::set_var("PIXTUOID_SOCKET", "");
     std::env::set_var("USERNAME", "ada");
     assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");

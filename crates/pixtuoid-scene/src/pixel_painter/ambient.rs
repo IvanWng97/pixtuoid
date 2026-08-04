@@ -1,9 +1,6 @@
 //! Ambient pass — non-character, non-furniture effects painted between
 //! the background and the y-sorted drawables: sun spot on wall, dust
 //! motes in window spill, ceiling halos above active monitors.
-//!
-//! Each subroutine is independently togglable and self-contained. New
-//! ambient effects go here, not in `background/` or `drawable.rs`.
 
 use std::time::SystemTime;
 
@@ -34,10 +31,9 @@ pub(super) struct DustMote {
 
 const MOTES_PER_COLUMN: usize = 3;
 
-/// Deterministic per `(floor_seed, particle_id, now)`. Returns up to
-/// `MOTES_PER_COLUMN` positions inside the column: sine drift in x,
-/// slow fall in y, alpha fades in/out at the top/bottom 15% bands so
-/// motes don't pop on/off at the spill boundary.
+/// Deterministic per `(floor_seed, particle_id, now)`: sine drift in x, slow
+/// fall in y, alpha fading in the top/bottom 15% bands so motes don't pop
+/// on/off at the spill boundary.
 pub(super) fn dust_mote_positions(
     floor_seed: u64,
     now: SystemTime,
@@ -46,17 +42,14 @@ pub(super) fn dust_mote_positions(
     let t_ms = super::epoch_ms(now);
     let mut out = Vec::with_capacity(MOTES_PER_COLUMN);
     for i in 0..MOTES_PER_COLUMN {
-        // Mix floor_seed, column x, and particle id through splitmix64 so
-        // every (column, mote) pair gets an independent 64-bit seed. The
-        // prior approach `floor_seed * K + i` only varied the lowest few
-        // bits, leaving the >> 4/12/14 shifts identical across all three
-        // motes — they collapsed to a single drifting pixel per column.
+        // Mix floor_seed, column x, and particle id so every (column, mote) pair
+        // gets an independent 64-bit seed: a plain `floor_seed * K + i` varies
+        // only the lowest bits, collapsing all three motes into one pixel.
         let mut s = floor_seed
             .wrapping_add((col.x as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9))
             .wrapping_add((i as u64).wrapping_mul(0x94d0_49bb_1331_11eb));
-        // splitmix64 finalizer over the per-(column, mote) seed, open-coded by
-        // deliberate choice (see `strike_offset` in background/mod.rs for the
-        // cross-crate-copy rationale).
+        // splitmix64 finalizer, open-coded by deliberate choice (see
+        // `strike_offset` in background/mod.rs for the rationale).
         s = (s ^ (s >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         s = (s ^ (s >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         s ^= s >> 31;
@@ -64,17 +57,14 @@ pub(super) fn dust_mote_positions(
         let speed_y = 0.6 + ((s >> 12) & 0x3) as f32 * 0.2;
         let speed_x = 0.4 + ((s >> 14) & 0x3) as f32 * 0.15;
         let cycle = col.depth as f32;
-        // `t_ms` is the absolute epoch ms (~1.7e12); `t_ms as f32` first would
-        // round to the nearest f32 (ULP ~131 s at that magnitude) and freeze the
-        // drift/fall for ~2 min. Keep the time term in f64 (elapsed seconds),
-        // cast to f32 only at the final position — see `lighting::neon_pulse`.
+        // Keep the time term in f64: `t_ms as f32` would round to the nearest
+        // f32 (ULP ~131 s at epoch magnitude) and freeze the drift for ~2 min.
         let ts = t_ms as f64 / 1000.0;
         let y_offset = ((ts * speed_y as f64 + ((s >> 4) & 0xFF) as f64) % cycle as f64) as f32;
         let y = col.top_y + y_offset as u16;
         let sx = (phase as f64 + ts * speed_x as f64).sin() as f32;
-        // Clamp x to [0, u16::MAX] before casting — negative f32 silently
-        // wraps to 0 via `as u16`, dragging motes to the left buffer edge
-        // on narrow terminals where col.x is small.
+        // Clamp before casting — a negative f32 silently wraps to 0 via
+        // `as u16`, dragging motes to the left buffer edge when col.x is small.
         let raw_x = (col.x as f32 + sx * 2.5).round();
         let x = raw_x.max(0.0).min(u16::MAX as f32) as u16;
         let norm = y_offset / cycle.max(1.0);
@@ -95,9 +85,6 @@ pub(super) fn paint_ambient(
     look: &TimeOfDayLook,
     seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
 ) {
-    // `look` is the per-frame `time_of_day_look(ctx.now, ctx.theme)` already
-    // computed once in `render_to_rgb_buffer` — forwarded so the sub-passes
-    // read its `spill_strength` instead of recomputing the identical value.
     paint_sun_spot(ctx.buf, ctx.theme, ctx.layout, ctx.now, look);
     paint_dust_motes(
         ctx.buf,
@@ -124,10 +111,8 @@ const CEILING_HALO_INTENSITY: f32 = 0.8;
 /// Peak additive glow at a halo's center (caps the composited strength).
 const CEILING_HALO_MAX_STRENGTH: f32 = 0.4;
 
-/// Soft 5×2 tinted halo above each lit monitor — tied to the active
-/// tool's glow color so the ceiling reads "this desk is doing edits"
-/// at a glance. Painted only on dark themes; on light themes the warm
-/// tint reads as grime, not glow, so we short-circuit.
+/// Soft 5×2 halo above each lit monitor, tinted by the active tool's glow
+/// color. Dark themes only — on a light theme the warm tint reads as grime.
 pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[CeilingHalo]) {
     use crate::theme::ThemeKind;
     if theme.kind != ThemeKind::Dark {
@@ -151,11 +136,9 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[C
     }
 }
 
-/// Gather one halo per agent currently mid-tool-call. Monitor x is the
-/// centre of the screen sprite that `paint_screen_glow` lights up
-/// (desk.x + 6, matching the 4..=9 lit column band). Ceiling y is one
-/// row above the desk's top edge so the halo sits in the wall band
-/// rather than on the monitor frame itself.
+/// Gather one halo per agent currently mid-tool-call. `desk.x + 6` is the
+/// centre of the lit screen column band `paint_screen_glow` uses; y sits one
+/// row above the desk so the halo lands in the wall band, not on the monitor.
 fn collect_ceiling_halos(
     ctx: &PaintCtx<'_>,
     seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
@@ -179,8 +162,7 @@ fn collect_ceiling_halos(
             continue;
         }
         // Only halo a desk whose occupant is actually SEATED right now — not
-        // mid-walk (entry / snap-back) during the Active grace window. Mirrors
-        // the desk-cubicle screen-glow gate so the two never disagree.
+        // mid-walk (entry / snap-back) during the Active grace window.
         if !seated_agents
             .get(&agent.desk_index.single_floor_local())
             .copied()
@@ -191,11 +173,8 @@ fn collect_ceiling_halos(
         let Some(desk) = ctx.layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
-        // `tool_glow_tint` only returns None for a non-Active state, but the
-        // `Active { detail: Some(_) }` guard above has already filtered to
-        // Active-with-detail agents — so this else arm is unreachable here
-        // (the `_ => glow.default` fallback always yields Some). Kept as a
-        // total binding; not a missing-coverage target.
+        // Unreachable given the `Active { detail: Some(_) }` guard above — a
+        // total binding, not a missing-coverage target.
         let Some(color) =
             crate::pixel_painter::palette::tool_glow_tint(agent, &ctx.theme.tool_glow)
         else {
@@ -212,9 +191,6 @@ fn collect_ceiling_halos(
 }
 
 /// Drift 1-pixel warm specks through each window's sunbeam spill column.
-/// Only paints when `sun_on_wall(now)` reports the sun is visible —
-/// otherwise there's no sunbeam for motes to ride. Cheap: 3 motes per
-/// column × ~6-8 columns × 1 px each.
 pub(super) fn paint_dust_motes(
     buf: &mut RgbBuffer,
     theme: &Theme,
@@ -226,12 +202,9 @@ pub(super) fn paint_dust_motes(
     if sun_on_wall(now).is_none() {
         return;
     }
-    // Dust motes scatter the direct beam; their density rides `beam_strength`
-    // (emitter luminance carried by the weather's direct transmission — full
-    // under clear sky, faint through thin cloud/haze/snow-glare, zero under
-    // thick overcast/rain/storm or at night). `look.spill_strength` adds the
-    // daylight ramp so they also fade in/out with the hour. `look` is the
-    // per-frame value forwarded from `render_to_rgb_buffer` (was recomputed here).
+    // Motes scatter the DIRECT beam, so density rides `beam_strength` (full
+    // under clear sky, faint through haze/snow-glare, zero under thick
+    // overcast/rain); `look.spill_strength` adds the daylight ramp.
     let beam = beam_strength(now);
     if beam <= 0.0 {
         return;
@@ -259,25 +232,17 @@ pub(super) fn paint_sun_spot(
     let Some(spot) = sun_on_wall(now) else {
         return;
     };
-    // South wall is the window wall — paint_window_light_spill already
-    // conveys midday sun via warm spill on the floor under the glass.
-    // Painting on the glass itself would ghost-glow over the skyline.
+    // South wall is the glass: a spot painted on it would ghost-glow over the
+    // skyline, and the floor spill already conveys midday sun.
     if matches!(spot.wall, WallSide::South) {
         return;
     }
-    // The wall sun-spot is the projected direct beam. Its strength rides
-    // `beam_strength`: a sharp rectangle under clear sky, a faint smudge through
-    // haze/thin-cloud/snow-glare, gone entirely under thick overcast/rain/storm
-    // (diffuse light reaches the wall but never as a defined rectangle) — and
-    // zero at night (the moon casts no usable beam, so `sun_on_wall` is already
-    // `None` above). `look.spill_strength` adds the daylight ramp so it fades
-    // in/out smoothly.
+    // The spot is the projected DIRECT beam, so diffuse light under thick
+    // overcast/rain reaches the wall but never as a defined rectangle.
     let beam = beam_strength(now);
     if beam <= 0.0 {
         return;
     }
-    // `look` is the per-frame `time_of_day_look(now, theme)` forwarded from
-    // `render_to_rgb_buffer` (was recomputed here for the identical value).
     let effective_intensity = spot.intensity * look.spill_strength * beam;
     if effective_intensity <= 0.0 {
         return;
@@ -299,17 +264,13 @@ pub(super) fn paint_sun_spot(
     let w = (((base_w as f32) * effective_intensity).round() as u16).max(7);
     let h = (((base_h as f32) * effective_intensity).round() as u16).max(3);
 
-    // The top wall band is the visible window wall; East/West sun spots
-    // project onto the outer 1-px column at the left/right edge of that band.
     let wall_band_h = layout.wall_band_h();
     if wall_band_h == 0 {
         return;
     }
 
-    // Slide range keeps the spot WITHIN the wall band: along_px ∈ [0, band-h].
-    // (The old `.max(band-1)` let ry reach band-1, so the spot bled `h` px below
-    // the wall band onto the room floor.) On a band shorter than the spot this
-    // is 0 → the spot pins to the band top, correct (it fills the band).
+    // Slide range keeps the spot WITHIN the wall band: along_px ∈ [0, band−h].
+    // A band shorter than the spot gives 0, pinning it to the band top.
     let along_range = wall_band_h.saturating_sub(h) as f32;
     let (rx, ry) = match spot.wall {
         WallSide::East => {
@@ -324,22 +285,18 @@ pub(super) fn paint_sun_spot(
         WallSide::South => unreachable!("guarded above"),
     };
 
-    // Visible warm lift on the dark wall: a strong base so the (small, radially
-    // falling-off) spot actually reads, gently scaled by how direct the light is.
-    // The old `0.35 * effective_intensity` (~0.10) blended sub-1-RGB → invisible.
+    // Visible warm lift on the dark wall: a strong base so the small, radially
+    // falling-off spot actually reads, gently scaled by how direct the light is.
     let tint_strength = (0.45 + 0.35 * effective_intensity).min(0.7);
     let max_x = (rx + w).min(buf.width());
     let max_y = (ry + h).min(buf.height());
-    // Centre at (rx + (w-1)/2, ry + (h-1)/2) so the ellipse spans the
-    // loop's full inclusive index range symmetrically — pre-fix used
-    // `rx + w/2` which biased the centre half a cell off-grid, making
-    // the falloff sample only the top-left quadrant at small sizes.
+    // Centre on (w−1)/2 so the ellipse spans the loop's full inclusive index
+    // range symmetrically; `w/2` biases it half a cell off-grid, sampling only
+    // the top-left quadrant at small sizes.
     let cx = rx as f32 + (w.saturating_sub(1)) as f32 * 0.5;
     let cy = ry as f32 + (h.saturating_sub(1)) as f32 * 0.5;
     let rx_norm = ((w.saturating_sub(1)) as f32 * 0.5).max(1.0);
     let ry_norm = ((h.saturating_sub(1)) as f32 * 0.5).max(1.0);
-    // Quadratic radial falloff (shared with the ceiling pool / shadow) so the
-    // spot reads round, not boxy.
     paint_radial_falloff(
         buf,
         RadialFalloff {
@@ -360,11 +317,8 @@ pub(super) fn paint_sun_spot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-    // The paint passes now take the per-frame `look` by reference (computed once
-    // in `render_to_rgb_buffer`); tests build it the same way the production
-    // caller does, so the asserted output is unchanged.
     use crate::pixel_painter::background::{time_of_day_look, weather_state};
+    use std::time::Duration;
 
     #[test]
     fn dust_mote_positions_deterministic_per_seed() {
@@ -394,10 +348,6 @@ mod tests {
         assert_ne!(a, b, "positions should advance over time");
     }
 
-    // Regression: the drift must also advance at a WALL-CLOCK-scale `now`
-    // (~1.7e12 ms), not just a small test epoch. The old `t_ms as f32` froze
-    // here (f32 ULP ~131 s at that magnitude) — this case FAILS on the pre-fix
-    // code (equal positions) and passes once the time term is computed in f64.
     #[test]
     fn dust_motes_drift_at_wall_clock_scale() {
         let now1 = SystemTime::UNIX_EPOCH + Duration::from_millis(1_752_000_000_000);
@@ -473,22 +423,17 @@ mod tests {
         );
     }
 
-    // The F4 change: the wall sun-spot now SCALES by `beam_strength` instead of
-    // gating on a bool. A clear morning beams hard (brightest spot), a snowy
-    // morning throws a faint-but-real spot (beam 0.25), and rain has no beam at
-    // all (no spot). Verifies the multiply, the faint-beam path, and the early-out.
     #[test]
     fn sun_spot_scales_with_beam_strength() {
         use crate::pixel_painter::background::Weather;
         use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
         let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
-        // 07:00 → East-wall spot. Weather varies by day at a fixed hour, so
-        // search days for each weather. Real calendar arithmetic (NaiveDate +
-        // Days), NOT `with_ymd_and_hms(2026, 1, day, …)` — a raw day > 31 is
-        // an invalid date (LocalResult::None), so the old form panicked in
-        // any timezone whose day-hash sequence lacked a wanted weather within
-        // January (TZ shifts which UTC days the local mornings map to).
+        // 07:00 → East-wall spot; weather varies by day, so search days for
+        // each. Calendar arithmetic (NaiveDate + Days), NOT
+        // `with_ymd_and_hms(2026, 1, day, …)`: a raw day > 31 is an invalid
+        // date and panics in any timezone whose day-hash sequence lacks a
+        // wanted weather within January.
         let morning = |day: u32| -> SystemTime {
             let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid base date")
                 + chrono::Days::new(u64::from(day));
@@ -539,13 +484,9 @@ mod tests {
         assert_eq!(rain, base, "rain has no direct beam → no sun spot");
     }
 
-    // At the exact sunrise instant (local 05:00:00) the emitter's altitude —
-    // and therefore BOTH `spot.intensity` and `beam_strength` — is exactly
-    // zero: the two are now coupled (both derive from the same `sky.altitude`
-    // for the Sun), unlike the old model's independent clock-based
-    // `boundary_fade` vs weather-based beam. `paint_sun_spot` must still be a
-    // clean no-op at that instant, regardless of which early-return catches
-    // it. Zero precision fuzz: `sin(pi * 0.0) == 0.0` exactly.
+    // At the exact sunrise instant BOTH `spot.intensity` and `beam_strength`
+    // are exactly zero (`sin(pi * 0.0) == 0.0`, no precision fuzz), so the
+    // no-op must hold whichever early-return catches it.
     #[test]
     fn sun_spot_paints_nothing_at_the_exact_sunrise_instant() {
         use chrono::TimeZone;
@@ -583,16 +524,10 @@ mod tests {
         }
     }
 
-    // Dust motes and ceiling halos clamp per-pixel writes against the buffer
-    // bounds. A mote/halo positioned at the far edge of a tight buffer must hit
-    // the `>= buf.width || >= buf.height` continue without panicking (RgbBuffer
-    // has no internal bounds guard).
     #[test]
     fn ceiling_halo_near_edge_does_not_panic() {
         let mut buf = RgbBuffer::filled(6, 4, Rgb { r: 0, g: 0, b: 0 });
         let theme = &crate::theme::CYBERPUNK; // Dark theme so halos paint.
-                                              // Halo centred at the bottom-right corner: the 5×2 stamp runs off both
-                                              // edges, exercising the clamp.
         let halos = vec![CeilingHalo {
             x: 5,
             y: 0,
@@ -606,10 +541,6 @@ mod tests {
         paint_ceiling_halos(&mut buf, theme, &halos);
     }
 
-    // Dust motes anchored to the layout's spill columns can land outside a
-    // buffer narrower/shorter than the layout, exercising the bounds `continue`.
-    // Render into a 1×1 buffer with a daytime beam-bearing `now` so the mote
-    // loop runs but every put is clamped.
     #[test]
     fn dust_motes_clamp_to_a_tiny_buffer() {
         use chrono::TimeZone;
@@ -626,8 +557,8 @@ mod tests {
             })
             .find(|t| weather_state(*t) == crate::pixel_painter::background::Weather::Clear)
             .expect("a clear morning");
-        // Buffer far smaller than the layout's spill columns → every mote put is
-        // out of bounds and clamped. The assertion is simply "no panic".
+        // No assertion: the test is that the clamped, out-of-bounds puts on a
+        // buffer far smaller than the layout's spill columns don't panic.
         let fill = Rgb { r: 0, g: 0, b: 0 };
         let mut buf = RgbBuffer::filled(1, 1, fill);
         paint_dust_motes(
@@ -640,8 +571,6 @@ mod tests {
         );
     }
 
-    // wall_band_h == 0 (a degenerate tiny top margin) makes paint_sun_spot
-    // early-return before any wall projection — must not panic / paint.
     #[test]
     fn sun_spot_zero_wall_band_returns_early() {
         use chrono::TimeZone;
@@ -649,8 +578,8 @@ mod tests {
         // top_margin == WALL_BAND_TO_TOP_MARGIN → wall_band_h saturating_sub to 0.
         let mut layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
         layout.top_margin = crate::layout::WALL_BAND_TO_TOP_MARGIN;
-        // 07:00 → East wall spot with a real beam under Clear, so execution
-        // reaches the wall_band_h==0 guard rather than an earlier return.
+        // A real beam under Clear, so execution reaches the wall_band_h == 0
+        // guard rather than an earlier return.
         let clear_morning = (1..=60u32)
             .map(|day| -> SystemTime {
                 chrono::Local
@@ -674,7 +603,6 @@ mod tests {
             clear_morning,
             &time_of_day_look(clear_morning, theme),
         );
-        // wall_band_h == 0 → nothing painted.
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), fill, "zero wall band → no sun spot");

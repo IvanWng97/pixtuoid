@@ -14,10 +14,6 @@ use pixtuoid_core::source::Transport;
 
 use crate::fast_watch;
 
-// CodexSource::run is just `JsonlWatcher::new(...).run(tx)` — drive the real
-// Source impl against a TempDir sessions_root so its run()-glue is exercised
-// (not only the watcher internals). A rollout file with a task_started line must
-// surface an ActivityStart through the source.
 #[tokio::test]
 async fn codex_source_run_emits_events_from_rollout() {
     fast_watch();
@@ -72,8 +68,6 @@ async fn codex_source_run_emits_events_from_rollout() {
     handle.abort();
 }
 
-// AntigravitySource::run mirrors CodexSource::run — drive the real Source impl
-// against a TempDir brain_root.
 #[tokio::test]
 async fn antigravity_source_run_emits_events_from_transcript() {
     fast_watch();
@@ -124,10 +118,6 @@ async fn antigravity_source_run_emits_events_from_transcript() {
     handle.abort();
 }
 
-// CC is now a PURE transcript watcher (the hook socket lifted to `HookRouter`) —
-// drive the real Source impl so the watcher spawn + run glue is exercised. A CC
-// transcript written under the projects_root must surface a SessionStart through
-// the JSONL leg, with NO hook socket involved at all (platform-neutral now).
 #[tokio::test]
 async fn claude_code_source_run_emits_session_start_from_jsonl() {
     fast_watch();
@@ -182,9 +172,6 @@ async fn claude_code_source_run_emits_session_start_from_jsonl() {
     handle.abort();
 }
 
-// #632: a usage-bearing assistant line must surface AgentEvent::Usage through
-// the REAL Source::run glue (the decoder unit test can't see a seam dropping
-// the new variant between the watcher and the channel).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn claude_code_source_run_emits_usage_from_jsonl() {
     fast_watch();
@@ -244,11 +231,8 @@ async fn claude_code_source_run_emits_usage_from_jsonl() {
     handle.abort();
 }
 
-// CopilotSource::run drives a JsonlWatcher over <sessions_root>/<id>/events.jsonl
-// with the parent-dir id-deriver. The e2e gap that unit tests can't cover: does
-// the real watcher RECURSE into the <sessionId>/ dir, pick up the constant-named
-// `events.jsonl`, derive the id from the PARENT DIR (not the "events" stem), and
-// surface a copilot SessionStart? Driven against real-shaped bytes.
+// Layout: <sessions_root>/<sessionId>/events.jsonl — the id derives from the
+// PARENT DIR, not the "events" stem.
 #[tokio::test]
 async fn copilot_source_run_emits_session_start_from_events_jsonl() {
     fast_watch();
@@ -264,7 +248,6 @@ async fn copilot_source_run_emits_session_start_from_events_jsonl() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Real session.start shape + a tool round (single agent → one AgentId).
     let start = serde_json::json!({
         "type": "session.start",
         "data": {"sessionId": "65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3", "version": 1,
@@ -313,12 +296,9 @@ async fn copilot_source_run_emits_session_start_from_events_jsonl() {
     handle.abort();
 }
 
-// OmpSource::run drives a JsonlWatcher over the DEEPEST nesting yet:
-// <sessions_root>/<encoded-cwd>/<ts>_<uuid>.jsonl with a subagent child at
-// <sessions_root>/<encoded-cwd>/<ts>_<uuid>/<taskId>.jsonl. The e2e gap unit
-// tests can't cover: does the real watcher recurse BOTH levels, key the root
-// on its stem and the child on the stem CHAIN, and surface the child's header
-// SessionStart parent-linked to the root? Driven against real-shaped bytes.
+// Layout: <sessions_root>/<encoded-cwd>/<ts>_<uuid>.jsonl with a subagent child
+// at <sessions_root>/<encoded-cwd>/<ts>_<uuid>/<taskId>.jsonl — the root keys on
+// its stem, the child on the stem CHAIN.
 #[tokio::test]
 async fn omp_source_run_links_a_nested_subagent_to_its_root() {
     use pixtuoid_core::source::omp::OmpSource;
@@ -362,13 +342,9 @@ async fn omp_source_run_links_a_nested_subagent_to_its_root() {
         f.flush().await.unwrap();
     }
 
-    // Collect until the CHILD's parented SessionStart shows (root + child both
-    // also arrive via first-sight; only the header-decoded child carries the
-    // parent link). Expected ids go through the SAME seam fold + deriver the
-    // watcher uses (walk.rs `id_path` → `omp_id_from_path`) — a raw-case
-    // literal here passes on Unix and fails ONLY on windows-test, where the
-    // id-space is normalize_path_key-folded (the path-fold
-    // expectation-literal class).
+    // Expected ids must go through the SAME seam fold + deriver the watcher uses:
+    // a raw-case literal here passes on Unix and fails ONLY on windows-test,
+    // where the id-space is normalize_path_key-folded.
     use pixtuoid_core::source::omp::omp_id_from_path;
     let watcher_key = |p: &std::path::Path| {
         omp_id_from_path(std::path::Path::new(
@@ -403,12 +379,6 @@ async fn omp_source_run_links_a_nested_subagent_to_its_root() {
     handle.abort();
 }
 
-// The session-ended checker's WIRING into OmpSource's watcher (native.rs) —
-// the checker fn is unit-tested, but swapping it for `|_| false` in the
-// JsonlWatcher::new call would keep every unit test green while finished
-// sessions resurrect at first sight. Paired: the same recent transcript
-// seeds a SessionStart WITHOUT the session_exit marker and is gated WITH it,
-// so the assert can only pass through the wired checker.
 #[tokio::test]
 async fn omp_ended_transcript_is_gated_at_first_sight_and_a_live_one_seeds() {
     use pixtuoid_core::source::omp::OmpSource;
@@ -455,15 +425,6 @@ async fn omp_ended_transcript_is_gated_at_first_sight_and_a_live_one_seeds() {
     }
 }
 
-// The COMMITTED permission-flow fixture, folded through the REAL `Reducer` —
-// the assertion `codex_source_run_emits_events_from_rollout` above cannot make.
-// That test stops at "an ActivityStart arrived" over two inline JSON lines; it
-// never observes an `ActivityState`, so nothing in the suite has ever checked
-// that a real Codex rollout drives the state machine anywhere.
-//
-// That coverage lived only in a MANUAL script that was structurally incapable
-// of failing, so it reported success while producing no agent at all. A check
-// nobody can fail is not coverage; this is why the assertion belongs in a test.
 #[tokio::test]
 async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
     use pixtuoid_core::state::ActivityState;
@@ -491,7 +452,7 @@ async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Written in one shot: first sight reads the whole file from the top, so the
-    // events arrive in file order without a per-line sleep to make this flaky.
+    // events arrive in file order without a flaky per-line sleep.
     tokio::fs::write(&transcript, &body).await.unwrap();
 
     // `SceneState::uniform` — NOT `default()`, whose all-zero floor_capacities
@@ -507,17 +468,15 @@ async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
             Ok(Some((transport, ev))) => {
                 reducer.apply(&mut scene, ev, std::time::SystemTime::now(), transport);
                 if let Some(slot) = scene.agents.values().next() {
-                    // Distinct-consecutive, mirroring what the replay printed.
                     if states.last() != Some(&slot.state) {
                         states.push(slot.state.clone());
                     }
                 }
             }
-            // A quiet gap once the whole file has been folded: the fixture is
-            // finite, so this is the normal exit, not a timeout failure. A
-            // CLOSED channel ends the loop unconditionally — guarding it on
-            // `states` would spin at full CPU until the deadline on the very
-            // path where nothing more can arrive.
+            // A quiet gap once the finite fixture has been folded is the normal
+            // exit, not a timeout failure. A CLOSED channel ends the loop
+            // unconditionally — guarding that arm on `states` would spin at full
+            // CPU until the deadline on the very path where nothing can arrive.
             Ok(None) => break,
             Err(_) if !states.is_empty() => break,
             _ => {}
@@ -537,10 +496,8 @@ async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
         "label derives from the session_meta cwd basename"
     );
 
-    // ORDER, not mere presence. Two `any()` checks would also pass for a reducer
-    // that parked the agent on the permission prompt BEFORE the tool ran, or one
-    // that left it Waiting after the fixture's task_complete — neither of which
-    // is the permission flow this scenario is named for.
+    // ORDER, not mere presence: two `any()` checks would also pass for a reducer
+    // that parked the agent on the permission prompt BEFORE the tool ran.
     let idx = |want: &str| {
         states.iter().position(|s| {
             matches!(
@@ -560,9 +517,6 @@ async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
         first_active.is_some(),
         "the fixture's function_call must drive Active, got {states:?}"
     );
-    // THE point of this scenario: an escalation-requiring exec_command parks the
-    // agent on a permission prompt. This is the only state in the progression a
-    // decoder-level test can't reach — it is a reducer decision.
     assert!(
         first_waiting.is_some(),
         "the escalated exec_command must drive Waiting(permission), got {states:?}"
@@ -571,8 +525,6 @@ async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
         first_active < first_waiting,
         "Active must precede Waiting — the tool runs, THEN the gate parks it: {states:?}"
     );
-    // The terminal state: the fixture ends on task_complete, so the permission
-    // gate must have been resolved rather than left latched.
     assert!(
         !matches!(states.last(), Some(ActivityState::Waiting { .. })),
         "the agent must not still be Waiting after task_complete, got {states:?}"

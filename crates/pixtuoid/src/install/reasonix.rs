@@ -1,31 +1,18 @@
 //! Reasonix hook install target.
 //!
-//! Writes the GLOBAL `<reasonix-home>/settings.json` (`~/.reasonix/settings.json`
-//! on macOS/Linux, **`%APPDATA%\reasonix\settings.json` on Windows** — see
-//! `default_config_path`/`reasonix_home`) — project-scope
+//! Writes the GLOBAL `<reasonix-home>/settings.json`: project-scope
 //! (`<repo>/.reasonix/settings.json`) hooks only load after the user runs
-//! `/hooks trust`, so a project-scope install would silently never fire
-//! (`internal/hook/trust.go` @v1.2.0). The schema is Reasonix's own, FLAT
-//! shape (`internal/hook/hook.go:88-106` @v1.2.0) — per-event arrays of
+//! `/hooks trust`, so a project-scope install would silently never fire. The
+//! schema is Reasonix's own FLAT shape — per-event arrays of
 //! `{match, command, description, timeout, cwd}` entries, NOT Claude's nested
-//! `{matcher, hooks: [{type, command}]}` groups:
+//! `{matcher, hooks: [{type, command}]}` groups.
 //!
-//! ```json
-//! {"hooks": {"PreToolUse": [{"command": "PIXTUOID_SOURCE=reasonix '/abs/pixtuoid-hook'",
-//!                            "timeout": 1000, "description": "pixtuoid visualizer",
-//!                            "_pixtuoid": true}]}}
-//! ```
-//!
-//! - `match` is OMITTED: empty = every tool. (Upstream special-cases `"*"` to
-//!   every-tool as well; any OTHER value is an ANCHORED regex and a malformed
-//!   one never fires — omission is the simplest always-fires form.)
-//! - `timeout` is in MILLISECONDS (upstream default 5000 for the gating
-//!   PreToolUse, where a TIMEOUT BLOCKS the user's tool call). The shim
-//!   self-limits to 200ms and always exits 0, so 1000ms is pure headroom.
+//! - `match` is OMITTED: empty = every tool. Any other value is an ANCHORED
+//!   regex, and a malformed one never fires.
+//! - `timeout` is in MILLISECONDS, and on the gating PreToolUse a TIMEOUT BLOCKS
+//!   the user's tool call.
 //! - `_pixtuoid` is the managed-entry sentinel; Go's `json.Unmarshal` ignores
 //!   unknown fields, so Reasonix never sees it.
-//! - Hooks are loaded once at session boot — the orchestrator's standard
-//!   "start a new session" hint covers activation.
 
 use std::path::{Path, PathBuf};
 
@@ -37,18 +24,12 @@ use crate::install::merge;
 use crate::install::target::MergeOutcome;
 use crate::install::SENTINEL_KEY;
 
-/// Events we register == events we decode (`source/reasonix.rs`), enforced by
-/// `every_registered_reasonix_event_decodes` below. PostLLMCall / PreCompact /
-/// SubagentStop are deliberately absent: per-model-turn noise, compaction
-/// internals, and a no-id subagent signal already covered by the parent's
-/// `task` PostToolUse. PostToolUseFailure / StopFailure (#710) are ALSO
-/// deliberately absent: the runner re-fires failures to NATIVE hooks
-/// registered under PostToolUse / Stop with the event re-labeled
-/// (`internal/hook/runner.go` `PostToolUseFailure`/`StopResult` legacy
-/// blocks), and ours are native-format — registering both spellings would
-/// double-fire every failed tool/turn for the same decoded ActivityEnd.
-/// `PermissionRequest` (#302) is the structured approval
-/// gate → Waiting, fired alongside `Notification` (idempotent).
+/// Events we register == events we decode, enforced by
+/// `every_registered_reasonix_event_decodes` below. PostToolUseFailure /
+/// StopFailure are deliberately ABSENT: the runner re-fires failures to NATIVE
+/// hooks registered under PostToolUse / Stop with the event re-labeled, and ours
+/// are native-format — registering both spellings would double-fire every failed
+/// tool/turn for the same decoded ActivityEnd.
 const REASONIX_EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
@@ -60,23 +41,17 @@ const REASONIX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-/// The GLOBAL `settings.json` Reasonix actually reads, under its `ReasonixHomeDir`.
-/// Reasonix's home is **platform-ASYMMETRIC** (`docs/CONFIG_PATHS.md` +
-/// `internal/config/config.go::reasonixHomeDir`): `REASONIX_HOME` (verbatim) wins;
-/// else macOS/Linux = `~/.reasonix`, but **Windows = `%APPDATA%\reasonix`**
-/// (Go's `os.UserConfigDir()/reasonix`, NOT `%USERPROFILE%\.reasonix`). Global
-/// hooks live at `<reasonix-home>/settings.json`. Writing `~/.reasonix/settings.json`
-/// on Windows (pixtuoid's generic USERPROFILE-first path) lands the hooks where
-/// Reasonix never reads → installed, but no sprite — the same class as
-/// CodeWhale/OpenClaw but on the %APPDATA% (config-dir) axis, not HOME-vs-USERPROFILE.
+/// The GLOBAL `settings.json` Reasonix actually reads. Reasonix's home is
+/// platform-ASYMMETRIC: `REASONIX_HOME` (verbatim) wins; else macOS/Linux =
+/// `~/.reasonix`, but **Windows = `%APPDATA%\reasonix`**, NOT
+/// `%USERPROFILE%\.reasonix`. Writing pixtuoid's generic USERPROFILE-first path
+/// on Windows lands the hooks where Reasonix never reads → installed, no sprite.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     reasonix_home()
         .map(|h| h.join("settings.json"))
         .ok_or_else(|| {
-            // Non-Windows: no `HOME`. Windows: neither `%APPDATA%` nor a home
-            // (USERPROFILE/HOME) resolves — erroring mirrors the sibling
-            // home-anchored targets instead of silently writing a CWD-relative
-            // config Reasonix never reads.
+            // Erroring mirrors the sibling home-anchored targets instead of
+            // silently writing a CWD-relative config Reasonix never reads.
             anyhow!(
                 "cannot resolve Reasonix's home (REASONIX_HOME and the platform \
                  home/config dir unset); pass --config <path>"
@@ -84,9 +59,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
         })
 }
 
-/// Reasonix's `ReasonixHomeDir`: `REASONIX_HOME` (TRIMMED — `cleanEnvDir` does
-/// `TrimSpace` + `filepath.Clean`, NO `~`-expand, so `home: None`, #342) → Windows
-/// `%APPDATA%\reasonix` (`user_config_dir()/reasonix`) → else `<home>/.reasonix`.
+/// `REASONIX_HOME` (upstream trims but does NOT `~`-expand it, hence `home: None`)
+/// → Windows `%APPDATA%\reasonix` → else `<home>/.reasonix`.
 fn reasonix_home() -> Option<PathBuf> {
     resolve_reasonix_home(
         io::nonempty_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
@@ -96,15 +70,9 @@ fn reasonix_home() -> Option<PathBuf> {
     )
 }
 
-/// Pure core for [`reasonix_home`] — the `REASONIX_HOME` override, the platform
-/// flag, the resolved Windows config dir (`%APPDATA%`, `None` when unresolvable),
-/// and the OS home are all injected so BOTH platform arms unit-test on any host.
-/// The Windows arm is still MORE lenient than Go's `os.UserConfigDir` (which
-/// ERRORS whenever `%APPDATA%` is unset): with `%APPDATA%` unset but a HOME
-/// resolved, [`user_config_dir`] computes `<home>/AppData/Roaming` — exactly the
-/// canonical `%APPDATA%` default. It returns `None` only when NEITHER resolves;
-/// installing then would write a CWD-relative file Reasonix never reads, so the
-/// caller surfaces "pass --config" like every other home-anchored target.
+/// Pure core for [`reasonix_home`] — everything is injected so BOTH platform arms
+/// unit-test on any host. `None` only when neither `%APPDATA%` nor a home
+/// resolves; installing then would write a CWD-relative file Reasonix never reads.
 fn resolve_reasonix_home(
     reasonix_home_env: Option<PathBuf>,
     windows: bool,
@@ -122,27 +90,19 @@ fn resolve_reasonix_home(
 
 /// Presence probe for auto-detection. The default file-exists check on
 /// `default_config_path` would NEVER fire: Reasonix itself never creates
-/// `settings.json` (it is purely user-authored; `readSettings` just returns nil
-/// when missing). What a real install does create is the Reasonix home dir
-/// (`reasonix_home` — `%APPDATA%\reasonix` on Windows, `~/.reasonix` elsewhere,
-/// honoring `REASONIX_HOME`); hook/trust users additionally have a `~/.reasonix`
-/// even on Windows. Probe both.
+/// `settings.json`, it is purely user-authored. What a real install does create
+/// is the Reasonix home dir — and hook/trust users additionally have a
+/// `~/.reasonix` even on Windows, so probe both.
 pub(crate) fn detect_installed() -> bool {
     reasonix_home().is_some_and(|d| d.exists()) || io::home_relative(".reasonix").exists()
 }
 
-/// Rust mapping of Go's `os.UserConfigDir()` for the platforms we ship:
-/// macOS `$HOME/Library/Application Support`, **Windows `%APPDATA%`** (Roaming —
-/// where Reasonix's v2 config dir actually lives; without this arm
-/// `detect_installed` probes `~/.config/reasonix` on Windows, which Reasonix never
-/// creates, so auto-detection would always miss), else `$XDG_CONFIG_HOME` falling
-/// back to `~/.config`.
-///
-/// The OS->dir decision is a PURE core fn (`platform::resolve_user_config_dir`)
-/// so every arm is unit-testable on any host; this site just injects the live
-/// OS + env + home values once. Returns `None` (instead of the CWD-relative
-/// path the probe-only `home_relative("")` would fabricate — its own doc bans
-/// WRITE paths) when the selected arm needs a home and none resolves.
+/// Rust mapping of Go's `os.UserConfigDir()`: macOS `$HOME/Library/Application
+/// Support`, **Windows `%APPDATA%`** (Roaming — without this arm `detect_installed`
+/// probes `~/.config/reasonix` on Windows, which Reasonix never creates, so
+/// auto-detection would always miss), else `$XDG_CONFIG_HOME` or `~/.config`.
+/// `None` when the selected arm needs a home and none resolves, rather than the
+/// CWD-relative path `home_relative("")` would fabricate.
 fn user_config_dir() -> Option<PathBuf> {
     user_config_dir_checked(
         std::env::consts::OS,
@@ -152,13 +112,9 @@ fn user_config_dir() -> Option<PathBuf> {
     )
 }
 
-/// Pure core for [`user_config_dir`]: `platform::resolve_user_config_dir` with
-/// the WRITE-path home contract layered on — `None` when the arm the OS/env
-/// select would fall back to a home join and no home resolves. The env-decided
-/// arms (Windows non-empty `%APPDATA%`; Linux/BSD non-empty `$XDG_CONFIG_HOME`)
-/// never consult the home, so they resolve home-lessly; `io::nonempty` mirrors
-/// the core fn's own empty-as-unset filter so the two can't disagree on when
-/// the fallback fires.
+/// Pure core for [`user_config_dir`]: `None` when the arm the OS/env select would
+/// fall back to a home join and no home resolves. `io::nonempty` mirrors the core
+/// fn's own empty-as-unset filter so the two can't disagree on when that fires.
 fn user_config_dir_checked(
     os: &str,
     appdata: Option<String>,
@@ -182,29 +138,22 @@ fn user_config_dir_checked(
 }
 
 /// Reasonix runs the `command` string under a shell — `sh -c` on Unix, `cmd.exe
-/// /c` on Windows (verified: `internal/hook/hook.go:414` `shellInvocation`, an
-/// explicit `GOOS=="windows"` branch). Same contract as Codex, so the OS forms
-/// mirror codex::hook_command exactly:
+/// /c` on Windows:
 /// - **Unix**: env-prefix `PIXTUOID_SOURCE=reasonix '<abs-path>'` (single-quoted).
-/// - **Windows**: BARE `<abs-path> --source reasonix` via the shared
-///   `hook_cmd::windows::windows_bare_hook_command` (cmd.exe can't express the env-prefix; the
-///   source rides as the shim's `--source` flag). That helper substitutes the 8.3
-///   short name for a space/metacharacter path, rejecting only if 8.3 is disabled
-///   (#195) — a quoted path can't survive cmd /C.
+/// - **Windows**: BARE `<abs-path> --source reasonix` — cmd.exe can't express the
+///   env-prefix, so the source rides as the shim's `--source` flag, and a
+///   space/metacharacter path uses its 8.3 short name because a quoted path
+///   can't survive cmd /C.
 ///
 /// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Reasonix always
     // embeds the absolute path, so the flag changes nothing here.
     let p = merge::hook_path_str(resolved)?;
-    // Same OS fork as Codex, in one place (hook_cmd::shell_hook_command): Unix
-    // env-prefix form / Windows bare `<path> --source reasonix`.
     crate::install::hook_cmd::shell_hook_command(p, "reasonix")
 }
 
 pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    // Shared parse + non-object guard + semantic-`changed` + serialize wrapper
-    // (the guard's one copy lives in merge.rs).
     merge::flat_json_merge_outcome_install(content, "settings", |doc| {
         merge::flat_json_merge_install(doc, REASONIX_EVENTS, SENTINEL_KEY, managed_entry, hook_cmd)
     })
@@ -225,8 +174,7 @@ fn managed_entry(hook_command: &str) -> Value {
     })
 }
 
-/// Install-schema verification (#309) — Reasonix's flat-JSON shape (shared with
-/// Cursor): `hooks.<event>` arrays of `{_pixtuoid, command}`.
+/// Install-schema verification: `hooks.<event>` arrays of `{_pixtuoid, command}`.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     crate::install::verify::flat_json_verify(content, REASONIX_EVENTS, SENTINEL_KEY)
 }
@@ -235,8 +183,6 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
 mod tests {
     use super::*;
 
-    // Thin wrappers over the shared flat-JSON merge so the existing per-shape
-    // tests below exercise Reasonix's events + entry shape against the common core.
     fn json_merge_install(doc: Value, hook_command: &str) -> Value {
         merge::flat_json_merge_install(
             doc,
@@ -253,11 +199,7 @@ mod tests {
 
     #[test]
     fn reasonix_home_is_appdata_on_windows_but_dot_reasonix_elsewhere() {
-        // The platform asymmetry (docs/CONFIG_PATHS.md): Windows = %APPDATA%\reasonix,
-        // macOS/Linux = ~/.reasonix. The Windows arm was the bug — pixtuoid wrote
-        // %USERPROFILE%\.reasonix while Reasonix reads %APPDATA%\reasonix.
         let appdata = PathBuf::from(r"C:\Users\me\AppData\Roaming");
-        // Windows → <%APPDATA%>/reasonix (the injected config dir), NOT <home>/.reasonix.
         assert_eq!(
             resolve_reasonix_home(
                 None,
@@ -267,26 +209,19 @@ mod tests {
             ),
             Some(appdata.join("reasonix"))
         );
-        // Non-Windows → <home>/.reasonix (config dir ignored).
         assert_eq!(
             resolve_reasonix_home(None, false, Some(appdata), Some("/home/u".into())),
             Some(PathBuf::from("/home/u").join(".reasonix"))
         );
-        // Non-Windows with no home → None (installer surfaces "pass --config").
         assert_eq!(
             resolve_reasonix_home(None, false, Some(PathBuf::from("/ignored")), None),
             None
         );
-        // Windows with NO resolvable config dir (APPDATA + home all unset) →
-        // None too: writing `./AppData/Roaming/reasonix/settings.json` relative
-        // to pixtuoid's CWD would be a config Reasonix never reads — the same
-        // "pass --config" error every other home-anchored target surfaces.
         assert_eq!(resolve_reasonix_home(None, true, None, None), None);
     }
 
     #[test]
     fn user_config_dir_checked_refuses_a_homeless_fallback_arm() {
-        // Env-decided arms resolve without a home…
         assert_eq!(
             user_config_dir_checked("windows", Some(r"C:\AppData".into()), None, None),
             Some(PathBuf::from(r"C:\AppData"))
@@ -295,9 +230,7 @@ mod tests {
             user_config_dir_checked("linux", None, Some("/xdg".into()), None),
             Some(PathBuf::from("/xdg"))
         );
-        // …but the home-joining fallback arms refuse (None) instead of the
-        // probe-only CWD fabrication when no home resolves — incl. an EMPTY
-        // env value, which the core resolver also treats as unset.
+        // An EMPTY env value counts as unset for the core resolver too.
         assert_eq!(user_config_dir_checked("windows", None, None, None), None);
         assert_eq!(
             user_config_dir_checked("windows", Some("  ".into()), None, None),
@@ -305,7 +238,6 @@ mod tests {
         );
         assert_eq!(user_config_dir_checked("macos", None, None, None), None);
         assert_eq!(user_config_dir_checked("linux", None, None, None), None);
-        // With a home, the fallback arms join onto it as before.
         assert_eq!(
             user_config_dir_checked("windows", None, None, Some(r"C:\Users\me".into())),
             Some(PathBuf::from(r"C:\Users\me").join("AppData/Roaming"))
@@ -314,8 +246,6 @@ mod tests {
 
     #[test]
     fn reasonix_home_env_override_wins_verbatim_on_both_platforms() {
-        // REASONIX_HOME is the home dir VERBATIM (docs: "override Reasonix home"),
-        // beating the platform default on either OS; settings.json joins onto it.
         for windows in [true, false] {
             assert_eq!(
                 resolve_reasonix_home(
@@ -337,9 +267,6 @@ mod tests {
             let arr = hooks.get(*ev).and_then(|v| v.as_array()).unwrap();
             assert_eq!(arr.len(), 1, "event {ev}");
             let entry = &arr[0];
-            // FLAT Reasonix shape: command directly on the entry — no nested
-            // {hooks:[{type,command}]} group, which Reasonix would ignore
-            // (empty `command` entries are skipped upstream).
             assert_eq!(
                 entry["command"].as_str().unwrap(),
                 "PIXTUOID_SOURCE=reasonix '/opt/pixtuoid-hook'"
@@ -350,8 +277,6 @@ mod tests {
                 entry.get("hooks").is_none() && entry.get("type").is_none(),
                 "must not write CC-style nested groups"
             );
-            // `match` omitted = every tool (upstream also special-cases "*";
-            // omission is the simplest always-fires form).
             assert!(entry.get("match").is_none(), "must not write a match key");
         }
     }
@@ -428,16 +353,12 @@ mod tests {
 
     #[test]
     fn merge_install_rejects_valid_json_that_is_not_an_object() {
-        // Mirrors claude.rs: a valid-JSON-but-non-object doc must be refused,
-        // not silently coerced to {} (which drops the user's content).
         assert!(merge_install("[1, 2, 3]", "/x").is_err());
         assert!(merge_install("42", "/x").is_err());
     }
 
     #[test]
     fn merge_install_rejects_invalid_json() {
-        // A malformed settings.json upstream silently disables ALL the user's
-        // hooks — refusing to overwrite is the only safe behavior.
         assert!(merge_install("{not json", "/x").is_err());
     }
 
@@ -449,8 +370,8 @@ mod tests {
         assert_eq!(doc["hooks"]["Stop"].as_array().unwrap().len(), 1);
     }
 
-    // Unix POSIX-form pin (single-quoted env-prefix). Unix-only: on Windows
-    // hook_command emits the bare form and this spaced path would be REJECTED.
+    // Unix-only: on Windows `hook_command` emits the bare form and this spaced
+    // path would be REJECTED.
     #[cfg(unix)]
     #[test]
     fn hook_command_stamps_source_and_quotes() {
@@ -461,8 +382,6 @@ mod tests {
         );
     }
 
-    // Windows: bare exec form `<path> --source reasonix` (mirrors codex; Reasonix
-    // shells hooks via cmd.exe /c, hook.go:414). Pinned by check-windows + windows-test.
     #[test]
     #[cfg(windows)]
     fn hook_command_emits_bare_exec_form_with_source_flag_on_windows() {
@@ -470,9 +389,8 @@ mod tests {
         assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe --source reasonix");
     }
 
-    // Windows: a space/metacharacter path uses its 8.3 short name when available,
-    // else rejects (shared hook_cmd::shell_hook_command — see #195). These test
-    // paths don't exist on the runner, so the reject fallback fires.
+    // These fixture paths don't exist on the runner, so the 8.3 short-name lookup
+    // fails and the reject fallback is what fires.
     #[test]
     #[cfg(windows)]
     fn hook_command_rejects_cmd_unsafe_path_on_windows() {
@@ -486,8 +404,6 @@ mod tests {
         );
     }
 
-    // detect_installed probes user_config_dir()/reasonix; on Windows that must be
-    // %APPDATA% (Go's os.UserConfigDir), not ~/.config, or auto-detection misses.
     #[cfg(windows)]
     #[test]
     fn user_config_dir_uses_appdata_on_windows() {
@@ -514,15 +430,10 @@ mod tests {
         assert!(hook_command(bad, false).is_err());
     }
 
-    // Internal-consistency guard (mirror of the CC/Codex ones): every hook
-    // event we REGISTER with Reasonix must have a decoder arm, else it arrives
-    // at the shared socket and `decode_hook_payload` bails — silently dropped.
     #[test]
     fn every_registered_reasonix_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;
         for ev in REASONIX_EVENTS {
-            // Reasonix envelope: camelCase, `event` discriminator, cwd-only
-            // identity, stamped by the shim.
             let payload = serde_json::json!({
                 "event": ev,
                 "cwd": "/repo",

@@ -1,39 +1,21 @@
-//! Walkability primitives — pure data, no terminal deps.
+//! Walkability primitives — pure data, no terminal deps. Coordinates are
+//! `(x, y)` u16 pixel positions; origin top-left.
 //!
-//! `WalkableMask` is a per-pixel boolean grid stating which positions are
-//! open floor (`true`) vs obstacle (`false`). Built once by the layout
-//! engine, queried by any router implementation.
-//!
-//! `OccupancyOverlay` is the dynamic counterpart — a small list of blocked
-//! rects added/cleared each frame so routers can avoid live agents. Kept
-//! separate from the static mask so the mask can be cached / shipped over
-//! the wire (serializable; no out-of-process consumer today) while occupancy
-//! stays per-frame.
-//!
-//! Both types are sprite-pack-agnostic and have no terminal dependencies,
-//! so they're safe to live in core and reuse from any future renderer
-//! (web, native canvas, etc.).
-//!
-//! Coordinates are `(x, y)` u16 pixel positions; origin top-left.
+//! The static [`WalkableMask`] is kept separate from the per-frame
+//! [`OccupancyOverlay`] so the mask can be cached and shipped over the wire.
 
 use crate::grid::Grid;
 
 /// Static obstacle mask sized `width × height` pixels — a `Grid<bool>`
 /// (`true` = open floor, `false` = obstacle). An ALIAS, not a wrapper: the
-/// mask's dims ARE the grid's `width()`/`height()` accessors (no mirrored fields), and
-/// the obstacle ops live in the `impl Grid<bool>` below. This is the clean
-/// endpoint of the #333 `Grid<T>` extraction — it landed in the 0.10.0 break
-/// because removing the old `pub struct WalkableMask` is a cargo-semver-checks
-/// `struct_missing`.
+/// mask's dims ARE the grid's `width()`/`height()` accessors, and the obstacle
+/// ops live in the `impl Grid<bool>` below.
 pub type WalkableMask = Grid<bool>;
 
-// Obstacle ops on the concrete `Grid<bool>` instantiation. ACCEPTED RESIDUAL of
-// the alias form (review LOW): these become visible on EVERY `Grid<bool>`,
-// including `ReachSet`'s private inner grid where `is_walkable`/`mark_blocked`
-// are semantically off — but that grid is private (no external surface) and the
-// methods are never called there, so the leak is harmless. An extension trait
-// would scope them at the cost of an import at every call site (the churn the
-// alias exists to avoid); not worth it.
+// Accepted residual of the alias form: these become visible on EVERY
+// `Grid<bool>`, including `ReachSet`'s private inner grid where they are
+// semantically off. Harmless — that grid is private and never calls them — and
+// an extension trait would cost an import at every call site.
 impl Grid<bool> {
     /// Create a fully-open mask. Caller fills obstacles via `mark_blocked`.
     pub fn new_open(width: u16, height: u16) -> Self {
@@ -72,9 +54,8 @@ impl Grid<bool> {
     }
 }
 
-/// Dynamic per-frame occupancy — rebuilt each render tick from current
-/// agent positions. Composed on top of `WalkableMask` so routers can
-/// avoid live agents without modifying the static mask.
+/// Dynamic per-frame occupancy — rebuilt each render tick from current agent
+/// positions, so routers can avoid live agents without touching the mask.
 #[derive(Debug, Clone, Default)]
 pub struct OccupancyOverlay {
     /// `(x, y, width, height)` of each blocked rect.
@@ -115,11 +96,9 @@ impl OccupancyOverlay {
         })
     }
 
-    /// Order-stable hash of the current occupancy set. Rects are sorted
-    /// before hashing so two overlays containing the same rects in
-    /// different push order produce the same signature — important for
-    /// the router cache, which uses signature equality to decide whether
-    /// to invalidate.
+    /// Order-stable hash of the current occupancy set — rects are sorted
+    /// before hashing, so push order cannot change the signature the router
+    /// cache invalidates on.
     pub fn signature(&self) -> u64 {
         let mut sorted: Vec<(u16, u16, u16, u16)> = self.rects.clone();
         sorted.sort_unstable();
@@ -152,13 +131,11 @@ mod tests {
     fn mark_blocked_pads_and_clips() {
         let mut m = WalkableMask::new_open(10, 10);
         m.mark_blocked(4, 4, 2, 2, 1);
-        // Padded rect: x=3..7, y=3..7 are blocked.
         for y in 3..7 {
             for x in 3..7 {
                 assert!(!m.is_walkable(x, y), "({x},{y}) should be blocked");
             }
         }
-        // Outside still walkable.
         assert!(m.is_walkable(2, 4));
         assert!(m.is_walkable(8, 4));
     }
@@ -216,21 +193,12 @@ mod tests {
     }
 }
 
-// Property-based generalizations of the `WalkableMask` example tests above: the
-// hand-picked cases pin a few points; these falsify the same invariants across
-// thousands of generated dims/rects/pads — exercising the saturating-arithmetic
-// clip path (overflowing + out-of-bounds rects, zero-size rects, edge queries)
-// the example cases can't reach. All three are provably true from the impl, so a
-// failure means a real regression, not flake.
 #[cfg(test)]
 mod prop {
     use super::*;
     use proptest::prelude::*;
 
     proptest! {
-        // An OPEN mask is walkable at EXACTLY the in-bounds cells, and `is_walkable`
-        // never panics for any query — routers probe near/over the edges unchecked.
-        // (Generalizes `out_of_bounds_query_is_not_walkable` + `new_open_is_all_walkable`.)
         #[test]
         fn open_mask_is_walkable_iff_in_bounds(
             w in 1u16..=256, h in 1u16..=256, x in 0u16..512, y in 0u16..512,
@@ -239,18 +207,13 @@ mod prop {
             prop_assert_eq!(m.is_walkable(x, y), x < w && y < h);
         }
 
-        // `mark_blocked` clips, so it NEVER panics for any rect/pad — including
-        // out-of-bounds and arithmetic-overflowing ones (the documented "caller
-        // needn't bounds-check" contract). The result blocks EXACTLY its clipped,
-        // padded rect: nothing outside is touched, nothing inside is missed.
-        // (Generalizes `mark_blocked_pads_and_clips`.)
         #[test]
         fn mark_blocked_blocks_exactly_its_clipped_padded_rect(
             w in 1u16..=48, h in 1u16..=48,
             x in 0u16..160, y in 0u16..160, rw in 0u16..160, rh in 0u16..160, pad in 0u16..24,
         ) {
             let mut m = WalkableMask::new_open(w, h);
-            m.mark_blocked(x, y, rw, rh, pad); // must not panic for any input
+            m.mark_blocked(x, y, rw, rh, pad);
             let min_x = x.saturating_sub(pad);
             let max_x = x.saturating_add(rw).saturating_add(pad).min(w);
             let min_y = y.saturating_sub(pad);
@@ -263,8 +226,6 @@ mod prop {
             }
         }
 
-        // Carving the whole mask walkable after any block fully restores it — a door
-        // cutout can always re-open ground. (Generalizes `mark_walkable_carves_a_cutout`.)
         #[test]
         fn mark_walkable_over_the_whole_mask_restores_walkability(
             w in 1u16..=48, h in 1u16..=48,

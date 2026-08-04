@@ -10,7 +10,7 @@ use crate::sprite::{Frame, Palette, Pixel, Rgb, Sprite};
 pub fn parse_sprite_file(src: &str, palette: &Palette) -> Result<Vec<Frame>> {
     let mut frames: Vec<Frame> = Vec::new();
     let mut current: Option<Vec<Vec<Pixel>>> = None;
-    let mut last_lineno = 0; // last non-empty content line — for the final-frame flush diagnostic
+    let mut last_lineno = 0;
 
     for (lineno, raw) in src.lines().enumerate() {
         let line = strip_comment_and_trim(raw);
@@ -40,8 +40,6 @@ pub fn parse_sprite_file(src: &str, palette: &Palette) -> Result<Vec<Frame>> {
     }
 
     if let Some(rows) = current.take() {
-        // Wrap with line context like the in-loop flush, so an inconsistent-width
-        // or empty final @frame block gets the same diagnostic as every other.
         frames.push(rows_to_frame(rows).map_err(|e| anyhow!("{e} (line {})", last_lineno + 1))?);
     }
 
@@ -65,12 +63,9 @@ mod tests {
 
     #[test]
     fn palette_value_rejects_sign_prefixed_or_non_hex() {
-        // u8::from_str_radix accepts a leading '+'/'-', so a 6-char value like
-        // `#+f0102` would parse to a valid color without an explicit hex check.
         assert!(parse_palette_value("#+f0102").is_err());
         assert!(parse_palette_value("#-f0102").is_err());
         assert!(parse_palette_value("#abXY12").is_err());
-        // Valid hex + transparent still parse.
         assert!(parse_palette_value("#Ff0102").unwrap().is_some());
         assert!(parse_palette_value("transparent").unwrap().is_none());
     }
@@ -79,8 +74,6 @@ mod tests {
     fn final_frame_width_error_carries_line_context() {
         let mut pal = Palette::new();
         pal.insert('X', Some(Rgb { r: 1, g: 1, b: 1 }));
-        // The LAST @frame block has rows of differing widths → rows_to_frame
-        // errors; the diagnostic must carry a line number like in-loop frames.
         let src = "@frame 0\nX X\nX\n";
         let err = parse_sprite_file(src, &pal).unwrap_err();
         let msg = format!("{err:#}");
@@ -93,7 +86,6 @@ mod tests {
     #[test]
     fn recolor_palette_rejects_colliding_recolor_keys() {
         let red = Some(Rgb { r: 200, g: 0, b: 0 });
-        // Distinct recolor keys (+ a transparent one, which never participates) → ok.
         let mut ok = Palette::new();
         ok.insert('B', red);
         ok.insert('H', Some(Rgb { r: 0, g: 200, b: 0 }));
@@ -101,23 +93,16 @@ mod tests {
         ok.insert('P', None);
         assert!(validate_recolor_palette(&ok).is_ok());
 
-        // Two recolor keys sharing an RGB → bail (recolor would silently fail one).
         let mut bad = ok.clone();
-        bad.insert('H', red); // collides with 'B'
+        bad.insert('H', red);
         let err = validate_recolor_palette(&bad).unwrap_err();
         assert!(format!("{err:#}").contains("share RGB"), "{err:#}");
 
-        // A NON-recolor key sharing a recolor key's RGB is REJECTED: `recolor_frame`
-        // substitutes by RGB equality over EVERY pixel, so an 'X' pixel equal to
-        // 'B' would get swapped to the agent's shirt color (artifacts). The load
-        // guard must cover this, not just recolor-vs-recolor — else a custom
-        // `--pack-dir` pack ships artifacts while `validate-pack` prints OK.
         let mut other = ok.clone();
-        other.insert('X', red); // collides with the recolor base 'B'
+        other.insert('X', red);
         let err = validate_recolor_palette(&other).unwrap_err();
         assert!(format!("{err:#}").contains("share RGB"), "{err:#}");
 
-        // A non-recolor key with its OWN distinct color, or a transparent one, is fine.
         let mut fine = ok.clone();
         fine.insert('X', Some(Rgb { r: 1, g: 2, b: 3 }));
         fine.insert('q', None);
@@ -145,11 +130,9 @@ fn rows_to_frame(rows: Vec<Vec<Pixel>>) -> Result<Frame> {
     if rows.is_empty() {
         bail!("frame has no rows");
     }
-    // Frame dims are u16; a silent `as u16` truncation would wrap the dims
-    // while `pixels` keeps the full flattened length, breaking Frame's
-    // documented `pixels.len() == width * height` contract that blit/mirror
-    // index against. Pathological pack input only — bail like the
-    // inconsistent-row-width case below.
+    // Frame dims are u16: a silent `as u16` truncation would wrap them while
+    // `pixels` keeps the full flattened length, breaking Frame's
+    // `pixels.len() == width * height` contract that blit/mirror index against.
     if rows.len() > u16::MAX as usize {
         bail!("frame has {} rows (maximum {})", rows.len(), u16::MAX);
     }
@@ -213,10 +196,9 @@ impl Pack {
         self.animations.keys().cloned().collect()
     }
 
-    /// Merge furniture/environment animations from `base` into self.
-    /// Only fills animations listed in OPTIONAL_FURNITURE_ANIMATIONS —
-    /// character animations are never inherited so a robot pack doesn't
-    /// accidentally show human sprites for missing optional poses.
+    /// Merge OPTIONAL_FURNITURE_ANIMATIONS from `base` into self. Character
+    /// animations are never inherited — a robot pack must not fall back to
+    /// human sprites.
     pub fn merge_from(&mut self, base: &Pack) {
         for &name in OPTIONAL_FURNITURE_ANIMATIONS {
             if !self.animations.contains_key(name) {
@@ -229,12 +211,9 @@ impl Pack {
 }
 
 /// Assemble a `Pack` from parsed TOML, resolving each frame's source text via
-/// `get_src(frame_name)`. The two public loaders differ ONLY in how a frame's
-/// text is fetched — filesystem IO (with the path-traversal guard) for
-/// [`load_pack`] vs an in-memory lookup for [`load_pack_from_strings`] — so that
-/// closure is the one thing they don't share. The traversal guard MUST stay
-/// inside `load_pack`'s closure: `load_pack_from_strings` has no filesystem and
-/// no untrusted paths to escape.
+/// `get_src(frame_name)`. The path-traversal guard MUST stay inside
+/// [`load_pack`]'s closure: [`load_pack_from_strings`] has no filesystem and no
+/// untrusted paths to escape.
 fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>) -> Result<Pack> {
     let palette = build_palette(&parsed.palette)?;
     validate_recolor_palette(&palette)?;
@@ -278,7 +257,6 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
         .with_context(|| format!("canonicalizing {}", dir.display()))?;
 
     build_pack(parsed, |fname| {
-        // Path-traversal guard — load from disk only within the pack dir.
         if Path::new(fname)
             .components()
             .any(|c| c == std::path::Component::ParentDir)
@@ -312,24 +290,17 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
 }
 
 /// The base palette keys per-agent recoloring substitutes by RGB equality
-/// (shirt/hair/skin/pants). The SINGLE source of truth: the tui's `recolor_frame`
-/// consumes this exact set, and `validate_recolor_palette` guards it — so the
-/// substitution and the guard can't drift (add a 5th key here, once). They MUST
-/// map to distinct RGBs: if two share a color, recolor swaps only the first and
-/// the other key silently fails (no panic — just the wrong color on the
-/// overlapping character). Enforced at LOAD so a `--pack-dir` custom pack can't
-/// violate it undetectably — the embedded pack is also test-pinned.
+/// (shirt/hair/skin/pants) — the single source of truth for the tui's
+/// `recolor_frame` and for `validate_recolor_palette`. They MUST map to
+/// distinct RGBs: if two share a color, recolor swaps only the first and the
+/// other silently keeps the wrong color.
 pub const RECOLOR_KEYS: [char; 4] = ['B', 'H', 'S', 'P'];
 
-/// Fail a pack where `recolor_frame`'s by-RGB substitution would be ambiguous.
-/// `recolor_frame` swaps EVERY opaque pixel whose RGB equals a recolor key's base
-/// color, so the guard must reject BOTH (a) two recolor keys sharing an RGB (one
-/// would silently fail) AND (b) any opaque NON-recolor key sharing a recolor
-/// base's RGB (its pixels would be recolored to the agent's color — artifacts).
-/// Only opaque (`Some(rgb)`) keys participate; a transparent key isn't substituted.
+/// Fail a pack where `recolor_frame`'s by-RGB substitution would be ambiguous:
+/// it swaps EVERY opaque pixel matching a recolor base, so a NON-recolor key
+/// sharing that RGB would be recolored to the agent's color too. Transparent
+/// keys never participate.
 fn validate_recolor_palette(palette: &Palette) -> Result<()> {
-    // First map each recolor base RGB → its key, rejecting recolor-vs-recolor
-    // collisions as we go.
     let mut recolor_rgb: HashMap<Rgb, char> = HashMap::new();
     for key in RECOLOR_KEYS {
         if let Some(Some(rgb)) = palette.get(key) {
@@ -341,7 +312,6 @@ fn validate_recolor_palette(palette: &Palette) -> Result<()> {
             }
         }
     }
-    // Then reject any opaque non-recolor key colliding with a recolor base.
     for (key, pixel) in palette.iter() {
         if RECOLOR_KEYS.contains(&key) {
             continue;
@@ -364,8 +334,6 @@ fn build_palette(map: &HashMap<String, String>) -> Result<Palette> {
     for (k, v) in map {
         let mut it = k.chars();
         let key = it.next();
-        // Validate-and-extract in one fallible step so the single-char invariant
-        // and the bail can't drift apart in a refactor (no positional expect).
         let (Some(key), None) = (key, it.next()) else {
             bail!("palette key {k:?} must be exactly one character");
         };
@@ -375,12 +343,7 @@ fn build_palette(map: &HashMap<String, String>) -> Result<Palette> {
     Ok(palette)
 }
 
-// ---------------------------------------------------------------------------
-// Animation registry — canonical list of animation names the renderer uses.
-// ---------------------------------------------------------------------------
-
-/// Character animation names every pack MUST provide; `validate_pack_animations`
-/// reports any that are missing as an error.
+/// Character animation names every pack MUST provide.
 pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
     "seated",
     "typing",
@@ -393,15 +356,12 @@ pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
     "back_couch",
 ];
 
-// side_seated is optional-by-design: the chair render degrades to the front
-// `seated` pose when a pack lacks it (seat_sprite_in_pack), never invisible.
-/// Character animation names a pack MAY omit; the renderer degrades gracefully
-/// when absent (e.g. `side_seated` falls back to the front `seated` pose).
+/// Character animation names a pack MAY omit — the renderer degrades
+/// gracefully (`side_seated` falls back to the front `seated` pose).
 pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &["walking_coffee", "side_seated"];
 
 /// Environment/furniture animation names a pack MAY provide; `Pack::merge_from`
-/// inherits any of these that are missing from the base pack (character
-/// animations are never inherited).
+/// inherits any that are missing from the base pack.
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
     "filing_cabinet",
@@ -433,7 +393,6 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "exit_sign",
 ];
 
-/// Multi-frame requirements: animations that must have at least N frames.
 const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
     ("typing", 2),
     ("walking", 2),
@@ -444,18 +403,15 @@ const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
     ("lobster_walk", 2),
 ];
 
-/// Per-category tally of a pack's animation discrepancies, produced by
-/// `validate_pack_animations`.
+/// Per-category tally of a pack's animation discrepancies.
 #[derive(Debug, Default)]
 pub struct ValidationReport {
     /// Required character-animation names absent from the pack — an error.
     pub missing_required: Vec<String>,
     /// Optional animation names absent from the pack — reported, not an error.
     pub missing_optional: Vec<String>,
-    /// `(name, need, have)` for each animation with fewer frames than its
-    /// multi-frame minimum (e.g. `typing` needs 2) — the REQUIRED count first,
-    /// matching what the producer pushes and both `validate-pack` consumers
-    /// destructure.
+    /// `(name, need, have)` — REQUIRED count first — for each animation with
+    /// fewer frames than its minimum.
     pub insufficient_frames: Vec<(String, usize, usize)>,
     /// Animation names present in the pack but in none of the known registries.
     pub unknown: Vec<String>,
@@ -470,7 +426,7 @@ impl ValidationReport {
 }
 
 /// Check a pack's animations against the required/optional/multi-frame
-/// registries, collecting every discrepancy into a [`ValidationReport`].
+/// registries.
 pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     let mut report = ValidationReport::default();
     let known_names = || {
@@ -496,13 +452,11 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
         }
     }
 
-    // Frame-count floor: every KNOWN animation PRESENT in the pack needs at
-    // least one frame — a `frames = []` entry deserializes and makes
+    // Implicit min-1 floor: a `frames = []` entry deserializes and makes
     // `animation()` return Some (dodging the missing-required check above)
     // while every render consumer guards with `.frames.first()` and silently
     // draws nothing; an empty OPTIONAL entry additionally SHADOWS the embedded
-    // default in `Pack::merge_from` (`contains_key` is true). Names in
-    // MULTI_FRAME_REQUIREMENTS carry their own higher minimum.
+    // default in `Pack::merge_from` (`contains_key` is true).
     for name in known_names() {
         let min_frames = MULTI_FRAME_REQUIREMENTS
             .iter()
@@ -541,13 +495,6 @@ mod validation_floor_tests {
 
     #[test]
     fn empty_frames_on_a_required_animation_fails_validation() {
-        // `frames = []` deserializes, build_pack inserts `Sprite { frames:
-        // vec![] }`, and `animation()` returns Some — dodging the
-        // missing-required check — while every render consumer guards with
-        // `.frames.first()` and silently draws nothing. An empty frame list
-        // on a known animation must be a hard validation error (implicit
-        // min-1), so `pixtuoid validate-pack` catches the exact authoring
-        // mistake it exists for.
         let pack = pack_with_animation("seated", "[]");
         let report = validate_pack_animations(&pack);
         assert!(
@@ -557,20 +504,14 @@ mod validation_floor_tests {
             "empty seated must report (seated, 1, 0); got {:?}",
             report.insufficient_frames
         );
-        // Name the positions: an anonymous `(_, 1, 0)` reads the same either way
-        // round, so it cannot pin the field's documented element ORDER.
         let (name, need, have) = &report.insufficient_frames[0];
         assert_eq!((name.as_str(), *need, *have), ("seated", 1, 0));
         assert!(report.has_errors());
-        // Not double-counted as missing — the entry exists.
         assert!(!report.missing_required.contains(&"seated".to_string()));
     }
 
     #[test]
     fn empty_frames_on_an_optional_furniture_animation_fails_validation() {
-        // An empty OPTIONAL entry is worse than an absent one: `merge_from`
-        // skips the embedded-default fallback because `contains_key` is true,
-        // so the empty animation SHADOWS the default furniture sprite.
         let pack = pack_with_animation("desk", "[]");
         let report = validate_pack_animations(&pack);
         assert!(
@@ -585,10 +526,6 @@ mod validation_floor_tests {
 
     #[test]
     fn one_frame_on_a_plain_known_animation_passes_validation() {
-        // The implicit floor is min-1 — a single-frame animation outside
-        // MULTI_FRAME_REQUIREMENTS must not be flagged as insufficient.
-        // (The pack still misses OTHER required animations; only the
-        // frame-count floor is under test here.)
         let pack = pack_with_animation("seated", "[\"f.sprite\"]");
         let report = validate_pack_animations(&pack);
         assert!(
@@ -600,9 +537,6 @@ mod validation_floor_tests {
 
     #[test]
     fn multi_frame_requirements_all_name_known_animations() {
-        // The frame-count floor iterates the KNOWN animation lists and reads
-        // each name's stricter minimum from MULTI_FRAME_REQUIREMENTS — a row
-        // naming an unknown animation would silently never be checked.
         let known: std::collections::HashSet<&str> = REQUIRED_CHARACTER_ANIMATIONS
             .iter()
             .chain(OPTIONAL_CHARACTER_ANIMATIONS.iter())
@@ -628,9 +562,8 @@ fn parse_palette_value(v: &str) -> Result<Pixel> {
     if hex.len() != 6 {
         bail!("color {v:?} must be 6 hex digits");
     }
-    // u8::from_str_radix accepts a leading '+', so reject non-hex bytes up front
-    // — otherwise `#+f0102` would slice to `+f`/`01`/`02` and parse to a valid
-    // color, violating the "must be 6 hex digits" contract on untrusted packs.
+    // `u8::from_str_radix` accepts a leading '+', so `#+f0102` would slice to
+    // `+f`/`01`/`02` and parse as a valid color without this explicit hex check.
     if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         bail!("color {v:?} must be 6 hex digits");
     }

@@ -1,41 +1,26 @@
-//! `pixtuoid doctor` — read-only source self-diagnosis.
+//! `pixtuoid doctor` — read-only source self-diagnosis. Surfaces the
+//! decode-drift breadcrumbs (`source/drift.rs`, under the `pixtuoid::drift`
+//! tracing target) that otherwise die in the warn-floor log nobody reads.
 //!
-//! Surfaces the decode-drift breadcrumbs (`source/drift.rs`, structured under the
-//! `pixtuoid::drift` tracing target) that otherwise die in the warn-floor log
-//! nobody reads — the gap the Task→Agent rename exposed. For each registered
-//! source it reports: connected? hooks installed? the installed CLI version
-//! (probed via `<cli> --version`) vs the `verified_version` anchor — flagging
-//! skew ("NEWER than verified, drift possible") where an anchor exists; and any
-//! drift recorded in the log (unknown events / missing fields / unknown dispatch
-//! / shape drift), with a sanitized sample of the distinctive new names so the
-//! user can report them.
-//!
-//! Strictly READ-ONLY: log file + config + install-state + best-effort
-//! `<cli> --version` subprocess probes (stdin nulled so they can't block; argv
-//! from the static registry, never user input). It never writes config
-//! (re-connecting hooks stays the Sources panel's job) and never spawns the
-//! TUI. The PROBED CLI is not read-only about its own state, though — several
-//! bootstrap their state dir on any invocation — so the probe is gated by
+//! Strictly READ-ONLY: it never writes config (re-connecting hooks stays the
+//! Sources panel's job) and never spawns the TUI. The PROBED CLI is not
+//! read-only about its own state, though — several bootstrap their state dir on
+//! any invocation — so the `<cli> --version` probe is gated by
 //! `may_probe_version` on evidence the user already runs that CLI; see the
-//! `doctor`-probe sharp edge in `crates/pixtuoid/CLAUDE.md`. The untrusted wire
-//! values (event/tool names) it samples are
-//! `sanitize`d before display (R0615-06) — `doctor` is the third consumer of
-//! those breadcrumbs and must hold the same line as the headless path + footer.
+//! `doctor`-probe sharp edge in `crates/pixtuoid/CLAUDE.md`. Untrusted wire
+//! values (event/tool names) are `sanitize`d before display.
 
 use pixtuoid_core::source::{drift, registry};
 
-/// Per-source drift tallied from the log, by `kind`, plus a sanitized sample of
-/// the distinctive values (new event/tool names) and the most recent timestamp.
 #[derive(Default, Debug, PartialEq, Eq)]
 pub(crate) struct LogScanResult {
     pub unknown_event: u64,
     pub missing_field: u64,
     pub unknown_dispatch: u64,
     pub shape_drift: u64,
-    /// Sanitized, deduped, capped distinctive values (unknown event names / tool
-    /// names) — the actionable "what drifted", safe to print.
+    /// Sanitized, deduped, capped distinctive values — safe to print.
     pub samples: Vec<String>,
-    /// The leading timestamp token of the latest matching log line, if any.
+    /// The leading timestamp token of the latest matching log line.
     pub last_ts: Option<String>,
 }
 
@@ -47,30 +32,23 @@ impl LogScanResult {
 
 const SAMPLE_CAP: usize = 5;
 
-// Strip control chars from an untrusted wire value before it reaches stdout
-// (R0615-06) — the one canonical `crate::strip_control_chars`.
+// Strip control chars from an untrusted wire value before it reaches stdout.
 use crate::strip_control_chars as sanitize;
 
-/// The parsed fields of one `pixtuoid::drift` breadcrumb line, borrowed from it.
 struct DriftLine<'a> {
     source: &'a str,
     kind: &'a str,
-    /// The fields segment AFTER the `target:` marker — sample values are pulled
-    /// from here, so a span field of the same name (rendered BEFORE the target)
-    /// can't be picked up (R0615-09).
+    /// The fields segment AFTER the `target:` marker, so a span field of the
+    /// same name (rendered BEFORE the target) can't be picked up.
     fields: &'a str,
 }
 
 /// Parse a warn-floor log line as a drift breadcrumb, anchored on the STRUCTURAL
-/// tracing-fmt `target:` marker rather than a loose `contains` (R0615-08/-09).
-/// `marker` is `"<TARGET>: "` (hoisted by the caller to avoid a per-line alloc).
-/// tracing-fmt renders the target verbatim after the level + any span list, so:
-/// (1) a line that merely MENTIONS the literal inside a field value isn't matched
-/// (the marker carries the `: ` the target position always has, and must be a
-/// standalone token, not the suffix of a longer `a::b::pixtuoid::drift` target);
-/// (2) fields are parsed only from the segment AFTER it, never an active-span
-/// field of the same name. `None` if not a drift line or source/kind is absent.
-/// Accepted residual: a non-drift line whose value literally embeds
+/// tracing-fmt `target:` marker rather than a loose `contains`, so a line that
+/// merely MENTIONS the literal inside a field value isn't matched and a longer
+/// `a::b::pixtuoid::drift` target can't suffix-match ours. `marker` is
+/// `"<TARGET>: "`, hoisted by the caller to avoid a per-line alloc. Accepted
+/// residual: a non-drift line whose value literally embeds
 /// ` <TARGET>: source=… kind=… ` would still match — no in-tree code emits that.
 fn parse_drift_line<'a>(line: &'a str, marker: &str) -> Option<DriftLine<'a>> {
     let at = line.find(marker)?;
@@ -85,12 +63,11 @@ fn parse_drift_line<'a>(line: &'a str, marker: &str) -> Option<DriftLine<'a>> {
     })
 }
 
-/// Pull a field value from a tracing-fmt fields segment. Handles the quoted form
-/// (`key="…"`, fmt's string-literal rendering) AND the unquoted Display form
-/// (`key=val`), INCLUDING a value containing spaces (a hostile wire name): an
-/// unquoted value runs to the next ` <ident>=` field boundary or the segment end,
-/// not merely the next whitespace (R0615-09). The key must START a field (segment
-/// start or space-preceded) so `name` can't match inside `displayName=`.
+/// Pull a field value from a tracing-fmt fields segment, in both the quoted
+/// (`key="…"`) and unquoted Display (`key=val`) forms. An unquoted value runs to
+/// the next ` <ident>=` field boundary, not merely the next whitespace, so a
+/// hostile wire name containing spaces survives whole; and the key must START a
+/// field so `name` can't match inside `displayName=`.
 fn field_value<'a>(seg: &'a str, key: &str) -> Option<&'a str> {
     let pat = format!("{key}=");
     let mut from = 0;
@@ -109,8 +86,6 @@ fn field_value<'a>(seg: &'a str, key: &str) -> Option<&'a str> {
     }
 }
 
-/// Index of the next ` <ident>=` field boundary in an unquoted value tail (so a
-/// spaced value is kept whole instead of truncated at its first space).
 fn next_field_boundary(s: &str) -> Option<usize> {
     let b = s.as_bytes();
     (0..b.len()).find(|&i| {
@@ -134,10 +109,8 @@ fn push_sample(samples: &mut Vec<String>, v: Option<&str>) {
     }
 }
 
-/// Scan warn-floor log text for `pixtuoid::drift` breadcrumbs for ONE source,
-/// tallying by `kind`. Pure (takes the log text) so it's testable against real
-/// fmt output. Source/kind values are matched, never re-emitted raw; the sampled
-/// names ARE sanitized (they're untrusted wire content).
+/// Scan warn-floor log TEXT (not a path, so it's testable against real fmt
+/// output) for `pixtuoid::drift` breadcrumbs for ONE source.
 pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
     let mut r = LogScanResult::default();
     let marker = format!("{}: ", drift::TARGET);
@@ -169,7 +142,7 @@ pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
 }
 
 /// Source label-prefixes (e.g. `"cc"`) that have ANY decode-drift breadcrumb in
-/// the log — for the live footer nudge. Reuses `scan_log_for_source` (tested).
+/// the log — for the live footer nudge.
 pub(crate) fn drifted_sources(log: &str) -> Vec<String> {
     registry::registered_source_names()
         .filter(|s| scan_log_for_source(log, s).total() > 0)
@@ -178,8 +151,7 @@ pub(crate) fn drifted_sources(log: &str) -> Vec<String> {
 }
 
 /// Merge the source-death footer warning (HIGHEST priority — the office is
-/// partially frozen) with a passive decode-drift nudge. `None` when both clear.
-/// The footer (`run_tui`) sets this each frame; the drift list is throttle-scanned.
+/// partially frozen) with a passive decode-drift nudge.
 pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<String> {
     if let Some(d) = source_death {
         return Some(d.to_string());
@@ -192,23 +164,17 @@ pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<
         .map(|p| format!("{p}·"))
         .collect::<Vec<_>>()
         .join(" ");
-    // No leading `⚠` — the footer painter (`footer.rs` `" ⚠ {warn} "`) owns the
-    // glyph, same as the source-death message. Embedding one here double-prints
-    // it (`⚠ ⚠ decode drift`), a regression a snapshot caught.
+    // No leading `⚠`: the footer painter (`footer.rs` `" ⚠ {warn} "`) owns the
+    // glyph, so embedding one here double-prints it (`⚠ ⚠ decode drift`).
     Some(format!("decode drift: {prefixes} — run `pixtuoid doctor`"))
 }
 
-/// Windows-only advisory for the "installed but no sprite" path-split class
-/// (CodeWhale / OpenClaw, #census-266-style): when `HOME` is set and differs from
-/// `%USERPROFILE%`, a source whose CLI resolves its home differently than pixtuoid
-/// did may have its hooks written where the CLI never reads. pixtuoid already
-/// mirrors the HOME-first CLIs (`platform::home_first_dir`), so this is a SAFETY
-/// NET — it surfaces the one host condition under which any residual resolver
-/// mismatch (a closed-source CLI verified only by convention, or a future source)
-/// would bite, and points a troubleshooting user straight at it. `None` on
-/// non-Windows or when the two homes are equivalent (the common case, where
-/// nothing can diverge). Pure (env + platform injected) so it unit-tests on any
-/// host.
+/// Windows-only advisory for the "installed but no sprite" path-split class:
+/// when `HOME` is set and differs from `%USERPROFILE%`, a source whose CLI
+/// resolves its home differently than pixtuoid did may have its hooks written
+/// where the CLI never reads. pixtuoid already mirrors the HOME-first CLIs
+/// (`platform::home_first_dir`), so this is a SAFETY NET for a residual resolver
+/// mismatch. Pure (env + platform injected) so it unit-tests on any host.
 pub(crate) fn home_split_advisory(
     is_windows: bool,
     home: Option<&str>,
@@ -223,7 +189,7 @@ pub(crate) fn home_split_advisory(
         return None;
     }
     // Sanitized: HOME/USERPROFILE are user-controlled env values surfaced in the
-    // report (same discipline as the config-warning lines).
+    // report.
     Some(format!(
         "⚠ Windows: HOME ({}) differs from USERPROFILE ({}). pixtuoid resolves \
          CodeWhale/OpenClaw HOME-first to match their CLIs — but if a source's \
@@ -234,42 +200,35 @@ pub(crate) fn home_split_advisory(
     ))
 }
 
-/// Windows path equivalence for the home-split check: case-insensitive (NTFS),
-/// `\`/`/` agnostic, trailing-separator agnostic. A `/c/Users/me`-vs-`C:\Users\me`
-/// split is a REAL divergence (different roots), so this only collapses cosmetic
-/// differences, never a POSIX-form HOME vs a native USERPROFILE.
+/// Collapses only COSMETIC differences (case, slash direction, trailing
+/// separator). A `/c/Users/me`-vs-`C:\Users\me` split is a REAL divergence
+/// (different roots) and must stay unequal.
 fn win_path_eq(a: &str, b: &str) -> bool {
     let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_lowercase();
     norm(a) == norm(b)
 }
 
-/// Per-source diagnostics rollup — the SHARED source of truth the Connection
-/// panel (the board), the boot preflight, and `run` (the CLI report) all read,
-/// so the surfaces can't drift apart and no check runs twice. Scope is the
-/// CHEAP signals: install-schema soundness + decode drift. Version skew stays
-/// report-only (the
-/// `<cli> --version` probe, up to 5s each, is too costly for an interactive
-/// panel-open across N sources, and is advisory); live activity + transport
-/// death stay the panel's per-frame facets.
+/// The SHARED rollup the Connection panel, the boot preflight, and the CLI
+/// report all read, so those surfaces can't drift apart. Scope is the CHEAP
+/// signals only — version skew stays report-only, because the `<cli> --version`
+/// probe is too costly for an interactive panel-open across N sources.
 #[derive(Debug, Default)]
 pub struct SourceDiagnostics {
-    /// #309 install-schema soundness — `Some` only when hooks are installed in
-    /// the target's config; `None` = not checked (no target / not installed).
+    /// `Some` only when hooks are installed in the target's config; `None` = not
+    /// checked (no target / not installed).
     pub install: Option<crate::install::verify::SchemaVerifyResult>,
-    /// Decode-drift tally from the warn-floor log.
     pub(crate) drift: LogScanResult,
 }
 
 impl SourceDiagnostics {
     /// A HARD install problem ⇒ the source is broken (zero sprites despite a
-    /// claimed connection). Soft notes + drift do NOT count as broken.
+    /// claimed connection). Soft notes and drift do NOT count as broken.
     pub fn is_broken(&self) -> bool {
         self.install.as_ref().is_some_and(|i| !i.is_sound())
     }
 
-    /// The single worst issue as a one-line, glyph-prefixed summary for the
-    /// Sources panel detail + the boot warning. `None` = nothing to flag.
-    /// Priority: install-broken (hooks can't fire) > decode-drift.
+    /// The single worst issue as a one-line, glyph-prefixed summary. Priority:
+    /// install-broken (hooks can't fire) > decode-drift.
     pub(crate) fn summary(&self) -> Option<String> {
         if let Some(i) = &self.install {
             if !i.is_sound() {
@@ -284,14 +243,11 @@ impl SourceDiagnostics {
     }
 }
 
-/// Compute the cheap per-source diagnostics given the warn-floor log text. The
-/// install check runs whenever the source's target has managed hooks installed
-/// (NOT gated on the connected flag — `run` reports a stale broken install even
-/// on a disconnected source; the boot warning gates on connected itself).
-/// `config` injects a config root (mirroring `verify_target`): prod passes
-/// `None` (real default paths); a fixture test passes a temp dir so an
-/// install-broken verdict is exercisable through the SAME root both the
-/// `has_hooks` gate and `verify_target` read.
+/// The install check runs whenever the source's target has managed hooks
+/// installed, NOT gated on the connected flag — the report must surface a stale
+/// broken install even on a disconnected source. `config` injects a config root
+/// (`None` in prod) so an install-broken verdict is exercisable through the SAME
+/// root both the `has_hooks` gate and `verify_target` read.
 pub fn diagnose(source: &str, log: &str, config: Option<std::path::PathBuf>) -> SourceDiagnostics {
     let install = crate::install::target::by_source(source)
         .filter(|t| crate::install::has_hooks(t, config.clone()))
@@ -302,26 +258,21 @@ pub fn diagnose(source: &str, log: &str, config: Option<std::path::PathBuf>) -> 
     }
 }
 
-/// One source's diagnosis row (plain data, so `format_doctor_row` is pure/tested).
 pub(crate) struct DoctorSourceRow {
     pub prefix: &'static str,
-    /// The registry source id (e.g. "claude-code"), NOT a display name — it's
-    /// the registry key, distinct from `install::Target.name`/`display_name`.
+    /// The registry source id (e.g. "claude-code"), distinct from
+    /// `install::Target.name`/`display_name`.
     pub source_id: &'static str,
     pub connected: bool,
     pub has_target: bool,
     pub hooks_installed: bool,
-    /// The installed CLI version (raw probe output), if probeable.
+    /// Raw probe output, if probeable.
     pub installed_version: Option<String>,
-    /// The version this build's decoder was verified against (`"unknown"` = no
-    /// anchor), from the source's `SourceDescriptor`.
+    /// The version this build's decoder was verified against; `"unknown"` = no
+    /// anchor.
     pub verified_version: &'static str,
-    /// The shared health rollup (install soundness + decode drift) — the SAME
-    /// [`SourceDiagnostics`] the Sources panel + boot preflight read, embedded
-    /// whole so `is_broken`/`drift` stay the ONE authority (no re-implemented
-    /// `row_broken`, no re-flattened `scan`/`schema` copy that could disagree).
-    /// A non-sound install flips the verdict glyph to `⚠` and prints the reason
-    /// on an indented `↳` continuation line.
+    /// The SAME [`SourceDiagnostics`] the Sources panel + boot preflight read,
+    /// embedded whole so `is_broken`/`drift` stay the ONE authority.
     pub diag: SourceDiagnostics,
 }
 
@@ -330,20 +281,12 @@ pub(crate) struct DoctorSourceRow {
 const IMPLAUSIBLE_MAJOR: u64 = 1000;
 
 /// Extract a `MAJOR.MINOR[.PATCH]` tuple from a `--version` banner. Tolerant:
-/// surrounding text ignored, missing patch = 0, no dotted run = None (a skew
-/// check then silently no-ops rather than alarming on garbage). A bare integer
-/// (`2026`) is NOT a version (needs at least `MAJOR.MINOR`).
-///
-/// Banner-order robust: a banner can print a dotted DATE/build token
-/// before the semver (`Built 2026.06.04 — v1.2.3`). Selection order:
-///   1. a `v`/`V`-prefixed run wins (an explicit version marker);
-///   2. else the first run with a plausible (< `IMPLAUSIBLE_MAJOR`) major,
-///      skipping a year-like date prefix;
-///   3. else the first run — so a genuine CalVer (`2026.06.04`, e.g. cursor)
-///      still parses rather than vanishing.
+/// no dotted run = None, so a skew check silently no-ops rather than alarming on
+/// garbage. Banner-order robust — a banner can print a dotted DATE/build token
+/// BEFORE the semver (`Built 2026.06.04 — v1.2.3`) — while still parsing a
+/// genuine CalVer (`2026.06.04`, e.g. cursor) rather than letting it vanish.
 pub(crate) fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     let bytes = s.as_bytes();
-    // (v_prefixed, (major, minor, patch)) for every dotted-number run.
     let mut runs: Vec<(bool, (u64, u64, u64))> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
@@ -357,7 +300,7 @@ pub(crate) fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
         }
         let run = &s[start..i];
         if !run.contains('.') {
-            continue; // a bare integer is too ambiguous to be a version
+            continue;
         }
         let mut parts = run.split('.').filter(|p| !p.is_empty());
         if let Some(major) = parts.next().and_then(|p| p.parse().ok()) {
@@ -374,13 +317,11 @@ pub(crate) fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
         .map(|(_, v)| *v)
 }
 
-/// The version segment for a doctor row. Skew is flagged ONLY when both the
-/// installed and the (non-`unknown`) verified version parse — otherwise it just
-/// shows the installed version (still useful) with no alarm.
+/// Skew is flagged ONLY when both the installed and the (non-`unknown`) verified
+/// version parse — otherwise the installed version shows with no alarm.
 pub(crate) fn version_status(installed: Option<&str>, verified: &str) -> String {
-    // Show the RAW probe string (what the CLI actually reports) — honest, not a
-    // lossy reformat (cursor's `2026.06.04-5fd875e` isn't semver). The skew
-    // check still parses internally.
+    // Display the RAW probe string, not a lossy reformat (cursor's
+    // `2026.06.04-5fd875e` isn't semver); the skew check still parses internally.
     let inst_disp = installed
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -397,10 +338,6 @@ pub(crate) fn version_status(installed: Option<&str>, verified: &str) -> String 
     format!("{inst_disp} (verified {verified}{cmp})")
 }
 
-/// The scannable per-row HEALTH verdict glyph (the rollup made visible):
-/// `⚠` a problem (install broken OR decode drift), `✓` healthy (installed +
-/// sound + no drift), `○` installable but not installed, `–` transcript-only
-/// (no install schema to verify).
 fn verdict_glyph(row: &DoctorSourceRow) -> char {
     if row.diag.is_broken() || row.diag.drift.total() > 0 {
         '\u{26a0}' // ⚠
@@ -413,7 +350,6 @@ fn verdict_glyph(row: &DoctorSourceRow) -> char {
     }
 }
 
-/// The decode-drift detail (counts + when + samples) for a continuation line.
 fn drift_detail(s: &LogScanResult) -> String {
     let mut parts = Vec::new();
     if s.unknown_event > 0 {
@@ -441,10 +377,8 @@ fn drift_detail(s: &LogScanResult) -> String {
     format!("{}{when}{samples}", parts.join(", "))
 }
 
-/// Render one row: a scannable verdict line (glyph + name + connection + install
-/// state + version), plus an indented `↳` continuation line per problem (broken
-/// install / soft note / decode drift) so the long detail never wrecks the
-/// table's column alignment. Pure — the test seam (like `runtime::summarize`).
+/// Render one row: a scannable verdict line, plus an indented `↳` continuation
+/// line per problem so the long detail never wrecks the table's column alignment.
 pub(crate) fn format_doctor_row(row: &DoctorSourceRow) -> String {
     let conn = if row.connected {
         "connected"
@@ -468,9 +402,8 @@ pub(crate) fn format_doctor_row(row: &DoctorSourceRow) -> String {
         state,
         version
     );
-    // Reason continuation lines — only emitted when there IS a problem, so a
-    // healthy row stays a single clean line. `issues` are already control-char
-    // sanitized at the source (`verify::display_safe`).
+    // `issues` are already control-char sanitized at the source
+    // (`verify::display_safe`).
     if let Some(s) = &row.diag.install {
         if !s.is_sound() {
             out.push_str(&format!(
@@ -492,7 +425,7 @@ pub(crate) fn format_doctor_row(row: &DoctorSourceRow) -> String {
 
 /// First non-empty line of subprocess output, trimmed AND control-char
 /// `sanitize`d — `--version` output is untrusted (a PATH-substituted binary
-/// could emit ANSI/OSC to manipulate the terminal; R0615-06). Pure → tested.
+/// could emit ANSI/OSC to manipulate the terminal).
 fn first_sanitized_line(bytes: &[u8]) -> Option<String> {
     String::from_utf8_lossy(bytes)
         .lines()
@@ -502,14 +435,11 @@ fn first_sanitized_line(bytes: &[u8]) -> Option<String> {
 }
 
 /// Probe a source's `<cli> --version` (argv from the static registry — never
-/// user input) → the first non-empty output line, sanitized. Best-effort; every
-/// failure → None ("unknown"):
-/// - missing binary / spawn error,
-/// - NONZERO exit (a broken `--version` must not show its error text as the
-///   version),
-/// - a HANG: stdin is nulled (no block on the inherited TTY) and the child is
-///   killed after a deadline (a slow/blocking/PATH-substituted binary can't hang
-///   doctor — `output()` has no timeout). Checks stdout then stderr.
+/// user input) → the first non-empty output line, sanitized. Best-effort; a
+/// spawn error, a NONZERO exit (whose error text must never show as a version),
+/// or a hang all yield None. stdin is nulled so the child can't block on the
+/// inherited TTY, and it is killed after a deadline because `output()` has no
+/// timeout.
 fn probe_version(argv: &'static [&'static str]) -> Option<String> {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
@@ -523,8 +453,6 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
         .ok()?;
     // `--version` output is tiny, so the piped buffers never fill while we poll
     // (no reader-vs-writer deadlock for this use).
-    // Kill a `--version` child that hasn't exited within this budget; poll for its
-    // exit at this cadence meanwhile.
     const PROBE_VERSION_TIMEOUT_SECS: u64 = 5;
     const PROBE_POLL_INTERVAL_MS: u64 = 20;
     let deadline = Instant::now() + Duration::from_secs(PROBE_VERSION_TIMEOUT_SECS);
@@ -541,7 +469,6 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
         }
     }
     let output = child.wait_with_output().ok()?;
-    // A `--version` that exits nonzero is broken — "unknown", never its error text.
     if !output.status.success() {
         return None;
     }
@@ -549,25 +476,21 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
 }
 
 /// Whether `doctor` may spawn this source's `<cli> --version` probe: only with
-/// evidence the user already runs that CLI — it is either CONNECTED, or its
-/// install target probed PRESENT. `cli_detected` is `None` for a transcript-only
-/// source (no install target, so nothing to detect).
+/// evidence the user already runs that CLI — CONNECTED, or its install target
+/// probed PRESENT. `cli_detected` is `None` for a transcript-only source.
 ///
 /// `--version` is not side-effect-free on the other side: several agent CLIs
 /// bootstrap their own state dir on ANY invocation, and those dirs are exactly
-/// what `presence_probe` / `detect_installed` key on — so an unconditional probe
-/// MANUFACTURED the presence it was diagnosing (`cli_present` false→true), and
-/// the natural `doctor` → `setup --yes` order then installed hooks into CLIs
-/// `setup --yes` alone had just declined to touch. Gating on presence removes
-/// the observer effect by construction: a CLI that has already written its own
-/// state cannot be perturbed into existence by one more `--version`.
+/// what `presence_probe` / `detect_installed` key on, so an unconditional probe
+/// MANUFACTURED the presence it was diagnosing and the natural `doctor` →
+/// `setup --yes` order then installed hooks into CLIs `setup --yes` alone had
+/// just declined to touch. Gating on presence removes the observer effect by
+/// construction: a CLI that has already written its own state cannot be
+/// perturbed into existence by one more `--version`.
 fn may_probe_version(connected: bool, cli_detected: Option<bool>) -> bool {
     connected || cli_detected.unwrap_or(false)
 }
 
-/// The desktop activation backend focus-jump would use on THIS host — the
-/// per-OS half of the #526 focus diagnostic. Linux detection is the pure
-/// [`linux_activation_backend`] over the env markers `focus/linux.rs` keys on.
 fn activation_backend() -> String {
     #[cfg(target_os = "macos")]
     {
@@ -594,24 +517,22 @@ fn activation_backend() -> String {
 }
 
 /// Is a compositor/display env marker actually SET? EMPTY (or whitespace-only)
-/// counts as UNSET — the workspace `install::io::nonempty` rule (#172), NOT bare
-/// presence. A leftover `WAYLAND_DISPLAY=`/`SWAYSOCK=` (systemd user units and
-/// non-forwarded ssh sessions leave them routinely) would otherwise print a
-/// confidently wrong verdict at a user whose X11 EWMH channel works fine.
-/// `focus::linux::detect_channel` keys the live channel on the SAME rule.
+/// counts as UNSET, NOT bare presence: a leftover `WAYLAND_DISPLAY=`/`SWAYSOCK=`
+/// (systemd user units and non-forwarded ssh sessions leave them routinely)
+/// would otherwise print a confidently wrong verdict at a user whose X11 EWMH
+/// channel works fine. `focus::linux::detect_channel` keys the live channel on
+/// the SAME rule.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn marker_set(value: Option<String>) -> bool {
     crate::install::io::nonempty(value).is_some()
 }
 
-/// Pure so every arm is unit-tested on any host: mirrors `focus/linux.rs`'s
-/// ONE-channel-per-env order (sway IPC → hyprland IPC → X11 EWMH → nothing) —
-/// EXCEPT that a Wayland session without a pid-addressable IPC must NOT be
-/// reported as "X11 EWMH ✓": XWayland sets $DISPLAY, but a native-Wayland
-/// terminal never appears in XWayland's client list and mutter/kwin block
-/// focus-steal anyway, so the ✓ would mislead exactly the users focus fails
-/// for. Only the linux `activation_backend` arm calls this in prod — on
-/// other hosts the tests are the (deliberate) only caller.
+/// Mirrors `focus/linux.rs`'s ONE-channel-per-env order (sway IPC → hyprland IPC
+/// → X11 EWMH → nothing) — EXCEPT that a Wayland session without a
+/// pid-addressable IPC must NOT be reported as "X11 EWMH ✓": XWayland sets
+/// $DISPLAY, but a native-Wayland terminal never appears in XWayland's client
+/// list and mutter/kwin block focus-steal anyway, so the ✓ would mislead exactly
+/// the users focus fails for.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn linux_activation_backend(sway: bool, hyprland: bool, wayland: bool, x11: bool) -> &'static str {
     if sway {
@@ -629,11 +550,8 @@ fn linux_activation_backend(sway: bool, hyprland: bool, wayland: bool, x11: bool
     }
 }
 
-/// The focus-jump block of the report: the activation backend + which
-/// pid channel each source family rides, with the transcript-family probe
-/// roots checked on disk. Pure over the probed facts; the family buckets come
-/// straight from the registry (a new source lands in the right bucket with no
-/// edit here).
+/// The family buckets come straight from the registry, so a new source lands in
+/// the right bucket with no edit here.
 pub(crate) fn focus_section(
     backend: &str,
     cc_registry: Option<(&std::path::Path, bool)>,
@@ -652,8 +570,8 @@ pub(crate) fn focus_section(
         let Some(d) = registry::descriptor_for(src) else {
             continue;
         };
-        // Daemons (the lobster) aren't click-focusable agents; the
-        // TranscriptProbe sources (CC/Codex) get their own rows below.
+        // Daemons aren't click-focusable agents; the TranscriptProbe sources get
+        // their own rows below.
         if d.is_daemon() || d.focus_channel() == FocusChannel::TranscriptProbe {
             continue;
         }
@@ -714,21 +632,16 @@ pub(crate) fn focus_section(
 }
 
 /// Read the warn-floor log for a drift scan, separating "there is no log yet"
-/// from "the log could not be read". Returns the text (empty on either failure)
-/// plus a warning line for the SECOND case only.
+/// from "the log could not be read" — the latter gets a warning line.
 ///
 /// A missing log is the ordinary no-TUI-run-yet state and genuinely means "no
-/// drift recorded". Every other error class — permission denied, an I/O error,
-/// a path that isn't a file — means the drift counts are UNKNOWN, and folding
-/// that into the same silent empty string made `doctor` positively assert
-/// `✓ no decode drift` (and `sources --json` return `health: null`) off an input
-/// it never read. One authority so both readers answer identically — `pub`
-/// because `sources_cli` (bin crate) is the second reader.
+/// drift recorded". Every other error class means the drift counts are UNKNOWN,
+/// and folding that into the same silent empty string made `doctor` positively
+/// assert `✓ no decode drift` off an input it never read.
 ///
 /// The warning is `sanitize`d where it is MINTED, not per presenter: the path it
 /// interpolates comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`, and the two readers
-/// print it to different terminals (`doctor`'s stdout report, `sources_cli`'s
-/// `tracing` warn to raw stderr) — sanitizing per reader is exactly how the
+/// print it to different terminals — sanitizing per reader is exactly how the
 /// escape reached one of them.
 pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     match std::fs::read_to_string(path) {
@@ -744,21 +657,16 @@ pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     }
 }
 
-/// Run the diagnosis: read config + install-state + the log, probe installed CLI
-/// versions, print a per-source health table. Read-only. `log_path` is injected
-/// by `main` (it owns the log-path resolution, which lives in the bin, not lib).
-/// Build the read-only health report. Returns the rendered string (the caller —
-/// `main.rs`, an excluded presenter — prints it) so the WHOLE report builder is
-/// unit-testable, not just its pure row helpers.
+/// Returns the rendered report rather than printing it, so the WHOLE report
+/// builder is unit-testable. `log_path` is injected by `main`, which owns the
+/// log-path resolution.
 pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     let mut warnings = Vec::new();
     let cfg = crate::config::load(&crate::config::config_path(), &mut warnings);
     // `doctor` is a separate PROCESS from the running TUI, so it derives the
-    // connected-set fresh from config via the SAME `resolve_connected` the boot
-    // seeder uses (NOT the live in-process `ConnectedSources`, which it can't
-    // see). A snapshot diagnostic reading live on-disk state is the correct
-    // semantic — it can lag a just-made in-TUI toggle until that toggle persists,
-    // which it always does (persist-first; see `connect_source`/`disconnect_source`).
+    // connected-set fresh from config rather than the live in-process
+    // `ConnectedSources` it can't see. That can lag a just-made in-TUI toggle
+    // until it persists, which it always does (persist-first).
     let connected = crate::config::resolve_connected(&cfg);
     let (log, log_warning) = read_log(log_path);
 
@@ -768,17 +676,12 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
         "config: {}\n",
         crate::config::config_path().display()
     ));
-    // Terminal capability: the pixel-art office needs a 24-bit-color terminal, and
-    // the #1 silent failure is a non-truecolor terminal rendering approximated
-    // colors. When $COLORTERM hasn't already declared truecolor, ASK the terminal
-    // directly (DECRQSS) — but ONLY when stdout is a real tty (so a piped
-    // `pixtuoid doctor > file` neither emits escape codes nor blocks, and the test
-    // harness, whose output is captured, never probes) AND the terminal isn't
-    // $TERM=dumb (which can't answer DECRQSS — don't emit escapes at it). The same
-    // `color_preflight` the launcher acts on drives both the probe skip and the
-    // color-status line, so the diagnostic matches what `run` would do. The row is
-    // formatted by the PURE, unit-tested `term::terminal_diagnostic_row`; `.ok()`
-    // makes an unset var a genuine `None`, not `Some("")`.
+    // ASK the terminal for truecolor (DECRQSS) — but ONLY when stdout is a real
+    // tty, so a piped `pixtuoid doctor > file` neither emits escape codes nor
+    // blocks (and the capture-output test harness never probes), and only when
+    // $TERM isn't dumb, which can't answer. The same `color_preflight` the
+    // launcher acts on drives both the probe skip and the color-status line, so
+    // the diagnostic matches what `run` would do.
     let color_pf = crate::term::color_preflight(
         std::env::var("NO_COLOR").ok().as_deref(),
         std::env::var("CLICOLOR_FORCE").ok().as_deref(),
@@ -801,31 +704,25 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
         out.push_str(line);
         out.push('\n');
     }
-    // Surface config-load warnings IN the report — a malformed config makes every
-    // source read disconnected, and a diagnostic tool must say WHY rather than
-    // silently swallow it. Sanitized: a warning can interpolate config content.
+    // A malformed config makes every source read disconnected, and a diagnostic
+    // tool must say WHY rather than silently swallow it. Sanitized: a warning can
+    // interpolate config content.
     for w in &warnings {
         out.push_str(&format!("⚠ config: {}\n", sanitize(w)));
     }
-    // Same rule for the report's OTHER primary input: an unreadable log must not
-    // read as "no drift". Sanitized identically — the io::Error Display carries a
-    // path.
     if let Some(w) = &log_warning {
         out.push_str(&format!("⚠ {}\n", sanitize(w)));
     }
     out.push('\n');
 
     let mut any_drift = false;
-    let mut broken: Vec<String> = Vec::new(); // prefixes of broken installs (locally fixable)
+    let mut broken: Vec<String> = Vec::new();
     for src in registry::registered_source_names() {
         let desc = registry::descriptor_for(src);
         let target = crate::install::target::by_source(src);
         let hooks_installed = target
             .map(|t| crate::install::has_hooks(t, None))
             .unwrap_or(false);
-        // ONE shared rollup (install soundness + drift) — the same `diagnose` the
-        // Sources panel + boot preflight read, so the report can't drift apart
-        // from the live surfaces.
         let diag = diagnose(src, &log, None);
         let is_connected = connected.contains(src);
         let cli_detected = target.map(crate::install::target::is_present);
@@ -849,17 +746,14 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
         out.push('\n');
     }
 
-    // Rolled-up footer: a broken install is locally fixable (reconnect); decode
-    // drift is a report-upstream concern — distinct remediation paths.
     out.push_str(&health_summary(
         registry::registered_source_names().count(),
         &broken,
         any_drift,
     ));
-    // The #526 focus diagnostic — probe roots come from the SAME default
-    // resolution the runtime seeds its watchers with (a --projects-root /
-    // --codex-sessions-root override changes the RUNNING app, and doctor
-    // diagnoses the default setup — noted so the mismatch can't surprise).
+    // Probe roots come from the DEFAULT resolution: a --projects-root /
+    // --codex-sessions-root override changes the RUNNING app, but doctor
+    // deliberately diagnoses the default setup.
     let cc_projects =
         pixtuoid_core::source::claude_code::ClaudeCodeSource::default_paths().projects_root;
     let cc_registry = pixtuoid_core::source::cc_registry_dir(&cc_projects);
@@ -870,8 +764,6 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
         cc_registry.as_deref().map(|d| (d, d.is_dir())),
         (&codex_sessions, codex_sessions.is_dir()),
     ));
-    // Windows safety net: a HOME≠USERPROFILE shell is the one host condition under
-    // which a CLI's home-resolution could land hooks where pixtuoid didn't write.
     if let Some(adv) = home_split_advisory(
         cfg!(windows),
         std::env::var("HOME").ok().as_deref(),
@@ -883,9 +775,7 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
 }
 
 /// The rolled-up doctor footer: the broken-install rollup (locally fixable via
-/// reconnect) + the decode-drift note (report-upstream). Split out of the
-/// I/O-heavy `run()` so the user-facing wording — singular/plural verb, the
-/// comma-joined broken list, and the drift branch — is teeth-testable in isolation.
+/// reconnect) + the decode-drift note (report-upstream).
 fn health_summary(n: usize, broken: &[String], any_drift: bool) -> String {
     let mut out = String::new();
     if broken.is_empty() {
@@ -939,9 +829,8 @@ mod tests {
 
     #[test]
     fn health_summary_clean_installs_with_and_without_drift() {
-        // Exact byte layout for the clean case pins the leading/trailing `\n` and
-        // the ` · ` joiners the extraction must preserve (the substring tests above
-        // deliberately don't, so a whitespace regression would slip past them).
+        // Exact byte layout, deliberately: the substring tests above can't catch a
+        // whitespace regression in the leading `\n` or the ` · ` joiners.
         let clean = health_summary(9, &[], false);
         assert_eq!(
             clean,
@@ -958,8 +847,6 @@ mod tests {
     fn linux_activation_backend_covers_every_channel_in_priority_order() {
         assert!(linux_activation_backend(true, true, true, true).contains("sway"));
         assert!(linux_activation_backend(false, true, true, true).contains("hyprland"));
-        // A Wayland session without sway/hyprland must be an HONEST ✗ even
-        // when XWayland set $DISPLAY — never "X11 EWMH ✓" (the F2 fix).
         assert!(linux_activation_backend(false, false, true, true).contains("✗ Wayland"));
         assert!(linux_activation_backend(false, false, false, true).contains("EWMH"));
         assert!(linux_activation_backend(false, false, false, false).contains("✗ none"));
@@ -971,8 +858,6 @@ mod tests {
         assert!(!marker_set(Some(String::new())), "SWAYSOCK= is a leftover");
         assert!(!marker_set(Some("  \t ".to_string())));
         assert!(marker_set(Some("/run/user/1000/sway-ipc.sock".to_string())));
-        // The whole point: on an X11 host, blank sway/wayland markers must not
-        // outrank a real $DISPLAY. Bare `var_os(..).is_some()` reported sway.
         assert_eq!(
             linux_activation_backend(
                 marker_set(Some(String::new())),
@@ -992,9 +877,6 @@ mod tests {
         assert!(s.contains("backend: test-backend ✓"));
         assert!(s.contains("claude-code — registry probe") && s.contains("✓"));
         assert!(s.contains("codex — rollout fd probe"));
-        // Hook-only sources ride the _pid stamp; transcript-only non-probe
-        // sources have no channel — both buckets are REGISTRY-derived, so a
-        // new source lands correctly with no doctor edit.
         assert!(
             s.contains("opencode") && s.contains("plugin-stamped"),
             "plugin stampers listed separately: {s}"
@@ -1011,7 +893,6 @@ mod tests {
             no_channel_line.contains("antigravity") && no_channel_line.contains("copilot"),
             "transcript-only sources listed: {no_channel_line}"
         );
-        // The daemon (lobster) is not a click-focusable agent.
         assert!(!s.contains("openclaw"), "daemons are excluded: {s}");
     }
 
@@ -1028,10 +909,6 @@ mod tests {
 
     #[test]
     fn run_renders_the_structural_report_headers() {
-        // run() reads the real config/log/env, but the structural headers are
-        // present regardless — so a whole-body `replace run with Ok(default)`
-        // survivor (an empty report) is caught, giving the report builder teeth
-        // beyond its pure row helpers. (A missing log path → empty log, fine.)
         let out = run(std::path::Path::new("/nonexistent-pixtuoid-doctor-log")).unwrap();
         assert!(out.contains("pixtuoid doctor — source health"), "{out}");
         assert!(out.contains("config:"), "{out}");
@@ -1041,10 +918,6 @@ mod tests {
 
     #[test]
     fn an_unreadable_log_is_reported_but_a_missing_one_is_not() {
-        // The one tool whose job is to explain "connected but no sprite" used to
-        // fail OPEN on its own primary input: every read error became an empty
-        // string, so `✓ no decode drift` was asserted off a file never read.
-        // A genuinely MISSING log stays the silent no-TUI-run-yet case.
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read_log(&dir.path().join("nope")), (String::new(), None));
 
@@ -1062,18 +935,14 @@ mod tests {
             "got: {warning}"
         );
 
-        // And the report SURFACES it (the config-warning half already did).
         let out = run(dir.path()).unwrap();
         assert!(out.contains("⚠ log unreadable"), "{out}");
     }
 
     #[test]
     fn the_unreadable_log_warning_is_stripped_where_it_is_minted() {
-        // The path comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`, and the warning has
-        // TWO presenters with different sinks: `doctor`'s stdout report and
-        // `sources_cli`'s `tracing::warn!` to raw stderr. Sanitizing per presenter
-        // is how one of them shipped raw, so the strip lives at the mint point —
-        // asserted on `read_log`'s OWN return value, not on either presenter.
+        // Asserted on `read_log`'s OWN return value, not on either presenter —
+        // sanitizing per presenter is how one of them shipped raw.
         let dir = tempfile::tempdir().unwrap();
         // Windows forbids codepoints 1-31 in a filename (Microsoft's "Naming Files,
         // Paths, and Namespaces"), so the Cc half of the vector cannot exist in a
@@ -1095,13 +964,9 @@ mod tests {
 
     #[test]
     fn version_probe_is_gated_on_evidence_the_user_runs_that_cli() {
-        // Explicitly connected → probe, even before the CLI has written anything.
         assert!(may_probe_version(true, Some(false)));
         assert!(may_probe_version(true, None));
-        // Already initialised on disk → probing can't bootstrap what exists.
         assert!(may_probe_version(false, Some(true)));
-        // No evidence at all → never spawn. Both the target-bearing "probed
-        // absent" case and the transcript-only "nothing to probe" case.
         assert!(!may_probe_version(false, Some(false)));
         assert!(!may_probe_version(false, None));
     }
@@ -1109,12 +974,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn run_never_spawns_a_version_probe_for_a_cli_it_has_no_evidence_of() {
-        // `<cli> --version` is NOT side-effect-free: several agent CLIs bootstrap
-        // their own state dir on ANY invocation, and those dirs are exactly what
-        // `presence_probe`/`detect_installed` key on. An unconditional probe
-        // therefore flipped `cli_present` false→true, so the natural
-        // troubleshooting order `doctor` → `setup --yes` installed hooks into CLIs
-        // that `setup --yes` alone had just declined to touch.
         use std::os::unix::fs::PermissionsExt;
         let _env = crate::TEST_ENV_LOCK
             .lock()
@@ -1123,7 +982,7 @@ mod tests {
         let (home, bin) = (dir.path().join("home"), dir.path().join("bin"));
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&bin).unwrap();
-        // A stand-in for the real CLI: spawning it AT ALL leaves this trace.
+        // Spawning the stand-in CLI AT ALL leaves this trace.
         let marker = dir.path().join("spawned");
         let fake = bin.join("opencode");
         std::fs::write(
@@ -1161,29 +1020,23 @@ mod tests {
 
     #[test]
     fn home_split_advisory_fires_only_on_windows_with_a_real_home_split() {
-        // Windows + HOME≠USERPROFILE → advisory (the bug's host condition).
         let a = home_split_advisory(true, Some(r"C:\msys\home\me"), Some(r"C:\Users\me"));
         assert!(a.is_some());
         let a = a.unwrap();
         assert!(a.contains("HOME") && a.contains("USERPROFILE") && a.contains("sprite"));
 
-        // Non-Windows → never (Unix uses HOME on both sides, no split possible).
         assert!(home_split_advisory(false, Some("/home/a"), Some("/home/b")).is_none());
 
-        // Windows but HOME unset / empty → nothing can diverge.
         assert!(home_split_advisory(true, None, Some(r"C:\Users\me")).is_none());
         assert!(home_split_advisory(true, Some("  "), Some(r"C:\Users\me")).is_none());
-        // USERPROFILE unset → no comparison to make.
         assert!(home_split_advisory(true, Some(r"C:\Users\me"), None).is_none());
     }
 
     #[test]
     fn home_split_advisory_ignores_cosmetic_path_differences() {
-        // Same dir, different slash / case / trailing sep → NOT a split.
         assert!(home_split_advisory(true, Some(r"C:\Users\Me"), Some(r"c:/users/me/")).is_none());
-        // But a POSIX-form HOME vs a native USERPROFILE IS a real split (Git Bash).
+        // A POSIX-form HOME vs a native USERPROFILE IS a real split (Git Bash).
         assert!(home_split_advisory(true, Some("/c/Users/me"), Some(r"C:\Users\me")).is_some());
-        // win_path_eq directly.
         assert!(win_path_eq(r"C:\a\b", "c:/a/b/"));
         assert!(!win_path_eq("/c/a/b", r"C:\a\b"));
     }
@@ -1195,7 +1048,7 @@ mod tests {
             drift::missing_field("copilot", "tool.execution_start", "toolName");
             drift::unknown_dispatch("copilot", "AgentV3");
             drift::shape_drift("copilot", "registry missing pid");
-            drift::unknown_event("codex", "OtherHook"); // different source
+            drift::unknown_event("codex", "OtherHook");
         });
         let r = scan_log_for_source(&log, "copilot");
         assert_eq!(r.unknown_event, 1, "log:\n{log}");
@@ -1210,7 +1063,6 @@ mod tests {
         );
         assert!(r.samples.contains(&"AgentV3".to_string()));
         assert!(r.last_ts.is_some());
-        // The codex line must not bleed into copilot's tally.
         let rc = scan_log_for_source(&log, "codex");
         assert_eq!(rc.unknown_event, 1);
         assert_eq!(rc.missing_field, 0);
@@ -1221,32 +1073,24 @@ mod tests {
         assert_eq!(scan_log_for_source("", "copilot"), LogScanResult::default());
     }
 
-    // R0615-08: a non-drift line that merely MENTIONS the bare target string is
-    // NOT counted — the structural `target:` marker (with its `: `) gates it, not
-    // a loose `contains(TARGET)` (which the old scanner used). The crafted line
-    // carries `source=`/`kind=` so only the missing structural marker saves it.
+    // The crafted line carries valid `source=`/`kind=`, so ONLY the missing
+    // structural `target:` marker keeps it out of the tally.
     #[test]
     fn scan_ignores_a_body_mention_of_the_target_string() {
         let line = "2026-06-15T00:00:00Z  WARN pixtuoid::source::manager: a pixtuoid::drift mention source=copilot kind=unknown_event name=X";
         assert_eq!(scan_log_for_source(line, "copilot").total(), 0);
     }
 
-    // R0615-08: the space-guard rejects a LONGER target that merely SUFFIXES our
-    // token (`a::b::pixtuoid::drift`). Distinct from the body-mention path above:
-    // here the `pixtuoid::drift: ` marker IS present so `find` succeeds, but it's
-    // preceded by `:` (not a space), so the guard returns None. Carries valid
-    // source/kind so ONLY the guard prevents the (false) count.
+    // Distinct from the body-mention case above: the marker IS present, so `find`
+    // succeeds and only the space-guard prevents the false count.
     #[test]
     fn scan_rejects_a_longer_target_suffixing_our_token() {
         let line = "2026-06-15T00:00:00Z  WARN myapp::pixtuoid::drift: source=copilot kind=\"unknown_event\" name=X";
         assert_eq!(scan_log_for_source(line, "copilot").total(), 0);
     }
 
-    // R0615-09: a breadcrumb emitted inside a tracing SPAN that carries its OWN
-    // `source=` field — fmt renders span fields BEFORE the target, so parsing
-    // after the marker must pick the EVENT's source, never the span's. (No
-    // production code wraps a decoder in such a span today; this pins the parser
-    // so adding one later can't silently misattribute.)
+    // No production code wraps a decoder in a `source=`-carrying span today; this
+    // pins the parser so adding one later can't silently misattribute.
     #[test]
     fn scan_parses_event_fields_not_a_span_field_of_the_same_name() {
         let line = "2026-06-15T00:00:00Z  WARN decode{source=spanwrong}: pixtuoid::drift: source=copilot kind=\"unknown_event\" name=NewHook";
@@ -1257,13 +1101,9 @@ mod tests {
             "{:?}",
             r.samples
         );
-        // the span's value must NOT be attributed.
         assert_eq!(scan_log_for_source(line, "spanwrong").total(), 0);
     }
 
-    // R0615-09: a hostile wire name containing a SPACE is preserved whole in the
-    // sample, not truncated at the first space (an unquoted Display value runs to
-    // the next ` <ident>=` boundary or end-of-line).
     #[test]
     fn scan_preserves_a_spaced_sample_value() {
         let line = "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source=copilot kind=\"unknown_dispatch\" tool=My New Tool";
@@ -1280,7 +1120,7 @@ mod tests {
     fn samples_are_sanitized_deduped_and_capped() {
         let log = capture(|| {
             for _ in 0..3 {
-                drift::unknown_event("cursor", "Dup"); // dedup → one sample
+                drift::unknown_event("cursor", "Dup");
             }
             for i in 0..10 {
                 drift::unknown_event("cursor", Box::leak(format!("E{i}").into_boxed_str()));
@@ -1294,7 +1134,6 @@ mod tests {
             1,
             "deduped"
         );
-        // Control chars never survive into a sample.
         assert!(!r.samples.iter().any(|s| s.chars().any(|c| c.is_control())));
     }
 
@@ -1317,7 +1156,6 @@ mod tests {
         assert!(c.contains("codex") && c.contains("connected") && c.contains("installed"));
         assert!(c.contains("2.0.0"));
         assert!(c.starts_with("  \u{2713}"), "sound row leads with ✓: {c}");
-        // A healthy row is a SINGLE line — no `↳` reason continuation.
         assert!(!c.contains('\n'), "a healthy row has no reason line: {c}");
         assert!(
             !c.to_lowercase().contains("broken"),
@@ -1347,7 +1185,6 @@ mod tests {
         );
         assert!(d.contains("transcript-only"), "{d}");
         assert!(d.contains("NEWER than verified"), "skew flagged: {d}");
-        // Drift detail is on its own `↳` continuation line.
         assert!(
             d.contains("\n       \u{21b3} decode drift: 3 missing-field"),
             "{d}"
@@ -1382,8 +1219,6 @@ mod tests {
             "broken reason on its own ↳ line: {b}"
         );
     }
-
-    // --- SourceDiagnostics rollup (the shared panel/boot/report source of truth) ---
 
     fn diag(
         install: Option<crate::install::verify::SchemaVerifyResult>,
@@ -1458,12 +1293,8 @@ mod tests {
 
     #[test]
     fn diagnose_surfaces_an_install_broken_verdict_through_the_injected_config_root() {
-        // The 3-arg `diagnose(.., config)` makes install soundness fixture-
-        // testable: BOTH the has_hooks gate and verify_target read the SAME
-        // injected root, so a real sentinel'd install whose embedded shim path
-        // can't exist reads as broken — a verdict the old hardcoded
-        // `verify_target(t, None)` + default-path gate could never surface
-        // hermetically.
+        // BOTH the has_hooks gate and verify_target must read the SAME injected
+        // root, or the broken verdict is unreachable hermetically.
         use crate::install::{install_target, target::CLAUDE};
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("settings.json");
@@ -1494,39 +1325,29 @@ mod tests {
             parse_version("GitHub Copilot CLI 1.0.62."),
             Some((1, 0, 62))
         );
-        assert_eq!(parse_version("v2.1"), Some((2, 1, 0))); // missing patch = 0
+        assert_eq!(parse_version("v2.1"), Some((2, 1, 0)));
         assert_eq!(parse_version("codex 0.41.0 (abc)"), Some((0, 41, 0)));
         assert_eq!(parse_version("no version here"), None);
-        assert_eq!(parse_version("2026"), None); // a bare integer is not a version
+        assert_eq!(parse_version("2026"), None);
     }
 
-    // #307: a banner that prints a dotted DATE/build token BEFORE the semver must
-    // not lock onto the date — the smarter extractor prefers a `v`-prefixed run,
-    // else the first plausible (non-year) major, else falls back (CalVer-safe).
     #[test]
     fn parse_version_is_banner_order_robust() {
-        // v-prefixed semver wins over a leading date.
         assert_eq!(parse_version("Built 2026.06.04 — v1.2.3"), Some((1, 2, 3)));
-        // no `v`: skip the year-like major, take the first plausible run.
         assert_eq!(parse_version("Built 2026.06.04 — 1.2.3"), Some((1, 2, 3)));
-        // a genuine CalVer with NO semver still parses (cursor's date style) —
-        // fallback rather than vanishing.
+        // A genuine CalVer with NO semver must fall back, not vanish.
         assert_eq!(parse_version("2026.06.04-5fd875e"), Some((2026, 6, 4)));
-        // the only anchored CLI today: its raw banner parses to its anchor.
         assert_eq!(parse_version("GitHub Copilot CLI 1.0.62"), Some((1, 0, 62)));
     }
 
     #[test]
     fn version_status_flags_skew_only_with_a_known_anchor() {
-        // unknown anchor → just the installed version (raw), no skew text.
         let u = version_status(Some("3.4.5"), "unknown");
         assert_eq!(u, "3.4.5");
         assert!(!u.contains("verified"));
-        // newer / older / matches.
         assert!(version_status(Some("1.1.0"), "1.0.62").contains("NEWER than verified"));
         assert!(version_status(Some("1.0.0"), "1.0.62").contains("older than verified"));
         assert!(version_status(Some("1.0.62"), "1.0.62").contains("matches verified"));
-        // un-probeable installed → shows unknown, no false skew.
         let n = version_status(None, "1.0.62");
         assert!(n.contains("unknown") && !n.contains("NEWER"));
     }
@@ -1540,39 +1361,31 @@ mod tests {
         let mut d = drifted_sources(&log);
         d.sort();
         assert_eq!(d, vec!["cc".to_string(), "cx".to_string()]);
-        // source-death wins (the office is partially frozen).
         assert_eq!(
             footer_warning(Some("source 'x' died"), &d).as_deref(),
             Some("source 'x' died")
         );
-        // drift nudge when no death.
         let w = footer_warning(None, &d).unwrap();
         assert!(
             w.contains("cc·") && w.contains("cx·") && w.contains("doctor"),
             "{w}"
         );
         // The footer painter (`footer.rs` `" ⚠ {warn} "`) owns the warning glyph;
-        // neither the drift NOR the death message may embed its own or it
-        // double-prints (`⚠ ⚠ …`).
+        // an embedded one double-prints (`⚠ ⚠ …`).
         assert!(!w.contains('⚠'), "drift msg must not embed ⚠: {w}");
-        // Death tier: route the REAL `source_warning_message` output through the
-        // merge (not a literal) — if that producer ever embeds a glyph, this
-        // catches the same double-print at the death tier too.
+        // The REAL `source_warning_message` output, not a literal, so the death
+        // tier is checked against its actual producer.
         let death = crate::tui::widgets::source_warning_message(&[
             pixtuoid_core::source::manager::SourceDeath::new("claude-code", "x"),
         ])
         .unwrap();
         let dw = footer_warning(Some(&death), &d).unwrap();
         assert!(!dw.contains('⚠'), "death msg must not embed ⚠: {dw}");
-        // both clear → nothing.
         assert_eq!(footer_warning(None, &[]), None);
     }
 
     #[test]
     fn probe_output_is_sanitized_and_first_nonempty() {
-        // Leading blank lines skipped; the version line returned with control
-        // chars (ANSI/OSC/BEL) stripped — a PATH-substituted binary can't drive
-        // the terminal through `--version`.
         let raw = b"\n\n\x1b]0;pwned\x07cli \x1b[31m1.2.3\x1b[0m\nnext line";
         let got = first_sanitized_line(raw).unwrap();
         assert_eq!(got, "]0;pwnedcli [31m1.2.3[0m"); // ESC + BEL stripped, text kept
@@ -1584,10 +1397,6 @@ mod tests {
         assert_eq!(first_sanitized_line(b"   \n  \n"), None);
     }
 
-    // R0615-09 / field_value loop-back (97-98): `name=` inside `displayName=` is a
-    // FALSE match (not field-start) and must be skipped so the loop advances to the
-    // real `name=` field. Without the boundary guard, `displayName=foo` would be
-    // mis-picked → the sample would be "foo", not "Real".
     #[test]
     fn scan_does_not_pick_name_inside_displayname() {
         let line = "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source=copilot kind=\"unknown_event\" displayName=foo name=Real";
@@ -1597,9 +1406,6 @@ mod tests {
         assert!(!r.samples.contains(&"foo".to_string()), "{:?}", r.samples);
     }
 
-    // push_sample's None arm (130): an `unknown_event` breadcrumb with NO `name=`
-    // field still counts (parse_drift_line needs only source+kind) but contributes
-    // no sample — field_value returns None → push_sample no-ops.
     #[test]
     fn scan_unknown_event_without_a_name_field_counts_but_samples_none() {
         let line =
@@ -1609,8 +1415,6 @@ mod tests {
         assert!(r.samples.is_empty(), "{:?}", r.samples);
     }
 
-    // scan_log_for_source `_ => continue` arm (158): a well-formed drift line whose
-    // kind is none of the four known kinds is silently ignored — no count, no sample.
     #[test]
     fn scan_ignores_an_unknown_drift_kind() {
         let line =
@@ -1624,23 +1428,16 @@ mod tests {
         );
     }
 
-    // parse_version skip arm (355→360 without push): a dotted run whose major
-    // overflows u64 is DROPPED (not pushed), so the next valid run is selected; a
-    // pure-overflow banner with no fallback run yields None.
     #[test]
     fn parse_version_skips_a_run_with_an_overflowing_major() {
-        // 23-digit major overflows u64 → that run is dropped → the v-run wins.
+        // The 23-digit major overflows u64, so that run is dropped.
         assert_eq!(
             parse_version("99999999999999999999999.0 v1.2.3"),
             Some((1, 2, 3))
         );
-        // No fallback run → the overflowing run is the only one → None.
         assert_eq!(parse_version("99999999999999999999999.0"), None);
     }
 
-    // verdict_glyph en-dash branch (404→405): a CLEAN transcript-only row (no target,
-    // no drift, not broken) renders `–`, distinct from the existing transcript-only
-    // test row which carries drift (→ `⚠`).
     #[test]
     fn verdict_glyph_dash_for_clean_transcript_only_row() {
         let row = DoctorSourceRow {
@@ -1665,9 +1462,6 @@ mod tests {
         assert!(!s.contains('\n'), "a clean row is a single line: {s}");
     }
 
-    // verdict_glyph circle branch (406→407) + format state "not installed" (453→454):
-    // a row with a target but no installed hooks, clean scan/schema → `○` + "not
-    // installed". connected:false also covers the "disconnected" label (448→449).
     #[test]
     fn row_installable_but_not_installed_shows_circle_and_not_installed() {
         let row = DoctorSourceRow {
@@ -1696,9 +1490,6 @@ mod tests {
         assert!(!s.contains('\n'), "no problem → single line: {s}");
     }
 
-    // format_doctor_row soft-note continuation (477→478): a SOUND schema (no issues)
-    // with non-empty notes emits a `↳ note: …` line but stays a `✓` healthy verdict,
-    // never "broken".
     #[test]
     fn format_row_emits_note_continuation_for_sound_schema_with_notes() {
         let row = DoctorSourceRow {
@@ -1729,9 +1520,6 @@ mod tests {
         );
     }
 
-    // drift_detail kind-branches (417/423/426) + samples join (436) + when=last_ts:
-    // a row carrying every drift kind, samples, and a timestamp renders the full
-    // detail line. The existing format test only exercises missing-field (419-421).
     #[test]
     fn format_row_drift_detail_covers_all_kinds_samples_and_last_ts() {
         let row = DoctorSourceRow {

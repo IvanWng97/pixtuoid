@@ -1,47 +1,28 @@
 //! Burn tier — how expensive an agent's LLM brain is, as a VISUAL fact.
 //!
-//! The model is the GATE, effort is the SPLIT (user-pinned): only
-//! the `TOP_MODELS` ever color at all — at ordinary/unknown effort they get
-//! ember-red hair ([`BurnTier::Premium`]); with a FRESH max-class effort
-//! (`MAX_EFFORTS`, within `EFFORT_TTL_SECS`) the hair catches fire
-//! ([`BurnTier::Top`], the flame crown). Everything else — including
+//! The model is the GATE, effort is the SPLIT (user-pinned): only the
+//! `TOP_MODELS` ever color at all, and only a FRESH `MAX_EFFORTS` effort
+//! promotes one to the flame crown. Everything else — including
 //! opus/gpt-5.5-class flagships — stays [`BurnTier::Normal`].
-//!
-//! Both tables are DATA (the SourceDescriptor const-table pattern): a new
-//! model or effort word is one row, the logic never changes. Unknown/absent
-//! model → Normal — fail-quiet, an unrecognized model never flames. The RAW
-//! strings live on the slot (`AgentSlot::{model, effort}`, core); ALL
-//! interpretation happens here in the scene layer.
 
 use std::time::SystemTime;
 
 use pixtuoid_core::AgentSlot;
 
-/// Model prefixes that gate the color tiers — most-specific-first, first
-/// match wins. PREFIX matching is deliberate (version-independent:
-/// `claude-fable` covers `claude-fable-5` and its successors) — the tradeoff
-/// is that a future CHEAPER variant sharing a prefix (a hypothetical
-/// `gpt-5.6-sol-mini`) would wrongly burn until a Normal-override row is
-/// added ABOVE its family line. No such slug exists today. `gpt-5.6-sol` is the
-/// flagship slug in openai/codex `models-manager/models.json` (terra/luna miss the prefix
-/// naturally); fable/mythos are Anthropic's Mythos-class ids on CC's wire.
+/// Model prefixes that gate the color tiers — most-specific-first, first match
+/// wins. PREFIX matching is deliberate (version-independent), so a future
+/// CHEAPER variant sharing a prefix would wrongly burn until a Normal-override
+/// row is added ABOVE its family line.
 const TOP_MODELS: &[&str] = &["claude-fable", "claude-mythos", "gpt-5.6-sol"];
 
-/// Effort values that set a top model on fire. Codex's catalog vocabulary
-/// tops out at `xhigh`/`max`/`ultra` (same source file as the slugs); CC's
-/// periodic ultra marker arrives as the decoder-synthesized
-/// `"ultra"`/`"ultrathink"` labels.
+/// Effort values that set a top model on fire.
 const MAX_EFFORTS: &[&str] = &["ultra", "ultrathink", "xhigh", "max"];
 
-/// How long an effort observation stays "fresh". Codex re-stamps per turn and
-/// CC's ultra marker re-fires every ~dozen prompts (live-measured), so an
-/// ACTIVE max-effort agent refreshes far inside this window; once the user
-/// drops out (or the agent idles — honest either way: an idle agent isn't
-/// burning), the flame decays back to ember hair.
+/// How long an effort observation stays "fresh". Both sources re-stamp well
+/// inside this window while active, so it only expires once the agent idles.
 pub(crate) const EFFORT_TTL_SECS: u64 = 600;
 
-/// The three visual tiers. Ordering matters (`Top > Premium > Normal`) only
-/// for readability; consumers match exhaustively.
+/// The three visual tiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BurnTier {
     /// Unchanged agent-seeded hair.
@@ -52,8 +33,8 @@ pub enum BurnTier {
     Top,
 }
 
-/// The pure tier judgment over raw wire strings. `effort_fresh` must already
-/// be freshness-filtered by the caller (see [`slot_burn_tier`]).
+/// The pure tier judgment. `effort_fresh` must already be freshness-filtered
+/// by the caller (see [`slot_burn_tier`]).
 pub(crate) fn burn_tier(model: Option<&str>, effort_fresh: Option<&str>) -> BurnTier {
     let top = model.is_some_and(|m| TOP_MODELS.iter().any(|p| m.starts_with(p)));
     if !top {
@@ -66,10 +47,9 @@ pub(crate) fn burn_tier(model: Option<&str>, effort_fresh: Option<&str>) -> Burn
     }
 }
 
-/// The slot's effort observation, IF still fresh (within `EFFORT_TTL_SECS`)
-/// — the ONE freshness rule shared by the tier judgment and the dossier's
-/// `· effort` suffix, so the tooltip can't show an effort the flame already
-/// decayed past.
+/// The slot's effort observation, IF still fresh — the ONE freshness rule
+/// shared by the tier judgment and the dossier's `· effort` suffix, so the
+/// tooltip can't show an effort the flame already decayed past.
 pub fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
     slot.effort.as_ref().and_then(|obs| {
         // The CC decoder's exit sentinel exists ONLY to kill the flame via
@@ -80,15 +60,13 @@ pub fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
         let fresh = now
             .duration_since(obs.seen_at)
             .map(|d| d.as_secs() <= EFFORT_TTL_SECS)
-            // A future-stamped observation (clock skew) counts as fresh —
-            // the next sighting re-stamps it sanely.
+            // A future-stamped observation (clock skew) counts as fresh.
             .unwrap_or(true);
         fresh.then_some(&*obs.value)
     })
 }
 
-/// The slot-level judgment the paint pass calls: applies the `EFFORT_TTL_SECS`
-/// freshness filter to the slot's last effort observation, then delegates to
+/// The slot-level judgment the paint pass calls: freshness-filter, then
 /// `burn_tier`.
 pub fn slot_burn_tier(slot: &AgentSlot, now: SystemTime) -> BurnTier {
     burn_tier(slot.model.as_deref(), fresh_effort(slot, now))
@@ -101,7 +79,6 @@ mod tests {
 
     #[test]
     fn only_the_top_set_models_color_at_all() {
-        // The user-pinned closed set burns; flagships OUTSIDE it stay Normal.
         for m in ["claude-fable-5", "claude-mythos-5", "gpt-5.6-sol"] {
             assert_eq!(burn_tier(Some(m), None), BurnTier::Premium, "{m}");
         }
@@ -128,10 +105,6 @@ mod tests {
                 "{e}"
             );
         }
-        // Ordinary efforts split to Premium, and effort NEVER promotes a
-        // non-top model (the "only these burn" pin). CC's synthesized
-        // "ultra_exit" label (the exit marker) is deliberately NON-max, so
-        // last-seen-wins kills the flame the moment it arrives.
         assert_eq!(
             burn_tier(Some("claude-fable-5"), Some("medium")),
             BurnTier::Premium
@@ -181,11 +154,8 @@ mod tests {
         let mut slot = slot();
         slot.model = Some("claude-fable-5".into());
         slot.effort = Some(EffortObservation::new(ULTRA_EXIT_LABEL.into(), t0));
-        // Fresh by timestamp, but a sentinel: suppressed from the dossier,
-        // and the flame stays dead (Premium, not Top).
         assert_eq!(fresh_effort(&slot, t0), None);
         assert_eq!(slot_burn_tier(&slot, t0), BurnTier::Premium);
-        // A REAL effort still surfaces.
         slot.effort = Some(EffortObservation::new("ultra".into(), t0));
         assert_eq!(fresh_effort(&slot, t0), Some("ultra"));
     }
@@ -197,7 +167,6 @@ mod tests {
         let mut slot = slot();
         slot.model = Some("claude-fable-5".into());
         slot.effort = Some(EffortObservation::new("ultra".into(), t0));
-        // Fresh within the TTL → flame; stale past it → decays to ember.
         assert_eq!(
             slot_burn_tier(&slot, t0 + Duration::from_secs(super::EFFORT_TTL_SECS)),
             BurnTier::Top
@@ -206,7 +175,6 @@ mod tests {
             slot_burn_tier(&slot, t0 + Duration::from_secs(super::EFFORT_TTL_SECS + 1)),
             BurnTier::Premium
         );
-        // No model → Normal regardless of effort.
         slot.model = None;
         assert_eq!(slot_burn_tier(&slot, t0), BurnTier::Normal);
     }

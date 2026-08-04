@@ -1,9 +1,5 @@
 use super::*;
 
-// ===================================================================
-// Graceful degradation
-// ===================================================================
-
 #[test]
 fn too_small_terminal_returns_no_layout_no_panic() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
@@ -16,16 +12,11 @@ fn too_small_terminal_returns_no_layout_no_panic() {
     );
 }
 
-// Regression: the hover/disambiguation label sliced session_id by BYTE
-// (`&session_id[..4]`), guarded only by a byte-length check, so byte 4 landing
-// inside a multi-byte UTF-8 codepoint panicked the per-frame render loop. A
-// Reasonix session_id IS the raw cwd path, so two same-labeled agents under a
-// non-ASCII project dir hit it. Must render without panicking.
 #[test]
 fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
     let mut scene = SceneState::uniform(16);
-    // `/naïveté/app`: `ï` occupies bytes 3..5, so `&session_id[..4]` would split
-    // it. Both agents share a label ⇒ the disambiguation suffix fires.
+    // In `/naïveté/app` the `ï` occupies bytes 3..5, so a `&session_id[..4]` slice
+    // splits it; the shared label makes the disambiguation suffix fire.
     let mut mk = |id: &str, desk: usize| {
         let a = AgentId::from_transcript_path(id);
         let mut s = slot(a, 0, desk, t0());
@@ -40,11 +31,6 @@ fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
         .expect("render must not panic on a multi-byte session_id");
 }
 
-// The version popup is painted on the footer-only frame too (its Enter-dismiss
-// handler is live at every size), and its click rect derives from the terminal
-// BOUNDS, not the office layout — so the painted scale must be the clickable one
-// here exactly as on a full frame. (The older invariant zeroed the hit-box on
-// this path because nothing was painted; painting it is the fix.)
 #[test]
 fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
     // 100x16 → scene_rect 100x15 passes render()'s 20x12 gate, but buf_h=30 is
@@ -71,16 +57,11 @@ fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
     );
 }
 
-// Regression: below the office layout's minimum (60 buffer rows ⇒ 31 terminal
-// rows, so the classic 80x24 is inside it) draw_scene took the footer-only path
-// and painted NO overlay — while every modal's key handler stayed live. A
-// first-run user at 80x24 pressed `?`/`s`/Tab and something toggled invisibly.
 #[test]
 fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
     use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
     let scene = scene_with(vec![idle("/tiny/0.jsonl", 0, t0())], 16);
 
-    // Help — the `?` overlay.
     let mut r = build(80, 24, vec![]);
     r.set_help_open(true);
     r.render(&scene, &pack(), t0()).expect("render");
@@ -94,7 +75,6 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
         "the help overlay must paint on the footer-only frame; frame was:\n{text}"
     );
 
-    // Onboarding — the first-run overlay, top of the modal precedence chain.
     let mut r = build(80, 24, vec![]);
     r.set_onboarding_frame(OnboardingFrame {
         open: true,
@@ -115,7 +95,6 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
         "the onboarding overlay must paint on the footer-only frame; frame was:\n{text}"
     );
 
-    // Sources panel — reachable by `s` at any size.
     let mut r = build(80, 24, vec![]);
     r.set_connection_frame_parts(
         true,
@@ -134,16 +113,11 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
     );
 }
 
-// Regression: the overlays were centered in the FULL terminal rect, so a panel
-// whose natural height exceeds the terminal clamps to it and overwrites the
-// footer row — the one persistent affordance, and the only place a first-run
-// user reads `[q]uit`. Overlays own the SCENE rect; the footer row is never
-// theirs to take.
 #[test]
 fn a_full_height_modal_never_covers_the_footer_row() {
     let scene = scene_with(vec![idle("/fh/0.jsonl", 0, t0())], 16);
-    // 32x31 is the office layout's exact minimum, and the real release notes
-    // wrap past 31 rows there — the size the popup swallowed the footer at.
+    // 32x31 is the office layout's exact minimum, and the real release notes wrap
+    // past 31 rows there.
     let mut r = build(32, 31, vec![]);
     r.set_version_popup(true, t0());
     let t = t0() + Duration::from_millis(400); // fully scaled in
@@ -160,8 +134,8 @@ fn a_full_height_modal_never_covers_the_footer_row() {
          \nframe was:\n{text}"
     );
 
-    // TEETH in cells, not a substring: surviving glyphs are not a READABLE footer,
-    // and the shadow's bottom band dims `fg` only (see the every-frame sharp edge).
+    // Compare CELLS, not a substring: surviving glyphs are not a READABLE footer,
+    // and the shadow's bottom band dims `fg` only.
     let mut plain = build(32, 31, vec![]);
     plain.render(&scene, &pack(), t).expect("render");
     let (lit, dimmed) = (plain.frame_buffer(), r.frame_buffer());
@@ -180,12 +154,6 @@ fn a_full_height_modal_never_covers_the_footer_row() {
     }
 }
 
-// Regression (the N-1-of-N half of the every-frame rule): the modal state reaches
-// `render_transition`'s too-small arm too — a floor slide can be in flight when
-// the terminal is below the 20x12 scene gate, and `Tab`/`s`/`?` are not
-// transition-gated. Reverting that arm's `paint_overlays` left the whole suite
-// green, so this is the arm's own pin: the panel text AND the popup scale the
-// mouse handler reads.
 #[test]
 fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
     let scene = two_floor_scene();
@@ -216,11 +184,6 @@ fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
     );
 }
 
-// Regression: per-agent MotionState was evicted only on the CURRENT floor, so an
-// agent that exited while a different floor was visible leaked its walk-path Vec
-// on its own (non-current) floor until that floor was next navigated to. The
-// eviction now lives in `evict_missing` (called by the event loop with the live
-// snapshot before every render), which this drives like the production loop.
 #[test]
 fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
     let cap = 16;
@@ -237,7 +200,6 @@ fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
 
-    // Warm up floor 0, then visit floor 1 so agent B gets a MotionState there.
     for _ in 0..10 {
         r.render(&scene, &pack(), now).expect("render");
         now += Duration::from_millis(33);
@@ -253,7 +215,6 @@ fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
         "floor-1 agent B should have a MotionState after visiting floor 1"
     );
 
-    // Back to floor 0 (B's floor is now NON-current), then B exits the scene.
     r.navigate_floor(0, now);
     render_until_settled(&mut r, &scene, &pack(), &mut now, 0);
     let scene_without_b = scene_with(vec![slot(a, 0, 0, t0() - Duration::from_secs(120))], cap);
@@ -268,12 +229,6 @@ fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
     );
 }
 
-// Regression: PoseHistory had NO eviction anywhere — one `(Point, SystemTime)`
-// per AgentId ever rendered lived for the process lifetime, on every floor —
-// and motion eviction lived only inside the normal render path (skipped on
-// transition frames). Both belong in `TuiRenderer::evict_missing`, the seam the
-// event loop calls with the live snapshot before every render, next to the
-// frame-cache eviction — across EVERY floor.
 #[test]
 fn evict_missing_drops_history_and_motion_on_every_floor() {
     let cap = 16;
@@ -310,8 +265,6 @@ fn evict_missing_drops_history_and_motion_on_every_floor() {
         "floor-1 motion should hold agent B"
     );
 
-    // Both agents leave the scene; the loop hands the new snapshot to
-    // evict_missing before the next render.
     let empty = SceneState::uniform(cap);
     r.evict_missing(&empty);
 
@@ -331,9 +284,6 @@ fn evict_missing_drops_history_and_motion_on_every_floor() {
     }
 }
 
-// Regression: an in-flight floor transition used to leave `last_pet_pos` stale
-// from the previous normal frame, so the mouse handler could "pet" a ghost at
-// last frame's location mid-slide. The transition path must clear it.
 #[test]
 fn floor_transition_clears_stale_pet_position() {
     let cap = 16;
@@ -362,13 +312,6 @@ fn floor_transition_clears_stale_pet_position() {
     );
 }
 
-// ===================================================================
-// renderer.rs: Layout::compute None bail (CG7)
-// ===================================================================
-
-// A terminal that PASSES the 20×12 scene-rect gate but is too small for
-// Layout::compute (buf_w < MIN_W) takes draw_scene's compute-None bail → no
-// cached layout, footer-only, no error.
 #[test]
 fn layout_compute_none_bails_to_footer_only() {
     let scene = scene_with(vec![idle("/lc/0.jsonl", 0, t0())], 16);

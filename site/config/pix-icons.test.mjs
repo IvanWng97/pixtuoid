@@ -1,6 +1,3 @@
-// Bridge: every features.json `pix` icon must exist as a generated PNG in
-// site/src/assets/pix-icons/ — the manifest-vs-artifact posture the Rust
-// theme/weather set-equality guards use. Regenerate via `just gen-icons`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';

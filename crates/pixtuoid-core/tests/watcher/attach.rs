@@ -1,9 +1,5 @@
-// ── Mid-attach scenario suite ────────────────────────────────────────────────
-// The acceptance criterion: opening pixtuoid at ANY moment must show all
-// active running agent CLIs correctly. These drive JsonlWatcher::run over a
-// pre-populated projects-root — the attach moment — and assert the emitted
-// live set, exercising the first-sight gate, the liveness-probe bypass, the
-// ended check, and the subagent parent link TOGETHER.
+// Each test drives JsonlWatcher::run over a pre-populated projects-root — the
+// attach moment — and asserts the emitted live set.
 
 use std::time::Duration;
 
@@ -19,16 +15,6 @@ use crate::{
     vouch_snapshot, write_lines,
 };
 
-/// S2 + S6 — THE acceptance test for "attach shows exactly the live set".
-/// ONE watcher run over a projects-root holding, side by side:
-///   (a) a recent live transcript                 → registers (fresh mtime)
-///   (b) a stale transcript the probe vouches for → registers (probe bypass)
-///   (c) a stale transcript NOT in the probe      → stays hidden
-///   (d) a recent transcript ending in a structural session_end → stays hidden
-///   (e) a fresh subagent transcript under (b)    → registers, linked to (b)
-/// Exactly {a, b, e} emit SessionStart — and each exactly ONCE across the
-/// initial seed, the 250ms rescan, and the poll cycles (S6: emit_first_sight
-/// idempotence at the suite level — re-scans must not duplicate registrations).
 #[tokio::test]
 async fn attach_matrix_registers_exactly_the_live_set() {
     let dir = TempDir::new().unwrap();
@@ -41,7 +27,6 @@ async fn attach_matrix_registers_exactly_the_live_set() {
     let sub_dir = proj.join(idle_b).join("subagents");
     tokio::fs::create_dir_all(&sub_dir).await.unwrap();
 
-    // (a) recent live: fresh mtime, no end marker.
     write_lines(
         &proj.join(format!("{live_a}.jsonl")),
         &[
@@ -56,7 +41,6 @@ async fn attach_matrix_registers_exactly_the_live_set() {
         ],
     )
     .await;
-    // (b) long-idle but probe-live: stale mtime, in the probe's live set.
     let b_path = proj.join(format!("{idle_b}.jsonl"));
     write_lines(
         &b_path,
@@ -64,7 +48,6 @@ async fn attach_matrix_registers_exactly_the_live_set() {
     )
     .await;
     backdate(&b_path, 7200);
-    // (c) genuinely dead: stale mtime, NOT in the probe.
     let c_path = proj.join(format!("{dead_c}.jsonl"));
     write_lines(
         &c_path,
@@ -72,7 +55,6 @@ async fn attach_matrix_registers_exactly_the_live_set() {
     )
     .await;
     backdate(&c_path, 7200);
-    // (d) recent but ENDED: fresh mtime, structural session_end at the tail.
     write_lines(
         &proj.join(format!("{ended_d}.jsonl")),
         &[
@@ -83,7 +65,6 @@ async fn attach_matrix_registers_exactly_the_live_set() {
         ],
     )
     .await;
-    // (e) fresh subagent under the probe-live parent (b).
     write_lines(
         &sub_dir.join("agent-e1.jsonl"),
         &[cc_subagent_line("agent-e1", "/Users/me/proj-b", "tu_e")],
@@ -122,9 +103,8 @@ async fn attach_matrix_registers_exactly_the_live_set() {
             break;
         }
     }
-    // S6: settle past the 250ms post-startup rescan (plus several poll
-    // cycles), then drain — re-scans of the SAME root must not re-emit
-    // SessionStart for any fixture.
+    // Settle past the 250ms post-startup rescan and several poll cycles, then
+    // drain: re-scans of the SAME root must not re-emit SessionStart.
     tokio::time::sleep(Duration::from_millis(700)).await;
     while let Ok(Some((_, ev))) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
         if let AgentEvent::SessionStart {
@@ -154,13 +134,9 @@ async fn attach_matrix_registers_exactly_the_live_set() {
     handle.abort();
 }
 
-/// S3 — the delegating-parent attach: the parent transcript is STALE (it has
-/// been silently waiting on its subagent for longer than the window), its tail
-/// is a pending Agent dispatch (tool_use with no tool_result), and its UUID is
-/// in the probe's live set; the subagent transcript is fresh. One attach scan
-/// must register BOTH, link the subagent to the parent, and replay the pending
-/// dispatch as a Task ActivityStart (so the reducer's active_tasks suppression
-/// picks the in-flight delegation back up).
+/// The parent transcript is STALE with a pending Agent dispatch at its tail
+/// (a tool_use with no tool_result) and its UUID in the probe's live set; the
+/// subagent transcript is fresh.
 #[tokio::test]
 async fn delegating_parent_attach_registers_parent_and_links_subagent() {
     let dir = TempDir::new().unwrap();
@@ -251,14 +227,10 @@ async fn delegating_parent_attach_registers_parent_and_links_subagent() {
     handle.abort();
 }
 
-/// #222 — the oversized delegating-parent attach: like S3, but the parent
-/// transcript has > MAX_PENDING_BYTES pending at attach, so the backlog is
-/// skipped to EOF instead of replayed. The in-flight Agent dispatch sits in
-/// the last 256 KiB (TASK_SCAN_BYTES) with no tool_result — the tail scan
-/// must re-emit it as a Task ActivityStart, EXACTLY ONCE across the initial
-/// seed + rescan + poll cycles, while the completed Bash backlog stays
-/// un-replayed. The parent registers via the bounded head read (#204) and the
-/// fresh subagent links to it.
+/// The parent transcript has > MAX_PENDING_BYTES pending at attach, so the
+/// backlog is skipped to EOF instead of replayed and the in-flight Agent
+/// dispatch must be recovered by the TASK_SCAN_BYTES tail scan (#222), while
+/// the parent still registers via the bounded head read (#204).
 #[tokio::test]
 async fn oversized_delegating_parent_attach_replays_pending_dispatch() {
     let dir = TempDir::new().unwrap();
@@ -268,8 +240,6 @@ async fn oversized_delegating_parent_attach_replays_pending_dispatch() {
     let sub_dir = proj.join(parent_uuid).join("subagents");
     tokio::fs::create_dir_all(&sub_dir).await.unwrap();
 
-    // Parent: head session_start (cwd on line 1), > 1 MiB of completed-tool
-    // backlog, then the pending Agent dispatch at the tail.
     let parent_path = proj.join(format!("{parent_uuid}.jsonl"));
     let mut contents = format!(
         "{}\n",
@@ -347,9 +317,9 @@ async fn oversized_delegating_parent_attach_replays_pending_dispatch() {
             break;
         }
     }
-    // Settle past the 250ms rescan + several poll cycles, then drain: the
-    // scan runs only on the oversized-skip pass, so re-scans (cursor parked
-    // at EOF) must not re-emit the dispatch.
+    // Settle past the 250ms rescan and several poll cycles, then drain: the
+    // tail scan runs only on the oversized-skip pass, so re-scans (cursor
+    // parked at EOF) must not re-emit the dispatch.
     tokio::time::sleep(Duration::from_millis(700)).await;
     while let Ok(Some(pair)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
         events.push(pair);
@@ -398,11 +368,8 @@ async fn oversized_delegating_parent_attach_replays_pending_dispatch() {
     handle.abort();
 }
 
-/// S4 — the #203 identity property pinned for the ATTACH path: a worktree
-/// cwd-split puts the parent transcript and the subagent transcript under
-/// DIFFERENT project dirs. At attach time the parent is stale-but-probe-live
-/// and the subagent is fresh; both must register, and the `<parent-uuid>`
-/// join must hold across the project dirs.
+/// A worktree cwd-split puts the parent transcript and the subagent
+/// transcript under DIFFERENT project dirs (#203).
 #[tokio::test]
 async fn cwd_split_attach_links_subagent_to_probe_live_stale_parent() {
     let dir = TempDir::new().unwrap();

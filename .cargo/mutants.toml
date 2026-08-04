@@ -1,190 +1,40 @@
-# cargo-mutants config (see `just mutants`). Mutation testing injects bugs and
-# checks the tests catch them — the "do your assertions have teeth?" dimension
-# that line/region coverage can't see. Use the project's runner (nextest) and
-# exclude the paths (`exclude_globs`) and FUNCTIONS (`exclude_re`) where a
-# surviving mutant is NOISE, not a real gap, so the advisory signal stays high.
-#
-# READ THIS BEFORE ACTING ON A `pixtuoid-core` / `pixtuoid-scene` SURVIVOR.
-# `test_workspace` is deliberately left at its default, which means "only the
-# tests in the mutated package are run" (`cargo mutants --help`). That is a
-# systematic BLIND SPOT for this repo specifically, because core/scene behaviour
-# is covered on purpose by the BINARY's headless harness (~100 integration tests
-# driving the real TuiRenderer), not by core's own unit tests. So a core/scene
-# mutant can be reported MISSED while `-p pixtuoid` catches it outright —
-# measured, not theorised: making `SceneState::insert_daemon` a no-op reds 8 of 9
-# `harness::mascot` tests while all 53 of core's own daemon tests stay green, and
-# it still reported as a survivor.
-#
-# So: for a survivor in core/scene, REPRODUCE IT FIRST — apply the mutation and
-# run `-p pixtuoid` too. Only write a new test if the mutation genuinely survives
-# the whole workspace. Otherwise you are padding the suite, or "fixing" code that
-# already works.
-#
-# Turning it on is the accurate-but-unusable option: the 2026-07 run of this diff
-# took 2h for 221 mutants package-scoped (~33s each), while the full workspace
-# suite is ~135s per mutant — so the same run would be ~8h. For an ADVISORY check
-# that trade is not worth it. Pass `--test-workspace true` by hand
-# (`just mutants --test-workspace true`) when auditing core/scene specifically and
-# you can afford the wall-clock.
+# cargo-mutants config (`just mutants`). Advisory: exclude only where a surviving
+# mutant is NOISE, never where it is killable. Rationale for each entry lives in
+# the commit that added it; `docs/mutants-exclusions.md` holds the measured
+# derivations and the core/scene `test_workspace` blind spot.
 test_tool = "nextest"
 
 exclude_globs = [
-    # Untestable painter / async + winit glue — no headless test can kill their
-    # mutants, so every one "survives" = noise. These four are a SUBSET of the
-    # painter files codecov.yml ignores; the lists overlap without either being
-    # a subset of the other, since codecov also ignores crash/logging/sources_cli
-    # (pure helpers stay unit-tested — sources_cli via the cli_json e2e — so
-    # their mutants stay IN), this file also excludes the pixtuoid-core probe
-    # files below, and tui/mod.rs + driver.rs are ignored THERE but mutated HERE
-    # (see the note under this list). Edit shared entries together.
+    # winit / async glue: no headless test can kill these. Shared with codecov.yml's
+    # ignore list — edit together. These four are that list's intersection, so a
+    # decision here is measured by NOTHING: move it out instead of widening (#827).
     "crates/pixtuoid/src/main.rs",
     "crates/pixtuoid/src/runtime/pipeline.rs",
     "crates/pixtuoid/src/floating/mod.rs",
     "crates/pixtuoid/src/floating/window.rs",
-    # NOT excluded, though codecov.yml ignores both: `tui/mod.rs` and
-    # `runtime/driver.rs` are line-uncoverable in BULK while still carrying a
-    # unit-tested pure decision layer, and per-FUNCTION mutants see that split
-    # where per-LINE coverage cannot. Their untestable glue is pinned by
-    # FUNCTION in `exclude_re` below rather than hidden by file, so the decision
-    # layers stay in scope. The evidence behind that, and its exact limits:
-    # - tui/mod.rs carries 135 mutants (`cargo mutants --list --no-config
-    #   --package pixtuoid --file crates/pixtuoid/src/tui/mod.rs`), 72 of them in
-    #   `dispatch_key` alone. Exactly 22 have ever been RUN — those matching
-    #   `-F 'toggle_intent|is_quit_chord|should_dispatch_key'` — scoring 19
-    #   caught, 1 unviable, 2 missed (the `should_dispatch_key` match guards at
-    #   700:38, inside `run_tui`, now excluded by function). 14 of those 22 are
-    #   `is_quit_chord` guards INSIDE `dispatch_key`, so the run covered 22 of
-    #   the 78 mutants those four fns carry — NOT all of them. The other 113 are
-    #   UNMEASURED: a survivor there is unknown, not known noise, so measure it
-    #   before dismissing it.
-    # - driver.rs carries 9 mutants and none has been run under mutation. The 6
-    #   naming fns with zero test call sites are excluded below; the 3 left in
-    #   are the ones a test can reach (`build_source_set` x2 via the
-    #   registry-drift test, `headless_loop_with_signal` via the two signal-arm
-    #   tests).
-    # File-level exclusion was still the wrong tool: it hid all 135 and all 9,
-    # killable ones included, and an exclusion that hides a killable mutant is
-    # worse than a noisy row (the same call as the `mascot_position` pair below).
-    # Timing / FFI liveness probes: their tests assert wall-clock + OS behavior and
-    # flake under mutation load — a "survivor" here is a flaked test, not a missing
-    # assertion (this repo is flake-averse; #352-#354).
+    # tui/mod.rs + runtime/driver.rs are ignored by codecov but MUTATED here: they
+    # carry unit-tested decision layers, so their glue is excluded by fn below.
+    # Timing/FFI probes: a survivor here is a flaked test, not a missing assertion.
     "crates/pixtuoid-core/src/source/exit_watch.rs",
     "crates/pixtuoid-core/src/source/fd_probe.rs",
-    # cfg(windows)-gated: never COMPILED on the unix hosts that run mutants, so
-    # the mutated code can't reach any test binary and every mutant "survives"
-    # as pure cross-compile noise (10/10 in the 2026-07 full run). Real Windows
-    # coverage lives in the windows-test CI job's actual test run.
+    # cfg(windows): never compiled on the unix hosts that run mutants.
     "crates/pixtuoid-core/src/source/hook/windows.rs",
 ]
 
 exclude_re = [
-    # Equivalent-mutant classes verified by hand in the 2026-07 survivor triage
-    # (each re-confirmed surviving on current main, then proven UNOBSERVABLE —
-    # not merely untested):
-    #
-    # ChildEndUnclaims prunes on `Instant::now()` deltas — `<` vs `<=` differs
-    # only when two monotonic reads land on the same instant, which no
-    # deterministic test can arrange (the non-boundary prune/dedupe behavior
-    # IS pinned by unclaim.rs's unit tests).
-    'unclaim\.rs.*replace < with <= in ChildEndUnclaims',
-    # `mascot_position`'s walk-in boundary, `if entered < MASCOT_ENTER_MS`. `<=`
-    # extends the leg by one millisecond, and at that instant the walk-in's own t=1
-    # endpoint IS `home`, which is also the wander's forced cycle-0 origin ("Cycle 0's
-    # origin is forced to `home` so it joins the enter walk pop-free" — mascot_wander),
-    # so both branches render the identical Point. Measured per consecutive-port seed,
-    # including the frames either side.
-    #
-    # Its SIBLING boundary is deliberately NOT excluded any more: `if age < enter_delay`
-    # used to HOLD the mascot at the elevator, making `<=` a one-millisecond no-op, but
-    # the stagger now returns `None` instead — so `<=` changes drawn to not-drawn at
-    # exactly `age == enter_delay`, which is observable and IS killed (verified) by
-    # `the_walk_out_starts_from_where_the_mascot_was_when_it_died`'s arrival assertion.
-    # An exclusion that hides a killable mutant is worse than a noisy row — and
-    # cargo-mutants describes the two boundaries IDENTICALLY ("replace < with <= in
-    # mascot_position"), so no regex can exclude one without the other. Hence NEITHER
-    # is excluded: the walk-in one will show up as a known-noise row, documented here,
-    # and the stagger one is genuinely caught. (Same call as the `% with /` pair in
-    # `mascot_spot_for` before that fn was deleted.)
-    # The unix hook-socket bind's `tmp.len() > 100` picks between two bind
-    # strategies (temp-rename vs direct+chmod) whose end states are
-    # byte-identical — the boundary is sun_path headroom, distinguishable only
-    # by which syscall sequence ran, invisible to any external observation.
-    'hook/unix\.rs.*replace > with >= in Listener::bind',
-    # `pid_start_time_secs` is a cfg-twin pair (macOS proc_pidinfo / non-macOS
-    # `None` fallback): on ANY host the OTHER platform's variant is compiled
-    # out, so its mutants always "survive" — fn-level cross-compile noise
-    # (the windows.rs class). BOTH variants are pinned by cfg-twin tests in
-    # cc_probe.rs (`pid_start_time_is_plausible_epoch_seconds_for_own_process`
-    # / `pid_start_time_is_deliberately_unavailable_off_macos`), which run on
-    # their own platforms.
-    'cc_probe\.rs.*replace pid_start_time_secs',
-    # `plant_ground_in_bounds` selects which scatter plants the #566 connectivity
-    # guard drops (aisle-resident sealers) vs the `plants.clear()` last resort.
-    # Within the SWEPT space (narrow-band 32..=76 × {80,100,120,160} × seeds 0..11)
-    # the mutant is UNOBSERVABLE: at every config where the guard fires (the
-    # 59-60×160 single-pod-column seals) BOTH corridor plants are already aisle-
-    # resident, so the targeted retain empties the list identically to clear-all,
-    # and the configs that keep a plant (38-42×160) never seal. The targeted path
-    # is NOT dead, though — `plants` can also carry meeting-room + Ficus plants
-    # (compute.rs) that sit far from `cubicle_aisle`, so a seal involving one
-    # (outside the swept space) is exactly where `plant_ground_in_bounds` protects
-    # it from the clear-all sledgehammer: genuine future-proofing. The
-    # never-ship-a-pocket invariant IS pinned (appliance_strip_not_sealed_at_a_
-    # single_pod_band + the boundary scan), so only the unobservable culprit-vs-
-    # blanket distinction survives — an equivalent mutant within reach today.
-    'compute\.rs.*plant_ground_in_bounds',
-    # `ProbeSnapshot::bind_pid`'s #252 tiebreak, `if pid > *bound { *bound = pid }`.
-    # `>=` differs only when `pid == *bound`, and the body then writes the value
-    # that is ALREADY there — `pid_of` is a `HashMap<String, i32>`, so there is no
-    # identity an observer could distinguish. Equivalent by construction, not
-    # merely untested (the ordering behavior itself IS pinned, both directions, by
-    # `bind_pid_keeps_the_larger_pid_in_both_orders`).
-    'liveness\.rs.*replace > with >= in ProbeSnapshot::bind_pid',
-    # `no_cwd_from_path` is the DEFAULT `CwdDeriver` ("no opinion"), and its sole
-    # consumer collapses both spellings one line later:
-    #     cwd.or_else(|| (decoders.cwd_derive)(path)).unwrap_or_default()
-    # `None` and `Some(PathBuf::new())` both leave `unwrap_or_default()` with the
-    # same empty PathBuf, and walk.rs:540 is the only call site in the tree
-    # (grep-verified) — so no observer exists. The grok OVERRIDE that makes this
-    # seam matter is separately pinned by the `with_cwd_deriver` test.
-    'jsonl/mod\.rs.*replace no_cwd_from_path ->',
-    #
-    # A SECOND class, deliberately kept apart from the equivalent mutants above:
-    # untestable GLUE inside two files that are otherwise mutated. These are the
-    # function-granular replacement for the `tui/mod.rs` + `runtime/driver.rs`
-    # file exclusions dropped from `exclude_globs`, which is what lets the pure
-    # decision layers in the same files stay in scope. Every fn named here has
-    # ZERO test call sites — production callers only — so nothing exists that
-    # could kill a mutant in it. That is a call-graph fact (`--list` plus a grep
-    # for each name), NOT a claim that a mutation run scored them; re-derive both
-    # before adding a name, and delete a name the moment a test reaches it.
+    # Equivalent mutants — each verified UNOBSERVABLE by hand, not merely untested.
+    'unclaim\.rs.*replace < with <= in ChildEndUnclaims',       # same-instant monotonic reads
+    'hook/unix\.rs.*replace > with >= in Listener::bind',       # byte-identical end states
+    'cc_probe\.rs.*replace pid_start_time_secs',                # cfg-twin; both pinned per-platform
+    'compute\.rs.*plant_ground_in_bounds',                      # targeted retain == clear-all in range
+    'liveness\.rs.*replace > with >= in ProbeSnapshot::bind_pid',  # writes the value already there
+    'jsonl/mod\.rs.*replace no_cwd_from_path ->',               # sole caller collapses both spellings
+    # Untestable glue inside otherwise-mutated files: ZERO test call sites, so
+    # nothing exists that could kill them. Delete a name the moment a test reaches it.
     'tui/mod\.rs.*(run_tui|focus_clicked_agent|setup_terminal|teardown_terminal|resolve_version_popup)',
     'runtime/driver\.rs.*replace (run|run_async|headless_loop|compute_boot_capacities) ->',
     'runtime/driver\.rs.*replace reducer_task with',
-    #
-    # A THIRD class: one-line BINDERS that tests DO reach, but only on a branch
-    # where the mutation is unobservable. Distinct from the zero-call-site glue
-    # above — the admission test here is not "is it called" but "can any REACHABLE
-    # call distinguish the mutant", so re-check that, not the call graph, before
-    # trusting either entry.
-    #
-    # `hook::unix::ensure_owned_socket_dir` substitutes the real
-    # `/tmp/pixtuoid-{uid}` + our uid into `ensure_owned_socket_dir_in`. It IS
-    # called under test — `tests/transport/socket.rs` drives it via
-    # `HookSocketListener::bind` — but always with a tempdir endpoint, i.e. only
-    # on the no-op branch, where `-> Ok(())` is the correct answer. Reaching the
-    # FIRING branch means creating and validating the REAL per-user socket dir,
-    # which would race a live daemon on a dev box. Keep this fn a pure
-    # substitution: the decision logic and its six pins live in
-    # `ensure_owned_socket_dir_in`, and any logic added HERE becomes unmeasurable.
-    'unix\.rs.*replace ensure_owned_socket_dir ->',
-    # `ProbeSnapshot::from_open_fds` is the same shape: reached under test through
-    # the omp/codex probes, but only where the proc-table walk finds nothing, so
-    # `Some(Default::default())` is indistinguishable from the real answer.
-    # Distinguishing it needs a live process holding a transcript open under a
-    # temp root — the real-FFI-plus-scheduling flakiness `fd_probe.rs` is excluded
-    # wholesale for. The logic it used to hide is now measured: `_with` takes both
-    # enumerators, so canonicalize-or-`Some(empty)`, enumeration-failure-is-`None`,
-    # and the pid→path join are each killable.
-    'liveness\.rs.*replace ProbeSnapshot::from_open_fds ->',
+    # Reached under test, but only on a branch where the mutation is unobservable.
+    'unix\.rs.*replace ensure_owned_socket_dir ->',   # tests hit only the no-op branch
+    'liveness\.rs.*replace ProbeSnapshot::from_open_fds ->',  # proc walk finds nothing under test
 ]

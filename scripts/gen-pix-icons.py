@@ -6,25 +6,19 @@ Single color source: the embedded sprite pack's palette
 (crates/pixtuoid-scene/sprites/default/pack.toml) — an icon grid may only use
 keys defined there, so the icons can never drift off the office's own colors.
 An icon is either extracted verbatim from a pack sprite ("sprite") or authored
-here as a pixel grid ("grid"). The site's 1x RGBA PNGs are consumed by
-PixIcon.astro, which integer-upscales them with image-rendering: pixelated
-(upscale-crisp only). GitHub strips that CSS, so the README instead embeds a
-SEPARATE, pre-scaled (nearest-neighbor, README_SCALE) variant per icon — the
-only way to keep them crisp there — written to docs/images/pix-icons/
-(the doc-image convention; the site's src/assets/pix-icons/ is a Vite build
-input, not a docs asset).
+here as a pixel grid ("grid"). The site's 1x RGBA PNGs are integer-upscaled by
+PixIcon.astro with image-rendering: pixelated; GitHub strips that CSS, so the
+README instead embeds a SEPARATE, pre-scaled variant per icon.
 
 Usage:
   .venv/bin/python3 scripts/gen-pix-icons.py          # (re)generate (just gen-icons)
   .venv/bin/python3 scripts/gen-pix-icons.py --check  # exit 1 on drift
 
---check decode-compares pixels (via scripts/compare-screenshots.py, like
-gen-media.py's --check) rather than raw PNG bytes — a raw-byte compare is
+--check decode-compares pixels rather than raw PNG bytes: a raw-byte compare is
 Pillow-version-fragile (re-encoding the identical pixels can change the
 compressed bytes), which would make the gate flaky across machines/CI. It also
-diffs each output directory's file listing against ICONS.keys() so a PNG left
-behind by a removed manifest entry (an orphan) fails loudly instead of going
-unnoticed.
+diffs each output directory's listing against ICONS.keys() so an orphaned PNG
+fails loudly.
 """
 
 import io
@@ -42,11 +36,9 @@ PACK = ROOT / "crates/pixtuoid-scene/sprites/default"
 OUT = ROOT / "site/src/assets/pix-icons"
 README_OUT = ROOT / "docs/images/pix-icons"
 # Nearest-neighbor upscale factor for the README variants: GitHub's markdown
-# renderer strips <img> sizing/CSS, so these must be pre-scaled pixels. 2x turns
-# the 10x10 (or 8x12 sprite) grids into ~16-28px images — gen-readme.mjs then
-# pins each <img> to THESE dimensions (width/height from the PNG's IHDR) AND
-# derives the icon-column &nbsp; padding from the widest one, so the table column
-# can't collapse them (Safari) nor waste space; bump this to resize README icons.
+# renderer strips <img> sizing/CSS, so these must be pre-scaled pixels.
+# gen-readme.mjs pins each <img> to the resulting IHDR dimensions and derives the
+# icon-column padding from the widest one; bump this to resize README icons.
 README_SCALE = 2
 COMPARE = ROOT / "scripts/compare-screenshots.py"
 DIFF_DIR = ROOT / "target/gen-check-diff"
@@ -54,7 +46,7 @@ DIFF_DIR = ROOT / "target/gen-check-diff"
 # Icon manifest. "sprite": extract a whole pack sprite frame verbatim.
 # "grid": rows of space-separated pack-palette keys ('.' = transparent).
 ICONS = {
-    # the office's own walker, straight from the pack (8x12)
+    # the office's own walker, straight from the pack
     "walk": {"sprite": "walking_0.sprite"},
     "coffee": {
         "grid": [
@@ -98,8 +90,7 @@ ICONS = {
             ". . . . . . . . . .",
         ]
     },
-    # per-tool monitor glow → a monitor with a light (K) outline so the dark
-    # bezel doesn't dissolve into the DARK theme
+    # light (K) outline so the dark bezel doesn't dissolve into the DARK theme
     "glow": {
         "grid": [
             ". K K K K K K K K .",
@@ -114,8 +105,7 @@ ICONS = {
             ". . . . . . . . . .",
         ]
     },
-    # hover tooltips → an info "i" badge (the old magnifier read as "search /
-    # zoom", not "hover for details")
+    # hover tooltips → an info "i" badge; a magnifier reads as "search / zoom"
     "magnify": {
         "grid": [
             ". . K K K K K K . .",
@@ -130,9 +120,8 @@ ICONS = {
             ". . K K K K K K . .",
         ]
     },
-    # token meter → a stack of sheets on a desk, the top one fanned. Dark (n)
-    # side-edges so the near-white sheets separate on the LIGHT theme (they
-    # vanished into cream before).
+    # token meter → a stack of sheets; dark (n) side-edges so the near-white
+    # sheets don't vanish into the LIGHT theme's cream
     "tokens": {
         "grid": [
             ". . . n n n . . . .",
@@ -175,10 +164,8 @@ ICONS = {
             ". . . n n n n . . .",
         ]
     },
-    # stacked floors with up/down arrows — "hop between floors". The orange
-    # arrows (visible on both themes) + banded floors read as floor navigation,
-    # NOT the filing-cabinet/building the earlier shaft version was mistaken for
-    # (and no longer twins the multiagent building).
+    # stacked floors with orange (both-theme-visible) up/down arrows — this reads
+    # as floor navigation, where a shaft reads as a filing cabinet/building
     "multifloor": {
         "grid": [
             ". . . . o . . . . .",
@@ -193,8 +180,7 @@ ICONS = {
             ". . . . . . . . . .",
         ]
     },
-    # an office facade (light frame) with 2-wide windows lit in different hues —
-    # one per agent — and a bright ground-floor entrance
+    # an office facade, one differently-hued lit window per agent
     "multiagent": {
         "grid": [
             ". K K K K K K K K .",
@@ -209,10 +195,8 @@ ICONS = {
             ". K K K K K K K K .",
         ]
     },
-    # a top-down floor plan: four rooms (cream), each with a desk (cyan), walled
-    # off with doorways. Light (K) walls so the plan holds on the DARK theme (the
-    # earlier brown frame merged into the night bg), and the desks say "rooms",
-    # not a bare "+" grid.
+    # a top-down floor plan: rooms with desks, so it reads as rooms and not a
+    # bare "+" grid. Light (K) walls — a brown frame merges into the night bg.
     "spaces": {
         "grid": [
             "K K K K K K K K K .",
@@ -227,9 +211,8 @@ ICONS = {
             ". . . . . . . . . .",
         ]
     },
-    # the agent-tree DASHBOARD — a file-tree view: a root row, a trunk, and
-    # three coloured agent rows branching off it (the sidebar-tree idiom reads
-    # far clearer at ~20px than an org-chart's thin diagonal lines)
+    # the agent-tree dashboard as a file-tree view: the sidebar-tree idiom reads
+    # far clearer at ~20px than an org-chart's thin diagonal lines
     "tree": {
         "grid": [
             ". . . . . . . . . .",
@@ -244,8 +227,7 @@ ICONS = {
             ". . . . . . . . . .",
         ]
     },
-    # a paw print — four toe beans in an arc + a rounded pad, centred and in a
-    # warm brown (D) so it reads clean, not a heavy off-centre lump
+    # a paw print, centred and in warm brown (D) so it isn't a heavy dark lump
     "pets": {
         "grid": [
             ". . D D . . D D . .",
@@ -260,13 +242,12 @@ ICONS = {
             ". . . . . . . . . .",
         ]
     },
-    # the OpenClaw gateway mascot — the office's own lobster, straight from the
-    # pack (14x12), so the icon IS the mascot rendered in the office
+    # the OpenClaw gateway mascot, straight from the pack, so the icon IS the
+    # lobster as the office renders it
     "lobster": {"sprite": "lobster_rest.sprite"},
-    # Office VIBES = the ambient atmosphere: day/night + weather + themes (NOT
-    # audio — that's the lofi row). A warm sun peeking behind a cloud; the cloud
-    # is fully grey-OUTLINED so the white body stays legible on the light theme
-    # (a base-only edge still washed out on cream).
+    # ambient atmosphere: day/night + weather + themes (NOT audio — that's the
+    # lofi row). The cloud is fully grey-OUTLINED, not base-edged, or its white
+    # body washes out on the light theme's cream.
     "vibes": {
         "grid": [
             ". t . . . . . . . .",
@@ -281,9 +262,8 @@ ICONS = {
             ". . . . . . . . . .",
         ]
     },
-    # a floating desktop window — title bar with traffic-light dots, then a light
-    # content pane with text lines (NOT a solid cyan screen, which twinned the
-    # monitor-glow icon)
+    # a floating desktop window: a light content pane with text lines, NOT a
+    # solid cyan screen, which twins the monitor-glow icon
     "window": {
         "grid": [
             "K K K K K K K K K K",
@@ -346,8 +326,7 @@ def render(icon_name, rows, pal):
     return img
 
 
-# (label, dir) pairs — label disambiguates the two outputs, since both
-# directories happen to share the basename "pix-icons".
+# The label disambiguates the two outputs: both dirs are basenamed "pix-icons".
 OUTPUTS = [("site", OUT), ("readme", README_OUT)]
 
 
@@ -393,9 +372,8 @@ def main():
         shutil.rmtree(work, ignore_errors=True)
 
     if check:
-        # F3: an orphaned committed PNG (its manifest entry removed) is invisible
-        # to the loop above, which only ever iterates ICONS — diff the directory
-        # listing the other way too.
+        # An orphaned committed PNG (its manifest entry removed) is invisible to
+        # the loop above, which only ever iterates ICONS.
         for label, out_dir in OUTPUTS:
             orphans = sorted(p.stem for p in out_dir.glob("*.png") if p.stem not in ICONS)
             if orphans:

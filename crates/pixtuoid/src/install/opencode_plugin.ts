@@ -1,20 +1,17 @@
 // @pixtuoid-opencode-plugin — managed by pixtuoid (connect/disconnect opencode in pixtuoid's Sources panel: press s).
 //
-// opencode has no config-level shell hook, so pixtuoid integrates as a tiny
-// opencode plugin (auto-discovered from `<config>/plugins/*.ts`). This pipes the
-// session lifecycle / tool / permission events pixtuoid maps into the
-// `pixtuoid-hook` shim on stdin; the shim forwards them over the pixtuoid
-// daemon's socket. It NEVER blocks or breaks opencode (the shim is best-effort,
-// self-bounds at 200ms, and every error here is swallowed — invariant #5).
+// opencode has no config-level shell hook, so pixtuoid integrates as a tiny plugin
+// (auto-discovered from `<config>/plugins/*.ts`) that pipes the session lifecycle /
+// tool / permission events into the `pixtuoid-hook` shim on stdin. It NEVER blocks
+// or breaks opencode (the shim is best-effort, self-bounds at 200ms, and every
+// error here is swallowed — invariant #5).
 //
 // HOOK_PATH is baked in at install time (a JSON-encoded absolute path). Safe to
 // delete — disconnecting opencode in pixtuoid's Sources panel replaces this
 // with a removed-marker stub.
 const HOOK_PATH: string = "{{HOOK_PATH_JSON}}"
 
-// Only forward what pixtuoid maps. `message.part.updated` fires per token, so we
-// gate it to tool parts — AND only on a tool-state TRANSITION (see below),
-// instead of flooding the socket. The decoder (`source/opencode.rs`) ignores
+// Only forward what pixtuoid maps; the decoder (`source/opencode.rs`) ignores
 // anything else anyway.
 const FORWARD = new Set<string>([
   "session.created",
@@ -26,11 +23,10 @@ const FORWARD = new Set<string>([
 // opencode re-publishes a tool part with status STILL `running` on EVERY output
 // chunk (streaming `bash`/`task` output). Forwarding each would spawn a shim per
 // chunk and inflate the tooltip's tool-call count, so we forward a tool part only
-// when its status CHANGES (the pending→running→completed edges). The key is
-// `sessionID:callID`, NOT callID alone: this Map is module-level (one plugin
-// process serves a parent AND its task-spawned child sessions concurrently), so
-// callID alone could collide across sessions and drop the wrong one. Bounded by
-// the live tool-call count; entries are freed on a terminal status.
+// when its status CHANGES. The key is `sessionID:callID`, NOT callID alone: this
+// Map is module-level (one plugin process serves a parent AND its task-spawned
+// child sessions concurrently), so callID alone could collide across sessions and
+// drop the wrong one.
 const lastToolStatus = new Map<string, string>()
 
 export const PixtuoidOpencode = async () => ({
@@ -45,7 +41,7 @@ export const PixtuoidOpencode = async () => ({
         const sessionID: unknown = event.properties?.sessionID
         if (typeof callID === "string" && typeof status === "string") {
           const key = `${typeof sessionID === "string" ? sessionID : "?"}:${callID}`
-          if (lastToolStatus.get(key) === status) return // same status re-published (streaming) — drop
+          if (lastToolStatus.get(key) === status) return
           lastToolStatus.set(key, status)
           if (status === "completed" || status === "error") lastToolStatus.delete(key)
         }

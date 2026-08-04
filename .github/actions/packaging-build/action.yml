@@ -8,8 +8,7 @@ runs:
     - uses: Swatinem/rust-cache@v2
       with:
         prefix-key: v1-rust
-        # Explicit job IDs keep both platforms fail-closed in ci-gate; retain
-        # the former matrix job's cache namespace while rust-cache isolates OS.
+        # rust-cache isolates by OS, so one shared-key is safe across platforms.
         shared-key: packaging-build
     - name: Install ALSA headers (Linux only)
       if: runner.os == 'Linux'

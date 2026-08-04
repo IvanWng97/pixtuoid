@@ -1,7 +1,6 @@
 //! The first-run onboarding overlay painter (ratatui). Pure presentation over a
 //! `tui::welcome::WelcomeRow` snapshot + an `elapsed_ms` clock that drives the
-//! typewriter reveal and the staged "move-in" of roster rows. Borderless (via
-//! `panel::borderless_panel`), painted TOPMOST in both draw paths.
+//! typewriter reveal and the staged "move-in" of roster rows.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -12,15 +11,11 @@ use crate::tui::welcome::OnboardingFrame;
 use pixtuoid_scene::theme::Theme;
 
 const WELCOME_W: u16 = 54;
-/// Typewriter speed for the subtitle reveal.
 const TYPE_MS_PER_CHAR: u64 = 38;
-/// After the subtitle finishes, roster rows fade in one every `ROW_STAGGER_MS`.
 const ROW_LEAD_MS: u64 = 140;
 const ROW_STAGGER_MS: u64 = 110;
 const SUBTITLE: &str = "Let's move your agents in. Pick who walks in:";
 
-/// `elapsed_ms` since the overlay opened (the event loop's clock). Returns the
-/// number of subtitle chars revealed and whether typing is still in progress.
 fn subtitle_done_ms() -> u64 {
     SUBTITLE.chars().count() as u64 * TYPE_MS_PER_CHAR
 }
@@ -37,8 +32,6 @@ pub(crate) fn paint_welcome(
     let dim = Style::default().fg(to_color(theme.ui.label_idle));
     let bright = Style::default().fg(to_color(theme.ui.neon_brand));
 
-    // Above (fixed chrome): the typewriter subtitle + a blank. Reveal N chars by
-    // elapsed, with a blinking caret while still typing.
     let total = SUBTITLE.chars().count();
     let typed = ((elapsed_ms / TYPE_MS_PER_CHAR) as usize).min(total);
     let shown: String = SUBTITLE.chars().take(typed).collect();
@@ -52,10 +45,8 @@ pub(crate) fn paint_welcome(
         Line::from(""),
     ];
 
-    // List: the roster. Each CLI fades in after the subtitle finishes, one every
-    // ROW_STAGGER_MS. A not-yet-due row reserves a BLANK line (fixed height, so the
-    // staged reveal never resizes the panel); paint_panel then windows-with-cue if
-    // the roster overflows a short terminal.
+    // A not-yet-due row reserves a BLANK line, so the staged reveal never resizes
+    // the panel.
     let base = subtitle_done_ms() + ROW_LEAD_MS;
     let list: Vec<Line<'static>> = rows
         .iter()
@@ -90,9 +81,8 @@ pub(crate) fn paint_welcome(
         })
         .collect();
 
-    // Below (fixed chrome): a blank + the key hints, revealed once every row is in.
-    // The hint rows stay RESERVED (blank) before `all_in` so the panel height is
-    // constant across the whole reveal (incl. the one-line audio offer, #633).
+    // The hint rows stay RESERVED (blank) before `all_in`, so the panel height is
+    // constant across the whole reveal.
     let all_in = base + rows.len().saturating_sub(1) as u64 * ROW_STAGGER_MS;
     let shown_hints = elapsed_ms >= all_in;
     let mut below = vec![Line::from("")];
@@ -107,9 +97,8 @@ pub(crate) fn paint_welcome(
     if cfg!(feature = "audio") {
         below.push(if shown_hints {
             Line::from(Span::styled(
-                // ≤ WELCOME_W(54) cols incl. the 2-col indent — a longer line
-                // clips mid-word; no line on no-audio builds (a dead m key reads
-                // broken on the Linux prebuilts).
+                // Must fit WELCOME_W incl. the 2-col indent, or it clips mid-word.
+                // Absent on no-audio builds: a dead m key reads as broken.
                 "  \u{2669} office sound \u{2014} press m anytime",
                 dim,
             ))

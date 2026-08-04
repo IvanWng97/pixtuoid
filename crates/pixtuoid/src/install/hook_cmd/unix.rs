@@ -1,12 +1,9 @@
 //! Unix half of the shell-hook-command quoting primitives.
 
-/// POSIX single-quote a string so a shell treats it as one literal token —
-/// embedded single quotes become `'\''`. Codex and Reasonix both run the hook
-/// `command` under a shell, so an unquoted path containing spaces would split
-/// into multiple args and the hook would never be found (Claude's explicit
-/// `--hook-path` arm reuses it for the same reason). Unix-only: on Windows
-/// these targets use the windows-half `windows_bare_hook_command` (cmd.exe, not
-/// `sh`).
+/// POSIX single-quote a string so a shell treats it as one literal token.
+/// Targets run the hook `command` under a shell, so an unquoted path containing
+/// spaces would split into multiple args and the hook would never be found.
+/// Unix-only: on Windows those targets use `windows_bare_hook_command` instead.
 pub(crate) fn shell_single_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
@@ -33,17 +30,14 @@ mod tests {
 
     #[test]
     fn escapes_embedded_single_quote() {
-        // A single quote becomes '\'' — close, escaped literal, reopen — so the
-        // whole string stays one shell token.
+        // '\'' is close, escaped literal, reopen — the string stays ONE token.
         assert_eq!(shell_single_quote("a'b"), r#"'a'\''b'"#);
     }
 
-    // The WRITE side (`shell_single_quote`, here — cfg(unix)) and the READ side
-    // (`verify::posix_unquote`, a different, all-platform module) must round-trip
-    // byte-for-byte, or the on-disk shim path can't be recovered → a false "shim
-    // binary missing" in `doctor` / the Sources panel. They legitimately can't be
-    // merged (the read side is not cfg-forked — see verify.rs's module doc), so
-    // pin the write/read PAIR directly instead of trusting they stay in sync.
+    // The WRITE side here and the READ side (`verify::posix_unquote`, a separate
+    // all-platform module that legitimately cannot be merged with this one) must
+    // round-trip byte-for-byte, or the on-disk shim path can't be recovered → a
+    // false "shim binary missing" in `doctor` / the Sources panel.
     #[test]
     fn quoting_round_trips_through_the_verify_reader() {
         use crate::install::verify::posix_unquote;

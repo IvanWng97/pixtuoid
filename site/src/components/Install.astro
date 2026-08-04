@@ -3,10 +3,8 @@ import { Code } from 'astro:components';
 import { REPO, CRATES, floorById, floorName } from '../consts';
 
 const floor = floorById('install');
-// Single source of truth for install commands → site/src/install.json. The README
-// regenerates its install block from the same file (gen-readme-check), so the site and
-// README can't drift — the site shows every method, the README only the ones
-// flagged `readme: true`.
+// The README regenerates its install block from this same file, so the two
+// can't drift — the site shows every method, the README only `readme: true`.
 import tabs from '../install.json';
 ---
 
@@ -51,9 +49,8 @@ import tabs from '../install.json';
           >
             <Code code={t.cmds.join('\n')} lang="bash" theme="vesper" />
             {/* no aria-label: the visible "Copy" text IS the accessible name, so
-              the textContent swap stays exposed. The role=status sibling
-              ANNOUNCES the outcome to screen readers (a name change alone isn't
-              announced) — WCAG 4.1.3. */}
+              the textContent swap stays exposed. A name change alone isn't
+              announced, hence the role=status sibling — WCAG 4.1.3. */}
             <button class="install__copy" data-copy={t.cmds.join('\n')}>
               Copy
             </button>
@@ -78,10 +75,6 @@ import tabs from '../install.json';
     box.querySelectorAll('.install__tab').forEach(function (tab) {
       tab.addEventListener('click', function () {
         const id = tab.dataset.tab;
-        // crossfade the panel swap with the SAME view-transition the Showcase
-        // demo dial uses one section up (guarded on reduced-motion + support),
-        // so the two adjacent "switch the content" gestures feel of a piece
-        // instead of one crossfading and one hard-cutting.
         function swap() {
           box.querySelectorAll('.install__tab').forEach(function (t) {
             const on = t === tab;
@@ -102,19 +95,18 @@ import tabs from '../install.json';
       // click would capture 'Copied ✓' and the button would stick on it
       const LABEL = (btn.textContent || 'Copy').trim();
       const status = btn.parentElement && btn.parentElement.querySelector('[data-copy-status]');
-      // visible label swap (sighted) + a role=status announcement (screen reader)
       function flash(label, announce) {
         btn.textContent = label;
         if (status) status.textContent = announce;
-        clearTimeout(restore); // a fresh click cancels the previous restore timer
+        clearTimeout(restore);
         restore = setTimeout(function () {
           btn.textContent = LABEL;
           if (status) status.textContent = '';
         }, 1600);
       }
       function manual() {
-        // no / blocked Clipboard API (insecure context, old browser): select the
-        // command so the user can copy it, and say so — don't fail silently.
+        // no / blocked Clipboard API (insecure context, old browser): select
+        // the command so the user can copy it — don't fail silently.
         const code = btn.parentElement && btn.parentElement.querySelector('code');
         const sel = window.getSelection && window.getSelection();
         if (code && sel) {
@@ -134,9 +126,8 @@ import tabs from '../install.json';
           .writeText(btn.dataset.copy)
           .then(function () {
             flash('Copied ✓', 'Copied to clipboard');
-            // #434, generalized (Working Building): a successful install-copy
-            // ANYWHERE fires one event; OfficeBackdrop's listener does the
-            // hiring and answers with pix:hired (the statusline receipt).
+            // OfficeBackdrop listens for this, does the hiring, and answers
+            // with pix:hired (the statusline receipt).
             document.dispatchEvent(
               new CustomEvent('pix:install-copy', { detail: { source: 'install' } })
             );
@@ -151,7 +142,6 @@ import tabs from '../install.json';
   .install__box {
     max-width: 860px;
   }
-  /* tabs: bare mono text-links (same aria-pressed JS) */
   .install__tabs {
     display: flex;
     flex-wrap: wrap;
@@ -170,20 +160,17 @@ import tabs from '../install.json';
     cursor: pointer;
   }
   .install__tab.is-active {
-    /* --coral-deep (5.2:1 on the day bg); the old --led green was ~1.4:1 and the
-       tab label is the ONLY text conveying which install method is selected */
+    /* 5.2:1 on the day bg; the tab label is the ONLY text conveying which
+       install method is selected, so --led green (~1.4:1) won't do */
     color: var(--coral-deep);
   }
-  /* the climax: the active command HUGE in a square --screen block */
   .install__panel {
     display: none;
     position: relative;
     overflow: hidden;
     border: 1px solid var(--chip-line);
     background: var(--screen);
-    /* the one surface a visitor is meant to ACT on — lift it off the office with
-       the same warm, theme-aware elevation .terminal/.card already use, instead
-       of sitting flat on the cream. Sharp edge stays: it's a terminal screen. */
+    /* lifted off the office, but the edge stays sharp: it's a terminal screen */
     box-shadow: var(--shadow-lg);
   }
   .install__panel.is-active {
@@ -221,24 +208,22 @@ import tabs from '../install.json';
   }
   .install__copy:hover {
     /* --coral-cta is the AA-capped coral (white label ≥4.5:1); raw --coral
-       under #fff is only ~3.1:1. Shared with .btn-primary. */
+       under #fff is only ~3.1:1 */
     background: var(--coral-cta);
     border-color: var(--coral-cta);
     color: #fff;
   }
   .install__note {
     padding: 0.4rem 0.7rem 0.6rem;
-    /* text-scrim's negative margin exists so OFFICE-floating text stays
-       left-aligned despite the plate's padding; INSIDE the install card the
-       visible plate edge must align with the command/tabs column instead
-       (user-caught: the plate hung ~11px left of its siblings) */
+    /* cancels text-scrim's negative margin: that exists to keep OFFICE-floating
+       text left-aligned, but inside the card the plate edge must line up with
+       the command/tabs column */
     margin-inline: 0;
     font-size: 0.9rem;
     color: var(--fg-muted);
   }
-  /* phone widths: wrap the command instead of scrolling it under the pill —
-     pre-wrap breaks at the content box, so the reserved right padding keeps
-     every character clear of the Copy control */
+  /* pre-wrap breaks at the content box, so the reserved right padding is what
+     keeps every character clear of the Copy pill */
   @media (max-width: 560px) {
     .install__panel :global(pre) {
       padding-right: 4.6rem;
@@ -251,8 +236,6 @@ import tabs from '../install.json';
     .install__tab {
       padding-block: 0.55rem;
     }
-    /* the section's PRIMARY action (and the #434 hire trigger) — give it a
-       real thumb target (≥44px) instead of the 29px-tall desktop pill. */
     .install__copy {
       min-height: 44px;
       padding-block: 0.55rem;

@@ -1,9 +1,8 @@
 [package]
 name        = "pixtuoid-web"
 description  = "WebAssembly canvas painter over the pixtuoid-scene engine — the live office hero"
-# A SITE BUILD INPUT, never a crates.io artifact: it must not enter the
-# workspace's semver/release surface (the render engine's public API does; this
-# thin wasm shim does not).
+# A site build input, never a crates.io artifact: this thin wasm shim must not
+# enter the workspace's semver/release surface.
 publish     = false
 version.workspace      = true
 edition.workspace      = true
@@ -16,8 +15,8 @@ homepage.workspace     = true
 [lints]
 workspace = true
 
-# cdylib = the wasm-bindgen artifact; rlib = so the pure sim logic (scene
-# seeding, the scripted timeline, RGB→RGBA) is unit-testable natively.
+# cdylib = the wasm-bindgen artifact; rlib = so the pure sim logic is
+# unit-testable natively.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -28,24 +27,17 @@ pixtuoid-core  = { path = "../pixtuoid-core", version = "0.16.0", default-featur
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.16.0", default-features = false }
 # Pin to the installed wasm-bindgen-cli (the generated JS glue must match).
 wasm-bindgen   = "=0.2.126"
-# Feature-unions `wasmbind` into scene's chrono: on wasm32, `chrono::Local`
-# resolves the REAL browser timezone via js-sys (else it silently falls back
-# to UTC and the office's day/night cycle is wrong for most visitors). The
-# wasmbind deps are target-gated to wasm32 — zero cost on native builds.
+# Feature-unions `wasmbind` into scene's chrono so that on wasm32
+# `chrono::Local` resolves the REAL browser timezone via js-sys; without it the
+# office's day/night cycle silently falls back to UTC for most visitors.
 chrono         = { version = "0.4", default-features = false, features = ["wasmbind"] }
 
-# chrono is unused BY THE LIB on purpose — no direct `use chrono` in src/;
-# it exists there solely for the feature-union above (machete can't see
-# feature-unioning). The `hero_still` example DOES use it directly
-# (deterministic --hour → t0_ms); the ignore stays regardless since the
-# feature-union reason alone already justifies pinning the dep here.
+# The lib has no direct `use chrono` — it's here solely for the feature-union
+# above, which machete can't see.
 [package.metadata.cargo-machete]
 ignored = ["chrono"]
 
 [dev-dependencies]
-# hero_still example only (PNG encode for the committed wide poster, #425);
-# dev-deps never reach the wasm artifact.
+# hero_still example only: PNG encode for the committed wide poster.
 image = { version = "0.25", default-features = false, features = ["png"] }
-# Parse+assert `overlay_json`'s hand-built payload in the native tests (never in
-# the wasm artifact — dev-deps aren't bundled).
 serde_json = { workspace = true }

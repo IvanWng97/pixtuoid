@@ -1,12 +1,8 @@
 ---
 import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../consts';
 
-// The elevator made literal (spec §4): a slim pixel shaft fixed at the right
-// edge; a pixel car rides 6F→1F with scroll; floors are dual-labeled from the
-// ONE FLOORS manifest (the same const the section anchors and the statusline
-// lift read, so a rename/renumber can't desync the three). Desktop shows the
-// shaft + hover plates; mobile collapses to a 6-dot rail. index-only chrome —
-// the docs pages get wb-5's elevator-PANEL sidebar instead.
+// A slim pixel shaft fixed at the right edge; a pixel car rides 6F→1F with
+// scroll. index-only chrome — the docs pages get the elevator-PANEL sidebar.
 ---
 
 <aside class="shaft" data-shaft>
@@ -28,11 +24,7 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
     }
     <span class="shaft__car" data-shaft-car aria-hidden="true"></span>
   </nav>
-  {
-    /* no keys hint here — the statusline owns the ONE "keys 1–6" affordance
-      (it sits beside the popover's on/off toggle); a second copy on the
-      shaft duplicated it on-screen (user-caught) */
-  }
+  {/* no keys hint here — the statusline owns the ONE "keys 1–6" affordance */}
 </aside>
 
 <script
@@ -51,9 +43,6 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
     let userPaused = false;
     let sections = [];
 
-    // deferred: this component mounts at the END of <body>, but keep the same
-    // defensive DOMContentLoaded gate the statusline documents (the is:inline
-    // parse-position trap) so a future mount-point move can't silently break it
     function resolveSections() {
       sections = stops
         .map(function (s) {
@@ -62,8 +51,6 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
         .filter(Boolean);
     }
 
-    // ── click-to-ride (mirrors the statusline's go(): smooth unless reduced,
-    // focus follows so keys keep working from the landed floor) ──
     stops.forEach(function (s) {
       s.addEventListener('click', function () {
         const sec = document.querySelector('[data-floor="' + s.dataset.shaftStop + '"]');
@@ -74,8 +61,6 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
       });
     });
 
-    // ── arrival: current-floor LED + the visual-only "ding" pulse (skipped
-    // under reduced motion and while the page pause switch holds motion) ──
     let currentFl = null;
     function arrive(fl) {
       if (fl === currentFl) return;
@@ -94,8 +79,6 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
       });
     }
 
-    // ── the car rides with scroll: piecewise-lerp between stop positions,
-    // keyed on the sections' live offsets (rAF-throttled) ──
     let raf = 0;
     function ride() {
       raf = 0;
@@ -117,9 +100,6 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
     window.addEventListener('scroll', queueRide, { passive: true });
     window.addEventListener('resize', queueRide);
 
-    // ── current floor: the SAME center-band observer contract the statusline
-    // scrollspy uses — both read FLOOR_SPY_ROOT_MARGIN (consts.ts), so the two
-    // readouts can never disagree ──
     function observe() {
       resolveSections();
       if ('IntersectionObserver' in window) {
@@ -143,12 +123,9 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
       observe();
     }
 
-    // Bottom-clamp: mirrors the statusline's identical fix (Statusline.astro)
-    // — both consume the same FLOOR_SPY_ROOT_MARGIN (consts.ts) center-band
-    // authority, so 1F + the footer rarely fill the band the observer above
-    // keys off, and the last section can never cross it. At the true scroll
-    // max, the last floor's LED wins unconditionally, overriding whatever the
-    // observer last reported.
+    // 1F + the footer rarely fill the FLOOR_SPY_ROOT_MARGIN center band the
+    // observer keys off, so at the true scroll max the last floor's LED wins
+    // unconditionally, overriding whatever the observer last reported.
     function clampToLastFloorAtBottom() {
       if (!stops.length) return;
       const atBottom =
@@ -170,11 +147,9 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
     );
     clampToLastFloorAtBottom(); // a hash-anchored load can already start at the bottom
 
-    // ── ambient-motion membership (adjudicated): the page pause switch
-    // stills the ding pulse ONLY. The car itself keeps riding while paused —
-    // it only ever moves WITH user scroll, the same "user-initiated, not
-    // ambient" status a native scrollbar thumb has, so it sits outside WCAG
-    // 2.2.2's auto-motion scope and the pause switch has nothing to hold. ──
+    // The pause switch stills the ding pulse ONLY. The car keeps riding while
+    // paused: it moves solely WITH user scroll, like a scrollbar thumb, so it
+    // sits outside WCAG 2.2.2's auto-motion scope.
     document.addEventListener('pix:paused', function (e) {
       userPaused = !!(e.detail && e.detail.paused);
     });
@@ -183,22 +158,17 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
 
 <style is:global>
   :root {
-    /* the shaft's own footprint, named so the body-gutter reservation below
-       (and .shaft/.shaft__rail themselves) never carry a second copy. */
     --shaft-edge: clamp(4px, 0.6vw, 10px);
     --shaft-w: 24px;
   }
   @media (max-width: 760px) {
     :root {
-      --shaft-w: 14px; /* the collapsed mobile dot-rail */
+      --shaft-w: 14px;
     }
   }
-  /* The shaft is position:fixed at every width (only --shaft-w above
-     shrinks ≤760px) — .container's own padding leaves no room to clear it
-     once the viewport narrows toward that footprint (measured: body text
-     runs under the rail at both 390 and 768px, not just below the 760px
-     dot-rail cutover). Mirrors Statusline.astro's identical body-padding
-     idiom for its own fixed bar. */
+  /* 960px, not the 760px dot-rail cutover: the shaft is position:fixed at every
+     width and .container's own padding leaves no room to clear it once the
+     viewport narrows (measured: body text runs under the rail at 768px too). */
   @media (max-width: 960px) {
     body {
       padding-right: calc(var(--shaft-edge) + var(--shaft-w) + 8px);
@@ -224,7 +194,7 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    width: var(--shaft-w); /* the spec's slim pixel shaft — 14px ≤760px, above */
+    width: var(--shaft-w);
     height: min(52vh, 420px);
     padding: 8px 0;
   }
@@ -260,11 +230,8 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
   .shaft__stop:focus-visible .shaft__plate {
     opacity: 1;
   }
-  /* .led-selected (global) recolors TEXT — it doesn't reach the dot's own
-     background, so the current floor's dot would stay perpetually "off"
-     (.led-dot's own default) without this. Reuses the SAME --led/--led-glow
-     tokens .led-dot.is-on itself uses — no new value, just wiring the
-     existing "lit" look to the state this component already tracks. */
+  /* .led-selected (global) recolors TEXT only — without this the current
+     floor's dot would stay perpetually "off". */
   .shaft__stop.led-selected :global(.led-dot) {
     background: var(--led);
     box-shadow: 0 0 6px var(--led-glow);
@@ -282,7 +249,6 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
     will-change: transform;
     pointer-events: none;
   }
-  /* the arrival "ding" — visual pulse ONLY (no audio, spec §4) */
   @keyframes shaft-ding {
     0% {
       box-shadow: 0 0 0 0 var(--led-glow);
@@ -295,12 +261,9 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
     animation: shaft-ding 0.6s ease-out 1;
   }
   @media (prefers-reduced-motion: reduce) {
-    /* static indicator: the LED still tracks floors; the car snaps (no glide),
-       the ding never pulses. global.css's sitewide reset already forces
-       transition-duration near-zero here (0.001ms !important, universal
-       selector) — this rule additionally zeroes transition-PROPERTY, the one
-       longhand that reset doesn't touch, so the car is fully non-transitioning
-       rather than merely imperceptibly fast. */
+    /* Not redundant with global.css's sitewide reset: that forces
+       transition-duration near-zero, this zeroes transition-PROPERTY, the one
+       longhand the reset doesn't touch. */
     .shaft__car {
       transition: none;
     }
@@ -309,8 +272,6 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
     }
   }
   @media (max-width: 760px) {
-    /* the 6-dot rail: dots + current LED only (the width itself already
-       shrunk via --shaft-w, set above) */
     .shaft__rail {
       height: 38vh;
       padding: 6px 0;
@@ -321,13 +282,9 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
     }
   }
   @media (pointer: coarse) {
-    /* The shaft stays slim by design (it reads as hardware, a rail, not a
-       button bar) — widening each dot into a real touch target here would
-       defeat that. The applicable SC is 2.5.8 Target Size Minimum (AA,
-       24×24px) — NOT 2.5.5 (AAA, 44×44px, a stricter level this site doesn't
-       claim). 2.5.8 carries its own "equivalent control" exception, met by
-       the statusline's own floor list (sl__floorbtn), which exposes the SAME
-       six floors at a measured ~40.9px target (already coarse-pointer-bumped)
-       — comfortably clearing the 24px AA minimum, well short of AAA. */
+    /* Deliberately no touch-target bump: the shaft stays slim (it reads as
+       hardware, not a button bar). The applicable SC is 2.5.8 (AA, 24×24), not
+       2.5.5 (AAA), and its "equivalent control" exception is met by the
+       statusline's own floor list (sl__floorbtn) at ~40.9px. */
   }
 </style>

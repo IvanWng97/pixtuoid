@@ -1,8 +1,6 @@
 //! Render ONE frame of the `pixtuoid floating` office to a PNG — visual verification for
-//! the floating window (the desktop-window twin of the `snapshot` example, which captures
-//! the half-block TUI). It drives the SAME `floating::offscreen::OfficeRenderer` the live
-//! window uses AND the same `paint_labels_into_surface`, so the PNG is byte-faithful to what
-//! the window blits (full-resolution `RgbBuffer` + name badges, NOT a ▀-compressed grab).
+//! the floating window. It drives the SAME `OfficeRenderer` and `paint_labels_into_surface`
+//! the live window uses, so the PNG is byte-faithful to what the window blits.
 //!
 //! Usage:
 //!   cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]
@@ -20,8 +18,8 @@ use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::floor::FloorMeta;
 use pixtuoid_scene::theme::theme_by_name;
 
-/// A few demo agents at desks 0..n with varied states + a deliberate label collision
-/// (two `cc`) so the snapshot exercises every label tone AND the `·<id4>` disambiguation.
+/// The two `cc` labels are a DELIBERATE collision, so the snapshot exercises the
+/// `·<id4>` disambiguation as well as every label tone.
 fn populate_demo_agents(scene: &mut SceneState, now: SystemTime, n: usize) {
     let archetypes: [(&str, ActivityState); 6] = [
         (
@@ -57,9 +55,9 @@ fn populate_demo_agents(scene: &mut SceneState, now: SystemTime, n: usize) {
             },
         ),
     ];
-    // Back-date well past the entry animation + keep `last_event_at` recent so each agent is
-    // SEATED at its own desk (Active → typing, Idle → thinking-pose within the 20s window) —
-    // spread out, not clustered walking in from the elevator (which overlaps their badges).
+    // Back-dated past the entry animation with a recent `last_event_at`, so every agent is
+    // SEATED and spread out rather than clustered walking in from the elevator, which
+    // overlaps their badges.
     let seated_since = now.checked_sub(Duration::from_secs(120)).unwrap_or(now);
     let recent = now.checked_sub(Duration::from_secs(3)).unwrap_or(now);
     for i in 0..n {
@@ -141,13 +139,11 @@ fn main() -> Result<()> {
     let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(None)?;
     let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
-    // Empty office (default) shows the layout / walls / windows / desks; `--agents N` seats
-    // demo agents so the name-badge overlay is exercised too.
     let mut scene = SceneState::uniform(64);
     populate_demo_agents(&mut scene, now, n_agents);
     let mut renderer = OfficeRenderer::new();
-    // Mirror floating::window EXACTLY: render the office at window/SCALE, nearest-neighbor
-    // upscale into a `u32` surface, then blit the name badges — so the PNG is byte-faithful.
+    // Mirror floating::window EXACTLY: render at window/SCALE, nearest-neighbor upscale into
+    // a `u32` surface, then blit the name badges — otherwise the PNG is not byte-faithful.
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
     let scale = pixtuoid::floating::offscreen::office_scale(win_h); // shared with the live window
     let ow = (win_w / scale).max(1).min(u16::MAX as u32) as u16;
@@ -177,8 +173,7 @@ fn main() -> Result<()> {
         scale as i32,
         theme,
     );
-    // The status footer band (full TUI parity) — audible so the ♩ suffix shows;
-    // no transient flash in a static snapshot.
+    // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);
     let footer = renderer.footer(&scene, budget, true, None);
     pixtuoid::floating::offscreen::paint_footer_into_surface(&mut sb, ww, wh, &footer, theme);

@@ -1,15 +1,8 @@
-//! Coarse-cell reachability over a [`WalkableMask`] — a mirror of this crate's
-//! A\* router's coarsening, so the geometry layer (`layout`) can ask "is this
-//! cell actually *routable*?" without depending on the pathfind layer.
-//!
-//! [`approach_point`](super::approach) uses it to PREFER an A\*-reachable
-//! approach side over a merely-walkable-but-walled-off one — the "available
-//! approach side" rule. The coarsening rides the SHARED `super::coarse`
-//! primitives (`COARSE_CELL_SIZE`-edge cells, ≥ `COARSE_CELL_WALKABLE_MIN`
-//! walkable px, `cell_walkable`/`snap`/`NEIGHBORS_8`) — the exact same ones
+//! Coarse-cell reachability over a [`WalkableMask`], so the geometry layer
+//! (`layout`) can ask "is this cell actually *routable*?" without depending on
+//! the pathfind layer. It rides the SHARED `super::coarse` primitives that
 //! [`crate::pathfind`]'s `AStarRouter` rides, so "reachable here" means the same
-//! thing A\* will find at route time BY CONSTRUCTION (was two hand-kept copies
-//! pinned equal by a 2-const compile assert). Reachability is over STATIC
+//! thing A\* will find at route time BY CONSTRUCTION. Reachability is over STATIC
 //! geometry only, so it passes an EMPTY occupancy overlay.
 
 use std::collections::VecDeque;
@@ -21,25 +14,21 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 /// How far (in coarse cells) to snap a blocked seed to the nearest walkable
 /// coarse cell — mirrors the router's start-snap so a seed sitting on a blocked
 /// pixel (a door on a wall edge, a desk) still lands in the right component.
-/// Shorter than the router's `MAX_SNAP_RADIUS` (a seed is always near its
-/// component; a route goal may be farther).
 const SEED_SNAP_CELLS: u16 = 3;
 
 /// The set of coarse cells reachable (8-connected) from a seed — i.e. the
 /// agent's connected walkable component. Built once per layout from a known
-/// in-component seed (the door, or a home desk); real floors are
-/// connectivity-tested, so this set covers the whole walkable area.
+/// in-component seed (the door, or a home desk).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReachSet {
-    /// Coarse-cell reachability (`grid.width`/`height` are the cell dims, =
-    /// `mask.{width,height} / COARSE_CELL_SIZE`).
+    /// Coarse-cell reachability; the grid dims are `mask` dims / `COARSE_CELL_SIZE`.
     grid: Grid<bool>,
 }
 
 impl ReachSet {
     /// 8-connected coarse BFS from `seed`'s cell (snapped to the nearest walkable
-    /// coarse cell when `seed` lands on a blocked one, like the router's start
-    /// snap). An empty/degenerate mask yields an all-unreachable set.
+    /// cell when `seed` lands on a blocked one). An empty/degenerate mask yields
+    /// an all-unreachable set.
     pub fn from_mask(mask: &WalkableMask, seed: Point) -> ReachSet {
         let cell_w = mask.width() / COARSE_CELL_SIZE;
         let cell_h = mask.height() / COARSE_CELL_SIZE;
@@ -47,9 +36,6 @@ impl ReachSet {
         if cell_w == 0 || cell_h == 0 {
             return ReachSet { grid };
         }
-        // Reachability is over STATIC geometry — pass an empty overlay so the
-        // shared `cell_walkable`/`snap` count only the mask (the router passes the
-        // live occupancy overlay instead).
         let empty = OccupancyOverlay::new();
         let seed_cell = (seed.x / COARSE_CELL_SIZE, seed.y / COARSE_CELL_SIZE);
         if let Some(start) = snap(mask, &empty, seed_cell, cell_w, cell_h, SEED_SNAP_CELLS) {
@@ -82,8 +68,8 @@ impl ReachSet {
     ///
     /// **Conservative at cell boundaries** (a lone walkable px inside a
     /// <50%-walkable coarse cell reads unreachable), but NEVER a false positive:
-    /// `reaches(p) ⇒ A* can route to p`. So `approach_point` can safely drop any
-    /// side `reaches` rejects — it will never pick an unroutable one.
+    /// `reaches(p) ⇒ A* can route to p`, so `approach_point` can safely drop any
+    /// side `reaches` rejects.
     pub fn reaches(&self, p: Point) -> bool {
         self.grid
             .get_or(p.x / COARSE_CELL_SIZE, p.y / COARSE_CELL_SIZE, false)
@@ -101,18 +87,12 @@ mod tests {
         assert!(r.reaches(Point { x: 4, y: 4 }));
         assert!(r.reaches(Point { x: 60, y: 60 }));
         assert!(r.reaches(Point { x: 32, y: 8 }));
-        // Edge cells (column 0, row 0) must be reachable from an interior seed —
-        // this pins the BFS neighbor boundary guard (`nx < 0 || ny < 0`). A
-        // `< → ==` / `<= ` mutant drops the top/left coarse cells from the
-        // reachable set, which the interior-only asserts above cannot catch.
         assert!(r.reaches(Point { x: 0, y: 32 }), "column-0 cell reachable");
         assert!(r.reaches(Point { x: 32, y: 0 }), "row-0 cell reachable");
     }
 
     #[test]
     fn walled_pocket_is_unreachable_but_main_is_reachable() {
-        // Split a 64×64 field with a full-height wall at x∈[28,36): the seed on
-        // the left can reach the left side but NOT the right pocket.
         let mut m = WalkableMask::new_open(64, 64);
         m.mark_blocked(28, 0, 8, 64, 0);
         let r = ReachSet::from_mask(&m, Point { x: 8, y: 32 });
@@ -129,12 +109,9 @@ mod tests {
 
     #[test]
     fn blocked_seed_snaps_into_the_component() {
-        // Seed lands on the blocked wall column; snap should pull it into the
-        // adjacent walkable component rather than yield an empty set.
         let mut m = WalkableMask::new_open(64, 64);
         m.mark_blocked(30, 0, 4, 64, 0);
         let r = ReachSet::from_mask(&m, Point { x: 31, y: 32 }); // on the wall
-                                                                 // Snapped to one side → that side is reachable (whichever it picked).
         assert!(
             r.reaches(Point { x: 8, y: 32 }) || r.reaches(Point { x: 56, y: 32 }),
             "a blocked seed must snap into SOME component, not vanish"
@@ -143,20 +120,12 @@ mod tests {
 
     #[test]
     fn seed_in_fully_blocked_pocket_snaps_to_nothing() {
-        // Seed buried in a region with NO walkable coarse cell within the
-        // SEED_SNAP_CELLS=3 ring radius → the shared `snap` returns None and the
-        // BFS never runs, yielding an all-unreachable set (covers the None return
-        // and the skipped `if let Some(start)` BFS guard). The blocked pocket
-        // must extend ≥ (3 rings + 1) coarse cells (≈ 4*4 = 16px) past the seed
-        // cell in every direction so all three snap rings land on blocked cells.
+        // The blocked pocket must extend ≥ (SEED_SNAP_CELLS + 1) coarse cells past
+        // the seed cell in every direction, so every cell the snap scan probes
+        // (incl. its ring-interior skips) is blocked and `snap` returns None.
         let mut m = WalkableMask::new_open(64, 64);
-        // Block a generous square around the seed cell at (8,8)px → cell (2,2);
-        // 3 rings out reaches cell (5,5), spanning px [20,24). Block [0,40) so
-        // every cell the snap scan probes (incl. its ring-interior skips) is
-        // blocked.
         m.mark_blocked(0, 0, 40, 40, 0);
         let r = ReachSet::from_mask(&m, Point { x: 8, y: 8 });
-        // Nothing is reachable — the seed could not snap into any component.
         assert!(!r.reaches(Point { x: 8, y: 8 }), "seed cell is blocked");
         assert!(!r.reaches(Point { x: 50, y: 50 }), "open area never seeded");
         let all_unreachable = (0..r.grid.height()).all(|cy| {
@@ -175,14 +144,9 @@ mod tests {
 
     #[test]
     fn corner_seed_ring_scan_handles_negative_coords() {
-        // Seed at the top-left corner cell (0,0) sitting on a blocked patch: the
-        // snap ring scan walks to negative cell coords (covered by the
-        // nx<0||ny<0 guard) and skips ring-INTERIOR cells (the `dx!=r && dy!=r`
-        // continue) before finding a walkable cell a couple rings out. Snap must
-        // still pull it into the open component.
+        // The seed's cell is at the grid corner, so the snap ring scan walks to
+        // negative cell coords before finding a walkable cell a few rings out.
         let mut m = WalkableMask::new_open(64, 64);
-        // Block the top-left 8×8px patch so cells (0,0) and (1,1) are blocked;
-        // the rest of the field is open, so a walkable cell sits within range.
         m.mark_blocked(0, 0, 8, 8, 0);
         let r = ReachSet::from_mask(&m, Point { x: 1, y: 1 }); // → cell (0,0)
         assert!(
@@ -193,19 +157,14 @@ mod tests {
 
     #[test]
     fn sub_cell_mask_yields_empty_reachset() {
-        // A mask narrower than COARSE_CELL_SIZE (4) gives cell_w = 3/4 = 0, so
-        // from_mask hits the degenerate early-return (an all-unreachable set with
-        // an empty reachable grid) instead of indexing into a 0-width grid.
+        // Width 3 is narrower than COARSE_CELL_SIZE, so cell_w collapses to 0.
         let r = ReachSet::from_mask(&WalkableMask::new_open(3, 64), Point { x: 0, y: 0 });
         assert!(!r.reaches(Point { x: 0, y: 0 }));
-        // width < cell size collapses the cell width to 0 → a 0-column grid, so
-        // no cell is addressable and every query is unreachable (asserted above).
         assert_eq!(r.grid.width(), 0, "degenerate mask has a 0-width cell grid");
     }
 
     #[test]
     fn reaches_is_false_out_of_bounds() {
-        // Querying a point whose coarse cell is past the grid hits the OOB guard.
         let m = WalkableMask::new_open(64, 64);
         let r = ReachSet::from_mask(&m, Point { x: 4, y: 4 });
         assert!(

@@ -13,15 +13,10 @@ pub(crate) struct BootDecision {
     pub(crate) should_persist: bool,
 }
 
-/// Decide whether the version popup should fire on boot and whether to
-/// persist `last_seen_version`. Pure function so the boot logic is testable
-/// without spinning up a terminal.
-///
-/// Persist happens in three cases:
-/// - The popup is firing (record current so it only fires once).
-/// - First-time install (no recorded version yet).
-/// - The recorded version is unparseable — overwrite to recover, otherwise a
-///   corrupted/hand-edited value silently disables the popup forever.
+/// Decide whether the version popup should fire on boot and whether to persist
+/// `last_seen_version`. Persist also happens on a first-time install and on an
+/// UNPARSEABLE recorded version — overwrite to recover, else a corrupted or
+/// hand-edited value silently disables the popup forever.
 pub(crate) fn boot_decision(current_ver: &str, last_seen: Option<&str>) -> BootDecision {
     let last_seen_parseable = last_seen.is_some_and(is_valid_version);
     let should_show_popup = match last_seen {
@@ -37,9 +32,8 @@ pub(crate) fn boot_decision(current_ver: &str, last_seen: Option<&str>) -> BootD
     }
 }
 
-/// Parses `major.minor.patch[-prerelease]` into a tuple where the 4th
-/// component is `0` for a prerelease and `1` for a release, so that
-/// `0.5.0-rc1 < 0.5.0` per semver precedence rules.
+/// Parses `major.minor.patch[-prerelease]` into a tuple whose 4th component is `0`
+/// for a prerelease and `1` for a release, so `0.5.0-rc1 < 0.5.0` per semver.
 fn parse_semver(v: &str) -> Option<(u64, u64, u64, u8)> {
     let mut parts = v.splitn(3, '.');
     let major = parts.next()?.parse().ok()?;
@@ -59,16 +53,14 @@ fn parse_semver(v: &str) -> Option<(u64, u64, u64, u8)> {
 #[cfg(test)]
 pub(crate) const UNCURATED_MARKER: &str = concat!("TODO", ": curate");
 
-/// True while the shipped arm is still `just bump`'s draft — one bullet per
-/// commit since the last tag (140 for the 0.15.0→0.16.0 cycle), which no popup
-/// could frame.
+/// True while the shipped arm is still `just bump`'s draft — one bullet per commit
+/// since the last tag, which no popup could frame.
 ///
-/// The framing gates skip that window because `bump` runs `just preflight` at
-/// step 6, BEFORE the human curates at step 7, and its failure trap restores
-/// `version.rs` — so a gate that reds there discards the draft and breaks the
-/// documented release path. `just notes-curated` (a required CI job, and
-/// deliberately NOT in preflight for this same reason) is what stops an
-/// uncurated arm reaching main.
+/// The framing gates skip that window because `bump` runs `just preflight` BEFORE
+/// the human curates, and its failure trap restores `version.rs` — so a gate that
+/// reds there discards the draft. `just notes-curated` (a required CI job, and
+/// deliberately NOT in preflight for this same reason) is what stops an uncurated
+/// arm reaching main.
 #[cfg(test)]
 pub(crate) fn release_notes_are_uncurated() -> bool {
     include_str!("version.rs").contains(UNCURATED_MARKER)
@@ -77,8 +69,8 @@ pub(crate) fn release_notes_are_uncurated() -> bool {
 pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
     match version {
         // `just bump` injects the new version's arm right after the marker below;
-        // anchoring on a marker is whitespace-independent — matching the `match`
-        // brace would silently break if the indentation ever shifted.
+        // anchoring on a marker is whitespace-independent, where matching the
+        // `match` brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.16.0" => Some(&[
             "The office you can hear — press m for procedural lofi that builds with the bustle, plus typing, rain, door and appliance cues. Starts muted; + and - set volume",
@@ -153,10 +145,9 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
             "Windows: Codex + Reasonix hooks and the Antigravity watcher work end-to-end",
             "Your config is never wiped: installs and saves preserve comments & permissions under one atomic locked round",
         ]),
-        // 0.6.1 re-runs the 0.6.0 release with the npm-launcher publish fix
-        // (#186) — 0.6.0 shipped to crates.io/homebrew but the `pixtuoid` npm
-        // launcher failed, so 0.6.1 is the first fully-published version. Same
-        // highlights, since most users first land here.
+        // 0.6.1 deliberately repeats 0.6.0's highlights: 0.6.0 shipped to
+        // crates.io/homebrew but its npm launcher failed, so 0.6.1 is the first
+        // fully-published version and where most users first land.
         "0.6.1" => Some(&[
             "Windows support — native hook transport, installer, and release builds",
             "Install via npm — `npm i -g pixtuoid` on macOS, Linux & Windows",
@@ -165,8 +156,6 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
             "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
             "New project site — live demos, architecture & contributing docs, weather gallery",
         ]),
-        // 0.6.0 shipped to crates.io/homebrew but its npm launcher failed, so
-        // 0.6.1 (above) superseded it as the first fully-published release.
         "0.6.0" => Some(&[
             "Windows support — native hook transport, installer, and release builds",
             "Install via npm — `npm i -g pixtuoid` now works on macOS, Linux & Windows",
@@ -204,10 +193,8 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
 mod tests {
     use super::*;
 
-    /// Every shipped version, for the `release_notes_present_for_every_shipped_version`
-    /// teeth. `just bump` prepends the new version at the marker below — the twin of
-    /// the `[bump-inject-here]` match-arm injection — so this list can't silently
-    /// drift out of sync with the arms the way the old hand-maintained array did.
+    /// Every shipped version. `just bump` prepends the new one at the marker below —
+    /// the twin of the `[bump-inject-here]` match-arm injection.
     const SHIPPED_VERSIONS: &[&str] = &[
         // [bump-version-list-here]
         "0.16.0", "0.15.0", "0.14.0", "0.13.0", "0.12.0", "0.11.1", "0.11.0", "0.10.0", "0.9.0",
@@ -272,11 +259,6 @@ mod tests {
         assert!(release_notes("9.9.9").is_none());
     }
 
-    /// Every SHIPPED historical version must keep a non-empty `release_notes`
-    /// arm — those arms back the upgrade popup, which `boot_decision` gates on
-    /// `release_notes(current).is_some()`. An empty/absent slice renders a
-    /// blank popup, so this fails if any arm is deleted or returns `Some(&[])`.
-    /// (No exact-prose assertions — that would be brittle to copy edits.)
     #[test]
     fn release_notes_present_for_every_shipped_version() {
         for v in SHIPPED_VERSIONS {
@@ -286,9 +268,6 @@ mod tests {
         }
     }
 
-    /// Guards against a silent regression: bumping `Cargo.toml` without
-    /// adding a matching `release_notes` arm would make the popup
-    /// permanently invisible for the new release. This test fails fast.
     #[test]
     fn current_version_has_release_notes() {
         let current = env!("CARGO_PKG_VERSION");
@@ -298,12 +277,9 @@ mod tests {
         );
     }
 
-    /// The INVERSE of `release_notes_present_for_every_shipped_version`: `just
-    /// bump` injects the new version at BOTH `[bump-inject-here]` (the arm) and
-    /// `[bump-version-list-here]` (this list). An arm added without the list
-    /// entry — the 0.15.0 drift the forward test can't see — makes that release a
-    /// permanent gap once the next bump prepends over it. Pin the current version
-    /// into the list so the miss fails fast.
+    /// An arm added without the matching `SHIPPED_VERSIONS` entry — the drift the
+    /// forward test can't see — makes that release a permanent gap once the next
+    /// bump prepends over it.
     #[test]
     fn current_version_is_in_shipped_versions() {
         let current = env!("CARGO_PKG_VERSION");
@@ -315,23 +291,16 @@ mod tests {
     }
 
     /// Guard for #110: every hardcoded intra-workspace path-dep `version` (NOT
-    /// workspace-inherited) must track the crate version, or a bump that misses
-    /// one breaks `cargo publish`. Three such pins exist — `pixtuoid →
-    /// pixtuoid-core`, `pixtuoid → pixtuoid-scene`, and `pixtuoid-scene →
-    /// pixtuoid-core` — and the whole workspace bumps in lockstep, so all equal
-    /// `CARGO_PKG_VERSION`. `just bump` (cargo set-version --workspace) keeps them
-    /// synced; this fails fast — in `just test`, preflight, and the release
-    /// `check` job — if any drifts. Checks EVERY `path =` + `version = "` line
-    /// (not a named subset), so a future workspace path-dep is covered the moment
-    /// it's added, not silently left unguarded.
+    /// workspace-inherited) must track the crate version, or a bump that misses one
+    /// breaks `cargo publish`. Checks EVERY `path =` + `version = "` line rather
+    /// than a named subset, so a future workspace path-dep is covered the moment
+    /// it's added.
     #[test]
     fn path_dep_version_tracks_crate_version() {
         let assert_tracks = |manifest: &str, who: &str| {
             let mut checked = 0;
             for line in manifest.lines() {
                 let l = line.trim_start();
-                // An intra-workspace published path-dep carries BOTH `path =` and a
-                // hardcoded `version = "..."`; that pair is the #110 publish surface.
                 // A version-inherited path-dep (no `version = "`) is not a hazard.
                 if !(l.contains("path =") && l.contains("version = \"")) {
                     continue;
@@ -374,10 +343,7 @@ mod tests {
         assert!(!is_valid_version(""));
     }
 
-    // Regression for the silent-disable bug: a hand-edited or corrupted
-    // last_seen_version (e.g. `v0.4.0` matching the git-tag spelling) must
-    // be overwritten on boot, not left in place to suppress every future
-    // popup.
+    // `v0.4.0` is the git-tag spelling — the corruption a hand-edit actually hits.
     #[test]
     fn boot_decision_overwrites_corrupted_last_seen() {
         let d = boot_decision("0.4.1", Some("v0.4.0"));

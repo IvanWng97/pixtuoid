@@ -4,19 +4,17 @@
 //! `$HYPRLAND_INSTANCE_SIGNATURE` is (`hyprctl`), else the X11/EWMH
 //! `_NET_ACTIVE_WINDOW` protocol (the wmctrl mechanism) via x11rb — which
 //! covers i3 too (X11-native; `$I3SOCK` deliberately does NOT route to
-//! `swaymsg`). `focusable` asks the SAME channel "does this pid own a
-//! window?" (compositor tree / `_NET_WM_PID`), so the walk surfaces the
-//! terminal emulator — the agent process itself owns no surface. GNOME
-//! Wayland forbids focus-steal by design — every channel simply fails there
-//! → the caller's silent no-op, per the ONE failure rule.
+//! `swaymsg`). The walk exists because the agent process owns no surface —
+//! its terminal emulator does. GNOME Wayland forbids focus-steal by design —
+//! every channel simply fails there → the caller's silent no-op, per the ONE
+//! failure rule.
 //!
 //! codecov-ignored glue; the walk logic is tested in `focus::tests`.
 
 use super::ProcessTable;
 
-// The two IPC-compositor env markers — the SINGLE source `detect_channel`
-// (below) and doctor's `activation_backend` read, so an upstream rename can't
-// drift one of the three copies.
+// The SINGLE source `detect_channel` and doctor's `activation_backend` read, so
+// an upstream rename can't drift the copies.
 pub(crate) const SWAY_ENV: &str = "SWAYSOCK";
 pub(crate) const HYPRLAND_ENV: &str = "HYPRLAND_INSTANCE_SIGNATURE";
 
@@ -30,14 +28,10 @@ enum LinuxFocusChannel {
     X11,
 }
 
-/// EMPTY (or whitespace-only) counts as UNSET — the workspace
-/// `install::io::nonempty` rule, NOT bare presence: systemd user units and
-/// non-forwarded ssh sessions routinely leave an exported-but-blank `SWAYSOCK`
-/// behind, and reading that as "sway is running" routes BOTH halves (the
-/// `focusable` probe and the activation) to `swaymsg` on a host where EWMH
-/// would have worked — every click then dead-ends in the ONE failure rule's
-/// silent no-op, permanently. `doctor::marker_set` applies the same rule to the
-/// same markers so the jump and its diagnostic can't disagree.
+/// EMPTY (or whitespace-only) counts as UNSET, NOT bare presence: systemd user
+/// units and non-forwarded ssh sessions routinely leave an exported-but-blank
+/// `SWAYSOCK` behind, and reading that as "sway is running" routes both halves
+/// to `swaymsg` on a host where EWMH would have worked.
 fn detect_channel() -> LinuxFocusChannel {
     if crate::install::io::nonempty_env(SWAY_ENV).is_some() {
         LinuxFocusChannel::Sway
@@ -68,10 +62,9 @@ impl ProcessTable for OsProcessTable {
     }
 }
 
-/// Whether the compositor's JSON tree (`swaymsg -t get_tree` / `hyprctl
-/// clients -j`) lists a node with `"pid": <pid>` — the IPC answer to "does
-/// this pid own a window". Full serde parse + recursive scan rather than a
-/// substring match: both tools vary pretty-vs-compact output by tty.
+/// Whether the compositor's JSON tree lists a node with `"pid": <pid>`. Full
+/// serde parse + recursive scan rather than a substring match: both tools vary
+/// pretty-vs-compact output by tty.
 fn tree_lists_pid(cmd: &str, args: &[&str], pid: i32) -> bool {
     let Ok(out) = std::process::Command::new(cmd).args(args).output() else {
         return false;
@@ -127,9 +120,7 @@ fn x11_window_of(pid: i32) -> Option<u32> {
     None
 }
 
-/// Activate `pid`'s window on the same channel `focusable` matched it on:
-/// sway/hyprland IPC (pid-addressed) when the env marker is present, else
-/// EWMH `_NET_ACTIVE_WINDOW`.
+/// Activate `pid`'s window on the same channel `focusable` matched it on.
 pub(crate) fn activate_os(pid: i32) -> bool {
     match detect_channel() {
         LinuxFocusChannel::Sway => {
@@ -148,15 +139,10 @@ pub(crate) fn activate_os(pid: i32) -> bool {
 /// whether it succeeded.
 ///
 /// The caller is the crossterm event loop, INSIDE the TUI's raw-mode alternate
-/// screen (a sprite click / dashboard `f`). Inherited stdio — `Command::status`'s
-/// default — would let the child paint into the office (`swaymsg`'s diagnostic
-/// for an unmatched `[pid=N]` criterion is the COMMON case, given focus's
-/// documented misses) where ratatui's diff-based redraw leaves it until those
-/// cells next change, and would hand the child the raw-mode tty the TUI is
-/// polling for keystrokes. Every other child spawn in the binary already
-/// captures or nulls (`.output()` in `tree_lists_pid` and `focus::macos`,
-/// explicit `Stdio` in `doctor::probe_version`); routing every arm through one
-/// helper is what stops a future compositor being added un-nulled.
+/// screen. Inherited stdio — `Command::status`'s default — would let the child
+/// paint into the office, where ratatui's diff-based redraw leaves it until
+/// those cells next change, and would hand the child the raw-mode tty the TUI
+/// is polling for keystrokes.
 fn run_detached(cmd: &str, args: &[&str]) -> bool {
     std::process::Command::new(cmd)
         .args(args)

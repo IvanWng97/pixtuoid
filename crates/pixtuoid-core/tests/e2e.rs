@@ -90,13 +90,8 @@ fn scripted_timeline_drives_scene_through_states() {
         snaps[1].agents.get(&id).unwrap().state,
         ActivityState::Active { .. }
     ));
-    // After ActivityEnd the slot is debounced (ACTIVE_GRACE_WINDOW =
-    // 1500ms) — it stays visually Active so that rapid CC tool chains
-    // (PreToolUse → PostToolUse → PreToolUse) read as continuous work
-    // instead of flickering. The transition to Idle is realized later
-    // by `reducer.tick` (or by another event arriving past the
-    // window). `pending_idle_at` is the signal that the debounce is
-    // armed.
+    // ActivityEnd only arms `pending_idle_at`: the slot stays Active for the
+    // grace window so rapid tool chains read as continuous work; `tick` realizes Idle.
     let slot2 = snaps[2].agents.get(&id).unwrap();
     assert!(matches!(slot2.state, ActivityState::Active { .. }));
     assert!(slot2.pending_idle_at.is_some());
@@ -104,10 +99,6 @@ fn scripted_timeline_drives_scene_through_states() {
         snaps[3].agents.get(&id).unwrap().state,
         ActivityState::Waiting { .. }
     ));
-    // After SessionEnd the slot is marked for exit (renderer plays the
-    // walkout animation) and the reducer's sweep removes it ~4.5s later
-    // on the next tick / event. The slot is still present in the
-    // immediate snapshot but has `exiting_at` set.
     let exit_slot = snaps[4]
         .agents
         .get(&id)

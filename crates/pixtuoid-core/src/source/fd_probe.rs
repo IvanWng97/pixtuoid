@@ -1,14 +1,8 @@
 //! Process → open-file-descriptor enumeration, the OS half of the Codex
-//! liveness probe (`codex::live_codex_rollout_ids`). A live `codex` process
-//! holds its rollout `.jsonl` open in append mode for the whole session
-//! (upstream `RolloutRecorder` owns the handle), so "which rollout files does
-//! a running `codex` hold open" is a first-party liveness signal — no
-//! registry, no PID file, no log-content reads.
-//!
-//! Platform split: macOS uses the libproc syscall wrappers (`proc_listallpids`
-//! / `proc_name` / `proc_pidinfo(PROC_PIDLISTFDS)` / `proc_pidfdinfo`); Linux
-//! reads `/proc/<pid>/{comm,fd}`. Everything else returns empty — the probe is
-//! ADDITIVE-ONLY, so empty = today's pure-mtime first-sight gate.
+//! liveness probe. A live `codex` process holds its rollout `.jsonl` open in
+//! append mode for the whole session (upstream `RolloutRecorder` owns the
+//! handle), so "which rollout files does a running `codex` hold open" is a
+//! first-party liveness signal.
 //!
 //! Contract: never panic, never block. Every failure path (process exited
 //! mid-probe, EPERM, short read) skips the entry or returns empty; the probe
@@ -17,24 +11,19 @@
 use std::path::PathBuf;
 
 /// PIDs of running processes whose (kernel-truncated) name equals `name`
-/// exactly. Both kernels truncate the comparand — macOS `proc_name` and Linux
-/// `comm` cap at well under 32 bytes — so only short names like `codex` can
-/// ever match; that's the intended use.
+/// exactly. Both kernels truncate the comparand at well under 32 bytes, so only
+/// short names like `codex` can ever match.
 ///
-/// `None` = the proc-table enumeration ITSELF failed (macOS
-/// `proc_listallpids` sizing/fill <= 0; Linux `/proc` unreadable) — the
-/// caller must treat the whole probe pass as failed (#223: an empty result
-/// from a broken enumeration must not read as "every process exited").
-/// `Some(vec![])` = the enumeration ran fine and nothing matched
-/// (meaningful). Per-PID failures inside [`open_vnode_paths`] stay
-/// non-failures — a pid vanishing mid-probe is normal.
+/// `None` = the proc-table enumeration ITSELF failed — the caller must treat the
+/// whole probe pass as failed (#223: an empty result from a broken enumeration
+/// must not read as "every process exited"). `Some(vec![])` = the enumeration
+/// ran fine and nothing matched.
 pub(crate) fn pids_by_name(name: &str) -> Option<Vec<i32>> {
     imp::pids_by_name(name)
 }
 
 /// Filesystem paths of the regular-file (vnode) descriptors `pid` holds open.
-/// A pid that exited, is unreadable (EPERM), or closes an fd between the list
-/// and the per-fd query simply contributes nothing.
+/// A pid that exited or is unreadable simply contributes nothing.
 pub(crate) fn open_vnode_paths(pid: i32) -> Vec<PathBuf> {
     imp::open_vnode_paths(pid)
 }
@@ -44,11 +33,8 @@ mod imp {
     use std::ffi::c_void;
     use std::path::PathBuf;
 
-    // libc 0.2.x ships proc_fdinfo / vnode_info_path / PROC_PIDLISTFDS /
-    // PROX_FDTYPE_VNODE and the four libproc fns (verified against the
-    // vendored libc 0.2.186), but lacks ONLY the per-fd vnode-path flavor —
-    // the constant and the two structs below, from <sys/proc_info.h>
-    // (ABI-stable since 10.5).
+    // libc lacks ONLY the per-fd vnode-path flavor — the constant and the two
+    // structs below, from <sys/proc_info.h> (ABI-stable since 10.5).
     const PROC_PIDFDVNODEPATHINFO: libc::c_int = 2;
 
     #[repr(C)]
@@ -69,7 +55,6 @@ mod imp {
     }
 
     pub(super) fn pids_by_name(name: &str) -> Option<Vec<i32>> {
-        // Two-call sizing: a null buffer returns the current process count.
         // SAFETY: the null-buffer/0-size form is the documented sizing call —
         // nothing is written.
         let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
@@ -174,7 +159,7 @@ mod imp {
                 continue;
             }
             // vip_path is [[c_char; 32]; 32] (libc's old-rustc stand-in for a
-            // flat 1024 array); flatten and take the NUL-terminated prefix.
+            // flat 1024 array), hence the flatten.
             let path_bytes: Vec<u8> = info
                 .pvip
                 .vip_path
@@ -210,16 +195,15 @@ mod imp {
                 .to_str()
                 .and_then(|s| s.parse::<i32>().ok())
             else {
-                continue; // non-numeric /proc entries (self, sys, ...)
+                continue;
             };
             // A process exiting mid-scan makes the read fail — skip it.
             let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) else {
                 continue;
             };
-            // `pid > 0` for parity with the macOS arm: /proc never lists 0 or
-            // negative pids, but a 0 leaking downstream would collide with the
-            // kqueue wake slot's ident-0 on the macOS twin — keep both arms
-            // structurally incapable of emitting it.
+            // `pid > 0` for parity with the macOS arm: a 0 leaking downstream
+            // would collide with the kqueue wake slot's ident-0 there, so keep
+            // both arms structurally incapable of emitting it.
             if pid > 0 && comm.trim_end_matches('\n') == name {
                 pids.push(pid);
             }
@@ -227,14 +211,10 @@ mod imp {
         Some(pids)
     }
 
-    /// Linux arm: absoluteness IS the vnode test. `/proc/<pid>/fd` resolves
-    /// non-file descriptors to synthetic NON-absolute targets
-    /// (`socket:[inode]`, `pipe:[inode]`, `anon_inode:[eventfd]`), so the
-    /// `is_absolute` filter matches this fn's name + doc AND the macOS arm's
-    /// `PROX_FDTYPE_VNODE`. Unfiltered, the two platform arms returned
-    /// DIFFERENT things under one name, and a caller that believed the doc got
-    /// a Linux-only false positive (pinned by
-    /// `open_vnode_paths_never_reports_a_unix_socket`).
+    /// Absoluteness IS the vnode test here: `/proc/<pid>/fd` resolves non-file
+    /// descriptors to synthetic NON-absolute targets (`socket:[inode]`,
+    /// `pipe:[inode]`, `anon_inode:[eventfd]`), so the `is_absolute` filter is
+    /// what makes this arm match the macOS arm's `PROX_FDTYPE_VNODE`.
     ///
     /// A deleted file's link ends with `" (deleted)"`, which simply never
     /// matches a rollout path — no stripping needed.
@@ -246,7 +226,6 @@ mod imp {
         entries
             .flatten()
             .filter_map(|e| std::fs::read_link(e.path()).ok())
-            // VNODE only: absoluteness is the vnode test — see this fn's doc.
             .filter(|p| p.is_absolute())
             .collect()
     }
@@ -256,12 +235,9 @@ mod imp {
 mod imp {
     use std::path::PathBuf;
 
-    // No validated fd-enumeration path on this platform (Windows needs
-    // NtQuerySystemInformation handle walks we haven't vetted). Some(empty) =
-    // "ran fine, nothing matched": nothing is ever vouched here, so the
-    // pure-mtime gate applies AND the negative vouch can never fire (an empty
-    // prev_vouched set has nothing to lose) — Some keeps the un-gated
-    // empty-result tests platform-uniform.
+    // No validated fd-enumeration path on this platform. Some(empty) rather
+    // than None: nothing is ever vouched here, so the pure-mtime gate applies
+    // AND the negative vouch can never fire.
     pub(super) fn pids_by_name(_name: &str) -> Option<Vec<i32>> {
         Some(Vec::new())
     }
@@ -275,9 +251,6 @@ mod imp {
 mod tests {
     use super::*;
 
-    /// Exercises the REAL enumeration (libproc FFI on macOS, /proc on Linux):
-    /// this very test process holds a tempfile open, so its canonical path
-    /// must appear among our own open vnodes.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn open_vnode_paths_sees_a_file_this_process_holds_open() {
@@ -302,21 +275,14 @@ mod tests {
         assert!(open_vnode_paths(999_999_999).is_empty());
     }
 
-    /// A UNIX SOCKET this process holds open must NOT be reported: the fn is
-    /// vnode-only on both arms, so a socket path can never come back from it.
-    ///
-    /// This is the negative half the two platform arms disagreed on — macOS
-    /// filtered `PROX_FDTYPE_VNODE` while Linux returned every `/proc/<pid>/fd`
-    /// link, `socket:[inode]` included — and it is load-bearing beyond hygiene:
-    /// `grok::leader_socket_owner` asks THIS fn whether a pid holds
-    /// `{grok_home}/leader.sock`, which is exactly the question it cannot
-    /// answer. Verified against the live syscalls: a bound+listening AF_UNIX fd
-    /// reports `proc_fdtype=2` (SOCKET, not VNODE=1) and its
-    /// `PROC_PIDFDVNODEPATHINFO` query returns 0 bytes with an empty path.
-    /// Detecting a socket's owner needs a socket-aware probe
-    /// (`PROC_PIDFDSOCKETINFO` on macOS, a `/proc/net/unix` inode join on
-    /// Linux) — see `grok::native::leader_socket_owner`, which is inert for
-    /// exactly this reason (#826).
+    /// The macOS/Linux parity pin: macOS filtered `PROX_FDTYPE_VNODE` while
+    /// Linux returned every `/proc/<pid>/fd` link, `socket:[inode]` included.
+    /// A caller needing a socket's OWNER needs a socket-aware probe instead
+    /// (macOS `PROC_PIDFDSOCKETINFO`; on Linux a `/proc/net/unix` inode join —
+    /// NOT `stat`'s `st_ino`, the path's filesystem inode rather than the
+    /// sockfs inode `socket:[N]` names). grok's #638 leader vouch was this
+    /// crate's only such caller and was deleted rather than repaired (#826);
+    /// don't add a socket arm here on spec.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn open_vnode_paths_never_reports_a_unix_socket() {
@@ -334,11 +300,7 @@ mod tests {
 
     #[test]
     fn pids_by_name_for_nonexistent_process_is_some_empty() {
-        // Longer than any kernel-truncated process name, so it can never
-        // match. Some(empty) — the enumeration RAN and found nothing; None is
-        // reserved for the proc table itself failing (#223: the distinction
-        // is what keeps a broken enumeration from reading as "everything
-        // exited").
+        // Longer than any kernel-truncated process name, so it can never match.
         assert_eq!(
             pids_by_name("definitely-not-a-process-7q3z9"),
             Some(Vec::new())
@@ -351,10 +313,6 @@ mod tests {
         let _ = pids_by_name("codex");
     }
 
-    /// Positive-path proof for the pid enumeration (the held-open test above
-    /// only proves the fd half): a spawned `sleep` child must be found by its
-    /// kernel-reported name. Guards the `proc_listallpids` two-call sizing
-    /// semantics on macOS and the `/proc` comm scan on Linux.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn pids_by_name_finds_a_spawned_child() {
@@ -364,7 +322,7 @@ mod tests {
             .unwrap();
         let pid = child.id() as i32;
         // A just-spawned child isn't always named in the proc-table at the first
-        // probe (/proc/<pid>/comm materializes a beat after spawn) — poll ≤500ms.
+        // probe — poll rather than assert once.
         let found = (0..50).any(|_| {
             if pids_by_name("sleep")
                 .expect("a healthy system's proc-table enumeration must succeed")

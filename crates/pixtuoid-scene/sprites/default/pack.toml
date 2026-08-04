@@ -2,8 +2,6 @@
 name    = "topdown"
 version = "1"
 
-# Same palette as the side-view pack; H (hair) and B (shirt) stay as the
-# per-agent recolor targets so the existing recolor pipeline works.
 [palette]
 "." = "transparent"
 "H" = "#2a1a0e"   # hair (per-agent recolor target)
@@ -19,9 +17,8 @@ version = "1"
 "t" = "#d68a4a"   # orange tabby cat
 "u" = "#3a2010"   # cat dark (ears, eyes, nose, tail tip)
 "M" = "#3a3a40"   # monitor frame
-"E" = "#6e7280"   # elevator frame — brushed steel; deliberately lighter
-                  # than wall (#383846) and darker than chrome (K) so the
-                  # elevator pops as a metal box embedded in the wall
+"E" = "#6e7280"   # elevator frame — brushed steel: between wall (#383846) and
+                  # chrome (K) so it reads as a metal box embedded in the wall
 "k" = "#1a1a22"   # keyboard
 "D" = "#8b5a2b"   # desk wood
 "d" = "#5a3818"   # desk shadow
@@ -101,11 +98,8 @@ frames   = ["floor_lamp.sprite"]
 frame_ms = 600
 
 [animations.door]
-# 3-frame elevator door: closed → half-open → fully open. frame_ms is
-# irrelevant — the renderer picks the frame manually each tick based on
-# how far through their entry/exit window any agent is, instead of
-# auto-cycling. Large `frame_ms` is just a safety so accidental
-# cycling won't blink the door.
+# The renderer picks the frame manually each tick from entry/exit progress, so
+# `frame_ms` is irrelevant — 999999 only stops accidental cycling blinking the door.
 frames   = ["door.sprite", "door_half.sprite", "door_open.sprite"]
 frame_ms = 999999
 
@@ -146,8 +140,6 @@ frames   = ["dog_sleep.sprite"]
 frame_ms = 600
 
 [animations.lobster_walk]
-# 14x12 top-down lobster — the OpenClaw gateway mascot. Scuttles around the
-# floor (presence-gated); the two frames twitch the legs to read as motion.
 frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite"]
 frame_ms = 200
 
@@ -156,9 +148,7 @@ frames   = ["lobster_rest.sprite"]
 frame_ms = 600
 
 [animations.meeting_sofa]
-# 20x7 3-seat sofa, shared by the meeting room AND the lounge couch.
-# Bigger silhouette + visible cushion divisions so the focal furniture
-# of the meeting area reads as a sofa rather than a flat plank.
+# Shared by the meeting room AND the lounge couch.
 frames   = ["meeting_sofa.sprite"]
 frame_ms = 600
 
@@ -171,8 +161,7 @@ frames   = ["pantry.sprite"]
 frame_ms = 600
 
 [animations.pantry_small]
-# Fallback for narrow terminals (pantry room width < 36 px). Renderer
-# picks this over `pantry` based on layout.pantry_room.width.
+# The renderer picks this over `pantry` when `layout.pantry_room.width` is narrow.
 frames   = ["pantry_small.sprite"]
 frame_ms = 600
 

@@ -1,8 +1,8 @@
 name: cache cleanup
 
-# PR caches are scoped away from main and can evict useful main caches when the
-# repository reaches its 10 GB limit. Run in the base context so fork PRs can
-# clean up too, but never checkout or execute pull-request content here.
+# PR caches can evict useful main caches once the repository hits its size limit.
+# Runs in the base context so fork PRs clean up too — never checkout or execute
+# pull-request content here.
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] no checkout or PR-code execution; policy pins the cache-only job
     types: [closed]

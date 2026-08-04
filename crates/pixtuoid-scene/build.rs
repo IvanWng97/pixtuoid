@@ -1,13 +1,9 @@
 //! Tell cargo to rebuild whenever any embedded default-pack asset changes.
 //!
-//! `include_str!` in `src/embedded_pack.rs` bakes the default character pack
-//! into the crate at compile time, but cargo doesn't track those paths as
-//! source dependencies on its own — editing a `.sprite` file or `pack.toml`
-//! would otherwise leave the build stale until the .rs changes (a real
-//! time-sink during sprite iteration).
-//!
-//! This script walks `sprites/default/` and emits one `rerun-if-changed`
-//! line per file plus one for the directory itself (catches new files).
+//! `include_str!` in `src/embedded_pack.rs` bakes the default character pack in
+//! at compile time, but cargo doesn't track those paths as source dependencies
+//! on its own — an edited `.sprite` would leave the build stale until a .rs
+//! changes.
 
 use std::path::Path;
 
@@ -29,6 +25,5 @@ fn main() {
         }
     }
 
-    // Always rerun if THIS script changes.
     println!("cargo:rerun-if-changed=build.rs");
 }

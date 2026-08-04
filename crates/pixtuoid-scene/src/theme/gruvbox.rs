@@ -4,10 +4,6 @@ use super::*;
 
 /// Gruvbox Dark — retro warm amber on dark brown.
 /// Based on <https://github.com/morhetz/gruvbox>
-/// bg: #282828, bg1: #3c3836, bg2: #504945, bg3: #665c54
-/// fg: #ebdbb2, fg2: #d5c4a1, fg3: #bdae93, fg4: #a89984
-/// Red: #fb4934, Green: #b8bb26, Yellow: #fabd2f
-/// Blue: #83a598, Purple: #d3869b, Aqua: #8ec07c, Orange: #fe8019
 pub static GRUVBOX: Theme = Theme {
     name: "gruvbox",
     kind: ThemeKind::Dark,
@@ -193,8 +189,8 @@ pub static GRUVBOX: Theme = Theme {
             g: 18,
             b: 16,
         },
-        // Gruvbox bright yellow sun / a bluer aqua moon (gruvbox's own aqua
-        // leans green — brightened toward blue so the moon reads unambiguously cool).
+        // Moon brightened toward blue: gruvbox's own aqua leans green and would
+        // not read as cool.
         sun_core: Rgb {
             r: 250,
             g: 189,
@@ -346,10 +342,8 @@ pub static GRUVBOX: Theme = Theme {
             g: 187,
             b: 38,
         },
-        // Gruvbox bright yellow #fabd2f. Was the blue #83a598, byte-identical to
-        // `edit`; the palette's other spare accents are already green-family
-        // (read is aqua, grep is the yellow-green), so yellow is the one pick
-        // that reads apart from all five.
+        // Yellow, not the gruvbox blue: that one is byte-identical to `edit`, and
+        // the remaining spare accents are all green-family.
         default: Rgb {
             r: 250,
             g: 189,
@@ -534,31 +528,31 @@ pub static GRUVBOX: Theme = Theme {
             r: 0xa0,
             g: 0xaa,
             b: 0xc3,
-        }, // cursor slate-blue (monochrome brand; distinct from all 7)
+        }, // cursor slate-blue (monochrome brand)
         openclaw: Rgb {
             r: 0xff,
             g: 0xaa,
             b: 0x30,
-        }, // openclaw marigold (lobster; warm, clears claude-amber + opencode-red)
+        }, // openclaw marigold (must clear claude-amber + opencode-red)
         hermes: Rgb {
             r: 0x68,
             g: 0x58,
             b: 0xe0,
-        }, // Hermes/Nous indigo (brand-constant like openclaw marigold; clears reasonix-violet + cursor-slate + codex-blue on every theme, min Manhattan >=92)
+        }, // Hermes/Nous indigo (brand-constant; must clear reasonix-violet + cursor-slate + codex-blue)
         omp: Rgb {
             r: 0x8a,
             g: 0xc8,
             b: 0x32,
-        }, // omp lime (brand-constant; clears antigravity-green + codewhale-teal + claude-amber on every theme)
+        }, // omp lime (brand-constant; must clear antigravity-green + codewhale-teal + claude-amber)
         grok: Rgb {
             r: 0x30,
             g: 0xd0,
             b: 0xe8,
-        }, // grok cyan (brand-constant; nearest neighbor codewhale-teal at Manhattan 78 ≥ the 60 floor, and the SITE's chip transforms clear WCAG AA in both themes: ×0.55-on-day-chip 5.3:1, ×0.8+white-on-night-chip 11.6:1 — the silver e6e6e6 failed the day chip at 3.83:1, caught by the site e2e badge sweep)
+        }, // grok cyan (brand-constant; nearest neighbor codewhale-teal, and the site's chip transforms must clear WCAG AA)
         kimi: Rgb {
             r: 0xc4,
             g: 0x46,
             b: 0xfe,
-        }, // kimi electric violet (brand-constant like hermes/omp/grok; Kimi/Moonshot's purple, min Manhattan >=88 vs every source on every theme)
+        }, // kimi electric violet (brand-constant; must clear every source on every theme)
     },
 };

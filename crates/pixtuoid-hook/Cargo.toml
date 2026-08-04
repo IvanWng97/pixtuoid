@@ -10,11 +10,9 @@ authors.workspace      = true
 homepage.workspace     = true
 keywords.workspace     = true
 categories.workspace   = true
-# Workspace-only test that reads a sibling crate's source file, absent from the
-# published tarball — shipping it would make `cargo test` fail on the .crate
-# (publish itself is unaffected: its verify step builds, not tests).
-# pipe_quota_parity include_str!'s pixtuoid-core's source/hook/windows.rs, the
-# same treatment core gives socket_path_parity.
+# A workspace-only test: it include_str!'s a sibling crate's source, which is
+# absent from the published tarball, so shipping it would make `cargo test` fail
+# on the .crate (publish itself is unaffected — its verify step builds, not tests).
 exclude                = ["tests/pipe_quota_parity.rs"]
 
 [lints]
@@ -31,10 +29,9 @@ anyhow     = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# The shim was deliberately Windows-dep-free (constants hand-hardcoded), but the
-# #495 client-side peer-cred check needs Win32 (GetNamedPipeServerProcessId +
-# token-user SID compare) — verified decls beat hand-FFI in the never-panic shim.
-# Pin the SAME major as pixtuoid-core / pixtuoid so the bindings don't double-compile.
+# The client-side peer-cred check (#495) needs Win32 — verified decls beat hand-FFI
+# in a never-panic shim. Pin the SAME major as pixtuoid-core / pixtuoid so the
+# bindings don't double-compile.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Pipes", "Win32_System_Threading"] }
 

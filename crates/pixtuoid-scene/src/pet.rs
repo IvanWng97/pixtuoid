@@ -5,9 +5,8 @@ use crate::layout::{Point, Size};
 /// Duration (ms) the pet stays frozen in place after being petted.
 pub const PET_DURATION_MS: u64 = 2000;
 
-/// State for the "pet the animal" interaction. Lives on `TuiRenderer`
-/// (render-side only) — petting is a local visual effect, not a data
-/// model concern. Same pattern as `mouse_pos`.
+/// State for the "pet the animal" interaction — render-side only, not a data
+/// model concern.
 pub struct PetState {
     /// When the pet was last clicked — anchors the `PET_DURATION_MS` freeze.
     pub petted_at: SystemTime,
@@ -30,15 +29,14 @@ impl PetState {
 
     /// Milliseconds since the pet was clicked, saturating to 0 on a backward clock.
     pub fn elapsed_ms(&self, now: SystemTime) -> u64 {
-        // Delegate to the crate's saturate-to-0 helper (byte-identical). `is_active`
-        // above keeps its own form: its backward-clock fallback is `PET_DURATION_MS+1`
-        // (treat-as-expired), the deliberate variant anim.rs says not to migrate.
+        // `is_active` above deliberately does NOT use this helper: its
+        // backward-clock fallback is `PET_DURATION_MS+1` (treat-as-expired),
+        // not saturate-to-0.
         crate::anim::elapsed_ms(now, self.petted_at)
     }
 }
 
-/// The pet's resolved render frame for one tick (position + anim + kind),
-/// produced by the pixel pass and consumed by the renderer/tooltip/hit-test.
+/// The pet's resolved render frame for one tick (position + anim + kind).
 #[derive(Clone, Copy)]
 pub struct PetFrame {
     /// Buffer-pixel position of the pet this tick.
@@ -96,8 +94,7 @@ impl PetKind {
     }
 
     /// Default display name shown in the hover tooltip when a `[[pets]]` stanza
-    /// gives no `name`. Single source for these strings (the tooltip reads this
-    /// rather than hardcoding them).
+    /// gives no `name`.
     pub fn default_name(self) -> &'static str {
         match self {
             PetKind::Cat => "Office Cat",
@@ -126,11 +123,8 @@ impl PetKind {
 }
 
 /// A pet configured for the office: its [`PetKind`] plus the display name shown
-/// in the hover tooltip. The name is resolved ONCE (custom from the `[[pets]]`
-/// stanza, else [`PetKind::default_name`]) so the render path never does a name
-/// lookup or fallback — it reads `pet.name` directly. Keying the office's pets
-/// as a `&[Pet]` (not a parallel `Vec<PetKind>` + name map) makes "every enabled
-/// pet has a name" true by construction.
+/// in the hover tooltip. The name is resolved ONCE at construction, so the
+/// render path never does a lookup or fallback.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pet {
     /// Which animal.
@@ -178,10 +172,6 @@ mod tests {
     #[test]
     fn every_pet_kind_is_reachable_from_config() {
         for &kind in PetKind::ALL {
-            // Exhaustive match — adding a PetKind without a config string
-            // breaks compile HERE instead of warn-skipping at config load.
-            // (This forcing function used to live in the deleted
-            // config_name's own exhaustive match.)
             let name = match kind {
                 PetKind::Cat => "cat",
                 PetKind::Dog => "dog",
@@ -280,14 +270,9 @@ mod tests {
             kind: PetKind::Cat,
             floor_idx: 0,
         };
-        // Within the freeze window → active.
         assert!(pet.is_active(t0 + Duration::from_millis(PET_DURATION_MS / 2)));
-        // At/after the window → inactive (the `< PET_DURATION_MS` boundary).
         assert!(!pet.is_active(t0 + Duration::from_millis(PET_DURATION_MS)));
         assert!(!pet.is_active(t0 + Duration::from_millis(PET_DURATION_MS + 500)));
-        // Backward clock (now < petted_at): the deliberate `unwrap_or(PET_DURATION_MS+1)`
-        // fallback treats it as EXPIRED, not active — guards that constant against a
-        // `unwrap_or(0)` regression that would freeze the pet on a clock step.
         assert!(!pet.is_active(t0 - Duration::from_secs(1)));
     }
 }

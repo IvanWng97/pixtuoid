@@ -9,7 +9,7 @@ pub const SAMPLE_RATE: u32 = 44_100;
 
 /// Deterministic noise stream over the canonical splitmix64 finalizer
 /// (`pixtuoid_core::id`) — seedable, so synthesized assets are reproducible
-/// run-to-run (the audition prototype's seeded-numpy property, kept).
+/// run-to-run.
 pub struct NoiseStream {
     seed: u64,
     counter: u64,
@@ -33,8 +33,7 @@ impl NoiseStream {
         (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32
     }
 
-    /// Approximately standard-normal (Irwin–Hall n=4, unit variance) —
-    /// plenty gaussian for noise beds; nothing here is statistics.
+    /// Approximately standard-normal (Irwin–Hall n=4, unit variance).
     pub fn norm(&mut self) -> f32 {
         (self.unit() + self.unit() + self.unit() + self.unit() - 2.0) * 1.732_051
     }
@@ -94,8 +93,7 @@ fn fft(re: &mut [f32], im: &mut [f32], inverse: bool) {
 }
 
 /// Zero-pad `buf` to a power-of-two length, forward-FFT it, and return
-/// `(re, im, n, hz_per_bin)`. THE real-signal spectrum preamble shared by
-/// `bandpass`/`centroid_hz`/`band_energy_share` (byte-identical at all three).
+/// `(re, im, n, hz_per_bin)`.
 fn forward_spectrum(buf: &[f32]) -> (Vec<f32>, Vec<f32>, usize, f32) {
     let n = buf.len().next_power_of_two().max(2);
     let mut re = vec![0.0f32; n];
@@ -107,16 +105,15 @@ fn forward_spectrum(buf: &[f32]) -> (Vec<f32>, Vec<f32>, usize, f32) {
 }
 
 /// Mirror-aware frequency of FFT bin `k` in an `n`-point spectrum: bins above
-/// `n/2` are NEGATIVE frequencies, folded back to `n − k`. The load-bearing
-/// subtlety shared by `bandpass` + `shaped_noise_loop` — a copy that drops the
-/// fold would band-pass the wrong half of the spectrum.
+/// `n/2` are NEGATIVE frequencies, folded back to `n − k`. A copy that drops the
+/// fold band-passes the wrong half of the spectrum.
 fn bin_freq(k: usize, n: usize, hz_per_bin: f32) -> f32 {
     (if k <= n / 2 { k } else { n - k }) as f32 * hz_per_bin
 }
 
-/// Brickwall band-pass via FFT bin zeroing (the audition prototype's filter).
-/// Construction-time only — a linear-phase FIR would be overkill for
-/// pre-rendered assets. Keeps `buf.len()` (internally pads to a power of 2).
+/// Brickwall band-pass via FFT bin zeroing. Construction-time only — a
+/// linear-phase FIR would be overkill for pre-rendered assets. Keeps
+/// `buf.len()` (internally pads to a power of 2).
 pub fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
     let (mut re, mut im, n, hz_per_bin) = forward_spectrum(buf);
     for k in 0..n {
@@ -140,8 +137,7 @@ pub fn highpass(buf: &[f32], cutoff_hz: f32) -> Vec<f32> {
 }
 
 /// Tape wow/flutter — resample `buf` along a sinusoidally warped time axis
-/// (the Phase 0 `lofi_post` core, numpy `interp(t + warp, t, x)` semantics:
-/// linear interpolation, edge-clamped). Each `(hz, dev)` pair contributes a
+/// (linear interpolation, edge-clamped). Each `(hz, dev)` pair contributes a
 /// pitch deviation of ±`dev` (fractional) by displacing the read head
 /// `dev·SR/(2π·hz)` samples at rate `hz`.
 pub fn warp_resample(buf: &[f32], warps: &[(f32, f32)]) -> Vec<f32> {
@@ -196,7 +192,7 @@ pub fn shaped_noise_loop(
             }
         }
     }
-    // smooth the band stairs so edges don't ring (the prototype's hanning-201)
+    // smooth the band stairs so edges don't ring
     let smoothed = moving_average(&gain, 201);
     for k in 0..n_pow2 {
         re[k] *= smoothed[k];
@@ -214,7 +210,6 @@ fn moving_average(x: &[f32], window: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; n];
     let mut acc = 0.0f32;
     let mut count = 0usize;
-    // sliding window over a clamped range; O(n) with incremental updates
     let mut lo = 0usize;
     let mut hi = 0usize; // exclusive
     for (i, o) in out.iter_mut().enumerate() {
@@ -235,10 +230,9 @@ fn moving_average(x: &[f32], window: usize) -> Vec<f32> {
     out
 }
 
-/// Spectral centroid in Hz — the fingerprint metric from the Phase 0
-/// analyzers. Un-gated (not `#[cfg(test)]`) because the binary's `run_loop`
-/// composition test reads it CROSS-CRATE (a dependency's test-cfg items are
-/// invisible), and the web driver's tests will too.
+/// Spectral centroid in Hz. NOT `#[cfg(test)]`-gated: a dependency's test-cfg
+/// items are invisible cross-crate, and the binary's `run_loop` composition test
+/// reads this (as the web driver's tests will).
 pub fn centroid_hz(buf: &[f32]) -> f32 {
     let (re, im, n, hz_per_bin) = forward_spectrum(buf);
     let (mut num, mut den) = (0.0f64, 0.0f64);
@@ -250,8 +244,7 @@ pub fn centroid_hz(buf: &[f32]) -> f32 {
     (num / den.max(1e-12)) as f32
 }
 
-/// Fraction of spectral power inside `[lo_hz, hi_hz)` — the octave-band
-/// energy metric of the Phase 0 analyzers, for the rain-envelope pin.
+/// Fraction of spectral power inside `[lo_hz, hi_hz)`.
 #[cfg(test)]
 pub fn band_energy_share(buf: &[f32], lo_hz: f32, hi_hz: f32) -> f32 {
     let (re, im, n, hz_per_bin) = forward_spectrum(buf);
@@ -286,8 +279,6 @@ mod tests {
 
     #[test]
     fn bandpass_keeps_in_band_and_kills_out_of_band() {
-        // a 500Hz tone through a 300-800Hz pass survives; through a
-        // 2-4kHz pass it dies (both sides of the band edges)
         let t: Vec<f32> = (0..8192)
             .map(|i| (2.0 * std::f32::consts::PI * 500.0 * i as f32 / SAMPLE_RATE as f32).sin())
             .collect();
@@ -303,11 +294,10 @@ mod tests {
         let tone: Vec<f32> = (0..44_100)
             .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / SAMPLE_RATE as f32).sin())
             .collect();
-        // zero deviation = bit-exact identity (the read head never moves)
+        // zero deviation is bit-exact identity: the read head never moves
         let same = warp_resample(&tone, &[(0.7, 0.0)]);
         assert_eq!(same, tone);
-        // the ratified wow/flutter is a SUBTLE warble: the tone's centroid
-        // stays put and its power survives (no smearing to noise)
+        // the shipped wow/flutter pair — a deliberately subtle warble
         let warped = warp_resample(&tone, &[(0.7, 0.0025), (8.0, 0.0006)]);
         let c = centroid_hz(&warped);
         assert!((400.0..480.0).contains(&c), "centroid {c} strayed from 440");
@@ -320,8 +310,6 @@ mod tests {
 
     #[test]
     fn shaped_noise_matches_its_target_envelope() {
-        // shaping IS the rain-bed mechanism — pin it against a simple
-        // two-band target within a few percentage points
         let mut rng = NoiseStream::new(7);
         let bands = [(100.0, 1000.0, 70.0), (1000.0, 8000.0, 30.0)];
         let buf = shaped_noise_loop(1 << 16, &bands, &mut rng);

@@ -1,34 +1,17 @@
 //! opencode hook install target — a TS PLUGIN, not a config block.
 //!
 //! opencode has no config-level shell hook (and SQLite-only sessions, no
-//! tailable transcript), so pixtuoid integrates as an opencode plugin: opencode
-//! auto-discovers `<config>/plugins/*.{ts,js}` (the canonical docs' dir; the
-//! anomalyco fork's `config/plugin.ts::load` globs `{plugin,plugins}` so both
-//! work there, but PLURAL `plugins/` is the documented dir canonical opencode
-//! scans), so we DROP a plugin file at `<opencode-config>/plugins/pixtuoid.ts` —
-//! no edit to the user's `opencode.jsonc` (no comment-clobber risk). This is the
-//! FIRST install target that ships a CODE artifact rather than a config block.
+//! tailable transcript), so pixtuoid drops a plugin file at
+//! `<opencode-config>/plugins/pixtuoid.ts`, which opencode auto-discovers. The
+//! plugin pipes the EventV2 lifecycle/tool/permission stream into the
+//! `pixtuoid-hook` shim on stdin; the shim's absolute path is baked in
+//! (JSON-escaped) at install time from the `opencode_plugin.ts` template.
 //!
-//! The plugin's `event` hook receives the same EventV2 stream the server SSE
-//! endpoint serves (dir-scoped, base `type` — `event-v2-bridge.ts`), and pipes
-//! the lifecycle/tool/permission events into the `pixtuoid-hook` shim on stdin
-//! (`--source opencode`, plain mode). The shim's absolute path is baked into the
-//! plugin (JSON-escaped) at install time; the template lives in
-//! `opencode_plugin.ts`.
-//!
-//! The plugin FILE is wholly owned by pixtuoid (not a shared config we merge
-//! into), so `merge_install` renders the whole file and `merge_uninstall`
-//! replaces it with a sentinel-free no-op stub (`export {}`). ACCEPTED residual:
-//! uninstall leaves that ~1-line stub rather than deleting the file — the
-//! orchestrator's `write_atomic` can't delete, and the stub is a harmless empty
-//! module opencode loads to nothing. `merge_uninstall` keys on the
-//! `@pixtuoid-opencode-plugin` sentinel (absent from the stub) to decide
-//! `changed`, so a re-install/uninstall round-trip is exact. (`detect_installed`
-//! — the auto-detect probe — keys on the opencode CLI's dirs, NOT this sentinel;
-//! see its doc.)
-//!
-//! Config dir resolution mirrors opencode's own (`global.ts`): `OPENCODE_CONFIG_DIR`
-//! else `$XDG_CONFIG_HOME/opencode` else `~/.config/opencode`.
+//! The plugin FILE is wholly owned by pixtuoid, so `merge_install` renders the
+//! whole file and `merge_uninstall` replaces it with a sentinel-free no-op stub.
+//! ACCEPTED residual: uninstall leaves that stub rather than deleting the file —
+//! the orchestrator's `write_atomic` can't delete, and the stub is a harmless
+//! empty module.
 
 use std::path::{Path, PathBuf};
 
@@ -37,24 +20,17 @@ use anyhow::{anyhow, Result};
 use crate::install::io;
 use crate::install::target::MergeOutcome;
 
-/// First-line marker in the rendered plugin — `merge_uninstall` keys on it to
-/// detect our managed plugin (absent from the removed-stub, so an uninstall of
-/// a foreign/removed file is a clean no-op).
+/// Marks the plugin as ours — absent from the removed-stub, so an uninstall of
+/// a foreign/removed file is a clean no-op.
 const SENTINEL: &str = "@pixtuoid-opencode-plugin";
 
-/// The placeholder the bundled template carries for the baked shim path.
 const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
-/// The bundled plugin source (with the quoted `{{HOOK_PATH_JSON}}` placeholder).
 const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
-/// Written on uninstall: a valid empty ES module (opencode loads it to zero
-/// hooks) WITHOUT the sentinel, so a re-uninstall is a clean no-op.
+/// A valid empty ES module WITHOUT the sentinel, so a re-uninstall is a no-op.
 const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport {}\n";
 
-/// opencode's config dir: `OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`,
-/// else `~/.config/opencode` — mirroring opencode `global.ts` so we write into
-/// the dir it actually scans for plugins.
 fn opencode_config_dir() -> Result<PathBuf> {
     config_dir_from(
         io::nonempty_env("OPENCODE_CONFIG_DIR").as_deref(),
@@ -63,12 +39,12 @@ fn opencode_config_dir() -> Result<PathBuf> {
     )
 }
 
-/// Pure precedence resolver (testable without env mutation): `OPENCODE_CONFIG_DIR`,
-/// then `$XDG_CONFIG_HOME/opencode`, then `<home>/.config/opencode`. Errs only when
-/// none resolve (no home) — same contract as the home-anchored targets.
+/// Mirrors opencode's own `global.ts` precedence, so we write into the dir it
+/// actually scans for plugins: `OPENCODE_CONFIG_DIR`, then
+/// `$XDG_CONFIG_HOME/opencode`, then `<home>/.config/opencode`.
 fn config_dir_from(oc: Option<&str>, xdg: Option<&str>, home: Option<&str>) -> Result<PathBuf> {
-    // Trim-aware empty check (io::nonempty's policy) — a whitespace-only env
-    // override is unset, not a path made of spaces.
+    // Trim-aware (io::nonempty's policy) — a whitespace-only env override is
+    // unset, not a path made of spaces.
     if let Some(dir) = oc.filter(|s| !s.trim().is_empty()) {
         return Ok(PathBuf::from(dir));
     }
@@ -84,40 +60,29 @@ fn config_dir_from(oc: Option<&str>, xdg: Option<&str>, home: Option<&str>) -> R
         })
 }
 
-/// The managed plugin file: `<opencode-config>/plugins/pixtuoid.ts`. The dir is
-/// `plugins` (PLURAL) — the canonical opencode docs auto-discover
-/// `<config>/plugins/*.{ts,js}`; the anomalyco fork globs `{plugin,plugins}` (so
-/// both work there), but plural is the documented form and the only one canonical
-/// opencode scans, so it's correct for every install.
+/// The dir is `plugins` (PLURAL): canonical opencode auto-discovers only
+/// `<config>/plugins/*.{ts,js}` (the anomalyco fork globs `{plugin,plugins}`, so
+/// plural works there too).
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     Ok(opencode_config_dir()?.join("plugins").join("pixtuoid.ts"))
 }
 
-/// Presence probe for auto-detect (`is_present`): is the opencode CLI present,
-/// so the Sources panel OFFERS it? Probe opencode's OWN dirs — the config
-/// dir we write into (created on first run) and the XDG data dir (the SQLite
-/// store) — NOT our plugin file: keying on our own artifact would chicken-and-egg
-/// (opencode could never be auto-detected until AFTER we'd installed into it).
-/// Mirrors CodeWhale's CLI-dir probe. Uninstall keys on the plugin file existing
-/// (`config_present`, file-existence) and `merge_uninstall` on the
-/// `@pixtuoid-opencode-plugin` sentinel, so removal stays exact regardless.
+/// Presence probe for auto-detect: probe opencode's OWN dirs, NOT our plugin
+/// file — keying on our own artifact would chicken-and-egg (opencode could never
+/// be auto-detected until AFTER we'd installed into it).
 pub(crate) fn detect_installed() -> bool {
     opencode_config_dir().map(|d| d.exists()).unwrap_or(false)
         || io::home_relative(".local/share/opencode").exists()
 }
 
-/// The "command" for opencode is the shim's absolute path, baked into the
-/// plugin. opencode runs the plugin under Bun and spawns the shim with that
-/// path, so it must be embedded (no PATH reliance) — Err on non-UTF-8 like
-/// Codex/Reasonix/CodeWhale. `_explicit` (Claude's bare-vs-absolute switch) is
-/// irrelevant: opencode always needs the absolute path.
+/// opencode runs the plugin under Bun and spawns the shim by embedded path (no
+/// PATH reliance), so `_explicit` — Claude's bare-vs-absolute switch — is
+/// irrelevant here: opencode always needs the absolute path.
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
 
-/// Render the plugin with the shim path baked in (JSON-encoded → a valid,
-/// escaped JS string literal, so a path with quotes/backslashes can't break the
-/// module). `changed` is a content diff: a same-path re-install is a no-op.
+/// `changed` is a content diff: a same-path re-install is a no-op.
 pub(crate) fn merge_install(content: &str, hook_path: &str) -> Result<MergeOutcome> {
     let baked = render_plugin(hook_path)?;
     Ok(MergeOutcome {
@@ -126,9 +91,8 @@ pub(crate) fn merge_install(content: &str, hook_path: &str) -> Result<MergeOutco
     })
 }
 
-/// Replace our plugin with the sentinel-free no-op stub. `changed` only when the
-/// current content is actually ours (carries the sentinel) — a foreign file, an
-/// already-removed stub, or empty content is a semantic no-op (left untouched).
+/// `changed` only when the content is actually ours (carries the sentinel) — a
+/// foreign file, an already-removed stub, or empty content is left untouched.
 pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     let ours = content.contains(SENTINEL);
     Ok(MergeOutcome {
@@ -141,11 +105,9 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
-/// Install-schema verification (#309): the managed plugin is a CODE artifact, so
-/// the checks are (1) our sentinel present, (2) the shim-path placeholder fully
-/// substituted, (3) the baked `HOOK_PATH` literal readable for the on-disk stat.
-/// There is no per-event config to check (the forwarded EventV2 set lives in the
-/// plugin's own code).
+/// The managed plugin is a CODE artifact, so there is no per-event config to
+/// check — only that the sentinel is present, the shim-path placeholder was
+/// substituted, and the baked `HOOK_PATH` is readable for the on-disk stat.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{SchemaParse, ShimRef};
     if !content.contains(SENTINEL) {
@@ -175,18 +137,10 @@ fn render_plugin(hook_path: &str) -> Result<String> {
 mod tests {
     use super::*;
 
-    /// `verify_schema` is the #309 silent-dead check, and it had NO test of its own:
-    /// mutation testing replaced the whole body with `Default::default()` — no issues,
-    /// no shim, i.e. a MISSING or replaced plugin verifying SOUND — and the suite
-    /// stayed green, because `verify_target_is_sound_after_a_real_install_for_every_target`
-    /// only asserts the positive direction. Deleting the `shim:` field also survived,
-    /// which silently disables the shim-on-disk stat for this target.
     #[test]
     fn verify_schema_reports_the_baked_shim_and_every_way_the_plugin_can_be_dead() {
         use crate::install::verify::ShimRef;
 
-        // A real install: the ONLY sound case, and it must hand the baked absolute
-        // path onward or `verify_target` cannot stat the shim.
         let installed = merge_install("", "/opt/bin/pixtuoid-hook").unwrap().content;
         let sound = verify_schema(&installed);
         assert!(
@@ -200,7 +154,6 @@ mod tests {
             "the baked HOOK_PATH must be reported, or the shim-on-disk check is skipped"
         );
 
-        // Replaced by a foreign plugin / removed: the sentinel is the tell.
         let foreign = verify_schema("export default function () {}\n");
         assert_eq!(foreign.shim, ShimRef::Unknown);
         assert!(
@@ -212,7 +165,6 @@ mod tests {
             foreign.issues
         );
 
-        // Rendered but never substituted (a bake that failed half-way).
         let unsubstituted = format!("// {SENTINEL}\nconst HOOK_PATH = {HOOK_PLACEHOLDER};\n");
         assert!(
             verify_schema(&unsubstituted)
@@ -222,7 +174,6 @@ mod tests {
             "an unsubstituted placeholder must be reported"
         );
 
-        // Sentinel present but no readable HOOK_PATH binding at all.
         let no_binding = format!("// {SENTINEL}\nexport default function () {{}}\n");
         assert!(
             verify_schema(&no_binding)
@@ -241,8 +192,6 @@ mod tests {
             out.content.contains(SENTINEL),
             "rendered plugin must carry the sentinel"
         );
-        // The path is baked as a JSON string literal (quoted), and the
-        // placeholder is fully substituted.
         assert!(out.content.contains("\"/opt/bin/pixtuoid-hook\""));
         assert!(
             !out.content.contains(HOOK_PLACEHOLDER),
@@ -292,9 +241,7 @@ mod tests {
 
     #[test]
     fn a_path_with_special_chars_bakes_as_a_valid_escaped_literal() {
-        // A backslash / quote in the path must not break the JS string literal.
         let out = merge_install("", r#"/weird/pi"x\hook"#).unwrap();
-        // serde_json escapes the quote and backslash.
         assert!(out.content.contains(r#""/weird/pi\"x\\hook""#));
     }
 
@@ -315,19 +262,14 @@ mod tests {
 
     #[test]
     fn uninstall_of_a_foreign_or_removed_file_is_a_no_op() {
-        // A user's own plugin (no sentinel) must not be clobbered.
         let foreign = "export const myPlugin = async () => ({})\n";
         assert!(!merge_uninstall(foreign).unwrap().changed);
-        // An already-removed stub is also a no-op (no sentinel).
         assert!(!merge_uninstall(REMOVED_STUB).unwrap().changed);
-        // Empty content is a no-op.
         assert!(!merge_uninstall("").unwrap().changed);
     }
 
     #[test]
     fn install_then_uninstall_round_trips_the_content_sentinel() {
-        // After install the content carries the sentinel; after uninstall it
-        // doesn't — so merge_uninstall's changed-detection round-trips cleanly.
         let installed = merge_install("", "/opt/bin/pixtuoid-hook").unwrap();
         assert!(installed.content.contains(SENTINEL));
         let removed = merge_uninstall(&installed.content).unwrap();
@@ -336,29 +278,23 @@ mod tests {
 
     #[test]
     fn config_dir_precedence_is_env_then_xdg_then_home() {
-        // OPENCODE_CONFIG_DIR wins outright.
         assert_eq!(
             config_dir_from(Some("/custom/oc"), Some("/xdg"), Some("/home/u")).unwrap(),
             PathBuf::from("/custom/oc")
         );
-        // Else $XDG_CONFIG_HOME/opencode.
         assert_eq!(
             config_dir_from(None, Some("/xdg"), Some("/home/u")).unwrap(),
             PathBuf::from("/xdg/opencode")
         );
-        // Else ~/.config/opencode.
         assert_eq!(
             config_dir_from(None, None, Some("/home/u")).unwrap(),
             PathBuf::from("/home/u/.config/opencode")
         );
-        // Empty env values are treated as unset (basedir-spec semantics).
+        // Empty and whitespace-only env values are both unset (basedir-spec).
         assert_eq!(
             config_dir_from(Some(""), Some(""), Some("/home/u")).unwrap(),
             PathBuf::from("/home/u/.config/opencode")
         );
-        // WHITESPACE-only env values are ALSO unset — the trim-aware check mirrors
-        // io::nonempty's policy (a value of all spaces can't be a real path), so it
-        // falls through rather than producing a literal "   " path.
         assert_eq!(
             config_dir_from(Some("   "), Some("   "), Some("/home/u")).unwrap(),
             PathBuf::from("/home/u/.config/opencode")
@@ -369,8 +305,6 @@ mod tests {
 
     #[test]
     fn default_path_is_the_plugin_file_under_the_plural_plugins_dir() {
-        // PLURAL `plugins/` — the canonical opencode auto-discovery dir (the
-        // fork globs both, but canonical scans only `plugins/`).
         assert_eq!(
             config_dir_from(None, Some("/xdg"), None)
                 .unwrap()
@@ -396,17 +330,12 @@ mod tests {
         assert!(hook_command(bad, false).is_err());
     }
 
-    // Internal-consistency guard (mirror of the CC/Codex/Reasonix/CodeWhale
-    // ones): every opencode event TYPE the bundled plugin forwards must have a
-    // decoder arm (or be a deliberate skip), so a registered-but-undecoded type
-    // can't silently drop. The plugin's FORWARD set + the tool-part gate are the
-    // source of truth; we assert each decodes without error.
+    // The fixtures must stay in sync with `opencode_plugin.ts`'s FORWARD set and
+    // its `message.part.updated` tool gate — those are the source of truth for
+    // what the plugin actually sends.
     #[test]
     fn every_forwarded_opencode_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;
-        // The plugin forwards these `type`s (see opencode_plugin.ts FORWARD set
-        // + the message.part.updated tool gate). Each must decode (map or skip),
-        // never error.
         let payloads = [
             serde_json::json!({"type": "session.created",
                 "properties": {"info": {"id": "ses_1", "directory": "/r"}}, "_pixtuoid_source": "opencode"}),

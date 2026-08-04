@@ -2,17 +2,10 @@
 //! task + sources, binds the hook socket, and drives either the TUI or the
 //! headless summary loop until Ctrl-C.
 //!
-//! Split out of `runtime/mod.rs` so this file — structurally unreachable by
-//! any headless test (real tokio runtime + `block_on` + `ctrl_c` + socket
-//! bind; see issue #103) — can be excluded from coverage on its own, while
-//! the tested helpers (`RunConfig`, capacity math, `summarize`) keep full
-//! coverage accounting in the parent module. One exception: `headless_loop`'s
-//! signal handling takes the ctrl_c future as an injected seam, so its
-//! registration-failure arm IS unit-tested here (the file stays
-//! coverage-excluded regardless). The connection-gate DECISION (gate + apply +
-//! reconcile-sweep) lives in the sibling [`super::gate`] module — covered AND
-//! mutation-tested — so a drift in it reds a test; this shell only wires the
-//! tokio channels to those functions.
+//! This file is structurally unreachable by any headless test (real tokio
+//! runtime + `block_on` + `ctrl_c` + socket bind), so it is coverage-excluded on
+//! its own and must stay a pure shell: the connection-gate DECISION lives in the
+//! sibling [`super::gate`] module, which IS covered and mutation-tested.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -63,29 +56,18 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         first_run,
         audio,
     } = cfg;
-    // Ambient audio (#633): `run_tui` builds the AudioController, which OWNS the
-    // device thread — boot-spawn iff `!audio.muted`, then Drop-teardown when the
-    // controller (a run_tui local) drops on ANY exit. Nothing to spawn or tear
-    // down here; the muted default costs nothing until the first `m`. (Headless
-    // has no painter/controller, so it never plays.)
+    // Audio owns no state here: `run_tui` builds the AudioController, which owns
+    // the device thread and tears it down on Drop at any exit.
     // Focus-jump pid point-query roots (cloned: build_source_set consumes the
-    // originals). CC = projects root (sessions registry derived in-core);
-    // Codex = the rollout tree the fd probe walks.
+    // originals).
     let focus_roots = (projects_root.clone(), codex_sessions_root.clone());
-    // The live, shared connected-source set: the reducer-task gate reads it, the
-    // Sources panel mutates it. Seeded from the resolved boot flags.
     let connected = ConnectedSources::new(connected);
-    // Resolve the bound socket (Unix) / pipe (Windows) the HookRouter binds; the
-    // Sources panel shows the same path (explicit --socket override, else default).
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
-    // Headless-vs-interactive boot capacity policy — the covered + mutation-tested
-    // `resolve_boot_caps` in mod.rs; the terminal-size query stays here in the shell
-    // (passed as the injected `measure`, called only on the interactive arm).
+    // The terminal-size query stays here in the shell (the injected `measure`);
+    // the policy is the covered + mutation-tested `resolve_boot_caps`.
     let boot_caps = resolve_boot_caps(desk_cap, headless, compute_boot_capacities);
-    // The shared spine (#714): presence channel + exit watch, the source set,
-    // event/scene/health channels, floor-caps atomics, reducer + source task
-    // spawns — ONE authority with `floating::run`. The tasks live on this
-    // fn's runtime; `_source_handles` is an inert anchor (see Pipeline's doc).
+    // The shared spine — ONE authority with `floating::run`. The tasks live on
+    // this fn's runtime; `_source_handles` is an inert anchor (see Pipeline's doc).
     let super::pipeline::Pipeline {
         scene_rx,
         health_rx,
@@ -123,14 +105,10 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
 }
 
 /// Build the runtime source set `run_async` spawns — the ONE place that set is
-/// constructed: the `HookRouter` (shared-socket owner) + the transcript-bearing
-/// watchers. A transcript source registered in the core registry but missing here
-/// (a silent "never spawns" no-op) is caught by
-/// `build_source_set_wires_every_transcript_bearing_source_plus_the_hook_router`.
-/// Each transcript source carries different typed config (CC's projects root,
-/// Codex's sessions root), so this stays imperative rather than a registry-driven
-/// loop — invariant #3's per-source-typed seam. Hook-only sources + the daemon
-/// (OpenClaw) are absent by design — they ride the router's shared socket.
+/// constructed. Each transcript source carries different typed config (CC's
+/// projects root, Codex's sessions root), so this stays imperative rather than a
+/// registry-driven loop. Hook-only sources + the daemon (OpenClaw) are absent by
+/// design — they ride the router's shared socket.
 pub(crate) fn build_source_set(
     socket_path: PathBuf,
     projects_root: Option<PathBuf>,
@@ -150,9 +128,8 @@ pub(crate) fn build_source_set(
         codex_src.sessions_root = p;
     }
 
-    // #246: ONE shared child-end un-claim handle. The HookRouter's hook tee is the
-    // PRODUCER (every source's SubagentStop rides the one shared socket it owns);
-    // both watchers CONSUME — each drains only the ids whose transcripts it claims
+    // ONE shared child-end un-claim handle: the HookRouter's hook tee is the sole
+    // PRODUCER, and each watcher drains only the ids whose transcripts it claims
     // (AgentId is source-namespaced), so a Codex child's id waits for the Codex
     // watcher even though the router decoded its hook.
     let child_end_unclaims = ChildEndUnclaims::new();
@@ -165,9 +142,6 @@ pub(crate) fn build_source_set(
     let mut grok_src = GrokSource::default_paths();
     grok_src.child_end_unclaims = Some(child_end_unclaims.clone());
 
-    // The HookRouter owns the ONE shared hook socket every source's hooks ride;
-    // it is the tee producer + the daemon-presence demux. CC/Codex are now pure
-    // transcript watchers (consumers of the un-claim handle).
     let hook_router = HookRouter::new(socket_path)
         .with_child_end_unclaims(Some(child_end_unclaims))
         .with_presence_tx(presence_tx);
@@ -184,9 +158,8 @@ pub(crate) fn build_source_set(
 }
 
 /// The reducer event loop: gate + apply incoming `AgentEvent`s, merge daemon
-/// presence, and run the 1-Hz reconcile sweep — the codecov/mutants-excluded
-/// async shell over [`super::gate`] (#103), which owns the gate/reconcile
-/// decision so it stays covered and mutation-tested.
+/// presence, and run the 1-Hz reconcile sweep — an async shell over
+/// [`super::gate`], which owns every decision.
 pub(crate) async fn reducer_task(
     mut rx: TaggedReceiver,
     scene_tx: watch::Sender<Arc<SceneState>>,
@@ -199,18 +172,15 @@ pub(crate) async fn reducer_task(
     // Disabled once the presence channel closes (all senders dropped) so its
     // `recv() -> None` branch can't busy-loop the select.
     let mut presence_open = true;
-    // Registered sources already announced as gated (see the connection gate).
-    // Bounded by the registry, NOT by the wire: `_pixtuoid_source` arrives
-    // verbatim from socket JSON with no registry check and no length cap, and an
-    // unknown name is a supported, tested decode path — so keying this on the
-    // raw string would let a long-lived `run` accumulate one entry per distinct
-    // name seen. An unregistered source is a DRIFT story, not a connection-gate
-    // one, and `source/drift.rs` already owns it.
+    // Registered sources already announced as gated. `&'static str`, NOT the raw
+    // wire name: `_pixtuoid_source` arrives verbatim from socket JSON with no
+    // registry check and no length cap, so keying on it would let a long-lived
+    // `run` accumulate one entry per distinct name seen.
     let mut gate_logged: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
     let initial_caps: [usize; MAX_FLOORS] =
         std::array::from_fn(|i| floor_caps[i].load(Ordering::Relaxed));
     let mut scene = SceneState::new(initial_caps);
-    // 1-Hz tick so exit-grace sweeps run even when no new events arrive.
+    // Ticks so exit-grace sweeps run even when no new events arrive.
     const SWEEP_TICK_INTERVAL_SECS: u64 = 1;
     let mut sweep_interval = tokio::time::interval(Duration::from_secs(SWEEP_TICK_INTERVAL_SECS));
     sweep_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -223,9 +193,7 @@ pub(crate) async fn reducer_task(
         tokio::select! {
             event = rx.recv() => {
                 let Some((transport, ev)) = event else { break };
-                // Connection gate + apply, in the shared `gate` core (covered +
-                // mutation-tested; the async shell here is neither). A gated event
-                // mutates nothing, so publish only when it actually applied.
+                // A gated event mutates nothing, so publish only when it applied.
                 if gate::apply_gated_event(
                     &mut reducer,
                     &mut scene,
@@ -240,20 +208,13 @@ pub(crate) async fn reducer_task(
                     break;
                 }
             }
-            // Daemon-presence deltas — instance-tagged `(DaemonInstanceKey, delta)`
-            // (hook-derived + `PidExited` from the shared exit watch) — merged into
-            // SceneState::daemons, NEVER through Reducer::apply (which is
-            // AgentId-pure). Invariant #2. N daemons AND N instances of one daemon
-            // (two OpenClaw gateways) route by that key, so nothing here is
-            // per-source special-cased.
+            // Daemon-presence deltas are merged into SceneState::daemons, NEVER
+            // through Reducer::apply (which is AgentId-pure). They route by
+            // `DaemonInstanceKey`, so N instances of one daemon (two OpenClaw
+            // gateways) need no per-source special-casing.
             update = presence_rx.recv(), if presence_open => {
                 match update {
                     Some(PresenceMsg { key, delta }) => {
-                        // Connection gate + armable-pid selection + apply, in the
-                        // shared `gate` core (covered + mutation-tested) — the
-                        // presence twin of `apply_gated_event`. A disconnected
-                        // daemon's delta is dropped (walked out by the sweep-tick
-                        // reconcile); only `ew.watch` (IO) + the publish stay here.
                         if let gate::PresenceGate::Applied { arm_pid } = gate::apply_gated_presence(
                             &mut scene,
                             &key,
@@ -261,13 +222,10 @@ pub(crate) async fn reducer_task(
                             &connected,
                             SystemTime::now(),
                         ) {
-                            // Arm the instant abrupt-down watch on the gateway pid
-                            // (GatewayUp/PidSeen #318). Arming AFTER apply_presence is
-                            // safe: the two touch DISJOINT state (the exit-watch pid
-                            // map vs scene.daemons), and a dead pid's synthesized
-                            // PidExited (ESRCH at registration) re-enters only on a
-                            // LATER select iteration — it can never observe a
-                            // half-applied arm within this synchronous arm.
+                            // Arming AFTER apply_presence is safe: the two touch
+                            // DISJOINT state (the exit-watch pid map vs
+                            // scene.daemons), and a dead pid's synthesized PidExited
+                            // re-enters only on a LATER select iteration.
                             if let (Some(ew), Some(pid)) = (presence_exit_watch.as_ref(), arm_pid) {
                                 ew.watch(&key, pid);
                             }
@@ -281,9 +239,6 @@ pub(crate) async fn reducer_task(
                 }
             }
             _ = sweep_interval.tick() => {
-                // Walk out disconnected sources, advance exit-grace, decay daemon
-                // presence — the shared `gate` core (covered + mutation-tested; a
-                // 2nd daemon needs no edit, it is registry-DRIVEN).
                 gate::reconcile_sweep_tick(&mut reducer, &mut scene, &connected, SystemTime::now());
                 if scene_tx.send(Arc::new(scene.clone())).is_err() {
                     tracing::warn!("scene channel closed — renderer dropped");
@@ -298,16 +253,12 @@ async fn headless_loop(
     scene_rx: SceneRx,
     health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
 ) -> Result<()> {
-    // ONE SIGINT listener for the loop's lifetime. A fresh `ctrl_c()` per
-    // select! iteration drops the old listener while the sleep arm runs, and
-    // tokio's process-global handler (installed once) suppresses default
-    // termination — so a SIGINT landing in that gap notifies zero listeners
-    // and is silently lost (the user must Ctrl-C twice). Created once here,
-    // the subscription is continuous; the future is boxed so the loop can
-    // disarm a registration FAILURE (a resolved future must never be polled
-    // again). The signal future is INJECTED into the loop body so the
-    // registration-failure arm is testable in-process (the real ctrl_c()
-    // registers an unfakeable process-global handler).
+    // ONE SIGINT listener for the loop's lifetime. A fresh `ctrl_c()` per select!
+    // iteration would drop the old listener while the sleep arm runs, and tokio's
+    // process-global handler suppresses default termination — so a SIGINT landing
+    // in that gap notifies zero listeners and is silently lost. Boxed so the loop
+    // can disarm a registration FAILURE (a resolved future must never be polled
+    // again), and injected so that arm is testable in-process.
     headless_loop_with_signal(scene_rx, health_rx, Box::pin(tokio::signal::ctrl_c())).await
 }
 
@@ -318,12 +269,10 @@ async fn headless_loop_with_signal(
 ) -> Result<()> {
     tracing::info!("pixtuoid headless mode — Ctrl-C to quit");
     let mut prev_summary = String::new();
-    // Headless has no TUI footer (#157's sink for source deaths) and no
-    // stderr subscriber guarantee — surface them in the summary stream, or a
-    // dead transport reads as a silently empty office. Tracked by count: the
-    // watch Vec only grows.
+    // Headless has no TUI footer and no stderr subscriber guarantee, so source
+    // deaths must surface in the summary stream or a dead transport reads as a
+    // silently empty office. Tracked by count: the watch Vec only grows.
     let mut deaths_seen = 0usize;
-    // How often the headless driver re-samples the scene watch and prints a diff.
     const HEADLESS_SUMMARY_POLL_INTERVAL_MS: u64 = 200;
     loop {
         tokio::select! {
@@ -347,11 +296,9 @@ async fn headless_loop_with_signal(
                     return Ok(());
                 }
                 Err(e) => {
-                    // A failed handler registration resolves Err on the FIRST
-                    // poll. A wildcard match here exited headless mode
-                    // instantly — silently, status 0 (the #157 class), on the
-                    // exact CI/container surface where registration can be
-                    // denied. Disarm the arm and keep serving: the default
+                    // A failed handler registration resolves Err on the FIRST poll,
+                    // so a wildcard match here exits headless mode instantly and
+                    // silently with status 0. Disarm and keep serving: the default
                     // SIGINT disposition was never replaced, so Ctrl-C still
                     // terminates the process.
                     tracing::error!(
@@ -389,13 +336,6 @@ mod tests {
         (scene_tx, scene_rx, watch::channel(Vec::new()))
     }
 
-    // The documented "a source registered in the core registry but NOT wired
-    // into run_async passes every conformance/manifest test yet never spawns"
-    // gap (core/CLAUDE.md) — closed. `build_source_set` constructs the shared-
-    // socket `HookRouter` PLUS every transcript-bearing registered source
-    // (`line_decoder().is_some()`); it reads names off the real boxes, so it
-    // can't drift from a hand-maintained second list. Hook-only sources + the
-    // daemon (OpenClaw) are absent by design (they ride the router's socket).
     #[test]
     fn build_source_set_wires_every_transcript_bearing_source_plus_the_hook_router() {
         use pixtuoid_core::source::registry::{self, descriptor_for};
@@ -404,10 +344,8 @@ mod tests {
         let sources = build_source_set(PathBuf::from("/tmp/pixtuoid-test.sock"), None, None, None);
         let built: BTreeSet<&str> = sources.iter().map(|s| s.name()).collect();
 
-        // The HookRouter (infrastructure — owns the shared socket, NOT a
-        // registered CLI) must be in the set so its fatal-bind death surfaces via
-        // `spawn_with_health` (#157); it has no descriptor, so it's excluded from
-        // the transcript-coverage check below.
+        // The HookRouter is infrastructure, not a registered CLI: it has no
+        // descriptor, so it is excluded from the transcript check below.
         assert!(
             built.contains("hook-router"),
             "the shared-socket HookRouter must be spawned (else hook signals never decode)"
@@ -439,11 +377,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn headless_loop_keeps_serving_after_a_failed_signal_registration() {
-        // A failed ctrl_c registration resolves Err on the first poll. The old
-        // wildcard arm (`_ = &mut ctrl_c`) matched it and returned Ok(()) —
-        // headless mode exited instantly, silently, status 0. The Err arm must
-        // disarm itself instead: the loop keeps serving the scene/health arms,
-        // so the timeout elapses (paused-clock time, so this is instant).
+        // Still-serving is proved by the timeout ELAPSING — on the paused clock
+        // that is instant.
         let (_scene_tx, scene_rx, (_health_tx, health_rx)) = channels();
         let res = tokio::time::timeout(
             Duration::from_secs(5),

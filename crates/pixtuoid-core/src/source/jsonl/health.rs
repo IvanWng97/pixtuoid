@@ -1,12 +1,9 @@
-/// Once-per-transition gate for persistent-failure warnings (the watched
-/// root going unreadable mid-run, a broken notify backend, the hook socket's
-/// accept loop erroring). These failures recur on every pass/retry — so an
-/// ungated `warn!` would spam the warn-floor file log every interval, while
-/// total silence leaves the watcher permanently blind with no breadcrumb
-/// (the silently-empty-office class #157/#224 exist to surface; after a
-/// successful bind there is no SourceDeath path left to report through).
-/// `on_failure` is true exactly on the first failure after a success;
-/// `on_success` is true exactly on recovery.
+/// Once-per-transition gate for persistent-failure warnings (the watched root
+/// going unreadable mid-run, a broken notify backend, the hook socket's accept
+/// loop erroring). These failures recur on every pass, so an ungated `warn!`
+/// spams the warn-floor log every interval, while total silence leaves the
+/// watcher permanently blind — after a successful bind there is no SourceDeath
+/// path left to report through.
 #[derive(Default)]
 pub(crate) struct FailureLatch {
     failing: bool,

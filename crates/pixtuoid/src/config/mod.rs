@@ -3,14 +3,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a required
-/// field, NOT a serde-derived `PetKind`) on purpose: an unknown value (`kind =
-/// "hamster"`) OR a missing/typo'd key (`knid = "cat"` → `kind` defaults to
-/// `None`) is validated + warn-skipped in [`resolve_pets`], rather than failing
-/// the whole `toml::from_str` and tripping `load`'s all-or-nothing malformed arm
-/// — which would silently revert EVERY user setting (theme, etc.) to defaults.
-/// (A wrong-TYPE value like `kind = 5` still fails the parse; not worth a custom
-/// deserializer.) `name` is optional; omit it for the pet's default name.
+/// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a serde-derived
+/// `PetKind`) on purpose: an unknown or typo'd value is warn-skipped in
+/// [`resolve_pets`] rather than failing the whole `toml::from_str` and tripping
+/// `load`'s all-or-nothing malformed arm, which would silently revert EVERY user
+/// setting to defaults.
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PetEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -22,12 +19,11 @@ pub struct PetEntry {
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct AppConfig {
     pub theme: Option<String>,
-    /// Optional per-floor desk cap. When set, each floor holds at most
-    /// this many desks — excess agents overflow to additional floors.
-    /// When absent, capacity is fully auto-computed from terminal size.
+    /// Per-floor desk cap; excess agents overflow to additional floors. Absent ⇒
+    /// capacity is auto-computed from terminal size.
     #[serde(rename = "max-desks")]
     pub max_desks: Option<usize>,
-    /// Custom sprite pack directory. Supports ~ expansion.
+    /// Supports `~` expansion.
     #[serde(rename = "pack-dir")]
     pub pack_dir: Option<String>,
     #[serde(
@@ -36,57 +32,36 @@ pub struct AppConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_seen_version: Option<String>,
-    /// Per-source connection flags (registry source id → connected). An absent
-    /// id is simply DISCONNECTED ([`resolve_connected`] — only an explicit
-    /// `true` connects; the old v0.4–0.7 "absent ⇒ connected iff hooks
-    /// installed" migrate inference was dropped in 0.12.0). The `s` Sources
-    /// panel writes a flag on toggle. A `[sources]` table; empty ⇒ omitted on
-    /// save. Keep BEFORE `pets` — pets must stay last (its array-of-tables
-    /// serializes cleanest after all tables, and a `[sources]` table written
-    /// after `[[pets]]` would re-parent).
+    /// Per-source connection flags (registry source id → connected); only an
+    /// explicit `true` connects. Keep BEFORE `pets` (see `pets`).
     #[serde(
         rename = "sources",
         default,
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub sources: BTreeMap<String, bool>,
-    /// `pixtuoid floating` desktop-window geometry — a single `[floating]` table
-    /// (size/position/opacity). Absent ⇒ defaults from [`resolve_floating`]. Keep
-    /// BEFORE `pets`: it's a `[table]`, and the `[[pets]]` array-of-tables must
-    /// stay last (a table written after an AoT would re-parent under it).
+    /// Keep BEFORE `pets` (see `pets`).
     #[serde(rename = "floating", default, skip_serializing_if = "Option::is_none")]
     pub floating: Option<FloatingConfigRaw>,
-    /// Ambient office sound — a single `[audio]` table (#633). Absent ⇒
-    /// MUTED (the office starts silent; `m` is the whole opt-in and persists
-    /// here). Resolved by [`resolve_audio`]. Keep BEFORE `pets` (the
-    /// table-before-array-of-tables rule above).
+    /// Ambient office sound. Absent ⇒ MUTED — the office starts silent and `m`
+    /// is the whole opt-in. Keep BEFORE `pets` (see `pets`).
     #[serde(rename = "audio", default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<AudioConfigRaw>,
-    /// The office's pets — one `[[pets]]` stanza each (`kind` + optional
-    /// `name`). Absent = all kinds with default names; `pets = []` = no pets;
-    /// an unknown `kind` is warn-skipped (non-fatal). Resolved into the runtime
-    /// `Vec<Pet>` by [`resolve_pets`].
-    ///
-    /// Keep `pets` LAST in the struct by convention: an array-of-tables
-    /// serializes cleanest after all scalar keys (matching where `pet_names`
-    /// used to sit). `toml` does not *require* it — it tolerates a scalar after
-    /// an AoT — but don't rely on its key/table interleaving; just keep it last.
+    /// Keep `pets` LAST in the struct: it is an array-of-tables, and any `[table]`
+    /// serialized after it would re-parent under it.
     #[serde(rename = "pets", default, skip_serializing_if = "Option::is_none")]
     pub pets: Option<Vec<PetEntry>>,
 }
 
-/// Default `pixtuoid floating` window size (logical px) + the minimum below which the
-/// half-block office art is unreadable — `resolve_floating` clamps up to it.
+/// Default `pixtuoid floating` window size (logical px) + the minimum below which
+/// the half-block office art is unreadable.
 pub const FLOATING_DEFAULT_W: u32 = 360;
 pub const FLOATING_DEFAULT_H: u32 = 240;
 pub const FLOATING_MIN_W: u32 = 240;
 pub const FLOATING_MIN_H: u32 = 160;
-/// Floor the parsed floating-window opacity is clamped up to — below this the
-/// window is too transparent to read.
+/// Below this the window is too transparent to read.
 pub const FLOATING_MIN_OPACITY: f32 = 0.2;
 
-/// Raw `[floating]` table as parsed — every field optional so a partial table (or an
-/// absent one) is valid; [`resolve_floating`] fills defaults + clamps.
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FloatingConfigRaw {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -101,9 +76,7 @@ pub struct FloatingConfigRaw {
     pub opacity: Option<f32>,
 }
 
-/// Resolved floating-window geometry: defaults applied, size clamped up to the legible
-/// minimum, opacity clamped to `[0.2, 1.0]` (fully transparent / over-opaque are both
-/// useless). Position stays `Option` — `None` lets the OS place the window.
+/// Position stays `Option` — `None` lets the OS place the window.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FloatingConfig {
     pub width: u32,
@@ -124,8 +97,6 @@ pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
     }
 }
 
-/// Raw `[audio]` table as parsed — both fields optional; [`resolve_audio`]
-/// applies the defaults + the volume clamp.
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AudioConfigRaw {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -134,13 +105,7 @@ pub struct AudioConfigRaw {
     pub volume: Option<f32>,
 }
 
-/// Resolved ambient-audio settings: the ONE sound switch is `muted`,
-/// default TRUE (#633 — the office starts silent; `m` unmutes and
-/// persists). The old dual `enabled` knob was owner-cut as redundant —
-/// muted-by-default + lazy spawn gives the same strict opt-in with one
-/// keypress instead of a config edit. (`enabled` never shipped in a
-/// release; a leftover key is silently ignored like any unknown key.)
-/// Volume clamped to `[0.0, 1.0]`.
+/// `muted` is the ONE sound switch — there is deliberately no second `enabled`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AudioConfig {
     pub muted: bool,
@@ -155,22 +120,15 @@ pub fn resolve_audio(config: &AppConfig) -> AudioConfig {
     }
 }
 
-/// Persist the `[audio] muted` flag (the `m` toggle writes through here —
-/// the theme-save precedent: ConfigLock round via `update_config`, comments
-/// and unknown keys survive, a malformed existing config is never
-/// rewritten).
 pub(crate) fn save_audio_muted(path: &Path, muted: bool) -> Result<()> {
     update_config(path, |doc| {
         doc["audio"]["muted"] = toml_edit::value(muted);
     })
 }
 
-/// Persist the `[audio] volume` level (the +/- nudge keys write through
-/// here, same ConfigLock round).
 pub(crate) fn save_audio_volume(path: &Path, volume: f32) -> Result<()> {
-    // quantize to the footer's percent vocabulary before widening — a raw
-    // f32→f64 writes float noise (0.949999988079071) into a file the repo
-    // deliberately keeps human-edited
+    // Quantize to the footer's percent vocabulary before widening — a raw
+    // f32→f64 writes float noise (0.949999988079071) into a hand-edited file.
     let percent = (volume * 100.0).round() / 100.0;
     update_config(path, |doc| {
         doc["audio"]["volume"] = toml_edit::value(percent as f64);
@@ -180,11 +138,8 @@ pub(crate) fn save_audio_volume(path: &Path, volume: f32) -> Result<()> {
 pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
     cli_pack_dir.or_else(|| {
         config.pack_dir.as_ref().map(|p| {
-            // Delegate to the ONE tilde-expander (`install::io::expand_tilde`): it
-            // handles `~/` AND `~\` (Windows), trims, and stays in PathBuf-land, so
-            // a `pack-dir` override expands the SAME way a config-location override
-            // does. The previous local copy only knew `~/` and round-tripped through
-            // `String` → `--pack-dir ~\packs` silently never expanded on Windows.
+            // The ONE tilde-expander: it handles `~\` as well as `~/` and stays in
+            // PathBuf-land, so `pack-dir` expands the same way on Windows.
             let home = pixtuoid_core::platform::user_home_opt();
             crate::install::io::expand_tilde(p, home.as_deref().map(Path::new))
         })
@@ -192,8 +147,8 @@ pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Op
 }
 
 pub fn config_path() -> PathBuf {
-    // Empty/relative XDG_CONFIG_HOME is invalid (XDG spec) → `nonempty_abs_env`
-    // falls to $HOME/.config, never a CWD-relative `pixtuoid/config.toml`.
+    // Empty/relative XDG_CONFIG_HOME is invalid (XDG spec), so `nonempty_abs_env`
+    // falls to $HOME/.config rather than a CWD-relative `pixtuoid/config.toml`.
     let xdg = crate::install::io::nonempty_abs_env("XDG_CONFIG_HOME");
     if let Some(base) = xdg {
         return PathBuf::from(base).join("pixtuoid").join("config.toml");
@@ -208,18 +163,10 @@ pub fn config_path() -> PathBuf {
 }
 
 /// Report ONE user-facing config warning to BOTH of its sinks from a single
-/// control-char-stripped string (R0615-06).
-///
-/// Every consumer is a real terminal: the `warnings` Vec reaches `main`'s
-/// pre-altscreen `eprintln!` and the `doctor` report, and `tracing` writes to
-/// RAW stderr in every non-TUI mode (`doctor`, `run --headless`,
-/// `connect`/`disconnect`/`setup`) at a `warn` floor. These lines interpolate
-/// config CONTENT — a `toml::de::Error` Display embeds the raw offending source
-/// line — so an ANSI/OSC escape or a Trojan-Source bidi override would render
-/// live on either.
-///
-/// ONE emission point, not one per sink: the two were separately worded and
-/// separately sanitized, and the `tracing` half was the one left raw.
+/// control-char-stripped string. Both sinks are real terminals and these lines
+/// interpolate config CONTENT — a `toml::de::Error` Display embeds the raw
+/// offending source line — so an ANSI/OSC escape or a Trojan-Source bidi override
+/// would render live. Keep it ONE emission point so neither sink drifts back to raw.
 fn warn_user(warnings: &mut Vec<String>, line: String) {
     let line = crate::strip_control_chars(&line);
     tracing::warn!("{line}");
@@ -227,12 +174,9 @@ fn warn_user(warnings: &mut Vec<String>, line: String) {
 }
 
 /// Load the config, never crashing: unreadable/malformed files fall back to
-/// defaults. Each fallback is reported twice on purpose (#87): to the log file
-/// via `tracing`, and onto `warnings` so `main` can print it to stderr BEFORE
-/// the alternate screen swallows it — the resolvers stay layer-clean (no
-/// printing here; the caller picks the sink), and `warn_user` emits both from
-/// one sanitized string. Callers that have no user to warn (the save path's
-/// internal reload, the in-TUI version re-load) pass a throwaway Vec.
+/// defaults. Fallbacks go onto `warnings` (as well as the log) so `main` can
+/// print them to stderr BEFORE the alternate screen swallows them; callers with
+/// no user to warn pass a throwaway Vec.
 pub fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -263,30 +207,23 @@ pub fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
     }
 }
 
-/// Load-modify-write the config atomically through the install/io.rs write
-/// authority: ONE advisory lock held across the whole read→mutate→write
-/// round ([`crate::install::io::lock_config`] — symlink-resolved target,
-/// fsync + atomic rename + Windows retry, lock file left in place).
-///
-/// The mutation edits the RAW TOML document (`toml_edit`), not a typed
-/// `AppConfig` round-trip — unknown keys (a newer pixtuoid's settings) and
-/// the user's comments/formatting survive a theme/version save, matching the
-/// deliberately-tolerant read side (`load_ignores_unknown_keys`).
+/// Load-modify-write under ONE advisory lock held across the whole
+/// read→mutate→write round. The mutation edits the RAW TOML document, not a typed
+/// `AppConfig` round-trip, so unknown keys (a newer pixtuoid's settings) and the
+/// user's comments survive a save.
 ///
 /// Data-safety contract: a config that EXISTS but does not parse is NEVER
-/// rewritten — the save fails with the parse error (both callers
-/// warn-and-continue), leaving the user's typo fixable. The first overwrite
-/// of an existing file takes a one-time sibling backup
-/// (`config.toml.pixtuoid.bak`, `io::backup_once` semantics).
+/// rewritten — the save fails with the parse error, leaving the user's typo
+/// fixable.
 fn update_config<F>(path: &Path, mutate: F) -> Result<()>
 where
     F: FnOnce(&mut toml_edit::DocumentMut),
 {
     let lock = crate::install::io::lock_config(path)?;
     let real_path = lock.target();
-    // Read through the guard's pinned resolution (ConfigLock::read — "" for a
-    // missing/empty file), NOT a raw read of a re-derived path: every leg of
-    // the locked round must address the ONE file the flock protects.
+    // Read through the guard's pinned resolution, NOT a raw read of a re-derived
+    // path: every leg of the locked round must address the ONE file the flock
+    // protects.
     let contents = lock.read().with_context(|| {
         format!(
             "refusing to rewrite {}: cannot read the existing config",
@@ -302,12 +239,10 @@ where
                 real_path.display()
             )
         })?;
-        // Syntax alone isn't enough: a type-invalid value (`max-desks =
-        // "oops"`) parses as a document but fails the typed `load`, which
-        // resets everything to defaults in memory each boot — persisting
-        // over it would make this save "succeed" while never taking
-        // effect. Unknown keys still pass (forward-compat, pinned by
-        // `load_ignores_unknown_keys`).
+        // Syntax alone isn't enough: a type-invalid value (`max-desks = "oops"`)
+        // parses as a document but fails the typed `load`, so persisting over it
+        // would make this save "succeed" while never taking effect. Unknown keys
+        // still pass (forward-compat).
         toml::from_str::<AppConfig>(&contents).map_err(|e| {
             anyhow::anyhow!(
                 "refusing to rewrite {}: it exists but has invalid values ({e}); fix or delete it",
@@ -333,9 +268,6 @@ pub(crate) fn save_version(path: &Path, version: &str) -> Result<()> {
     })
 }
 
-/// Persist a single source's connection flag, auto-vivifying the `[sources]`
-/// table, through the comment/unknown-key-preserving `update_config` path. The
-/// `s` Sources panel calls this on every connect/disconnect toggle.
 pub(crate) fn save_source_connected(
     path: &Path,
     source_id: &'static str,
@@ -346,13 +278,10 @@ pub(crate) fn save_source_connected(
     })
 }
 
-/// Remove a single source's connection flag — the connect-rollback restore for a
-/// flag that was ABSENT before the attempt (rollback must restore absence, the
-/// pre-attempt state; an absent flag and an explicit `false` both read as
-/// disconnected in [`resolve_connected`], but only absence keeps the
-/// `setup::is_first_run` empty-table signal intact). Drops an emptied
-/// `[sources]` table so a rolled-back first connect leaves the config exactly
-/// as it was.
+/// Remove a source's connection flag — the connect-rollback restore. An absent
+/// flag and an explicit `false` both read as disconnected, but only absence keeps
+/// the `setup::is_first_run` empty-table signal intact, so an emptied `[sources]`
+/// table is dropped too.
 pub(crate) fn remove_source_connected(path: &Path, source_id: &str) -> Result<()> {
     update_config(path, |doc| {
         let emptied = match doc.get_mut("sources").and_then(|s| s.as_table_like_mut()) {
@@ -368,9 +297,6 @@ pub(crate) fn remove_source_connected(path: &Path, source_id: &str) -> Result<()
     })
 }
 
-/// Persist the `pixtuoid floating` window geometry into the `[floating]` table (size always;
-/// position when the OS reported it). Same `toml_edit` ConfigLock round as
-/// `save_source_connected`, so the user's other settings + hand-formatting survive.
 pub(crate) fn save_floating(
     path: &Path,
     width: u32,
@@ -381,17 +307,16 @@ pub(crate) fn save_floating(
     update_config(path, |doc| {
         doc["floating"]["width"] = toml_edit::value(width as i64);
         doc["floating"]["height"] = toml_edit::value(height as i64);
-        // Set-or-CLEAR x/y: a `None` means the OS couldn't report the window position
-        // (`outer_position()` returned `Err` — ALWAYS on Wayland, or a transient at close).
-        // Persisting the OLD coords would (1) leave width/height/x/y internally inconsistent
-        // (new size, stale position) and (2) restore a stale/offscreen spot next launch — so
-        // drop the keys instead and let the OS place the window.
+        // Set-or-CLEAR x/y: a `None` means the OS couldn't report the position
+        // (ALWAYS on Wayland, or a transient at close). Keeping the OLD coords
+        // would restore a stale/offscreen spot next launch, so drop the keys and
+        // let the OS place the window.
         for (key, val) in [("x", x), ("y", y)] {
             match val {
                 Some(v) => doc["floating"][key] = toml_edit::value(v as i64),
-                // `as_table_like_mut` (not `as_table_mut`): save_floating serializes
-                // `floating` as an INLINE table (`floating = { … }`), so the standard-table
-                // accessor returns None and the key would never drop.
+                // `as_table_like_mut`, not `as_table_mut`: `floating` serializes as
+                // an INLINE table, for which the standard-table accessor returns
+                // None and the key would never drop.
                 None => {
                     if let Some(t) = doc["floating"].as_table_like_mut() {
                         t.remove(key);
@@ -403,14 +328,9 @@ pub(crate) fn save_floating(
 }
 
 /// Resolve the runtime connected-set the office gates its sprites on: a
-/// registered source is connected iff its `[sources]` flag is an explicit
-/// `true`. An absent flag (or an absent/empty `[sources]` table) is plainly
-/// DISCONNECTED — the v0.4–0.7 "absent ⇒ connected iff hooks installed"
-/// migrate inference was dropped in 0.12.0 (too old to keep supporting).
-/// CONSEQUENCE: a v0.4–0.7 upgrader's config (exists, no `[sources]`, not
-/// degraded) now reads as a first run (`setup::is_first_run`), so the
-/// onboarding wizard replays and they re-connect there — acceptable, that IS
-/// the connect flow.
+/// registered source is connected iff its `[sources]` flag is an explicit `true`.
+/// An absent flag is plainly DISCONNECTED, so a config predating `[sources]`
+/// reads as a first run and replays the onboarding wizard.
 pub fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String> {
     pixtuoid_core::source::registry::registered_source_names()
         .filter(|src| config.sources.get(*src).copied().unwrap_or(false))
@@ -418,13 +338,10 @@ pub fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String
         .collect()
 }
 
-/// Resolve the config `max-desks` into the runtime desk cap. `0` is treated
-/// as unset with a collected warning (#87 channel): the cap clamps every
-/// floor via `min`, and the per-frame capacity re-seed only grows atomics
-/// when `capacity > 0` — so an accepted 0 would permanently zero every floor
-/// and silently drop every SessionStart (a permanently empty office with no
-/// in-TUI signal). The hidden `--max-desks` CLI flag rejects 0 at the clap
-/// seam (`range(1..)`); this is the config file's twin of that guard.
+/// Resolve the config `max-desks` into the runtime desk cap. `0` is treated as
+/// unset with a warning: the cap clamps every floor via `min`, so an accepted 0
+/// would permanently zero every floor and silently drop every SessionStart. The
+/// `--max-desks` CLI flag rejects 0 at the clap seam; this is its config twin.
 pub fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) -> Option<usize> {
     match config.max_desks {
         Some(0) => {
@@ -451,8 +368,8 @@ pub fn resolve_theme(
 ) -> Result<&'static pixtuoid_scene::theme::Theme> {
     use pixtuoid_scene::theme::{theme_by_name, ALL_THEMES, NORMAL};
 
-    // Validate the config theme even when the CLI overrides it — the warn is
-    // the only signal that a persisted theme in config.toml has gone stale.
+    // Validate the config theme even when the CLI overrides it — the warn is the
+    // only signal that a persisted theme has gone stale.
     let config_theme = config.theme.as_deref().and_then(|t| {
         let theme = theme_by_name(t);
         if theme.is_none() {
@@ -472,12 +389,9 @@ pub fn resolve_theme(
     Ok(config_theme.unwrap_or(&NORMAL))
 }
 
-/// Resolve config into the office's `Pet`s. `[[pets]]` absent → all kinds
-/// with default names. `pets = []` → no pets. An unknown `kind` is warn-skipped
-/// (non-fatal; the rest of the config and the remaining stanzas survive). A
-/// `name` is trimmed; empty/absent → `PetKind::default_name`. Resolving HERE
-/// (once, at startup) means the render path reads `pet.name` directly — no
-/// per-frame lookup, no parallel kind→name map to keep in sync.
+/// Resolve config into the office's `Pet`s. An unknown `kind` is warn-skipped —
+/// the remaining stanzas survive. Resolving HERE (once, at startup) means the
+/// render path reads `pet.name` directly, with no per-frame lookup.
 pub fn resolve_pets(
     config: &AppConfig,
     warnings: &mut Vec<String>,

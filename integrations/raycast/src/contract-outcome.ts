@@ -6,21 +6,13 @@
  */
 
 /**
- * One row of the `--json` batch envelope `pixtuoid connect|disconnect|sources set`
- * print — the SECOND stable wire contract the Raycast extension parses (alongside
- * `SourceStatus`), with the same treatment: a committed JSON Schema
- * (`integrations/raycast/contract/outcome-row.schema.json`, golden-tested below)
- * the extension's TS type is generated from (`gen:contract`). The wire shape is
- * `{id, outcome, message?}` — a bare machine token plus an optional human-detail
- * field, split from the older folded `failed: <msg>` string on the ASSUMPTION
- * that the in-repo extension, which ships atomically with the binary, was the
- * only consumer. It was not: the last `ray publish` marker PREDATES the split,
- * so the break reached the store. Treat this wire as PUBLISHED — installed
- * copies parse it independently of the binary's version, and a further shape
- * change needs a version handshake, never another flag-day edit;
- * see the sharp edge in `crates/pixtuoid/CLAUDE.md`. Pinned by
- * `outcome_row_json_shape_is_the_raycast_contract` + the envelope test in
- * `sources_cli.rs`.
+ * One `{id, outcome, message?}` row of the `--json` batch envelope
+ * `connect`/`disconnect`/`sources set` print.
+ *
+ * Treat this wire as PUBLISHED: installed Raycast store copies parse it
+ * independently of the binary's version, so a further shape change needs a
+ * version handshake, never another flag-day edit — see the sharp edge in
+ * `crates/pixtuoid/CLAUDE.md`.
  */
 export interface OutcomeRow {
   /**
@@ -28,15 +20,12 @@ export interface OutcomeRow {
    */
   id: string;
   /**
-   * The BARE outcome token: `connected` | `disconnected` | `no_op` |
-   * `failed` — a schema ENUM, so the generated TS side is a string-literal
-   * union (machine-matchable with `===`); human text rides in `message`.
+   * The bare machine token; human text rides in `message`.
    */
   outcome: "connected" | "disconnected" | "no_op" | "failed";
   /**
-   * Human-readable detail for the row — present exactly when the outcome
-   * carries any (`failed`), and OMITTED (not `null`) otherwise, so a
-   * success row stays the minimal `{id, outcome}`.
+   * Human-readable detail, present exactly when the outcome carries any
+   * (`failed`) and OMITTED rather than `null` otherwise.
    */
   message?: string | null;
 }

@@ -16,22 +16,15 @@ use crate::source::TaggedSender;
 
 use super::{handle_conn, CONN_TIMEOUT, MAX_CONCURRENT_CONNS};
 
-/// In-buffer must cover the shim's stamped wire line: stdin is capped at
-/// `STDIN_CAP = 1MiB − 256B` and the stamps + newline fit the 256B
-/// `STAMP_HEADROOM` (both in pixtuoid-hook main.rs, where their sum is
-/// test-pinned to this 1MiB quota) — so one payload always fits the pipe
-/// quota and the shim's sync write can't stall behind a momentarily busy
-/// daemon task.
+/// Must cover the shim's whole stamped wire line — `STDIN_CAP` + the 256B
+/// `STAMP_HEADROOM` in pixtuoid-hook are test-pinned to this 1MiB quota — so
+/// the shim's sync write can't stall behind a busy daemon task.
 const IN_BUFFER_SIZE: u32 = 1 << 20;
 
-/// Owner-only security descriptor via SDDL `D:P(A;;GA;;;OW)` — protected
-/// DACL, single ACE granting GENERIC_ALL to OWNER_RIGHTS (the creating
-/// user). The named-pipe equivalent of the Unix socket's umask-0700: closes
-/// the default DACL's Everyone-READ while keeping the owner fully able to
-/// connect. Held alive for the daemon's lifetime; the kernel copies the
-/// descriptor at each CreateNamedPipe, but keeping the allocation around
-/// makes the raw-pointer SECURITY_ATTRIBUTES trivially valid at every
-/// create site.
+/// Owner-only security descriptor via SDDL `D:P(A;;GA;;;OW)` — the named-pipe
+/// equivalent of the Unix socket's umask-0700, closing the default DACL's
+/// Everyone-READ. Held alive for the daemon's lifetime so the raw-pointer
+/// SECURITY_ATTRIBUTES stays valid at every create site.
 struct OwnerOnlySd {
     psd: PSECURITY_DESCRIPTOR,
     attrs: SECURITY_ATTRIBUTES,
@@ -71,8 +64,7 @@ impl OwnerOnlySd {
         })
     }
 
-    /// Pointer for tokio's `create_with_security_attributes_raw`. Only ever
-    /// read by CreateNamedPipeW for the duration of that call.
+    /// Only ever read by CreateNamedPipeW, for the duration of that call.
     fn attributes_ptr(&self) -> *mut c_void {
         std::ptr::from_ref(&self.attrs).cast_mut().cast()
     }
@@ -95,14 +87,10 @@ pub(super) struct Listener {
     sd: OwnerOnlySd,
 }
 
-/// The ONE `ServerOptions` chain (+ its SAFETY contract) for our hook pipe, so
-/// the initial bind, the per-connect recreate, and the next-instance create
-/// can't drift — they were byte-for-byte identical apart from `first_pipe_instance`.
-///
-/// `first` claims `first_pipe_instance`: ONLY the initial bind does, so a missing
-/// name surfaces as the typed `SocketBusy`. The recreate + next-instance must NOT
-/// claim it (the instance still in flight already holds it, and re-claiming would
-/// fail ACCESS_DENIED).
+/// `first` claims `first_pipe_instance`: ONLY the initial bind may, so a taken
+/// name surfaces as the typed `SocketBusy`. The recreate + next-instance must
+/// NOT claim it — the in-flight instance still holds it, and re-claiming fails
+/// ACCESS_DENIED.
 ///
 /// SAFETY: `attributes_ptr` must point at a well-formed `SECURITY_ATTRIBUTES`
 /// whose `lpSecurityDescriptor` is valid for the duration of the call; the kernel
@@ -126,14 +114,9 @@ impl Listener {
     pub(super) async fn bind(path: &Path) -> Result<Self> {
         let name = path.to_string_lossy().into_owned();
         let sd = OwnerOnlySd::new()?;
-        // first_pipe_instance: if another process already owns this name,
-        // creation fails ACCESS_DENIED — mapped to the typed SocketBusy
-        // below (Unix lock-arbitration parity) so the CC source degrades to
-        // transcript-only instead of silently queueing behind the owner OR
-        // dying wholesale. reject_remote_clients is the tokio default;
-        // pinned here explicitly. The server stays DUPLEX (tokio default) —
-        // the shim's client opens read+write, so an inbound-only pipe would
-        // reject it with ACCESS_DENIED (silent event drop).
+        // The server stays DUPLEX (tokio default): the shim's client opens
+        // read+write, so an inbound-only pipe would reject it with
+        // ACCESS_DENIED — a silent event drop.
         //
         // SAFETY: sd outlives the call (it moves into Self below) and
         // attributes_ptr points at its well-formed SECURITY_ATTRIBUTES whose
@@ -142,12 +125,11 @@ impl Listener {
         // past the call.
         let server = match unsafe { create_hook_pipe(&name, sd.attributes_ptr(), true) } {
             Ok(s) => s,
-            // ERROR_ACCESS_DENIED (5): almost always another instance holding
+            // ERROR_ACCESS_DENIED is almost always another instance holding
             // first_pipe_instance on this name — the one recoverable bind
             // failure. A genuine ACL denial (restricted token / AppContainer)
-            // is indistinguishable and also degrades; accepted trade-off, the
-            // JSONL watcher stays alive either way. Every other create error
-            // stays fatal.
+            // is indistinguishable and also degrades to transcript-only;
+            // accepted trade-off. Every other create error stays fatal.
             Err(e)
                 if e.kind() == std::io::ErrorKind::PermissionDenied
                     || e.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) =>
@@ -178,16 +160,11 @@ impl Listener {
                 }
             };
             if let Err(e) = self.server.connect().await {
-                // A failed instance isn't guaranteed reusable (tokio's own
-                // accept-loop pattern propagates connect errors for this
-                // reason) — recreate it; if THAT fails the error converges
-                // with the recreate-bail below. Unix accept errors leave the
-                // listener fd valid, hence its plain warn+continue.
+                // A failed instance isn't guaranteed reusable — recreate it.
                 warn!("hook pipe connect error: {e}; recreating instance");
-                // SAFETY: same contract as the bind site — `self.sd` is owned
-                // by `self` and outlives the call; the kernel copies the
-                // descriptor during CreateNamedPipeW, so nothing borrows past
-                // it.
+                // SAFETY: same contract as the bind site — `self.sd` outlives
+                // the call and the kernel copies the descriptor during
+                // CreateNamedPipeW, so nothing borrows past it.
                 self.server =
                     unsafe { create_hook_pipe(&self.name, self.sd.attributes_ptr(), false) }
                         .with_context(|| {
@@ -195,14 +172,13 @@ impl Listener {
                         })?;
                 continue;
             }
-            // Create the NEXT instance BEFORE handing this one off —
-            // tokio's documented pattern; in the gap between handoff and
-            // re-create, clients would get ERROR_PIPE_BUSY or NotFound
-            // depending on timing.
+            // Create the NEXT instance BEFORE handing this one off: in the gap
+            // between handoff and re-create, clients get ERROR_PIPE_BUSY or
+            // NotFound depending on timing.
             //
-            // SAFETY: same contract as the bind site — `self.sd` is owned by
-            // `self` and outlives the call; the kernel copies the descriptor
-            // during CreateNamedPipeW, so nothing borrows past it.
+            // SAFETY: same contract as the bind site — `self.sd` outlives the
+            // call and the kernel copies the descriptor during
+            // CreateNamedPipeW, so nothing borrows past it.
             let next = unsafe { create_hook_pipe(&self.name, self.sd.attributes_ptr(), false) }
                 .with_context(|| format!("re-creating hook pipe at {}", self.name))?;
             let conn = std::mem::replace(&mut self.server, next);

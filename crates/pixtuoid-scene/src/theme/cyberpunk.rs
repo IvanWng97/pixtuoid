@@ -172,7 +172,6 @@ pub static CYBERPUNK: Theme = Theme {
             b: 255,
         },
         night_tint: Rgb { r: 8, g: 6, b: 18 },
-        // Hot-magenta sun / electric-cyan moon — the theme's own neon duality.
         sun_core: Rgb {
             r: 255,
             g: 90,
@@ -469,66 +468,66 @@ pub static CYBERPUNK: Theme = Theme {
             r: 0xff,
             g: 0x8c,
             b: 0x00,
-        }, // neon amber/orange
+        },
         codex: Rgb {
             r: 0x00,
             g: 0xe5,
             b: 0xff,
-        }, // electric cyan
+        },
         reasonix: Rgb {
             r: 0xff,
             g: 0x00,
             b: 0xc8,
-        }, // hot magenta
+        },
         antigravity: Rgb {
             r: 0x39,
             g: 0xff,
             b: 0x14,
-        }, // neon green
+        },
         codewhale: Rgb {
             r: 0x1e,
             g: 0x90,
             b: 0xff,
-        }, // electric azure
+        },
         opencode: Rgb {
             r: 0xff,
             g: 0x3b,
             b: 0x30,
-        }, // neon red
+        },
         copilot: Rgb {
             r: 0xe0,
             g: 0x60,
             b: 0x9c,
-        }, // copilot rose
+        },
         cursor: Rgb {
             r: 0xaa,
             g: 0xb4,
             b: 0xc8,
-        }, // cursor slate-blue (monochrome brand; distinct from all 7)
+        },
         openclaw: Rgb {
             r: 0xff,
             g: 0xaa,
             b: 0x30,
-        }, // openclaw marigold (lobster; warm, clears claude-amber + opencode-red)
+        },
         hermes: Rgb {
             r: 0x68,
             g: 0x58,
             b: 0xe0,
-        }, // Hermes/Nous indigo (brand-constant like openclaw marigold; clears reasonix-violet + cursor-slate + codex-blue on every theme, min Manhattan >=92)
+        },
         omp: Rgb {
             r: 0x8a,
             g: 0xc8,
             b: 0x32,
-        }, // omp lime (brand-constant; clears antigravity-green + codewhale-teal + claude-amber on every theme)
+        },
         grok: Rgb {
             r: 0x30,
             g: 0xd0,
             b: 0xe8,
-        }, // grok cyan (brand-constant; nearest neighbor codewhale-teal at Manhattan 78 ≥ the 60 floor, and the SITE's chip transforms clear WCAG AA in both themes: ×0.55-on-day-chip 5.3:1, ×0.8+white-on-night-chip 11.6:1 — the silver e6e6e6 failed the day chip at 3.83:1, caught by the site e2e badge sweep)
+        },
         kimi: Rgb {
             r: 0xc4,
             g: 0x46,
             b: 0xfe,
-        }, // kimi electric violet (brand-constant like hermes/omp/grok; Kimi/Moonshot's purple, min Manhattan >=88 vs every source on every theme)
+        },
     },
 };

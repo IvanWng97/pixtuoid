@@ -1,10 +1,8 @@
-//! Golden image regression tests.
+//! Golden image regression tests: render deterministic scenes and hash the
+//! pixels, so any visual regression changes the hash.
 //!
-//! Render deterministic scenes and snapshot the pixel hash. Any visual
-//! regression (missing sprite, wrong color, broken layout) changes the
-//! hash. Tests only compare same-machine renders against each other
-//! (eq/ne assertions), so timezone-dependent code paths like the sky
-//! emitter's golden-hour blaze (`golden_hour_blaze`) don't cause
+//! The assertions only compare same-machine renders against each other, so
+//! timezone-dependent paths like the sky emitter's golden-hour blaze can't cause
 //! cross-platform failures.
 
 mod common;

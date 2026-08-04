@@ -2,13 +2,10 @@ version: 2
 updates:
   - package-ecosystem: cargo
     # A RED cargo run does not mean the lane stopped: dependabot-core updates one
-    # package at a time, so a release that needs a LOCKSTEP SIBLING bump
-    # (serde -> serde_core/serde_derive; toml/toml_edit -> toml_writer) leaves the
-    # regenerated lock unchanged and `cargo/file_updater/lockfile_updater.rb:76`
-    # raises `unknown_error`. The group loop skips that dependency and still opens
-    # the PR for the rest — #624 and #761 were both cut from red runs. The remedy
-    # is a human `cargo update -p <crate>`; the advisory axis is covered
-    # independently by audit.yml's daily `cargo-deny check advisories`.
+    # package at a time, so a release needing a LOCKSTEP SIBLING bump (serde ->
+    # serde_core/serde_derive) leaves the regenerated lock unchanged and raises
+    # `unknown_error`. The group loop skips it and still opens the PR for the
+    # rest; the remedy is a human `cargo update -p <crate>`.
     directory: /
     schedule:
       interval: weekly
@@ -17,18 +14,15 @@ updates:
         patterns: ["*"]
     open-pull-requests-limit: 5
     ignore:
-      # objc2-app-kit MUST track winit's stack (see crates/pixtuoid/Cargo.toml):
-      # winit 0.30.x still pulls 0.2.x on objc2 0.5.x, so a 0.3+ bump would build
-      # a SECOND objc2 stack beside winit's AND break the activate API. Allow only
-      # 0.2.x patch bumps until winit itself moves to objc2 0.6.
+      # objc2-app-kit MUST track winit's stack: winit 0.30.x still pulls 0.2.x,
+      # so a 0.3+ bump builds a SECOND objc2 stack beside winit's AND breaks the
+      # activate API. Lift when winit itself moves to objc2 0.6.
       - dependency-name: "objc2-app-kit"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
-      # Same discipline for x11rb (see crates/pixtuoid/Cargo.toml): winit and
-      # softbuffer both require `^0.13.0`, so a bump past 0.13.x builds a SECOND
-      # x11rb + x11rb-protocol on Linux instead of reusing the one already in
-      # tree. A grouped bump did exactly that once; [bans] is warn-only, so only
-      # this ignore stops it recurring. Lift it when winit moves to x11rb 0.14.
+      # Same discipline for x11rb: winit and softbuffer both require `^0.13.0`,
+      # so a bump past 0.13.x builds a SECOND x11rb stack on Linux. [bans] is
+      # warn-only, so only this ignore stops it. Lift at winit's x11rb 0.14.
       - dependency-name: "x11rb"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
@@ -37,11 +31,9 @@ updates:
 
   - package-ecosystem: github-actions
     # `directory: /` searches ONLY `.github/workflows` plus a root `action.yml`,
-    # so every third-party pin that #784/#785 moved into a composite left
-    # Dependabot's map. The second entry is the form dependabot-core#6704
-    # confirms works — `/.github/actions/*`, not `/.github/actions/*/action.yml`,
-    # which silently degrades back to workflows-only. `policy/ci-observability`
-    # denies a composite pin no declared directory covers.
+    # so composite actions need the second entry — and it must be
+    # `/.github/actions/*`, NOT `/.github/actions/*/action.yml`, which silently
+    # degrades back to workflows-only (dependabot-core#6704).
     directories:
       - /
       - /.github/actions/*
@@ -52,22 +44,17 @@ updates:
         patterns: ["*"]
     open-pull-requests-limit: 5
     ignore:
-      # This repo pins actions to a FLOATING major (`@v4`), which .github/zizmor.yml
-      # records as deliberate policy — the tag already tracks the newest release, so
-      # patch/minor updates arrive without a PR. Dependabot reads `@v4` as "version
-      # 4" and, filtered by the cooldown below, offers the newest version that is a
-      # week OLD — rewriting the self-updating ref into a stale exact pin. #786 did
-      # exactly that: `@v1` (then v1.0.183) -> v1.0.178, `@v4` (then v4.37.3) ->
-      # v4.37.1. Both downgrades. Only a MAJOR bump needs a human, so only majors
-      # should open a PR.
+      # This repo pins actions to a FLOATING major (`@v4`), so patch/minor
+      # updates already arrive without a PR. Dependabot reads `@v4` as "version
+      # 4" and, filtered by the cooldown below, would rewrite the self-updating
+      # ref into an exact pin a week OLD — a downgrade (#786). Only majors need
+      # a human.
       - dependency-name: "*"
         update-types:
           ["version-update:semver-patch", "version-update:semver-minor"]
     cooldown:
       default-days: 7
 
-  # The two Node projects previously had security ALERTS but no update PRs —
-  # npm advisories surfaced with nothing offering the fix.
   - package-ecosystem: npm
     directory: /site
     schedule:
@@ -80,9 +67,8 @@ updates:
         patterns: ["*"]
     open-pull-requests-limit: 5
     ignore:
-      # typescript major (→7) is peer-rejected by @astrojs/check (peers
-      # typescript ^5||^6) and typescript-eslint (<6.1.0), so `npm ci` ERESOLVEs.
-      # Stay on 6.x until the astro-check + eslint toolchain supports TS7.
+      # typescript major (→7) is peer-rejected by @astrojs/check and
+      # typescript-eslint, so `npm ci` ERESOLVEs.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
     cooldown:
@@ -97,14 +83,12 @@ updates:
         patterns: ["*"]
     open-pull-requests-limit: 5
     ignore:
-      # @raycast/api peers @types/node EXACTLY (22.19.17 — Raycast's runtime is
-      # Node 22); a major ahead of that types APIs the runtime doesn't have.
-      # Bump only when @raycast/api's own peer pin moves.
+      # @raycast/api peers @types/node EXACTLY; a major ahead of that types APIs
+      # Raycast's Node 22 runtime doesn't have.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
       # typescript major (→7) is peer-rejected by @raycast/eslint-config's
-      # typescript-eslint (peers typescript <6.1.0), so `npm ci` ERESOLVEs. Stay
-      # on 6.x until the eslint toolchain supports TS7.
+      # typescript-eslint, so `npm ci` ERESOLVEs.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
     cooldown:

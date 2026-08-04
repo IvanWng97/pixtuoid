@@ -1,9 +1,6 @@
-//! Walkable mask visualization snapshots.
-//!
-//! Renders the walkable mask as a compact ASCII grid (`.` = walkable, `#` =
-//! blocked) and snapshots it with `insta`. More visual than the BFS
-//! connectivity test — you can SEE where the blocked areas are, so a changed
-//! obstacle pad or wall placement shows up as a clear diff.
+//! Walkable-mask visualization snapshots: the mask as an ASCII grid, so a changed
+//! obstacle pad or wall placement shows up as a readable diff rather than the BFS
+//! connectivity test's boolean.
 
 use pixtuoid_scene::layout::SceneLayout;
 

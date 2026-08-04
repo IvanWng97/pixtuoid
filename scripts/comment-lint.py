@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 """Diff-scoped advisory for the ast-grep comment-slop rules.
 
-The whole-repo scan has ~5k pre-existing hits (mostly legitimate dense WHY
-comments), so a whole-repo gate is wrong. This reports ONLY hits on lines a PR
-ADDED or CHANGED vs its base — the new-slop signal — and is ADVISORY: it prints
-findings and always exits 0 unless `--gate` is passed. Mirrors the diff-scoping
-`just mutants --in-diff` already uses.
+The whole-repo scan is dominated by pre-existing, mostly legitimate hits, so a
+whole-repo gate is wrong; this reports ONLY hits on lines a PR added or changed.
 
 Usage: comment-lint.py [BASE_REF] [--gate] [--worktree] [--selftest]
   BASE_REF     git ref to diff against (default: origin/main)
   --gate       exit 1 if any new-code hit is found (default: advisory, exit 0)
-  --worktree   diff the WORKING TREE vs BASE (lint uncommitted changes) instead
-               of the committed BASE...HEAD range (the default, for CI/PRs)
+  --worktree   diff the WORKING TREE vs BASE, not the committed BASE...HEAD range
   --selftest   pin this driver's pathspec + hidden-dir scan on a throwaway repo
 """
 import json
@@ -22,18 +18,15 @@ import subprocess
 import sys
 import tempfile
 
-# The file types comment-lint covers. One definition: the selftest drives the
-# reader that uses it, so a change here cannot pass a stale second copy.
 PATHSPEC = ("*.rs", "*.py", "*.pyi")
 
 
 def added_lines_by_file(
     base: str, worktree: bool, cwd: str | None = None
 ) -> dict[str, set[int]]:
-    """Map each changed .rs/.py/.pyi file → the set of its NEW-side added/changed line
-    numbers (1-indexed), parsed from a zero-context diff."""
-    # `base...HEAD` = the PR's own commits (merge-base range); `base` alone also
-    # folds in uncommitted working-tree edits (local `--worktree` mode).
+    """Map each changed file → its NEW-side added/changed line numbers, 1-indexed."""
+    # `base...HEAD` is the merge-base range (the PR's own commits); bare `base`
+    # also folds in uncommitted working-tree edits.
     rev = base if worktree else f"{base}...HEAD"
     diff = subprocess.run(
         ["git", "diff", "--unified=0", "--no-color", rev, "--", *PATHSPEC],
@@ -58,12 +51,9 @@ def added_lines_by_file(
 
 
 def scan_hits(cwd: str | None = None) -> list[dict]:
-    """Every rule's hits for the tree at `cwd`.
-
-    `--no-ignore hidden`: ast-grep skips dot-dirs like ripgrep, but the diff
+    """`--no-ignore hidden`: ast-grep skips dot-dirs like ripgrep, but the diff
     filter matches `.claude/skills/**/*.py` — without it the scan reports a clean
-    pass on files it never opened. Pinned by `--selftest`.
-    """
+    pass on files it never opened."""
     out = subprocess.run(
         ["ast-grep", "scan", "--json", "--no-ignore", "hidden"],
         capture_output=True,
@@ -76,13 +66,7 @@ def scan_hits(cwd: str | None = None) -> list[dict]:
 
 def selftest() -> int:
     """Pin this DRIVER's two behaviors: which files it diffs, and which it scans.
-
-    The ast-grep RULES have their own fires/does-not-fire pins (`just
-    ast-grep-test`); this covers the Python half of the pathspec and the
-    hidden-dir scan flag, which live here and had no coverage. Both are
-    regressions a refactor could make silently — the hidden-dir case shipped as a
-    clean pass over six unread files before it was caught in review.
-    """
+    The ast-grep RULES have their own pins (`just ast-grep-test`)."""
     root = pathlib.Path(__file__).resolve().parent.parent
     fails: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -113,9 +97,8 @@ def selftest() -> int:
             if path not in scanned:
                 fails.append(f"{why}: {path} missing from {sorted(scanned)}")
 
-        # The pathspec half, driven through the REAL reader — not a second copy
-        # of the extension list, which would pass while the production pathspec
-        # silently changed underneath it.
+        # Driven through the REAL reader, not a second copy of the extension list,
+        # which would pass while the production pathspec changed underneath it.
         added = added_lines_by_file("HEAD~1", worktree=False, cwd=str(repo))
         for path in ("src/plain.py", ".claude/skills/hidden.py", "src/keep.rs"):
             if not added.get(path):
@@ -145,9 +128,8 @@ def main() -> int:
         print("comment-lint: no added/changed Rust or Python lines vs", base)
         return 0
 
-    # Fail SOFT if ast-grep isn't installed — this is an advisory (it's excluded
-    # from setup-tools' verify loop on purpose), so a dev without it gets a hint,
-    # never a raw traceback that reads like the tool is broken.
+    # Fail SOFT if ast-grep isn't installed — this is an advisory, so a dev without
+    # it gets a hint, never a traceback that reads like the tool is broken.
     if shutil.which("ast-grep") is None:
         print("comment-lint: ast-grep not found — run `just setup-tools` (advisory skipped)")
         return 0
@@ -158,9 +140,8 @@ def main() -> int:
     for h in hits:
         f = h["file"]
         # ast-grep JSON `start.line` is 0-indexed; the diff is 1-indexed. The hit
-        # anchors on the LAST comment of a run, so prepending a line onto an
-        # existing 2-run isn't caught (the anchor is unchanged) — a rare,
-        # accepted diff-scoping residual; a fresh 3+-run in new code IS caught.
+        # anchors on the LAST comment of a run, so prepending onto an existing
+        # 2-run isn't caught — an accepted residual, not a bug to fix here.
         ln = h["range"]["start"]["line"] + 1
         if ln in added.get(f, ()):  # noqa: SIM118 — set membership
             new_hits.append((f, ln, h["text"].strip().splitlines()[0], h["message"]))
@@ -170,15 +151,14 @@ def main() -> int:
         return 0
 
     github = "--github" in sys.argv[1:]
-    # A run of N>3 comments yields N-2 overlapping ast-grep windows, so this
-    # counts flagged LINES, not distinct runs — each still points at its fn.
+    # A long run yields overlapping ast-grep windows, so this counts flagged
+    # LINES, not distinct runs.
     print(f"comment-lint: {len(new_hits)} new comment-slop finding(s) in a fn body")
     print("  (advisory — pr-review.prompt.md comment-value factor)")
     for f, ln, txt, msg in sorted(new_hits):
         print(f"  {f}:{ln}: {txt}")
         if github:
-            # GitHub Actions annotation (inline on the PR diff); the rule's own
-            # `message` is the single source of the guidance text.
+            # GitHub Actions annotation — inline on the PR diff.
             print(f"::warning file={f},line={ln}::{msg}")
     return 1 if gate else 0
 

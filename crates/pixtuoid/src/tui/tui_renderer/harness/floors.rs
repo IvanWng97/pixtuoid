@@ -7,8 +7,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     let theme = pixtuoid_scene::theme::ALL_THEMES[0];
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
-    // Two-floor scene: a long-idle (wandering) agent on floor 0, plus a
-    // filler on floor 1 so `num_floors` == 2.
+    // A filler on floor 1 so `num_floors` == 2; the floor-0 agent is long-idle ⇒ wanders.
     let cap = 16;
     let mut scene = SceneState::uniform(cap);
     let a = AgentId::from_transcript_path("/h/floor0.jsonl");
@@ -33,18 +32,16 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
         "floor-0 agent should have a MotionState after warm-up"
     );
 
-    // Switch to floor 1 and let the transition settle.
     r.navigate_floor(1, now);
     render_until_settled(&mut r, &scene, &pack, &mut now, 1);
 
-    // Baseline: floor 0 is now off-screen.
     let frozen_at = r
         .floor_motion(0)
         .and_then(|m| m.get(&a))
         .map(|ms| ms.wander.last_advanced_at)
         .expect("floor-0 motion present");
 
-    // ~30 s on floor 1 — floor 0 must NOT be advanced.
+    // ~30 s on floor 1.
     for _ in 0..900 {
         now += Duration::from_millis(33);
         r.render(&scene, &pack, now).expect("render");
@@ -59,15 +56,10 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
         "off-screen floor 0 motion must stay frozen while floor 1 is visible"
     );
 
-    // Switch back to floor 0.
     let back_at = now;
     r.navigate_floor(0, now);
     render_until_settled(&mut r, &scene, &pack, &mut now, 0);
 
-    // RESYNC: the stale-resume must re-anchor the phase clock to ~now
-    // (clean Seated start) instead of replaying ~30 s of backlogged cycles
-    // one transition per frame. wander.phase_started_at would be far in the
-    // past if it replayed.
     let ms = r
         .floor_motion(0)
         .and_then(|m| m.get(&a))
@@ -78,9 +70,6 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     );
 }
 
-// ===================================================================
-// Floor navigation
-// ===================================================================
 #[test]
 fn floor_transition_completes_and_lands() {
     let p = pack();
@@ -153,7 +142,6 @@ fn transition_cancelled_when_target_floor_disappears() {
     r.navigate_floor(1, now);
     assert!(r.transition().is_some());
 
-    // Floor-1 agent leaves ⇒ num_floors drops to 1 ⇒ transition target gone.
     scene.agents.remove(&f1.agent_id);
     now += Duration::from_millis(100);
     r.render(&scene, &pack(), now).unwrap();
@@ -203,17 +191,13 @@ fn per_floor_layout_seeds_differ() {
     );
 }
 
-// `invalidate_routes` drops every floor's A* path cache. Its only production
-// caller is the codecov-ignored resize handler in tui/mod.rs, so the loop body
-// is never exercised under coverage. Warm up a wandering agent so the router
-// populates its (from,to) path cache, then assert invalidate empties it.
+// The only production caller is the codecov-ignored resize handler in tui/mod.rs, so
+// the loop body is otherwise never exercised.
 #[test]
 fn invalidate_routes_clears_every_floor_router_cache() {
-    // Long-idle agents wander; a WalkingOut/WalkingBack leg drives
-    // route_walking_pose → AStarRouter::route, populating the (from,to) cache.
-    // Several agents + a multi-second timeline guarantee at least one walk leg
-    // (a fresh agent bootstraps Seated@now, then sits seated_dwell_ms 15-30s
-    // before its first walk-out).
+    // A fresh agent bootstraps Seated@now then sits 15-30s before its first walk-out,
+    // so several agents + a multi-second timeline are needed to guarantee one walk leg
+    // (only a walk populates the router's (from,to) cache).
     let agents = (0..8)
         .map(|i| {
             idle(
@@ -226,7 +210,6 @@ fn invalidate_routes_clears_every_floor_router_cache() {
     let scene = scene_with(agents, 16);
     let mut r = build(120, 60, vec![]);
     let mut now = t0();
-    // Advance up to ~60s of render time; bail out as soon as the router caches.
     for _ in 0..120 {
         r.render(&scene, &pack(), now).expect("render");
         if !r.floors[0].ctx.router.is_empty() {
@@ -251,19 +234,10 @@ fn invalidate_routes_clears_every_floor_router_cache() {
     );
 }
 
-// The transition path's no-layout guard (`floor::render_floor`'s
-// `compute_with_seed(...)?`) — the transition twin of the normal-path
-// Ok(None) branch. A 30-col
-// terminal passes `render_transition`'s 20×12 scene gate (scene_rect 30×39) but
-// buf_w=30 < the office MIN_W=34, so compute_with_seed returns None and the
-// floor paints nothing (no render_to_rgb_buffer, no coffee carriers). Mutating
-// away the None-guard would paint over the bg-fallback fill (or panic on the
-// missing layout), flipping this assertion.
 #[test]
 fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
     let cap = 16;
-    // A floor-0 agent (coffee carrier would-be) + a floor-1 occupant so
-    // num_floors==2 and navigate_floor(1) has a destination.
+    // A floor-1 occupant so num_floors==2 and navigate_floor(1) has a destination.
     let scene = scene_with(
         vec![
             idle("/narrow/0.jsonl", 0, t0() - Duration::from_secs(120)),
@@ -287,7 +261,6 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
     r.render(&scene, &pack(), now).expect("render at 30 cols");
     r.navigate_floor(1, now);
     assert!(r.transition().is_some(), "navigation begins a transition");
-    // Render ONE in-flight transition frame (slide still active).
     now += Duration::from_millis(33);
     r.render(&scene, &pack(), now)
         .expect("transition render at a narrow terminal must not panic");
@@ -296,8 +269,6 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
         "the slide is still active this frame"
     );
 
-    // The from-floor buffer was ensure_size'd to the theme's bg-fallback, then
-    // render_floor returned early (no layout) ⇒ it stays uniform.
     let bg = normal_theme().surface.bg_fallback;
     let from = r.floor_buf(0).expect("floor-0 buffer allocated");
     let non_bg = (0..from.height())
@@ -308,16 +279,11 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
         non_bg, 0,
         "compute failed at 30 cols ⇒ no scene/agents painted, buffer stays bg-fallback ({non_bg} stray pixels)"
     );
-    // No pantry trip could have completed against a None layout.
     assert!(
         !r.coffee_contains(AgentId::from_transcript_path("/narrow/0.jsonl")),
         "a skipped transition floor records no coffee carriers"
     );
 }
-
-// ===================================================================
-// Overlays during a floor transition (transition render path)
-// ===================================================================
 
 #[test]
 fn footer_shows_source_death_warning() {
@@ -333,7 +299,6 @@ fn footer_shows_source_death_warning() {
         "the footer must surface a dead source (#157); footer row:\n{}",
         text.lines().last().unwrap_or("")
     );
-    // And it clears once healthy again (e.g. after a future restart-in-place).
     r.set_source_warning(None);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -398,14 +363,9 @@ fn help_overlay_renders_during_floor_transition() {
     );
 }
 
-// ===================================================================
-// tui_renderer: render_transition too-small bail (CG9) + getters (CG10)
-// ===================================================================
-
 #[test]
 fn transition_on_too_small_terminal_clears_state_and_lands() {
-    // Two-floor scene on a sub-20×12 terminal: starting a transition hits the
-    // render_transition too-small bail → cached layout / pet / popup cleared.
+    // A sub-20×12 terminal hits the render_transition too-small bail.
     let scene = two_floor_scene();
     let mut r = build(18, 10, vec![PetKind::Cat]);
     let now = t0();
@@ -416,12 +376,10 @@ fn transition_on_too_small_terminal_clears_state_and_lands() {
     assert!(r.cached_layout().is_none());
     assert!(r.cached_pet_pos().is_none());
     assert_eq!(r.last_popup_scale(), 0.0);
-    // The gate now LANDS the transition instead of leaving it live: render_transition
-    // returns before render_floor/ensure_size, so the floor buffer's size signature
-    // never changes and the event loop's resize detector can't fire cancel_transition
-    // — the slide would otherwise stay live hitting the no-draw path for its whole
-    // ~400 ms timer, freezing a stale frame. Landing it drops back to draw_scene's
-    // footer-only path, which shares the same threshold behavior.
+    // Landing matters: render_transition returns before ensure_size, so the floor
+    // buffer's size signature never changes and the resize detector can't fire
+    // cancel_transition — the slide would stay live on the no-draw path for its whole
+    // ~400 ms timer, freezing a stale frame.
     assert!(
         r.transition().is_none(),
         "the too-small gate should land (cancel) the stuck transition"
@@ -441,8 +399,6 @@ fn debug_walkable_getter_reflects_setter() {
 
 #[test]
 fn already_expired_active_pet_clears_on_render() {
-    // set_active_pet with a PetState whose petted_at is far in the past → the
-    // render-time auto-expire drops it.
     let scene = scene_with(vec![active("/exp/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(100, 40, vec![PetKind::Cat]);
     r.set_active_pet(Some(PetState {
@@ -460,8 +416,6 @@ fn already_expired_active_pet_clears_on_render() {
 
 #[test]
 fn current_floor_clamps_when_floor_count_drops() {
-    // Land on floor 1, then re-render a scene with only floor 0 ⇒ current_floor
-    // must clamp back into range (the nf-shrink clamp).
     let cap = 16;
     let two = two_floor_scene();
     let mut r = build(100, 40, vec![]);
@@ -470,7 +424,6 @@ fn current_floor_clamps_when_floor_count_drops() {
     r.navigate_floor(1, now);
     render_until_settled(&mut r, &two, &pack(), &mut now, 1);
     assert_eq!(r.current_floor(), 1);
-    // Drop to a single-floor scene.
     let one = scene_with(vec![idle("/clamp/0.jsonl", 0, t0())], cap);
     r.render(&one, &pack(), now).unwrap();
     assert_eq!(
@@ -482,8 +435,6 @@ fn current_floor_clamps_when_floor_count_drops() {
 
 #[test]
 fn theme_picker_renders_during_floor_transition() {
-    // Opening the theme picker mid-transition exercises the transition-path
-    // theme_picker paint arm.
     let scene = two_floor_scene();
     let mut r = build(140, 48, vec![]);
     let mut now = t0();

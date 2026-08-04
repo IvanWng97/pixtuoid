@@ -1,23 +1,9 @@
 #!/usr/bin/env node
 // Generate the per-platform `@pixtuoid/cli-*` npm packages + stamp the launcher.
 //
-// Mirrors Biome's generate-packages.mjs, adapted for pixtuoid's TWO binaries
-// (pixtuoid + pixtuoid-hook) and ASYMMETRIC 6-target matrix. Reads the prebuilt
-// binaries from --artifacts (layout: <dir>/<rust-target>/{pixtuoid,pixtuoid-hook}
-// [.exe]) — the exact binaries release.yml already ships in its tarballs — and
-// writes, under npm/:
-//   • @pixtuoid/cli-<platform>-<arch>/  (per target: package.json + both binaries)
-//   • re-stamps the launcher (npm/pixtuoid) version + its 6 optionalDependencies
-//     pins to <version>.
-//
 // Usage: node npm/generate.mjs --version X.Y.Z --artifacts <dir> [--npm-dir <dir>]
-// Writes into the npm/ tree in place (default: this script's own dir) — version
-// + dep pins are stamped here; the per-platform @pixtuoid/cli-* dirs are
-// gitignored. --npm-dir overrides the target tree (used by the test to generate
-// into a temp copy instead of mutating the tracked launcher).
-//
-// Nothing per-platform is committed (git-cliff style) — the packages are
-// generated here at publish time and gitignored.
+// Writes into the npm/ tree in place; --npm-dir points it at a temp copy so the
+// test doesn't mutate the tracked launcher.
 
 import {
   existsSync,
@@ -35,13 +21,11 @@ import { fileURLToPath } from "node:url";
 const SCOPE = "@pixtuoid";
 const BINS = ["pixtuoid", "pixtuoid-hook"];
 
-// The asymmetric 6-row target table — mirrors release.yml's build matrix
-// (equality PINNED by npm/generate.test.mjs, so a matrix target this table lacks
-// fails `just npm-check` instead of silently shipping nowhere on npm).
-//   linux-x64   → static musl build (portable to glibc too) → NO `libc` gate,
-//                 so npm installs it on every linux-x64 host.
-//   linux-arm64 → glibc build → `libc:["glibc"]` so npm SKIPS it on musl /
-//                 Alpine-arm64 (where it would crash) rather than mis-installing.
+// Must stay equal to release.yml's build matrix; npm/generate.test.mjs pins that,
+// so a missing target fails `just npm-check` instead of silently shipping nowhere.
+// linux-x64 is a static musl build (portable to glibc too), so it takes NO `libc`
+// gate; linux-arm64 is glibc, so `libc:["glibc"]` makes npm SKIP it on Alpine-arm64
+// rather than install a binary that would crash there.
 const TARGETS = [
   { rust: "aarch64-apple-darwin", pkg: "darwin-arm64", os: "darwin", cpu: "arm64" },
   { rust: "x86_64-apple-darwin", pkg: "darwin-x64", os: "darwin", cpu: "x64" },
@@ -105,7 +89,7 @@ for (const t of TARGETS) {
     files,
   };
   writeFileSync(join(pkgDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
-  launcher.optionalDependencies[pkgName] = version; // re-pin to this version
+  launcher.optionalDependencies[pkgName] = version;
   console.log(`generated ${pkgName}@${version} (${files.join(", ")})`);
 }
 

@@ -1,22 +1,18 @@
 //! Floating-window keyboard input — the winit KEY→action map for the audio
-//! runtime controls (#633 close-out). The state TRANSITION is shared with the
-//! TUI in `crate::audio` ([`crate::audio::apply_audio_action`]); only this
-//! key-decoding half is painter-specific (winit here, crossterm in the TUI),
-//! so the two surfaces can't drift on feel. The winit glue in `window.rs`
-//! stays thin (codecov-ignored, like the TUI event loop).
+//! runtime controls. The state TRANSITION is shared with the TUI in
+//! [`crate::audio::apply_audio_action`]; only this key-decoding half is
+//! painter-specific (winit here, crossterm in the TUI).
 
 use crate::audio::AudioAction;
 use winit::keyboard::Key;
 
 /// Map a winit logical key to an [`AudioAction`] — the TUI's `m` / `+`(`=`) /
 /// `-`(`_`) vocabulary (lowercase `m` only, matching the TUI's
-/// `KeyCode::Char('m')`; no Shift+M).
+/// `KeyCode::Char('m')`).
 ///
-/// winit delivers an explicit `repeat` flag, which the TUI's crossterm path
-/// LACKS (crossterm surfaces OS autorepeat as ordinary `Press` events unless
-/// the never-enabled kitty protocol is on, so a held `m` there re-dispatches).
-/// We use it as floating-only hardening: volume keys accept repeats (holding
-/// `-` slides the volume), the mute TOGGLE swallows them (a held `m` must not
+/// winit delivers an explicit `repeat` flag the TUI's crossterm path LACKS. We
+/// use it as floating-only hardening: volume keys accept repeats (holding `-`
+/// slides the volume), the mute TOGGLE swallows them (a held `m` must not
 /// oscillate).
 pub(crate) fn audio_action(key: &Key, repeat: bool) -> Option<AudioAction> {
     let Key::Character(s) = key else {

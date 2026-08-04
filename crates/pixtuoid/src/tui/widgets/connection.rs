@@ -1,7 +1,6 @@
-//! The Sources panel painter (ratatui). Pure presentation over the pre-built
-//! row list + per-frame live facet from `tui::connection`; all model logic lives
-//! there. Borderless (via `panel::borderless_panel`), painted over the scene in
-//! both the normal and floor-transition draw paths.
+//! The Sources panel painter (ratatui). Pure presentation over the pre-built row
+//! list + per-frame live facet from `tui::connection`; all model logic lives
+//! there.
 
 use std::time::{Duration, SystemTime};
 
@@ -16,18 +15,14 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-/// Popup content width (clamped to the terminal by the panel geometry).
 const CONNECTION_POPUP_W: u16 = 66;
-/// Char budget for the display-name column (after the badge).
 const NAME_W: usize = 13;
-/// Char budget for the connection-state column.
 const CONN_W: usize = 15;
 
 /// The column header, kept as one fn so the "Live" position can't drift from the
 /// data row. The two trailing spaces before "Live" mirror the fixed 2-col
-/// `health_flag` slot each data row carries between the Connection and Live
-/// columns (see `connection_line`) — without them "Live" sits 2 cols left of its
-/// data. `live_header_aligns_with_the_live_data_column` pins the two together.
+/// `health_flag` slot each data row carries — without them "Live" sits 2 cols
+/// left of its data.
 fn column_header() -> String {
     format!(
         "  {:<18}{:<width$}  Live",
@@ -59,15 +54,12 @@ pub(crate) fn paint_connection_panel(
         return;
     };
 
-    // Above (fixed chrome): the socket line, a blank, the column header.
     let above = vec![
         Line::from(Span::styled(format!("  {socket_line}"), dim)),
         Line::from(""),
         Line::from(Span::styled(column_header(), dim)),
     ];
 
-    // List: one row per CLI — paint_panel windows-with-cue + follows the selection
-    // on a short terminal (so the source list no longer clips its footer/detail).
     let list: Vec<Line<'static>> = rows
         .iter()
         .enumerate()
@@ -77,9 +69,6 @@ pub(crate) fn paint_connection_panel(
         })
         .collect();
 
-    // Below (fixed chrome): a blank, the SELECTED row's detail line, the footer.
-    // Detail priority: armed-confirm prompt > last action result > install path >
-    // no-action hint. (Health verdict preempts the benign per-state line — #309.)
     let detail = if let Some(ci) = confirm {
         let name = rows.get(ci).map_or("", |r| r.display_name);
         format!("\u{26a0} disconnect {name}? (y/n)")
@@ -89,8 +78,8 @@ pub(crate) fn paint_connection_panel(
         if let Some(h) = &row.health {
             h.clone()
         } else {
-            // Surface the install path ONLY when Connected (else the path is a
-            // meaningless future destination); no-CLI explains why it can't bind.
+            // The install path is surfaced ONLY when Connected — otherwise it is a
+            // meaningless future destination.
             match row.state {
                 ConnState::Connected => match &row.config_path {
                     Some(p) => format!("installed at: {}", p.display()),
@@ -103,8 +92,8 @@ pub(crate) fn paint_connection_panel(
     } else {
         String::new()
     };
-    // Width budget reserves the 2-space left indent + a symmetric 2-col right
-    // margin so a full-width scroll never runs flush to the panel edge.
+    // Reserves the 2-space left indent + a symmetric 2-col right margin, so a
+    // full-width scroll never runs flush to the panel edge.
     let detail_w = (inner_w as usize).saturating_sub(4);
     let below = vec![
         Line::from(""),
@@ -136,8 +125,8 @@ pub(crate) fn paint_connection_panel(
     );
 }
 
-/// One CLI row: a colored badge (never reversed), the name (tinted/reversed by
-/// selection), the connection-state column, and the live-activity column.
+/// One CLI row: a colored badge, the name (tinted/reversed by selection), the
+/// connection-state column, and the live-activity column.
 fn connection_line(
     row: &ConnectionRow,
     live: &LiveInfo,
@@ -147,8 +136,8 @@ fn connection_line(
 ) -> Line<'static> {
     let prefix = if is_selected { "\u{25b8} " } else { "  " };
 
-    // Badge: source color, NEVER reversed (a low-luminance hue inverted vanishes
-    // against the highlight bg). Same shared builder as the dashboard + tooltip.
+    // The badge is NEVER reversed: a low-luminance hue inverted vanishes against
+    // the highlight bg.
     let badge_tag = row.label_prefix;
 
     let base = if is_selected {
@@ -189,13 +178,10 @@ fn connection_line(
                     theme.ui.label_active,
                 )
             }
-            // A daemon counts INSTANCES, and names their rolled-up state — "idle"
-            // alone can't distinguish a stopped gateway from a busy one, which is
-            // the whole reason this facet is typed. Zero instances reports the
-            // OBSERVATION, not a verdict: presence is announce-driven, so a gateway
-            // that announced before this pixtuoid started — or whose plugin has not
-            // loaded yet — is alive and merely unheard. A diagnosis surface must not
-            // assert a fact it cannot observe (the same rule as the socket line).
+            // Zero instances reports the OBSERVATION, not a verdict: presence is
+            // announce-driven, so a gateway that announced before this pixtuoid
+            // started is alive and merely unheard. A diagnosis surface must not
+            // assert a fact it cannot observe.
             LiveFacet::Daemon(None) => (
                 '\u{25cc}',
                 "no gateway seen".to_string(),
@@ -204,11 +190,9 @@ fn connection_line(
             LiveFacet::Daemon(Some(rollup)) => {
                 let instances = rollup.instances.get();
                 let plural = if instances == 1 { "" } else { "s" };
-                // The WORD and the hue both come from the shared board model
-                // (`gateway_label`/`gateway_tone`) — the exact pair the footer's
-                // `⬢gw` chip renders, so the panel can't describe the same gateway
-                // differently from the chip two rows below it. No default needed:
-                // the state rides WITH the count, so there is no absent case here.
+                // The WORD and the hue both come from the shared board model, the
+                // exact pair the footer's `⬢gw` chip renders, so the panel can't
+                // describe the same gateway differently from the chip below it.
                 let rolled = rollup.state;
                 (
                     '\u{25cf}',
@@ -230,11 +214,9 @@ fn connection_line(
         marquee_or_truncate(row.display_name, NAME_W, is_selected, now)
     );
 
-    // Health flag (#309 / consolidation): a fixed 2-col slot — `⚠` when this row
-    // has a health summary (install broken / decode drift), else blank to keep
-    // the Live column aligned. SEPARATE from the Connection column on purpose:
-    // ConnState is the lifecycle, health is the sub-state it annotates. The full
-    // reason is on the selected row's detail line below.
+    // A fixed 2-col slot — blank rather than absent, to keep the Live column
+    // aligned. SEPARATE from the Connection column on purpose: ConnState is the
+    // lifecycle, health is the sub-state it annotates.
     let health_flag = if row.health.is_some() {
         "\u{26a0} "
     } else {
@@ -255,7 +237,6 @@ fn connection_line(
     ])
 }
 
-/// Compact age: seconds under a minute, then minutes, then hours.
 fn fmt_age(d: Duration) -> String {
     let s = d.as_secs();
     if s < 60 {
@@ -270,8 +251,7 @@ fn fmt_age(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
 
-    /// `Daemon` facet for `n` instances at `state` — the panel's live half. `n == 0`
-    /// is `Daemon(None)` by construction, which is the point of the atomic pair.
+    /// `n == 0` is `Daemon(None)` by construction — the point of the atomic pair.
     fn daemon_facet(n: usize, state: pixtuoid_core::state::DaemonState) -> LiveFacet {
         LiveFacet::Daemon(
             std::num::NonZeroUsize::new(n).map(|instances| DaemonRollup { instances, state }),
@@ -307,24 +287,18 @@ mod tests {
         let badge = &line.spans[1];
         assert_eq!(badge.style.fg, Some(to_color(NORMAL.source.codex)));
         assert!(!badge.style.add_modifier.contains(Modifier::REVERSED));
-        // name (spans[3]) IS reversed when selected.
         assert!(line.spans[3]
             .style
             .add_modifier
             .contains(Modifier::REVERSED));
     }
 
-    // The "Live" header column must line up with where each data row's live span
-    // actually starts — the 2-col health_flag slot (#309) shifted the data right
-    // and the header has to match. Char-count == column here (all glyphs single-
-    // width BMP). Guards the regression both online lenses flagged on #315.
+    // Char-count == column here only because every glyph is single-width BMP.
     #[test]
     fn live_header_aligns_with_the_live_data_column() {
         let header = column_header();
         let header_live_col = header.find("Live").expect("header has a Live column");
 
-        // health=None → blank 2-col flag; health=Some → `⚠ ` 2-col flag. Both keep
-        // the same width, so the live column is fixed regardless of health.
         for health in [None, Some("install broken".to_string())] {
             let r = ConnectionRow {
                 source_id: "claude",
@@ -354,9 +328,6 @@ mod tests {
         }
     }
 
-    // The `ConnState::NoCli` arm: the connection cell is the `—` glyph + "no CLI"
-    // text. Existing tests only ever build Connected/Disconnected rows, so this
-    // arm never ran — a mutation swapping its glyph or text would slip past them.
     #[test]
     fn connection_line_no_cli_state_renders_no_cli_cell() {
         let r = row("some-cli", "xx", ConnState::NoCli { connected: false });
@@ -373,7 +344,6 @@ mod tests {
             text.contains('\u{2014}'),
             "NoCli em-dash glyph missing: {text:?}"
         );
-        // Pin the arm: it must NOT render the Connected/Disconnected state words.
         assert!(
             !text.contains("connected"),
             "NoCli must not say connected: {text:?}"
@@ -404,10 +374,6 @@ mod tests {
 
     #[test]
     fn connection_line_daemon_names_its_gateways_and_their_state() {
-        // The daemon LIVE cell must distinguish "not running" from "running, and
-        // how" — a stopped gateway and four busy ones both read `idle` before this
-        // facet was typed. The word comes from the shared board vocabulary, so it
-        // matches the footer's `⬢gw` chip exactly.
         let r = row("openclaw", "ok", ConnState::Connected);
         let cell = |facet: LiveFacet| -> String {
             let live = LiveInfo { facet, dead: false };
@@ -420,9 +386,6 @@ mod tests {
 
         let stopped = cell(LiveFacet::Daemon(None));
         assert!(stopped.contains("no gateway seen"), "{stopped}");
-        // The INTENT is "claims no gateway EXISTS", not "avoids the word" — the cell
-        // must carry no instance COUNT and none of the state words a live roster
-        // would produce.
         assert!(
             !stopped.chars().any(|c| c.is_ascii_digit()),
             "a zero-instance daemon must report no count: {stopped}"
@@ -503,7 +466,6 @@ mod tests {
             target: None,
             health: None,
         };
-        // Unselected: static `…`-truncated name (spans[3]).
         let unsel = connection_line(
             &r,
             &LiveInfo::default(),
@@ -516,7 +478,6 @@ mod tests {
             name_unsel.contains('\u{2026}'),
             "unselected long name must ellipsize: {name_unsel:?}"
         );
-        // Selected: scrolling window — no ellipsis, animates across time.
         let t1 = SystemTime::UNIX_EPOCH + Duration::from_millis(3000);
         let n0 = connection_line(
             &r,
@@ -538,10 +499,6 @@ mod tests {
         assert_ne!(n0, n1, "selected name must animate across time");
     }
 
-    // Registry-bridge pin: every registered source gets a real badge color, not
-    // the idle fallback — a new source added to REGISTRY without a matching arm
-    // in `connection_line` would render in the idle color (mirrors the dashboard's
-    // `every_registry_source_has_a_non_fallback_badge_color`).
     #[test]
     fn every_registry_source_has_a_non_fallback_badge_color() {
         use crate::tui::connection::build_rows_from;

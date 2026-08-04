@@ -1,15 +1,10 @@
-//! `run_tui`'s per-surface UI state, lifted out of the event loop's loose
-//! mutable locals into ONE struct: [`UiState`] owns each modal surface's
-//! open/close transitions, projects the dispatch-facing [`ModalState`]
-//! ([`UiState::modal`] — one source of truth instead of an ad-hoc literal per
-//! key event), and computes the per-frame renderer mirrors
-//! ([`UiState::build_frames`] → [`RenderFrames`]). `run_tui` keeps the event
-//! loop, the terminal lifecycle, and every renderer/config/install side
-//! effect; the blocking-I/O sites (`build_rows`, connect/disconnect, the
-//! onboarding apply) stay at the loop as brief inline stalls (block_in_place
-//! removed in #603 — inert on the block_on thread; see the tui/CLAUDE.md sharp
-//! edge) and reach the state through these methods' closure parameters or the
-//! `pub(crate)` fields.
+//! `run_tui`'s per-surface UI state: [`UiState`] owns each modal surface's
+//! open/close transitions, projects the dispatch-facing [`ModalState`] (one
+//! source of truth instead of an ad-hoc literal per key event), and computes
+//! the per-frame renderer mirrors ([`RenderFrames`]). `run_tui` keeps the event
+//! loop, the terminal lifecycle, and every renderer/config/install side effect;
+//! the blocking-I/O sites (`build_rows`, connect/disconnect, the onboarding
+//! apply) stay at the loop as brief inline stalls.
 
 use std::time::{Instant, SystemTime};
 
@@ -22,34 +17,27 @@ use connection::{ConnectionFrame, ConnectionRow, ConnectionUi};
 use dashboard::{DashboardFrame, DashboardUi};
 use welcome::{OnboardingFrame, WelcomeUi};
 
-/// The throttled (≤ every 15s) decode-drift re-scan that drives the footer
-/// nudge: reuses doctor's tested scanner over the warn-floor log. The ONE
+/// The throttled decode-drift re-scan that drives the footer nudge. The ONE
 /// deliberate exception to "no scan-the-history" — it derives a passive
-/// diagnostic nudge from the log artifact, NOT lifecycle state. A `None` log
-/// path is a no-op (headless = no surfacing).
+/// diagnostic nudge from the log artifact, NOT lifecycle state.
 ///
 /// INCREMENTAL: log rotation is startup-only, so within a session the file is
-/// append-only and unbounded (a sustained drift regime warns per tool call).
-/// Re-reading the WHOLE file every 15s inline in the ~30fps loop turns that
-/// growth into monotonically-worsening frame hitches + a log-sized transient
-/// allocation — so the scan keeps persistent state (byte offset + accumulated
-/// prefixes) and each pass reads ONLY the appended bytes. Drift breadcrumbs are
-/// monotone within a session (they never un-happen), so prefixes accumulate.
+/// append-only and unbounded. Re-reading the WHOLE file every pass inline in the
+/// ~30fps loop would turn that growth into monotonically-worsening frame
+/// hitches, so the scan keeps a byte offset and reads ONLY the appended bytes.
+/// Drift breadcrumbs are monotone within a session, so prefixes accumulate.
 #[derive(Default)]
 struct DriftScan {
     last_scan: Option<Instant>,
     /// End of the last fully-scanned LINE — never mid-line: a read boundary can
     /// split a breadcrumb, so a partial trailing line waits for the next pass.
     offset: u64,
-    /// Accumulated drifted label prefixes — what the footer merge reads.
     drifted: Vec<String>,
 }
 
 impl DriftScan {
-    /// The per-frame call site: throttled to at most one scan per interval.
     fn rescan(&mut self, log_path: &Option<std::path::PathBuf>) {
         let Some(lp) = log_path else { return };
-        // Throttle: rescan the log for decode-drift breadcrumbs at most this often.
         const DRIFT_RESCAN_INTERVAL_SECS: u64 = 15;
         let due = self
             .last_scan
@@ -60,10 +48,9 @@ impl DriftScan {
         }
     }
 
-    /// One unthrottled incremental pass: read from the stored offset to EOF,
-    /// scan the COMPLETE new lines, merge the drifted prefixes. A file shrunk
-    /// out from under us (external rotation/truncation) rescans from the top.
-    /// Any I/O error leaves the state unchanged for the next pass.
+    /// One unthrottled incremental pass: from the stored offset to EOF, scanning
+    /// COMPLETE lines only. A file shrunk out from under us (external rotation)
+    /// rescans from the top.
     fn scan_appended(&mut self, lp: &std::path::Path) {
         use std::io::{Read, Seek, SeekFrom};
         let Ok(mut f) = std::fs::File::open(lp) else {
@@ -80,7 +67,6 @@ impl DriftScan {
         if f.take(len - self.offset).read_to_end(&mut new).is_err() {
             return;
         }
-        // Only complete lines: a partial tail (mid-write) stays for next pass.
         let Some(last_nl) = new.iter().rposition(|&b| b == b'\n') else {
             return;
         };
@@ -94,10 +80,8 @@ impl DriftScan {
     }
 }
 
-/// One frame's renderer mirrors, computed by [`UiState::build_frames`] and
-/// pushed onto the [`TuiRenderer`](super::TuiRenderer) by
-/// [`RenderFrames::apply_to`] — bundling them keeps the compute (here) and the
-/// push (one call in the loop) from drifting apart per surface.
+/// One frame's renderer mirrors — bundling them keeps the compute (here) and
+/// the push (one call in the loop) from drifting apart per surface.
 pub(crate) struct RenderFrames {
     theme_picker: Option<usize>,
     version_popup: bool,
@@ -124,26 +108,18 @@ impl RenderFrames {
     }
 }
 
-/// The per-surface UI state `run_tui` used to hold as one loose mutable-local
-/// cluster per surface. Fields stay `pub(crate)` where the loop's I/O arms
-/// read/write them directly (the move-only discipline: state lives here,
-/// side effects stay in the loop).
+/// The per-surface UI state. Fields stay `pub(crate)` where the loop's I/O arms
+/// read/write them directly: state lives here, side effects stay in the loop.
 pub(crate) struct UiState {
     // First-run onboarding "move-in" overlay (TOP of the modal precedence
-    // chain). The overlay is "open" exactly while `onboarding_opened_at` is
-    // `Some` (also the clock its painter's typewriter reads); confirm/skip
-    // clears it to `None` and starts the close fade (`onboarding_closing_at`:
-    // the office dims back UP over `welcome::DIM_FADE_OUT_MS` after the card
-    // is gone, then clears to fully live).
+    // chain). It is "open" exactly while `onboarding_opened_at` is `Some`, which
+    // is also the clock its painter's typewriter reads.
     pub(crate) onboarding_ui: WelcomeUi,
     onboarding_opened_at: Option<Instant>,
     /// `(fade start, the dim the open ramp was interrupted at)` — the second
     /// half is what keeps a mid-ramp skip from snapping the office darker.
     onboarding_closing_at: Option<(Instant, f32)>,
-    /// The "what's new in vX" version popup.
     version_popup: bool,
-    /// `?` help overlay. Owned HERE (the projection's one source of truth);
-    /// the renderer's copy is a per-frame mirror like every other overlay.
     help_open: bool,
     /// `[p]ause`: while paused, `now()` returns the frozen instant so every
     /// clock-driven animation (and the dashboard marquee) holds still.
@@ -156,7 +132,6 @@ pub(crate) struct UiState {
     pub(crate) dashboard: DashboardUi,
     pub(crate) connection: ConnectionUi,
     drift_scan: DriftScan,
-    /// The resolved hook socket path — the Sources panel's connection line.
     socket_path: std::path::PathBuf,
     /// The warn-floor log path the drift re-scan reads (`None` = no surfacing).
     log_path: Option<std::path::PathBuf>,
@@ -193,9 +168,8 @@ impl UiState {
         }
     }
 
-    /// The dispatch-facing modal snapshot — THE projection (`dispatch_key`'s
-    /// precedence chain reads exactly this; no surface's open flag has a
-    /// second home).
+    /// The dispatch-facing modal snapshot — THE projection: no surface's open
+    /// flag has a second home.
     pub(crate) fn modal(&self) -> ModalState {
         ModalState {
             onboarding_open: self.onboarding_open(),
@@ -218,8 +192,6 @@ impl UiState {
             SystemTime::now()
         }
     }
-
-    // --- open/close + per-surface transitions ------------------------------
 
     pub(crate) fn toggle_pause(&mut self) {
         self.paused = !self.paused;
@@ -334,17 +306,17 @@ impl UiState {
         floor
     }
 
-    /// `f` in the dashboard: the selected row's agent, for the focus-jump
-    /// (the panel STAYS open — focusing a terminal is a glance-and-return
-    /// action, unlike Enter's floor navigation which closes to show it).
+    /// `f` in the dashboard: the selected row's agent, for the focus-jump. The
+    /// panel STAYS open — focusing a terminal is a glance-and-return action,
+    /// unlike Enter's floor navigation which closes to show it.
     pub(crate) fn dashboard_focus(&self) -> Option<pixtuoid_core::AgentId> {
         self.dashboard.selected
     }
 
     /// `s` on a closed panel: open with the freshly rebuilt connection facet.
     /// The rows' blocking I/O (`build_rows` — FS probes + per-source `diagnose`)
-    /// runs at the loop inline (a brief stall, #603) and is handed in; it happens
-    /// ON OPEN only, never per frame.
+    /// runs at the loop and is handed in; it happens ON OPEN only, never per
+    /// frame.
     pub(crate) fn open_connection(&mut self, rows: Vec<ConnectionRow>) {
         self.connection.open = true;
         self.connection.confirm = None;
@@ -356,10 +328,9 @@ impl UiState {
 
     /// Park the selection on `source_id`'s row, leaving it where it is when the
     /// panel has no such row. `open_connection` deliberately CARRIES the previous
-    /// index (0 on a fresh `UiState`), so a caller that opens the panel about ONE
-    /// source — the onboarding failure surfacing — has to say which; otherwise the
-    /// `t` it offers acts on an unrelated row. Unlike `connection_move` this keeps
-    /// `last_result` (the reason the panel was opened at all).
+    /// index, so a caller that opens the panel about ONE source has to say which;
+    /// otherwise the `t` it offers acts on an unrelated row. Unlike
+    /// `connection_move` this keeps `last_result` — the reason the panel opened.
     pub(crate) fn select_connection_source(&mut self, source_id: &str) {
         if let Some(idx) = self
             .connection
@@ -391,8 +362,8 @@ impl UiState {
     }
 
     /// Confirm/skip both end the overlay the same way: card gone, close fade
-    /// armed (the office keeps dimming back up for a beat) FROM the dim the open
-    /// ramp had reached — a skip mid-ramp must not snap the office darker first.
+    /// armed FROM the dim the open ramp had reached — a skip mid-ramp must not
+    /// snap the office darker first.
     pub(crate) fn close_onboarding(&mut self) {
         self.onboarding_closing_at = self.onboarding_opened_at.take().map(|o| {
             (
@@ -401,8 +372,6 @@ impl UiState {
             )
         });
     }
-
-    // --- the per-frame renderer mirrors -------------------------------------
 
     /// Compute this frame's renderer mirrors from the live scene + health
     /// snapshot. Mutates the pieces that are themselves per-frame state: the
@@ -414,23 +383,15 @@ impl UiState {
         scene: &SceneState,
         health: &[SourceDeath],
     ) -> RenderFrames {
-        // Throttled drift re-scan (≤ every 15s) — reuse doctor's tested
-        // scanner; the source-death warning still preempts it in the merge.
-        // This is the ONE deliberate exception to "no scan-the-history": it
-        // derives a passive diagnostic nudge from the log artifact, NOT
-        // lifecycle state (the no-history rule guards the reducer). A counting
-        // tracing::Layer was rejected — it would add stateful blast radius to
-        // the single global file subscriber for a hint the 15s scan covers.
+        // A counting tracing::Layer was rejected here: stateful blast radius on
+        // the single global file subscriber, for a hint this scan already covers.
         self.drift_scan.rescan(&self.log_path);
         let source_warning = crate::doctor::footer_warning(
             widgets::source_warning_message(health).as_deref(),
             &self.drift_scan.drifted,
         );
 
-        // Mirror the dashboard frame: while open, rebuild the rows from the
-        // live snapshot, re-anchor the selection by AgentId (an agent may
-        // have exited), and keep it in the scroll viewport. Closed → an
-        // empty frame (the painter reads rows only when open).
+        // Re-anchor the selection by AgentId — an agent may have exited.
         let dashboard_frame = if self.dashboard.open {
             let rows = dashboard::build_dashboard_rows(scene, &self.dashboard.folds);
             self.dashboard.selected = dashboard::reanchor_selection(&rows, self.dashboard.selected);
@@ -450,18 +411,16 @@ impl UiState {
             DashboardFrame::default()
         };
 
-        // Mirror the Connection frame: the HOOK facet (`connection.rows`) is
-        // cached (rebuilt on open + after actions, NOT per frame — it does FS
-        // reads); only the LIVE facet + socket line recompute here from the
-        // snapshot.
+        // The HOOK facet (`connection.rows`) is cached — rebuilt on open and
+        // after actions, NOT per frame, because it does FS reads. Only the LIVE
+        // facet + socket line recompute here.
         let connection_frame = if self.connection.open {
             self.connection.selected =
                 connection::move_selection(&self.connection.rows, self.connection.selected, 0);
             let live = connection::live_view(now, &self.connection.rows, scene, health);
-            // NOT "(listening)": a second pixtuoid instance loses the hook plane to
-            // the lock-holding owner, so THIS process may own no socket at all — and
-            // this is the one line that could explain a missing lobster. Don't assert
-            // what we haven't checked.
+            // NOT "(listening)": a second pixtuoid instance loses the hook plane
+            // to the lock-holding owner, so THIS process may own no socket at
+            // all. Don't assert what we haven't checked.
             let socket_line = format!("socket  {}", self.socket_path.display());
             ConnectionFrame {
                 open: true,
@@ -476,10 +435,6 @@ impl UiState {
             ConnectionFrame::default()
         };
 
-        // Onboarding frame: while OPEN, paint the card + dim ramps in (the
-        // painter's `elapsed_ms` drives the typewriter). While CLOSING, the
-        // card is gone but the office keeps fading back UP for a beat; once
-        // the fade completes, drop the closing state to fully live.
         let onboarding_frame = if let Some(opened) = self.onboarding_opened_at {
             let e = opened.elapsed().as_millis() as u64;
             OnboardingFrame {
@@ -515,10 +470,8 @@ impl UiState {
         }
     }
 
-    /// The Sources panel's cached rows carry a per-source HEALTH summary
-    /// (install soundness + drift) computed on open/toggle; it scans the
-    /// warn-floor log, so read it fresh at each (infrequent) rebuild. `""`
-    /// when no log path.
+    /// The Sources panel's cached rows carry a per-source HEALTH summary that
+    /// scans the warn-floor log, so read it fresh at each (infrequent) rebuild.
     pub(crate) fn read_conn_log(&self) -> String {
         self.log_path
             .as_deref()
@@ -542,11 +495,6 @@ mod tests {
         )
     }
 
-    /// The projection is the ONE source of truth for the dispatch chain: each
-    /// surface's open flag must round-trip through `modal()` exactly, so
-    /// `dispatch_key`'s precedence (onboarding > help > version > connection >
-    /// dashboard > theme-picker — pinned per-tier in `dispatch_tests`) is fed
-    /// by real state, not an ad-hoc literal that can drift.
     #[test]
     fn modal_projection_mirrors_each_surface_open_flag() {
         let mut ui = ui();
@@ -592,12 +540,8 @@ mod tests {
         assert!(!m.connection_open && !m.connection_confirm);
     }
 
-    /// Onboarding is open exactly while `onboarding_opened_at` is `Some` —
-    /// seeded by a NON-empty detected roster, cleared by close (which arms the
-    /// fade-out, not a reopen).
     #[test]
     fn onboarding_opens_only_with_a_roster_and_closes_for_good() {
-        // No CLIs detected → nothing to connect → stays closed.
         assert!(!ui().modal().onboarding_open);
 
         let mut ui = UiState::new(
@@ -610,12 +554,10 @@ mod tests {
         assert!(ui.modal().onboarding_open, "a roster opens the overlay");
         ui.close_onboarding();
         assert!(!ui.modal().onboarding_open);
-        // The close fade is armed: the next frame still carries a dim value.
         let scene = SceneState::new([4, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         let frames = ui.build_frames(SystemTime::now(), &scene, &[]);
         assert!(!frames.onboarding.open, "the card itself is gone");
-        // Closed immediately, so the open ramp had barely dimmed — the first
-        // close frame must still be near full brightness.
+        // Closed immediately, so the open ramp had barely dimmed.
         assert!(
             frames.onboarding.dim > 0.9,
             "an instantly-skipped overlay must not snap the office to the dim \
@@ -624,7 +566,6 @@ mod tests {
         );
     }
 
-    /// Pause freezes `now()` at one instant; unpausing releases it.
     #[test]
     fn pause_freezes_the_clock() {
         let mut ui = ui();
@@ -636,9 +577,7 @@ mod tests {
         assert_ne!(a, ui.now(), "unpaused: live time again");
     }
 
-    // --- DriftScan: the incremental warn-floor log scan ------------------------
-
-    // A real tracing-fmt drift breadcrumb line (the shape doctor's scanner parses).
+    // A real tracing-fmt drift breadcrumb line — the shape doctor's scanner parses.
     fn drift_line(source: &str, name: &str) -> String {
         format!(
             "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source={source} kind=\"unknown_event\" name={name}\n"
@@ -662,9 +601,6 @@ mod tests {
             "offset advances past the scanned lines"
         );
 
-        // Append a SECOND source's breadcrumb: the next pass reads only the
-        // appended bytes (offset moved by exactly the new line) and MERGES the
-        // new prefix — the first one survives without re-reading its bytes.
         let codex_line = drift_line("codex", "Y");
         let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
         f.write_all(codex_line.as_bytes()).unwrap();
@@ -677,8 +613,6 @@ mod tests {
             "second pass consumed only the appended bytes"
         );
 
-        // A no-growth pass changes nothing (and re-appending the SAME source
-        // never duplicates its prefix).
         scan.scan_appended(&log);
         assert_eq!(scan.drifted.len(), 2);
     }
@@ -689,7 +623,6 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let log = dir.path().join("log");
         let full = drift_line("claude-code", "X");
-        // Write the line WITHOUT its terminating newline (mid-write).
         std::fs::write(&log, full.trim_end_matches('\n')).unwrap();
 
         let mut scan = DriftScan::default();
@@ -697,7 +630,6 @@ mod tests {
         assert_eq!(scan.offset, 0, "a partial line is not consumed");
         assert!(scan.drifted.is_empty(), "…nor scanned: {:?}", scan.drifted);
 
-        // The newline lands → the completed line scans on the next pass.
         let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
         f.write_all(b"\n").unwrap();
         drop(f);
@@ -710,7 +642,6 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let log = dir.path().join("log");
 
-        // Missing file: a quiet no-op.
         let mut scan = DriftScan::default();
         scan.scan_appended(&log);
         assert_eq!(scan.offset, 0);
@@ -719,7 +650,6 @@ mod tests {
         scan.scan_appended(&log);
         assert!(scan.offset > 0);
 
-        // Externally truncated/rotated below the offset → rescan from the top.
         std::fs::write(&log, drift_line("codex", "Y")).unwrap();
         scan.scan_appended(&log);
         assert!(

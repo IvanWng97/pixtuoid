@@ -1,15 +1,8 @@
 //! The source-control CORE: detect / connect / disconnect / reconcile, TUI-free.
 //!
-//! ONE home for "which agent CLIs exist, their connection state, and how to
-//! change it." Three thin presenters sit on top: the in-TUI Sources panel
-//! (`tui::connection` + `tui::mod::{connect_source,disconnect_source}`), the
-//! scriptable CLI (`pixtuoid sources|connect|disconnect`, Raycast-facing), and
-//! first-run onboarding (`crate::setup`). The mutating ops here are the
-//! PERSISTED half — they write the `[sources]` flag + install/uninstall hooks,
-//! exactly as the panel does, but DON'T touch a running instance's live
-//! `ConnectedSources` (a separate CLI process has none; a running `run`/`floating`
-//! reflects the change on its next launch). The panel adds the one live line on
-//! top.
+//! The mutating ops here are the PERSISTED half — they write the `[sources]`
+//! flag + install/uninstall hooks, but DON'T touch a running instance's live
+//! `ConnectedSources`, which reflects the change on its next launch.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -25,11 +18,9 @@ use crate::install::{
 };
 
 /// The wire-facing outcome token — a CLOSED set, published in the JSON schema
-/// as an `enum` so the generated Raycast type is a string-literal UNION (a
-/// consumer typo like `"conected"` is a `tsc` error, not a runtime miss).
-/// Widening the set is additive for the PRODUCER only — an installed store
-/// copy still won't match a new token, so it is a wire change under the
-/// `OutcomeRow` handshake rule below, not a free extension.
+/// as an `enum` so the generated Raycast type is a string-literal UNION.
+/// Widening it is a wire change under the `OutcomeRow` handshake rule below,
+/// not a free extension: an installed store copy won't match a new token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -41,8 +32,6 @@ pub enum WireOutcome {
 }
 
 impl WireOutcome {
-    /// The serialized token — the ONE string authority (serde's snake_case
-    /// rename and this table are pinned equal by `wire_outcome_serializes_as_its_token`).
     pub fn token(self) -> &'static str {
         match self {
             WireOutcome::Connected => "connected",
@@ -59,21 +48,15 @@ impl std::fmt::Display for WireOutcome {
     }
 }
 
-/// Outcome of a single connect/disconnect, so a batch (`reconcile_to`) can
-/// report per-source without aborting the rest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChangeOutcome {
     Connected,
     Disconnected,
-    /// Already in the desired state — nothing written.
     NoOp,
-    /// The change failed (e.g. a hook install error); the message is human-readable.
     Failed(String),
 }
 
 impl ChangeOutcome {
-    /// Stable BARE wire token for `--json` / scripting — a machine-matchable
-    /// value, never carrying human text (the detail rides in [`Self::message`]).
     /// Kept separate from the enum's `Debug` so the JSON contract can't drift
     /// if a variant is renamed.
     pub fn wire_outcome(&self) -> WireOutcome {
@@ -85,13 +68,10 @@ impl ChangeOutcome {
         }
     }
 
-    /// The serialized token for this outcome (via [`WireOutcome::token`]).
     pub fn wire_token(&self) -> &'static str {
         self.wire_outcome().token()
     }
 
-    /// The human-readable detail alongside the token — `Some` exactly for
-    /// `Failed` (the only variant that carries any).
     pub fn message(&self) -> Option<&str> {
         match self {
             ChangeOutcome::Failed(msg) => Some(msg),
@@ -100,49 +80,32 @@ impl ChangeOutcome {
     }
 }
 
-/// One row of the `--json` batch envelope `pixtuoid connect|disconnect|sources set`
-/// print — the SECOND stable wire contract the Raycast extension parses (alongside
-/// `SourceStatus`), with the same treatment: a committed JSON Schema
-/// (`integrations/raycast/contract/outcome-row.schema.json`, golden-tested below)
-/// the extension's TS type is generated from (`gen:contract`). The wire shape is
-/// `{id, outcome, message?}` — a bare machine token plus an optional human-detail
-/// field, split from the older folded `failed: <msg>` string on the ASSUMPTION
-/// that the in-repo extension, which ships atomically with the binary, was the
-/// only consumer. It was not: the last `ray publish` marker PREDATES the split,
-/// so the break reached the store. Treat this wire as PUBLISHED — installed
-/// copies parse it independently of the binary's version, and a further shape
-/// change needs a version handshake, never another flag-day edit;
-/// see the sharp edge in `crates/pixtuoid/CLAUDE.md`. Pinned by
-/// `outcome_row_json_shape_is_the_raycast_contract` + the envelope test in
-/// `sources_cli.rs`.
+/// One `{id, outcome, message?}` row of the `--json` batch envelope
+/// `connect`/`disconnect`/`sources set` print.
+///
+/// Treat this wire as PUBLISHED: installed Raycast store copies parse it
+/// independently of the binary's version, so a further shape change needs a
+/// version handshake, never another flag-day edit — see the sharp edge in
+/// `crates/pixtuoid/CLAUDE.md`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-// Same rationale as `SourceStatus` below: `additionalProperties: false` so the
-// generated TS type has no index signature and a consumer typo is a `tsc` error.
+// `deny_unknown_fields` ⇒ `additionalProperties: false` (rationale on `SourceStatus`).
 #[cfg_attr(test, derive(schemars::JsonSchema), schemars(deny_unknown_fields))]
 pub struct OutcomeRow {
     /// The registry source id the outcome applies to (e.g. `codex`).
     pub id: String,
-    /// The BARE outcome token: `connected` | `disconnected` | `no_op` |
-    /// `failed` — a schema ENUM, so the generated TS side is a string-literal
-    /// union (machine-matchable with `===`); human text rides in `message`.
+    /// The bare machine token; human text rides in `message`.
     pub outcome: WireOutcome,
-    /// Human-readable detail for the row — present exactly when the outcome
-    /// carries any (`failed`), and OMITTED (not `null`) otherwise, so a
-    /// success row stays the minimal `{id, outcome}`.
+    /// Human-readable detail, present exactly when the outcome carries any
+    /// (`failed`) and OMITTED rather than `null` otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
 
 impl OutcomeRow {
-    /// Map one applied outcome to its wire row: the bare token plus the
-    /// optional human message — the ONE outcome→row authority, so the two
-    /// emitting surfaces (`run_change` / `run_sources_set`) can't drift.
-    ///
     /// The message is control-char-stripped HERE, where the untrusted value
-    /// enters the row (the `verify::display_safe` discipline): it folds another
-    /// CLI's config content verbatim — a failed `connect codex` carries
-    /// `toml::de::Error`'s Display, which embeds the RAW offending source line —
-    /// and `sources_cli::text_line` prints it to a real terminal (R0615-06).
+    /// enters the row: it folds another CLI's config content verbatim (a failed
+    /// `connect codex` embeds the RAW offending source line) and
+    /// `sources_cli::text_line` prints it to a real terminal (R0615-06).
     pub fn new(id: String, outcome: &ChangeOutcome) -> Self {
         OutcomeRow {
             id,
@@ -152,15 +115,12 @@ impl OutcomeRow {
     }
 }
 
-/// A serializable status row for `pixtuoid sources --json` — the STABLE wire
-/// contract the Raycast extension parses (pinned by `source_status_json_shape`).
-/// Deliberately a flat DTO, NOT the internal `ConnectionRow` (whose shape is a
-/// UI concern free to change).
+/// The STABLE `pixtuoid sources --json` wire contract the Raycast extension
+/// parses. Deliberately a flat DTO, NOT the internal `ConnectionRow` (whose
+/// shape is a UI concern free to change).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-// `deny_unknown_fields` stamps `additionalProperties: false` into the emitted
-// schema so the generated TS type has NO `[k: string]: unknown` index signature —
-// then a renamed/typo'd field in the consumer is a `tsc` error, not silently
-// `unknown`. Matches the wire reality: the CLI never emits extra keys.
+// `deny_unknown_fields` ⇒ `additionalProperties: false`, so the generated TS type
+// has no index signature and a consumer typo is a `tsc` error.
 #[cfg_attr(test, derive(schemars::JsonSchema), schemars(deny_unknown_fields))]
 pub struct SourceStatus {
     pub id: String,
@@ -168,20 +128,15 @@ pub struct SourceStatus {
     pub connected: bool,
     pub cli_present: bool,
     /// A health/issue summary (install-broken / decode-drift), or `null` when n/a.
-    // Generates `health?: string | null`, kept OPTIONAL on purpose. The wire always
-    // emits `health` (no `skip_serializing_if`; pinned by `source_status_json_shape`),
-    // so the `?` is a harmless SUPERSET, and the consumer only does `if (s.health)`
-    // — identical for optional vs required. The one schemars knob to force `required`
-    // (`schemars(required)`) STRIPS the `| null` → the WRONG `health: string` (the
-    // wire CAN be null), the very "mis-specified nullability" pitfall
-    // PARALLEL-DELIVERY.md names. So nullable is preserved (it matters); optional is
-    // kept (it doesn't).
+    // Generates `health?: string | null`. Do NOT add `schemars(required)` to force
+    // it required: that STRIPS the `| null` → the WRONG `health: string`, and the
+    // wire CAN be null. Optional is a harmless superset; nullable is load-bearing.
     pub health: Option<String>,
 }
 
-/// Resolve a user-supplied id to the `'static` registry id, or a clear error
-/// (the CLI surface takes arbitrary input; `config::save_source_connected`
-/// needs `&'static str`). Mirrors how the panel only ever feeds registry ids.
+/// Resolve a user-supplied id to the `'static` registry id, or a clear error —
+/// the CLI surface takes arbitrary input and `config::save_source_connected`
+/// needs `&'static str`.
 pub fn registered_id(id: &str) -> Result<&'static str> {
     registry::registered_source_names()
         .find(|s| *s == id)
@@ -195,91 +150,67 @@ pub fn registered_id(id: &str) -> Result<&'static str> {
         })
 }
 
-/// Result of a successful single connect — carries the `InstallReport` for a
-/// target-bearing source so the panel can render its rich notes (backup / PATH
-/// warning); `FlagOnly` for a no-target (JSONL-only) source.
+/// `FlagOnly` for a no-target (JSONL-only) source.
 #[derive(Debug)]
 pub enum ConnectOutcome {
     FlagOnly,
     Installed(InstallReport),
 }
 
-/// Result of a single disconnect whose FLAG was persisted false (the user IS
-/// disconnected). `Err` from `disconnect` is reserved for the persist-failure
-/// abort; a failed hook removal is folded in here (harmless stale hooks remain
-/// behind the now-closed gate), so the gate still closes — mirroring the original
-/// panel asymmetry (connect rolls back on install failure; disconnect does not).
+/// Result of a disconnect whose FLAG was persisted false. `Err` from
+/// `disconnect` is reserved for the persist-failure abort; a failed hook removal
+/// folds in here so the gate still closes (connect rolls back, disconnect does not).
 #[derive(Debug)]
 pub enum DisconnectOutcome {
     FlagOnly,
     Uninstalled(UninstallReport),
-    /// Flag persisted false, but removing the hooks errored. Carries the message.
     HookRemovalFailed(String),
 }
 
-/// The step (if any) a user must still take after a successful `connect` of `id`,
-/// read from that target's ONE `post_install_hint` — exposed here because the
-/// scriptable CLI presenter lives in the bin crate and `install::target` is
-/// `pub(crate)`. `None` for a source with no target, and for every target whose
-/// hooks take effect on the CLI's next run.
+/// The step (if any) a user must still take after a successful `connect` —
+/// `None` for a target whose hooks take effect on the CLI's next run.
 pub fn post_install_hint(id: &str) -> Option<&'static str> {
     crate::install::target::by_source(id).and_then(|t| t.post_install_hint)
 }
 
-/// Connect a source: PERSIST the `[sources]` flag FIRST (so it survives restart),
-/// then — only for a target-bearing source — install its hooks, rolling the flag
-/// back if the install fails (a persisted "connected" with no integration behind
-/// it would show connected yet never produce an agent). The panel's
-/// `connect_source` adds `connected.set(..)` on top for the live gate; the CLI
-/// and onboarding don't (a separate process has no live set).
+/// Connect a source: PERSIST the `[sources]` flag FIRST, then — only for a
+/// target-bearing source — install its hooks, rolling the flag back if the
+/// install fails.
 ///
 /// **Honors the explicit id — it does NOT gate on CLI presence.** Unlike the
 /// in-TUI panel (which renders an absent CLI as `NoCli` and refuses the toggle),
-/// `connect`/`reconcile_to` install for any registered id even if that CLI isn't
-/// installed yet — pre-provisioning for automation/onboarding where the caller
-/// stated intent. (`detect()` returns only PRESENT CLIs, so onboarding offers
-/// only installed ones; a `connect <absent-cli>` is a deliberate user/script
-/// choice that materializes that CLI's config dir.)
+/// this installs for any registered id even if that CLI isn't installed yet —
+/// pre-provisioning for automation/onboarding where the caller stated intent.
 pub fn connect(cfg: &Path, id: &str) -> Result<ConnectOutcome> {
     let sid = registered_id(id)?;
     connect_target(cfg, sid, by_source(sid))
 }
 
-/// The persist + install + rollback core, with the `target` passed EXPLICITLY so
-/// tests can inject a deterministic-fail fake (`connect` resolves it from the
-/// registry). Hooks install at the target's default config path — the
-/// per-target config override is `install_target`'s own seam (exercised there),
-/// and the sources layer only ever wants the default, so it isn't re-threaded.
+/// The persist + install + rollback core, with `target` passed EXPLICITLY so
+/// tests can inject a deterministic-fail fake.
 fn connect_target(
     cfg: &Path,
     sid: &'static str,
     target: Option<&Target>,
 ) -> Result<ConnectOutcome> {
-    // Capture the PRIOR flag before the optimistic save, so a failed install
-    // restores the exact pre-attempt state: a re-connect of an ALREADY-connected
-    // source (`connect` re-run, `setup --yes`) can fail while the old, working
-    // hooks stay on disk — forcing `false` there would silently disconnect a
-    // healthy source on the next launch.
+    // Capture the PRIOR flag before the optimistic save: a failed re-connect of
+    // an ALREADY-connected source must not force `false` — its old working hooks
+    // are still on disk, so that would silently disconnect it on the next launch.
     let prior = config::load(cfg, &mut Vec::new()).sources.get(sid).copied();
     config::save_source_connected(cfg, sid, true)?;
     match target {
         Some(t) => match install::install_target(t, None, None) {
             Ok(r) => Ok(ConnectOutcome::Installed(r)),
             Err(e) => {
-                // Roll the flag back to the prior state so the next launch
-                // doesn't honor a "connected" with no hooks behind it — and an
-                // absent flag rolls back to ABSENT (preserving the
-                // `is_first_run` empty-table signal), not an explicit `false`.
+                // An absent flag rolls back to ABSENT, not an explicit `false` —
+                // preserving the `is_first_run` empty-table signal.
                 let restore = match prior {
                     Some(v) => config::save_source_connected(cfg, sid, v),
                     None => config::remove_source_connected(cfg, sid),
                 };
                 if let Err(re) = restore {
-                    // The write path just succeeded, so this is rare — but a
-                    // silently-failed restore leaves flag=true with no hooks
-                    // (the shown-but-broken class), so it must leave a trace.
-                    // The chain can carry a `toml_edit` parse failure — raw config
-                    // content — and `connect` writes tracing to RAW stderr.
+                    // The error chain can carry raw config content (a `toml_edit`
+                    // parse failure) and `connect` writes tracing to RAW stderr.
                     tracing::warn!(
                         source = sid,
                         error = %crate::strip_control_chars(&format!("{re:#}")),
@@ -293,9 +224,8 @@ fn connect_target(
     }
 }
 
-/// Disconnect a source: persist the flag false FIRST, then remove its hooks
-/// (target-bearing only). No rollback — a failed uninstall still leaves the user
-/// disconnected (the safer direction).
+/// No rollback — a failed uninstall still leaves the user disconnected (the
+/// safer direction).
 pub fn disconnect(cfg: &Path, id: &str) -> Result<DisconnectOutcome> {
     let sid = registered_id(id)?;
     disconnect_target(cfg, sid, by_source(sid))
@@ -318,7 +248,6 @@ fn disconnect_target(
     })
 }
 
-/// What `reconcile_to` should do to one source. Pure — see `plan_reconcile`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Connect,
@@ -326,13 +255,10 @@ pub enum Action {
     NoOp,
 }
 
-/// PURE diff: given the CURRENT connected-set and the DESIRED set, decide each
-/// registered source's action. The declarative "connected set = exactly these"
-/// semantics the Raycast checkbox-form / `sources set` needs: a source in
-/// `desired` but not `current` → Connect; in `current` but not `desired` →
-/// Disconnect; otherwise NoOp. Ids outside the source registry are ignored
-/// here (the I/O wrapper validates them up front so an unknown id is a loud
-/// error, not a silent drop).
+/// PURE diff of the CURRENT connected-set against the DESIRED one — the
+/// declarative "connected set = exactly these" semantics `sources set` needs.
+/// Ids outside the source registry are ignored here; the I/O wrapper validates
+/// them up front so an unknown id is a loud error, not a silent drop.
 pub(crate) fn plan_reconcile(
     current: &HashSet<String>,
     desired: &HashSet<String>,
@@ -351,12 +277,9 @@ pub(crate) fn plan_reconcile(
         .collect()
 }
 
-/// Declarative apply: make the connected set EXACTLY `desired` (the Raycast
-/// checkbox-form / `sources set` semantics). For each registered source: connect
-/// the newly-desired, disconnect the no-longer-desired, NoOp the rest — reporting
-/// each (a failed item doesn't abort the batch). The CURRENT set is computed the
-/// same way the boot seed is (`config::resolve_connected` — explicit `true`
-/// flags only, pure config read since the 0.12.0 migrate-inference removal).
+/// Declarative apply: make the connected set EXACTLY `desired`, reporting each
+/// source (a failed item doesn't abort the batch). CURRENT is resolved the same
+/// way the boot seed is — explicit `true` flags only.
 pub fn reconcile_to(cfg: &Path, desired: &HashSet<String>) -> Vec<(String, ChangeOutcome)> {
     let app = config::load(cfg, &mut Vec::new());
     let current = config::resolve_connected(&app);
@@ -366,10 +289,6 @@ pub fn reconcile_to(cfg: &Path, desired: &HashSet<String>) -> Vec<(String, Chang
         .collect()
 }
 
-/// Apply ONE planned action and map it to a reportable `ChangeOutcome`. The single
-/// connect/disconnect→outcome mapping shared by `reconcile_to` (declarative) and
-/// `apply_choices` (the explicit onboarding list) so the folded-hook-removal-
-/// failure surfacing can't drift between them.
 fn apply_one(cfg: &Path, sid: &'static str, action: Action) -> ChangeOutcome {
     match action {
         Action::Connect => match connect(cfg, sid) {
@@ -385,27 +304,18 @@ fn apply_one(cfg: &Path, sid: &'static str, action: Action) -> ChangeOutcome {
 }
 
 /// The marker a folded hook-removal failure carries into [`ChangeOutcome::Failed`]
-/// — the `sources set` wire token AND the tag a presenter reads back to tell the
-/// fold apart from a real failure (the disconnect itself SUCCEEDED; only the hook
-/// removal didn't). One definition so the writer here and the onboarding reader
-/// (`tui::reflect_onboarding_outcomes`) cannot drift.
+/// — a presenter reads it back to tell the fold (the disconnect SUCCEEDED; only
+/// the hook removal didn't) apart from a real failure.
 pub(crate) const HOOK_REMOVAL_FAILED_PREFIX: &str = "hooks not removed: ";
 
-/// How BOTH presenters word that same fold for a human: the disconnect landed,
-/// the hooks did not. `pub` (not `pub(crate)`) for the reason [`crate::tui::widgets::REPO_URL`]
-/// is — `disconnect`'s CLI arm lives in `main.rs`, a separate crate the lib's
-/// `pub(crate)` can't reach, and the pixtuoid lib target is not a semver surface
-/// so the widening is free. It is the PHRASE only: the panel frames it
-/// `{name}: {phrase} — {reason}` ([`crate::tui::connection::format_failure`]) and
-/// the CLI `{phrase}: {reason}` under its own `{id}: failed:` row prefix, so each
-/// surface keeps its own punctuation while neither can reword the fold alone.
+/// How BOTH presenters word that same fold for a human. `pub` (not `pub(crate)`)
+/// because `disconnect`'s CLI arm lives in `main.rs`, a separate crate the lib's
+/// `pub(crate)` can't reach. It is the PHRASE only — each surface adds its own
+/// framing, so neither can reword the fold alone.
 pub const HOOK_REMOVAL_FAILED_PHRASE: &str = "disconnected, but hook removal failed";
 
-/// Map a SUCCESSFUL `disconnect`'s [`DisconnectOutcome`] to the CLI
-/// [`ChangeOutcome`]. Split out of `apply_one` so the load-bearing fold is
-/// teeth-testable apart from the real install FS path: a folded hook-removal
-/// failure MUST surface as `Failed` (with the reason), NEVER a clean
-/// `Disconnected` — else a caller hides stale hooks behind a clean "disconnected".
+/// A folded hook-removal failure MUST surface as `Failed` (with the reason),
+/// NEVER a clean `Disconnected` — else a caller hides stale hooks behind it.
 fn map_disconnect_outcome(o: DisconnectOutcome) -> ChangeOutcome {
     match o {
         DisconnectOutcome::HookRemovalFailed(e) => {
@@ -417,15 +327,9 @@ fn map_disconnect_outcome(o: DisconnectOutcome) -> ChangeOutcome {
     }
 }
 
-/// Apply an EXPLICIT per-source decision list (the first-run onboarding apply):
-/// connect each `true` id, disconnect each `false` id. Unlike `reconcile_to` (which
-/// is declarative over EVERY registered source and would disconnect the complement),
-/// this touches ONLY the ids passed — a source absent from the list (e.g.
-/// `antigravity`, which never appears in `detect()`) keeps its existing flag —
-/// or, absent one, the plain disconnected default — never a surprise write.
-/// Each write makes `[sources]` non-empty, so the first-run gate
-/// (`setup::is_first_run`) closes. Idempotent: connect/disconnect no-op at the
-/// install layer when already in state.
+/// Apply an EXPLICIT per-source decision list (the first-run onboarding apply).
+/// Unlike the declarative `reconcile_to`, this touches ONLY the ids passed — a
+/// source absent from the list keeps its existing flag, never a surprise write.
 pub fn apply_choices(cfg: &Path, choices: &[(&'static str, bool)]) -> Vec<(String, ChangeOutcome)> {
     choices
         .iter()
@@ -440,15 +344,10 @@ pub fn apply_choices(cfg: &Path, choices: &[(&'static str, bool)]) -> Vec<(Strin
         .collect()
 }
 
-/// The onboarding SKIP freeze (pure core): map each detected source to its REAL
-/// current connection state — connected in the live gate OR already carrying
-/// installed hooks (`is_hooked`). Feeding THIS to [`apply_choices`] (rather than
-/// the live gate alone, which is EMPTY on a first run) is what makes a skip
-/// preserve an existing install: a pre-0.12 upgrader — hooks present but no
-/// `[sources]` flag, exactly the population onboarding replays to re-connect —
-/// freezes to `true`, so apply re-installs idempotently (a semantic no-op) instead
-/// of disconnecting + UNINSTALLING its working hooks. `is_hooked` is injected so
-/// this stays pure and unit-testable; production callers go through [`skip_freeze`].
+/// The onboarding SKIP freeze (pure core): a detected source freezes `true` if
+/// it is in the live gate OR already carries installed hooks. The live gate
+/// alone is EMPTY on a first run, so a hooked-but-unflagged source would freeze
+/// `false` and the skip would UNINSTALL its working hooks.
 pub(crate) fn freeze_for_skip(
     detected: impl IntoIterator<Item = &'static str>,
     connected: &HashSet<String>,
@@ -460,13 +359,8 @@ pub(crate) fn freeze_for_skip(
         .collect()
 }
 
-/// The production onboarding-SKIP freeze: [`freeze_for_skip`] with the real
-/// install-state probe assembled HERE, so the install-layer access
-/// (`has_hooks`/`by_source`) stays funneled through this `sources` facade — the
-/// same layer that owns connect/disconnect's install calls — rather than reaching
-/// out of the TUI event loop. Does per-target config reads (`has_hooks`), which
-/// the caller runs inline — a brief one-shot stall, like the rest of the skip I/O
-/// (block_in_place was removed in #603; see the tui/CLAUDE.md sharp edge).
+/// The production onboarding-SKIP freeze. Does blocking per-target config reads
+/// (`has_hooks`) inline on the caller's thread — a brief one-shot stall.
 pub(crate) fn skip_freeze(
     detected: impl IntoIterator<Item = &'static str>,
     connected: &HashSet<String>,
@@ -476,30 +370,20 @@ pub(crate) fn skip_freeze(
     })
 }
 
-// ---- Source status MODEL (moved here from `tui::connection`, which re-exports
-//      it so the panel/harness are unchanged). Pure: no ratatui, no SceneState. ----
-
-/// Connection state for one CLI row — the single facet the toggle acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnState {
-    /// Bound: this source's events flow and its characters show. Toggle disconnects.
     Connected,
-    /// Unbound: the gate is closed; no characters. Toggle connects.
     Disconnected,
-    /// A target-bearing CLI that isn't installed on this machine — nothing to bind
-    /// to. Carries the persisted `[sources]` intent (`connected`) because `NoCli`
-    /// overrides the `Connected`/`Disconnected` display (an absent CLI is worth
-    /// surfacing), yet a connected-but-absent source is still disconnectable — its
-    /// hooks live in the config, not the missing binary — so the toggle needs the
-    /// bit the display hides.
-    NoCli { connected: bool },
+    /// A target-bearing CLI that isn't installed on this machine. Carries the
+    /// persisted `[sources]` intent because a connected-but-absent source is
+    /// still disconnectable — its hooks live in the config, not the missing
+    /// binary — so the toggle needs the bit the `NoCli` display hides.
+    NoCli {
+        connected: bool,
+    },
 }
 
 impl ConnState {
-    /// Whether this source is in the live connected-set (the persisted `[sources]`
-    /// intent): `true` for `Connected`, `false` for `Disconnected`, and the carried
-    /// bit for `NoCli` (a connected-but-absent CLI is still disconnectable). The ONE
-    /// derivation now that `ConnectionRow` no longer stores the bit separately.
     pub fn connected(self) -> bool {
         match self {
             ConnState::Connected => true,
@@ -512,48 +396,39 @@ impl ConnState {
 /// One row = one agent CLI (the union of registry sources + install targets).
 #[derive(Debug, Clone)]
 pub struct ConnectionRow {
-    /// The core source id (registry `SourceDescriptor.name`, e.g. "claude-code")
-    /// — the unifying key; joined to an install target via `Target.core_source`.
+    /// The core source id — joined to an install target via `Target.core_source`.
     pub source_id: &'static str,
     /// 2-char badge id (`cc`/`cx`/…), from the source descriptor.
     pub label_prefix: &'static str,
     pub display_name: &'static str,
-    /// The connection facet — and, for `NoCli`, the persisted-intent bit the
-    /// display hides (read it via `ConnState::connected`). The row no longer
-    /// stores `connected` separately: `state` is the single source of truth.
     pub state: ConnState,
     /// The config the hooks live in; `None` for no-target (JSONL-only) rows.
     pub config_path: Option<PathBuf>,
-    /// The install target backing this row; `None` ⇒ connect/disconnect is a
-    /// flag-only flip (Antigravity — no hooks to write).
+    /// `None` ⇒ connect/disconnect is a flag-only flip (no hooks to write).
     pub target: Option<&'static Target>,
-    /// Cached HEALTH summary — a one-line `⚠ …` verdict from
-    /// `doctor::diagnose(..).summary()`, computed for CONNECTED rows only.
+    /// Cached health summary, computed for CONNECTED rows only.
     pub health: Option<String>,
 }
 
-/// Per-target filesystem facts, injected so `build_rows_from` is pure (the FS
-/// reads happen in `build_rows`). `Some` exactly when the row has an install target.
+/// Per-target filesystem facts, injected so `build_rows_from` is pure. `Some`
+/// exactly when the row has an install target.
 #[derive(Debug, Clone)]
 pub struct RowFacts {
     pub present: bool,
     pub config_path: Option<PathBuf>,
 }
 
-/// One pure input row for `build_rows_from`.
 #[derive(Debug, Clone)]
 pub struct RowInput {
     pub source_id: &'static str,
     pub label_prefix: &'static str,
     pub target: Option<&'static Target>,
     pub facts: Option<RowFacts>,
-    /// Whether this source is in the live connected-set (the persisted intent).
     pub connected: bool,
-    /// Cached health summary (injected so `build_rows_from` stays pure).
     pub health: Option<String>,
 }
 
-/// Title-case the no-target sources (the registry omits their display names).
+/// Title-case the no-target sources — the registry omits their display names.
 fn display_name_for(source_id: &'static str) -> &'static str {
     match source_id {
         "antigravity" => "Antigravity",
@@ -563,9 +438,6 @@ fn display_name_for(source_id: &'static str) -> &'static str {
     }
 }
 
-/// Pure row builder over injected facts — the testable core of `build_rows`.
-/// A target-bearing CLI that isn't present is `NoCli`; otherwise the connected-set
-/// is authoritative.
 pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
     inputs
         .into_iter()
@@ -598,9 +470,8 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
         .collect()
 }
 
-/// Build the status rows from the registry + install targets + the connected-set.
-/// Performs FS reads (`is_present`/`default_config_path`) AND, for connected rows,
-/// the health rollup (`doctor::diagnose`). `log` is the warn-floor log text.
+/// Performs FS reads AND, for connected rows, the health rollup
+/// (`doctor::diagnose`). `log` is the warn-floor log text.
 pub fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<ConnectionRow> {
     let inputs = pixtuoid_core::source::registry::REGISTRY
         .iter()
@@ -628,28 +499,20 @@ pub fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<ConnectionRow> 
     build_rows_from(inputs)
 }
 
-/// Map a status row to the serializable `SourceStatus` DTO (the CLI/Raycast wire shape).
-///
-/// NOTE: the wire `connected` here is deliberately PRESENT-AND-BOUND
-/// (`state == Connected`), NOT the persisted `[sources]` intent bit
-/// (`ConnState::connected` — which stays `true` for a connected-but-absent `NoCli`
-/// source). The two answer different questions; the wire keeps the
-/// present-and-bound meaning it always had (changing it is a `--json` contract
-/// change needing `gen-contract`).
+/// The wire `connected` is deliberately PRESENT-AND-BOUND (`state == Connected`),
+/// NOT the persisted `[sources]` intent bit (`ConnState::connected`, which stays
+/// `true` for a connected-but-absent `NoCli` source). Changing it is a `--json`
+/// contract change needing `gen-contract`.
 fn status_from_row(r: &ConnectionRow) -> SourceStatus {
     SourceStatus {
         id: r.source_id.to_string(),
         display_name: r.display_name.to_string(),
         connected: matches!(r.state, ConnState::Connected),
-        // A no-target (JSONL-only) source is always "present"; a target-bearing
-        // one is present unless probed absent (`NoCli`).
         cli_present: !matches!(r.state, ConnState::NoCli { .. }),
         health: r.health.clone(),
     }
 }
 
-/// The status of every registered source — what `pixtuoid sources [--json]` and
-/// onboarding read. Resolves the connected-set the same way the boot seed does.
 pub fn status(cfg: &Path, log: &str) -> Vec<SourceStatus> {
     let app = config::load(cfg, &mut Vec::new());
     let connected = config::resolve_connected(&app);
@@ -659,8 +522,8 @@ pub fn status(cfg: &Path, log: &str) -> Vec<SourceStatus> {
         .collect()
 }
 
-/// Which agent CLIs are installed on this machine (target-bearing + probed present)
-/// — the "offer to connect these" set for first-run onboarding.
+/// Which agent CLIs are installed on this machine (target-bearing + probed
+/// present) — the "offer to connect these" set for first-run onboarding.
 pub fn detect() -> Vec<&'static str> {
     registry::registered_source_names()
         .filter(|sid| by_source(sid).is_some_and(is_present))
@@ -676,14 +539,8 @@ mod tests {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
-    /// The lookup behind every presenter's post-install step. Mutation testing found
-    /// it wholly untested: returning `None`, `Some("")` or `Some("xyzzy")` from here
-    /// all passed the suite, so the feature could have gone silent — or started
-    /// printing nonsense — without one red test.
     #[test]
     fn post_install_hint_names_a_real_step_only_for_targets_that_need_one() {
-        // OpenClaw is the one target whose install does NOT take effect on the CLI's
-        // next run: a RUNNING gateway loads plugins at boot, so it must be restarted.
         let hint = post_install_hint("openclaw").expect("openclaw needs a restart step");
         assert!(
             hint.contains("restart") && hint.contains("gateway"),
@@ -694,9 +551,6 @@ mod tests {
             "and name the runnable command, so the user need not guess — got {hint:?}"
         );
 
-        // Every other registered source's hooks apply on its next run, so a hint there
-        // would be a nag with no action. Ranged over the REGISTRY, not a hand list, so
-        // a new source must consciously opt in.
         for id in pixtuoid_core::source::registry::registered_source_names() {
             if id == "openclaw" {
                 continue;
@@ -706,18 +560,11 @@ mod tests {
                 "{id} declares a post-install step — if that is intended, assert it here"
             );
         }
-        // An id with no target at all resolves to no step rather than panicking.
         assert!(post_install_hint("not-a-source").is_none());
     }
 
     #[test]
     fn status_from_row_connected_is_present_and_bound_not_persisted_intent() {
-        // The wire `connected` is PRESENT-AND-BOUND (state == Connected), NOT the
-        // persisted `[sources]` intent bit. A NoCli{connected:true} (absent CLI whose
-        // stored intent is "connected") must serialize connected:false AND
-        // cli_present:false — the divergence status_from_row's doc warns about. The
-        // empty-HOME golden only ever produces NoCli{connected:false}+connected:false
-        // rows, so it can't distinguish `matches!(Connected)` from `state.connected()`.
         let row = |state| ConnectionRow {
             source_id: "claude-code",
             label_prefix: "cc",
@@ -749,12 +596,6 @@ mod tests {
 
     #[test]
     fn freeze_for_skip_keeps_a_hooked_but_unflagged_source_connected() {
-        // A pre-0.12 upgrader: config has NO [sources] table (empty connected set),
-        // but claude-code's hooks ARE installed. Skip must freeze it to `true` so
-        // apply re-installs idempotently (hooks survive), NOT `false` — which would
-        // disconnect → uninstall its working hooks (the bug). A fresh, un-hooked
-        // source (codex) freezes to `false`. Teeth: reading only the connected gate
-        // (the old behavior) would freeze claude-code false here.
         let connected = HashSet::new();
         let freeze = freeze_for_skip(
             ["claude-code", "codex"],
@@ -766,8 +607,6 @@ mod tests {
 
     #[test]
     fn freeze_for_skip_honors_the_live_connected_gate() {
-        // A source already connected in the live gate freezes to `true` even with
-        // no installed hooks (e.g. antigravity, a no-target source).
         let connected = set(&["antigravity"]);
         let freeze = freeze_for_skip(["antigravity", "codex"], &connected, |_| false);
         assert_eq!(freeze, vec![("antigravity", true), ("codex", false)]);
@@ -775,14 +614,10 @@ mod tests {
 
     #[test]
     fn map_disconnect_outcome_surfaces_a_folded_hook_removal_failure() {
-        // The safety fold: a disconnect whose flag flipped but whose hooks did NOT
-        // get removed must surface as Failed (with the reason), never a clean
-        // Disconnected — else a caller hides stale hooks behind "disconnected".
         match map_disconnect_outcome(DisconnectOutcome::HookRemovalFailed("boom".into())) {
             ChangeOutcome::Failed(m) => assert_eq!(m, "hooks not removed: boom"),
             other => panic!("expected Failed, got {other:?}"),
         }
-        // A clean disconnect (flag-only) maps to a plain Disconnected.
         assert!(matches!(
             map_disconnect_outcome(DisconnectOutcome::FlagOnly),
             ChangeOutcome::Disconnected
@@ -791,10 +626,8 @@ mod tests {
 
     #[test]
     fn connect_then_disconnect_a_no_target_source_persists_the_flag() {
-        // Antigravity has no install target → connect/disconnect is a pure flag
-        // flip (no agent-config I/O), so we can exercise the persist round in a
-        // tempdir without touching any real ~/.claude-style file. No env mutation
-        // (the cfg path is explicit), so no TEST_ENV_LOCK needed.
+        // Antigravity has no install target → a pure flag flip, so this touches no
+        // real agent config and mutates no env (no TEST_ENV_LOCK needed).
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
 
@@ -821,9 +654,8 @@ mod tests {
         );
     }
 
-    // A target whose install ALWAYS fails (its `default_config_path` errs, so
-    // `install_target` bails before any FS) — exercises `connect_target`'s
-    // install-failure rollback deterministically + cross-platform.
+    // Its `default_config_path` errs, so `install_target` bails before any FS —
+    // a deterministic, cross-platform install failure.
     static FAIL_TARGET: Target = Target {
         name: "rollbacktest",
         core_source: "rollbacktest",
@@ -851,9 +683,6 @@ mod tests {
 
     #[test]
     fn connect_target_rolls_the_flag_back_when_install_fails() {
-        // Persist succeeds (writable cfg), THEN install_target fails → the flag
-        // must roll back to its PRIOR state. From a fresh config that state is
-        // ABSENT (keeping the is_first_run signal), not a forced `false`.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
         let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap_err();
@@ -868,11 +697,6 @@ mod tests {
 
     #[test]
     fn connect_target_rollback_restores_a_previously_connected_flag() {
-        // The already-connected re-connect case (`pixtuoid connect` re-run,
-        // `setup --yes` over a working source): a failed re-install must RESTORE
-        // the prior `true`, never force `false` — the old hooks are still on
-        // disk and working, so persisting false silently disconnects a healthy
-        // source on next launch.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
         config::save_source_connected(&cfg, "rollbacktest", true).unwrap();
@@ -889,9 +713,6 @@ mod tests {
 
     #[test]
     fn connect_target_rollback_restores_a_previously_disconnected_flag() {
-        // Explicit prior `false` is restored as `false` (not removed — the
-        // rollback restores the exact pre-attempt state, and removal would
-        // re-open the is_first_run signal for an onboarded user).
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
         config::save_source_connected(&cfg, "rollbacktest", false).unwrap();
@@ -903,10 +724,6 @@ mod tests {
 
     #[test]
     fn disconnect_target_folds_a_hook_removal_failure_into_the_outcome() {
-        // FAIL_TARGET's uninstall errs (default_config_path errs) → the flag is
-        // STILL persisted false (disconnect's primary semantics hold), and the
-        // error is FOLDED into HookRemovalFailed (Err is reserved for the
-        // persist-abort) so the gate still closes + the CLI/panel can surface it.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
         let outcome = disconnect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap();
@@ -939,10 +756,8 @@ mod tests {
         assert_eq!(plan["codex"], Action::Disconnect, "in current, not desired");
         assert_eq!(plan["cursor"], Action::Connect, "in desired, not current");
         assert_eq!(plan["claude-code"], Action::NoOp, "in both");
-        // A source in neither is a NoOp (not touched).
         assert_eq!(plan["antigravity"], Action::NoOp);
 
-        // Idempotent: reconciling an already-matching state is all NoOp.
         let steady = plan_reconcile(&desired, &desired);
         assert!(
             steady.iter().all(|(_, a)| *a == Action::NoOp),
@@ -952,8 +767,6 @@ mod tests {
 
     #[test]
     fn wire_outcome_serializes_as_its_token() {
-        // serde's snake_case rename and the token() table are two spellings of
-        // one contract — pin them equal for every variant.
         for w in [
             WireOutcome::Connected,
             WireOutcome::Disconnected,
@@ -973,16 +786,12 @@ mod tests {
         assert_eq!(ChangeOutcome::Disconnected.wire_token(), "disconnected");
         assert_eq!(ChangeOutcome::NoOp.wire_token(), "no_op");
         assert_eq!(ChangeOutcome::Failed("boom".into()).wire_token(), "failed");
-        // The human detail rides SEPARATELY (the `message` field) — never
-        // folded into the token.
         assert_eq!(ChangeOutcome::Failed("boom".into()).message(), Some("boom"));
         assert_eq!(ChangeOutcome::Connected.message(), None);
     }
 
     #[test]
     fn source_status_json_shape_is_the_raycast_contract() {
-        // Pins the exact JSON the Raycast extension parses. Changing a key here
-        // is a breaking change to that contract — update both sides deliberately.
         let s = SourceStatus {
             id: "codex".into(),
             display_name: "Codex".into(),
@@ -998,10 +807,6 @@ mod tests {
 
     #[test]
     fn outcome_row_json_shape_is_the_raycast_contract() {
-        // Pins the exact `{id, outcome, message?}` JSON row `connect`/
-        // `disconnect`/`sources set --json` emit per source: a bare machine
-        // token in `outcome`, the human detail in `message` — present exactly
-        // on failure, OMITTED (not null) on success.
         let ok = OutcomeRow::new("codex".into(), &ChangeOutcome::Connected);
         let failed = OutcomeRow::new("cursor".into(), &ChangeOutcome::Failed("boom".into()));
         assert_eq!(
@@ -1016,19 +821,12 @@ mod tests {
 
     #[test]
     fn outcome_row_message_is_control_char_stripped_at_the_authority() {
-        // `message` carries another CLI's config content verbatim: a failed
-        // `connect codex` folds `toml::de::Error`'s Display, which embeds the RAW
-        // offending source line, and `sources_cli::text_line` prints that row to a
-        // real terminal. Sanitize where the untrusted value ENTERS the row (the
-        // `verify::display_safe` discipline) so no present or future presenter can
-        // reopen the hole (R0615-06).
         let row = OutcomeRow::new(
             "codex".into(),
             &ChangeOutcome::Failed("bad\u{1b}]0;PWNED\u{7}key\u{202e}txet".into()),
         );
         assert_eq!(row.message.as_deref(), Some("bad]0;PWNEDkeytxet"));
 
-        // Stays silent on ordinary text: an untouched message is byte-identical.
         let clean = "processing /home/u/.codex/config.toml: not valid TOML";
         assert_eq!(
             OutcomeRow::new("codex".into(), &ChangeOutcome::Failed(clean.into()))
@@ -1040,10 +838,6 @@ mod tests {
 
     #[test]
     fn outcome_row_schema_matches_the_committed_contract() {
-        // The `OutcomeRow` twin of `source_status_schema_matches_the_committed_contract`
-        // below (same regenerate flow: `UPDATE_CONTRACT_SCHEMA=1`, then the raycast
-        // `gen:contract`). Shares the `schema_matches_the_committed_contract`
-        // name suffix so one test filter regenerates both goldens.
         let schema = schemars::schema_for!(OutcomeRow);
         let generated = serde_json::to_string_pretty(&schema).unwrap() + "\n";
         let path = concat!(
@@ -1066,12 +860,6 @@ mod tests {
 
     #[test]
     fn source_status_schema_matches_the_committed_contract() {
-        // The Raycast extension GENERATES its SourceStatus type from this committed
-        // JSON Schema (`integrations/raycast/contract/source-status.schema.json`),
-        // so the two can't hand-drift. This test fails if the struct changes
-        // without the schema being regenerated — regenerate with
-        // `just gen-contract` (UPDATE_CONTRACT_SCHEMA=1), then the raycast
-        // `gen:contract` + tsc catches any consumer break.
         let schema = schemars::schema_for!(SourceStatus);
         let generated = serde_json::to_string_pretty(&schema).unwrap() + "\n";
         let path = concat!(
@@ -1095,14 +883,11 @@ mod tests {
     #[test]
     fn reconcile_to_disconnects_the_complement_and_noops_the_rest() {
         // Drive only the no-target source (antigravity) to avoid agent-config I/O;
-        // every other source has no flag ⇒ resolves "not connected" (NoOp under an
-        // empty desired — resolve_connected reads only explicit flags since the
-        // 0.12.0 migrate-inference removal, so no install-state injection needed).
-        // Pre-set antigravity connected; desired={} ⇒ antigravity disconnects,
-        // all targets NoOp. Deterministic, no real hooks.
+        // every other source has no flag ⇒ resolves "not connected", so no
+        // install-state injection is needed.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
-        connect(&cfg, "antigravity").unwrap(); // flag → true
+        connect(&cfg, "antigravity").unwrap();
 
         let outcomes: std::collections::HashMap<_, _> =
             reconcile_to(&cfg, &HashSet::new()).into_iter().collect();
@@ -1113,17 +898,13 @@ mod tests {
             ChangeOutcome::NoOp,
             "not connected → no change"
         );
-        // The flag was actually written.
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(app.sources.get("antigravity"), Some(&false));
     }
 
     #[test]
     fn apply_choices_writes_only_the_listed_sources() {
-        // The onboarding apply is SCOPED to the ids passed — a source absent from
-        // the list is never touched (the "an unlisted source's flag is never
-        // written" property that a declarative reconcile_to would break). Drive
-        // only the no-target source so there's no agent-config I/O.
+        // Drive only the no-target source so there's no agent-config I/O.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
 
@@ -1141,7 +922,6 @@ mod tests {
         );
         assert_eq!(app.sources.get("codex"), None, "unlisted → untouched");
 
-        // Unchecked (the uncheck / skip-freeze path) persists false.
         apply_choices(&cfg, &[("antigravity", false)]);
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(app.sources.get("antigravity"), Some(&false));

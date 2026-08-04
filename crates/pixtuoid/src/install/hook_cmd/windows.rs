@@ -1,21 +1,16 @@
 //! Windows half of the shell-hook-command quoting primitives.
 //!
-//! The cmd-safety DECISION CORE (`CMD_UNSAFE` / `first_cmd_unsafe_char` /
-//! `resolve_windows_command`) is compiled on every OS — with the 8.3 resolver
-//! injected — so every branch unit-tests on macOS without the Win32 FFI. Only
-//! the FFI itself (`short_path_windows`) and the public entry point that wires
-//! it in (`windows_bare_hook_command`) are `#[cfg(windows)]`.
+//! The cmd-safety decision core is compiled on every OS — with the 8.3 resolver
+//! injected — so every branch unit-tests without the Win32 FFI. Only the FFI
+//! itself and the entry point that wires it in are `#[cfg(windows)]`.
 
 use anyhow::Result;
 
-/// Characters that are special to cmd.exe's command-line parser (so they're
-/// unsafe in an UNQUOTED hook path): a first-token DELIMITER — space, tab,
-/// `;`, `,`, `=` — TRUNCATES the command (and unlike `"` `<` `>` `|`, the
-/// `;`/`,`/`=` trio is LEGAL in an NTFS filename, so a space-free path can
-/// genuinely carry one); a separator/redirect/escape/expansion char injects
-/// or redirects. (`!` is deliberately excluded — it's special only under
-/// delayed expansion, `cmd /V:ON`, which the codex/reasonix hook runners
-/// don't enable.)
+/// Characters special to cmd.exe's parser, hence unsafe in an UNQUOTED hook
+/// path: the first-token delimiters (space, tab, `;`, `,`, `=` — the last three
+/// are legal in an NTFS filename) TRUNCATE the command; the rest inject or
+/// redirect. `!` is deliberately excluded — special only under delayed expansion
+/// (`cmd /V:ON`), which these hook runners don't enable.
 const CMD_UNSAFE: &[char] = &[
     ' ', '\t', ';', ',', '=', '"', '&', '|', '<', '>', '(', ')', '^', '%',
 ];
@@ -26,36 +21,24 @@ fn first_cmd_unsafe_char(p: &str) -> Option<char> {
 }
 
 /// The BARE Windows hook `command` for a CLI whose hook runner shells via
-/// `cmd.exe /C` — Codex AND Reasonix both do (verified: codex-rs
-/// `command_runner.rs`; reasonix `internal/hook/hook.go:414` `shellInvocation`).
-/// Form: `<path> --source <name>`. The source rides as the shim's `--source`
-/// flag because cmd.exe has no `VAR=value cmd` env-prefix and neither CLI injects
-/// a per-hook env. The path is UNQUOTED: a quoted path can't survive `cmd /C`
-/// (the host's argv-quoting escapes `"`→`\"`, which cmd then mangles), so cmd
-/// PARSES the path — meaning any cmd-special char in it would truncate (`space`,
-/// #195) or inject (`& | < > ( ) ^ %` — `C:\Users\a&b\h.exe --source x` splits on
-/// `&` and cmd runs the relative tail from the CWD). When the resolved path has
-/// such a char we substitute its DOS 8.3 SHORT name (`C:\PROGRA~1\…`, which is
-/// space- and metacharacter-free by construction) and only REJECT if the short
-/// name is unavailable (8.3 generation disabled on the volume). One place for
-/// both targets so the guard can't drift.
+/// `cmd.exe /C` (Codex and Reasonix). Form: `<path> --source <name>` — the source
+/// rides as a flag because cmd.exe has no `VAR=value cmd` env-prefix. The path is
+/// UNQUOTED because a quoted one can't survive `cmd /C` (the host's argv-quoting
+/// escapes `"`→`\"`, which cmd then mangles), so cmd PARSES the path and any
+/// cmd-special char in it would truncate or inject — hence the 8.3 substitution.
 #[cfg(windows)]
 pub(super) fn windows_bare_hook_command(resolved_path: &str, source: &str) -> Result<String> {
     resolve_windows_command(resolved_path, source, short_path_windows)
 }
 
-/// Pure decision core, with the 8.3 resolver injected so every branch is testable
-/// without the Win32 FFI (and on any OS).
 #[cfg_attr(not(windows), allow(dead_code))]
 fn resolve_windows_command(
     path: &str,
     source: &str,
     short_path: impl FnOnce(&str) -> Option<String>,
 ) -> Result<String> {
-    // Defense-in-depth: `source` is interpolated into the command alongside the
-    // path. It's a hardcoded "codex"/"reasonix" at every call site today, but this
-    // is a general guard — screen it for the same cmd-unsafe chars rather than
-    // trust the caller, so the command string can never be made injectable here.
+    // Defense-in-depth: `source` is a hardcoded literal at every call site today,
+    // but screen it too so this command string can never be made injectable.
     if let Some(bad) = first_cmd_unsafe_char(source) {
         anyhow::bail!(
             "internal: hook source name {source:?} contains a cmd-unsafe character {bad:?}"
@@ -64,9 +47,8 @@ fn resolve_windows_command(
     let Some(bad) = first_cmd_unsafe_char(path) else {
         return Ok(format!("{path}{}{source}", super::SOURCE_FLAG));
     };
-    // Try the DOS 8.3 short form — space/metacharacter-free by construction.
-    // (When 8.3 generation is disabled on the volume, GetShortPathNameW returns
-    // the long path unchanged, so we re-check and fall through to the reject.)
+    // With 8.3 generation disabled on the volume GetShortPathNameW returns the
+    // long path unchanged, so the short form is re-checked before it is accepted.
     if let Some(s) = short_path(path) {
         if first_cmd_unsafe_char(&s).is_none() {
             return Ok(format!("{s}{}{source}", super::SOURCE_FLAG));
@@ -81,10 +63,6 @@ fn resolve_windows_command(
     );
 }
 
-/// The DOS 8.3 short path for an EXISTING path via `GetShortPathNameW` (two-call
-/// length-then-fill pattern). Returns `None` on any failure — a missing path, or
-/// a volume with 8.3 generation disabled (then the API yields the long path,
-/// which the caller re-checks).
 #[cfg(windows)]
 pub(super) fn short_path_windows(long: &str) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
@@ -115,9 +93,6 @@ pub(super) fn short_path_windows(long: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    // The 8.3 decision logic, with the short-path resolver injected so every
-    // branch runs on any OS (no FFI). The real GetShortPathNameW is smoke-tested
-    // separately below on windows-test.
     #[test]
     fn windows_command_is_bare_for_a_clean_path() {
         let c = resolve_windows_command(r"C:\tools\pixtuoid-hook.exe", "codex", |_| {
@@ -142,7 +117,6 @@ mod tests {
             Some(p.to_string())
         });
         assert!(long.is_err());
-        // resolver fails outright (missing path) → reject.
         let none = resolve_windows_command(r"C:\a&b\h.exe", "codex", |_| None);
         let err = none.unwrap_err().to_string();
         assert!(
@@ -153,12 +127,8 @@ mod tests {
 
     #[test]
     fn windows_command_treats_cmd_first_token_delimiters_as_unsafe() {
-        // cmd.exe terminates the command token at ';' ',' '=' and tab exactly
-        // like a space — ';' ',' '=' are legal Win32 filename chars and tab
-        // survives at the NTFS/POSIX-namespace layer (Win32 forbids 0-31), so
-        // a space-free path can carry one. The bare form would exec a truncated
-        // sibling path (`C:\tools\a` for `C:\tools\a;b\…`): each must take the
-        // 8.3 route, and reject when 8.3 is unavailable — never the bare form.
+        // `;` `,` `=` are legal Win32 filename chars and tab survives at the
+        // NTFS layer, so a space-free path can genuinely carry one.
         for path in [
             r"C:\tools\a;b\pixtuoid-hook.exe",
             r"C:\tools\a,b\pixtuoid-hook.exe",
@@ -183,17 +153,14 @@ mod tests {
 
     #[test]
     fn windows_command_rejects_a_cmd_unsafe_source() {
-        // `source` is interpolated too — a metacharacter-bearing source is rejected
-        // even with a perfectly clean path (defense-in-depth; never injectable here).
         let c = resolve_windows_command(r"C:\tools\hook.exe", "co&dex", |_| {
             panic!("must reject on source before touching the short-path resolver")
         });
         assert!(c.unwrap_err().to_string().contains("source name"));
     }
 
-    // Smoke-test the real FFI: for an EXISTING dir it returns Some(non-empty),
-    // whether or not 8.3 is enabled (disabled → the long path, still Some). Pins
-    // that the two-call length-then-fill pattern doesn't panic / mis-size.
+    // With 8.3 disabled the API returns the long path — still `Some` — so this can
+    // only pin that the two-call length-then-fill pattern doesn't mis-size.
     #[cfg(windows)]
     #[test]
     fn short_path_windows_resolves_an_existing_dir() {

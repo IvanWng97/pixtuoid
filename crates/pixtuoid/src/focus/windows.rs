@@ -2,11 +2,9 @@
 //! `EnumWindows`/`GetWindowThreadProcessId` for the focusable test +
 //! `SetForegroundWindow` for activation. Zero permissions.
 //!
-//! Honesty note (from the plan review): a console app does not own its host
-//! window — conhost/WindowsTerminal does — so `SetForegroundWindow` from this
-//! process may be DENIED by the foreground lock; that's the caller's silent
-//! no-op path, per the ONE failure rule (AttachThreadInput workaround =
-//! backlog). codecov-ignored glue; behavior rides windows-test/dogfood.
+//! A console app does not own its host window — conhost/WindowsTerminal does —
+//! so `SetForegroundWindow` from this process may be DENIED by the foreground
+//! lock; that is the caller's silent no-op path.
 
 use windows_sys::Win32::Foundation::{CloseHandle, HWND, INVALID_HANDLE_VALUE, LPARAM};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -80,8 +78,7 @@ fn top_level_window_of(pid: i32) -> Option<HWND> {
     search.hwnd
 }
 
-/// Bring `pid`'s top-level window to the foreground. A foreground-lock denial
-/// returns false — the caller's silent no-op.
+/// Bring `pid`'s top-level window to the foreground; `false` on a denial.
 pub(crate) fn activate_os(pid: i32) -> bool {
     let Some(hwnd) = top_level_window_of(pid) else {
         return false;

@@ -13,18 +13,6 @@ use pixtuoid_core::AgentId;
 
 use crate::{cc_subagent_line, cc_watcher, fast_watch, write_lines};
 
-// ── Child-end un-claim (#246): the carrier for in-flight multi-turn children ─
-
-/// #246 — the watcher half of the un-claim side-channel: a hook SubagentStop
-/// ends a child whose transcript stays `seen`-claimed, so turn-N+1 appends
-/// used to decode as unknown-id no-ops with no re-registration carrier on
-/// either transport (upstream provides none — codex-rs hook_runtime.rs).
-/// Pushing the child id into the shared handle (the ClaudeCodeSource tee's
-/// job in production, pinned separately) must make the running watcher
-/// release the claim on a scan/notify pass, so a later append re-registers
-/// the SAME id with a FRESH SessionStart. (The drain-before-release straggler
-/// discipline is pinned deterministically in source/jsonl/tests.rs's
-/// `child_end_unclaim_drains_stragglers_then_releases_without_session_end`.)
 #[tokio::test]
 async fn child_end_unclaim_lets_a_turn_n_plus_1_append_re_register() {
     let dir = TempDir::new().unwrap();
@@ -47,7 +35,6 @@ async fn child_end_unclaim_lets_a_turn_n_plus_1_append_re_register() {
     let handle = tokio::spawn(async move { watcher.run(tx).await });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Turn N: the child's transcript registers (claims `seen`).
     write_lines(
         &transcript,
         &[cc_subagent_line(child_stem, "/repo", "tu_n1")],
@@ -67,12 +54,10 @@ async fn child_end_unclaim_lets_a_turn_n_plus_1_append_re_register() {
     }
     assert!(registered, "turn N must register the child transcript");
 
-    // Turn N ends: the SubagentStop hook is decoded; the tee pushes the id.
     unclaims.push(expected);
 
-    // Turn N+1: appends arrive. The first notify after the push drains the
-    // handle (releasing the claim) — appends keep coming during an active
-    // turn, so re-registration converges within a couple of writes.
+    // Only the first notify AFTER the push drains the handle, so the append has to
+    // repeat — one write is not enough to observe the release.
     let mut revived = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     let mut next_tu = 0u32;
@@ -114,16 +99,6 @@ async fn child_end_unclaim_lets_a_turn_n_plus_1_append_re_register() {
     handle.abort();
 }
 
-/// THE #246 acceptance test — the full in-flight multi-turn Codex child story
-/// across the REAL CodexSource (run()-wiring included) + the reducer:
-/// the SubagentStart hook registers the child WITH its parent (the ledger
-/// remembers the applied link); the flat rollout is `seen`-claimed by the
-/// watcher; the SubagentStop hook (`as_child: true`) ends the slot and — via
-/// the tee, simulated here by the push (pinned separately in claude_code.rs)
-/// — feeds the un-claim side-channel; the turn-N+1 append then re-emits a
-/// parentless SessionStart through the released claim, and the reducer's
-/// child ledger RE-LINKS it to the remembered parent: the child re-joins the
-/// scope tree mid-flight instead of staying invisible.
 #[tokio::test]
 async fn in_flight_multi_turn_codex_child_revives_and_relinks_via_unclaim() {
     use pixtuoid_core::source::decoder::decode_hook_payload;
@@ -146,7 +121,6 @@ async fn in_flight_multi_turn_codex_child_revives_and_relinks_via_unclaim() {
         }
     };
 
-    // Thread startup: the parent prompt + the child's SubagentStart hook.
     apply_hook(
         &mut r,
         &mut scene,
@@ -174,7 +148,6 @@ async fn in_flight_multi_turn_codex_child_revives_and_relinks_via_unclaim() {
         "first life: the child registers with the parent link"
     );
 
-    // The REAL CodexSource (with the shared handle) claims the rollout.
     let unclaims = ChildEndUnclaims::new();
     let src = CodexSource {
         sessions_root,
@@ -208,7 +181,6 @@ async fn in_flight_multi_turn_codex_child_revives_and_relinks_via_unclaim() {
     }
     assert!(claimed, "the watcher must claim the child's flat rollout");
 
-    // Turn N ends: SubagentStop ends the slot; the tee pushes the id.
     apply_hook(
         &mut r,
         &mut scene,
@@ -229,9 +201,6 @@ async fn in_flight_multi_turn_codex_child_revives_and_relinks_via_unclaim() {
         "the child's first life is GC'd after the SubagentStop"
     );
 
-    // Turn N+1 (parent send_input): rollout appends resume. Through the
-    // released claim a parentless SessionStart re-registers the child, and
-    // the ledger restores the remembered parent.
     let mut relinked = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline && !relinked {

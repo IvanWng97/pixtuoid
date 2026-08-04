@@ -1,14 +1,13 @@
 //! Crash reporting: the panic hook that restores the terminal, appends a
 //! timestamped backtrace to `~/.cache/pixtuoid/crash.log`, and prints a
-//! pre-filled GitHub issue URL. Binary-crate module (lifted out of `main.rs`);
-//! `main()` installs it first thing.
+//! pre-filled GitHub issue URL.
 
 use std::path::PathBuf;
 
 pub(crate) fn install_crash_hook() {
     std::panic::set_hook(Box::new(|info| {
-        // stdout is the stream `setup_terminal` entered the alt screen on, and
-        // these are ANSI bytes going to whatever writer `execute!` is handed.
+        // stdout is the stream `setup_terminal` ENTERED the alt screen on, so the
+        // restore must go there — on stderr, `pixtuoid run 2>/dev/null` strands it.
         let _ = pixtuoid::tui::unwind_terminal_modes(
             &mut std::io::stdout(),
             crossterm::terminal::disable_raw_mode,
@@ -33,8 +32,8 @@ pub(crate) fn install_crash_hook() {
         report.push_str(&bt_str);
         report.push('\n');
 
-        // Owner-only, through the SAME opener the runtime log uses: a backtrace
-        // carries the same project paths and agent ids (see `open_private_append`).
+        // Owner-only: a backtrace carries the same project paths and agent ids
+        // the runtime log does.
         if let Ok(mut f) = crate::logging::open_private_append(&crash_path) {
             use std::io::Write;
             let _ = f.write_all(report.as_bytes());
@@ -77,7 +76,6 @@ fn build_issue_url(
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
 
-    // Truncate an over-long panic message for the crash-report title.
     const PANIC_TITLE_MAX_LEN: usize = 80;
     let title_msg = if panic_msg.len() > PANIC_TITLE_MAX_LEN {
         let cut = truncate_to_char_boundary(panic_msg, PANIC_TITLE_MAX_LEN);
@@ -110,9 +108,6 @@ fn build_issue_url(
          ```\n{bt_body}\n```\n"
     );
 
-    // Derive from the ONE repo-URL authority (the lib's version_popup.rs REPO_URL — the
-    // same const the version popup + bulletin board open; crash.rs is a BIN-crate
-    // module, hence the `pixtuoid::` path). The test pins the expanded literal.
     format!(
         "{}/issues/new?labels=crash-report&title={}&body={}",
         pixtuoid::tui::widgets::REPO_URL,
@@ -149,8 +144,8 @@ fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> usize {
 }
 
 fn crash_log_path() -> PathBuf {
-    // Empty or RELATIVE XDG_STATE_HOME = unset (XDG spec; nonempty_abs_env) — an
-    // unfiltered "" yields root `/pixtuoid/...`, a relative one lands CWD-relative.
+    // Empty or RELATIVE XDG_STATE_HOME = unset (XDG spec): an unfiltered "" yields
+    // root `/pixtuoid/...`, a relative one lands CWD-relative.
     if let Some(state) = pixtuoid::install::nonempty_abs_env("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/crash.log"));
     }
@@ -169,29 +164,16 @@ mod tests {
 
     use super::*;
 
-    /// The escape the alternate screen is left with. Asserted as a literal
-    /// rather than re-executing the command into a second buffer, which would
-    /// only prove `execute!` is deterministic.
-    ///
-    /// Unix-only, and so is EVERY test below that reads it — the gate is a
-    /// property of crossterm, not of either test. crossterm 0.29 dispatches on a
-    /// PROCESS-GLOBAL flag rather than on the writer: `queue` and `execute_fmt`
-    /// both `return command.execute_winapi()` when `ansi_support::supports_ansi()`
-    /// is false, and that flag is `enable_vt_processing().is_ok() || TERM is set
-    /// and != "dumb"`. Under `windows-test` nextest runs each test binary with a
-    /// PIPED stdout and no console, and windows-latest/pwsh sets no `TERM`, so
-    /// the flag is false and the sequences go to the real console — no writer,
-    /// in-memory or piped, ever sees a byte to assert on.
+    /// Unix-only, and so is every test that reads it: crossterm dispatches on a
+    /// PROCESS-GLOBAL ansi-support flag rather than on the writer, and under
+    /// `windows-test` that flag is false — the sequences go to the real console,
+    /// so no writer, in-memory or piped, ever sees a byte to assert on.
     #[cfg(unix)]
     const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
 
-    /// Which STREAM the installed hook writes to, end to end. The panic hook is
-    /// process-global and writes to a real fd, so the only way to observe its
-    /// choice is from outside: re-exec this test binary with the child marker,
-    /// let a real panic fire the hook, and read the two pipes apart.
-    ///
-    /// Unix-only for the same crossterm dispatch reason as `LEAVE_ALT_SCREEN`
-    /// above — and the defect itself is the Unix fd-redirection case.
+    /// The panic hook is process-global and writes to a real fd, so the only way
+    /// to observe which stream it chose is from outside: re-exec this test binary
+    /// with the child marker, let a real panic fire the hook, read the pipes apart.
     #[cfg(unix)]
     #[test]
     fn the_hook_restores_on_stdout_and_keeps_the_report_on_stderr() {
@@ -242,10 +224,8 @@ mod tests {
 
     #[test]
     fn truncate_multibyte_boundary() {
-        // "café" is 5 bytes: c(1) a(1) f(1) é(2)
         let s = "café";
         assert_eq!(s.len(), 5);
-        // Cutting at byte 4 lands inside the é (2-byte char starting at 3)
         let cut = truncate_to_char_boundary(s, 4);
         assert_eq!(cut, 3);
         assert_eq!(&s[..cut], "caf");
@@ -287,14 +267,11 @@ mod tests {
     fn build_issue_url_truncates_long_backtrace() {
         let long_bt = "x".repeat(2000);
         let url = build_issue_url("0.4.0", "msg", "loc", &long_bt, Path::new("/tmp/x"));
-        // URL should stay under GitHub's 8191 byte limit
         assert!(url.len() < 8191);
     }
 
     #[test]
     fn crash_log_path_rejects_a_relative_xdg_state_home() {
-        // Sibling of log_file_path's test — same nonempty_abs_env call site: a
-        // relative/empty XDG_STATE_HOME → ~/.cache fallback (shares the bin ENV_LOCK).
         let _env = crate::logging::ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());

@@ -1,8 +1,3 @@
-// Unit tests for the build-time star-count kernel: the offline/failure paths
-// MUST yield null (an offline `astro build` can never fail on this), and a
-// reachable API yields the raw count as a string. Same posture as
-// csp-hashes.test.mjs: the kernel is pure-ish and injectable, the config owns
-// only the wiring.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import process from 'node:process';

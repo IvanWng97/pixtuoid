@@ -1,39 +1,6 @@
 #!/usr/bin/env python3
-"""Self-test for check_upstream_drift.py — the drift watcher had ZERO tests, yet
-a regex-parser regression = a SILENT monitor death (it returns empty / raises and
-the weekly job either alarms on junk or watches nothing). This pins:
-
-  1. `try_fetch` failure classification — the PR that added it fixed the
-     `HTTPError ⊂ URLError ⊂ FETCH_ERRORS` swallow that bucketed a permanent 404
-     as transient. A 404/410/451 MUST be breaking; 5xx/429/timeouts transient.
-  2. The `read_*_events` source parsers still find a non-empty, well-shaped set
-     (catches "the regex broke" / "it grabbed the wrong block").
-  3. The `upstream_*` parsers extract names from a representative snippet.
-  4. The CC doc-marker DETECTION (`cc_doc_marker_findings`) fires in BOTH
-     directions — depended markers on VANISH, surface markers on APPEARANCE
-     (the #541 burn-tier watches ship with teeth, not just parsers).
-  5. The anchor gate, in BOTH directions, for EVERY document in `ANCHORS`: a
-     pure upstream refactor yields probe health, and an intact anchor still
-     hands the body to the caller's sweep. That a real rename STILL yields drift
-     is proven end-to-end for CodeWhale (`test_793_…`), the #793 source. The
-     refactor direction is the one that had no test and is exactly what #793
-     escaped through — the watcher reported three working CodeWhale env vars as
-     renamed because a stale pin still fetched 200.
-     NB the samples are hand-written to satisfy their patterns, so this pair
-     proves the GATE works — never that any anchor is CORRECT against the live
-     document. A typo'd anchor passes here and shows up as a permanent weekly
-     probe-health line (self-reporting, which is why that is acceptable).
-  6. The report keeps the two dispositions under separate headings, so a
-     "we could not verify" line can never be read as "upstream changed".
-  7. `Report` is the ONLY way to file a finding — no module code appends to a
-     bucket directly, so probe health cannot be hand-worded into a claim about
-     upstream. Plus the exit-2 (transient) path, which is unreachable through
-     `main()` without faking the network.
-  8. One stale `read_*` parser darkens ITS OWN checks and no others, via three
-     guards: the per-reader isolation, the READERS-to-`OurNames` bridge (a
-     mispaired row feeds one source's names to another's sweep), and the ban on
-     calling a `read_*` inline in `run_checks` (a raise there lands in the
-     TRANSIENT bucket — a warning on a green run — instead of probe health).
+"""Self-test for check_upstream_drift.py — a regex-parser regression is a SILENT
+monitor death: the weekly job either alarms on junk or watches nothing.
 
 Run: `python3 scripts/check_upstream_drift_selftest.py` (exit 0 = pass).
 No pytest dependency on purpose — the repo has no Python test harness.
@@ -55,7 +22,6 @@ import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
 
-# The suffixes a READERS reader may add to its OurNames field name.
 READER_NAME_SUFFIXES = {"", "_events", "_types", "_entry_types"}
 
 
@@ -71,10 +37,8 @@ def _http_error(code: int) -> urllib.error.HTTPError:
 def test_try_fetch_classifies_permanent_vs_transient() -> None:
     real = d.fetch
     try:
-        # Permanent HTTP → PROBE HEALTH (our pin is wrong, so the watch is dark
-        # for this source). Deliberately not `breaking`: a 404 says nothing about
-        # whether upstream renamed anything, only that we are looking in the
-        # wrong place.
+        # Deliberately not `breaking`: a 404 says nothing about whether upstream
+        # renamed anything, only that we are looking in the wrong place.
         for code in (404, 410, 451):
             d.fetch = lambda _u, c=code: (_ for _ in ()).throw(_http_error(c))
             r = d.Report()
@@ -86,7 +50,6 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
             )
             check(str(code) in (r.blind[0] if r.blind else ""), f"{code}: message names the status")
 
-        # Transient HTTP (server/throttle) → errors, NOT probe health.
         for code in (500, 502, 503, 429, 403):
             d.fetch = lambda _u, c=code: (_ for _ in ()).throw(_http_error(c))
             r = d.Report()
@@ -96,7 +59,6 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
                 f"{code}: -> transient (got blind={r.blind} errors={r.errors})",
             )
 
-        # Network-layer failure → transient.
         d.fetch = lambda _u: (_ for _ in ()).throw(urllib.error.URLError("conn refused"))
         r = d.Report()
         d.try_fetch("https://x/y", "T", r)
@@ -105,7 +67,6 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
             f"URLError -> transient (got blind={r.blind} errors={r.errors})",
         )
 
-        # Success → returns the body, no buckets touched.
         d.fetch = lambda _u: "BODY"
         r = d.Report()
         out = d.try_fetch("https://x/y", "T", r)
@@ -115,12 +76,8 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
 
 
 def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
-    # (reader, a shape regex every member must match, floor) — non-empty + shape
-    # catches a broken regex / wrong-block grab WITHOUT coupling to the exact event
-    # set (which legitimately grows as sources are added). floor is 2 for real
-    # event sets; the dispatch-tool name set is a legitimate SINGLETON since CC
-    # dropped the `Task` alias in 0.12.0 (only `Agent` remains — see the subagent
-    # sharp edge in crates/pixtuoid-core/CLAUDE.md), so it floors at 1.
+    # (reader, shape regex, floor). The dispatch-tool name set is a legitimate
+    # SINGLETON since CC dropped the `Task` alias, so it floors at 1.
     cases = [
         (d.read_codex_events, r"^[A-Za-z]\w+$", 2),
         (d.read_codex_rollout_outers, r"^[a-z][a-z_]*$", 4),
@@ -147,10 +104,6 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
         bad = [m for m in got if not re.match(shape, m)]
         check(not bad, f"{name}: members match {shape}; offenders={bad}")
 
-    # read_codex_rollout_types returns a (event_msg, response_item) TUPLE, not a
-    # set, so it rides its own check: both halves non-empty + snake_case, and the
-    # known task_started / function_call present (a decoder refactor that drops
-    # the ("event_msg"|"response_item", …) arms would empty these → RuntimeError).
     # N-of-N: a row with no floor case can return `set()` and pass vacuously.
     floored = {r.__name__ for r, _, _ in cases} | {"read_codex_rollout_types"}
     unfloored = sorted({r.__name__ for _, r, _ in d.READERS} - floored)
@@ -163,12 +116,9 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     offenders = [m for m in (ev | ri) if not re.match(r"^[a-z][a-z_]*$", m)]
     check(not offenders, f"codex rollout members are snake_case; offenders={offenders}")
 
-    # `openclaw_plugin_default_port` returns a single VALUE, not a set, so it rides
-    # its own check (the read_codex_rollout_types precedent). It exists because the
-    # port literal is COPIED into the plugin (un-importable from OpenClaw's state
-    # dir) and the live comparison is PR-gated off, so renaming the const would leave
-    # the weekly check comparing nothing. THIS is what notices — and the workflow
-    # lists the template in its PR `paths`, so it fires on the renaming PR itself.
+    # The port literal is COPIED into the plugin (un-importable from OpenClaw's
+    # state dir) and the live comparison is PR-gated off, so renaming the const
+    # would leave the weekly check comparing nothing.
     port = d.openclaw_plugin_default_port()
     check(
         port is not None and port.isdigit(),
@@ -177,12 +127,10 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
 
 
 def test_upstream_parsers_extract_from_a_snippet() -> None:
-    # Codex HookEventName enum snippet.
     codex = 'pub enum HookEventName {\n    SessionStart,\n    PreToolUse,\n    Stop,\n}'
     up = d.upstream_codex_hooks(codex)
     check(up is not None and {"SessionStart", "PreToolUse"} <= up, f"codex enum parse: {up}")
 
-    # Copilot schema: definitions[*].properties.type.const.
     schema = (
         '{"definitions":{"A":{"properties":{"type":{"const":"session.start"}}},'
         '"B":{"properties":{"type":{"const":"tool.execution_start"}}}}}'
@@ -190,12 +138,10 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     up = d.upstream_copilot_events(schema)
     check(up is not None and {"session.start", "tool.execution_start"} <= up, f"copilot schema parse: {up}")
 
-    # A malformed schema → None (signals "restructured", handled as breaking upstream).
     check(d.upstream_copilot_events("not json") is None, "copilot bad json -> None")
 
-    # Copilot NAMESPACES — scoped to the SessionEvent.anyOf union. A nested-content
-    # def that shares the `type.const` shape (`Blob`→"blob") must NOT leak a phantom
-    # family: the result is EXACTLY {session, tool}, proving the anyOf scoping.
+    # `Blob` shares the `type.const` shape but sits outside the SessionEvent
+    # union — it must not leak a phantom family.
     ns_schema = (
         '{"definitions":{'
         '"SessionEvent":{"anyOf":[{"$ref":"#/definitions/SessStart"},{"$ref":"#/definitions/ToolStart"}]},'
@@ -208,8 +154,6 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     check(d.upstream_copilot_namespaces("not json") is None, "copilot namespaces bad json -> None")
     check(d.upstream_copilot_namespaces('{"definitions":{}}') is None, "copilot namespaces no union -> None")
 
-    # omp entry types — direct `type: "x"` literals PLUS `type: typeof CONST`
-    # refs resolved via a `CONST = "x"` binding (the title / title_change slots).
     omp_ts = (
         'const SESSION_TITLE_SLOT_ENTRY_TYPE = "title";\n'
         'interface Msg { type: "message"; }\n'
@@ -219,8 +163,6 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     check(up == {"message", "title"}, f"omp entry types (literal + typeof-resolved): {up}")
     check(d.upstream_omp_entry_types("no types here") is None, "omp entry types none -> None")
 
-    # ACP v1 SessionUpdate tags — each `$defs.SessionUpdate.oneOf` member's inline
-    # `sessionUpdate.const`, with a `$ref` member resolved.
     acp_schema = (
         '{"$defs":{"SessionUpdate":{"oneOf":['
         '{"properties":{"sessionUpdate":{"const":"tool_call"}}},'
@@ -236,17 +178,11 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     check(d.upstream_acp_session_update_tags("not json") is None, "acp bad json -> None")
     check(d.upstream_acp_session_update_tags('{"$defs":{}}') is None, "acp no SessionUpdate -> None")
 
-    # Copilot FIELD-NAME union — every `properties` key at ANY depth (envelope
-    # `agentId` AND the nested `data.properties` `toolCallId`).
     copilot_fields = '{"definitions":{"A":{"properties":{"agentId":{},"data":{"properties":{"toolCallId":{}}}}}}}'
     up = d.upstream_copilot_field_names(copilot_fields)
     check(up is not None and {"agentId", "toolCallId"} <= up, f"copilot field union (recursive): {up}")
     check(d.upstream_copilot_field_names("not json") is None, "copilot fields bad json -> None")
 
-    # CC hook-event summary table — the MOST complex parser (anchors to the
-    # "| Event |" header + separator, extracts the backtick-quoted first cell).
-    # A wrong-but-non-None match here would silently miss a renamed event, so pin
-    # both a real table and the no-table -> None case.
     cc_md = (
         "| Event | When it fires |\n"
         "|---|---|\n"
@@ -257,24 +193,19 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     check(up is not None and {"PreToolUse", "PostToolUse"} <= up, f"cc table parse: {up}")
     check(d.upstream_cc_hook_events("no table here") is None, "cc no table -> None")
 
-    # Reasonix Go consts: `Ident Event = "Wire"`.
     reasonix_go = 'const (\n\tPreToolUse Event = "PreToolUse"\n\tStop Event = "Stop"\n)'
     up = d.upstream_reasonix_hooks(reasonix_go)
     check(up is not None and {"PreToolUse", "Stop"} <= up, f"reasonix consts parse: {up}")
     check(d.upstream_reasonix_hooks("no consts here") is None, "reasonix none -> None")
 
-    # CodeWhale Rust enum → snake_case wire names (serde rename_all = snake_case).
     codewhale_rs = "pub enum HookEvent {\n    SessionStart,\n    PreToolUse,\n}"
     up = d.upstream_codewhale_hooks(codewhale_rs)
     check(up is not None and {"session_start", "pre_tool_use"} <= up, f"codewhale enum parse: {up}")
     check(d.upstream_codewhale_hooks("no enum here") is None, "codewhale none -> None")
 
-    # grok HookEventName — BOTH declaration shapes, because upstream moved from a
-    # plain enum to a `hook_events!` macro TABLE and the enum-only regex then read
-    # empty, reporting the 15 unchanged variants as "not found at the pinned path"
-    # (#793). The macro-def arm is the trap: its body carries a literal
-    # `pub enum HookEventName {` with `$variant` placeholders and no real variants,
-    # so a parser must fall THROUGH it to the invocation rather than stop there.
+    # BOTH declaration shapes: the macro-def arm is the trap — its body carries a
+    # literal `pub enum HookEventName {` with `$variant` placeholders and no real
+    # variants, so a parser must fall THROUGH it to the invocation (#793).
     grok_plain = "pub enum HookEventName {\n    SessionStart,\n    PreToolUse,\n}"
     up = d.upstream_grok_hooks(grok_plain)
     check(up is not None and {"SessionStart", "PreToolUse"} <= up, f"grok plain enum parse: {up}")
@@ -306,15 +237,10 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
         up is not None and up == {"SessionStart", "SubagentEnd"},
         f"grok macro-table parse (exact, no alias/trait leakage): {up}",
     )
-    # A macro DEFINITION with no invocation must read None (a real "it moved"),
-    # never the placeholder-only enum body.
     grok_def_only = grok_macro.split("hook_events! {")[0]
     check(d.upstream_grok_hooks(grok_def_only) is None, "grok macro def without invocation -> None")
     check(d.upstream_grok_hooks("no enum here") is None, "grok none -> None")
 
-    # Codex EventMsg / ResponseItem: #[serde(tag="type", rename_all="snake_case")]
-    # enums. snake_case(variant) + explicit rename/alias, with nested tuple/struct
-    # bodies stripped so a CamelCase field TYPE isn't mistaken for a variant.
     codex_enum = (
         "pub enum EventMsg {\n"
         '    #[serde(rename = "task_started", alias = "turn_started")]\n'
@@ -329,21 +255,16 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
         up is not None and {"task_started", "turn_started", "exec_command_end"} <= up,
         f"codex EventMsg parse (rename+alias+snake): {up}",
     )
-    # A struct-field TYPE (ModelInfo/PathBuf) must NOT leak in as a variant.
     check(up is not None and "model_info" not in up and "path_buf" not in up, f"codex struct-field type leaked: {up}")
     check(d.upstream_codex_enum_types("no enum here", "EventMsg") is None, "codex enum none -> None")
 
-    # Codex ResponseItem::FunctionCall inline-struct FIELD extraction.
     fc_struct = "FunctionCall {\n    name: String,\n    arguments: String,\n    call_id: String,\n}"
     up = d.codex_function_call_fields(fc_struct)
     check(up is not None and {"name", "arguments"} <= up, f"codex FunctionCall fields: {up}")
-    # A tuple variant (external struct) → None = GRACEFUL SKIP, not a false alarm.
     check(
         d.codex_function_call_fields("FunctionCall(FunctionCallItem),") is None,
         "codex FunctionCall tuple variant -> None (graceful skip, not an alarm)",
     )
-    # TurnContextItem (burn tier, #541): field idents extracted incl. the two
-    # the decoder depends on; a moved/renamed struct → None (caller alarms).
     tc_struct = (
         "pub struct TurnContextItem {\n"
         "    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n"
@@ -364,30 +285,19 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
 
 
 def test_cc_doc_marker_detection_fires_both_directions() -> None:
-    # A doc carrying every depended marker and no surface marker is quiet.
     quiet = "\n".join(d.CC_DEPENDED_DOC_MARKERS)
     got = d.cc_doc_marker_findings(quiet)
     check(got == [], f"quiet doc -> no findings: {got!r}")
 
-    # VANISH direction: drop the effort surface → exactly its finding.
     missing = "\n".join(m for m in d.CC_DEPENDED_DOC_MARKERS if m != "CLAUDE_EFFORT")
     got = d.cc_doc_marker_findings(missing)
     check(len(got) == 1 and "CLAUDE_EFFORT" in got[0], f"vanish fires: {got!r}")
 
-    # APPEARANCE direction: an ultra marker shows up in the docs → its finding.
     got = d.cc_doc_marker_findings(quiet + "\nultra_effort_exit\n")
     check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
 
 
 def test_const_array_parser_ignores_words_quoted_inside_comments() -> None:
-    """A quoted word in a comment must NOT be read as a registered event.
-
-    The shape assertions above cannot catch this: a phantom scraped out of a
-    comment is an ordinary-looking word that passes every shape regex. It shipped
-    for real — a WHY comment inside CODEX_EVENTS mentioning the SessionEnd
-    payload's `reason const "other"` made the watcher report a phantom breaking
-    drift, auto-file an issue, and fail the run.
-    """
     src = '''
 const DEMO_EVENTS: &[&str] = &[
     "SessionStart",
@@ -400,8 +310,8 @@ const DEMO_EVENTS: &[&str] = &[
     got = d.parse_rust_const_str_array(src, "DEMO_EVENTS")
     check(got == {"SessionStart", "SessionEnd"}, f"comments excluded: {got!r}")
 
-    # And an absent const is reported as such, not as an empty set — an empty
-    # set would read as "nothing registered" and silence every check downstream.
+    # An empty set would read as "nothing registered" and silence every
+    # downstream check.
     check(
         d.parse_rust_const_str_array(src, "NOPE_EVENTS") is None,
         "a missing const returns None, never an empty set",
@@ -409,16 +319,11 @@ const DEMO_EVENTS: &[&str] = &[
 
 
 def test_parser_never_drops_a_real_event() -> None:
-    """The failing-OPEN direction, which is the worse one.
-
-    A phantom is loud: the watcher alarms on a name upstream does not have. A
-    DROPPED registration is silent — that name simply stops being checked, and
-    nothing says so. Both regex formulations of this parser had that bug, so
-    each case below is a construct that made one of them swallow a real entry.
+    """Each case is a construct that made some formulation of this parser swallow
+    a real entry — a dropped registration is SILENT, unlike a phantom.
     """
     cases = [
-        # `//` inside a string literal: a line-comment strip runs to end of line
-        # and takes every later entry with it.
+        # `//` inside a string literal: a line-comment strip runs to end of line.
         ('"SessionStart", "a//b", "SessionEnd"', {"SessionStart", "SessionEnd"}),
         ('"Alpha", "http://x", "Charlie"', {"Alpha", "Charlie"}),
         # Nested block comments are legal Rust; a non-greedy `/\\*.*?\\*/` closes
@@ -429,7 +334,6 @@ def test_parser_never_drops_a_real_event() -> None:
         ('"Alpha",\n // uses /* as a marker\n "Beta", /* real */', {"Alpha", "Beta"}),
         # Escaped quotes must not end the string early.
         (r'"Alpha", "say \"Beta\"", "Gamma"', {"Alpha", "Gamma"}),
-        # A URL in a COMMENT is the benign twin of case 2 — still excluded.
         ('"Alpha",\n // see https://x "Notification"\n "Beta"', {"Alpha", "Beta"}),
     ]
     for body, want in cases:
@@ -438,18 +342,6 @@ def test_parser_never_drops_a_real_event() -> None:
 
 
 def test_block_scrape_is_bounded_to_the_decoder() -> None:
-    """A scrape bounded to one block must not see code that follows it.
-
-    `read_codex_rollout_types` used to scan the WHOLE of source/codex.rs, so a
-    `#[cfg(test)] mod tests` constructing the same tuple shape would leak a type
-    the decoder does not depend on — and a phantom makes the watcher alarm on a
-    name upstream never had to have.
-
-    This exists because the sibling comment-safe parser shipped exactly such a
-    case one commit earlier and this bounding fix did not: the negative control
-    was RUN and then left out of the suite, which is the failure this whole
-    branch is about.
-    """
     src = """
 fn decode(v: Value) -> Vec<Event> {
     let out = match (outer, inner) {
@@ -476,8 +368,6 @@ mod tests {
         "the nested-brace arm is INSIDE the block (it did not close early)",
     )
 
-    # A missing anchor is None, so the caller raises loudly rather than silently
-    # scraping nothing — a decoder refactor must break the watcher, not blind it.
     check(
         d.rust_block_after("fn unrelated() { }", r"match \(outer, inner\)") is None,
         "a missing anchor returns None, never an empty block",
@@ -485,13 +375,7 @@ mod tests {
 
 
 def test_every_const_array_reader_uses_the_shared_parser() -> None:
-    """No reader may hand-roll the scrape the shared parser exists to own.
-
-    This is the mechanical form of the lesson, not a second copy of it: the
-    original migration was a HAND-LISTED sweep of nine readers and it missed one
-    (`read_kimi_events`), which is the N-1-of-N class this repo's review prompt
-    calls its most-recurrent escape. A checklist cannot enforce itself; this can.
-    """
+    """No reader may hand-roll the scrape the shared parser exists to own."""
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
     offenders = [
         ln.strip()
@@ -505,10 +389,8 @@ def test_every_const_array_reader_uses_the_shared_parser() -> None:
     )
 
 
-# One snippet per anchored document that MUST satisfy its anchor. Test data, and
-# a record of the shape each anchor expects. A new ANCHORS entry with no sample
-# here fails `test_anchor_gate_fires_in_both_directions` — the N-of-N tooth, so
-# the sweep below can't quietly cover 15 of 16 documents.
+# One snippet per anchored document; a new ANCHORS entry with no sample here
+# fails the gate test below.
 ANCHOR_SAMPLES: dict[str, str] = {
     d.CODEWHALE_EXECUTOR_URL: "pub fn to_env_vars(&self) -> HashMap<String, String> {",
     d.OPENCODE_EVENT_URLS[0]: "\nexport const Event = {\n  Created,\n}",
@@ -530,29 +412,16 @@ ANCHOR_SAMPLES: dict[str, str] = {
 }
 
 # A document that satisfies NO anchor — the "upstream reorganized this file"
-# stand-in. Deliberately prose-shaped: a re-export facade or a restructured docs
-# page is exactly this, content that fetches fine and owns nothing.
+# stand-in: content that fetches fine and owns nothing.
 _UNANCHORED = "mod config;\nmod executor;\npub use config::*;\n"
 
 
 def test_anchor_gate_fires_in_both_directions() -> None:
-    """Every anchored document, both ways.
-
-    The direction nobody writes is the second one, and it is precisely what #793
-    needed: a PURE UPSTREAM REFACTOR must produce probe-health, never drift. The
-    watcher reported three working CodeWhale env vars as renamed because the
-    stale pin still returned 200 and an unanchored sweep read the facade's
-    silence as absence.
-
-    Table-driven over `ANCHORS` itself so the pair cannot cover N-1 of N.
-    """
+    """A PURE UPSTREAM REFACTOR must produce probe-health, never drift (#793)."""
     real = d.fetch
     try:
         # A floor, because everything below iterates `ANCHORS`: an emptied table
-        # would run zero loop bodies and this whole test would pass VACUOUSLY
-        # while the watch swept nothing. The count only has to move when a
-        # document is added or dropped, which is exactly when a human should
-        # look at this test.
+        # would run zero loop bodies and this test would pass VACUOUSLY.
         check(len(d.ANCHORS) >= 17, f"ANCHORS covers every swept document, got {len(d.ANCHORS)}")
         missing_samples = sorted(set(d.ANCHORS) - set(ANCHOR_SAMPLES))
         check(not missing_samples, f"every ANCHORS entry needs a sample: {missing_samples}")
@@ -560,24 +429,19 @@ def test_anchor_gate_fires_in_both_directions() -> None:
         for url, anchor in sorted(d.ANCHORS.items()):
             served: list[str] = []
 
-            # (a) anchor ABSENT (a refactor moved the declaration away) -> the
-            #     document is not swept at all, and the finding is probe health.
             d.fetch = lambda u, _s=served: (_s.append(u), _UNANCHORED)[1]
             r = d.Report()
             out = d.fetch_anchored(url, "T", r)
             check(served == [url], f"{anchor.owns}: the stubbed fetch actually ran")
             check(out is None, f"{anchor.owns}: no anchor -> the sweep is skipped")
             check(len(r.blind) == 1 and not r.errors, f"{anchor.owns}: -> blind, got {r.blind}")
-            # Indexing is guarded, not assumed: a regressed gate leaves `blind`
-            # empty and this test must REPORT that, not abort the suite before
-            # the #793 regression test below ever runs.
+            # Guarded index: a regressed gate leaves `blind` empty, and that must
+            # REPORT rather than abort the suite before the later tests run.
             check(
                 "NOT evidence that upstream changed" in (r.blind[0] if r.blind else ""),
                 f"{anchor.owns}: the line disclaims upstream causation, got {r.blind!r}",
             )
 
-            # (b) anchor PRESENT -> the body comes back so the caller's presence
-            #     sweep can run and report a REAL rename.
             sample = ANCHOR_SAMPLES.get(url, "")
             d.fetch = lambda _u, _s=sample: _s
             r = d.Report()
@@ -591,16 +455,11 @@ def test_anchor_gate_fires_in_both_directions() -> None:
 
 
 def test_report_is_the_only_way_to_file_a_finding() -> None:
-    """`Report` owns the buckets, their wording, their order, and the exit code.
-
-    Pins the exit-2 path (unreachable through `main()` without faking a network)
-    and the rule that no module code may `.append` to a bucket directly.
-    """
+    """`Report` owns the buckets, their wording, their order, and the exit code."""
     empty = d.Report()
     check(empty.exit_code() == 0, f"an empty report exits 0, got {empty.exit_code()}")
     check("✅ No drift" in empty.render(), f"an empty report says so:\n{empty.render()}")
 
-    # Each adder files under its own name.
     r = d.Report()
     r.add_breaking("B-LINE")
     r.add_review("R-LINE")
@@ -611,7 +470,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
     check(r.errors == ["E-LINE"], f"add_error -> errors, got {r.errors}")
     check(len(r.blind) == 1, f"add_blind -> blind, got {r.blind}")
 
-    # `add_blind` words the line; the caller cannot assert a cause it never read.
     line = r.blind[0] if r.blind else ""
     check(
         all(p in line for p in ("WHAT", "WHERE", "CONSEQUENCE")),
@@ -630,7 +488,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
         f"our_source=True blames the script, not upstream: {our_line!r}",
     )
 
-    # Render order is the disposition order, most-actionable first.
     out = r.render()
     offsets = [out.find(x) for x in ("B-LINE", "R-LINE", "WHAT", "E-LINE")]
     check(
@@ -638,9 +495,8 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
         f"every bucket renders, in disposition order (offsets {offsets}):\n{out}",
     )
 
-    # The exit code is a function of all four buckets, so it lives with them.
-    # errors-ONLY is exit 2 (transient, do not alarm) — the one case `main()`
-    # could not reach without faking the network.
+    # errors-ONLY is exit 2 (transient) — the one case `main()` cannot reach
+    # without faking the network.
     for adder, want in (("add_breaking", 1), ("add_review", 1), ("add_error", 2)):
         one = d.Report()
         getattr(one, adder)("LINE")
@@ -656,7 +512,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
     both.add_blind("w", "where", "c")
     check(both.exit_code() == 1, f"actionable outranks transient, got {both.exit_code()}")
 
-    # The structural half: a bucket is appended to ONLY from inside `Report`.
     # An AST walk, not a regex: a regex also fires on prose QUOTING the spelling.
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
     tree = ast.parse(src)
@@ -675,9 +530,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
         if node.func.attr != "append":
             continue
         target = node.func.value
-        # `blind.append(...)` — a bare bucket-named binding; and
-        # `report.blind.append(...)` / `self.blind.append(...)` — reaching past
-        # the adders into a Report's list.
         name = (
             target.id if isinstance(target, ast.Name)
             else target.attr if isinstance(target, ast.Attribute)
@@ -694,15 +546,10 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
 
 
 def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
-    """A parser that goes stale must dark ITS source, not the rest of the file.
-
-    Injects row 1 — under the one shared `try` this replaced, that was the worst
-    case, because every other reader was assigned after it (#454, #793).
-    """
+    """A parser that goes stale must dark ITS source, not the rest of the file."""
     real_fetch, real_readers = d.fetch, d.READERS
-    # Every fetched document lands on the wrong content, so each source that IS
-    # checked contributes at least one probe-health line, and every source that
-    # is checked FETCHES. A source gone dark fetches nothing and says nothing.
+    # Every fetched document lands on the wrong content: a source gone dark
+    # fetches nothing and says nothing.
     fetched: set[str] = set()
     d.fetch = lambda u: (fetched.add(u), "unrelated body")[1]
 
@@ -720,9 +567,8 @@ def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
         base_urls, _ = run()
         check(len(base_urls) > 20, f"the baseline exercises the file, got {len(base_urls)} URLs")
 
-        # Break the FIRST row: under one shared `try` that is the worst case,
-        # because every other reader was assigned after it. Inject into the ROW,
-        # never `d.read_codex_events` — see the WHY on the READERS declaration.
+        # Inject into the ROW, never `d.read_codex_events` — see the WHY on the
+        # READERS declaration.
         first_field, first_reader, first_what = d.READERS[0]
         d.READERS = (
             (first_field, _raiser(first_reader.__name__), first_what),
@@ -730,13 +576,10 @@ def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
         )
         broken_urls, out = run()
 
-        # The fault FIRED: the report names the reader, which only the new
-        # per-row probe-health line can produce.
         check(
             first_reader.__name__ in out,
             f"the injected fault fired and named `{first_reader.__name__}`:\n{out}",
         )
-        # …carrying `our_source=True`: dropping that kwarg is otherwise invisible.
         own = [ln for ln in out.splitlines() if first_reader.__name__ in ln]
         check(
             len(own) == 1
@@ -744,17 +587,13 @@ def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
             and "Re-verify upstream by hand" not in own[0],
             f"the stale OWN-source line blames the script, not upstream: {own}",
         )
-        # Every LATER source is still checked. These four sit at the far end of
-        # the table: under one shared `try` a row-1 failure took the run from 25
-        # fetched documents to 4 and 28 finding lines to 5, with Cursor, Hermes,
-        # grok and Kimi gone entirely.
+        # These four sit at the far end of the table.
         for name in ("CURSOR_HOOKS_URL", "HERMES_HOOK_URL", "GROK_HOOK_URL", "KIMI_HOOKS_URL"):
             check(
                 getattr(d, name) in broken_urls,
                 f"a stale reader in row 1 must not dark {name} in row 10+ "
                 f"(fetched {len(broken_urls)} of {len(base_urls)} URLs):\n{out}",
             )
-        # ...and it must NOT claim the whole run was blind, because it was not.
         check(
             "Nothing upstream was checked" not in out,
             f"a single stale reader must not claim the whole run was blind:\n{out}",
@@ -774,17 +613,11 @@ def _raiser(name: str) -> typing.Callable[[], object]:
 
 
 def test_a_stale_flood_guard_skips_its_check_instead_of_flooding() -> None:
-    """A failed reader must SKIP its check, never run it against an empty set.
-
-    The flood guards are one-directional: they report every upstream name NOT in
-    our KNOWN_* set, so `up - set()` reports the whole upstream surface as new.
-    Reverting a consumer guard to `else` + `or set()` floods `review` from one
-    stale parser — with every producing-side gate still green, because they all
-    sit upstream of the comparison. This is the only gate reaching the consumer.
+    """The flood guards are one-directional — `up - set()` reports the whole
+    upstream surface as new — so a stale reader must SKIP its check.
 
     The upstream PARSER is stubbed, not just `fetch`: an unparseable body takes
-    the `is None` probe-health branch and never reaches the guard, which is how
-    the first version of this test passed against a reverted guard.
+    the `is None` probe-health branch and never reaches the guard.
     """
     real_fetch, real_readers = d.fetch, d.READERS
     parsers = ("upstream_omp_entry_types", "upstream_acp_session_update_tags")
@@ -792,7 +625,6 @@ def test_a_stale_flood_guard_skips_its_check_instead_of_flooding() -> None:
     # Carries omp's ANCHORS pattern: without it `fetch_anchored` files probe
     # health and the omp guard is never reached (acp rides plain `try_fetch`).
     d.fetch = lambda _u: "unrelated body\nexport type SessionEntry = never;\n"
-    # Each returns a set the KNOWN_* comparison can actually run against.
     d.upstream_omp_entry_types = lambda _t: {"phantom_entry_type"}
     d.upstream_acp_session_update_tags = lambda _t: {"phantom_acp_tag"}
     try:
@@ -827,12 +659,7 @@ def test_a_stale_flood_guard_skips_its_check_instead_of_flooding() -> None:
 
 
 def test_every_reader_row_matches_a_field_on_our_names() -> None:
-    """The READERS table is stringly-keyed; nothing else pins it to `OurNames`.
-
-    A typo'd row leaves its field `None` — the source silently unchecked. A
-    MISPAIRED row is worse and survives the set comparison: it feeds one source's
-    names to another's sweep, which reports them all as renames (#793).
-    """
+    """The READERS table is stringly-keyed; nothing else pins it to `OurNames`."""
     rows = {field for field, _, _ in _reader_rows()}
     fields = {f.name for f in dataclasses.fields(d.OurNames)}
     check(
@@ -852,8 +679,7 @@ def test_every_reader_row_matches_a_field_on_our_names() -> None:
         # `field in reader_name` is too weak: every flood-guard field is a
         # SUFFIX-EXTENSION of a source field, so the likeliest mispair —
         # ("copilot", read_copilot_namespaces) — is the one a substring test
-        # cannot see. Require the reader's stem to START with the field and the
-        # remainder to be a known suffix.
+        # cannot see.
         stem = reader_name.removeprefix("read_")
         suffix = stem[len(field):] if stem.startswith(field) else None
         check(
@@ -867,13 +693,8 @@ def test_every_reader_row_matches_a_field_on_our_names() -> None:
 
 
 def test_no_reader_is_called_outside_the_readers_table() -> None:
-    """An inline `read_*()` in `run_checks` fails WORSE than the bug this fixes.
-
-    Its raise unwinds to `main()`'s catch-all and is filed TRANSIENT — exit 2, a
-    warning on a GREEN run — instead of probe health. The `OurNames` comparison
-    cannot see it: an inline reader has no row and no field, it is simply absent.
-    `openclaw_plugin_default_port` is out of scope by design — it catches its own
-    OSError and its caller files the probe-health line.
+    """An inline `read_*()` raise unwinds to `main()`'s catch-all and is filed
+    TRANSIENT — exit 2, a warning on a GREEN run — instead of probe health.
     """
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
     tree = ast.parse(src)
@@ -885,9 +706,8 @@ def test_no_reader_is_called_outside_the_readers_table() -> None:
         tabled == {name for _, name, _ in _reader_rows()},
         "the READERS AST scan agrees with the runtime table",
     )
-    # Whole module, not just `run_checks`: a `read_*` inside a HELPER that
-    # run_checks calls unwinds to the same catch-all. Exempt `read_our_names`
-    # (the sanctioned caller) and the readers themselves (they compose).
+    # Whole module: a `read_*` inside a HELPER that run_checks calls unwinds to
+    # the same catch-all. `read_our_names` is the sanctioned caller.
     exempt = {"read_our_names"}
     scan_roots = [
         n for n in tree.body
@@ -895,7 +715,6 @@ def test_no_reader_is_called_outside_the_readers_table() -> None:
         and n.name not in exempt
         and not n.name.startswith("read_")
     ]
-    # ANY `read_*`, tabled or not — a re-inlined call is by definition tabled.
     stray = sorted({
         f"{n.func.id}:{n.lineno}"
         for root in scan_roots
@@ -912,10 +731,8 @@ def test_no_reader_is_called_outside_the_readers_table() -> None:
         f"run) instead of probe health: {stray}. Read it from the OurNames field "
         f"its READERS row fills, and guard on `is not None`.",
     )
-    # Name-independent twin: the check above keys on the `read_*` convention, and
-    # the precondition "an own-source reader not named read_*" has already
-    # occurred once (`openclaw_plugin_default_port`). A direct `REPO` read inside
-    # run_checks is the form a rename cannot slip past.
+    # Name-independent twin: the check above keys on the `read_*` convention; a
+    # direct `REPO` read is the form a rename cannot slip past.
     run_checks = next(
         n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_checks"
     )
@@ -930,18 +747,13 @@ def test_no_reader_is_called_outside_the_readers_table() -> None:
 
 
 def _reader_rows() -> list[tuple[str, str, str]]:
-    """`(field, reader function name, what it reads)` for every READERS row."""
     return [(field, reader.__name__, what) for field, reader, what in d.READERS]
 
 
 def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
-    """The #793 regression, end to end through `run_checks`, both directions.
-
-    CodeWhale split `crates/tui/src/hooks.rs` into a module directory. The old
-    path kept returning 200 as a `mod`/`pub use` facade, so the fetch succeeded
-    and all three `DEEPSEEK_*` names were absent — reported as three upstream
-    renames under "decoder will silently drop events". Acting on it would have
-    renamed three working env vars.
+    """The #793 regression: the old path kept returning 200 as a `mod`/`pub use`
+    facade, so the fetch succeeded, all three `DEEPSEEK_*` names were absent, and
+    they were reported as three upstream renames.
     """
     real = d.fetch
     config_rs = "pub enum HookEvent {\n    SessionStart,\n    ToolCallBefore,\n}"
@@ -969,8 +781,8 @@ def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
 
         d.fetch = stub
         report = d.Report()
-        # One named field, not a wall of 14 positional `None`s where a miscount
-        # silently drove the WRONG source and the test still passed.
+        # One named field, not a wall of positional `None`s where a miscount
+        # silently drove the WRONG source.
         d.run_checks(
             d.OurNames(codewhale={"session_start", "tool_call_before"}),
             report=report,
@@ -982,19 +794,14 @@ def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
         cw = lambda xs: [x for x in xs if "DEEPSEEK" in x or "CodeWhale" in x]  # noqa: E731
         return cw(report.breaking), cw(report.blind), served
 
-    # (a) THE BUG: the pin lands on the facade. Zero drift claims, one probe-health
-    #     line — the report must not name a single env var as renamed.
     br, bl, _ = drive(facade)
     check(not br, f"a stale pin must claim NO upstream change, got {br}")
     check(len(bl) == 1, f"a stale pin is one probe-health line, got {bl}")
-    # Guarded index: a regressed anchor gate leaves `bl` empty, and that must
-    # fail as a message rather than abort the rest of the suite.
     check(
         all(v not in "".join(bl) for v in ("DEEPSEEK_WORKSPACE", "DEEPSEEK_TOOL_NAME")),
         f"the probe-health line must not name env vars as renamed: {bl!r}",
     )
 
-    # (b) The check still has teeth: same anchor, one env var genuinely removed.
     br, bl, _ = drive(executor.replace('        env.insert("DEEPSEEK_WORKSPACE".to_string(), ws);\n', ""))
     check(
         len(br) == 1 and "DEEPSEEK_WORKSPACE" in br[0],
@@ -1002,26 +809,15 @@ def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
     )
     check(not bl, f"a readable document produces no probe-health noise, got {bl}")
 
-    # (c) The unchanged upstream is silent in both buckets.
     br, bl, _ = drive(executor)
     check(not br and not bl, f"unchanged upstream -> silence, got breaking={br} blind={bl}")
     d.fetch = real
 
 
 def test_every_swept_url_declares_an_anchor() -> None:
-    """A presence sweep may not run on an unproven document.
-
-    An undeclared URL is REPORTED, not raised (see `fetch_anchored`) — this is
-    the static half: every swept URL must appear in `ANCHORS`. The regex below
-    resolves the loop form too (`fetch_anchored(u, …)` over a URL tuple), which
-    an earlier `[A-Z_]+`-only version missed — the copy-ready shape for the next
-    multi-file source, and the one call site the N-of-N guard could not see.
-    """
-    # An undeclared URL must be REPORTED, never raise. `run_checks` is wrapped in
-    # `except Exception` that routes bugs to the TRANSIENT bucket (exit 2,
-    # warn-only), so a bare KeyError would turn "someone shipped an unproven
-    # sweep" into a green-ish warning — the fail-open shape (#454) this change
-    # exists to remove.
+    """A presence sweep may not run on an unproven document."""
+    # A bare KeyError would land in the TRANSIENT bucket (exit 2, warn-only),
+    # turning "someone shipped an unproven sweep" into a green-ish warning (#454).
     real = d.fetch
     try:
         d.fetch = lambda _u: "irrelevant body"
@@ -1041,8 +837,7 @@ def test_every_swept_url_declares_an_anchor() -> None:
 
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
     swept = set(re.findall(r"fetch_anchored\(\s*(\w+(?:\[\d\])?)\s*,", src))
-    # A lowercase first arg is a loop variable; resolve it to the tuple it
-    # iterates so OPENCODE_EVENT_URLS-style sources are covered too.
+    # A lowercase first arg is a loop variable; resolve it to the tuple it iterates.
     for loop_var in {n for n in swept if not n[0].isupper()}:
         swept.discard(loop_var)
         swept |= {
@@ -1060,16 +855,9 @@ def test_every_swept_url_declares_an_anchor() -> None:
         url = eval(f"d.{name}")  # noqa: S307 (module constants matched by the regex above)
         check(url in d.ANCHORS, f"{name} is swept but declares no ANCHORS entry")
 
-    # The OTHER spelling. Asserting only the `fetch_anchored` population leaves
-    # `try_fetch` as an unguarded way to add a presence sweep — which is how the
-    # design lens built its repro.
-    #
-    # Enumerating the *_URL CONSTANTS rather than the call sites, deliberately:
-    # a call-site regex has to keep up with how the fetch is spelled, and the
-    # first version of this very check missed `try_fetch(url, label, …)` in the
-    # ACP loop — the same loop-variable blindness it exists to catch. Every URL
-    # the module declares must be classified exactly once: anchored, or
-    # justified-unanchored with the reason written down.
+    # Enumerating the *_URL CONSTANTS rather than the call sites, deliberately: a
+    # call-site regex has to keep up with how the fetch is spelled. Every URL the
+    # module declares must be classified exactly once.
     urls: set[str] = set()
     for name in dir(d):
         if not (name.endswith("_URL") or name.endswith("_URLS")):
@@ -1094,12 +882,8 @@ def test_every_swept_url_declares_an_anchor() -> None:
 
 
 def test_report_separates_verified_change_from_probe_health() -> None:
-    """The two dispositions must not share a heading — that WAS the bug.
-
-    #793's report filed "our probe missed" under "Breaking drift — decoder will
-    silently drop events", which is a claim about upstream the script never had
-    evidence for. The heading is the instruction; a reader who trusts it edits a
-    decoder.
+    """The two dispositions must not share a heading: the heading is the
+    instruction, and a reader who trusts a wrong one edits a decoder (#793).
     """
     real_run, real_read = d.run_checks, d.read_codex_events
     try:
@@ -1120,9 +904,6 @@ def test_report_separates_verified_change_from_probe_health() -> None:
         verified_hd = "## ⛔ Verified upstream change"
         probe_hd = "## 🩺 Probe could NOT verify"
         check(verified_hd in out and probe_hd in out, f"both headings present:\n{out}")
-        # The probe-health line must sit UNDER the probe heading, not the drift
-        # one. `find` (not `index`) so a missing heading REPORTS rather than
-        # raising -1-free: -1 breaks the ordering chain and fails cleanly.
         order = [
             out.find(verified_hd),
             out.find("VERIFIED-CHANGE-LINE"),
@@ -1138,14 +919,9 @@ def test_report_separates_verified_change_from_probe_health() -> None:
             "the probe-health section says what NOT to do",
         )
 
-        # A blind-ONLY report must still exit 1. This is the single load-bearing
-        # behavioural claim of the disposition split, and the case above cannot
-        # test it: injecting a breaking line too means `breaking` carries the
-        # exit code and `blind`'s contribution is never exercised. Deleting
-        # `or blind` from main() left the whole suite green until this existed.
-        # If it regressed, a report saying the watch is DARK would exit 0, both
-        # `exit == '1'` workflow steps would skip, and the weekly run would go
-        # green — #454's fail-open, in the file that exists because of #454.
+        # A blind-ONLY case, because the one above cannot test it: with a breaking
+        # line injected, `breaking` carries the exit code and `blind`'s
+        # contribution is never exercised.
         def blind_only(*a: object, report: d.Report, **k: object) -> None:
             report.add_blind("PROBE-HEALTH-ONLY", "somewhere", "Checks were SKIPPED.")
 
@@ -1167,11 +943,9 @@ def test_report_separates_verified_change_from_probe_health() -> None:
 
 
 def test_enum_body_survives_struct_variants_and_indentation() -> None:
-    """The two positional assumptions `_enum_body` replaced, both directions.
-
-    `(.*?)\\}` stopped at the first `}` (a struct variant truncated the enum);
-    `(.*?)\\n\\}` additionally demanded a column-0 closing brace, so grok's enum
-    reading as "moved upstream" was really just indentation (#793).
+    """`(.*?)\\}` stopped at the first `}` (a struct variant truncated the enum);
+    `(.*?)\\n\\}` additionally demanded a column-0 closing brace, so an indented
+    enum read as "moved upstream" (#793).
     """
     struct_variant = (
         "pub enum HookEvent {\n"
@@ -1186,12 +960,9 @@ def test_enum_body_survives_struct_variants_and_indentation() -> None:
         f"a variant AFTER a struct variant survives (no first-`}}` truncation): {got}",
     )
 
-    # The OVER-capture direction: an indented enum's own `}` is not at column 0,
-    # so the old `\n\}` form ran past it to the next top-level brace and swallowed
-    # the following `impl` block. `upstream_codex_hooks` scrapes every CamelCase
-    # word, so those idents became phantom variants — and a phantom is worse than
-    # a miss, because it makes a real rename look present. Measured on grok's real
-    # event.rs the over-capture was 2324 chars.
+    # The OVER-capture direction: `upstream_codex_hooks` scrapes every CamelCase
+    # word, so a spill into the following `impl` becomes phantom variants — and a
+    # phantom is worse than a miss, because it makes a real rename look present.
     indented = (
         "mod outer {\n"
         "    pub enum HookEventName {\n"
@@ -1210,7 +981,6 @@ def test_enum_body_survives_struct_variants_and_indentation() -> None:
         f"the body STOPS at the enum's own brace — no spill into the impl: {got}",
     )
 
-    # A brace inside a comment must not unbalance the count...
     commented = (
         "pub enum HookEvent {\n"
         "    /// Fires like `Foo { bar }` does.\n"
@@ -1224,11 +994,9 @@ def test_enum_body_survives_struct_variants_and_indentation() -> None:
         f"a brace in a comment does not truncate the body: {got}",
     )
 
-    # ...and a genuinely absent enum still reads None, never an empty set (which
-    # would report every registered event as GONE).
+    # An empty set would report every registered event as GONE.
     check(d.upstream_codewhale_hooks("struct Other {}") is None, "absent enum -> None")
     check(d.upstream_codex_hooks("struct Other {}") is None, "absent enum -> None")
-    # A prefix name must not bind to a longer enum.
     check(
         d.upstream_codewhale_hooks("pub enum HookEventName {\n    PreToolUse,\n}") is None,
         "`HookEvent` must not match `enum HookEventName`",
@@ -1236,14 +1004,8 @@ def test_enum_body_survives_struct_variants_and_indentation() -> None:
 
 
 def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
-    """The H1 is a CROSS-FILE contract with upstream-drift.yml.
-
-    The workflow titles the GitHub issue with `head -1 | sed 's/^# //'` instead
-    of keeping its own copy of these strings, so this pins both halves: the
-    per-disposition text here, and the fact that the YAML still reads it that
-    way. #793's title said "drift detected" for a report whose five drift lines
-    were every one of them false positives — with the title carrying the
-    disposition, a wrong one mis-signals the issue list itself.
+    """The H1 is a CROSS-FILE contract: upstream-drift.yml titles the GitHub issue
+    with `head -1 | sed 's/^# //'` rather than keeping its own copy of these strings.
     """
     real = d.run_checks
     cases = [
@@ -1272,8 +1034,6 @@ def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
     finally:
         d.run_checks = real
 
-    # The consumer half: if the workflow stops reading the H1 (or goes back to
-    # grepping the section headings) this contract is silently one-way again.
     wf = (pathlib.Path(__file__).parents[1] / ".github/workflows/upstream-drift.yml").read_text()
     check(
         "head -1 drift-report.md" in wf and "s/^# //" in wf,

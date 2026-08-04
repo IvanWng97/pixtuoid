@@ -1,19 +1,11 @@
 //! Pathfinding façade — `Router` trait + `AStarRouter` impl.
 //!
-//! `Router` is the abstraction the renderer codes against: give it a static
-//! `WalkableMask` and a per-frame `OccupancyOverlay`, ask for a polyline
-//! from A to B, get back the route. The trait stays small so future impls
-//! (Theta*, HPA*, navmesh) can drop in without touching `pose.rs` or
-//! `renderer.rs`.
-//!
-//! `AStarRouter` is the concrete impl: A* on a coarsened 4×4 cell grid
-//! with a permissive cell-walkability threshold (≥8/16 px walkable, 50% —
-//! see `layout::coarse::COARSE_CELL_WALKABLE_MIN` for why tighter thresholds
-//! were rejected). The coarse-grid primitives (`cell_walkable`/`snap`/
-//! `NEIGHBORS_8`/`CELL_SIZE`) are the SHARED `layout::coarse` ones `layout::reach`
-//! also rides, so router reachability can't drift from `ReachSet`. Memoizes
-//! results in a per-(from, to) cache; auto-invalidates when the overlay
-//! signature changes so per-frame agent movement still routes around live agents.
+//! `AStarRouter` runs A* on a coarsened cell grid whose primitives
+//! (`cell_walkable`/`snap`/`NEIGHBORS_8`/`CELL_SIZE`) are the SHARED
+//! `layout::coarse` ones `layout::reach` also rides, so router reachability
+//! can't drift from `ReachSet`. Routes are memoized per (from, to) and
+//! auto-invalidated when the overlay signature changes, so per-frame agent
+//! movement still routes around live agents.
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
@@ -23,19 +15,15 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 use crate::layout::{cell_walkable, snap, Bounds, Point, COARSE_CELL_SIZE, NEIGHBORS_8};
 
 /// Cell size in pixels — the coarse routing-grid edge, re-exported from the
-/// SHARED `layout::coarse` (the single source `layout::reach`'s BFS also rides,
-/// so the router coarsening and the reachability coarsening can't drift — the
-/// agreement the two old `const _: () = assert!` checks pinned is now structural).
-/// Public name kept for this module's helpers + tests.
+/// SHARED `layout::coarse` so router coarsening can't drift from reachability
+/// coarsening.
 pub const CELL_SIZE: u16 = COARSE_CELL_SIZE;
 
-/// Abstract pathfinder — implementations route from `from` to `to` over
-/// the supplied mask + overlay, returning a polyline (first = `from`,
-/// last = `to`, intermediate = corners). Renderer + pose layer use this
-/// trait so the algorithm can be swapped without touching them.
+/// Abstract pathfinder — routes from `from` to `to` over the supplied mask +
+/// overlay, returning a polyline (first = `from`, last = `to`, intermediate =
+/// corners).
 pub trait Router {
-    /// Compute or look up the route. The returned slice is owned by the
-    /// router (cache-backed); copy if you need to outlive the next call.
+    /// Compute or look up the route.
     fn route(
         &mut self,
         mask: &WalkableMask,
@@ -48,45 +36,30 @@ pub trait Router {
     /// (terminal resize, layout shape change).
     fn invalidate(&mut self);
 
-    /// Optional: bias the cost function toward a preferred zone (e.g. the
-    /// office corridor). Cells inside `zone` get a small cost discount so
-    /// paths naturally hug the hallway instead of cutting diagonally
-    /// across the cubicle floor. Default impl is a no-op so a Router
-    /// that doesn't care about zones can skip it.
+    /// Optional: bias the cost function toward a preferred zone (e.g. the office
+    /// corridor) so paths hug the hallway instead of cutting across the cubicle
+    /// floor. Default impl is a no-op.
     fn set_preferred_zone(&mut self, zone: Option<Bounds>) {
         let _ = zone;
     }
 }
 
-/// Path-cache entry cap. The (from, to) key space is unbounded in steady
-/// state: aimless wander mints a fresh pseudo-random destination every cycle
-/// and snap-back/exit legs route from live interpolated origins, so an
-/// always-on office accumulates keys forever — and the per-overlay-change
-/// `retain` scan inside `route` grows linearly with the map. Keys are
-/// per-agent jittered (from, to) PAIRS, not shared anchors: a fully loaded
-/// floor (16 agents × ~12-16 waypoints × 2 directions) recurs ~400-500
-/// keys, which 512 covers. If the working set ever cycles past the cap
-/// anyway, the failure mode is graceful: on overflow the whole map is
-/// cleared, and each evicted route is a sub-ms uncached A* on its next
-/// request — at most #walking-agents re-misses per frame. A mid-leg clear
-/// is safe by construction: cornered in-flight legs are frozen on
-/// `MotionState.walk_path` (they never re-consult the router), and a
-/// straight 2-point leg recomputes bit-identically only while the overlay
-/// is unchanged — after a clear it re-routes under the CURRENT overlay,
-/// the same self-healing re-route class the design already accepts for
-/// unfrozen legs.
+/// Path-cache entry cap, sized above the recurring (from, to) pairs of a fully
+/// loaded floor. The key space is unbounded in steady state — aimless wander
+/// mints a fresh destination every cycle and snap-back/exit legs route from live
+/// interpolated origins — so an always-on office would accumulate keys forever.
+/// Overflowing clears the whole map, which is safe: cornered in-flight legs are
+/// frozen on `MotionState.walk_path` and never re-consult the router, and every
+/// other evicted route just re-routes under the CURRENT overlay.
 const PATH_CACHE_CAP: usize = 512;
 
-/// A* router with internal path cache. Cache invalidates on overlay
-/// signature change so per-frame occupancy movement (live agents) still
-/// produces correct routes.
+/// A* router with an internal path cache.
 #[derive(Debug, Default, Clone)]
 pub struct AStarRouter {
     paths: HashMap<(Point, Point), Vec<Point>>,
     last_overlay_sig: u64,
-    /// Cells inside this zone get a cost discount during A*. When `None`,
-    /// every cell has uniform cost. Changing this drops the cached paths
-    /// (different zone = different optimal route).
+    /// Cells inside this zone get a cost discount during A*. Changing it drops
+    /// the cached paths — a different zone means a different optimal route.
     preferred_zone: Option<Bounds>,
 }
 
@@ -116,10 +89,8 @@ impl Router for AStarRouter {
         to: Point,
     ) -> Vec<Point> {
         let overlay_sig = overlay.signature();
-        // Per-path validity (replaces the old global cache wipe): when the
-        // overlay changes, check each cached path to see if it now crosses
-        // an obstacle. Only invalidate entries that actually conflict —
-        // paths in unaffected corridors stay cached.
+        // Invalidate only the entries that actually conflict with the new
+        // overlay — paths in unaffected corridors stay cached.
         if overlay_sig != self.last_overlay_sig {
             self.paths.retain(|_, path| path_clear_under(path, overlay));
             self.last_overlay_sig = overlay_sig;
@@ -127,13 +98,11 @@ impl Router for AStarRouter {
         if let Some(p) = self.paths.get(&(from, to)) {
             return p.clone();
         }
-        // Cache ONLY real routes. The no-path straight [from, to] fallback is
-        // returned UNCACHED: `path_clear_under` validates cached entries against
-        // the OVERLAY only (never the static mask), so a fallback minted while a
-        // transient blocker severed the grid would survive every retain() and
-        // serve a walk-through-walls line for that (from, to) key forever. Left
-        // uncached it re-routes next call — the same self-healing re-route class
-        // the walk-path freeze already accepts for 2-point legs.
+        // Cache ONLY real routes. `path_clear_under` validates cached entries
+        // against the OVERLAY only, never the static mask, so a straight
+        // [from, to] fallback minted while a transient blocker severed the grid
+        // would survive every retain() and serve a walk-through-walls line for
+        // that key forever. Left uncached it re-routes next call.
         match find_path(mask, overlay, self.preferred_zone, from, to) {
             Some(path) => {
                 self.paths.insert((from, to), path.clone());
@@ -151,9 +120,6 @@ impl Router for AStarRouter {
     }
 
     fn set_preferred_zone(&mut self, zone: Option<Bounds>) {
-        // Different zone produces different optimal paths — invalidate the
-        // cache. Cheap to do unconditionally; the layout's corridor only
-        // changes on terminal resize so this fires rarely.
         if self.preferred_zone != zone {
             self.paths.clear();
             self.preferred_zone = zone;
@@ -161,11 +127,9 @@ impl Router for AStarRouter {
     }
 }
 
-/// Is `path` still walkable under the current `overlay`? Samples each
-/// segment at a small stride and checks whether any sample falls inside
-/// an overlay rect. Faster than re-running A* per path; tolerates a tiny
-/// overshoot (a 1-px clip into an obstacle won't invalidate, but a
-/// real intersection at any corner will).
+/// Is `path` still walkable under the current `overlay`? Samples each segment at
+/// a small stride, so it tolerates a tiny overshoot (a 1-px clip into an obstacle
+/// won't invalidate, but a real intersection at any corner will).
 fn path_clear_under(path: &[Point], overlay: &OccupancyOverlay) -> bool {
     if overlay.is_empty() {
         return true;
@@ -206,18 +170,14 @@ impl PartialOrd for Node {
     }
 }
 
-/// Octile-distance step costs (integer, so the heuristic stays admissible): a
-/// diagonal move costs `OCTILE_DIAGONAL_COST`, an orthogonal one
-/// `OCTILE_STRAIGHT_COST` — the classic 14/10 ≈ √2 : 1 ratio. Shared with
-/// `pose::octile_distance` so the heuristic and the path metric can't drift.
+/// Octile-distance step costs (integer, so the heuristic stays admissible) — the
+/// classic 14/10 ≈ √2 : 1 ratio. Shared with `pose::octile_distance` so the
+/// heuristic and the path metric can't drift.
 pub(crate) const OCTILE_STRAIGHT_COST: u32 = 10;
 pub(crate) const OCTILE_DIAGONAL_COST: u32 = 14;
 
-/// The octile distance for deltas `(dx, dy)`: `DIAG·min + STRAIGHT·(max − min)`.
-/// THE combining formula shared by the A* [`heuristic`] (coarse cells) and
-/// `pose::octile_distance` (pixel Points) — it was written byte-identically at
-/// both sites, guarded only by the shared consts (the formula itself was a
-/// second copy, the drift class the magic-number convention hunts).
+/// The octile distance for deltas `(dx, dy)` — THE combining formula shared by
+/// the A* [`heuristic`] (coarse cells) and `pose::octile_distance` (pixel Points).
 pub(crate) fn octile_cost(dx: u32, dy: u32) -> u32 {
     OCTILE_DIAGONAL_COST * dx.min(dy) + OCTILE_STRAIGHT_COST * (dx.max(dy) - dx.min(dy))
 }
@@ -228,9 +188,7 @@ fn heuristic(a: (u16, u16), b: (u16, u16)) -> u32 {
     octile_cost(dx, dy)
 }
 
-/// Is the center of cell `(cx, cy)` inside `zone`? Used by the preferred-
-/// zone discount: cells whose center lands in the corridor get a cheaper
-/// step cost so A* hugs the hallway.
+/// Is the center of cell `(cx, cy)` inside `zone`?
 fn cell_in_zone(zone: Option<Bounds>, cx: u16, cy: u16) -> bool {
     let Some(z) = zone else {
         return false;
@@ -250,9 +208,8 @@ fn cell_center(cx: u16, cy: u16) -> Point {
     }
 }
 
-/// Coarse-grid dimensions (`mask` pixel size ÷ `CELL_SIZE`), or `None` when
-/// either axis is 0 — a degenerate grid the A* loop can't index. Callers pick
-/// their own degenerate return (straight `[from,to]`, `None`, `false`).
+/// Coarse-grid dimensions, or `None` when either axis is 0 — a degenerate grid
+/// the A* loop can't index.
 fn grid_dims(mask: &WalkableMask) -> Option<(u16, u16)> {
     let cell_w = mask.width() / CELL_SIZE;
     let cell_h = mask.height() / CELL_SIZE;
@@ -262,15 +219,12 @@ fn grid_dims(mask: &WalkableMask) -> Option<(u16, u16)> {
     Some((cell_w, cell_h))
 }
 
-/// Max rings the A\* start/goal snap probes for a walkable coarse cell (the reach
-/// seed snap uses a shorter radius). Passed to the shared `layout::snap`.
+/// Max rings the A\* start/goal snap probes for a walkable coarse cell.
 const MAX_SNAP_RADIUS: u16 = 12;
 
-/// Run A* on the layout's walkability mask + per-frame occupancy. When
-/// `preferred` is `Some(rect)`, cells whose center falls inside the rect
-/// get a 30% step-cost discount — paths naturally hug that zone (e.g.
-/// the office corridor) when an off-zone diagonal cut would otherwise
-/// be slightly shorter.
+/// Run A* on the layout's walkability mask + per-frame occupancy. Cells whose
+/// center falls inside `preferred` get a step-cost discount, so paths hug that
+/// zone even when an off-zone diagonal cut would be slightly shorter.
 pub fn find_path(
     mask: &WalkableMask,
     overlay: &OccupancyOverlay,
@@ -282,9 +236,7 @@ pub fn find_path(
         return Some(vec![from, to]);
     };
 
-    // Preferred-corridor discount: a step inside the preferred zone costs
-    // `NUM/DEN` (= 7/10, a 30% discount) so A* is biased to hug the corridor
-    // without it being a hard constraint.
+    // A step inside the preferred zone costs 7/10 — a bias, not a hard constraint.
     const PREFERRED_ZONE_COST_NUM: u32 = 7;
     const PREFERRED_ZONE_COST_DEN: u32 = 10;
 
@@ -358,11 +310,10 @@ pub fn find_path(
 }
 
 /// Is the coarse routing cell containing `p` walkable (the SAME predicate A*
-/// expands on — ≥`COARSE_CELL_WALKABLE_MIN`/16 px open)? This is the granularity the
-/// router actually guarantees: a position can fail a per-pixel `is_walkable`
-/// (it's in the obstacle PAD band, or a transient diagonal corner-graze) yet
-/// still be in a walkable routing cell — exactly like every agent sprite, which
-/// rides the same coarse grid. Test/diagnostic helper.
+/// expands on)? This is the granularity the router actually guarantees: a
+/// position can fail a per-pixel `is_walkable` — it's in the obstacle PAD band,
+/// or a transient diagonal corner-graze — yet still be in a walkable routing
+/// cell, exactly like every agent sprite.
 pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
     let Some((cell_w, cell_h)) = grid_dims(mask) else {
         return false;
@@ -372,14 +323,10 @@ pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
 }
 
 /// Snap a pixel-space `Point` to the nearest walkable coarse-cell *center* on
-/// the STATIC mask (no dynamic overlay). Returns `None` only when the grid is
-/// degenerate or no walkable cell exists within `MAX_SNAP_RADIUS`.
-///
-/// This is the pet's rest/leg anchor: pass a raw furniture-adjacent spot to get
-/// the nearest floor pixel it can actually stand on. Distinct from `find_path`'s
-/// internal snapping, whose `reconstruct` overwrites the polyline endpoints with
-/// the RAW `from`/`to` — so callers that need a guaranteed-walkable endpoint must
-/// re-anchor with this.
+/// the STATIC mask. `None` when the grid is degenerate or no walkable cell exists
+/// within `MAX_SNAP_RADIUS`. Distinct from `find_path`'s internal snapping, whose
+/// `reconstruct` overwrites the polyline endpoints with the RAW `from`/`to` — a
+/// caller that needs a guaranteed-walkable endpoint must re-anchor with this.
 pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
     let (cell_w, cell_h) = grid_dims(mask)?;
     let empty = OccupancyOverlay::new();
@@ -417,7 +364,6 @@ fn simplify_polyline(pts: Vec<Point>) -> Vec<Point> {
     let mut out: Vec<Point> = Vec::with_capacity(pts.len());
     out.push(pts[0]);
     for i in 1..pts.len() - 1 {
-        // `out` is non-empty (pushed pts[0] above); index instead of unwrap.
         let prev = out[out.len() - 1];
         let here = pts[i];
         let next = pts[i + 1];
@@ -429,7 +375,6 @@ fn simplify_polyline(pts: Vec<Point>) -> Vec<Point> {
             out.push(here);
         }
     }
-    // `pts.len() >= 3` here (early-returned otherwise), so indexing is safe.
     out.push(pts[pts.len() - 1]);
     out
 }

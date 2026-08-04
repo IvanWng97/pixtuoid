@@ -1,45 +1,33 @@
-# Regal (the OPA project's Rego linter) over policy/ci-observability.
-# Every disabled rule below is a deliberate, evidence-backed disagreement — not
-# a convenience. Anything not listed here is ON and gated by `just regal`.
+# Regal (the OPA project's Rego linter) over policy/ci-observability. Anything not
+# disabled below is ON and gated by `just regal`.
 rules:
   idiomatic:
-    # `superfluous-object-get` rewrites `object.get(o, "k", default)` into a bare
-    # `o.k`. Those are NOT equivalent for policy: on a MISSING key the bare ref is
-    # undefined, so the rule body is never true and the check silently passes.
-    # Demonstrated with `opa eval` on a two-rule fixture — with the key absent,
-    # only the object.get form fires. This repo already shipped 11 CodeQL rules
-    # that were fail-open for exactly that reason; taking this lint's advice
-    # would have manufactured 32 more. The default is load-bearing, not noise.
+    # Rewriting `object.get(o, "k", default)` to a bare `o.k` is NOT equivalent:
+    # on a MISSING key the bare ref is undefined, so the rule body never fires and
+    # the check silently passes fail-open.
     superfluous-object-get:
       level: ignore
     # Conftest evaluates the `deny` set directly and has no entrypoint concept.
     no-defined-entrypoint:
       level: ignore
-    # Conftest requires the policy to live in the `main` namespace regardless of
-    # directory (`conftest test --policy policy/ci-observability`).
+    # Conftest requires the policy in the `main` namespace regardless of directory.
     directory-package-mismatch:
       level: ignore
   testing:
-    # Conftest's documented layout is `x.rego` + `x_test.rego` in the SAME
-    # package — `conftest verify` discovers tests there. A separate _test package
-    # would break the tool that actually runs them.
+    # `conftest verify` discovers `x_test.rego` in the SAME package as `x.rego`; a
+    # separate _test package would break the tool that runs them.
     test-outside-test-package:
       level: ignore
   style:
-    # Default is max-allowed: 2. Exactly one helper needs three —
-    # `pinned_npm_setup_steps` reads `documents` (the single input index this
-    # whole policy is built on) plus two package constants. The rule targets
-    # hidden dependencies on mutable state; threading the input index and two
-    # consts through every helper's signature would add noise, not safety.
-    # Raised by one rather than disabled, so a fourth reference still trips it.
+    # Exactly one helper needs three: `pinned_npm_setup_steps` reads `documents`
+    # plus two package constants. Raised by one rather than disabled, so a fourth
+    # reference still trips it.
     external-reference:
       max-allowed: 3
-    # The policy's WHY comments and sprintf messages are deliberately long-form;
-    # the repo's house style favours a complete sentence over a wrapped one.
+    # The policy's WHY comments and sprintf messages are deliberately long-form.
     line-length:
       level: ignore
-    # main.rego is one cross-file CI contract by design — splitting it would put
-    # rules that share constants into separate files.
+    # main.rego is one cross-file CI contract by design.
     file-length:
       level: ignore
     rule-length:

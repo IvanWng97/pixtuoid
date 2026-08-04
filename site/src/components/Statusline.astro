@@ -1,14 +1,7 @@
 ---
-// The STATUSLINE — the app's status bar as the page's one piece of fixed
-// chrome. Absorbs the Ticker (build-time real-PR feed, crossfading instead
-// of marqueeing) and the Elevator's organs (floor readout, scrollspy, keys
-// 1–6, jump list). Sits on --screen (the office's own hardware black) and is
-// NEVER subject to the dimmer.
-//
-// Feed frontmatter migrated verbatim from Ticker.astro: the most recently
-// merged PRs of this repo — authored by coding agents working in this very
-// office — with canned office-life beats interleaved; falls back to the
-// canned reel when the API is unreachable so the build never fails.
+// The page's one piece of fixed chrome: a build-time merged-PR feed plus the
+// elevator's organs (floor readout, scrollspy, keys 1–6, jump list). Sits on
+// --screen (the office's own hardware black) and is NEVER subject to the dimmer.
 import sources from '../sources.json';
 import {
   FLOORS,
@@ -22,16 +15,14 @@ import {
 import { GH_FETCH_TIMEOUT_MS } from '../../config/gh-stars.mjs';
 
 interface Props {
-  /** Doc-shell variant (§6): render "~ pixtuoid docs · /<doc>" as the left
-   * segment instead of the index-only organs (floor lift, PR feed, env
-   * readouts, keys hint). wb-1's #sl-install chip block renders in BOTH
-   * variants (it sits outside the conditional). */
+  /** Doc-shell variant: render the path segment instead of the index-only
+   * organs. The #sl-install chip renders in BOTH variants. */
   doc?: string;
 }
 const { doc } = Astro.props;
 
-// Build-time star count (§2): null when the API was unreachable at build —
-// the chip stays, the ★ segment is omitted (offline builds never fail).
+// null when the API was unreachable at build: the chip stays, the ★ segment is
+// omitted, and offline builds never fail.
 const ghStars: string | null = __GH_STARS__;
 
 const FALLBACK = [
@@ -40,7 +31,6 @@ const FALLBACK = [
   { state: 'active', who: 'claude-code', what: 'walking to the pantry ☕' },
   { state: 'active', who: 'codex', what: 'running cargo test' },
   { state: 'idle', who: 'cursor', what: 'idle at desk' },
-  // a real line from the meeting room's chitchat corpus (pixtuoid-scene/src/chitchat.rs)
   { state: 'active', who: 'meeting room', what: '“it’s DNS” · “blame git”' },
   { state: 'active', who: 'claude-code', what: 'git commit -m "feat: ..."' },
 ];
@@ -52,9 +42,8 @@ interface TickerItem {
 }
 
 let items: TickerItem[] = FALLBACK;
-// the fetch feeds only the index ticker (.sl__feed, doc-variant-excluded
-// below) — skip it on the doc variant so the 6 doc pages don't each re-hit
-// the GitHub API at build
+// Skipped on the doc variant so the doc pages don't each re-hit the GitHub API
+// at build (only the index renders .sl__feed).
 if (!doc) {
   try {
     const headers: Record<string, string> = { accept: 'application/vnd.github+json' };
@@ -96,24 +85,19 @@ if (!doc) {
   }
 }
 
-// FLOORS (id ↔ fl string ↔ label) is single-sourced in consts.ts; each
-// narrative section stamps its own data-floor/data-floor-label/id/eyebrow from
-// the SAME manifest, so the scrollspy can't desync from the sections it drives.
-
-// per-CLI hue for a feed credit like "cc·pixtuoid" — the same manifest colors
-// the tools-matrix chips use (badge includes the trailing '·')
+// per-CLI hue for a feed credit like "cc·pixtuoid" — the sources.json `badge`
+// includes the trailing '·', hence the prefix match
 const badgeColor = (who: string): string | undefined => {
   const hit = sources.find((s) => s.badge && who.startsWith(s.badge));
   return hit && 'badge_color' in hit ? (hit.badge_color as string) : undefined;
 };
 
-// Feed crossfade timing — single-sourced so the CSS fade (`--feed-fade`, set
-// from FEED_FADE_MS) and the JS out→in gap both derive from ONE value: a fade
-// longer than the gap would re-expose two lines mid-swap (ghosting).
-const FEED_FADE_MS = 300; // the .sl__item opacity transition
+// The CSS fade (`--feed-fade`) and the JS out→in gap derive from ONE value: a
+// fade longer than the gap would re-expose two lines mid-swap (ghosting).
+const FEED_FADE_MS = 300;
 const FEED_SWAP_MARGIN_MS = 50; // headroom so the fade-out fully finishes before the fade-in starts
-const FEED_SWAP_GAP_MS = FEED_FADE_MS + FEED_SWAP_MARGIN_MS; // out→in gap (must outlast the fade)
-const FEED_ROTATE_MS = 6000; // one line every 6s
+const FEED_SWAP_GAP_MS = FEED_FADE_MS + FEED_SWAP_MARGIN_MS;
+const FEED_ROTATE_MS = 6000;
 ---
 
 <div class="statusline" id="statusline">
@@ -219,9 +203,8 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
     <span class="sr-only" role="status" data-sl-copy-status></span>
   </div>
   {
-    /* index-only, and deliberately AFTER #sl-install: the base layout's
-      rightmost-item order (review-caught — bundling keys into the index
-      fragment above had silently swapped the two rightmost items) */
+    /* deliberately AFTER #sl-install: bundling this into the index fragment
+      above silently swaps the two rightmost items */
     !doc && (
       <span class="sl__keys" aria-hidden="true">
         keys 1–6
@@ -359,21 +342,17 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
     align-items: center;
     gap: 0.5rem;
     opacity: 0;
-    /* the operative fade is JS-set (--feed-fade, from FEED_FADE_MS) so it can
-       never drift past the out→in gap; the 0.3s literal is a never-operative
-       pre-JS default (rotation is JS-only, so the transition never fires before
-       the var is set). Must finish inside that gap. */
+    /* the operative fade is JS-set (--feed-fade); the 0.3s literal is a
+       never-operative pre-JS default, since rotation is JS-only. */
     transition: opacity var(--feed-fade, 0.3s) ease;
   }
   .sl__item.is-on {
     opacity: 1;
   }
-  /* the clippable run of text: a flex container's own overflow/text-overflow
-     never applies to ITS children (the `<b>` and the raw " · {what}" text run
-     are separate anonymous flex items, each un-clippable on its own) — so the
-     ellipsis has to live on this one block-level span instead of on
-     .sl__item itself. min-width:0 lets it shrink below its content's width,
-     the flex default is auto (content-sized, never shrinks). */
+  /* .sl__item's own overflow can't clip this: the `<b>` and the raw " · {what}"
+     run are separate anonymous flex items, so the ellipsis has to live on one
+     block-level span. min-width:0 lets it shrink below its content's width
+     (the flex default, auto, never shrinks). */
   .sl__text {
     min-width: 0;
     overflow: hidden;
@@ -444,7 +423,7 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
     color: var(--led);
   }
   /* hidden everywhere by default — only the icon-only mobile collapse below
-     ever shows it, so wide screens (label visible) stay pixel-unchanged. */
+     ever shows it */
   .sl__copy-icon-flash {
     display: none;
   }
@@ -468,13 +447,9 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
     white-space: nowrap;
     color: var(--chip-ink);
   }
-  /* The feed alone gets a WIDER hide-breakpoint than .sl__env/.sl__stars/etc
-     below: once its available width drops under ~200px (roughly 768-860px,
-     measured against .sl__text's clientWidth), even a clean single-line
-     ellipsis leaves a fragment too short to read ("cc·pixtuoid · mer…") —
-     hiding it reads better than a barely-there sliver. Decorative
-     (aria-hidden), so losing it here costs nothing accessibility-wise; its
-     CONTENT stays untouched, only where it disappears moves. */
+  /* The feed hides earlier than .sl__env/.sl__stars below: under ~200px of
+     available width even a clean ellipsis leaves an unreadable fragment
+     ("cc·pixtuoid · mer…"). It's aria-hidden, so nothing is lost. */
   @media (max-width: 860px) {
     .sl__feed {
       display: none;
@@ -492,10 +467,8 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
       display: none;
     }
     /* the jump link KEEPS its one-word label here — a bare arrow carries no
-       meaning to a first-time visitor (the old COMMAND chip collapsed because
-       the brew line was long; 'install' IS the point of the link). Only the
-       hire-receipt flash swaps to the glyph: the receipt text is too long for
-       this bar, so the pulse + ✓ carry the confirmation instead. */
+       meaning to a first-time visitor. Only the hire-receipt flash swaps to the
+       glyph, since the receipt text is too long for this bar. */
     .sl__copy.is-flash {
       animation: chip-pulse 0.6s ease-out;
     }
@@ -539,7 +512,6 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
     const list = document.getElementById('sl-floors');
     const btns = Array.prototype.slice.call(bar.querySelectorAll('[data-floor-btn]'));
 
-    // ── floor readout + jump (the elevator's organs) ──
     function setActive(n) {
       btns.forEach(function (b) {
         const on = b.dataset.floorBtn === String(n);
@@ -575,8 +547,8 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
       });
       document.addEventListener('keydown', function (e) {
         if (e.key !== 'Escape' || list.hidden) return;
-        // if focus was inside the popup, return it to the toggle so closing it
-        // (display:none) doesn't drop focus to <body> (WCAG 2.4.3) — mirrors Nav
+        // closing the popup is display:none, which would drop focus to <body>
+        // (WCAG 2.4.3)
         const inside = list.contains(document.activeElement);
         closeList();
         if (inside) toggle.focus();
@@ -587,10 +559,8 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
         go(b);
       });
     });
-    // ── keyboard-shortcuts off-switch (WCAG 2.1.4): render + persist the
-    // digit on/off state. The FLAG lives in window.__pixKeys (Base.astro,
-    // parse-first) — Base's document handler reads enabled() at each keydown;
-    // here we only reflect + toggle it. Default on. ──
+    // Keyboard-shortcuts off-switch (WCAG 2.1.4). The FLAG lives in
+    // window.__pixKeys (Base.astro, parse-first); here we only reflect + toggle.
     const keysToggle = bar.querySelector('[data-keys-toggle]');
     const keysState = bar.querySelector('[data-keys-state]');
     function renderKeys(on) {
@@ -605,9 +575,8 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
         renderKeys(next);
       });
     }
-    // scrollspy — DEFERRED: this is:inline script renders BEFORE <main>, so a
-    // parse-time querySelectorAll sees zero [data-floor] sections (the
-    // documented parse-position trap).
+    // DEFERRED: this is:inline script renders BEFORE <main>, so a parse-time
+    // querySelectorAll sees zero [data-floor] sections.
     function observeFloors() {
       if (!('IntersectionObserver' in window)) return;
       const io = new IntersectionObserver(
@@ -628,14 +597,9 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
       observeFloors();
     }
 
-    // Bottom-clamp: 1F (install) + the footer rarely fill the center band
-    // (FLOOR_SPY_ROOT_MARGIN, consts.ts) the observer above keys off, so the
-    // last section can never cross it — the readout freezes on the
-    // SECOND-to-last floor while the visitor reads the very end of the page.
-    // At the true scroll max, the last floor wins unconditionally,
-    // overriding whatever the observer last reported (the elevator shaft
-    // mirrors this same clamp — it consumes the identical root-margin
-    // authority, see ElevatorShaft.astro).
+    // 1F + the footer rarely fill the center band the observer keys off, so
+    // without this the readout freezes on the SECOND-to-last floor while the
+    // visitor reads the very end of the page. ElevatorShaft mirrors this clamp.
     function clampToLastFloorAtBottom() {
       if (!btns.length) return;
       const atBottom =
@@ -657,26 +621,21 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
     );
     clampToLastFloorAtBottom(); // a hash-anchored load can already start at the bottom
 
-    // ── page-level pause (WCAG 2.2.2): the office pause switch governs EVERY
-    // >5s auto-motion, so it also holds the feed ticker (the hero dust listens
-    // too). Reduced motion holds the same surfaces. Both drive ONE stop path. ──
+    // The office pause switch (WCAG 2.2.2) governs every >5s auto-motion, so it
+    // holds the feed ticker too; reduced motion drives the same stop path.
     let userPaused = false;
 
-    // ── the feed: one item at a time, sequenced fade-out → fade-in (the items
-    // are absolutely stacked, so a simultaneous swap double-exposes two lines
-    // mid-transition; reduced motion / user pause / hidden tab: static) ──
+    // The feed items are absolutely stacked, so the fade-out → fade-in must be
+    // sequenced: a simultaneous swap double-exposes two lines mid-transition.
     const feedItems = Array.prototype.slice.call(bar.querySelectorAll('.sl__item'));
-    // Single-source the crossfade duration into CSS (inherited by .sl__item) so
-    // the fade and the JS out→in gap (feedSwapGapMs = fade + margin) can't drift.
     bar.style.setProperty('--feed-fade', feedFadeMs + 'ms');
     let feedTimer = 0;
     // the pending out→in swap: tracked so a mid-transition stop cancels it — a
     // hidden tab whose timers kept firing would otherwise replay it on refocus
     let feedSwap = 0;
     let feedOn = 0;
-    // Exactly one line lit — the crossfade's invariant. Snapping to it on every
-    // stop means a paused/hidden feed can never freeze with two half-faded lines
-    // showing (the ghosting we saw on refocus).
+    // Exactly one line lit is the crossfade's invariant; snapping to it on every
+    // stop keeps a paused/hidden feed from freezing with two half-faded lines.
     function showOnlyFeed(idx) {
       feedItems.forEach(function (it, i) {
         it.classList.toggle('is-on', i === idx);
@@ -700,7 +659,6 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
       }, feedRotateMs);
     }
 
-    // ── env readouts ──
     const lights = bar.querySelector('[data-sl-lights]');
     const clock = bar.querySelector('[data-sl-clock]');
     const onair = bar.querySelector('[data-sl-onair]');
@@ -709,15 +667,13 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
       const d = new Date();
       const hh = String(d.getHours()).padStart(2, '0');
       const mm = String(d.getMinutes()).padStart(2, '0');
-      // __pixNight: the ONE site clock boundary, defined in Base's head boot
+      // __pixNight is the ONE site clock boundary, defined in Base's head boot
       const night = window.__pixNight();
       clock.textContent = hh + ':' + mm + ' ' + (night ? 'night' : 'day');
     }
     tickClock();
     setInterval(tickClock, 60000);
     if (lights) {
-      // the resting readout derives from the ONE dimmer const (was a baked
-      // 'lights 55%' that disagreed with the live 100·(1−0.55)=45% math)
       const rest = 'lights ' + Math.round((1 - dimResting) * 100) + '%';
       if (mq.matches) {
         lights.textContent = rest;
@@ -736,8 +692,6 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
         }, 250);
       }
     }
-    // the on-air readout reflects LIVE / user-PAUSED / STATIC (poster) — the
-    // paused state is what makes the fixed bar read as paused, not '● LIVE'
     let isLive = false;
     function renderAir() {
       if (!onair) return;
@@ -749,17 +703,14 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
         text = '● LIVE';
         live = true;
       } else {
-        // reduced motion shows the still POSTER (a frame); live-capable mode
-        // shows a paused feed (STATIC)
         text = mq.matches ? '□ STATIC FRAME' : '○ STATIC';
         live = false;
       }
       onair.textContent = text;
       onair.classList.toggle('is-live', live);
     }
-    // seed from the backdrop's class: the one-shot pix:onair event can fire
-    // before this script attaches (fast wasm load), and a missed event would
-    // read STATIC forever
+    // the one-shot pix:onair event can fire before this script attaches (fast
+    // wasm load), and a missed event would read STATIC forever
     if (!mq.matches && document.querySelector('.backdrop.is-live')) isLive = true;
     renderAir();
     document.addEventListener('pix:onair', function (e) {
@@ -767,18 +718,12 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
       renderAir();
     });
 
-    // ── the install chip (#sl-install): a plain jump link to the Install
-    // section (#install) — it copies nothing itself (Install.astro's own
-    // tabs do that); clicking/activating it smooth-scrolls there (instant
-    // under reduced motion) and parks focus on the section, same as the
-    // elevator's own floor-jump (go(), above). The label still flashes
-    // 'you · hired · just now' when a hire lands from one of those real
-    // copies (pix:hired), then reverts. Left-segment feed/readouts above are
-    // untouched (locked). ──
+    // The install chip is a plain jump link — it copies nothing itself
+    // (Install.astro's tabs do); it only flashes a receipt on pix:hired.
     const installLink = bar.querySelector('[data-sl-install-link]');
     const copyLabel = bar.querySelector('.sl__copy-label');
     const copyStatus = bar.querySelector('[data-sl-copy-status]');
-    const CHIP_FLASH_MS = 2000; // §2: the receipt holds for 2s
+    const CHIP_FLASH_MS = 2000;
     const CHIP_REST = 'install';
     let chipTimer = 0;
     function chipFlash(text, announce) {
@@ -786,10 +731,9 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
       copyLabel.textContent = text;
       if (copyStatus) copyStatus.textContent = announce || '';
       if (installLink) {
-        // Force the mobile icon-only pulse (chip-pulse, §sl__copy-icon-flash
-        // below) to restart even if a previous flash's class is still on —
-        // classList.toggle('is-flash', true) alone is a no-op when the class
-        // is already present (remove, flush a layout read, then re-add).
+        // Restart chip-pulse even if a previous flash's class is still on:
+        // toggle('is-flash', true) is a no-op when the class is already there,
+        // so remove, flush a layout read, then re-add.
         installLink.classList.remove('is-flash');
         void installLink.offsetWidth;
         installLink.classList.add('is-flash');
@@ -804,9 +748,8 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
     if (installLink) {
       installLink.addEventListener('click', function (e) {
         const sec = document.getElementById('install');
-        // Doc/404 pages have no #install here — DON'T preventDefault; let the
-        // href (now the cross-page `/#install`) carry the visitor to the index
-        // install section instead of eating the click and doing nothing (audit C7).
+        // Doc/404 pages have no #install — DON'T preventDefault; let the
+        // cross-page href carry the visitor instead of eating the click.
         if (!sec) return;
         e.preventDefault();
         sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
@@ -818,9 +761,6 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
       chipFlash('you · hired · just now', 'A coworker walked into the office');
     });
 
-    // ONE control, ONE stop path: the office pause switch fans out here (the
-    // feed ticker) and to the hero dust; the reduced-motion flip drives the SAME
-    // paths, so a mid-session reduce-ON freezes the ticker too (not just at load).
     document.addEventListener('pix:paused', function (e) {
       userPaused = !!(e.detail && e.detail.paused);
       if (userPaused) stopFeed();
@@ -835,10 +775,8 @@ const FEED_ROTATE_MS = 6000; // one line every 6s
       });
     }
     // A hidden tab freezes CSS transitions but keeps setInterval/setTimeout
-    // firing — the office render loop already stops on hide (OfficeBackdrop),
-    // but this ambient ticker was still free-running, so its queued is-on swaps
-    // all replayed their fades at once on refocus (ghosted double text). Stop
-    // the rotation while hidden and resync on return.
+    // firing, so a free-running ticker replays every queued fade at once on
+    // refocus (ghosted double text).
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) stopFeed();
       else startFeed();

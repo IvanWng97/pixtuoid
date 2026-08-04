@@ -2,7 +2,6 @@
 import { getCollection, render } from 'astro:content';
 import Docs from '../layouts/Docs.astro';
 
-// Rendered from docs/CONTRIBUTING.md (the single source) — there's one entry.
 const [entry] = await getCollection('contributing');
 if (!entry) {
   throw new Error(

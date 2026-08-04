@@ -1,21 +1,13 @@
 //! A tiny checked 2-D grid — pure data, no terminal deps.
 //!
-//! `Grid<T>` is a `width × height` row-major `Vec<T>` with bounds-checked
-//! access. It consolidates the hand-rolled `y * width + x` indexing + edge
-//! clamps that `WalkableMask` (a `Grid<bool>` pixel mask) and `ReachSet` (a
-//! `Grid<bool>` coarse-cell reachability set) each re-implemented (#333). The
-//! checked `get`/`set` make an off-by-one or a transposed index a `None`/clip
-//! rather than a panic or a silent wrong-cell read.
-//!
 //! Coordinates are `(x, y)` u16, origin top-left.
 
 /// A `width × height` row-major grid of `T`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Grid<T> {
-    // PRIVATE to the crate (`width()`/`height()` accessors, the
-    // `SceneState::daemons` precedent): `data.len() == width * height` is the
-    // invariant every checked access relies on, so an external caller must not
-    // be able to reassign a dimension out from under the data.
+    // Not `pub`: `data.len() == width * height` is the invariant every checked
+    // access relies on, so an external caller must not be able to reassign a
+    // dimension out from under the data.
     pub(crate) width: u16,
     pub(crate) height: u16,
     data: Vec<T>,
@@ -59,8 +51,8 @@ impl<T> Grid<T> {
         &mut self.data
     }
 
-    /// Build from an existing row-major `Vec<T>`. CHECKED: the data length must
-    /// equal `width * height`.
+    /// Build from an existing row-major `Vec<T>`. Panics unless
+    /// `data.len() == width * height`.
     pub fn from_vec(width: u16, height: u16, data: Vec<T>) -> Self {
         assert_eq!(
             data.len(),
@@ -74,7 +66,6 @@ impl<T> Grid<T> {
         }
     }
 
-    /// Row-major flat index of `(x, y)`, or `None` out of bounds.
     #[inline]
     fn index(&self, x: u16, y: u16) -> Option<usize> {
         if x >= self.width || y >= self.height {
@@ -100,17 +91,14 @@ impl<T> Grid<T> {
 }
 
 impl<T: Copy> Grid<T> {
-    /// The cell at `(x, y)`, or `default` out of bounds — the common read for
-    /// `Copy` cells (e.g. a `bool` mask that reads `false` past the edge).
+    /// The cell at `(x, y)`, or `default` out of bounds.
     #[inline]
     pub fn get_or(&self, x: u16, y: u16, default: T) -> T {
         self.get(x, y).copied().unwrap_or(default)
     }
 
     /// Resize and fill in one shot, reusing the existing allocation when
-    /// possible (cheaper than rebuilding once per frame): when the dims are
-    /// unchanged every cell is overwritten with `fill` in place; otherwise the
-    /// dims are set, the data cleared, and refilled to the new total.
+    /// possible (cheaper than rebuilding once per frame).
     pub fn resize_fill(&mut self, width: u16, height: u16, fill: T) {
         let total = (width as usize) * (height as usize);
         if self.width == width && self.height == height {
@@ -138,7 +126,6 @@ mod tests {
         assert_eq!(g.get(0, 0), Some(&0));
         g.set(2, 1, 7);
         assert_eq!(g.get(2, 1), Some(&7));
-        // The neighbour is untouched — the index math isn't transposed.
         assert_eq!(g.get(1, 2), Some(&0));
     }
 
@@ -147,7 +134,7 @@ mod tests {
         let mut g = Grid::filled(2, 2, false);
         assert_eq!(g.get(2, 0), None);
         assert_eq!(g.get(0, 2), None);
-        g.set(5, 5, true); // clipped, no panic
+        g.set(5, 5, true);
         assert!(!g.get_or(5, 5, false));
     }
 
@@ -178,11 +165,9 @@ mod tests {
 
     #[test]
     fn resize_fill_reuses_on_same_dims_and_grows_otherwise() {
-        // Same dims: overwrite every cell in place.
         let mut g = Grid::from_vec(2, 2, vec![1u8, 2, 3, 4]);
         g.resize_fill(2, 2, 7);
         assert_eq!(g.as_slice(), &[7, 7, 7, 7]);
-        // Grow: new dims + refill.
         g.resize_fill(3, 2, 5);
         assert_eq!(g.width, 3);
         assert_eq!(g.height, 2);

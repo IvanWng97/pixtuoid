@@ -1,8 +1,5 @@
-//! The seed-sweep property suite — the composer's quality contract.
-//! Frozen takes pin ONE realization (checksums); a generator pins the
-//! RULES: any seed must be musically well-formed. The suite sweeps a
-//! seed range so a constraint regression fails fast, not on the one
-//! unlucky hour a user hits.
+//! The seed-sweep property suite: frozen takes pin ONE realization
+//! (checksums); these pin the RULES — any seed must be musically well-formed.
 
 use super::*;
 
@@ -22,8 +19,7 @@ fn template_chords_and_roots_are_diatonic_or_deliberately_chromatic() {
                 .filter(|&&n| !p.scale_pcs.contains(&(n % 12)))
                 .count();
             if p.chromatic {
-                // a curated color template carries SOME chromatic move —
-                // but stays mostly inside the key (one chord's worth)
+                // at most one chord's worth of color, so it stays in the key
                 assert!(
                     (1..=4).contains(&color_tones),
                     "{name}[{i}]: chromatic template carries {color_tones} color tones"
@@ -46,8 +42,7 @@ fn template_chords_and_roots_are_diatonic_or_deliberately_chromatic() {
 
 #[test]
 fn every_day_template_chord_carries_a_third_and_seventh() {
-    // the shell voicings are only well-defined over true 7th chords —
-    // the grammar-level lint that caught the Am7/C-without-G voicing
+    // the shell voicings are only well-defined over true 7th chords
     for progs in [&DAY_PROGRESSIONS[..]] {
         for (i, p) in progs.iter().enumerate() {
             for (bar, chord) in p.chords.iter().enumerate() {
@@ -66,8 +61,6 @@ fn every_day_template_chord_carries_a_third_and_seventh() {
 
 #[test]
 fn lead_voice_varies_by_day_and_night_keeps_the_ep() {
-    // the instrument registry: day draws real variety over the sweep;
-    // night stays the ratified EP (the sleepy identity)
     let mut saw = (false, false);
     for seed in 0..SWEEP {
         match compose(Mood::Day, seed).lead_voice {
@@ -85,8 +78,8 @@ fn lead_voice_varies_by_day_and_night_keeps_the_ep() {
 
 #[test]
 fn day_lead_voice_distribution_tracks_the_draw_weight() {
-    // p(Pluck)=0.35: over 400 seeds expect ~140; a generous ±3.5σ band
-    // (~±33) catches a biased/misplaced draw without flaking
+    // p(Pluck)=0.35 ⇒ ~140 of 400; the band is ±3.5σ, so a biased or misplaced
+    // draw fails but an unlucky sample does not
     let plucks = (0..400)
         .filter(|&s| compose(Mood::Day, s).lead_voice == LeadVoice::Pluck)
         .count();
@@ -139,14 +132,12 @@ fn every_seed_is_well_formed_night() {
             "seed {seed}: bpm {}",
             s.bpm
         );
-        // the sleepy register: kick + closed hat only, never a backbeat
         assert!(
             s.drums
                 .iter()
                 .all(|&(_, k, _)| matches!(k, DrumKind::Kick | DrumKind::Hat)),
             "seed {seed}: night grew a snare/open hat"
         );
-        // the texture duck rides EXACTLY the kick timestamps
         let mut kicks: Vec<f32> = s
             .drums
             .iter()
@@ -157,7 +148,6 @@ fn every_seed_is_well_formed_night() {
         let mut kt = s.kick_times.clone();
         kt.sort_by(f32::total_cmp);
         assert_eq!(kicks, kt, "seed {seed}: kick_times desynced from drums");
-        // the sub floor: in the ratified window, diatonic, root-true
         for &b in &s.bass_roots {
             assert!(
                 (26..=38).contains(&b),
@@ -177,8 +167,6 @@ fn every_seed_is_well_formed_night() {
     }
 }
 
-/// The shared well-formedness core: in-loop, in-key, chord-tone comping,
-/// density bounds, a non-empty lead.
 fn assert_well_formed(s: &GeneratedScore, seed: u64) {
     let loop_s = s.loop_secs();
     let bar_s = s.bar_s();
@@ -196,8 +184,6 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
         );
         assert!(gain > 0.0 && gain <= 1.5, "seed {seed}: drum gain {gain}");
     }
-    // comping: bar-chord tones ±octaves, or the bar root's NINTH (the
-    // shell voicing's R6 color note)
     for &(at, note, _) in &s.keys {
         let bar = ((at / bar_s) as usize).min(GEN_LOOP_BARS - 1);
         let chord = s.bar_chords[bar];
@@ -210,8 +196,6 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
             "seed {seed}: keys note {note} at {at}s not a tone/ninth of {chord:?}"
         );
     }
-    // the lead lives in the take's key — except over the bar-8 turnaround
-    // dominant, whose tones are the hinge's deliberate tension
     for &(at, note, _) in &s.sparkle {
         let bar = ((at / bar_s) as usize).min(GEN_LOOP_BARS - 1);
         let in_turnaround = s.bar_chords[bar].iter().any(|&c| note % 12 == c % 12);
@@ -220,7 +204,6 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
             "seed {seed}: lead note {note} at {at}s outside key AND bar chord"
         );
     }
-    // density: a lead phrase, not a solo — and never silence
     assert!(
         s.sparkle.len() >= 2,
         "seed {seed}: the lead lost its identity"
@@ -245,9 +228,6 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
             "seed {seed}: bar {bar} lead density {n} > {max_per_bar}"
         );
     }
-    // template chord tones stay in key post-transpose — except a curated
-    // chromatic template's single color chord (≤ one chord's worth), and
-    // the timeline matches the template on bars 0-6 (bar 7 = turnaround)
     let color_tones = s
         .chords
         .iter()
@@ -258,6 +238,7 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
         color_tones <= 4,
         "seed {seed}: {color_tones} color tones — more than one chromatic chord"
     );
+    // bar 7 is the turnaround, so only bars 0-6 must match the template
     for bar in 0..7 {
         assert_eq!(
             s.bar_chords[bar],
@@ -308,8 +289,6 @@ fn day_keys_comp_in_rolled_shell_pairs() {
 
 #[test]
 fn day_lead_uses_sixteenth_anticipations_somewhere_in_the_sweep() {
-    // p≈0.15 per strong beat: the sweep must surface pushed notes, and
-    // every event still lands on the 8th grid or a x.75 anticipation
     let mut seen_push = false;
     for seed in 0..SWEEP {
         let s = compose(Mood::Day, seed);
@@ -363,8 +342,6 @@ fn the_answer_quotes_the_statements_opening() {
 
 #[test]
 fn adopted_color_templates_actually_rotate_in() {
-    // the two chromatic templates are ordinary grammar rows now: over the
-    // sweep some day seed draws one (color tones appear in bars 0-6)
     let mut seen_color = false;
     for seed in 0..SWEEP {
         let s = compose(Mood::Day, seed);
@@ -381,9 +358,6 @@ fn adopted_color_templates_actually_rotate_in() {
 
 #[test]
 fn night_hats_articulate_above_the_v1_floor() {
-    // the adopted articulation fix: every night hat now sits at ≥0.36
-    // pre-wobble — the groove tick is audible by construction, the sub
-    // untouched
     for seed in 0..SWEEP {
         let s = compose(Mood::Night, seed);
         for &(_, k, g) in s.drums.iter().filter(|&&(_, k, _)| k == DrumKind::Hat) {

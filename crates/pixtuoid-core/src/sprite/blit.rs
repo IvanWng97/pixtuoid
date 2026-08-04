@@ -1,8 +1,6 @@
 use crate::sprite::{Frame, RgbBuffer};
 
 /// Blit a sprite frame into `dst` with top-left at `(dst_x, dst_y)`.
-/// Transparent (None) pixels leave `dst` unchanged. Out-of-bounds pixels
-/// are silently clipped.
 pub fn blit_frame(frame: &Frame, dst_x: u16, dst_y: u16, dst: &mut RgbBuffer) {
     for fy in 0..frame.height {
         for fx in 0..frame.width {

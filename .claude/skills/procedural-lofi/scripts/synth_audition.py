@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Phase-0 audition synth for pixtuoid ambient sound (#633).
+"""Audition synth for pixtuoid ambient sound.
 
-Synthesizes PLACEHOLDER lofi stems (pad/keys/drums/texture/rain) and the
-REAL candidate procedural one-shots (clacks/ding/glug/whir/chime), then
-renders busy-ness-level demo mixes. Everything is deterministic (seeded).
-
-Output: audio-demos/*.wav next to this script.
+Renders the lofi stems, the candidate procedural one-shots and busy-ness-level
+demo mixes to audio-demos/*.wav next to this script. Deterministic (seeded).
 """
 
 import wave
@@ -18,14 +15,12 @@ BPM = 72
 BEAT = 60.0 / BPM
 BAR = 4 * BEAT
 LOOP_BARS = 4
-LOOP_S = BAR * LOOP_BARS  # 13.33s
+LOOP_S = BAR * LOOP_BARS
 OUT = Path(__file__).parent / "audio-demos"
 OUT.mkdir(exist_ok=True)
 
 rng = np.random.default_rng(42)
 
-
-# ---------- DSP primitives ----------
 
 def n_samples(dur):
     return int(round(dur * SR))
@@ -42,8 +37,8 @@ def sinc_lowpass_kernel(cutoff, taps=301):
 
 
 def lowpass(x, cutoff):
-    # kernel must not out-length the signal (np.convolve 'same' returns
-    # max(M,N) — a 4ms snippet vs a 301-tap kernel broadcast-errors upstream)
+    # The kernel must not out-length the signal: np.convolve 'same' returns
+    # max(M,N), so a 4ms snippet vs a 301-tap kernel broadcast-errors upstream.
     taps = min(301, len(x) if len(x) % 2 else len(x) - 1)
     return np.convolve(x, sinc_lowpass_kernel(cutoff, taps), "same")
 
@@ -61,7 +56,6 @@ def midi_freq(m):
 
 
 def env_ar(dur, attack, release):
-    """Attack-release envelope over dur seconds."""
     n = n_samples(dur)
     e = np.ones(n)
     na, nr = min(n_samples(attack), n), min(n_samples(release), n)
@@ -73,7 +67,7 @@ def env_ar(dur, attack, release):
 
 
 def place(buf, snippet, at_s, gain=1.0):
-    """Overlap-add snippet into buf at time at_s (clipped to buf)."""
+    """Overlap-add snippet into buf at time at_s, clipped to buf."""
     i = n_samples(at_s)
     if i >= len(buf):
         return
@@ -87,8 +81,7 @@ def normalize(x, peak=0.9):
 
 
 def pink_noise(n, r=None):
-    """1/f-shaped noise via FFT-domain -3dB/oct tilt (rain literature: the
-    aggregate of millions of bubble events reads PINK, not white)."""
+    """1/f noise — rain's aggregate of bubble events reads PINK, not white."""
     r = r or rng
     x = np.fft.rfft(r.standard_normal(n))
     f = np.fft.rfftfreq(n, 1 / SR)
@@ -99,12 +92,11 @@ def pink_noise(n, r=None):
 
 def lofi_post(x, wow_hz=0.7, wow_dev=0.0025, flut_hz=8.0, flut_dev=0.0006,
               drive=1.6, hiss=0.0):
-    # hiss default 0: per-stem hiss STACKS in the mix (4 stems ≈ +6dB) —
-    # the medium noise is stem_texture's job, exactly once.
-    """The lofi master chain, per production references: tape wow (slow
-    pitch warble) + flutter (fast shimmer) via time-warp resample, tanh
-    saturation (highs soften first), an 80-120Hz tape-head bump, gentle
-    HF rolloff, and a breath of hiss."""
+    """The lofi master chain: tape wow + flutter, saturation, head bump, rolloff.
+
+    hiss defaults to 0 because per-stem hiss STACKS in the mix — the medium noise
+    is stem_texture's job, exactly once.
+    """
     n = len(x)
     t = np.arange(n)
     warp = (wow_dev * SR / (2 * np.pi * wow_hz) * np.sin(2 * np.pi * wow_hz * t / SR)
@@ -116,10 +108,7 @@ def lofi_post(x, wow_hz=0.7, wow_dev=0.0025, flut_hz=8.0, flut_dev=0.0006,
     return x + rng.standard_normal(n) * hiss
 
 
-# ---------- stems (PLACEHOLDERS for the AI-generated ones) ----------
-
-# lofi progression: Dm7 - Gm7 - Bbmaj7 - Am7, one bar each
-CHORDS = [
+CHORDS = [  # one bar each
     [50, 53, 57, 60],  # Dm7
     [55, 58, 62, 65],  # Gm7
     [58, 62, 65, 69],  # Bbmaj7
@@ -128,22 +117,21 @@ CHORDS = [
 
 
 def stem_pad():
-    """Warm EP-chord bed at pitch (v2: the -12 octave drop + bare detuned
-    sines read as a horror-movie drone — keep the register, voice with
-    harmonics, and let each chord breathe like a held Rhodes chord)."""
+    """Warm EP-chord bed at pitch — a -12 octave drop with bare detuned sines
+    reads as a horror-movie drone, so keep the register and voice with harmonics."""
     buf = np.zeros(n_samples(LOOP_S))
     for bar, chord in enumerate(CHORDS):
         dur = BAR + 0.9
         t = t_axis(dur)
         chord_sig = np.zeros_like(t)
         for i, m in enumerate(chord):
-            f = midi_freq(m)  # at pitch — no octave drop
+            f = midi_freq(m)
             tone = (
                 np.sin(2 * np.pi * f * t)
                 + 0.30 * np.sin(2 * np.pi * 2 * f * t)
                 + 0.08 * np.sin(2 * np.pi * 3 * f * t)
             )
-            # stagger note onsets slightly: a hand, not a machine
+            # staggered onsets: a hand, not a machine
             tone *= env_ar(dur, 0.25 + 0.08 * i, 1.2)
             chord_sig += tone
         place(buf, chord_sig, bar * BAR)
@@ -153,12 +141,11 @@ def stem_pad():
 
 
 def stem_sparkle():
-    """Sparse gentle EP notes over the pad — the 'someone left the radio
-    on' humanity that keeps an empty office from feeling haunted."""
+    """Sparse EP notes over the pad — the 'someone left the radio on' humanity
+    that keeps an empty office from feeling haunted."""
     buf = np.zeros(n_samples(LOOP_S))
     r = np.random.default_rng(5)
     for bar, chord in enumerate(CHORDS):
-        # 1-2 soft high notes per bar, on friendly beats
         for beat in r.choice([0.0, 1.5, 2.0, 3.0], size=r.integers(1, 3), replace=False):
             note = int(r.choice(chord)) + 12
             place(buf, ep_pluck(note, dur=1.6, vel=0.35 + 0.2 * r.random()),
@@ -232,15 +219,14 @@ def stem_drums():
 
 
 def stem_texture():
-    """Room tone + light vinyl crackle (v2: crackle density halved and
-    softened — dense pops over a dark drone read 'haunted', not 'cozy';
-    a faint warm room hum replaces most of it)."""
+    """Room tone + light vinyl crackle — dense pops over a dark drone read
+    'haunted', not 'cozy', so a faint warm room hum carries most of it."""
     n = n_samples(LOOP_S)
     hiss = lowpass(rng.standard_normal(n), 3800) * 0.010
     t = t_axis(LOOP_S)
     room = 0.006 * np.sin(2 * np.pi * 90 * t) * (1 + 0.2 * np.sin(2 * np.pi * 0.4 * t))
     crackle = np.zeros(n)
-    n_cracks = int(LOOP_S * 4)  # was 9/s
+    n_cracks = int(LOOP_S * 4)
     for at in rng.uniform(0, LOOP_S - 0.01, n_cracks):
         d = 0.003 + 0.004 * rng.random()
         pop = rng.standard_normal(n_samples(d)) * np.exp(-t_axis(d) * 800)
@@ -249,11 +235,10 @@ def stem_texture():
 
 
 def _rain_bed(n):
-    """RainyMood-matched wash: noise FFT-shaped to the measured envelope."""
-    # GENTLE-rain envelope (owner's chosen reference, yt 42M3esYyHdw live
-    # "Gentle Night Rain", measured 2026-07-16): light airy rain — energy
-    # lives 500Hz-2k, almost no rumble, real 2-8k air. (RainyMood's
-    # 70%-below-250Hz storm wash was the WRONG character: "比较是gentle".)
+    """Noise FFT-shaped to the measured reference envelope."""
+    # Measured off the owner's chosen reference (yt 42M3esYyHdw, "Gentle Night
+    # Rain"): light airy rain, energy in 500Hz-2k with almost no rumble. A storm
+    # wash weighted below 250Hz is the WRONG character here.
     ref_bands = [  # (lo_hz, hi_hz, energy %)
         (20, 60, 1.5), (60, 125, 3.5), (125, 250, 6.9), (250, 500, 14.3),
         (500, 1000, 24.4), (1000, 2000, 25.3), (2000, 4000, 10.2),
@@ -282,9 +267,8 @@ def _slow_lfo(n, lo_hz=0.02, hi_hz=0.10, depth=0.18):
 
 
 def _one_drop(kind, strength, bed_med):
-    """A single drop, `strength`x above the bed's 800-6000Hz envelope.
-    Three surface populations per the reference's wide centroid spread
-    (p25 634 / median 1469 / p75 1726 Hz)."""
+    """A single drop, `strength`x above the bed's 800-6000Hz envelope. Three
+    surface populations, per the reference's wide centroid spread."""
     dp = 0.10
     tp = t_axis(dp)
     if kind == 0:    # dull plop — wood/soil: low, bodied, little splash
@@ -305,7 +289,6 @@ def _one_drop(kind, strength, bed_med):
 
 
 def _band_env_med(sig):
-    """Median of the 800-6000Hz envelope — the analyzer's own bed measure."""
     X = np.fft.rfft(sig)
     fr = np.fft.rfftfreq(len(sig), 1 / SR)
     X[(fr < 800) | (fr > 6000)] = 0
@@ -315,9 +298,8 @@ def _band_env_med(sig):
 
 
 def _scatter_drops(dur_s, bed_med, pan=None):
-    """Drop field calibrated to the reference: patter ~1.6/s at 2.6-4.2x,
-    foreground every ~4s at 4.5-6.5x, 35% fast pairs. kind mix 35/50/15.
-    Returns mono (pan=None) or stereo (n,2) with per-drop constant-power pan."""
+    """Drop field calibrated to the reference: a patter layer plus louder
+    foreground drops. Mono (pan=None) or stereo (n,2), per-drop constant-power pan."""
     n = n_samples(dur_s)
     buf = np.zeros((n, 2)) if pan else np.zeros(n)
 
@@ -346,11 +328,9 @@ def _scatter_drops(dur_s, bed_med, pan=None):
 
 
 def stem_rain(dur_s=LOOP_S, stereo=False):
-    """v8. Mono loop for the mixes; stereo long-form for standalone
-    listening (decorrelated L/R beds + per-drop pan — and a render longer
-    than the loop kills the every-13s drop deja vu. Product note: the
-    ENGINE loops only the bed and scatters drops at runtime, so the real
-    thing never repeats)."""
+    """Mono loop for the mixes; stereo long-form for standalone listening — a
+    render longer than the loop kills the once-per-loop drop deja vu. The ENGINE
+    loops only the bed and scatters drops at runtime, so it never repeats."""
     n = n_samples(dur_s)
     und = _slow_lfo(n)
     if stereo:
@@ -366,28 +346,19 @@ def stem_rain(dur_s=LOOP_S, stereo=False):
     return mix_ / np.max(np.abs(mix_)) * 0.6
 
 
-# ---------- one-shots (the REAL procedural candidates) ----------
-
 def one_keystroke(r):
-    """v4, matched to the OWNER'S reference (yt 2BUNHd7ENZk "Writing on
-    keyboard Sound Effect", fingerprinted with analyze_typing.py): a BRIGHT
-    office clack — 82.6% of energy in 1-4kHz, centroid ~2.4kHz, stroke
-    decays to 20% in ~8ms, almost no low end. (The v3 thock — centroid
-    474Hz per the ASMR-community ideal — measured exactly opposite; the
-    reference outranks the literature.)"""
+    """A BRIGHT office clack matched to the owner's reference (fingerprinted with
+    analyze_typing.py): most energy in 1-4kHz, almost no low end. The ASMR-ideal
+    "thock" measured exactly opposite — the reference outranks the literature."""
     d = 0.05
     n = n_samples(d)
     t = t_axis(d)
-    # main click: tight noise burst peaked 2-4k, very fast decay
     f_lo = 1250 + 450 * r.random()
     click = bandpass(r.standard_normal(n), f_lo, f_lo + 2100) * np.exp(-t * 330)
-    # body: 1-2k component gives the click its "key" substance
     f_b = 1000 + 400 * r.random()
     body = bandpass(r.standard_normal(n), f_b, f_b + 900) * np.exp(-t * 280) * 1.1
-    # spice: a whisper above 4k so the top octaves read natural
     spice = bandpass(r.standard_normal(n), 4200, 7500) * np.exp(-t * 500) * 0.18
     buf = click + body + spice
-    # up-stroke tick ~60-90ms later, same family, quieter
     up_at = 0.055 + 0.03 * r.random()
     du = 0.02
     tu = t_axis(du)
@@ -399,9 +370,8 @@ def one_keystroke(r):
 
 
 def typing_track(dur, bursts_per_min, r):
-    """Clustered keystrokes — bursts of fast typing with gaps.
-    v4 timing matched to the reference: inter-key median ~80ms with real
-    spread (p25-p75 = 59-93ms), occasional think-pause inside a burst."""
+    """Clustered keystrokes — burst and inter-key timings matched to the
+    reference, including the occasional think-pause inside a burst."""
     buf = np.zeros(n_samples(dur))
     n_bursts = max(1, int(dur / 60 * bursts_per_min))
     for _ in range(n_bursts):
@@ -420,10 +390,8 @@ def typing_track(dur, bursts_per_min, r):
 
 
 def elevator_ding():
-    """v4, chime-bar physics: a struck metal bar's transverse modes are
-    INHARMONIC at ~1 : 2.76 : 5.40 (the glockenspiel ratios — v3's 1:2:3
-    harmonic stack read 'organ', not 'ding'). Upper partials decay 3-5x
-    faster; the fundamental is a detuned pair for a slow beat."""
+    """Chime-bar physics: a struck metal bar's transverse modes are INHARMONIC at
+    ~1 : 2.76 : 5.40 — a 1:2:3 harmonic stack reads 'organ', not 'ding'."""
     dur = 1.6
     t = t_axis(dur)
     f0 = 870.0
@@ -438,18 +406,17 @@ def elevator_ding():
 
 
 def cooler_glug():
-    """v4, Minnaert physics: each glug is ONE large bubble — a damped sine
-    near its Minnaert frequency (r≈6-9mm → ~360-540Hz) whose pitch RISES
-    slightly as the bubble ascends and shrinks; successive glugs step UP
-    (the air column shortens). Plus a quiet pour-noise wash."""
+    """Minnaert physics: each glug is ONE large bubble — a damped sine near its
+    Minnaert frequency whose pitch RISES as the bubble ascends and shrinks, and
+    successive glugs step UP as the air column shortens."""
     dur = 0.85
     buf = np.zeros(n_samples(dur))
     f_base = 340.0
     for i, at in enumerate((0.02, 0.28, 0.55)):
         d = 0.16
         t = t_axis(d)
-        f0 = f_base * (1 + 0.18 * i)          # the sequence steps up
-        chirp = f0 * (1 + 0.12 * t / d)        # each bubble bends up
+        f0 = f_base * (1 + 0.18 * i)
+        chirp = f0 * (1 + 0.12 * t / d)
         phase = 2 * np.pi * np.cumsum(chirp) / SR
         g = np.sin(phase) * np.exp(-t * 22) * env_ar(d, 0.004, 0.05)
         place(buf, g, at, 0.9 - 0.1 * i)
@@ -459,21 +426,17 @@ def cooler_glug():
 
 
 def printer_whir():
-    """v2 — structured like a real office laser printer instead of the v1
-    noise blob: motor spin-UP (pitch rises), quasi-regular feed-roller
-    ticks, a paper-slide swoosh through the middle, spin-DOWN tail."""
+    """An office laser printer: motor spin-up, feed-roller ticks, a paper-slide
+    swoosh through the middle, spin-down tail."""
     dur = 1.5
     n = n_samples(dur)
     t = t_axis(dur)
     buf = np.zeros(n)
-    # motor: pitch ramps 80→130Hz over the spin-up, holds, sags at the end
     f_motor = 80 + 50 * np.clip(t / 0.25, 0, 1) - 30 * np.clip((t - 1.15) / 0.35, 0, 1)
     phase = 2 * np.pi * np.cumsum(f_motor) / SR
     motor = (np.sin(phase) + 0.45 * np.sin(2 * phase) + 0.2 * np.sin(3 * phase))
     motor *= env_ar(dur, 0.12, 0.3) * 0.5
-    # mechanical texture: filtered noise, gated by the same envelope
     texture_n = bandpass(rng.standard_normal(n), 400, 2600) * env_ar(dur, 0.15, 0.35) * 0.16
-    # feed-roller ticks: quasi-regular 11/s with jitter, through the middle
     ticks = np.zeros(n)
     at = 0.28
     while at < 1.05:
@@ -481,7 +444,6 @@ def printer_whir():
         tk = bandpass(rng.standard_normal(n_samples(d)), 1500, 4200) * np.exp(-t_axis(d) * 260)
         place(ticks, tk, at, 0.5 + 0.2 * rng.random())
         at += 0.09 + 0.02 * rng.random()
-    # paper slide: a swoosh — noise through a rising bandpass, mid-file
     sw_d = 0.5
     sw = bandpass(rng.standard_normal(n_samples(sw_d)), 900, 3000)
     sw *= np.hanning(n_samples(sw_d)) * 0.35
@@ -491,10 +453,8 @@ def printer_whir():
 
 
 def door_chime():
-    """v2 — a DESCENDING ding-dong (real doorbells fall, our v1 rose) with
-    warmer, longer bells so it cannot be confused with the elevator's
-    single bright inharmonic chime-bar strike (872Hz centroid): lower
-    register, harmonic (not chime-bar) partials, slow decay."""
+    """A DESCENDING ding-dong (real doorbells fall) with warmer, longer, harmonic
+    bells so it cannot be confused with elevator_ding's bright chime-bar strike."""
     buf = np.zeros(n_samples(2.0))
     for at, m, g in ((0.0, 76, 0.8), (0.42, 72, 1.0)):   # E5 → C5, falling
         d = 1.5
@@ -506,8 +466,6 @@ def door_chime():
         place(buf, note, at, g * 0.7)
     return normalize(lowpass(buf, 4000), 0.55)
 
-
-# ---------- mixing + IO ----------
 
 def to_stereo(mono, pan=0.0, width_delay=0):
     """Constant-power pan; optional tiny delay on R for width."""
@@ -549,8 +507,7 @@ def mix(parts):
 
 def main():
     print("stems (placeholder for AI-generated):")
-    # the musical stems go through the tape: wow/flutter + saturation +
-    # head bump + rolloff (the lofi literature chain). texture/rain don't —
+    # Only the musical stems go through the tape chain; texture/rain don't —
     # they ARE the medium.
     pad = normalize(lofi_post(stem_pad()), 0.7)
     sparkle = normalize(lofi_post(stem_sparkle()), 0.6)
@@ -575,19 +532,15 @@ def main():
     dur = LOOP_S * L
     r_e, r_m, r_b = (np.random.default_rng(s) for s in (21, 22, 23))
 
-    # empty office: warm pad + sparse EP notes + soft room tone —
-    # "someone left the radio on", NOT "abandoned building" (v2)
     write_wav("demo_1_empty.wav", mix([
         (tile(pad, L), 0.75, 0.0, 11), (tile(sparkle, L), 0.7, 0.15, 0),
         (tile(texture, L), 0.28, 0.0, 0)]))
 
-    # moderate: 2 agents — keys join, light drums, sparse typing
     write_wav("demo_2_moderate.wav", mix([
         (tile(pad, L), 0.7, 0.0, 11), (tile(texture, L), 0.30, 0.0, 0),
         (tile(keys, L), 0.6, -0.25, 0), (tile(drums, L), 0.35, 0.0, 0),
         (typing_track(dur, 14, r_m), 0.5, 0.3, 0)]))
 
-    # busy: full band + dense typing + appliance moments
     busy_parts = [
         (tile(pad, L), 0.65, 0.0, 11), (tile(texture, L), 0.28, 0.0, 0),
         (tile(keys, L), 0.7, -0.25, 0), (tile(drums, L), 0.6, 0.0, 0),
@@ -601,7 +554,6 @@ def main():
     busy_parts.append((appl, 0.8, 0.15, 0))
     write_wav("demo_3_busy.wav", mix(busy_parts))
 
-    # rainy + busy: the rain stem joins
     write_wav("demo_4_rainy_busy.wav", mix(
         busy_parts + [(tile(rain, L), 0.55, 0.0, 17)]))
 

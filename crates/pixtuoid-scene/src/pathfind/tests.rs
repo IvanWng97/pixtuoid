@@ -36,11 +36,9 @@ fn simplify_collapses_collinear() {
     assert_eq!(s.len(), 3);
 }
 
-// A DIAGONAL run (nonzero dx AND dy) exercises the collinearity determinant's
-// x-delta terms, which an axis-aligned run zeroes out (dy_in=dy_out=0 makes
-// the determinant 0 regardless of dx). Off-origin so the `here.x - prev.x`
-// subtraction can't be hidden by a `prev` of 0. A 3-point input also pins the
-// `len < 3` boundary: a `<= 3`/`== 3` early-return would leave this uncollapsed.
+// Diagonal and off-origin on purpose: an axis-aligned or origin-anchored run
+// zeroes the collinearity determinant's x-delta terms. 3 points also pins the
+// `len < 3` early-return boundary.
 #[test]
 fn simplify_collapses_diagonal_collinear() {
     let pts = vec![
@@ -51,8 +49,6 @@ fn simplify_collapses_diagonal_collinear() {
     assert_eq!(simplify_polyline(pts).len(), 2);
 }
 
-// The complement: a genuine 3-point corner must SURVIVE (determinant != 0),
-// so the collapse above can't be a degenerate "always drops the midpoint".
 #[test]
 fn simplify_keeps_genuine_corner() {
     let pts = vec![
@@ -80,13 +76,9 @@ fn routes_around_meeting_room_wall() {
 
 #[test]
 fn vertical_wall_is_impassable_except_through_the_door() {
-    // Regression: a vertical (N-S) room divider blocks its full
-    // `WALL_THICK_V` (4px) footprint, but 4px at a bad 4-alignment still
-    // splits into two coarse cells at exactly the 8/16 threshold — both
-    // stay "walkable" and A* threads STRAIGHT THROUGH. The X-only
-    // `WALL_ROUTING_MARGIN_X` widens the stamp to 6px so a full cell column
-    // drops under the threshold; this test pins that the wall is a real
-    // barrier (crossable only through the door gap).
+    // A vertical divider's `WALL_THICK_V` footprint at a bad 4-alignment splits
+    // across two coarse cells, both staying "walkable" so A* threads STRAIGHT
+    // THROUGH — which is why `WALL_ROUTING_MARGIN_X` widens the stamp.
     let l = make_layout();
     let overlay = OccupancyOverlay::new();
     let WallSegment { start, end } = l
@@ -110,8 +102,6 @@ fn vertical_wall_is_impassable_except_through_the_door() {
         .windows(2)
         .map(|w| crate::pose::octile_distance(w[0], w[1]))
         .sum();
-    // A straight crossing is ~24px; detouring through the mid door is far
-    // longer. A passable wall would yield a near-straight path (≈ direct).
     assert!(
         routed > direct * 2,
         "expected a detour around the wall (routed {routed} vs direct {direct}); \
@@ -119,24 +109,16 @@ fn vertical_wall_is_impassable_except_through_the_door() {
     );
 }
 
-/// Teleport guard (#22): a waypoint A\* can't reach on the coarse 4×4 grid makes
-/// an idle agent SNAP/teleport there — `find_path` returns None and `route()`
-/// falls back to a straight `[from,to]` line. The core connectivity sweep only
-/// checks full-PIXEL BFS from the door; this checks COARSE-grid reachability of
-/// EVERY emitted wander destination (meeting seats, pantry, couch, AND the
-/// pod-aisle decor — phone booth / standing desk / vending / printer, which also
-/// pins the `INTER_POD_AISLE_X` width: narrow the aisle and the decor
-/// disconnects the grid here). Across seeds × sizes incl. the 96×70 floor. It
-/// caught the narrow-meeting-room teleport (now gated).
+/// Teleport guard (#22): a waypoint A\* can't reach on the coarse grid makes an
+/// idle agent SNAP there — `find_path` returns None and `route()` falls back to
+/// a straight `[from,to]` line through furniture.
 ///
-/// This list stays narrow ON PURPOSE. The blocked furniture CENTRE is a PROXY
-/// for the destination, and at 41x160 / 240x160 (production floors 4 and 6) a
-/// vending machine's own coarse cell is under the `cell_walkable` floor while
-/// its APPROACH — the cell the router is actually aimed at — routes fine from
-/// every desk and from the door. The wide axis lives on the real contract
-/// instead: `placement_sweep::every_wander_destination_is_routable_from_its_desk`
-/// sweeps that suite's own size axis over `approach_point`. Widen THAT one, not
-/// this proxy.
+/// The size list stays narrow ON PURPOSE: the blocked furniture CENTRE is only a
+/// PROXY for the destination, and on some production floors a vending machine's
+/// own coarse cell is under the `cell_walkable` floor while its APPROACH — the
+/// cell the router actually aims at — routes fine. Widen
+/// `placement_sweep::every_wander_destination_is_routable_from_its_desk`, which
+/// rides the real contract, not this proxy.
 #[test]
 fn every_wander_waypoint_is_routable_on_the_coarse_grid() {
     use crate::layout::TEST_DEFAULT_DESKS;
@@ -172,16 +154,10 @@ fn every_wander_waypoint_is_routable_on_the_coarse_grid() {
 
 #[test]
 fn every_approach_point_is_routable_from_its_home_desk() {
-    // STRONGER routability guard for the approach model: the cell A* actually
-    // targets — `approach_point` on a reachable allowed side — must be
-    // find_path-routable from the agent's OWN home desk, for EVERY
-    // desk × waypoint × size × seed. The test above uses the DOOR origin + the
-    // blocked furniture CENTER, so it can pass while a specific desk's chosen
-    // approach side is unroutable (a teleport). `reaches ⇒ routable` (the
-    // ReachSet contract) makes this hold. When NO allowed+reachable side
-    // exists, approach_point returns the `wp.pos` sentinel (NO fallback — the
-    // wander skips the furniture), which isn't a real destination, so we
-    // exclude it below.
+    // Stronger than the test above, which uses the DOOR origin + the blocked
+    // furniture CENTER and so can pass while a specific desk's chosen approach
+    // side is unroutable. When NO allowed+reachable side exists `approach_point`
+    // returns the `wp.pos` sentinel, which isn't a destination — excluded below.
     use crate::layout::approach_point;
     use crate::layout::TEST_DEFAULT_DESKS;
     let overlay = OccupancyOverlay::new();
@@ -208,7 +184,7 @@ fn every_approach_point_is_routable_from_its_home_desk() {
                         &l.reachable,
                     );
                     if a == wp.pos {
-                        continue; // "no valid approach" sentinel — skipped, not routed to
+                        continue;
                     }
                     assert!(
                         find_path(&l.walkable, &overlay, None, desk, a).is_some(),
@@ -224,12 +200,9 @@ fn every_approach_point_is_routable_from_its_home_desk() {
 
 #[test]
 fn reachset_never_claims_an_unroutable_cell() {
-    // The core ReachSet must never be a FALSE POSITIVE vs the real router:
-    // every cell it reports reachable MUST be find_path-routable from the
-    // door. (Conservative false negatives at coarse boundaries are fine —
-    // approach_point simply won't pick those.) Pins the core↔router
-    // coarsening agreement on REAL layouts, not just synthetic masks, so
-    // approach_point can never select an unroutable approach side.
+    // One-directional on purpose: false POSITIVES are the bug (approach_point
+    // would select an unroutable side), while conservative false negatives at
+    // coarse boundaries are fine — approach_point simply won't pick those.
     use crate::layout::TEST_DEFAULT_DESKS;
     let overlay = OccupancyOverlay::new();
     for (w, h) in [(160u16, 120u16), (200, 80), (96, 70)] {
@@ -261,18 +234,11 @@ fn reachset_never_claims_an_unroutable_cell() {
 }
 
 /// The AIMLESS wander branch is the one destination producer that never
-/// consulted `ReachSet`: every NAMED destination goes through `approach_point`,
-/// whose obstacle and seat branches both require `reaches(c)`.
-/// `pick_aimless_dest` accepted the first `is_walkable` hit, so it could hand A\*
-/// a goal in a coarse-unroutable pocket — `find_path` returns None and `route()`
-/// yields the straight `[from,to]` fallback, walking the agent through furniture
-/// for the whole out-leg AND back-leg.
+/// consults `ReachSet`, so it can hand A\* a goal in a coarse-unroutable pocket
+/// and walk the agent through furniture for the whole leg.
 ///
-/// Swept over the PRODUCTION floor seeds (not raw 0..5) because that is what
-/// ships. `pick_aimless_dest` is a pure function of (layout, seed), so ONE desk
-/// per layout covers the destination axis; the second desk only varies the
-/// origin. `max_desks: None` is deliberate — that is production, and capping the
-/// desk count hides the very floors that fail.
+/// Swept over the PRODUCTION floor seeds with `max_desks: None` deliberately —
+/// capping the desk count hides the very floors that fail.
 #[test]
 fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
     use crate::floor::floor_seed;
@@ -329,14 +295,10 @@ fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
 /// The cache is observed through a SEALED mask: on a fully-blocked grid
 /// `find_path` returns `None` and `route` mints the 2-point `[from, to]`
 /// fallback, so a multi-point answer proves the cached polyline was served
-/// instead of a fresh A* run.
-///
-/// `route`'s miss arm re-`insert`s the SAME `(from, to)` key, so deleting the
-/// cache-hit branch entirely leaves `len() == 1` — the old
-/// `assert_eq!(router.len(), 1, "should hit cache")` was green either way (#750).
-/// The mask is a sound probe because the cache is deliberately mask-BLIND: it
-/// keys on `(from, to)` and invalidates on the OVERLAY signature, the mask being
-/// static per layout.
+/// instead of a fresh A* run. A `router.len()` assertion cannot do this —
+/// `route`'s miss arm re-`insert`s the SAME key, so it is green either way. The
+/// mask is a sound probe because the cache is deliberately mask-BLIND: it keys
+/// on `(from, to)` and invalidates on the OVERLAY signature.
 #[test]
 fn router_serves_the_cached_path_instead_of_re_running_astar() {
     let l = make_layout();
@@ -361,15 +323,9 @@ fn router_serves_the_cached_path_instead_of_re_running_astar() {
     );
 }
 
-/// Invalidation is PER-PATH, not a global wipe: an overlay change that misses a
-/// cached polyline must leave it cached, and one laid across it must drop it.
-/// Both directions ride the same sealed-mask oracle — after a sealed re-route the
-/// cached answer and the 2-point fallback are distinguishable, so each assertion
-/// names which side of `path_clear_under` it exercises.
-///
-/// The MISS direction is what pins the optimisation itself (`retain`, not
-/// `clear`): swapping the per-path retain for a global wipe passes every other
-/// test in the crate.
+/// Both directions ride the sealed-mask oracle. The MISS direction is what pins
+/// the optimisation itself (`retain`, not `clear`): swapping the per-path retain
+/// for a global wipe passes every other test in the crate.
 #[test]
 fn an_overlay_evicts_only_the_paths_it_actually_crosses() {
     let l = make_layout();
@@ -382,8 +338,8 @@ fn an_overlay_evicts_only_the_paths_it_actually_crosses() {
     let first = router.route(&l.walkable, &overlay, from, to);
     assert!(first.len() > 2, "fixture must corner: {first:?}");
 
-    // A rect far from the polyline changes the overlay SIGNATURE (so the
-    // invalidation branch runs) but crosses nothing.
+    // Far from the polyline: changes the overlay SIGNATURE (so the invalidation
+    // branch runs) but crosses nothing.
     overlay.add(0, 0, 8, 8);
     assert_eq!(
         router.route(&sealed, &overlay, from, to),
@@ -391,7 +347,6 @@ fn an_overlay_evicts_only_the_paths_it_actually_crosses() {
         "a rect clear of the polyline must leave its entry cached — `retain`, not `clear`"
     );
 
-    // Now cover a waypoint of that same path, so `path_clear_under` drops it.
     let mid = first[first.len() / 2];
     overlay.add(mid.x.saturating_sub(4), mid.y.saturating_sub(4), 8, 8);
     assert_eq!(
@@ -403,18 +358,17 @@ fn an_overlay_evicts_only_the_paths_it_actually_crosses() {
 
 #[test]
 fn path_cache_is_bounded_and_still_routes_after_the_clear() {
-    // Regression: aimless wander destinations + live-position snap-back/
-    // exit origins mint ever-new (from, to) keys, so without the cap the
-    // cache (and the per-overlay retain scan over it) grew without bound
-    // in an always-on office.
+    // Aimless wander destinations + snap-back/exit origins mint ever-new
+    // (from, to) keys, so without the cap the cache (and the per-overlay retain
+    // scan over it) grows without bound in an always-on office.
     let mask = WalkableMask::new_open(400, 400);
     let overlay = OccupancyOverlay::new();
     let mut router = AStarRouter::new();
     // On a cell-center (x % 4 == 2) so same-row routes collapse to the
-    // straight 2-point polyline (see routes_around_dynamic_obstacle).
+    // straight 2-point polyline.
     let from = Point { x: 10, y: 50 };
-    // Strictly more distinct (from, to) pairs than the cap holds, so the
-    // overflow clear provably fires at least once.
+    // Strictly more distinct pairs than the cap holds, so the overflow clear
+    // provably fires at least once.
     let distinct_routes = PATH_CACHE_CAP + 100;
     for i in 0..distinct_routes {
         let to = Point {
@@ -429,9 +383,6 @@ fn path_cache_is_bounded_and_still_routes_after_the_clear() {
             i + 1
         );
     }
-    // Routing stays correct after the overflow clear: a same-row route on
-    // an open mask yields the straight [from, to], recomputed
-    // bit-identically.
     let to = Point { x: 90, y: 50 };
     assert_eq!(
         router.route(&mask, &overlay, from, to),
@@ -442,8 +393,6 @@ fn path_cache_is_bounded_and_still_routes_after_the_clear() {
 
 #[test]
 fn routes_around_dynamic_obstacle() {
-    // Synthetic open mask isolates the routing behaviour from the
-    // production layout's obstacle clutter.
     let mask = pixtuoid_core::walkable::WalkableMask::new_open(100, 100);
     let mut overlay = OccupancyOverlay::new();
     let from = Point { x: 10, y: 50 };
@@ -651,9 +600,8 @@ fn cell_walkable_false_when_blocked_by_overlay() {
 
 #[test]
 fn find_path_returns_none_when_target_completely_surrounded() {
-    // 200×200 mask so the wall around (100,100) doesn't saturate to
-    // origin and accidentally cover from=(4,4). This ensures the coarse-cell
-    // `snap` succeeds on `from` but fails on the goal.
+    // The mask is oversized so the wall around (100,100) can't saturate to
+    // origin and cover `from` too: `snap` must succeed on `from`, fail on the goal.
     let mask = WalkableMask::new_open(200, 200);
     let mut overlay = OccupancyOverlay::new();
     let target = Point { x: 100, y: 100 };
@@ -671,21 +619,15 @@ fn find_path_returns_none_when_target_completely_surrounded() {
 
 #[test]
 fn transient_no_path_fallback_is_not_served_from_the_cache() {
-    // A wall with ONE gap; an overlay blocker transiently closes the gap →
-    // find_path None → route() returns the straight [from, to] fallback.
-    // When the blocker leaves, the SAME (from, to) key must recover the
-    // real detour: `path_clear_under` checks only the OVERLAY (never the
-    // static mask), so a cached wall-crossing fallback would survive every
-    // retain() and the agent would walk through the wall on every future
-    // leg (see the walk-path freeze doc: 2-point legs deliberately stay
-    // unfrozen precisely so "the next frame recovers the real route").
+    // `path_clear_under` checks only the OVERLAY, never the static mask, so a
+    // cached wall-crossing fallback would survive every retain() and the agent
+    // would walk through the wall on every future leg.
     let mut mask = WalkableMask::new_open(80, 48);
     // Blocked strip x ∈ [36, 44) for y ∈ [0, 32); gap open at y ∈ [32, 48).
     mask.mark_blocked(36, 0, 8, 32, 0);
     let from = Point { x: 10, y: 10 };
     let to = Point { x: 70, y: 10 };
 
-    // Sanity: with the gap open the real route is a cornered detour.
     let open = find_path(&mask, &OccupancyOverlay::new(), None, from, to).expect("gap routes");
     assert!(
         open.len() > 2,
@@ -701,8 +643,6 @@ fn transient_no_path_fallback_is_not_served_from_the_cache() {
         "with the gap closed the router falls back to the straight line"
     );
 
-    // Blocker leaves (overlay signature changes back). The poisoned key
-    // must re-route for real instead of serving the cached fallback.
     let recovered = router.route(&mask, &OccupancyOverlay::new(), from, to);
     assert!(
         recovered.len() > 2,
@@ -746,7 +686,6 @@ fn snap_point_to_walkable_returns_walkable_cell() {
         snapped.x,
         snapped.y
     );
-    // An already-open corridor point must also resolve to a walkable cell.
     let c = l.corridor.unwrap();
     let open_p = Point {
         x: c.x + c.width / 2,
@@ -759,10 +698,8 @@ fn snap_point_to_walkable_returns_walkable_cell() {
     );
 }
 
-// ── Router accessor / trait-default coverage ───────────────────────────
-
-/// A Router that does NOT override `set_preferred_zone`, so calling it hits
-/// the trait DEFAULT no-op body (pathfind.rs:63-65).
+/// A Router that does NOT override `set_preferred_zone`, so calling it hits the
+/// trait DEFAULT no-op body.
 struct NoZoneRouter;
 impl Router for NoZoneRouter {
     fn route(
@@ -781,8 +718,6 @@ impl Router for NoZoneRouter {
 #[test]
 fn router_default_set_preferred_zone_is_a_noop() {
     let mut r = NoZoneRouter;
-    // The default impl just drops the argument — calling it must not panic
-    // and must leave routing unchanged.
     r.set_preferred_zone(Some(Bounds {
         x: 0,
         y: 0,
@@ -806,11 +741,9 @@ fn astar_is_empty_then_invalidate_clears_cache() {
     let mask = WalkableMask::new_open(80, 80);
     let overlay = OccupancyOverlay::new();
     let mut router = AStarRouter::new();
-    // Fresh router has an empty cache.
     assert!(router.is_empty(), "fresh router cache must be empty");
     assert_eq!(router.len(), 0);
 
-    // One route populates the cache.
     let _ = router.route(
         &mask,
         &overlay,
@@ -820,28 +753,23 @@ fn astar_is_empty_then_invalidate_clears_cache() {
     assert!(!router.is_empty(), "cache must be non-empty after a route");
     assert_ne!(router.len(), 0);
 
-    // invalidate() drops every cached path.
     router.invalidate();
     assert!(router.is_empty(), "invalidate must clear the cache");
     assert_eq!(router.len(), 0);
 }
 
-// ── Degenerate sub-CELL_SIZE grid ──────────────────────────────────────
-
 #[test]
 fn degenerate_grid_returns_fallbacks() {
-    // A 3×3 mask: 3 / CELL_SIZE(4) == 0 on both axes ⇒ grid_dims None.
+    // Sub-CELL_SIZE on both axes, so `grid_dims` is None.
     let mask = WalkableMask::new_open(3, 3);
     let overlay = OccupancyOverlay::new();
     let a = Point { x: 0, y: 0 };
     let b = Point { x: 2, y: 2 };
-    // find_path hits the grid_dims-None early return ⇒ straight [a,b].
     assert_eq!(
         find_path(&mask, &overlay, None, a, b),
         Some(vec![a, b]),
         "degenerate grid must fall back to the straight [from,to]"
     );
-    // point_in_walkable_cell hits its grid_dims-None branch ⇒ false.
     assert!(
         !point_in_walkable_cell(&mask, a),
         "degenerate grid: no point is in a walkable cell"
@@ -850,14 +778,12 @@ fn degenerate_grid_returns_fallbacks() {
 
 #[test]
 fn snap_to_walkable_skips_out_of_bounds_corner_neighbours() {
-    // Block the bottom-right CORNER cell so the expanding ring at r>=1 pokes
-    // PAST the grid's far edge (nx>=cell_w / ny>=cell_h), forcing the
-    // out-of-range `continue` (pathfind.rs:274) before it lands on an
-    // interior walkable cell. Must still return Some.
-    let mut mask = WalkableMask::new_open(40, 40); // 10×10 cells
+    // Blocking the bottom-right CORNER cell makes the expanding ring poke PAST
+    // the grid's far edge, forcing the out-of-range `continue` before it lands
+    // on an interior walkable cell.
+    let mut mask = WalkableMask::new_open(40, 40);
     let overlay = OccupancyOverlay::new();
     let (cell_w, cell_h) = grid_dims(&mask).expect("non-degenerate");
-    // Block the corner cell (cell_w-1, cell_h-1) at the pixel level.
     let corner_px = ((cell_w - 1) * CELL_SIZE, (cell_h - 1) * CELL_SIZE);
     mask.mark_blocked(corner_px.0, corner_px.1, CELL_SIZE, CELL_SIZE, 0);
 
@@ -877,20 +803,15 @@ fn snap_to_walkable_skips_out_of_bounds_corner_neighbours() {
 
 #[test]
 fn find_path_none_when_two_regions_split_by_a_full_wall() {
-    // Two open regions split by a full-height blocked strip with NO door gap.
-    // `from`/`to` are each in open cells (snap succeeds) but the search
-    // exhausts the open set without reaching the goal ⇒ None AFTER the loop
-    // (pathfind.rs:356) — distinct from the goal-snap-fails None at 302.
+    // Both endpoints snap successfully, so the None comes from the A* loop
+    // EXHAUSTING the open set — distinct from the goal-snap-fails None.
     let mut mask = WalkableMask::new_open(80, 40);
     let overlay = OccupancyOverlay::new();
-    // Block x ∈ [36, 44) across the full height: 2 fully-blocked cell
-    // columns (cells 9,10) — impassable to the coarse diagonal stepper.
+    // Two fully-blocked cell columns, impassable to the coarse diagonal stepper.
     mask.mark_blocked(36, 0, 8, 40, 0);
 
-    let from = Point { x: 10, y: 20 }; // left region
-    let to = Point { x: 70, y: 20 }; // right region
-                                     // Sanity: both endpoints are in walkable cells, so snapping succeeds and
-                                     // the A* loop actually runs (start != goal).
+    let from = Point { x: 10, y: 20 };
+    let to = Point { x: 70, y: 20 };
     assert!(point_in_walkable_cell(&mask, from));
     assert!(point_in_walkable_cell(&mask, to));
 
@@ -902,8 +823,7 @@ fn find_path_none_when_two_regions_split_by_a_full_wall() {
 
 #[test]
 fn octile_cost_is_the_shared_diag_straight_formula() {
-    // DIAG·min + STRAIGHT·(max−min), symmetric in (dx,dy). The ONE formula the
-    // A* heuristic and pose::octile_distance now both call.
+    // The ONE formula the A* heuristic and `pose::octile_distance` both call.
     assert_eq!(
         octile_cost(3, 5),
         OCTILE_DIAGONAL_COST * 3 + OCTILE_STRAIGHT_COST * 2
@@ -915,7 +835,6 @@ fn octile_cost_is_the_shared_diag_straight_formula() {
         "pure orthogonal"
     );
     assert_eq!(octile_cost(4, 4), OCTILE_DIAGONAL_COST * 4, "pure diagonal");
-    // Parity with pose::octile_distance on the same delta (both ride octile_cost).
     let a = crate::layout::Point { x: 2, y: 7 };
     let b = crate::layout::Point { x: 9, y: 3 };
     assert_eq!(crate::pose::octile_distance(a, b), octile_cost(7, 4));

@@ -1,8 +1,6 @@
-//! The playback seam. `AudioSink` is the ONE device boundary: tests (and
-//! CI runners with no sound card) use [`NullSink`]; production uses the
-//! rodio-backed sink behind the `audio` feature. The LISTEN gate's wav
-//! renderer implements the same trait — everything above this line is
-//! device-free.
+//! The playback seam: `AudioSink` is the ONE device boundary, so everything above
+//! it is device-free and tests (or CI runners with no sound card) ride
+//! [`NullSink`].
 
 use std::sync::Arc;
 
@@ -11,25 +9,24 @@ use pixtuoid_scene::audio::mixer::LoopStem;
 pub(crate) trait AudioSink: Send {
     /// Start `stem` looping `samples` (mono f32 @ 44_100) at gain 0.
     fn start_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>);
-    /// Replace a looping stem's buffer (the #644 mood-track switch) — the
-    /// caller guarantees the stem is at gain 0, so the cut is inaudible.
+    /// Replace a looping stem's buffer — the caller guarantees the stem is at gain
+    /// 0, so the cut is inaudible.
     fn swap_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>);
     /// Set a looping stem's gain (0..=1, already master-scaled).
     fn set_loop_gain(&mut self, stem: LoopStem, gain: f32);
-    /// Fire-and-forget one-shot at `gain`.
+    /// Fire-and-forget: the one-shot is detached, never tracked.
     fn play_once(&mut self, samples: Arc<Vec<f32>>, gain: f32);
 }
 
-/// Records calls instead of making sound — the CI/test double. Keeps the
-/// registered BUFFERS (not just the stem tags) so tests can pin that each
-/// stem got the RIGHT bed — a `bed()` arm swap must not pass (review
-/// finding: tag-only recording was blind to it).
+/// Records calls instead of making sound — the CI/test double. Keeps the registered
+/// BUFFERS, not just the stem tags, so tests can pin that each stem got the RIGHT
+/// bed.
 #[cfg(test)]
 #[derive(Default)]
 pub(crate) struct NullSink {
     pub(crate) loops_started: Vec<LoopStem>,
     pub(crate) loop_samples: std::collections::HashMap<LoopStem, Arc<Vec<f32>>>,
-    /// (stem, new buffer length) per swap — the #644 switch-machine pin.
+    /// (stem, new buffer length) per swap.
     pub(crate) swaps: Vec<(LoopStem, usize)>,
     pub(crate) last_gain: std::collections::HashMap<LoopStem, f32>,
     pub(crate) one_shots: usize,
@@ -55,9 +52,8 @@ impl AudioSink for NullSink {
     }
 }
 
-/// The real device sink — rodio/cpal construction glue (winit-class:
-/// needs real audio hardware, codecov-excluded, no unit tests; the LISTEN
-/// gate + dogfood are its verification).
+/// The real device sink — rodio/cpal construction glue. Needs real audio hardware,
+/// so it is codecov-excluded and has no unit tests.
 #[cfg(feature = "audio")]
 pub(crate) mod rodio_sink {
     use super::*;
@@ -73,18 +69,13 @@ pub(crate) mod rodio_sink {
         /// `None` when no output device is available (headless boxes) —
         /// callers degrade to silence, never error the office.
         pub(crate) fn open() -> Option<Self> {
-            // `open_default_sink` keeps rodio's full open FALLBACK: the default
-            // device+config first, then — on failure — every other non-"null"
-            // output device, each retried across its supported configs. A
+            // `open_default_sink` keeps rodio's full open FALLBACK (every other
+            // non-"null" output device, each retried across its configs); a
             // hand-rolled `from_default_device().open_stream()` would silently drop
-            // that `.or_else` and go silent on hardware the fallback would have
-            // recovered. rodio's `tracing` feature (Cargo.toml) routes a MID-SESSION
-            // stream error (device unplugged, sample-rate change) — fired on the
-            // audio thread — to `tracing::error!` instead of the default callback's
-            // `eprintln!`, which mid-altscreen would corrupt the TUI. rodio 0.22 has
-            // no reconnect, so this is observability, not recovery — audio just goes
-            // silent, now logged. `with_stderr_silenced` still wraps the call for
-            // ALSA's C-level fd-2 chatter (below rodio's Rust logging).
+            // that `.or_else` and go silent on hardware the fallback recovers.
+            // rodio's `tracing` feature routes a MID-SESSION stream error to
+            // `tracing::error!` instead of an `eprintln!` that would corrupt the TUI
+            // mid-altscreen.
             let opened = with_stderr_silenced(rodio::DeviceSinkBuilder::open_default_sink);
             match opened {
                 Ok(mut stream) => {
@@ -109,11 +100,9 @@ pub(crate) mod rodio_sink {
         }
     }
 
-    /// Run `f` with fd 2 pointed at /dev/null (Unix): ALSA and friends
-    /// print raw diagnostics to stderr during device open, and with the
-    /// lazy spawn that happens MID-ALTSCREEN — one stray line corrupts the
-    /// TUI (lowfi's first-ever issue was exactly this). rodio's own logs
-    /// are already off via `log_on_drop(false)`.
+    /// Run `f` with fd 2 pointed at /dev/null (Unix): ALSA and friends print raw
+    /// diagnostics to stderr during device open, and the lazy spawn happens
+    /// MID-ALTSCREEN — one stray line corrupts the TUI.
     #[cfg(unix)]
     fn with_stderr_silenced<T>(f: impl FnOnce() -> T) -> T {
         // SAFETY: plain dup/dup2 fd shuffling; restored before returning.
@@ -152,8 +141,8 @@ pub(crate) mod rodio_sink {
         }
 
         fn swap_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>) {
-            // dropping the old Player stops it (the caller holds the stem
-            // at gain 0 across the swap, so nothing audible is cut)
+            // the caller holds the stem at gain 0 across the swap, so nothing
+            // audible is cut
             if let Some(old) = self.loops.remove(&stem) {
                 old.stop();
             }

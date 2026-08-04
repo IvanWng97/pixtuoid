@@ -105,13 +105,12 @@ jobs:
             echo "Head: $HEAD_SHA"
           } > .claude-review/review-context.md
 
-      # The schema lives in a committed .json so every tool can read it — the
-      # inline literal was invisible to actionlint and zizmor, and an unbalanced
-      # brace in it took both review bots down for 31h. `check-jsonschema
+      # The schema lives in a committed .json so every tool can read it: an
+      # inline literal is invisible to actionlint and zizmor, and an unbalanced
+      # brace in one took both review bots down. `check-jsonschema
       # --check-metaschema` gates the file in `just lint`. The CLI has no
       # --json-schema-file and rejects a path, so it must round-trip through a
-      # step output; shlex.quote does the shell quoting, which (unlike a
-      # hand-written '...' wrapper) survives a payload containing an apostrophe.
+      # step output; shlex.quote survives a payload containing an apostrophe.
       - name: Load the review schema
         if: steps.pr.outputs.reviewable == 'true'
         id: schema
@@ -166,13 +165,11 @@ jobs:
 
   # Absence renders as a pass: publish skips, nothing comments, and `ci-gate`
   # being the only required check leaves the PR merely UNSTABLE. The merge gate
-  # is "Findings: 0 at HEAD", so an absent verdict has to say it is absent.
-  #
-  # Two shapes, and the quieter one is greener: analyze FAILS, or it DECLINES
-  # (`reviewable=false` exits 0, so that arm has no red job at all — a
-  # `/claude-review` on a fork PR hits it). `!cancelled()` is load-bearing:
-  # without a status function an implicit `success()` skips this job in exactly
-  # the situation it exists for. #819
+  # is "Findings: 0 at HEAD", so an absent verdict has to say it is absent. Two
+  # shapes, and the quieter one is greener: analyze FAILS, or it DECLINES
+  # (`reviewable=false` exits 0, so that arm has no red job at all).
+  # `!cancelled()` is load-bearing: without a status function an implicit
+  # `success()` skips this job in exactly the situation it exists for.
   report_absence:
     name: Report a missing review
     needs: analyze
