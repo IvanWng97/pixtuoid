@@ -95,17 +95,18 @@ Raycast app** and only run before a store publish — they are NOT in CI, so a
 green PR does not prove the manifest is publishable. See the
 [README](README.md) for `npm run {build,dev,lint}`.
 
-- **`npm ci` reports HIGH advisories here, and the "don't fix" call is CHECKED
-  rather than asserted.** `npm run audit` (`scripts/audit-adjudicated.mjs`)
-  passes only while the live advisory set EQUALS the adjudicated set in that
-  file — so a new advisory reds CI, and one that clears upstream reds it too,
-  which keeps a refusal from outliving its reason. It is a script because
-  `npm audit` has no per-advisory ignore flag (only `--audit-level`). Today's
-  one entry is the brace-expansion DoS **GHSA-mh99-v99m-4gvg**, reached solely
-  through `@oclif/core → ejs ^3 → jake ^10 → filelist ^1 → minimatch ^5`; the
-  entry carries why the override is refused (5.x made the export an object,
-  so `npm audit` goes green over code that throws) and the one upstream move
-  that clears it.
+- **`npm run audit` is plain `npm audit --audit-level=low`, same as site's.** It
+  was a per-advisory allow-list script until its one entry, GHSA-mh99-v99m-4gvg,
+  cleared — upstream BACKPORTED that fix to **2.1.3**, so the pinned 2.x copy
+  took it in-range at 2.1.4 and the chain never had to move (the deleted entry's
+  "first patched 5.0.8, so 2.x is unfixable" is the stale reading, and it has
+  already misled one reviewer);
+  `npm audit` has no per-advisory ignore, so if an unfixable advisory recurs
+  here, restore that script from history rather than lowering `--audit-level`,
+  which blinds a whole severity band to hide one id. Unfixable is realistic:
+  the last one arrived via `@oclif/core → ejs ^3 → jake ^10 → filelist ^1 →
+  minimatch ^5`, a chain we own no link of, and the override that would have
+  patched it made audit green over code that throws (#792).
 - **A chord Raycast RESERVES is swallowed, so its Action is unreachable — and
   `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
   it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension

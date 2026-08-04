@@ -560,6 +560,249 @@ pub(crate) struct TuiSession {
     pub first_run: bool,
 }
 
+/// Whether a left-click at `(col, row)` landed on the wall's star/repo link,
+/// given the terminal's `(cols, rows)`.
+///
+/// Callers MUST gate this on `renderer.cached_layout().is_some()` — the wall
+/// display only paints with a layout, so an ungated hit phantom-launches a
+/// browser on a too-small frame or mid floor-slide.
+///
+/// Note the asymmetry with [`version_popup_url_clicked`]: this hit-tests the
+/// SCENE rect (footer excluded), that one the full terminal bounds.
+fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
+    let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
+    widgets::star_hit_rect(scene)
+        .is_some_and(|s| s.contains(ratatui::layout::Position { x: col, y: row }))
+}
+
+/// Whether a left-click at `(col, row)` landed on the version popup's URL,
+/// given the terminal's `(cols, rows)`.
+///
+/// `scale` is the PAINTER's own last frame-scale, so the hit geometry matches
+/// what was actually painted rather than the popup's resting size — the popup
+/// is clickable mid-animation.
+fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
+    let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
+    let notes = crate::version::release_notes(env!("CARGO_PKG_VERSION")).unwrap_or(&[]);
+    widgets::version_popup_url_rect(notes, bounds, scale)
+        .is_some_and(|rect| rect.contains(ratatui::layout::Position { x: col, y: row }))
+}
+
+/// Everything an applied [`KeyAction`] may touch: three `&mut` surfaces plus
+/// the read-only context. A parameter object, not an abstraction — it exists so
+/// the arm list takes one argument instead of nine.
+struct KeyCtx<'a, B: ratatui::backend::Backend<Error: Send + Sync + 'static>> {
+    ui: &'a mut ui_state::UiState,
+    renderer: &'a mut TuiRenderer<B>,
+    audio_ctl: &'a mut crate::audio::AudioController,
+    config_path: &'a std::path::Path,
+    connected: &'a crate::runtime::ConnectedSources,
+    snapshot: &'a pixtuoid_core::state::SceneState,
+    focus_roots: &'a (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+    now: SystemTime,
+    /// Injected for the same reason `AudioController::apply` takes it: the real
+    /// one opens an output device, so a test firing an audio arm would grab the
+    /// machine's sound hardware.
+    respawn: fn(&crate::audio::AudioHandle, f32),
+}
+
+/// Apply one decoded [`KeyAction`], returning whether it asked to QUIT — the
+/// single piece of control flow the caller's event loop keeps.
+///
+/// Paired with [`dispatch_key`], which decodes; this applies. Splitting them
+/// is what makes the arms reachable from a test at all — `run_tui` needs a
+/// real terminal.
+fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+    action: KeyAction,
+    cx: &mut KeyCtx<'_, B>,
+) -> bool {
+    match action {
+        KeyAction::None => {}
+        KeyAction::Quit => return true,
+        KeyAction::TogglePause => {
+            cx.ui.toggle_pause();
+            // Unpause restores the user's own m-key state rather than
+            // clobbering it.
+            cx.audio_ctl.set_paused(cx.ui.paused());
+        }
+        KeyAction::ToggleHelp => cx.ui.toggle_help(),
+        KeyAction::CloseHelp => cx.ui.close_help(),
+        KeyAction::DismissVersionPopup => cx.ui.dismiss_version_popup(),
+        KeyAction::OpenThemePicker => cx.ui.open_theme_picker(),
+        KeyAction::ThemePreview(i) => {
+            cx.ui.preview_theme(i);
+            cx.renderer.set_theme(theme::ALL_THEMES[i]);
+        }
+        KeyAction::ThemeCommit(i) => {
+            cx.ui.commit_theme(i);
+            let name = theme::ALL_THEMES[i].name;
+            if let Err(e) = crate::config::save(cx.config_path, name) {
+                tracing::warn!("failed to persist theme: {e}");
+            }
+        }
+        KeyAction::ThemeCancel => {
+            let saved = cx.ui.cancel_theme();
+            cx.renderer.set_theme(theme::ALL_THEMES[saved]);
+        }
+        KeyAction::NavigateFloor(target) => {
+            cx.renderer.navigate_floor(target, cx.now);
+        }
+        KeyAction::ToggleAudioMute => {
+            cx.audio_ctl.apply(
+                crate::audio::AudioAction::ToggleMute,
+                cx.ui.paused(),
+                Instant::now(),
+                cx.respawn,
+            );
+        }
+        KeyAction::AdjustVolume(up) => {
+            cx.audio_ctl.apply(
+                crate::audio::AudioAction::Volume(up),
+                cx.ui.paused(),
+                Instant::now(),
+                cx.respawn,
+            );
+        }
+        KeyAction::ToggleWalkableDebug => {
+            let on = cx.renderer.debug_walkable();
+            cx.renderer.set_debug_walkable(!on);
+        }
+        KeyAction::ToggleDashboard => cx.ui.toggle_dashboard(cx.snapshot),
+        KeyAction::DashboardClose => cx.ui.close_dashboard(),
+        KeyAction::DashboardUp => cx.ui.dashboard_move(cx.snapshot, -1),
+        KeyAction::DashboardDown => cx.ui.dashboard_move(cx.snapshot, 1),
+        KeyAction::DashboardFoldLeft => cx.ui.dashboard_fold_left(cx.snapshot),
+        KeyAction::DashboardFoldRight => cx.ui.dashboard_fold_right(cx.snapshot),
+        KeyAction::DashboardFoldAll => cx.ui.dashboard_fold_all(cx.snapshot),
+        KeyAction::DashboardJump => {
+            if let Some(floor) = cx.ui.dashboard_jump(cx.snapshot) {
+                cx.renderer.navigate_floor(floor, cx.now);
+            }
+        }
+        KeyAction::DashboardFocus => {
+            if let Some(slot) = cx
+                .ui
+                .dashboard_focus()
+                .and_then(|id| cx.snapshot.agents.get(&id))
+            {
+                crate::focus::focus_slot(slot, cx.focus_roots);
+            }
+        }
+        KeyAction::ToggleConnection => {
+            if cx.ui.connection.open {
+                cx.ui.close_connection();
+            } else {
+                // FS reads happen on open and after each toggle, never per
+                // frame.
+                let rows = connection::build_rows(&cx.connected.snapshot(), &cx.ui.read_conn_log());
+                cx.ui.open_connection(rows);
+            }
+        }
+        KeyAction::ConnectionUp => cx.ui.connection_move(-1),
+        KeyAction::ConnectionDown => cx.ui.connection_move(1),
+        KeyAction::ConnectionToggle => {
+            // Copy the fields out before any rebuild of `rows` (which would
+            // invalidate a `&ConnectionRow` borrow).
+            let action = cx
+                .ui
+                .connection
+                .rows
+                .get(cx.ui.connection.selected)
+                .map(|r| {
+                    (
+                        r.state,
+                        r.source_id,
+                        r.display_name,
+                        connection::no_action_hint(r),
+                    )
+                });
+            if let Some((state, source_id, name, hint)) = action {
+                match toggle_intent(state) {
+                    ToggleIntent::ArmConfirm => {
+                        cx.ui.connection.confirm = Some(cx.ui.connection.selected);
+                    }
+                    ToggleIntent::Connect => {
+                        cx.ui.connection.last_result = Some(connect_source(
+                            cx.config_path,
+                            cx.connected,
+                            source_id,
+                            name,
+                        ));
+                        cx.ui.connection.rows = connection::build_rows(
+                            &cx.connected.snapshot(),
+                            &cx.ui.read_conn_log(),
+                        );
+                    }
+                    ToggleIntent::Hint => {
+                        cx.ui.connection.last_result = Some(hint);
+                    }
+                }
+            }
+        }
+        KeyAction::ConnectionConfirm => {
+            if let Some(idx) = cx.ui.connection.confirm {
+                let action = cx
+                    .ui
+                    .connection
+                    .rows
+                    .get(idx)
+                    .map(|r| (r.source_id, r.display_name));
+                if let Some((source_id, name)) = action {
+                    cx.ui.connection.last_result = Some(disconnect_source(
+                        cx.config_path,
+                        cx.connected,
+                        source_id,
+                        name,
+                    ));
+                    cx.ui.connection.rows =
+                        connection::build_rows(&cx.connected.snapshot(), &cx.ui.read_conn_log());
+                }
+            }
+            cx.ui.connection.confirm = None;
+        }
+        KeyAction::ConnectionCancelConfirm => cx.ui.cancel_connection_confirm(),
+        KeyAction::ConnectionClose => cx.ui.close_connection(),
+        KeyAction::OnboardingUp => cx.ui.onboarding_ui.move_up(),
+        KeyAction::OnboardingDown => cx.ui.onboarding_ui.move_down(),
+        KeyAction::OnboardingToggle => cx.ui.onboarding_ui.toggle_selected(),
+        KeyAction::OnboardingConfirm => {
+            // SCOPED to the detected sources, so an undetected source's flag is
+            // never written.
+            let choices = cx.ui.onboarding_ui.decisions();
+            let outcomes = crate::sources::apply_choices(cx.config_path, &choices);
+            let failed = reflect_onboarding_outcomes(cx.connected, &choices, &outcomes);
+            cx.ui.close_onboarding();
+            surface_onboarding_failures(cx.ui, cx.connected, failed);
+        }
+        KeyAction::OnboardingSkip => {
+            // Skip marks onboarding done WITHOUT changing any hooks: freeze each
+            // detected source to its REAL current state — live-gate connected OR
+            // already carrying installed hooks (a pre-0.12 upgrader has hooks but
+            // no `[sources]` flag). The apply below re-installs those idempotently
+            // and leaves the rest disconnected, so `[sources]` becomes non-empty —
+            // onboarding won't re-trigger — yet NO hooks are added or removed.
+            let snap = cx.connected.snapshot();
+            let ids: Vec<&'static str> = cx
+                .ui
+                .onboarding_ui
+                .rows
+                .iter()
+                .map(|r| r.source_id)
+                .collect();
+            let freeze = crate::sources::skip_freeze(ids, &snap);
+            let outcomes = crate::sources::apply_choices(cx.config_path, &freeze);
+            // The freeze persists connected=true for a pre-0.12 upgrader's hooked
+            // sources, so the in-process gate must open THIS session too — else
+            // their office stays empty until the next restart re-seeds it from the
+            // flags.
+            let failed = reflect_onboarding_outcomes(cx.connected, &freeze, &outcomes);
+            cx.ui.close_onboarding();
+            surface_onboarding_failures(cx.ui, cx.connected, failed);
+        }
+    }
+    false
+}
+
 pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let TuiSession {
         mut scene_rx,
@@ -684,188 +927,21 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             current_floor: renderer.current_floor(),
                             in_transition: renderer.transition().is_some(),
                         };
-                        match dispatch_key(k.code, k.modifiers, ui.modal(), floor) {
-                            KeyAction::None => {}
-                            KeyAction::Quit => quit = true,
-                            KeyAction::TogglePause => {
-                                ui.toggle_pause();
-                                // Unpause restores the user's own m-key state rather
-                                // than clobbering it.
-                                audio_ctl.set_paused(ui.paused());
-                            }
-                            KeyAction::ToggleHelp => ui.toggle_help(),
-                            KeyAction::CloseHelp => ui.close_help(),
-                            KeyAction::DismissVersionPopup => ui.dismiss_version_popup(),
-                            KeyAction::OpenThemePicker => ui.open_theme_picker(),
-                            KeyAction::ThemePreview(i) => {
-                                ui.preview_theme(i);
-                                renderer.set_theme(theme::ALL_THEMES[i]);
-                            }
-                            KeyAction::ThemeCommit(i) => {
-                                ui.commit_theme(i);
-                                let name = theme::ALL_THEMES[i].name;
-                                if let Err(e) = crate::config::save(&config_path, name) {
-                                    tracing::warn!("failed to persist theme: {e}");
-                                }
-                            }
-                            KeyAction::ThemeCancel => {
-                                let saved = ui.cancel_theme();
-                                renderer.set_theme(theme::ALL_THEMES[saved]);
-                            }
-                            KeyAction::NavigateFloor(target) => {
-                                renderer.navigate_floor(target, now);
-                            }
-                            KeyAction::ToggleAudioMute => {
-                                audio_ctl.apply(
-                                    crate::audio::AudioAction::ToggleMute,
-                                    ui.paused(),
-                                    std::time::Instant::now(),
-                                    crate::audio::respawn,
-                                );
-                            }
-                            KeyAction::AdjustVolume(up) => {
-                                audio_ctl.apply(
-                                    crate::audio::AudioAction::Volume(up),
-                                    ui.paused(),
-                                    std::time::Instant::now(),
-                                    crate::audio::respawn,
-                                );
-                            }
-                            KeyAction::ToggleWalkableDebug => {
-                                let on = renderer.debug_walkable();
-                                renderer.set_debug_walkable(!on);
-                            }
-                            KeyAction::ToggleDashboard => ui.toggle_dashboard(&snapshot),
-                            KeyAction::DashboardClose => ui.close_dashboard(),
-                            KeyAction::DashboardUp => ui.dashboard_move(&snapshot, -1),
-                            KeyAction::DashboardDown => ui.dashboard_move(&snapshot, 1),
-                            KeyAction::DashboardFoldLeft => ui.dashboard_fold_left(&snapshot),
-                            KeyAction::DashboardFoldRight => ui.dashboard_fold_right(&snapshot),
-                            KeyAction::DashboardFoldAll => ui.dashboard_fold_all(&snapshot),
-                            KeyAction::DashboardJump => {
-                                if let Some(floor) = ui.dashboard_jump(&snapshot) {
-                                    renderer.navigate_floor(floor, now);
-                                }
-                            }
-                            KeyAction::DashboardFocus => {
-                                if let Some(slot) =
-                                    ui.dashboard_focus().and_then(|id| snapshot.agents.get(&id))
-                                {
-                                    crate::focus::focus_slot(slot, &focus_roots);
-                                }
-                            }
-                            KeyAction::ToggleConnection => {
-                                if ui.connection.open {
-                                    ui.close_connection();
-                                } else {
-                                    // FS reads happen on open and after each toggle,
-                                    // never per frame.
-                                    let rows = connection::build_rows(
-                                        &connected.snapshot(),
-                                        &ui.read_conn_log(),
-                                    );
-                                    ui.open_connection(rows);
-                                }
-                            }
-                            KeyAction::ConnectionUp => ui.connection_move(-1),
-                            KeyAction::ConnectionDown => ui.connection_move(1),
-                            KeyAction::ConnectionToggle => {
-                                // Copy the fields out before any rebuild of `rows`
-                                // (which would invalidate a `&ConnectionRow` borrow).
-                                let action =
-                                    ui.connection.rows.get(ui.connection.selected).map(|r| {
-                                        (
-                                            r.state,
-                                            r.source_id,
-                                            r.display_name,
-                                            connection::no_action_hint(r),
-                                        )
-                                    });
-                                if let Some((state, source_id, name, hint)) = action {
-                                    match toggle_intent(state) {
-                                        ToggleIntent::ArmConfirm => {
-                                            ui.connection.confirm = Some(ui.connection.selected);
-                                        }
-                                        ToggleIntent::Connect => {
-                                            ui.connection.last_result = Some(connect_source(
-                                                &config_path,
-                                                &connected,
-                                                source_id,
-                                                name,
-                                            ));
-                                            ui.connection.rows = connection::build_rows(
-                                                &connected.snapshot(),
-                                                &ui.read_conn_log(),
-                                            );
-                                        }
-                                        ToggleIntent::Hint => {
-                                            ui.connection.last_result = Some(hint);
-                                        }
-                                    }
-                                }
-                            }
-                            KeyAction::ConnectionConfirm => {
-                                if let Some(idx) = ui.connection.confirm {
-                                    let action = ui
-                                        .connection
-                                        .rows
-                                        .get(idx)
-                                        .map(|r| (r.source_id, r.display_name));
-                                    if let Some((source_id, name)) = action {
-                                        ui.connection.last_result = Some(disconnect_source(
-                                            &config_path,
-                                            &connected,
-                                            source_id,
-                                            name,
-                                        ));
-                                        ui.connection.rows = connection::build_rows(
-                                            &connected.snapshot(),
-                                            &ui.read_conn_log(),
-                                        );
-                                    }
-                                }
-                                ui.connection.confirm = None;
-                            }
-                            KeyAction::ConnectionCancelConfirm => ui.cancel_connection_confirm(),
-                            KeyAction::ConnectionClose => ui.close_connection(),
-                            KeyAction::OnboardingUp => ui.onboarding_ui.move_up(),
-                            KeyAction::OnboardingDown => ui.onboarding_ui.move_down(),
-                            KeyAction::OnboardingToggle => ui.onboarding_ui.toggle_selected(),
-                            KeyAction::OnboardingConfirm => {
-                                // SCOPED to the detected sources, so an undetected
-                                // source's flag is never written.
-                                let choices = ui.onboarding_ui.decisions();
-                                let outcomes =
-                                    crate::sources::apply_choices(&config_path, &choices);
-                                let failed =
-                                    reflect_onboarding_outcomes(&connected, &choices, &outcomes);
-                                ui.close_onboarding();
-                                surface_onboarding_failures(&mut ui, &connected, failed);
-                            }
-                            KeyAction::OnboardingSkip => {
-                                // Skip marks onboarding done WITHOUT changing any hooks:
-                                // freeze each detected source to its REAL current state
-                                // — live-gate connected OR already carrying installed
-                                // hooks (a pre-0.12 upgrader has hooks but no
-                                // `[sources]` flag). The apply below re-installs those
-                                // idempotently and leaves the rest disconnected, so
-                                // `[sources]` becomes non-empty — onboarding won't
-                                // re-trigger — yet NO hooks are added or removed.
-                                let snap = connected.snapshot();
-                                let ids: Vec<&'static str> =
-                                    ui.onboarding_ui.rows.iter().map(|r| r.source_id).collect();
-                                let freeze = crate::sources::skip_freeze(ids, &snap);
-                                let outcomes = crate::sources::apply_choices(&config_path, &freeze);
-                                // The freeze persists connected=true for a pre-0.12
-                                // upgrader's hooked sources, so the in-process gate must
-                                // open THIS session too — else their office stays empty
-                                // until the next restart re-seeds it from the flags.
-                                let failed =
-                                    reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
-                                ui.close_onboarding();
-                                surface_onboarding_failures(&mut ui, &connected, failed);
-                            }
-                        }
+                        let action = dispatch_key(k.code, k.modifiers, ui.modal(), floor);
+                        quit |= apply_key_action(
+                            action,
+                            &mut KeyCtx {
+                                ui: &mut ui,
+                                renderer: &mut renderer,
+                                audio_ctl: &mut audio_ctl,
+                                config_path: &config_path,
+                                connected: &connected,
+                                snapshot: &snapshot,
+                                focus_roots: &focus_roots,
+                                now,
+                                respawn: crate::audio::respawn,
+                            },
+                        );
                     }
                     Event::Mouse(_) if ui.onboarding_open() => {
                         // Modal for the mouse too: swallow every event so nothing leaks
@@ -884,30 +960,17 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         // Only the URL link is clickable while the popup is animating
                         // or visible. The painter's own frame-scale is used so the click
                         // geometry matches what was actually painted.
-                        if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
-                            if let Ok((cols, rows)) = crossterm::terminal::size() {
-                                let bounds = ratatui::layout::Rect {
-                                    x: 0,
-                                    y: 0,
-                                    width: cols,
-                                    height: rows,
-                                };
-                                let notes =
-                                    crate::version::release_notes(env!("CARGO_PKG_VERSION"))
-                                        .unwrap_or(&[]);
-                                let scale = renderer.last_popup_scale();
-                                if let Some(rect) =
-                                    widgets::version_popup_url_rect(notes, bounds, scale)
-                                {
-                                    if m.column >= rect.x
-                                        && m.column < rect.x + rect.width
-                                        && m.row >= rect.y
-                                        && m.row < rect.y + rect.height
-                                    {
-                                        let _ = open::that(widgets::VERSION_POPUP_URL);
-                                    }
-                                }
-                            }
+                        if matches!(m.kind, MouseEventKind::Down(MouseButton::Left))
+                            && crossterm::terminal::size().is_ok_and(|t| {
+                                version_popup_url_clicked(
+                                    m.column,
+                                    m.row,
+                                    renderer.last_popup_scale(),
+                                    t,
+                                )
+                            })
+                        {
+                            let _ = open::that(widgets::VERSION_POPUP_URL);
                         }
                     }
                     Event::Mouse(_)
@@ -924,26 +987,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
                             renderer.set_mouse_pos(Some((m.column, m.row)));
-                            // Gate on cached_layout — the wall display only paints with
-                            // one — so a too-small frame or a floor-slide transition
-                            // can't phantom-launch.
                             let on_star = renderer.cached_layout().is_some()
                                 && crossterm::terminal::size()
-                                    .ok()
-                                    .is_some_and(|(cols, rows)| {
-                                        let scene = renderer::scene_rect(ratatui::layout::Rect {
-                                            x: 0,
-                                            y: 0,
-                                            width: cols,
-                                            height: rows,
-                                        });
-                                        widgets::star_hit_rect(scene).is_some_and(|s| {
-                                            s.contains(ratatui::layout::Position {
-                                                x: m.column,
-                                                y: m.row,
-                                            })
-                                        })
-                                    });
+                                    .is_ok_and(|t| star_clicked(m.column, m.row, t));
                             if on_star {
                                 let _ = open::that(widgets::REPO_URL);
                             } else if focus_clicked_agent(
@@ -2061,6 +2107,310 @@ mod dispatch_tests {
         assert!(
             connected.is_connected("antigravity"),
             "skip must open the live gate for a frozen-connected source"
+        );
+    }
+}
+
+/// Tests for the APPLIER half of the key path. `dispatch_key` (the decoder) is
+/// covered by `dispatch_tests` above; before the #830 split these arms lived
+/// inside `run_tui`, which needs a real terminal, so nothing could reach them.
+#[cfg(test)]
+mod apply_key_action_tests {
+    use super::{apply_key_action, KeyAction, KeyCtx};
+    use crate::tui::tui_renderer::TuiRenderer;
+    use pixtuoid_scene::theme;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::collections::HashSet;
+    use std::time::SystemTime;
+
+    /// Stands in for `crate::audio::respawn`, which opens a real output device.
+    fn no_respawn(_: &crate::audio::AudioHandle, _: f32) {}
+
+    struct Harness {
+        ui: super::ui_state::UiState,
+        renderer: TuiRenderer<TestBackend>,
+        audio_ctl: crate::audio::AudioController,
+        connected: crate::runtime::ConnectedSources,
+        snapshot: pixtuoid_core::state::SceneState,
+        focus_roots: (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+        _tmp: tempfile::TempDir,
+        config_path: std::path::PathBuf,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let config_path = tmp.path().join("config.toml");
+            Self {
+                ui: super::ui_state::UiState::new(
+                    &theme::NORMAL,
+                    super::welcome::WelcomeUi::from_detected(&[]),
+                    false,
+                    tmp.path().join("sock"),
+                    None,
+                ),
+                renderer: TuiRenderer::new(
+                    Terminal::new(TestBackend::new(80, 24)).expect("test backend"),
+                    &theme::NORMAL,
+                    Vec::new(),
+                ),
+                // UNMUTED via `new_with` + a no-op spawn: an unmuted `new`
+                // would open the machine's real output device, and a MUTED
+                // controller makes pause unobservable (`set_paused` ORs the
+                // mute flag in, so the handle stays muted either way).
+                audio_ctl: crate::audio::AudioController::new_with(
+                    false,
+                    1.0,
+                    config_path.clone(),
+                    no_respawn,
+                ),
+                connected: crate::runtime::ConnectedSources::new(HashSet::new()),
+                snapshot: pixtuoid_core::state::SceneState::uniform(4),
+                focus_roots: (None, None),
+                _tmp: tmp,
+                config_path,
+            }
+        }
+
+        /// Register `n` agents so the dashboard has rows to move through.
+        fn seed_agents(&mut self, n: usize) {
+            use pixtuoid_core::source::{AgentEvent, Transport};
+            let mut r = pixtuoid_core::Reducer::new();
+            for i in 0..n {
+                let path = format!("/p/agent-{i}.jsonl");
+                r.apply(
+                    &mut self.snapshot,
+                    AgentEvent::SessionStart {
+                        agent_id: pixtuoid_core::AgentId::from_transcript_path(&path),
+                        source: "claude-code".into(),
+                        session_id: path.clone(),
+                        cwd: std::path::PathBuf::from("/repo"),
+                        parent_id: None,
+                    },
+                    SystemTime::UNIX_EPOCH,
+                    Transport::Jsonl,
+                );
+            }
+        }
+
+        fn apply(&mut self, action: KeyAction) -> bool {
+            apply_key_action(
+                action,
+                &mut KeyCtx {
+                    ui: &mut self.ui,
+                    renderer: &mut self.renderer,
+                    audio_ctl: &mut self.audio_ctl,
+                    config_path: &self.config_path,
+                    connected: &self.connected,
+                    snapshot: &self.snapshot,
+                    focus_roots: &self.focus_roots,
+                    now: SystemTime::UNIX_EPOCH,
+                    respawn: no_respawn,
+                },
+            )
+        }
+    }
+
+    /// The highest-blast-radius pair: `Quit` must be the ONLY action that ends
+    /// the loop. A mutant returning a constant makes every keypress quit (or
+    /// makes `q` inert), and nothing else in the suite would notice.
+    #[test]
+    fn only_quit_returns_true() {
+        let mut h = Harness::new();
+        assert!(h.apply(KeyAction::Quit), "Quit must end the loop");
+        for action in [
+            KeyAction::None,
+            KeyAction::TogglePause,
+            KeyAction::ToggleHelp,
+            KeyAction::CloseHelp,
+            KeyAction::DismissVersionPopup,
+            KeyAction::OpenThemePicker,
+            KeyAction::ToggleWalkableDebug,
+            KeyAction::ToggleDashboard,
+            KeyAction::DashboardClose,
+            KeyAction::ConnectionClose,
+        ] {
+            assert!(
+                !h.apply(action),
+                "only Quit may end the loop, but {action:?} did"
+            );
+        }
+    }
+
+    /// `set_paused` must read `paused()` AFTER the toggle. Asserting only
+    /// `ui.paused()` is NOT enough — that survives swapping the two statements,
+    /// because the UI flag flips either way. The audio handle is what goes out
+    /// of sync, so assert THAT: pausing must mute, unpausing must unmute.
+    #[test]
+    fn toggle_pause_drives_the_audio_handle_in_step_with_the_ui() {
+        let mut h = Harness::new();
+        assert!(!h.ui.paused());
+        assert!(
+            !h.audio_ctl.handle().is_muted(),
+            "harness precondition: the controller starts unmuted"
+        );
+
+        h.apply(KeyAction::TogglePause);
+        assert!(h.ui.paused(), "p must pause the UI");
+        assert!(
+            h.audio_ctl.handle().is_muted(),
+            "p must mute audio in the SAME apply — a set_paused read before the \
+             toggle leaves the handle a step behind"
+        );
+
+        h.apply(KeyAction::TogglePause);
+        assert!(!h.ui.paused(), "p again must unpause the UI");
+        assert!(
+            !h.audio_ctl.handle().is_muted(),
+            "unpause must unmute in the same apply"
+        );
+    }
+
+    /// Pins the `!` the mutation run flagged: dropping it makes the toggle a
+    /// no-op that always writes the value already there.
+    #[test]
+    fn toggle_walkable_debug_flips_rather_than_sets() {
+        let mut h = Harness::new();
+        let before = h.renderer.debug_walkable();
+        h.apply(KeyAction::ToggleWalkableDebug);
+        assert_eq!(
+            h.renderer.debug_walkable(),
+            !before,
+            "w must FLIP the overlay, not assign a constant"
+        );
+        h.apply(KeyAction::ToggleWalkableDebug);
+        assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
+    }
+
+    /// The click predicates were made pure so they COULD be tested; these are
+    /// that. Both were previously unreachable — they called
+    /// `crossterm::terminal::size()` internally, which under `cargo test` has no
+    /// tty and returned `Err` -> `false` unconditionally.
+    ///
+    /// Deliberately NOT asserted: the scene-rect-vs-full-bounds asymmetry
+    /// between the two. `star_hit_rect` places the star at `scene.y + 1` height
+    /// 1 and `scene_rect` shrinks only HEIGHT, so both framings yield an
+    /// identical star rect on any terminal taller than two rows — an assertion
+    /// there would be near-unfalsifiable.
+    #[test]
+    fn star_clicked_hits_only_the_star_span() {
+        use crate::tui::widgets::star_hit_rect;
+        let term = (120u16, 44u16);
+        let scene = super::renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
+        let star = star_hit_rect(scene).expect("the star fits at 120x44");
+
+        assert!(
+            super::star_clicked(star.x, star.y, term),
+            "a click on the star's first column must hit"
+        );
+        assert!(
+            super::star_clicked(star.x + star.width - 1, star.y, term),
+            "a click on the star's last column must hit"
+        );
+        assert!(
+            !super::star_clicked(star.x - 1, star.y, term),
+            "one column LEFT of the star must miss"
+        );
+        assert!(
+            !super::star_clicked(star.x, star.y + 1, term),
+            "one row BELOW the star must miss — the rect is height 1"
+        );
+        // Too narrow to paint any of the star ⇒ no click target, no phantom
+        // browser launch.
+        assert!(
+            !super::star_clicked(1, 1, (10, 44)),
+            "a terminal too narrow for the star must never register a hit"
+        );
+    }
+
+    /// The popup URL is clickable only while the popup is actually painted —
+    /// `version_popup_url_rect` returns `None` below the clickable scale, and a
+    /// predicate that ignored `scale` would launch a browser on a click landing
+    /// where the popup merely USED to be.
+    #[test]
+    fn version_popup_url_clicked_respects_the_rect_and_the_scale() {
+        use crate::tui::widgets::version_popup_url_rect;
+        let term = (120u16, 44u16);
+        let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
+        let notes = crate::version::release_notes(env!("CARGO_PKG_VERSION")).unwrap_or(&[]);
+        let Some(rect) = version_popup_url_rect(notes, bounds, 1.0) else {
+            // The shipped notes must produce a link rect at full scale; if this
+            // ever changes the assertions below would pass vacuously.
+            panic!("the shipped release notes must yield a URL rect at scale 1.0");
+        };
+
+        assert!(
+            super::version_popup_url_clicked(rect.x, rect.y, 1.0, term),
+            "a click inside the URL rect at full scale must hit"
+        );
+        assert!(
+            !super::version_popup_url_clicked(rect.x, rect.y.saturating_sub(1), 1.0, term),
+            "a click one row above the URL must miss"
+        );
+        assert!(
+            !super::version_popup_url_clicked(rect.x, rect.y, 0.5, term),
+            "mid-animation (below the clickable scale) there is no rect, so no hit"
+        );
+    }
+
+    /// `delete -` on either `-1` makes Up behave as Down. The panels are
+    /// independent, so both pairs need pinning — and each needs at least two
+    /// rows, or the move is a no-op in both directions and the assertion is
+    /// vacuous.
+    #[test]
+    fn dashboard_and_connection_up_move_opposite_to_down() {
+        let mut h = Harness::new();
+        h.seed_agents(3);
+
+        h.apply(KeyAction::ToggleDashboard);
+        let start = h.ui.dashboard.selected;
+        h.apply(KeyAction::DashboardDown);
+        let after_down = h.ui.dashboard.selected;
+        assert_ne!(after_down, start, "precondition: Down actually moves");
+        h.apply(KeyAction::DashboardUp);
+        // Must return to `start`, not merely DIFFER from `after_down` — with the
+        // `-1` deleted, Up moves further DOWN, which also differs.
+        assert_eq!(
+            h.ui.dashboard.selected, start,
+            "DashboardUp must undo DashboardDown, not advance further"
+        );
+
+        h.apply(KeyAction::ToggleConnection);
+        assert!(
+            h.ui.connection.rows.len() > 1,
+            "precondition: the Sources panel lists the registry, so it has rows"
+        );
+        let start = h.ui.connection.selected;
+        h.apply(KeyAction::ConnectionDown);
+        let after_down = h.ui.connection.selected;
+        assert_ne!(after_down, start, "precondition: Down actually moves");
+        h.apply(KeyAction::ConnectionUp);
+        assert_eq!(
+            h.ui.connection.selected, start,
+            "ConnectionUp must undo ConnectionDown, not advance further"
+        );
+    }
+
+    /// `ThemeCommit` persists; `ThemeCancel` restores the last COMMITTED theme,
+    /// not merely the previewed one.
+    #[test]
+    fn theme_commit_persists_and_cancel_restores_the_saved_theme() {
+        let mut h = Harness::new();
+        h.apply(KeyAction::OpenThemePicker);
+        h.apply(KeyAction::ThemeCommit(1));
+        let saved = std::fs::read_to_string(&h.config_path).expect("config written");
+        assert!(
+            saved.contains(theme::ALL_THEMES[1].name),
+            "commit must persist the theme: {saved:?}"
+        );
+
+        h.apply(KeyAction::OpenThemePicker);
+        h.apply(KeyAction::ThemePreview(3));
+        h.apply(KeyAction::ThemeCancel);
+        assert_eq!(
+            h.ui.saved_theme_idx, 1,
+            "cancel must restore the COMMITTED theme, not the preview"
         );
     }
 }

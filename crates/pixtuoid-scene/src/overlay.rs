@@ -17,9 +17,12 @@ use crate::pose::RouteCtx;
 use crate::theme::Theme;
 
 /// The separator between a label's source prefix and its cwd/disambiguation
-/// tail (`cc·repo`, `cc·repo·1a2b`). The label itself is WRITTEN core-side as a
-/// bare `·` (`reducer::source_label_prefix`) — a crate boundary this const can't
-/// reach — so it must MATCH that char.
+/// tail (`cc·repo`, `cc·repo·1a2b`). The label is WRITTEN core-side as a bare
+/// `·` at THREE sites — `decoder::cwd_basename_label` (the chokepoint),
+/// `claude_code::cc_derive_label`'s project-dir fallback, and the reducer's
+/// SessionStart back-fill, both of which document their bypass — and a crate
+/// boundary keeps this const out of reach of all three, so it must MATCH that
+/// char.
 const LABEL_SEP: char = '\u{b7}';
 
 /// Activity-derived label tone — backend-agnostic.

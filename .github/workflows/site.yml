@@ -40,7 +40,6 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: npm install --global npm@12.0.1 # zizmor: ignore[adhoc-packages] exact packageManager bootstrap before the lockfile install
       - run: npm ci
-      - run: npm run audit
       - name: Cache Playwright Chromium
         uses: actions/cache@v6
         with:
@@ -65,6 +64,9 @@ jobs:
       - run: npm run check:docs
       - run: npm run e2e
       - run: npm run lighthouse
+      # LAST: it resolves advisories live, so at step one someone else's publish
+      # skips every check below it (#847/#849). pages.yml keeps it first — it ships.
+      - run: npm run audit
       # The run logs carry only failing scores, not element-level violations.
       # `path` is workspace-root-relative, hence the site/ prefix despite the job cwd.
       - name: Upload Lighthouse reports

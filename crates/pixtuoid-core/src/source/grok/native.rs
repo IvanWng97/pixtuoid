@@ -10,6 +10,13 @@ use super::{decode_grok_line, grok_cwd_from_path, grok_home, grok_session_ended,
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
+/// Sized for the whole registry, not one entry: grok writes EVERY live TUI
+/// session into this single file, where `cc_probe`'s 64 KiB bounds one
+/// per-session file. Truncated bytes fail the JSON parse and take the
+/// shape-drift path.
+#[cfg(unix)]
+const MAX_SESSION_REGISTRY_BYTES: u64 = 1024 * 1024;
+
 /// grok's liveness probe: the session ids of every entry in
 /// `{grok_home}/active_sessions.json` whose pid is alive, plus the owning pid
 /// per id for the instant-exit watch.
@@ -26,7 +33,7 @@ use crate::source::{Source, TaggedSender};
 #[cfg(unix)]
 pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     let path = grok_root.join("active_sessions.json");
-    let bytes = match std::fs::read(&path) {
+    let bytes = match crate::source::read_bounded_bytes(&path, MAX_SESSION_REGISTRY_BYTES) {
         Ok(b) => b,
         // Absent registry = healthy "no TUI clients".
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(ProbeSnapshot::default()),
@@ -37,14 +44,23 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     }) {
         Some(snap) => Some(snap),
         None => {
+            // A read that hit the cap parses as garbage too, so say which it
+            // was — a truncation reported as upstream drift sends the reader
+            // hunting a format change that never happened.
+            let truncated = bytes.len() as u64 == MAX_SESSION_REGISTRY_BYTES;
             static SHAPE_DRIFT_WARNED: std::sync::Once = std::sync::Once::new();
             SHAPE_DRIFT_WARNED.call_once(|| {
+                let cause = if truncated {
+                    "was TRUNCATED at the read cap, so it cannot parse"
+                } else {
+                    "does not parse as the expected [{session_id,pid,cwd,opened_at}] \
+                     array — the registry shape changed upstream"
+                };
                 crate::source::drift::shape_drift(
                     SOURCE_NAME,
                     &format!(
-                        "active_sessions.json at {} does not parse as the expected \
-                         [{{session_id,pid,cwd,opened_at}}] array — the registry shape \
-                         changed upstream; liveness degraded to mtime gating",
+                        "active_sessions.json at {} {cause}; liveness degraded to \
+                         mtime gating",
                         path.display()
                     ),
                 );
