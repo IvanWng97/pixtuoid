@@ -181,8 +181,11 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 // Waiting would misrender every lunch break as a permission
                 // prompt. `agent_error` is the retry-exhausted toast, an
                 // errored TURN whose state signal is the `stop_failure` arm.
-                // Both matched explicitly so neither spams the breadcrumb.
-                "idle_prompt" | "agent_error" => Ok(vec![]),
+                // `task_complete` announces a BACKGROUNDED shell/monitor task
+                // finishing — no `toolUseId`, and its spawning tool call
+                // already Ended at backgrounding time, so nothing to close.
+                // All matched explicitly so none spams the breadcrumb.
+                "idle_prompt" | "agent_error" | "task_complete" => Ok(vec![]),
                 other => {
                     crate::source::drift::unknown_event(
                         SOURCE_NAME,
@@ -847,16 +850,37 @@ mod tests {
             if reason == "permission_prompt"));
     }
 
+    /// Zero events is the SAME observable for a knowingly-ignored type and an
+    /// unrecognized one, so the test above cannot tell them apart — this one
+    /// does, on the drift breadcrumb. `task_complete` is dispatched by upstream
+    /// on every background-task completion (`tools/notification_bridge.rs`),
+    /// and `drift::unknown_event` is undeduped on the hook plane, so leaving it
+    /// unmatched turns routine background work into a recurring "the wire
+    /// changed" warning that `pixtuoid doctor` surfaces.
     #[test]
-    fn idle_prompt_and_unknown_notification_types_decode_to_nothing() {
-        for kind in ["idle_prompt", "agent_error", "some_future_nudge"] {
+    fn known_notification_types_stay_silent_while_a_novel_one_breadcrumbs() {
+        for known in ["idle_prompt", "agent_error", "task_complete"] {
             let mut v = envelope("notification");
-            v["notificationType"] = json!(kind);
+            v["notificationType"] = json!(known);
+            let logs = crate::test_capture::capture_logs(|| {
+                assert!(decode_all(v).is_empty());
+            });
             assert!(
-                decode_all(v).is_empty(),
-                "{kind} must decode to zero events"
+                !logs.contains("unknown_event"),
+                "{known} is a KNOWN non-waiting type — it must not breadcrumb, got:\n{logs}"
             );
         }
+        // Control: the breadcrumb still fires for a genuinely new type, so the
+        // assertions above are silence-by-recognition, not a dead detector.
+        let mut novel = envelope("notification");
+        novel["notificationType"] = json!("some_future_nudge");
+        let logs = crate::test_capture::capture_logs(|| {
+            assert!(decode_all(novel).is_empty());
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("notification:some_future_nudge"),
+            "an unrecognized notificationType must still breadcrumb, got:\n{logs}"
+        );
     }
 
     #[test]
