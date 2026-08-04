@@ -1,17 +1,8 @@
-//! Regression for the CodeWhale subagent hook lifecycle.
-//!
-//! CodeWhale is HOOK-ONLY. Its `subagent_spawn`/`subagent_complete` observer
-//! hooks are forwarded RAW on stdin (no env-mode `--event`), and
-//! `decode_cw_subagent` keys the CHILD on its own `agent_id` — NOT the workspace
-//! cwd, else it would coalesce with the same-workspace parent — parent-linking to
-//! the cwd-keyed parent sprite (the mixed-keying pattern CC/Codex also use). This
-//! drives a real spawn→complete flow through the reducer to pin, end-to-end (the
-//! conformance harness's one-AgentId rule can't hold a two-sprite scenario): the
-//! parent (cwd-keyed) and child (agent_id-keyed) are DISTINCT sprites, the child
-//! links to the parent, and `subagent_complete` ends the child (`as_child`) while
-//! the parent keeps running. Payload shapes follow CodeWhale's documented
-//! observer-hook wire (Hmbown/CodeWhale `crates/tui/src/hooks/config.rs` `HookEvent` +
-//! `docs/CONFIGURATION.md`).
+//! Regression for the CodeWhale subagent hook lifecycle, driving a real
+//! spawn→complete flow through the reducer (the conformance harness's
+//! one-AgentId rule can't hold a two-sprite scenario). Payload shapes follow
+//! CodeWhale's documented observer-hook wire (Hmbown/CodeWhale
+//! `crates/tui/src/hooks/config.rs` `HookEvent` + `docs/CONFIGURATION.md`).
 
 use std::path::Path;
 use std::time::SystemTime;
@@ -25,8 +16,6 @@ use pixtuoid_core::AgentId;
 const WORKSPACE: &str = "/Users/dev/cwproj";
 const CHILD: &str = "agent_12345678";
 
-/// Decode the hook payloads in file order (a payload can decode to multiple
-/// events — Identity ahead of a tool/permission event, #221).
 fn hook_events() -> Vec<AgentEvent> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/sources/codewhale/fixtures/hook-payloads.jsonl");
@@ -57,8 +46,6 @@ fn codewhale_subagent_spawn_links_child_and_complete_ends_it() {
         r.apply(&mut scene, ev, now, Transport::Hook);
     }
 
-    // session_start created the cwd-keyed parent; subagent_spawn created the
-    // agent_id-keyed child linked to it.
     let child_slot = scene
         .agents
         .get(&child)
@@ -68,8 +55,6 @@ fn codewhale_subagent_spawn_links_child_and_complete_ends_it() {
         Some(parent),
         "the child links to the workspace-keyed parent"
     );
-    // subagent_complete ends the CHILD; the parent keeps running (its own
-    // session_end is a separate event, not part of this flow).
     assert!(
         child_slot.exiting_at.is_some(),
         "subagent_complete must mark the child exiting"
@@ -84,15 +69,13 @@ fn codewhale_subagent_spawn_links_child_and_complete_ends_it() {
 #[test]
 fn codewhale_subagent_complete_before_spawn_is_a_safe_noop() {
     // Observer hooks are best-effort and unordered: a subagent_complete can win
-    // the race against the child's spawn. SessionEnd for a not-yet-existing child
-    // must be harmless — no panic, no phantom slot, no spurious parent cascade.
+    // the race against the child's spawn.
     let parent = AgentId::from_parts("codewhale", WORKSPACE);
     let child = AgentId::from_parts("codewhale", CHILD);
     let mut scene = SceneState::uniform(8);
     let mut r = Reducer::new();
     let now = SystemTime::now();
 
-    // Parent exists; the child's complete arrives with no child slot.
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {

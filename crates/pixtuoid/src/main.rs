@@ -11,9 +11,8 @@ fn main() -> Result<()> {
     crash::install_crash_hook();
     let (log_level, cli_theme, cmd) = Cli::parse().cmd_or_default();
 
-    // The terminal `run` TUI is the only command that paints the pixel-art canvas:
-    // --headless is a text summary, `doctor`/`sources` are plain output, and
-    // `floating` paints real RGB via softbuffer — none need the terminal's color.
+    // Only the terminal `run` TUI needs the terminal's color: `floating` paints
+    // real RGB via softbuffer, and every other command is plain text.
     let is_run_tui = matches!(
         &cmd,
         Cmd::Run {
@@ -22,14 +21,10 @@ fn main() -> Result<()> {
         }
     );
 
-    // Color preflight (cross-platform — crossterm strips our 24-bit SGR to a bare
-    // reset under $NO_COLOR, and a $TERM=dumb terminal can't render escapes at all;
-    // either way the office, which has no legible monochrome fallback, would be
-    // unreadable). Refuse the canvas with a one-line explanation instead of
-    // rendering block-soup, honoring the BSD $CLICOLOR_FORCE > $NO_COLOR override
-    // (crossterm needs the force call applied explicitly — it ignores
-    // $CLICOLOR_FORCE on its own). This runs before the truecolor probe, so a dumb
-    // terminal never gets DECRQSS escapes.
+    // The office has no legible monochrome fallback, so refuse the canvas with an
+    // explanation rather than render block-soup. crossterm needs the
+    // $CLICOLOR_FORCE override applied explicitly — it ignores the var on its own.
+    // Runs before the truecolor probe, so a dumb terminal never gets DECRQSS.
     if is_run_tui {
         use pixtuoid::term::ColorPreflight;
         match pixtuoid::term::color_preflight(
@@ -61,16 +56,12 @@ fn main() -> Result<()> {
         }
     }
 
-    // Truecolor preflight: the terminal TUI renders 24-bit half-block pixels; a
-    // non-truecolor terminal renders them approximated/garbled with no other hint.
-    // Rather than guess from a $TERM allowlist, ASK the terminal (DECRQSS) when
-    // $COLORTERM hasn't already declared truecolor — warn ONCE on the pre-altscreen
-    // stderr channel only if the terminal doesn't confirm. Never gate on Unix;
-    // Windows hard-gates VT separately in `tui::mod`. $PIXTUOID_NO_TRUECOLOR_WARN
-    // is an explicit escape hatch for a terminal we can't auto-detect (#397). The
-    // `floating` window paints real RGB pixels via softbuffer, not terminal SGR,
-    // so it is exempt. The query only runs when warn_zone holds, so a healthy
-    // truecolor session (COLORTERM set) pays nothing.
+    // Rather than guess truecolor from a $TERM allowlist, ASK the terminal
+    // (DECRQSS) when $COLORTERM hasn't declared it, and only WARN — never gate on
+    // Unix (Windows hard-gates VT separately in `tui::mod`).
+    // $PIXTUOID_NO_TRUECOLOR_WARN is the escape hatch for a terminal we can't
+    // auto-detect. The query runs only inside `warn_zone`, so a healthy truecolor
+    // session pays nothing.
     #[cfg(not(windows))]
     if pixtuoid::term::warn_zone(
         is_run_tui,
@@ -87,11 +78,6 @@ fn main() -> Result<()> {
              PIXTUOID_NO_TRUECOLOR_WARN=1 to silence."
         );
     }
-    // The typed LogLevel's as_str is exactly the old free-string levels, so
-    // every filter built in logging::init is unchanged — the enum only moved
-    // typo rejection to the clap seam (a typo used to parse as a bogus
-    // EnvFilter TARGET directive that silently filtered everything off,
-    // #157 class).
     let log_level: &'static str = log_level.as_str();
     let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless)
         || matches!(&cmd, Cmd::Floating { .. });
@@ -107,8 +93,7 @@ fn main() -> Result<()> {
             runtime::run(rc)
         }
         Cmd::Floating { source } => {
-            // Floating reuses the TUI run prelude (theme/pack/pets/sources/log) but is
-            // never headless and has no desk cap — capacity is seeded from the window.
+            // No desk cap: floating seeds its capacity from the window.
             let rc = build_run_config(cli_theme.as_deref(), source, None, false)?;
             floating::run(rc)
         }
@@ -123,11 +108,9 @@ fn main() -> Result<()> {
         Cmd::Connect { ids, json } => sources_cli::run_change(&ids, json, |c, i| {
             sources::connect(c, i).map(|_| sources::ChangeOutcome::Connected)
         }),
-        // A folded hook-removal failure is a PARTIAL failure (the flag IS
-        // disconnected, but hooks remain) — surface it AND signal it via a
-        // non-zero exit (run_change treats an Err op as failed), so a $?-checking
-        // script isn't told a clean "disconnected". The phrase is the Sources
-        // panel's too, so neither surface can reword the fold alone.
+        // A folded hook-removal failure is PARTIAL (the flag IS disconnected, but
+        // hooks remain), so map it to `Err` for the non-zero exit — a $?-checking
+        // script must not be told a clean "disconnected".
         Cmd::Disconnect { ids, json } => {
             sources_cli::run_change(&ids, json, |c, i| match sources::disconnect(c, i)? {
                 sources::DisconnectOutcome::HookRemovalFailed(e) => Err(anyhow::anyhow!(
@@ -138,10 +121,9 @@ fn main() -> Result<()> {
             })
         }
         Cmd::Setup { yes } => sources_cli::run_setup(yes),
-        // Packaging interfaces: emit ONLY the generated artifact to stdout (the
-        // tracing subscriber above writes to stderr, so stdout stays clean for the
-        // homebrew `generate_completions_from_executable` / `man` capture). Driven
-        // off the same derived clap tree as `--help`, so they can't drift.
+        // Packaging interfaces: stdout carries ONLY the generated artifact (the
+        // tracing subscriber writes to stderr) so the homebrew
+        // `generate_completions_from_executable` / `man` capture stays clean.
         Cmd::Completions { shell } => {
             use clap::CommandFactory;
             clap_complete::generate(
@@ -160,10 +142,8 @@ fn main() -> Result<()> {
     }
 }
 
-/// Resolve the shared [`runtime::RunConfig`] from CLI args + the on-disk config —
-/// the common prelude for `run` (TUI) and `floating` (window). On a non-headless
-/// launch it also surfaces config warnings + the broken-install preflight to
-/// stderr (visible in the launching terminal / pre-altscreen scrollback, #87/#309).
+/// Resolve the shared [`runtime::RunConfig`] — the common prelude for `run`
+/// (TUI) and `floating` (window).
 fn build_run_config(
     cli_theme: Option<&str>,
     source: SourceArgs,
@@ -179,30 +159,22 @@ fn build_run_config(
     let cfg_path = config::config_path();
     let mut cfg_warnings = Vec::new();
     let cfg = config::load(&cfg_path, &mut cfg_warnings);
-    // First launch ever (no `[sources]` flags yet) → the TUI plays onboarding.
-    // Since 0.12.0 an empty [sources] also means NOTHING connected (the
-    // v0.4–0.7 migrate inference is gone), so onboarding IS the connect path
-    // for an upgrader whose config predates the flags.
     // Right after load(), a non-empty warnings Vec means the file EXISTS but is
-    // malformed/unreadable — "previously configured", never a first run (the
-    // onboarding apply couldn't succeed anyway: update_config refuses to
-    // rewrite a malformed config). A missing file warns nothing ⇒ first run.
+    // malformed — "previously configured", never a first run (the onboarding
+    // apply couldn't succeed anyway: update_config refuses to rewrite a malformed
+    // config). A missing file warns nothing ⇒ first run.
     let first_run = setup::is_first_run(&cfg, &cfg_path, !cfg_warnings.is_empty());
     let theme = config::resolve_theme(&cfg, cli_theme, &mut cfg_warnings)?;
-    // The config seam's twin of the clap range(1..) guard: a config max-desks = 0
-    // is ignored with a collected warning (eager `.or` argument on purpose — the
-    // warning must fire even when the CLI flag overrides).
+    // Eager `.or` argument on purpose: the config max-desks = 0 warning must fire
+    // even when the CLI flag overrides.
     let desk_cap = cli_max_desks.or(config::resolve_max_desks(&cfg, &mut cfg_warnings));
     let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
     let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
-    // The connected-source set the office gates sprites on: explicit `[sources]`
-    // true flags only (absent = disconnected; the install-state migrate
-    // inference was dropped in 0.12.0).
     let connected = config::resolve_connected(&cfg);
     if !headless {
-        // Config problems must reach the user's eyes, not only the log file (#87):
-        // stderr BEFORE any alternate screen / window. Headless already has a
-        // stderr tracing subscriber, so re-printing there would duplicate.
+        // Config problems must reach stderr BEFORE any alternate screen / window,
+        // not just the log file. Headless already has a stderr tracing subscriber,
+        // so re-printing there would duplicate.
         for w in &cfg_warnings {
             eprintln!("⚠ pixtuoid: {w}");
         }
@@ -225,13 +197,10 @@ fn build_run_config(
     })
 }
 
-/// Boot preflight (#309): warn (stderr) when a CONNECTED source's hooks are
-/// installed but structurally BROKEN — it would render zero sprites with no other
-/// hint, so the fully-passive user who never opens the Sources panel still learns.
-/// Routed through the SHARED `doctor::diagnose` rollup (empty log = skip the drift
-/// scan; warns on broken installs only) so this surface can't drift from the panel
-/// and the CLI report. Iterates TARGETS, not the source registry: only an
-/// install-bearing source can be install-BROKEN.
+/// Warn on stderr when a CONNECTED source's hooks are installed but structurally
+/// BROKEN — it renders zero sprites with no other hint, so the passive user who
+/// never opens the Sources panel still learns. Iterates TARGETS, not the source
+/// registry: only an install-bearing source can be install-BROKEN.
 fn warn_broken_installs(connected: &std::collections::HashSet<String>) {
     for &t in install::TARGETS {
         if !connected.contains(t.core_source) {

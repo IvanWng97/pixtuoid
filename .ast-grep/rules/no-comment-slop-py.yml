@@ -1,15 +1,7 @@
-# The Python twin of no-comment-slop.yml — same convention, same advisory
-# status. `scripts/comment-lint.py` diffed `*.rs` only, so every `.py` in the
-# repo sat outside the fn-body comment convention enforced everywhere else.
-# (The incident that surfaced the gap was a 9-line block on a one-line WORKFLOW
-# step — YAML, which no ast-grep comment rule here covers; closing the Python
-# hole is the adjacent, catchable half.)
-#
-# Simpler than the Rust rule: Python has no doc-comment syntax, so a docstring
-# is a string EXPRESSION, not a comment, and is excluded without a regex. Only
-# runs inside a `function_definition` count, so module-level and top-level-class
-# `#` blocks are fine (a class nested INSIDE a fn is still inside it). ADVISORY
-# only, diff-scoped; pre-existing runs are grandfathered.
+# Extends the fn-body comment convention (no-comment-slop.yml) to `.py`, which
+# the Rust-only lint left unenforced. ADVISORY, diff-scoped; pre-existing runs
+# are grandfathered. No docstring exclusion is needed — a docstring is a string
+# EXPRESSION, not a comment. YAML remains uncovered by any rule here.
 id: no-comment-slop-py
 language: Python
 severity: warning

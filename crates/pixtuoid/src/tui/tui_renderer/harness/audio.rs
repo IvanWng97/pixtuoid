@@ -1,7 +1,5 @@
-//! Floor-scoped audio wiring, pinned through the PRODUCTION render path
-//! (the online-review HIGH on #636): the renderer must feed the audio
-//! thread ONLY the floor being viewed — an inverted filter or a re-leaked
-//! `scene.agents.keys()` would silently restore cross-floor sound.
+//! Floor-scoped audio wiring, pinned through the PRODUCTION render path: the
+//! renderer must feed the audio thread ONLY the floor being viewed.
 
 use super::*;
 use crate::audio::{drain_frames, AudioHandle};
@@ -18,9 +16,8 @@ fn active_on(path: &str, floor_idx: usize, desk: usize) -> AgentSlot {
 
 #[test]
 fn audio_stems_count_only_the_viewed_floor() {
-    // 1 active on floor 0, 3 actives on floor 1. Viewed floor 0 must read
-    // MODERATE typing (1 active); a global count (4 actives) would read
-    // BUSY — the tiers differ exactly when the filter matters.
+    // 1 active on floor 0 vs 3 on floor 1: the typing tiers differ exactly there,
+    // so a global count (4) reads BUSY where the viewed floor reads MODERATE.
     let cap = 16;
     let scene = scene_with(
         vec![
@@ -66,9 +63,8 @@ fn door_chime_fires_only_for_viewed_floor_arrivals() {
     let pack = pack();
     let mut now = t0();
     r.render(&scene, &pack, now).expect("prime render");
-    drain_frames(&rx); // discard the priming frames
+    drain_frames(&rx);
 
-    // an arrival on ANOTHER floor: silent on the viewed floor
     agents.push(active_on("/d/f1-new.jsonl", 1, cap));
     let scene = scene_with(agents.clone(), cap);
     now += std::time::Duration::from_millis(33);
@@ -82,7 +78,6 @@ fn door_chime_fires_only_for_viewed_floor_arrivals() {
         "a floor-1 walk-in must not chime while viewing floor 0: {off_floor:?}"
     );
 
-    // an arrival on THIS floor chimes
     agents.push(active_on("/d/f0-new.jsonl", 0, 1));
     let scene = scene_with(agents, cap);
     now += std::time::Duration::from_millis(33);
@@ -99,10 +94,6 @@ fn door_chime_fires_only_for_viewed_floor_arrivals() {
 
 #[test]
 fn floor_switch_reprimes_without_a_chime_volley() {
-    // Riding the elevator to a floor full of EXISTING agents must not fire
-    // their door chimes: the switch installs a fresh tracker whose first
-    // observe only primes. (Completes lens-1 F3: the enabled-path wiring
-    // through an actual floor change.)
     let cap = 16;
     let scene = scene_with(
         vec![
@@ -131,7 +122,6 @@ fn floor_switch_reprimes_without_a_chime_volley() {
         "arriving on floor 1 must not chime its existing agents: {after_switch:?}"
     );
 
-    // …but a GENUINE arrival on the new floor still chimes
     let scene = scene_with(
         vec![
             active_on("/s/f0.jsonl", 0, 0),
@@ -155,10 +145,6 @@ fn floor_switch_reprimes_without_a_chime_volley() {
 
 #[test]
 fn footer_note_glyph_tracks_effective_audibility() {
-    // ♩ = "you would hear sound right now": enabled + unmuted shows it,
-    // muting (the m/p combined state on the handle) hides it, and the
-    // default DISABLED handle never shows it (a failed lazy spawn must not
-    // advertise sound that isn't playing).
     let scene = scene_with(vec![active_on("/f/a.jsonl", 0, 0)], 16);
     let pack = pack();
 
@@ -185,8 +171,6 @@ fn footer_note_glyph_tracks_effective_audibility() {
         "muting hides the glyph"
     );
 
-    // volume 0 is silence too: enabled + unmuted at 0% must not advertise
-    // sound (the audio_audible volume gate, through the real render path)
     handle.set_muted(false);
     handle.set_volume(0.0);
     r.render(&scene, &pack, t0()).expect("render");

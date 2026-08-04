@@ -2,11 +2,9 @@ use std::collections::HashMap;
 
 use crate::grid::Grid;
 
-/// Compositing a `Frame` onto an `RgbBuffer` (`blit_frame`), skipping
-/// transparent pixels.
+/// Compositing a `Frame` onto an `RgbBuffer`, skipping transparent pixels.
 pub mod blit;
-/// Sprite-pack file format: `pack.toml` + `.sprite` parsing, the recolor-key
-/// palette guard, and pack loading.
+/// Sprite-pack file format: `pack.toml` + `.sprite` parsing and pack loading.
 pub mod format;
 
 /// An opaque 24-bit color.
@@ -47,10 +45,8 @@ impl Palette {
         self.map.get(&key).copied()
     }
 
-    /// Iterate `(key, pixel)` pairs. Lets callers assert palette invariants —
-    /// notably that every key maps to a DISTINCT RGB, since `recolor_frame`
-    /// substitutes by RGB equality and two keys sharing a color would be
-    /// indistinguishable.
+    /// Iterate `(key, pixel)` pairs — lets callers assert that every key maps
+    /// to a DISTINCT RGB, which `recolor_frame`'s substitute-by-RGB requires.
     pub fn iter(&self) -> impl Iterator<Item = (char, Pixel)> + '_ {
         self.map.iter().map(|(&k, &p)| (k, p))
     }
@@ -86,9 +82,7 @@ impl Frame {
         Frame(Grid::from_vec(width, height, pixels))
     }
 
-    /// Reverse each row in place — turns a right-facing sprite into a
-    /// left-facing one. Cheap (single pass, no reallocation when called
-    /// repeatedly on a buffer reuse pattern).
+    /// Reverse each row — turns a right-facing sprite into a left-facing one.
     pub fn mirror_horizontal(&self) -> Self {
         let w = self.width as usize;
         let h = self.height as usize;
@@ -103,8 +97,7 @@ impl Frame {
         Frame::from_pixels(self.width, self.height, pixels)
     }
 
-    /// Flip rows top-to-bottom. Used to face a couch the opposite way
-    /// (e.g. for a meeting room with two sofas facing each other).
+    /// Flip rows top-to-bottom.
     pub fn mirror_vertical(&self) -> Self {
         let w = self.width as usize;
         let h = self.height as usize;
@@ -129,8 +122,7 @@ pub struct Sprite {
     pub frame_ms: u32,
 }
 
-/// A flat RGB buffer used as a blit target. Alpha is ignored — transparent
-/// pixels leave the underlying buffer unchanged.
+/// A flat RGB buffer used as a blit target.
 #[derive(Debug, Clone)]
 pub struct RgbBuffer(Grid<Rgb>);
 
@@ -158,18 +150,14 @@ impl RgbBuffer {
         RgbBuffer(Grid::from_vec(width, height, pixels))
     }
 
-    /// The row-major flat index — the ONE `y*w + x` formula `get`/`put`/
-    /// `put_checked` share (a second copy is the drift bug the sprite guide warns
-    /// about). No bounds check: callers that can't guarantee `(x, y)` in range
-    /// use [`checked_index`](Self::checked_index) or [`put_checked`](Self::put_checked).
     #[inline]
     fn raw_index(&self, x: u16, y: u16) -> usize {
         (y as usize) * (self.0.width as usize) + (x as usize)
     }
 
-    /// [`raw_index`](Self::raw_index) guarded by a debug-only bounds assert — a
+    /// [`raw_index`](Self::raw_index) guarded by a debug-only bounds assert: a
     /// stray `x >= width` would silently read/write the WRONG row rather than
-    /// fault, so catch it in debug/tests. Unchecked in release (the hot path).
+    /// fault. Unchecked in release (the hot path).
     #[inline]
     fn checked_index(&self, x: u16, y: u16) -> usize {
         debug_assert!(
@@ -184,26 +172,20 @@ impl RgbBuffer {
     /// Read the `Rgb` at `(x, y)`. Debug-asserts the point is in bounds;
     /// unchecked in release (the hot blit path clips first).
     pub fn get(&self, x: u16, y: u16) -> Rgb {
-        // Unchecked index in release (every caller clips first); this is a
-        // public primitive the v2 PNG/web renderers are meant to reuse.
         self.0.as_slice()[self.checked_index(x, y)]
     }
 
-    /// Write `rgb` at `(x, y)`. Debug-asserts the point is in bounds; unchecked
-    /// in release. Use [`put_checked`](Self::put_checked) when `(x, y)` may fall
-    /// outside the buffer.
+    /// Write `rgb` at `(x, y)`. Debug-asserts the point is in bounds; use
+    /// [`put_checked`](Self::put_checked) when `(x, y)` may fall outside.
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
         let i = self.checked_index(x, y);
         self.0.as_mut_slice()[i] = rgb;
     }
 
     /// Bounds-checked write: a no-op when `(x, y)` falls outside the buffer.
-    /// THE clip primitive for procedural painters, which would otherwise each
-    /// guard the unchecked [`put`](Self::put) with `if x < width && y < height`
-    /// (the idiom this collapses at ~20 sites). Deliberately distinct from
-    /// `put` — the hot blit path clips its loop bounds once and keeps the
-    /// unchecked write; per-pixel scatter (glyphs, particles, coffee cups) that
-    /// can't pre-clip uses this. The v2 PNG/web renderers reuse it too.
+    /// THE clip primitive for per-pixel scatter (glyphs, particles) that can't
+    /// pre-clip; the hot blit path clips its loop bounds once and keeps the
+    /// unchecked [`put`](Self::put).
     pub fn put_checked(&mut self, x: u16, y: u16, rgb: Rgb) {
         if x < self.0.width && y < self.0.height {
             let i = self.raw_index(x, y);
@@ -226,15 +208,12 @@ mod tests {
         assert_eq!(p.get('B'), Some(Some(Rgb { r: 0, g: 0, b: 255 })));
     }
 
-    // The unchecked get/put index would silently read/write the WRONG row on a
-    // stray out-of-range x (x >= width with small y maps into an earlier row);
-    // the debug_assert turns that into a loud fault under test.
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "out of bounds")]
     fn rgbbuffer_get_out_of_bounds_panics_in_debug() {
         let b = RgbBuffer::filled(4, 4, Rgb { r: 0, g: 0, b: 0 });
-        let _ = b.get(4, 0); // x == width
+        let _ = b.get(4, 0);
     }
 
     #[test]
@@ -295,16 +274,11 @@ mod tests {
         let bg = Rgb { r: 0, g: 0, b: 0 };
         let fg = Rgb { r: 9, g: 8, b: 7 };
         let mut b = RgbBuffer::filled(3, 2, bg);
-        // In bounds: writes, exactly like `put`.
         b.put_checked(2, 1, fg);
         assert_eq!(b.get(2, 1), fg);
-        // Out of bounds on either axis (and both): silent no-op, no panic — the
-        // clip contract the ~20 guard closures relied on. `get` would debug-panic
-        // here, so probe the buffer's unchanged state instead of reading OOB.
         for (x, y) in [(3, 0), (0, 2), (3, 2), (99, 99)] {
             b.put_checked(x, y, fg);
         }
-        // The only written cell is (2,1); every other cell is still `bg`.
         for y in 0..2 {
             for x in 0..3 {
                 let want = if (x, y) == (2, 1) { fg } else { bg };

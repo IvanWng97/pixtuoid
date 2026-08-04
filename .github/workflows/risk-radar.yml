@@ -2,10 +2,9 @@ name: risk radar
 
 # Advisory, deterministic blast-radius surfacer (NOT a merge gate). On each PR
 # it computes which high-risk seams the diff touches (pure path matching, no
-# LLM) and posts a sticky checklist of the documented review escalations. It
-# converts prose-only escalation — which slipped both the review bot and local
-# review in #198 — into something the PR states outright. Never blocks merge;
-# degrades to the step summary when the token can't comment (fork PRs).
+# LLM) and posts a sticky checklist of the documented review escalations, so a
+# prose-only escalation is stated outright instead of being missed. Never blocks
+# merge; degrades to the step summary when the token can't comment (fork PRs).
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -28,19 +27,15 @@ jobs:
           persist-credentials: false
       - uses: extractions/setup-just@v4
 
-      # The matcher's selftest is the gate on the seam map itself — if someone
-      # edits scripts/risk-radar.py and breaks a rule, this fails first. Through
-      # the justfile recipe (repo rule: CI calls the same recipes as local dev).
+      # The gate on the seam map itself: edit scripts/risk-radar.py and break a
+      # rule, this fails first. Via the recipe — CI calls what local dev calls.
       - name: Self-test the matcher
         run: just risk-radar-test
 
       # continue-on-error: a transient `gh pr diff` hiccup must not redden an
-      # advisory, non-required job. The step summary is the durable floor, so it
-      # is written on BOTH paths — but the two must not look alike. Without
-      # pipefail the pipeline reported python3's status, so a failed diff read as
-      # success on empty input and printed the same confident "no seams touched"
-      # as a genuinely clean diff. Pipefail separates them; the explicit else
-      # keeps the floor that a bare `set -e` would have removed entirely.
+      # advisory, non-required job. Without pipefail the pipeline reports
+      # python3's status, so a failed diff reads as success on empty input and
+      # prints the same confident "no seams touched" as a genuinely clean diff.
       - name: Compute risk radar
         id: compute
         continue-on-error: true
@@ -64,9 +59,9 @@ jobs:
             exit 1
           fi
 
-      # Only upsert when the radar was actually computed (else radar.md is
-      # untrustworthy and the empty-body branch would wrongly delete the
-      # existing comment). Soft: a read-only fork token can't comment anyway.
+      # Only upsert when the radar was actually computed, else the empty-body
+      # branch wrongly deletes the existing comment. Soft: a read-only fork
+      # token can't comment anyway.
       - name: Upsert sticky PR comment
         if: steps.compute.outcome == 'success'
         continue-on-error: true

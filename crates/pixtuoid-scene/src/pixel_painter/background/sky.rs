@@ -1,6 +1,5 @@
-//! Time-of-day derived state — the sky emitter (sun/moon), weather-as-
-//! atmosphere transmission, glass colors, sunlight spill, and nighttime
-//! floor dim overlay.
+//! Time-of-day derived state — the sky emitter (sun/moon), weather-as-atmosphere
+//! transmission, glass colors, sunlight spill, and the floor tint overlays.
 
 use std::cell::Cell;
 use std::time::SystemTime;
@@ -23,11 +22,9 @@ pub(in crate::pixel_painter) enum Weather {
 }
 
 impl Weather {
-    /// All variants, in canonical order — single source for `--weather` parsing
-    /// and the valid-names list. The site's gallery manifest
-    /// (site/src/weather.json) mirrors it; the bridge is the
-    /// `weather_gallery_manifest_matches_the_weather_enum` test, which fails on
-    /// any add/rename here until the manifest (+ gen-media art) follows.
+    /// All variants, in canonical order. The site's gallery manifest
+    /// (site/src/weather.json) mirrors it; `weather_gallery_manifest_matches_the_weather_enum`
+    /// fails on any add/rename here until the manifest (+ gen-media art) follows.
     pub(in crate::pixel_painter) const ALL: [Weather; 8] = [
         Weather::Clear,
         Weather::Rain,
@@ -61,12 +58,9 @@ impl Weather {
 }
 
 thread_local! {
-    /// Screenshot/test affordance: when `Some`, every `weather_state` call on this
-    /// thread returns it, bypassing the time-based selection. Production never sets
-    /// it (only `snapshot --weather` via `force_weather`), so live rendering is
-    /// byte-identical. `weather_state` is the single chokepoint every weather
-    /// derivation (time-of-day look, floor tint, ambient beam, lightning) funnels
-    /// through, so intercepting here covers them all without threading a param.
+    /// Screenshot/test affordance: when `Some`, every `weather_state` call on
+    /// this thread returns it. Production never sets it (only
+    /// `snapshot --weather`), so live rendering is byte-identical.
     static WEATHER_OVERRIDE: Cell<Option<Weather>> = const { Cell::new(None) };
 }
 
@@ -82,11 +76,10 @@ pub(in crate::pixel_painter) fn weather_state(now: SystemTime) -> Weather {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    // Weather re-rolls per hashed bucket, so it changes ~every 10 minutes.
     const WEATHER_CYCLE_SECS: u64 = 600;
     let cycle = secs / WEATHER_CYCLE_SECS;
     // splitmix64 finalizer, open-coded by deliberate choice (see `strike_offset`
-    // in background/mod.rs for the cross-crate-copy rationale).
+    // in background/mod.rs).
     let mut h = cycle.wrapping_add(0x9e37_79b9_7f4a_7c15);
     h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -103,17 +96,16 @@ pub(in crate::pixel_painter) fn weather_state(now: SystemTime) -> Weather {
     }
 }
 
-// Weights folding the two transmission channels into one interior illuminance.
-// Calibrated so a CLEAR noon (emitter_lum≈1, direct=1, diffuse=0.55) lands at
-// full brightness (K_BEAM + 0.55·K_FILL ≈ 1).
+// Weights folding the two transmission channels into one interior illuminance,
+// calibrated so a CLEAR noon lands at full brightness (K_BEAM + 0.55·K_FILL ≈ 1).
 const K_BEAM: f32 = 0.70;
 const K_FILL: f32 = 0.55;
 // Max window-spill horizontal lean (px/row) at the low-sun extremes.
 const SPILL_SLANT_MAX: f32 = 0.7;
 
 /// Direct-beam strength reaching the interior = emitter luminance carried by the
-/// weather's DIRECT transmission. Drives the wall sun-spot + dust motes. Zero at
-/// night (the moon casts no usable beam) and under thick cloud.
+/// weather's DIRECT transmission. Zero at night (the moon casts no usable beam)
+/// and under thick cloud.
 pub(in crate::pixel_painter) fn beam_strength(now: SystemTime) -> f32 {
     let sky = emitter(now);
     match sky.body {
@@ -127,9 +119,8 @@ pub(in crate::pixel_painter) fn beam_strength(now: SystemTime) -> f32 {
 /// the most; a storm swallows it. Independent of the moon's (date-varying) phase,
 /// so the night weather-ordering is phase-stable.
 fn city_bounce(w: Weather) -> f32 {
-    // Roughly half the old table (Snow 0.16→0.08, …, Storm 0.03→0.015), same
-    // ordering — so a moonlit night's floor can never out-light a stormy solar
-    // noon (see `solar_noon_outshines_the_brightest_night`).
+    // Magnitudes stay low enough that a moonlit night's floor can never
+    // out-light a stormy solar noon (`solar_noon_outshines_the_brightest_night`).
     let v = match w {
         Weather::Snow => 0.08,
         Weather::Clear => 0.055,
@@ -149,8 +140,7 @@ fn city_bounce(w: Weather) -> f32 {
 
 /// Weather as an ATMOSPHERE: how much of the emitter's light survives to the
 /// interior, split into a hard directional beam, a flat diffuse fill, and the
-/// disc's own visibility through the medium. (Replaces the old absolute
-/// `weather_light` light-level table — magnitude now comes from the emitter.)
+/// disc's own visibility through the medium.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::pixel_painter) struct Atmo {
     pub(in crate::pixel_painter) direct: f32,
@@ -159,11 +149,9 @@ pub(in crate::pixel_painter) struct Atmo {
 }
 
 pub(in crate::pixel_painter) fn atmo(w: Weather) -> Atmo {
-    // (direct, diffuse, disc). Storm < Rain in BOTH transmission channels
-    // (denser cloud); lightning adds transient punch elsewhere, not here.
-    // Overcast/Rain/Storm all sit at the SAME near-zero disc (0.05, below
-    // `MIN_DISC_VIS`) — thick cloud hides the disc uniformly, so a thicker
-    // cloud (Storm) never shows MORE of the disc than a thinner one (Rain).
+    // Storm < Rain in BOTH transmission channels (denser cloud), and
+    // Overcast/Rain/Storm share one near-zero disc (below `MIN_DISC_VIS`) so a
+    // thicker cloud never shows MORE of the disc than a thinner one.
     let (direct, diffuse, disc) = match w {
         Weather::Clear => (1.00, 0.55, 1.00),
         Weather::Windy => (0.90, 0.55, 0.95),
@@ -188,9 +176,8 @@ pub(in crate::pixel_painter) fn atmo(w: Weather) -> Atmo {
 }
 
 /// Window glass color + spill intensity + spill slant for the current local
-/// hour. `spill_slant` is x-shift per row going down: positive = rightward
-/// (morning sun in the east), negative = leftward (evening sun in the west).
-/// `darkness` is 1 - daylight, used to drive artificial-light effects.
+/// hour. `spill_slant` is x-shift per row going down; `darkness` is
+/// 1 - daylight, which drives the artificial-light effects.
 pub(in crate::pixel_painter) struct TimeOfDayLook {
     pub(in crate::pixel_painter) glass_a: Rgb,
     pub(in crate::pixel_painter) glass_b: Rgb,
@@ -202,17 +189,14 @@ pub(in crate::pixel_painter) struct TimeOfDayLook {
 pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme) -> TimeOfDayLook {
     let sky = emitter(now);
     let a = atmo(weather_state(now));
-    // The moon casts no USABLE direct beam (mirrors `beam_strength`'s own
-    // Sun/Moon gate) — a moonlit night must never out-light a cloudy solar
-    // noon, so only the sun feeds the hard-beam term; the moon's illuminance
-    // is diffuse-fill only.
+    // The moon casts no USABLE direct beam (mirrors `beam_strength`'s gate) — a
+    // moonlit night must never out-light a cloudy solar noon, so the moon's
+    // illuminance is diffuse-fill only.
     let direct_eff = match sky.body {
         Body::Sun => a.direct,
         Body::Moon => 0.0,
     };
-    // One illuminance for sun OR moon: luminance carried by beam + diffuse fill.
     let interior = (sky.emitter_lum * (direct_eff * K_BEAM + a.diffuse * K_FILL)).clamp(0.0, 1.0);
-    // At night the city-bounce floor keeps the room from going pitch black.
     let night_floor = match sky.body {
         Body::Moon => city_bounce(weather_state(now)),
         Body::Sun => 0.0,
@@ -226,14 +210,12 @@ pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme)
     let twilight_a = theme.lighting.twilight_a;
     let twilight_b = theme.lighting.twilight_b;
 
-    // Base sky lerps night→day by the exterior light (a moonlit night lifts a touch);
-    // then a low, LIT sun/moon warms it toward twilight (warmth is high near the horizon).
     let warm = (sky.warmth * interior).clamp(0.0, 1.0);
     let glass_a = mix_lab(mix_lab(night_a, day_a, exterior), twilight_a, warm * 0.5);
     let glass_b = mix_lab(mix_lab(night_b, day_b, exterior), twilight_b, warm * 0.5);
 
-    // Directional cues share the emitter azimuth (0=east/dawn .. 1=west/dusk):
-    // morning sun casts light westward (leftward, negative), evening eastward (right).
+    // Azimuth runs 0=east/dawn .. 1=west/dusk, so the morning sun casts light
+    // leftward (negative slant) and the evening sun rightward.
     let (spill_strength, spill_slant) = match sky.body {
         Body::Sun => (interior, (sky.azimuth - 0.5) * 2.0 * SPILL_SLANT_MAX),
         Body::Moon => (0.0, 0.0),
@@ -266,11 +248,6 @@ pub(in crate::pixel_painter) struct SunSpot {
     pub warmth: f32,
 }
 
-/// Time-of-day sun position projected onto an office wall, derived from the
-/// SAME emitter arc that drives `time_of_day_look`'s spill lean — so the
-/// wall the sun-spot lands on, the direction the floor spill leans, and the
-/// disc's own position (Task 5) can never disagree. Returns `None` at night
-/// (the moon casts no wall spot).
 /// Azimuth band boundaries partitioning the sun's E->W arc onto the office
 /// walls: `0.0..AZ_EAST_MAX` = east wall (morning), `AZ_EAST_MAX..AZ_WEST_MIN`
 /// = south/window wall (midday), `AZ_WEST_MIN..1.0` = west wall (evening).
@@ -282,9 +259,8 @@ pub(in crate::pixel_painter) fn sun_on_wall(now: SystemTime) -> Option<SunSpot> 
     if !matches!(sky.body, Body::Sun) {
         return None;
     }
-    // Azimuth bands map the arc onto the office walls: east wall in the morning,
-    // the south (window) wall around midday, west wall in the evening — the SAME
-    // azimuth that places the disc + leans the floor spill, so all three agree.
+    // The SAME azimuth that places the disc and leans the floor spill, so the
+    // wall, the disc, and the spill direction can never disagree.
     let az = sky.azimuth;
     let (wall, along) = if az < AZ_EAST_MAX {
         (WallSide::East, az / AZ_EAST_MAX)
@@ -304,13 +280,11 @@ pub(in crate::pixel_painter) fn sun_on_wall(now: SystemTime) -> Option<SunSpot> 
     })
 }
 
-/// Blend `tint` over every floor pixel in the band `top_y..bottom_y` (clamped to
-/// the buffer) at an ALREADY-CLAMPED strength `s`. THE floor-tint loop shared by
-/// the night dim and the day lift — the two differ only in their clamp ceiling and
-/// tint, so those stay caller-side. A full-floor pass, so `s <= 0.0` early-returns
-/// (`blend_rgb(cur, _, 0.0)` is a per-pixel no-op → byte-identical, but skips the
-/// pass every clear frame). Loop-bounded, so the unchecked `get`/`put` stay (not
-/// `blend_pixel`, which would add a per-pixel bounds check to a hot full-floor loop).
+/// Blend `tint` over every floor pixel in the band `top_y..bottom_y` at an
+/// ALREADY-CLAMPED strength `s`. `s <= 0.0` early-returns: byte-identical to
+/// blending, but it skips the whole pass every clear frame. Loop-bounded, so the
+/// unchecked `get`/`put` stay — `blend_pixel` would add a per-pixel bounds check
+/// to a hot full-floor loop.
 fn blend_floor_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s: f32) {
     if s <= 0.0 {
         return;
@@ -323,9 +297,8 @@ fn blend_floor_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s
     }
 }
 
-/// Multiplicative dim applied to floor pixels at night. Pulls everything
-/// toward a dark navy so the artificial-light pools have something to
-/// stand out against. `strength` is 0..1 (no dim..full dim).
+/// Multiplicative dim applied to floor pixels at night — pulls everything toward
+/// a dark navy so the artificial-light pools have something to stand out against.
 pub(in crate::pixel_painter) fn dim_floor_overlay(
     buf: &mut RgbBuffer,
     top_y: u16,
@@ -337,22 +310,17 @@ pub(in crate::pixel_painter) fn dim_floor_overlay(
     blend_floor_band(buf, top_y, bottom_y, theme.lighting.night_tint, s);
 }
 
-/// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`].
-/// Blends floor pixels toward a warm midday tint so a sunny day reads bright and
-/// warm instead of flat carpet. Needed because the model otherwise has only a
-/// night *dim* and no positive day term: `intensity` maxes at 1.0, so at clear
-/// noon `darkness` is 0 and the floor sat at its plain (brownish) base color.
-/// `strength` is `day_eff`-driven (0 at night / full-dark weather, full at clear
-/// noon), so cloudy days lift proportionally less. Sun enters regardless of
-/// occupancy, so — unlike the dim — this is NOT scaled by the empty-floor boost.
+/// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`],
+/// and the model's only positive day term (without it a clear noon leaves the
+/// floor at its plain brownish base). Sun enters regardless of occupancy, so —
+/// unlike the dim — this is NOT scaled by the empty-floor boost.
 pub(in crate::pixel_painter) fn daylight_floor_overlay(
     buf: &mut RgbBuffer,
     top_y: u16,
     bottom_y: u16,
     strength: f32,
 ) {
-    // Pale warm midday sunlight. Theme-agnostic (daylight is daylight); applied
-    // at low strength so it warms/brightens the floor without washing it out.
+    // Pale warm midday sunlight — theme-agnostic, since daylight is daylight.
     const SUN_TINT: Rgb = Rgb {
         r: 255,
         g: 246,
@@ -362,10 +330,9 @@ pub(in crate::pixel_painter) fn daylight_floor_overlay(
     blend_floor_band(buf, top_y, bottom_y, SUN_TINT, s);
 }
 
-/// The physical sky emitter — sun by day, moon by night — resolved from the
-/// local clock. Position rides an arc (§ altitude/azimuth); luminance + warmth
-/// follow altitude (low body = longer air path = dimmer + warmer). This is the
-/// ONE source the interior light + the disc derive from.
+/// The physical sky emitter — sun by day, moon by night. Luminance + warmth
+/// follow altitude (low body = longer air path = dimmer + warmer). The ONE
+/// source the interior light + the disc derive from.
 pub(in crate::pixel_painter) enum Body {
     Sun,
     Moon,
@@ -382,9 +349,8 @@ pub(in crate::pixel_painter) struct SkyState {
 // Sun rides the arc over its up-span; the moon owns the complementary night span.
 const SUN_RISE_H: f32 = 5.0;
 const SUN_SET_H: f32 = 20.0;
-/// Moon luminance is a small fraction of full sun even at a full phase — low
-/// enough that a full-moon midnight (plus the `city_bounce` floor) still
-/// stays dimmer than the dimmest cloudy daytime (a stormy solar noon); see
+/// Moon luminance at a full phase — low enough that a full-moon midnight (plus
+/// the `city_bounce` floor) still stays dimmer than a stormy solar noon; see
 /// `solar_noon_outshines_the_brightest_night`.
 const MOON_PEAK_LUM: f32 = 0.12;
 /// Synodic month (days) + a known new-moon epoch (unix days) for the phase calc.
@@ -396,9 +362,8 @@ fn arc_progress(h: f32, rise: f32, set: f32) -> f32 {
 }
 
 /// Whether the sky shows the SUN (not the moon) at hour-of-day `h` (0..24) — the
-/// ONE definition of the day/night boundary, so `emitter` below and any external
-/// consumer (the wasm `Office::is_day` the site's sky-slider phase reads) can't
-/// drift from a second hardcoded copy. Sun up over `[SUN_RISE_H, SUN_SET_H)`.
+/// ONE definition of the day/night boundary, so `emitter` and any external
+/// consumer can't drift from a second hardcoded copy.
 pub(crate) fn hour_is_day(h: f32) -> bool {
     (SUN_RISE_H..SUN_SET_H).contains(&h)
 }
@@ -421,7 +386,7 @@ pub(in crate::pixel_painter) fn emitter(now: SystemTime) -> SkyState {
     let altitude = (std::f32::consts::PI * t).sin();
     let warmth = (1.0 - altitude).clamp(0.0, 1.0);
     let (body, emitter_lum) = if is_day {
-        (Body::Sun, altitude) // full sun ∝ altitude
+        (Body::Sun, altitude)
     } else {
         (Body::Moon, MOON_PEAK_LUM * altitude * moon_phase(now))
     };
@@ -441,7 +406,6 @@ pub(in crate::pixel_painter) fn moon_phase(now: SystemTime) -> f32 {
         .map(|d| d.as_secs_f32() / 86_400.0)
         .unwrap_or(0.0);
     let age = (unix_days - NEW_MOON_EPOCH_UNIX_DAYS).rem_euclid(SYNODIC_DAYS);
-    // Illuminated fraction ≈ (1 - cos(2π·age/synodic)) / 2.
     (1.0 - (std::f32::consts::TAU * age / SYNODIC_DAYS).cos()) / 2.0
 }
 
@@ -458,7 +422,6 @@ mod tests {
             b: 100,
         };
         let tint = Rgb { r: 0, g: 0, b: 0 };
-        // s <= 0 is a no-op (the clear-frame early return): the whole buffer stays.
         let mut buf = RgbBuffer::filled(3, 4, base);
         blend_floor_band(&mut buf, 1, 3, tint, 0.0);
         for y in 0..4 {
@@ -466,8 +429,6 @@ mod tests {
                 assert_eq!(buf.get(x, y), base, "s=0 leaves ({x},{y}) untouched");
             }
         }
-        // s > 0 blends ONLY rows [top_y, bottom_y): row 0 (above) + row 3 (at/below)
-        // stay `base`; rows 1..3 become blend_rgb(base, tint, s).
         blend_floor_band(&mut buf, 1, 3, tint, 0.5);
         let blended = blend_rgb(base, tint, 0.5);
         for x in 0..3 {
@@ -480,8 +441,6 @@ mod tests {
 
     #[test]
     fn daylight_floor_overlay_brightens_at_positive_strength() {
-        // The warm SUN_TINT (255,246,224) blended in at positive strength lifts a
-        // dark floor on every channel (it only ever warms/brightens).
         let mut buf = RgbBuffer::filled(
             4,
             10,
@@ -504,7 +463,6 @@ mod tests {
 
     #[test]
     fn daylight_floor_overlay_is_noop_at_zero_strength() {
-        // strength 0 short-circuits before any blend — pixels untouched.
         let mut buf = RgbBuffer::filled(
             4,
             10,
@@ -530,9 +488,8 @@ mod tests {
         }
     }
 
-    /// Build a `SystemTime` that corresponds to local hour `h`, minute `m`
-    /// on a fixed date — keeps the tests TZ-independent because
-    /// `sun_on_wall` decodes the input back into `chrono::Local`.
+    /// Local hour `h`, minute `m` on a fixed date — TZ-independent because the
+    /// code under test decodes the input back into `chrono::Local`.
     fn at_hour(h: u32, m: u32) -> SystemTime {
         chrono::Local
             .with_ymd_and_hms(2026, 1, 1, h, m, 0)
@@ -541,9 +498,8 @@ mod tests {
             .into()
     }
 
-    /// Local 02:00 (always night in the day-ramp) on a given January day.
-    /// Weather varies by day at a fixed hour (the hash keys on unix-secs/600),
-    /// so searching days lets us find a clear vs storm night TZ-independently.
+    /// Local 02:00 (always night) on a given January day. Weather varies by day
+    /// at a fixed hour, so searching days finds different weathers/moon phases.
     fn night_on(day: u32) -> SystemTime {
         chrono::Local
             .with_ymd_and_hms(2026, 1, day, 2, 0, 0)
@@ -552,9 +508,8 @@ mod tests {
             .into()
     }
 
-    /// Local midnight on a given January day — near the night arc's own apex,
-    /// so it's close to the brightest instant of that night regardless of
-    /// weather (mirrors `night_on` but at 00:00).
+    /// Local midnight on a given January day — near the night arc's apex, so
+    /// it's close to the brightest instant of that night.
     fn midnight_on(day: u32) -> SystemTime {
         chrono::Local
             .with_ymd_and_hms(2026, 1, day, 0, 0, 0)
@@ -563,13 +518,6 @@ mod tests {
             .into()
     }
 
-    // The interior illuminance now folds emitter luminance with atmo transmission
-    // (`K_BEAM`/`K_FILL`), and night keeps a weather-keyed `city_bounce` floor —
-    // so weather must still separate a night's darkness, but the OLD test's
-    // "any clear vs any storm night" search is no longer phase-fair: two
-    // different nights can land on two different moon phases, which now ALSO
-    // drives interior brightness. Hold the instant fixed (only weather varies
-    // via the override) so the comparison is honest.
     #[test]
     fn night_darkness_tracks_weather_at_fixed_phase() {
         struct Reset;
@@ -591,16 +539,12 @@ mod tests {
             "clear night brighter than storm night at equal phase: {clear} vs {storm}"
         );
         assert!(storm < 1.0, "storm night keeps some city glow: {storm}");
-        // Clear noon is ~fully lit (day dominates).
         set_weather_override(Some(Weather::Clear));
         let noon = time_of_day_look(at_hour(12, 0), theme).darkness;
         set_weather_override(None);
         assert!(noon < 0.1, "clear noon ~fully lit: {noon}");
     }
 
-    // The property that was impossible under the old flat weather table: interior
-    // brightness now tracks the emitter's ALTITUDE, so even holding weather fixed,
-    // a higher sun (noon) out-lights a lower one (dusk).
     #[test]
     fn interior_brightness_is_altitude_coupled() {
         struct Reset;
@@ -621,12 +565,6 @@ mod tests {
         );
     }
 
-    // The headline physics-audit fix: a moonlit night must NEVER render
-    // brighter than a cloudy solar noon. Storm zeroes both `direct` channels
-    // (so the moon's already-zeroed direct beam can't matter, but a Storm
-    // noon still has to survive on diffuse alone), while Snow/Clear at a
-    // FULL moon are the two best cases night can offer (highest `city_bounce`
-    // floor + full lunar illumination). Even that best case must stay dimmer.
     #[test]
     fn solar_noon_outshines_the_brightest_night() {
         struct Reset;
@@ -638,7 +576,8 @@ mod tests {
         let _reset = Reset;
         let theme = crate::theme::ALL_THEMES[0];
 
-        // The fullest moon night in January 2026 (max illuminated fraction).
+        // Snow/Clear at the FULLEST moon are the two brightest cases night can
+        // offer — the highest `city_bounce` floor plus peak lunar illumination.
         let full_moon_day = (1..=31u32)
             .max_by(|&a, &b| {
                 moon_phase(night_on(a))
@@ -694,9 +633,6 @@ mod tests {
     fn sun_on_wall_west_at_evening() {
         let s = sun_on_wall(at_hour(18, 0)).expect("sun should be up at 18:00");
         assert_eq!(s.wall, WallSide::West);
-        // Was `> 0.6`: the emitter-derived warmth at 18:00 is ≈0.593 (symmetric
-        // with dawn's ≈0.593 on the sin(pi*t) arc) — the old flat-table value
-        // no longer applies. `> 0.55` keeps a real margin below the computed value.
         assert!(s.warmth > 0.55, "evening sun should be warm: {}", s.warmth);
     }
 
@@ -736,15 +672,12 @@ mod tests {
         for w in Weather::ALL {
             assert_eq!(Weather::from_name(w.name()), Some(w), "{w:?} round-trips");
         }
-        // case-insensitive + trimmed
         assert_eq!(Weather::from_name("  SNOW "), Some(Weather::Snow));
         assert_eq!(Weather::from_name("drizzle"), None);
     }
 
     #[test]
     fn emitter_is_sun_by_day_moon_by_night_never_both() {
-        // Sample every 30 min across a day; exactly one body, and the switch
-        // happens around the dawn/dusk ramps (no midday moon, no midnight sun).
         for slot in 0..48u32 {
             let (h, m) = (slot / 2, (slot % 2) * 30);
             let s = at_hour(h, m);
@@ -754,9 +687,6 @@ mod tests {
                     (5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
                     "sun only during the daylight ramp, got {h}:{m:02}"
                 ),
-                // Exact complement of the Sun arm's `[5,20)` band (was the
-                // looser `!(8..17)`, which left [5,8)/[17,20) unchecked for the
-                // moon — a SUN_RISE_H/SUN_SET_H boundary shift slipped past it).
                 Body::Moon => assert!(
                     !(5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
                     "moon only when the sun is down, got {h}:{m:02}"
@@ -771,16 +701,9 @@ mod tests {
         let dawn = emitter(at_hour(6, 30)).altitude;
         let dusk = emitter(at_hour(18, 0)).altitude;
         assert!(noon > 0.8, "midday sun rides high: {noon}");
-        // The brief's illustrative `< 0.35` for both doesn't hold honestly: on
-        // the sin(pi*t) arc over the 5..20 day span, dawn (6:30, t≈0.10) sits
-        // at altitude≈0.309 but dusk (18:00, t≈0.867) sits at altitude≈0.407
-        // -- dusk is only 2h before the 20:00 sunset while dawn is 1.5h after
-        // the 5:00 sunrise, so the two sample hours aren't equidistant from
-        // their respective horizon crossings. Not a curve bug, just an
-        // artifact of these particular sample points. Thresholds below keep
-        // the same ~0.09 real margin off the actual computed values (dawn
-        // 0.309 vs 0.4, dusk 0.407 vs 0.5) while still reading clearly low
-        // next to noon's >0.8.
+        // The two thresholds differ because these sample hours aren't
+        // equidistant from their horizon crossings on the 5..20 day span — dusk
+        // sits 2h before sunset, dawn 1.5h after sunrise.
         assert!(
             dawn < 0.4 && dusk < 0.5,
             "dawn/dusk sit low: {dawn} / {dusk}"
@@ -789,10 +712,6 @@ mod tests {
 
     #[test]
     fn warmth_is_high_low_on_the_horizon_and_neutral_at_apex() {
-        // The brief's illustrative `> 0.7` doesn't hold honestly: dawn's
-        // warmth = 1 - altitude(6:30) computes to ≈0.691 on the sin(pi*t)
-        // arc. `> 0.6` keeps the same ~0.09 real margin as the reconciled
-        // altitude thresholds above.
         assert!(emitter(at_hour(6, 30)).warmth > 0.6, "low sun is warm/red");
         assert!(emitter(at_hour(12, 30)).warmth < 0.3, "apex sun is neutral");
     }
@@ -807,8 +726,6 @@ mod tests {
 
     #[test]
     fn moon_luminance_tracks_phase() {
-        // A near-full-moon night is brighter than a near-new-moon night.
-        // Search a lunar month for the min/max illuminated fraction at 02:00.
         let (mut lo, mut hi) = (f32::MAX, f32::MIN);
         let (mut lo_lum, mut hi_lum) = (0.0, 0.0);
         for day in 1..=30u32 {
@@ -833,10 +750,8 @@ mod tests {
     #[test]
     fn weather_override_forces_a_fixed_variant_then_restores() {
         use std::time::Duration;
-        // Clear the thread-local even if an assert below panics — `cargo test` shares
-        // threads across tests, so a leaked override would corrupt a sibling weather
-        // test (nextest is process-per-test and immune, but the justfile falls back to
-        // `cargo test` when nextest isn't installed).
+        // Clear the thread-local even if an assert below panics — plain
+        // `cargo test` shares threads, so a leaked override corrupts a sibling.
         struct Reset;
         impl Drop for Reset {
             fn drop(&mut self) {
@@ -852,14 +767,12 @@ mod tests {
             .find(|&w| w != natural)
             .expect("8 variants");
         set_weather_override(Some(forced));
-        // The override ignores the timestamp entirely.
         assert_eq!(weather_state(t), forced);
         assert_eq!(
             weather_state(t + Duration::from_secs(987_654)),
             forced,
             "override is time-independent"
         );
-        // Restore so this thread-local can't bleed into sibling tests.
         set_weather_override(None);
         assert_eq!(
             weather_state(t),
@@ -870,7 +783,6 @@ mod tests {
 
     #[test]
     fn storm_transmits_less_than_rain_overall() {
-        // The physical correction: cumulonimbus is optically denser than nimbostratus.
         let s = atmo(Weather::Storm);
         let r = atmo(Weather::Rain);
         assert!(
@@ -913,13 +825,6 @@ mod tests {
 
     #[test]
     fn thick_cloud_hides_the_disc_uniformly() {
-        // `MIN_DISC_VIS` (background/celestial.rs `compute_disc`'s hide gate)
-        // is the authoritative threshold — Overcast/Rain/Storm must all sit at
-        // or below it, so thick
-        // cloud hides the disc uniformly: a THICKER cloud (Storm) must never
-        // show MORE of the disc than a thinner one (Rain), matching the
-        // direct/diffuse ordering `storm_transmits_less_than_rain_overall`
-        // already pins.
         let min_disc_vis = crate::pixel_painter::background::celestial::MIN_DISC_VIS;
         let overcast = atmo(Weather::Overcast).disc;
         let rain = atmo(Weather::Rain).disc;
@@ -938,7 +843,6 @@ mod tests {
 
     #[test]
     fn windy_near_full_beam() {
-        // Windy scatters cloud but keeps the sky mostly clear: near-full direct beam.
         assert!(
             atmo(Weather::Windy).direct > 0.5,
             "windy keeps a strong beam"
@@ -947,8 +851,6 @@ mod tests {
 
     #[test]
     fn haze_and_snow_keep_a_faint_but_nonzero_beam() {
-        // Snow glare and atmospheric haze (fog/smog) still let a weak directional
-        // beam through — never a hard zero, but well below a clear/windy sky.
         for w in [Weather::Snow, Weather::Fog, Weather::Smog] {
             let d = atmo(w).direct;
             assert!(
@@ -960,8 +862,6 @@ mod tests {
 
     #[test]
     fn storm_diffuse_dimmer_than_overcast() {
-        // A storm's cumulonimbus is optically denser than plain overcast stratus,
-        // so even the flat diffuse fill is dimmer under a storm.
         assert!(
             atmo(Weather::Storm).diffuse < atmo(Weather::Overcast).diffuse,
             "storm diffuse should be dimmer than overcast"
@@ -970,10 +870,6 @@ mod tests {
 
     #[test]
     fn night_floor_varies_by_weather() {
-        // The city_bounce night floor is phase-independent (unlike the moon), so
-        // this ordering must hold regardless of the date: snow's albedo bounces
-        // the most, a storm swallows the most, and every weather keeps SOME glow
-        // (a room is never truly pitch black).
         assert!(
             city_bounce(Weather::Snow) >= city_bounce(Weather::Clear),
             "snow albedo should bounce at least as much as a clear night"

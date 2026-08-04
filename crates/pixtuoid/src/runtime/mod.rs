@@ -1,8 +1,6 @@
-//! Runtime wiring: `RunConfig` (the startup inputs), the boot-capacity math,
-//! and the headless summary formatter — everything here is exercised by unit
-//! tests. The untestable async glue (tokio runtime, reducer task, source
-//! spawn, Ctrl-C loop) lives in `driver.rs`, which is excluded from coverage
-//! (issue #103).
+//! Runtime wiring: `RunConfig` (the startup inputs), the boot-capacity math, and the
+//! headless summary formatter. The untestable async glue (tokio runtime, reducer task,
+//! source spawn, Ctrl-C loop) lives in `driver.rs`, which is excluded from coverage.
 
 pub(crate) mod driver;
 pub(crate) mod gate;
@@ -19,27 +17,17 @@ use pixtuoid_core::state::{ActivityState, DaemonState, MAX_FLOORS};
 use pixtuoid_core::SceneState;
 use tokio::sync::watch;
 
-/// The reducer publishes a fresh `Arc<SceneState>` on every mutation through
-/// this watch channel. Consumers (renderer, headless summary loop) hold a
-/// `Receiver`, call `borrow()` for an O(1) pointer read, and never block
-/// the writer. Replaces the old `Arc<RwLock<SceneState>>` so:
-///   - cloning is a pointer copy (Arc::clone), not a heap allocation per
-///     field (thanks to interned `Arc<str>` strings in `AgentSlot`)
-///   - the renderer never holds a lock that could block the reducer
-///   - the Arc is serializable, so an out-of-process viewer could read it
-///     over a socket (no such consumer today)
+/// The reducer publishes a fresh `Arc<SceneState>` on every mutation through this watch
+/// channel. Consumers (renderer, headless summary loop) hold a `Receiver`, call
+/// `borrow()` for an O(1) pointer read, and never block the writer.
 pub type SceneRx = watch::Receiver<Arc<SceneState>>;
 
-/// Fallback desk capacity when the terminal cannot be queried (e.g.
-/// headless mode). The real capacity is computed from terminal size in
-/// `compute_boot_capacities` before the first TUI frame.
+/// Fallback desk capacity when the terminal cannot be queried (e.g. headless mode).
 pub(crate) const FALLBACK_DESKS: usize = 16;
 
-/// The startup inputs shared by `run` + `run_async`. Bundled so a new boot
-/// flag is one struct field, not a fourth copy of the arg list to thread
-/// through both signatures + the main.rs call. The `theme` is already resolved
-/// (`config::resolve_theme` validates CLI + config in one place), so an
-/// unknown theme can't reach the runtime by construction.
+/// The startup inputs shared by `run` + `run_async`. The `theme` is already resolved
+/// (`config::resolve_theme` validates CLI + config in one place), so an unknown theme
+/// can't reach the runtime by construction.
 pub struct RunConfig {
     pub socket: Option<PathBuf>,
     pub projects_root: Option<PathBuf>,
@@ -50,30 +38,24 @@ pub struct RunConfig {
     pub config_path: PathBuf,
     pub theme: &'static pixtuoid_scene::theme::Theme,
     pub pets: Vec<pixtuoid_scene::pet::Pet>,
-    /// The resolved set of CONNECTED source ids (registry names). Seeded at boot
-    /// from `config::resolve_connected`; the runtime wraps it in a shared
-    /// [`ConnectedSources`] the reducer gate reads and the Sources panel
-    /// mutates. A disconnected source's events are dropped + its sprites evicted.
+    /// The resolved set of CONNECTED source ids (registry names). A disconnected
+    /// source's events are dropped + its sprites evicted.
     pub connected: HashSet<String>,
-    /// The warn-floor log path (`main` owns the resolution). `run_tui`
-    /// throttle-scans it for decode-drift breadcrumbs → the footer nudge. `None`
-    /// in headless / when no log file (then no footer drift surfacing).
+    /// The warn-floor log path. `run_tui` throttle-scans it for decode-drift
+    /// breadcrumbs → the footer nudge. `None` in headless / when no log file.
     pub log_path: Option<PathBuf>,
     /// First launch ever (no `[sources]` flags persisted yet) — the TUI plays the
-    /// one-time onboarding "move-in" overlay. Computed by `main` via
-    /// `setup::is_first_run`; ignored by headless + `floating`.
+    /// one-time onboarding "move-in" overlay. Ignored by headless + `floating`.
     pub first_run: bool,
-    /// Resolved `[audio]` settings (#633) — muted defaults TRUE (the lazy
-    /// spawn waits for the first `m`), volume pre-clamped by
-    /// `config::resolve_audio`. Headless ignores it.
+    /// Resolved `[audio]` settings — muted defaults TRUE (the lazy spawn waits for the
+    /// first `m`), volume pre-clamped by `config::resolve_audio`. Headless ignores it.
     pub audio: crate::config::AudioConfig,
 }
 
-/// A live, shared set of connected source ids — the runtime mirror of the
-/// persisted `[sources]` flags. One writer (the Sources panel toggle), many
-/// readers (the reducer-task event gate + its per-tick reconcile sweep). On lock
-/// poison it recovers the set via `into_inner` (insert/remove/contains never
-/// panic, so the data is always valid — losing it would mass-evict the office).
+/// A live, shared set of connected source ids — the runtime mirror of the persisted
+/// `[sources]` flags. On lock poison it recovers the set via `into_inner`: the data is
+/// always valid (insert/remove/contains never panic), and losing it would mass-evict
+/// the office.
 #[derive(Clone, Default)]
 pub struct ConnectedSources(Arc<Mutex<HashSet<String>>>);
 
@@ -100,18 +82,16 @@ impl ConnectedSources {
     }
 }
 
-/// Per-floor boot capacities derived from the real terminal size. Each floor
-/// uses its own seed, so different layout variants can yield different desk
-/// counts. When a floor's layout rejects the terminal (e.g. too small), fall
-/// back to `FALLBACK_DESKS` for that floor so the reducer can still seat
-/// agents — they may render off-grid on the tiny terminal, but won't be
-/// silently dropped during the boot race before the first TUI frame.
+/// Per-floor boot capacities derived from the real terminal size, each floor with its
+/// own seed. When a floor's layout rejects the terminal (e.g. too small), fall back to
+/// `FALLBACK_DESKS` for that floor so the reducer can still seat agents — they may
+/// render off-grid on the tiny terminal, but won't be silently dropped during the boot
+/// race before the first TUI frame.
 pub(crate) fn boot_capacities_for(cols: u16, rows: u16) -> [usize; MAX_FLOORS] {
     std::array::from_fn(|i| {
-        // The ONE seed derivation every call site shares (floor_seed's own doc
-        // claim) — never an inline copy of the formula, which would silently
-        // drift the boot capacities from the rendered layout if the derivation
-        // ever changes (over-seeded atomics strand agents on unrendered desks).
+        // The ONE seed derivation every call site shares — an inline copy of the
+        // formula would silently drift the boot capacities from the rendered layout
+        // (over-seeded atomics strand agents on unrendered desks).
         let seed = pixtuoid_scene::floor::floor_seed(i);
         let cap = capacity_for_terminal(cols, rows, seed);
         if cap == 0 {
@@ -122,10 +102,9 @@ pub(crate) fn boot_capacities_for(cols: u16, rows: u16) -> [usize; MAX_FLOORS] {
     })
 }
 
-/// Clamp each per-floor boot capacity to an optional `--max-desks` cap. Returns
-/// `min(layout_capacity, cap)` per floor so the boot atomics are never seeded
-/// above the real layout capacity (`fetch_max` only grows; an over-seed strands
-/// agents on non-existent desks until the terminal grows). `None` is a no-op.
+/// Clamp each per-floor boot capacity to an optional `--max-desks` cap, so the boot
+/// atomics are never seeded above the real layout capacity (`fetch_max` only grows; an
+/// over-seed strands agents on non-existent desks until the terminal grows).
 fn cap_boot_capacities(base: [usize; MAX_FLOORS], cap: Option<usize>) -> [usize; MAX_FLOORS] {
     match cap {
         Some(c) => base.map(|x| x.min(c)),
@@ -133,14 +112,11 @@ fn cap_boot_capacities(base: [usize; MAX_FLOORS], cap: Option<usize>) -> [usize;
     }
 }
 
-/// The headless-vs-interactive boot capacity POLICY, lifted out of the
-/// coverage/mutants-excluded `run_async` so it is covered + mutation-tested.
-/// Headless honors `--max-desks` UNCLAMPED (there is no terminal layout to
-/// measure); interactive measures the real per-floor layout (`measure`, injected
-/// so the terminal query stays in the shell — and it is NOT called in headless,
-/// which never queries the terminal) then clamps to the cap. Clamping, not
-/// `[cap; N]`, keeps the `fetch_max` boot atomics from over-seeding agents onto
-/// non-existent desks.
+/// The headless-vs-interactive boot capacity POLICY. Headless honors `--max-desks`
+/// UNCLAMPED (there is no terminal layout to measure) and never calls `measure`;
+/// interactive measures the real per-floor layout (injected so the terminal query stays
+/// in the shell) then clamps to the cap — clamping, not `[cap; N]`, keeps the
+/// `fetch_max` boot atomics from over-seeding agents onto non-existent desks.
 pub(crate) fn resolve_boot_caps(
     desk_cap: Option<usize>,
     headless: bool,
@@ -160,11 +136,10 @@ pub(crate) fn capacity_for_terminal(cols: u16, rows: u16, floor_seed: u64) -> us
     pixtuoid_scene::floor::floor_capacity(cols, buf_h, floor_seed)
 }
 
-// The headless `println!` summary derives labels / tool detail / Notification
-// reason from untrusted transcript+hook input, so a crafted ANSI/OSC escape
-// would otherwise reach the user's terminal verbatim (the TUI is immune —
-// ratatui neutralizes escapes in its cell buffer). One chokepoint: the
-// canonical `crate::strip_control_chars`.
+// The headless `println!` summary derives labels / tool detail / Notification reason
+// from untrusted transcript+hook input, so a crafted ANSI/OSC escape would otherwise
+// reach the user's terminal verbatim (the TUI is immune — ratatui neutralizes escapes
+// in its cell buffer).
 use crate::strip_control_chars as sanitize_line;
 
 fn summarize(scene: &SceneState) -> String {
@@ -187,11 +162,10 @@ fn summarize(scene: &SceneState) -> String {
             format!("{}@{}:{}", sanitize_line(&a.label), a.desk_index.0, state)
         })
         .collect();
-    // Daemon-style sources (the OpenClaw gateway lobster) render as wandering
-    // mascots, not desk agents — surface them here too so headless is a complete
-    // window onto the scene (and the live-e2e harness can assert the lobster's state).
-    // Source name is a registry id (controlled), but sanitize for defense like
-    // every other field on this println path (R0609-02).
+    // Daemon-style sources (the OpenClaw gateway lobster) render as wandering mascots,
+    // not desk agents — surface them here too so headless is a complete window onto the
+    // scene. The source name is a registry id (controlled), but sanitize it like every
+    // other field on this println path.
     let daemons: Vec<String> = scene
         .daemons()
         .map(|(source, instance, p)| {
@@ -201,11 +175,9 @@ fn summarize(scene: &SceneState) -> String {
                 DaemonState::Degraded => "degraded",
                 DaemonState::Down => "down",
             };
-            // `source@instance:state` — the instance (an OpenClaw gateway port) is
-            // load-bearing here, not cosmetic: two gateways are two rows, so the
-            // live-e2e can assert one going down leaves the other alone. The id is
-            // decoder-minted (a checked port), but sanitize like every other field
-            // on this println path (R0609-02).
+            // The instance (an OpenClaw gateway port) is load-bearing, not cosmetic:
+            // two gateways are two rows, so the live-e2e can assert one going down
+            // leaves the other alone.
             format!(
                 "{}@{}:{}",
                 sanitize_line(source),
@@ -222,11 +194,9 @@ fn summarize(scene: &SceneState) -> String {
 }
 
 /// Format a `SourceDeath` for the headless stdout health line. Both fields are
-/// `sanitize_line`d before printing: `error` is `format!("{e:#}")` of an
-/// `anyhow` chain that can embed external strings (a malformed transcript path,
-/// a parse error quoting file content) carrying terminal escapes, and `source`
-/// is sanitized too for defense-in-depth — the same escape-injection class the
-/// `summarize` path already guards (R0609-02).
+/// `sanitize_line`d before printing: `error` is `format!("{e:#}")` of an `anyhow` chain
+/// that can embed external strings carrying terminal escapes, and `source` is sanitized
+/// too for defense-in-depth.
 fn format_source_death(d: &SourceDeath) -> String {
     format!(
         "warning: source '{}' died: {}",
@@ -235,14 +205,10 @@ fn format_source_death(d: &SourceDeath) -> String {
     )
 }
 
-/// The not-yet-surfaced tail of the grow-only `SourceDeath` health watch,
-/// advancing `seen` past it. The watch value is a `Vec` that only ever grows,
-/// so each consumer surfaces a death exactly once by tracking a running count —
-/// logging the whole borrow on every change would re-warn all prior deaths (N
-/// deaths → N(N+1)/2 lines, reading as repeated crashes in forensics). Both
-/// consumers ride this ONE owner (the headless stdout line in `driver.rs`, the
-/// floating-window `warn!` log in `floating/mod.rs`), so the off-by-one has a
-/// single tested home a future third consumer inherits.
+/// The not-yet-surfaced tail of the grow-only `SourceDeath` health watch, advancing
+/// `seen` past it. Each consumer surfaces a death exactly once by tracking a running
+/// count — logging the whole borrow on every change would re-warn all prior deaths,
+/// reading as repeated crashes in forensics.
 pub(crate) fn unseen_deaths<'a>(deaths: &'a [SourceDeath], seen: &mut usize) -> &'a [SourceDeath] {
     let start = (*seen).min(deaths.len());
     *seen = deaths.len();
@@ -255,17 +221,14 @@ mod tests {
     use pixtuoid_core::{Reducer, Transport};
     use std::time::SystemTime;
 
-    // The shared derivation, NOT a copy of the formula — a test-local restatement
-    // structurally couldn't catch the impl diverging from `floor_seed`.
+    // The shared derivation, NOT a copy: a test-local restatement structurally
+    // couldn't catch the impl diverging from `floor_seed`.
     fn floor_seed(i: usize) -> u64 {
         pixtuoid_scene::floor::floor_seed(i)
     }
 
     #[test]
     fn format_source_death_strips_terminal_escapes_from_both_fields() {
-        // `error` is the untrusted vector (anyhow `{e:#}` can quote a malformed
-        // transcript path / file content); `source` is sanitized too for
-        // defense-in-depth. Headless prints this straight to a terminal.
         let d = SourceDeath::new(
             "codex\u{1b}]0;pwned\u{7}",
             "open /tmp/a\u{1b}[2Jb.jsonl: \u{1b}[31mboom\u{7}",
@@ -275,7 +238,6 @@ mod tests {
             !out.chars().any(|c| c.is_control()),
             "no control chars may survive into the headless terminal line: {out:?}"
         );
-        // The human-readable text is preserved (only control chars stripped).
         assert!(out.contains("source 'codex]0;pwned' died"), "got {out:?}");
         assert!(
             out.contains("open /tmp/a[2Jb.jsonl: [31mboom"),
@@ -290,8 +252,6 @@ mod tests {
         assert_eq!(unseen_deaths(&one, &mut seen).len(), 1);
         assert_eq!(seen, 1);
 
-        // The grow-only Vec gains a second death: only the NEW one surfaces —
-        // the first must not be re-logged on every later change.
         let two = vec![
             SourceDeath::new("codex", "boom"),
             SourceDeath::new("claude-code", "bind"),
@@ -300,14 +260,11 @@ mod tests {
         assert_eq!(fresh.len(), 1);
         assert_eq!(fresh[0].source, "claude-code");
 
-        // No growth → nothing to log.
         assert!(unseen_deaths(&two, &mut seen).is_empty());
     }
 
     #[test]
     fn capacity_for_normal_terminal() {
-        // No upper bound: desk capacity fills the buffer's physical space
-        // (the old 16-desk layout ceiling was removed with the desk cap).
         let cap = capacity_for_terminal(192, 48, 0);
         assert!(cap > 0);
     }
@@ -339,10 +296,6 @@ mod tests {
         assert_eq!(capacity_for_terminal(cols, rows, 0), expected);
     }
 
-    // Regression for the pre-0.4.1 bug where boot capacity used floor-0's seed
-    // for all floors. Different seeds select different layout variants (mid_x
-    // splits {28%, 18%, 22%, 35%, 22%}) which can yield different desk counts
-    // at the same terminal size; capacity_for_terminal must respect the seed.
     #[test]
     fn seed_can_produce_distinct_capacities() {
         let mut found = false;
@@ -367,22 +320,18 @@ mod tests {
 
     #[test]
     fn resolve_boot_caps_headless_honors_cap_unclamped_interactive_clamps() {
-        // Headless honors --max-desks unclamped and NEVER measures the terminal.
         assert_eq!(
             resolve_boot_caps(Some(99), true, || panic!("headless must not measure")),
             [99; MAX_FLOORS]
         );
-        // Headless with no cap falls back.
         assert_eq!(
             resolve_boot_caps(None, true, || panic!("headless must not measure")),
             [FALLBACK_DESKS; MAX_FLOORS]
         );
-        // Interactive clamps the measured layout down to the cap.
         assert_eq!(
             resolve_boot_caps(Some(4), false, || [10; MAX_FLOORS]),
             [4; MAX_FLOORS]
         );
-        // Interactive with no cap keeps the measured layout.
         assert_eq!(
             resolve_boot_caps(None, false, || [10; MAX_FLOORS]),
             [10; MAX_FLOORS]
@@ -403,9 +352,6 @@ mod tests {
         assert_eq!(caps, expected);
     }
 
-    // Regression for the boot-race window where SessionStart events fired
-    // between SourceManager spawn and the first TUI frame's fetch_max were
-    // silently dropped because boot=0 left every floor capacity at zero.
     #[test]
     fn boot_capacities_falls_back_to_default_on_tiny_terminal() {
         let caps = boot_capacities_for(10, 10);
@@ -436,7 +382,6 @@ mod tests {
             );
         };
 
-        // Agent A: active with a detail.
         let a = AgentId::from_transcript_path("/p/a.jsonl");
         seat(&mut reducer, &mut scene, a);
         reducer.apply(
@@ -450,7 +395,6 @@ mod tests {
             Transport::Hook,
         );
 
-        // Agent B: waiting on a permission prompt.
         let b = AgentId::from_transcript_path("/p/b.jsonl");
         seat(&mut reducer, &mut scene, b);
         reducer.apply(
@@ -463,7 +407,6 @@ mod tests {
             Transport::Hook,
         );
 
-        // Agent C: bare SessionStart → idle.
         let c = AgentId::from_transcript_path("/p/c.jsonl");
         seat(&mut reducer, &mut scene, c);
 
@@ -472,15 +415,9 @@ mod tests {
         assert!(summary.contains("active(Edit: foo.rs)"), "got: {summary}");
         assert!(summary.contains("waiting(permission)"), "got: {summary}");
         assert!(summary.contains(":idle"), "got: {summary}");
-        // The "@desk_index" format is present for each agent.
         assert!(summary.contains('@'), "got: {summary}");
     }
 
-    // Headless must surface the DAEMON layer too (the OpenClaw gateway lobster),
-    // not just agents — in headless it is the ONLY programmatic window onto a
-    // daemon's presence. Format is `<source>@<instance>:<idle|busy|degraded|down>`,
-    // keyed by source AND instance so N daemons — and N gateways of one daemon —
-    // each get an entry. (This is also what the live-e2e harness asserts.)
     #[test]
     fn summarize_reports_daemon_presence() {
         use pixtuoid_core::source::daemon::{
@@ -495,14 +432,12 @@ mod tests {
             DaemonInstanceId::new("18789").expect("non-empty"),
         );
 
-        // No daemon configured → an empty (but present) daemons section.
         assert!(
             summarize(&scene).contains("daemons=[]"),
             "got: {}",
             summarize(&scene)
         );
 
-        // gateway_start → idle.
         apply_presence(
             &mut scene,
             &gw,
@@ -515,7 +450,6 @@ mod tests {
             summarize(&scene)
         );
 
-        // a run in flight → busy.
         apply_presence(
             &mut scene,
             &gw,
@@ -530,8 +464,7 @@ mod tests {
             summarize(&scene)
         );
 
-        // a FAILED run (agent_end.success:false) → degraded (#317). Drains the
-        // in-flight run, so the subsequent GatewayDown still reads as down.
+        // RunFailed drains the in-flight run, so the later GatewayDown still reads down.
         apply_presence(
             &mut scene,
             &gw,
@@ -546,7 +479,6 @@ mod tests {
             summarize(&scene)
         );
 
-        // gateway_stop → down.
         apply_presence(&mut scene, &gw, DaemonPresenceUpdate::GatewayDown, now);
         assert!(
             summarize(&scene).contains("daemons=[openclaw@18789:down]"),
@@ -555,9 +487,6 @@ mod tests {
         );
     }
 
-    // Headless `summarize` feeds `println!` directly. The label (cwd basename),
-    // tool detail, and Notification reason are all untrusted, so a crafted
-    // ANSI/OSC escape must be stripped before it reaches the user's terminal.
     #[test]
     fn summarize_strips_terminal_escapes_from_untrusted_fields() {
         use pixtuoid_core::source::AgentEvent;
@@ -567,8 +496,8 @@ mod tests {
         let mut reducer = Reducer::new();
         let now = SystemTime::now();
         let id = AgentId::from_parts("cc", "esc");
-        // The label derives from the cwd basename — an attacker-controlled path
-        // can smuggle an OSC set-title + BEL sequence.
+        // The label derives from the cwd basename — an attacker-controlled path can
+        // smuggle an OSC set-title + BEL sequence.
         reducer.apply(
             &mut scene,
             AgentEvent::SessionStart {
@@ -581,7 +510,6 @@ mod tests {
             now,
             Transport::Hook,
         );
-        // The Notification reason is wholly untrusted and length-uncapped.
         reducer.apply(
             &mut scene,
             AgentEvent::Waiting {
@@ -597,28 +525,20 @@ mod tests {
             !out.chars().any(|c| c.is_control()),
             "summary must carry no control chars (terminal-escape injection): {out:?}"
         );
-        // The benign text survives the scrub.
         assert!(out.contains("repo]0;pwned"), "got: {out}");
         assert!(out.contains("needs [2J approval"), "got: {out}");
     }
 
-    // Regression: an explicit --max-desks must CLAMP each floor to the real
-    // layout capacity, never seed a floor ABOVE it. The boot atomics grow via
-    // fetch_max only, so an over-seed (the old `[cap; MAX_FLOORS]` path) strands
-    // agents on non-existent desks on small terminals until the terminal grows.
     #[test]
     fn explicit_cap_clamps_to_layout_capacity_not_above() {
         let base = boot_capacities_for(192, 48);
         let layout_max = *base.iter().max().unwrap();
-        // A cap far above the layout must NOT inflate any floor.
         assert_eq!(
             cap_boot_capacities(base, Some(layout_max + 100)),
             base,
             "cap above layout capacity must clamp down to the layout, not inflate"
         );
-        // A cap of 1 clamps every floor to at most 1.
         assert!(cap_boot_capacities(base, Some(1)).iter().all(|&c| c <= 1));
-        // No cap leaves the base untouched.
         assert_eq!(cap_boot_capacities(base, None), base);
     }
 

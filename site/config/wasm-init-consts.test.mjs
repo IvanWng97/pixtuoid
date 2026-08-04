@@ -1,11 +1,6 @@
-// The bounded wasm-init retry was once a byte-identical copy in TWO is:inline
-// scripts (OfficeBackdrop's boot() + Showcase's bootCanvas()), and this test
-// pinned the two copies equal. Since #721 the retry lives ONCE in the shared
-// public/office-driver.js module both consumers dynamic-import, so drift is
-// structurally impossible — the test now guards the single source: the consts
-// live in office-driver.js AND neither component re-inlines a copy (which would
-// silently reintroduce the drift class). Keeps the "one source" a fact, not a
-// hope (the repo convention: a cross-boundary invariant is pinned by a test).
+// The bounded wasm-init retry must live ONCE in the shared office-driver.js both
+// live-office components dynamic-import: a re-inlined copy would silently
+// reintroduce the two-scripts drift class.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -24,9 +19,8 @@ for (const name of ['WASM_INIT_RETRIES', 'WASM_INIT_BACKOFF_MS']) {
   });
 
   test(`${name} is not re-inlined in either live-office consumer`, () => {
-    // Match a DECLARATION (`const NAME =`), not a bare mention — a comment
-    // cross-referencing the const by name must not spuriously red this in
-    // a codebase this comment-dense.
+    // Match a DECLARATION, not a bare mention — a comment cross-referencing the
+    // const by name must not spuriously red this.
     for (const rel of CONSUMERS) {
       assert.ok(
         !new RegExp(`const ${name}\\s*=`).test(read(rel)),

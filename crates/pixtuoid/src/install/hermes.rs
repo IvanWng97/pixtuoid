@@ -1,36 +1,19 @@
 //! Hermes Agent hook install target.
 //!
-//! Writes the `hooks:` block into `<hermes-home>/config.yaml` (`~/.hermes/config.yaml`
-//! by default; `HERMES_HOME` relocates it verbatim — see
-//! `pixtuoid_core::source::hermes::hermes_home`). Hermes runs each hook `command` by
-//! ARGV-EXEC (quote-aware word-split, NO shell — capture-verified: the
-//! env-prefix form yields "command not found", and `|`/`>` arrive as literal argv), so
-//! the command is the bare `'<abs>' --source hermes` exec form on all platforms (via
-//! `hook_cmd::exec_hook_command`), NOT Codex's Unix env-prefix.
-//!
-//! Config shape (YAML), per-event sequences of `{command, timeout, _pixtuoid}`:
-//! ```yaml
-//! hooks:
-//!   on_session_start:
-//!     - command: "'/abs/pixtuoid-hook' --source hermes"
-//!       timeout: 5
-//!       _pixtuoid: true
-//! ```
-//! - `_pixtuoid: true` is the managed-entry sentinel; Hermes IGNORES the unknown key
-//!   (capture-verified: `hermes hooks list` parses + lists an entry carrying it).
-//! - `timeout` is optional to Hermes (it defaults 60s); we set an explicit small bound.
+//! Writes the `hooks:` block into `<hermes-home>/config.yaml`. Hermes runs each hook
+//! `command` by ARGV-EXEC (quote-aware word-split, NO shell — capture-verified), so the
+//! command is the bare `'<abs>' --source hermes` exec form on all platforms, NOT Codex's
+//! Unix env-prefix. `_pixtuoid: true` is the managed-entry sentinel; Hermes ignores the
+//! unknown key.
 //!
 //! **Consent gate — deliberately NOT bypassed.** A freshly-declared Hermes shell hook is
-//! "not allowlisted" until the user approves it through Hermes's OWN flow (an interactive
-//! prompt, or `hermes --accept-hooks`). pixtuoid writes ONLY config.yaml and does NOT
-//! forge an approval in `~/.hermes/shell-hooks-allowlist.json`. This mirrors the Codex
-//! `trusted_hash` precedent (we write no trust hash; the user approves in the Codex TUI) —
-//! respect the tool's security gate rather than pre-authorize on the user's behalf. So a
+//! "not allowlisted" until the user approves it through Hermes's OWN flow. pixtuoid
+//! writes ONLY config.yaml and does NOT forge an approval in
+//! `~/.hermes/shell-hooks-allowlist.json` (the Codex `trusted_hash` precedent), so a
 //! newly-connected Hermes sprite appears only AFTER that one-time approval.
 //!
-//! YAML merge preserves the user's OTHER config keys (model/provider/…) but does NOT
-//! round-trip comments (a saphyr / YAML-ecosystem limitation) — data survives, comments
-//! are dropped on the connect/disconnect rewrite. Idempotent via the sentinel.
+//! The YAML merge preserves the user's other config keys but does NOT round-trip
+//! comments (a saphyr limitation) — data survives, comments are dropped on rewrite.
 
 use std::path::{Path, PathBuf};
 
@@ -41,9 +24,9 @@ use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 use crate::install::SENTINEL_KEY;
 
-/// Events we register == events the decoder handles (`pixtuoid_core::source::hermes`),
-/// enforced by `every_registered_hermes_event_decodes` below. Snake_case wire values
-/// from a real capture (session events carry the `on_` prefix, tool events don't).
+/// Events we register == events the decoder handles, enforced by
+/// `every_registered_hermes_event_decodes`. Wire values from a real capture — session
+/// events carry the `on_` prefix, tool events don't.
 const HERMES_EVENTS: &[&str] = &[
     "on_session_start",
     "pre_tool_call",
@@ -51,9 +34,8 @@ const HERMES_EVENTS: &[&str] = &[
     "on_session_end",
 ];
 
-/// The per-hook timeout (seconds) written into config.yaml. The shim returns within its
-/// 200ms send bound; 5s is generous headroom (Hermes defaults 60s when the key is
-/// omitted). One named source of truth for both the writer and the verify check.
+/// The shim returns within its 200ms send bound, so 5s is generous headroom (Hermes
+/// defaults to 60s when the key is omitted).
 const HOOK_TIMEOUT_SECS: i64 = 5;
 
 pub(crate) fn default_config_path() -> Result<PathBuf> {
@@ -64,23 +46,16 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
         })
 }
 
-/// Presence probe: Hermes creates `<hermes-home>` on first run and OWNS config.yaml (it
-/// holds the user's model/provider), so unlike Cursor's hooks.json the config file isn't
-/// purely ours — probing the home DIR is the robust "is Hermes installed" signal
-/// (config.yaml may not exist until `hermes setup`). Mirrors the Cursor/Reasonix
-/// dir-probe rationale.
+/// Probes the home DIR, not config.yaml: Hermes creates the home on first run but may
+/// not write config.yaml until `hermes setup`.
 pub(crate) fn detect_installed() -> bool {
     pixtuoid_core::source::hermes::hermes_home().is_some_and(|d| d.exists())
 }
 
-/// Hermes ARGV-execs the command (no shell), so the bare `'<abs>' --source hermes` exec
-/// form on all platforms. Err on a non-UTF-8 path (prevents the lossy dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let p = crate::install::merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::exec_hook_command(p, "hermes")
 }
-
-// --- saphyr YAML helpers (owned model: parse → mutate → emit) ---
 
 fn ystr(s: &str) -> YamlOwned {
     YamlOwned::Value(ScalarOwned::String(s.to_string()))
@@ -90,10 +65,6 @@ fn ybool(b: bool) -> YamlOwned {
     YamlOwned::Value(ScalarOwned::Boolean(b))
 }
 
-/// Parse config.yaml into its root mapping. Empty/whitespace content ⇒ the empty
-/// document (never an error — the [`MergeOutcome`] empty rule). Errs (refusing to
-/// overwrite) on unparseable YAML or a non-mapping root — a Hermes config.yaml root is
-/// always a key/value mapping.
 fn parse_root_mapping(content: &str) -> Result<MappingOwned> {
     if content.trim().is_empty() {
         return Ok(MappingOwned::new());
@@ -109,9 +80,8 @@ fn parse_root_mapping(content: &str) -> Result<MappingOwned> {
     }
 }
 
-/// Re-serialize a root mapping to YAML, stripping saphyr's leading `---` document-start
-/// marker for a cleaner diff (Hermes parses it either way; a hand-written config.yaml
-/// has none).
+/// Strips saphyr's leading `---` document-start marker for a cleaner diff; Hermes parses
+/// it either way, and a hand-written config.yaml has none.
 fn emit(root: &MappingOwned) -> Result<String> {
     let doc = YamlOwned::Mapping(root.clone());
     let borrowed = Yaml::from(&doc);
@@ -126,7 +96,6 @@ fn is_managed(entry: &YamlOwned) -> bool {
     matches!(entry, YamlOwned::Mapping(m) if m.get(&ystr(SENTINEL_KEY)) == Some(&ybool(true)))
 }
 
-/// A managed entry whose `command` + `timeout` already match ours — an install no-op.
 fn managed_matches(entry: &YamlOwned, hook_cmd: &str) -> bool {
     let YamlOwned::Mapping(m) = entry else {
         return false;
@@ -147,12 +116,9 @@ fn managed_entry(hook_cmd: &str) -> YamlOwned {
     YamlOwned::Mapping(e)
 }
 
-/// Extract the shim path from our exec-form command — `'<abs>' --source hermes` (Unix,
-/// single-quoted) or `<abs> --source hermes` (Windows, bare). The shared
-/// `verify::shell_shim_ref` handles the shell targets' env-prefix + Windows-bare shapes
-/// but NOT a leading QUOTED path before ` --source` (it would keep the quotes), so per
-/// invariant #3 the exec form's extraction lives here. `rsplit_once` so a path that
-/// literally contains " --source " keeps it and only the genuine trailing flag is cut.
+/// Not the shared `verify::shell_shim_ref`: that one keeps the quotes on a leading
+/// QUOTED path before ` --source`. `rsplit_once` so a path that literally contains
+/// " --source " keeps it and only the genuine trailing flag is cut.
 fn exec_shim_ref(command: &str) -> ShimRef {
     let path = command
         .rsplit_once(crate::install::hook_cmd::SOURCE_FLAG)
@@ -183,8 +149,8 @@ pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcom
 
     let hooks_key = ystr("hooks");
     if !matches!(root.get(&hooks_key), Some(YamlOwned::Mapping(_))) {
-        // Absent OR present-but-wrong-type — coerce to an empty mapping (mirrors
-        // Cursor coercing a non-object `hooks`); the per-event adds below set `changed`.
+        // Absent OR present-but-wrong-type — coerce to an empty mapping; `changed` is
+        // left to the per-event adds below.
         root.insert(hooks_key.clone(), YamlOwned::Mapping(MappingOwned::new()));
     }
     let Some(YamlOwned::Mapping(hooks)) = root.get_mut(&hooks_key) else {
@@ -201,9 +167,8 @@ pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcom
         };
         let managed: Vec<&YamlOwned> = seq.iter().filter(|e| is_managed(e)).collect();
         if managed.len() == 1 && managed_matches(managed[0], hook_cmd) {
-            continue; // already exactly one correct managed entry — no change
+            continue;
         }
-        // Normalize: drop every managed entry, append exactly one. User entries survive.
         seq.retain(|e| !is_managed(e));
         seq.push(managed_entry(hook_cmd));
         changed = true;
@@ -242,8 +207,7 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     for k in emptied_events {
         hooks.remove(&k);
     }
-    // Drop the `hooks` mapping entirely if OUR removals emptied it (a user's own hook
-    // keeps it). Gated on `changed` so an already-empty user `hooks:` is never touched.
+    // Gated on `changed` so an already-empty user `hooks:` is never touched.
     if changed && matches!(root.get(&hooks_key), Some(YamlOwned::Mapping(m)) if m.is_empty()) {
         root.remove(&hooks_key);
     }
@@ -254,12 +218,8 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
-/// Install-schema verification (#309): every `HERMES_EVENTS` entry still has a
-/// `_pixtuoid`-sentinel managed hook, and the shim path is extracted for
-/// `install::verify_target` to stat. A config.yaml with our hooks stripped (a user/tool
-/// rewrite) is the silent-dead class this catches. NOTE: the Hermes allowlist consent is
-/// deliberately out of scope here — it's the user's to grant in Hermes (module doc), not
-/// an install-soundness property pixtuoid owns.
+/// Catches the silent-dead class: a user/tool rewrite that strips our hooks out of an
+/// otherwise valid config.yaml.
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     let root = match parse_root_mapping(content) {
         Ok(r) => r,
@@ -318,7 +278,6 @@ mod tests {
         let src = "model: gpt\nprovider: nous\n";
         let out = install(src, "'/opt/pixtuoid-hook' --source hermes");
         let root = parse_root_mapping(&out).unwrap();
-        // User keys survive.
         assert_eq!(root.get(&ystr("model")), Some(&ystr("gpt")));
         assert_eq!(root.get(&ystr("provider")), Some(&ystr("nous")));
         let Some(YamlOwned::Mapping(hooks)) = root.get(&ystr("hooks")) else {
@@ -342,7 +301,6 @@ mod tests {
         let a = install("", "'/opt/a/pixtuoid-hook' --source hermes");
         let second = merge_install(&a, "'/opt/a/pixtuoid-hook' --source hermes").unwrap();
         assert!(!second.changed, "same command re-install must be a no-op");
-        // Path change → still exactly one managed entry per event (replaced, not dupED).
         let c = install(&a, "'/opt/b/pixtuoid-hook' --source hermes");
         let root = parse_root_mapping(&c).unwrap();
         let YamlOwned::Mapping(hooks) = root.get(&ystr("hooks")).unwrap() else {
@@ -375,7 +333,6 @@ mod tests {
         let YamlOwned::Sequence(seq) = hooks.get(&ystr("pre_tool_call")).unwrap() else {
             unreachable!()
         };
-        // Two entries: the user's guard + our managed one.
         assert_eq!(seq.len(), 2);
         assert!(seq
             .iter()
@@ -395,7 +352,6 @@ mod tests {
         let YamlOwned::Mapping(hooks) = root.get(&ystr("hooks")).unwrap() else {
             unreachable!()
         };
-        // The user's pre_tool_call guard survives; the emptied events are dropped.
         let YamlOwned::Sequence(seq) = hooks.get(&ystr("pre_tool_call")).unwrap() else {
             unreachable!()
         };
@@ -456,14 +412,13 @@ mod tests {
             ShimRef::Absolute(PathBuf::from("/opt/pixtuoid-hook")),
             "shim path must be extracted from the exec-form command"
         );
-        // A user rewrite that drops our hooks → broken (the #309 silent-dead class).
         let stripped = merge_uninstall(&installed).unwrap().content;
         let p = verify_schema(&stripped);
         assert!(!p.issues.is_empty(), "stripped config must verify broken");
     }
 
-    // Unix POSIX-form pin (single-quoted path + bare flag). Unix-only: on Windows the
-    // bare form is emitted and this spaced path would be REJECTED by the 8.3 guard.
+    // Unix-only: on Windows the bare form is emitted and this spaced path would be
+    // REJECTED by the 8.3 guard.
     #[cfg(unix)]
     #[test]
     fn hook_command_is_the_exec_form_with_source_flag() {
@@ -479,9 +434,6 @@ mod tests {
         assert!(hook_command(bad, false).is_err());
     }
 
-    // Internal-consistency guard (mirror of CC/Codex/Cursor): every hook event we
-    // REGISTER with Hermes must have a decoder arm, else it reaches the shared socket
-    // and the decoder bails — silently dropped.
     #[test]
     fn every_registered_hermes_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;

@@ -1,13 +1,10 @@
 //! Per-agent cache of recolored sprite frames.
 //!
-//! `recolor_frame` clones a Frame and rewrites pixels — cheap per call,
-//! but called once per agent per render tick (~30fps). With N agents the
-//! per-second work scales linearly. The recolored frame is stable for as
-//! long as its palette inputs are: hair/skin are `agent_id`-seeded (fixed
-//! for the agent's lifetime), and the OUTFIT is keyed on the agent's cwd
-//! (Team Palette) — mutable mid-lifetime via a cwd backfill, which
-//! [`FrameCache::note_outfit_seed`] detects to drop the agent's stale
-//! entries. With that one invalidation, caching is safe.
+//! A recolored frame is stable for as long as its palette inputs are: hair/skin
+//! are `agent_id`-seeded (fixed for the agent's lifetime), and the OUTFIT is
+//! keyed on the agent's cwd — mutable mid-lifetime via a cwd backfill, which
+//! [`FrameCache::note_outfit_seed`] detects. With that one invalidation, caching
+//! is safe.
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -15,9 +12,8 @@ use std::collections::HashMap;
 use pixtuoid_core::sprite::{Frame, Rgb};
 use pixtuoid_core::{AgentId, SceneState};
 
-/// Cache identity for one recolored frame. `flip_x` is part of the key so
-/// mirrored (left-facing) walkers cache separately; `glow_tint` so each
-/// monitor-glow color variant caches separately from the base.
+/// Cache identity for one recolored frame — every input that changes the output
+/// pixels is part of the key.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FrameKey {
     pub agent_id: AgentId,
@@ -26,15 +22,14 @@ pub struct FrameKey {
     pub flip_x: bool,
     pub glow_tint: Option<Rgb>,
     /// Burn tier keys the recolor too (ember hair) — a tier flip mid-life
-    /// (model switch / effort TTL decay) simply misses to a fresh entry, the
-    /// same containment as `glow_tint` variants (evicted with the agent).
+    /// simply misses to a fresh entry, evicted with the agent.
     pub burn: crate::burn::BurnTier,
 }
 
 #[derive(Default)]
 pub struct FrameCache {
     entries: HashMap<FrameKey, Frame>,
-    /// Last-seen outfit-determining seed per agent (see `note_outfit_seed`).
+    /// Last-seen outfit-determining seed per agent.
     outfit_seeds: HashMap<AgentId, u64>,
 }
 
@@ -43,20 +38,15 @@ impl FrameCache {
         Self::default()
     }
 
-    /// Lookup a cached frame by its [`FrameKey`], or compute and insert one and
-    /// return a borrow.
     pub fn get_or_make<F: FnOnce() -> Frame>(&mut self, key: FrameKey, compute: F) -> &Frame {
         self.entries.entry(key).or_insert_with(compute)
     }
 
-    /// Record the outfit-determining seed for `id`. The outfit (shirt+pants)
-    /// is keyed on the agent's cwd (Team Palette) with an `agent_id` fallback
-    /// while the cwd is unknown — and cwd is mutable post-registration (a
-    /// hook-first slot heals it on the next `SessionStart`). A seed CHANGE
-    /// therefore drops the agent's cached frames, or already-cached poses
-    /// would keep the stale outfit for the agent's lifetime while new poses
-    /// render the healed one. Callers pass the exact seed the palette derives
-    /// (`pixel_painter::palette::outfit_seed_for`), before `get_or_make`.
+    /// Record the outfit-determining seed for `id`, before `get_or_make`. A seed
+    /// CHANGE (the cwd backfill) drops the agent's cached frames — otherwise
+    /// already-cached poses keep the stale outfit for the agent's lifetime while
+    /// new poses render the healed one. Callers pass the exact seed the palette
+    /// derives (`pixel_painter::palette::outfit_seed_for`).
     pub fn note_outfit_seed(&mut self, id: AgentId, seed: u64) {
         match self.outfit_seeds.entry(id) {
             Entry::Occupied(mut e) => {
@@ -71,7 +61,6 @@ impl FrameCache {
         }
     }
 
-    /// Drop cached frames for agents no longer present in the scene.
     pub fn evict_missing(&mut self, scene: &SceneState) {
         self.entries
             .retain(|k, _| scene.agents.contains_key(&k.agent_id));
@@ -79,15 +68,14 @@ impl FrameCache {
             .retain(|id, _| scene.agents.contains_key(id));
     }
 
-    /// Test-only inspection seam (entry count). `#[doc(hidden)]`: not part of the
-    /// rendering API — the cache is opaque to consumers; only the unit tests read it.
+    /// Test-only inspection seam; `#[doc(hidden)]` because the cache is opaque
+    /// to consumers.
     #[doc(hidden)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Test-only inspection seam (paired with `len` so clippy's `len_without_is_empty`
-    /// is satisfied). `#[doc(hidden)]` for the same reason as `len`.
+    /// Paired with `len` so clippy's `len_without_is_empty` is satisfied.
     #[doc(hidden)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -127,7 +115,6 @@ mod tests {
         assert!(!cache.is_empty(), "cache must be non-empty after a make");
         assert_eq!(cache.len(), 1);
 
-        // A second get_or_make for the SAME key must reuse, not grow the cache.
         let mut computed_again = false;
         let _ = cache.get_or_make(key(), || {
             computed_again = true;
@@ -148,7 +135,6 @@ mod tests {
         let _ = cache.get_or_make(key_for(b), dummy_frame);
         assert_eq!(cache.len(), 2);
 
-        // Re-noting the SAME seed (the per-frame steady state) keeps the cache.
         cache.note_outfit_seed(a, 1);
         let mut recomputed = false;
         let _ = cache.get_or_make(key_for(a), || {
@@ -157,7 +143,6 @@ mod tests {
         });
         assert!(!recomputed, "an unchanged outfit seed must not evict");
 
-        // A CHANGED seed (the cwd backfill) drops a's entries; b's survive.
         cache.note_outfit_seed(a, 2);
         let mut recomputed = false;
         let _ = cache.get_or_make(key_for(a), || {

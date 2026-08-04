@@ -1,7 +1,5 @@
-# ast-grep project config — repo-specific structural lint rules.
-# Rules live in .ast-grep/rules/; run via `just comment-lint` (diff-scoped
-# advisory — each rule's own header explains the WHY) or `ast-grep scan`
-# (whole-repo, ~5k grandfathered hits).
+# Run via `just comment-lint` (diff-scoped advisory) or `ast-grep scan`
+# (whole-repo, mostly grandfathered hits). Each rule's own header explains its WHY.
 ruleDirs:
   - .ast-grep/rules
 testConfigs:

@@ -1,6 +1,5 @@
-//! Logging bootstrap (#157): the tracing-subscriber install + the log-file path
-//! resolution/rotation. Binary-crate module (lifted out of `main.rs`); `main()`
-//! computes `tui_active` from the parsed command and calls [`init`] once.
+//! Logging bootstrap: the tracing-subscriber install + the log-file path
+//! resolution/rotation.
 
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
@@ -8,22 +7,12 @@ use std::sync::{Arc, Mutex};
 
 use tracing_subscriber::EnvFilter;
 
-/// Install the global tracing subscriber. Log routing:
-///   TUI mode: ALWAYS log to the file (#157) — the alternate screen owns
-///     the terminal, so the log file is the only place a runtime error
-///     ("source died", decode failures) can surface. The default floor is
-///     `warn`; $RUST_LOG, $PIXTUOID_LOG, or --log-level raise/shape it.
-///     Crash reporting is handled separately by the panic hook.
-///   Non-TUI (--headless, validate-pack, init-pack): stderr.
-///   `floating`: file-log like the TUI — it's a long-running GUI; tracing spam
-///     into the launching terminal would be noise (config warnings still
-///     eprintln to that terminal via build_run_config before the window opens).
+/// Install the global tracing subscriber. TUI mode (and `floating`, a long-running
+/// GUI whose launching terminal would just collect noise) ALWAYS logs to the file —
+/// the alternate screen owns the terminal, so the log file is the only place a
+/// runtime error can surface — at a `warn` floor unless $RUST_LOG, $PIXTUOID_LOG or
+/// --log-level raises it. Every other mode goes to stderr.
 pub(crate) fn init(tui_active: bool, log_level: &'static str) {
-    // RUST_LOG wins only when set to a NON-EMPTY value; an empty RUST_LOG
-    // parses as Ok(zero directives) = everything OFF, which would silently
-    // defeat logging on the verbose / $PIXTUOID_LOG / --headless paths that
-    // route through make_filter (the #157 silent-diagnostics class). The
-    // empty=unset normalization is pinned by `filter_directives` + its test.
     let rust_log = std::env::var("RUST_LOG").ok();
     let make_filter = || {
         EnvFilter::try_new(filter_directives(rust_log.as_deref(), log_level))
@@ -31,27 +20,17 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) {
     };
 
     let wants_verbose = matches!(log_level, "debug" | "trace");
-    // The env var's VALUE is the log file path — an empty (or whitespace-only)
-    // value would "enable" file mode with an unopenable path; treat it as unset
-    // via the ONE empty-as-unset env filter (io::nonempty), the same trim
-    // semantics XDG_STATE_HOME / XDG_CONFIG_HOME / PIXTUOID_HOOK already use.
+    // The env var's VALUE is the log file path, so an empty one would "enable" file
+    // mode with an unopenable path — `nonempty_env` treats it as unset.
     let explicit_log_file = pixtuoid::install::nonempty_env("PIXTUOID_LOG").is_some();
 
     if tui_active {
-        // Explicit verbosity keeps today's semantics (the full --log-level /
-        // RUST_LOG filter); the always-on default floors at warn so the file
-        // captures errors without accumulating info-level noise. RUST_LOG
-        // set-but-EMPTY parses as Ok(zero directives) = everything OFF —
-        // treat it as unset, or it silently defeats the always-on floor
-        // (the exact silent-failure class #157 exists to kill).
         let rust_log_set = rust_log.as_deref().is_some_and(|v| !v.is_empty());
         let filter = if wants_verbose || explicit_log_file {
             make_filter()
         } else if rust_log_set {
             // Honor RUST_LOG, but floor the parse-failure fallback at warn (not
-            // log_level) so the always-on file stays quiet by default. Routed
-            // through filter_directives so an empty RUST_LOG can't silence this
-            // path either if the rust_log_set guard above ever changes.
+            // log_level) so the always-on file stays quiet by default.
             EnvFilter::try_new(filter_directives(rust_log.as_deref(), "warn"))
                 .unwrap_or_else(|_| EnvFilter::new("warn"))
         } else {
@@ -74,9 +53,8 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) {
                     .init();
             }
             Err(e) => {
-                // The footer's "see log" advice would point at nothing —
-                // say so on the pre-altscreen stderr channel rather than
-                // degrading silently (the #157 failure class).
+                // The footer's "see log" advice would point at nothing — say so on
+                // the pre-altscreen stderr channel rather than degrading silently.
                 eprintln!(
                     "⚠ pixtuoid: cannot open log file {} ({e}) — runtime warnings will not be recorded",
                     path.display()
@@ -92,10 +70,9 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) {
 }
 
 /// The tracing directive string to build the `EnvFilter` from: a NON-EMPTY
-/// `RUST_LOG` wins, otherwise the requested `log_level`. An empty `RUST_LOG`
-/// is treated as unset — left as-is it parses to zero directives (everything
-/// OFF) and silently defeats logging (#157). Pure (env read by the caller) so
-/// the normalization is unit-testable without mutating process env.
+/// `RUST_LOG` wins, otherwise the requested `log_level`. An empty `RUST_LOG` is
+/// treated as unset — left as-is it parses to zero directives (everything OFF) and
+/// silently defeats logging.
 fn filter_directives<'a>(rust_log: Option<&'a str>, log_level: &'a str) -> &'a str {
     match rust_log {
         Some(v) if !v.is_empty() => v,
@@ -104,11 +81,8 @@ fn filter_directives<'a>(rust_log: Option<&'a str>, log_level: &'a str) -> &'a s
 }
 
 pub(crate) fn log_file_path() -> PathBuf {
-    // Empty/whitespace-only value = unset (the value is the PATH, not an on/off
-    // toggle; an empty path would silently fail to open and log nothing) — the
-    // shared io::nonempty semantics, kept in lockstep with the
-    // `explicit_log_file` read in init() so "file mode enabled" and "which
-    // file" can't disagree on a whitespace value.
+    // Kept in lockstep with init()'s `explicit_log_file` read, so "file mode
+    // enabled" and "which file" cannot disagree on a whitespace value.
     if let Some(p) = pixtuoid::install::nonempty_env("PIXTUOID_LOG") {
         return PathBuf::from(p);
     }
@@ -121,40 +95,33 @@ pub(crate) fn log_file_path() -> PathBuf {
             .join("pixtuoid")
             .join("log");
     }
-    // No home dir at all: mirror crash_log_path's temp fallback — the log
-    // must exist somewhere, it is the only runtime diagnostics channel (#157).
+    // No home dir at all: the log must exist somewhere — it is the only runtime
+    // diagnostics channel.
     std::env::temp_dir().join("pixtuoid.log")
 }
 
-/// Open a diagnostic sink for append, creating it — and any directory it needs
-/// — OWNER-ONLY on Unix, the ONE opener the runtime log and the crash log share.
+/// Open a diagnostic sink for append, creating it — and any directory it needs —
+/// OWNER-ONLY on Unix, the ONE opener the runtime log and the crash log share:
+/// these are the most revealing artifacts pixtuoid creates (warn-floor records
+/// carry full transcript paths and `AgentId`s that for some sources ARE the
+/// workspace cwd; `--log-level debug` dumps the agent's own shell commands and
+/// edited file paths).
 ///
-/// These two are the most revealing artifacts pixtuoid creates: warn-floor
-/// records carry full transcript paths (a CC project dir name encodes the
-/// project cwd verbatim) and `AgentId`s that for CodeWhale/Reasonix ARE the
-/// workspace cwd; at `--log-level debug` the decoded event dumps `ToolDetail`,
-/// i.e. the agent's own shell commands and edited file paths. Left to the
-/// process umask they were 0644 under a 0755 dir, while the same binary pays a
-/// temp-rename dance to create settings.json 0600 (`install/io.rs`).
-///
-/// TWO mechanisms, kept separately callable because they cover different cases
-/// (and because folded together, reverting either was invisible to both tests):
+/// TWO mechanisms, kept separately callable because they cover different cases:
 /// [`create_owner_only_append`] binds the mode AT CREATION — race-free, no window
 /// in which a co-located user can open the sink — and
 /// [`pixtuoid::install::tighten_to_owner_only`] restates it on a sink an older
-/// version created 0644, which the create mode cannot bind to.
-/// An already-existing DIRECTORY keeps its mode: the 0600 file is what protects
-/// the content, and silently re-moding a user's `~/.cache` is not ours to do.
+/// version created 0644, which the create mode cannot bind to. An already-existing
+/// DIRECTORY keeps its mode: silently re-moding a user's `~/.cache` is not ours.
 pub(crate) fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
     let f = create_owner_only_append(path)?;
     pixtuoid::install::tighten_to_owner_only(&f);
     Ok(f)
 }
 
-/// The CREATE half of [`open_private_append`]: the sink's parent dir owner-only
-/// (0700) and the sink itself opened for append with the owner-only create mode.
-/// Deliberately does NOT fchmod — a test asserting the mode off THIS fn is
-/// asserting what the open established, not what a follow-up chmod repaired.
+/// The CREATE half of [`open_private_append`]. Deliberately does NOT fchmod — a
+/// test asserting the mode off THIS fn is asserting what the open established, not
+/// what a follow-up chmod repaired.
 fn create_owner_only_append(path: &Path) -> std::io::Result<std::fs::File> {
     if let Some(parent) = path.parent() {
         #[cfg(unix)]
@@ -174,32 +141,27 @@ fn create_owner_only_append(path: &Path) -> std::io::Result<std::fs::File> {
     opts.open(path)
 }
 
-/// The append-only log was opt-in before #157; now that it is always on in
-/// TUI mode it needs a growth bound. One-deep rotation at startup (log →
-/// log.old) keeps the last two generations without a rotation dependency.
-/// Known accepted edge: with several pixtuoid instances sharing the default
-/// path, one instance's startup rotation renames the file out from under a
-/// running sibling (its fd follows; a later rotation strands it on an
-/// unlinked inode) — startup-only one-deep rotation is the deliberate
-/// no-dependency trade-off.
+/// One-deep rotation at startup (log → log.old) keeps the last two generations
+/// without a rotation dependency. Accepted edge: with several instances sharing
+/// the default path, one instance's startup rotation renames the file out from
+/// under a running sibling (its fd follows; a later rotation strands it on an
+/// unlinked inode).
 const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
 
 fn rotate_if_large(path: &Path) {
     let too_large = std::fs::metadata(path).is_ok_and(|m| m.len() > LOG_ROTATE_BYTES);
     if too_large {
-        // APPEND ".old" rather than with_extension: a custom $PIXTUOID_LOG
-        // like app.log must rotate to app.log.old (not clobber a sibling
-        // app.old), and a path already ending in .old must not rename onto
-        // itself (a no-op that would never rotate). OsString concatenation,
-        // not format!/display(): display() is lossy on non-UTF-8 paths, and
-        // a U+FFFD-mangled target would silently break the rotation.
+        // APPEND ".old" rather than with_extension: a custom $PIXTUOID_LOG like
+        // app.log must rotate to app.log.old (not clobber a sibling app.old), and a
+        // path already ending in .old must not rename onto itself. OsString
+        // concatenation, not format!/display(): display() is lossy on non-UTF-8
+        // paths, and a U+FFFD-mangled target would silently break the rotation.
         let mut old = path.as_os_str().to_os_string();
         old.push(".old");
         let _ = std::fs::rename(path, &old);
     }
 }
 
-/// Adapter that gives `tracing-subscriber` a `Write`-able file behind a Mutex.
 struct MutexFileWriter(Arc<Mutex<std::fs::File>>);
 
 impl std::io::Write for MutexFileWriter {
@@ -217,10 +179,9 @@ impl std::io::Write for MutexFileWriter {
     }
 }
 
-/// Serializes the bin crate's env-mutating tests. `crash.rs` and `logging.rs`
-/// both drive `XDG_STATE_HOME`/`HOME` to pin their XDG path fallbacks, and the
-/// bin's unit-test target runs in ONE process under plain `cargo test`, so a
-/// single shared lock keeps the two suites from racing on that global env.
+/// Serializes the bin crate's env-mutating tests: `crash.rs` and `logging.rs` both
+/// drive `XDG_STATE_HOME`/`HOME`, and the bin's unit-test target runs in ONE
+/// process under plain `cargo test`.
 #[cfg(test)]
 pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -237,9 +198,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_fresh_diagnostic_sink_is_created_owner_only() {
-        // Drives `create_owner_only_append`, NOT `open_private_append`: the
-        // latter's follow-up fchmod would repair a dropped create mode, so the
-        // race-free half would be pinned by nothing.
+        // Drives `create_owner_only_append`, NOT `open_private_append`: the latter's
+        // follow-up fchmod would repair a dropped create mode.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state").join("pixtuoid").join("log");
         drop(create_owner_only_append(&path).expect("opens"));
@@ -254,11 +214,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_older_versions_world_readable_sink_is_tightened_on_reopen() {
-        // The UPGRADE half, and the wiring that reaches it: the create mode does
-        // not bind on a file that already exists, and these sinks are never
-        // unlinked, so an upgrader's 0644 log stays exposed unless
-        // `open_private_append` tightens it. Reds both if the fchmod goes AND if
-        // `open_private_append` stops calling it.
+        // The create mode does not bind on a file that already exists, and these
+        // sinks are never unlinked, so an upgrader's 0644 log stays exposed unless
+        // `open_private_append` tightens it.
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("log");
@@ -270,11 +228,8 @@ mod tests {
 
     #[test]
     fn empty_rust_log_falls_back_to_requested_level() {
-        // The bug: an empty-but-set RUST_LOG must be treated as unset, not as
-        // "everything off". (#157 — the make_filter path lacked this guard.)
         assert_eq!(filter_directives(Some(""), "debug"), "debug");
         assert_eq!(filter_directives(None, "debug"), "debug");
-        // A non-empty RUST_LOG still wins, simple level or full directive.
         assert_eq!(filter_directives(Some("trace"), "warn"), "trace");
         assert_eq!(
             filter_directives(Some("info,pixtuoid=debug"), "warn"),
@@ -284,9 +239,6 @@ mod tests {
 
     #[test]
     fn nonempty_treats_empty_and_whitespace_as_unset() {
-        // `io::nonempty` directly backs the `PIXTUOID_LOG` read (which may be a
-        // relative path); XDG_STATE_HOME instead routes through `nonempty_abs_env`
-        // (see `log_file_path_rejects_a_relative_xdg_state_home`).
         use pixtuoid::install::nonempty;
         assert_eq!(nonempty(None), None);
         assert_eq!(nonempty(Some(String::new())), None);
@@ -296,15 +248,14 @@ mod tests {
 
     #[test]
     fn log_file_path_rejects_a_relative_xdg_state_home() {
-        // Pins the CALL SITE (not just the primitive): a relative/empty
-        // XDG_STATE_HOME → ~/.cache fallback, so a revert to plain `nonempty_env`
-        // here would leak a relative log path and red this test.
+        // Pins the CALL SITE, not just the primitive: a revert to plain
+        // `nonempty_env` here would leak a relative log path.
         let _env = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let saved_log = std::env::var_os("PIXTUOID_LOG");
         let saved_xdg = std::env::var_os("XDG_STATE_HOME");
         std::env::remove_var("PIXTUOID_LOG");
-        // Expected fallback: the SAME user_home_opt + joins the impl uses (no
-        // hardcoded separator — Windows-safe per the path-string sharp edge).
+        // Build the expectation with the SAME joins the impl uses — a hardcoded
+        // separator would drift under Windows.
         let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
         let cache = PathBuf::from(home)
             .join(".cache")
@@ -318,8 +269,8 @@ mod tests {
                 "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
             );
         }
-        // Absolute wins (platform-specific — leading-slash isn't absolute on
-        // Windows). The impl composes it via `format!`, so mirror that.
+        // A leading slash is not absolute on Windows, so pick per-platform; the impl
+        // composes via `format!`, so mirror that.
         let abs = if cfg!(windows) { "C:/state" } else { "/state" };
         std::env::set_var("XDG_STATE_HOME", abs);
         assert_eq!(
@@ -341,12 +292,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("log");
 
-        // Small file: untouched.
         std::fs::write(&log, b"recent").unwrap();
         rotate_if_large(&log);
         assert!(log.exists(), "under-cap log must not rotate");
 
-        // Over the cap (sparse via set_len — no real 5MB write).
+        // Sparse via set_len — no real 5MB write.
         let f = std::fs::OpenOptions::new().write(true).open(&log).unwrap();
         f.set_len(LOG_ROTATE_BYTES + 1).unwrap();
         drop(f);
@@ -360,9 +310,6 @@ mod tests {
 
     #[test]
     fn rotate_if_large_appends_old_to_dotted_custom_paths() {
-        // A custom $PIXTUOID_LOG like app.log must rotate to app.log.old —
-        // replacing the extension would clobber an unrelated app.old, and a
-        // *.old path would rename onto itself and never rotate.
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("app.log");
         let f = std::fs::File::create(&log).unwrap();

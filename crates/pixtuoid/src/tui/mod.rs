@@ -28,35 +28,22 @@ use tui_renderer::TuiRenderer;
 use crate::runtime::SceneRx;
 use pixtuoid_scene::{embedded_pack, floor, pet, theme};
 
-/// Which overlay (if any) currently owns input, plus the one count the picker
-/// needs. The two together drive the modal precedence chain (onboarding > help >
-/// version > connection > dashboard > theme-picker > normal); when one is open it
-/// swallows keys and the normal-scene bindings are suspended.
-///
-/// Pulled out (with [`FloorNav`]) so the dispatch decision is a pure function of
-/// (key, state) and can be unit-tested without a TTY — the crossterm `read()` and
-/// all renderer/config side effects stay in the event loop. Modal state and floor
-/// navigation are ORTHOGONAL, so they're separate arguments to [`dispatch_key`]
-/// rather than one bundle: a key is gated by the modals first, and only the
-/// normal-scene floor keys ever read [`FloorNav`].
+/// Which overlay (if any) currently owns input, plus the one count the picker needs.
+/// An open overlay swallows keys and the normal-scene bindings are suspended; the
+/// precedence chain itself lives in [`dispatch_key`].
 #[derive(Clone, Copy)]
 struct ModalState {
-    /// First-run onboarding overlay open — the TOP of the modal precedence chain.
     onboarding_open: bool,
     help_open: bool,
     version_popup: bool,
     theme_picker: Option<usize>,
     dashboard_open: bool,
     connection_open: bool,
-    /// Whether the Sources panel has a disconnect armed (awaiting y/n). Splits the
-    /// open-connection dispatch into the armed (y/n only) vs unarmed (nav/toggle) sub-tiers.
+    /// A disconnect is armed on the Sources panel, awaiting y/n.
     connection_confirm: bool,
     n_themes: usize,
 }
 
-/// Floor-navigation state the normal-scene PageUp/PageDown arms read to clamp a
-/// move (can't go past the ends, and a slide already in flight blocks a new one).
-/// Independent of [`ModalState`] — see its doc.
 #[derive(Clone, Copy)]
 struct FloorNav {
     n_floors: usize,
@@ -64,9 +51,6 @@ struct FloorNav {
     in_transition: bool,
 }
 
-/// The decision a key press resolves to. The event loop maps each variant to the
-/// concrete renderer/config side effect; keeping the decision data-only is what
-/// makes the modal precedence and the floor-nav / theme-picker guards testable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KeyAction {
     None,
@@ -76,73 +60,47 @@ enum KeyAction {
     CloseHelp,
     DismissVersionPopup,
     OpenThemePicker,
-    /// Preview the theme at this index (picker navigation; index is pre-clamped).
+    /// The index is pre-clamped by the dispatch.
     ThemePreview(usize),
-    /// Enter in the picker: persist + close on this index.
     ThemeCommit(usize),
-    /// Esc in the picker: revert to the saved theme + close.
     ThemeCancel,
-    /// Navigate to this (already validated, in-range, no-transition) floor.
+    /// Already validated: in range, and no transition in flight.
     NavigateFloor(usize),
-    /// Toggle ambient-audio mute (`m`, #633). A no-op on the disabled handle.
     ToggleAudioMute,
-    /// +/- master-volume nudge (true = up). Volume-up from muted also
-    /// unmutes — the discoverable "more sound" gesture (the lowfi pattern).
+    /// `true` = up. Volume-up from muted also unmutes.
     AdjustVolume(bool),
-    /// Toggle the live walkable / approach / route debug layer (`w`).
-    /// Dev-only: the `w` dispatch arm is `#[cfg(debug_assertions)]`-gated, so in
-    /// release this variant is never constructed — silence the dead-code lint
-    /// there. The match arm in `run_tui` stays unconditional for exhaustiveness.
+    /// The `w` dispatch arm is `#[cfg(debug_assertions)]`-gated, so in release this
+    /// variant is never constructed; the `run_tui` match arm stays unconditional for
+    /// exhaustiveness.
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
     ToggleWalkableDebug,
-    /// Open/close the agent dashboard (`Tab`, from the normal scene only).
     ToggleDashboard,
-    /// Dashboard list navigation.
     DashboardUp,
     DashboardDown,
-    /// `←/h`: collapse the selected root (on a child, collapse its parent).
     DashboardFoldLeft,
-    /// `→/l`: expand the selected root.
     DashboardFoldRight,
-    /// `z`: fold-all / unfold-all toggle across every root.
     DashboardFoldAll,
-    /// `Enter`: jump to the selected agent's floor + close.
     DashboardJump,
-    /// `f`: bring the selected agent's terminal app to the foreground.
     DashboardFocus,
-    /// `Esc`/`Tab`: close without jumping.
     DashboardClose,
-    /// Open/close the Sources panel (`s`, from the normal scene; `s`/Esc closes).
-    /// (Variant + module keep the historical `Connection`/`connection` names.)
+    /// Open/close the Sources panel — the variant and module keep the historical
+    /// `Connection` name.
     ToggleConnection,
-    /// Connection list navigation.
     ConnectionUp,
     ConnectionDown,
-    /// `t`: toggle the selected CLI's connection. Connecting is immediate;
-    /// disconnecting arms a confirm first (it removes hooks + walks characters out).
+    /// Connecting is immediate; disconnecting arms a confirm first, since it removes
+    /// hooks and walks characters out.
     ConnectionToggle,
-    /// `y` while armed: run the disconnect.
     ConnectionConfirm,
-    /// `n`/`Esc` while armed: cancel the arm (panel stays open).
     ConnectionCancelConfirm,
-    /// `s`/`Esc` while unarmed: close the panel.
     ConnectionClose,
-    /// First-run onboarding roster navigation (`↑↓`/`jk`).
     OnboardingUp,
     OnboardingDown,
-    /// `space`: toggle the selected CLI's checkbox.
     OnboardingToggle,
-    /// `Enter`: apply the checked sources (connect) + close onboarding.
     OnboardingConfirm,
-    /// `Esc`: skip onboarding (mark done without connecting) + close.
     OnboardingSkip,
 }
 
-/// Left-click focus-jump: hit-test the click against the desk layout and bring
-/// the clicked agent's terminal APP to the foreground (the click-to-pin
-/// tooltip this replaced is gone — hover still shows the dossier). Identical
-/// in both the pet-present and pet-absent click branches, so it lives here.
-/// Every miss is a silent no-op (`focus`'s ONE failure rule).
 fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     scene_rx: &SceneRx,
@@ -152,8 +110,8 @@ fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static
     now: SystemTime,
 ) -> bool {
     let snap = scene_rx.borrow().clone();
-    // Project to the VISIBLE floor first — hit_test_agent_at → character_anchor
-    // reads floor-local desk indices; the click now follows the LIVE sprite (like hover).
+    // Project to the VISIBLE floor first: hit_test_agent_at → character_anchor reads
+    // floor-local desk indices.
     let floor_scene = floor::project_floor_scene(&snap, renderer.current_floor());
     let hit = renderer.hit_test_agent_at(&floor_scene, now, col, row);
     if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
@@ -164,12 +122,8 @@ fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static
     }
 }
 
-/// Connect a source from the panel: delegate the persist + install + rollback to
-/// the shared `crate::sources::connect` core, then — only on success — open the
-/// live gate (`connected.set` → the reducer task's reconciler stops evicting it +
-/// its events flow). The core persists the flag FIRST and rolls it back if the
-/// install fails, so on `Err` the gate was never opened (no shown-but-broken
-/// source surviving a restart). The panel adds the live-gate line the CLI omits.
+/// The core persists the flag FIRST and rolls it back if the install fails, so on `Err`
+/// the live gate was never opened — no shown-but-broken source survives a restart.
 fn connect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
@@ -196,11 +150,9 @@ fn connect_source(
     }
 }
 
-/// Disconnect a source from the panel: delegate to `crate::sources::disconnect`
-/// (persist the flag false FIRST, then remove hooks), then close the live gate.
-/// The core reserves `Err` for the persist-failure abort (flip NOTHING — a
-/// runtime hide the next restart reverts is a lie); a hook-removal failure is
-/// folded into the `Ok` outcome, so the gate STILL closes (the flag is false).
+/// The core reserves `Err` for the persist-failure abort — a runtime hide the next
+/// restart reverts is a lie. A hook-removal failure is folded into the `Ok` outcome, so
+/// the gate STILL closes.
 fn disconnect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
@@ -230,44 +182,29 @@ fn disconnect_source(
     }
 }
 
-/// One presentable onboarding failure: the source it belongs to (so the panel can
-/// put the selection — and thus the offered `t` retry — on the row that actually
-/// failed) plus the line the user reads. The two always travel together; a bare
-/// line can't be routed to a row.
+/// The source id rides along so the panel can put its selection — and the offered `t`
+/// retry — on the row that actually failed.
 #[derive(Debug)]
 struct OnboardingFailure {
     source_id: String,
     line: String,
 }
 
-/// Reflect the onboarding apply's outcomes into the LIVE connected-set, and hand
-/// BACK one presentable failure per failed row.
+/// Reflect the onboarding apply's outcomes into the LIVE connected-set, and hand back
+/// one presentable failure per failed row.
 ///
-/// `choices` and `outcomes` are index-aligned (`apply_choices` maps each choice
-/// in order). `NoOp` means "already in the DESIRED state — nothing written"
-/// (`sources::ChangeOutcome`), so it sets the gate to the desired flag rather
-/// than hardcoding it closed: a NoOp for a CHECKED row must leave the gate OPEN
-/// (an already-connected source the user just confirmed must not have its live
-/// agents evicted). A failed connect must NOT go live.
+/// `choices` and `outcomes` are index-aligned. `NoOp` means "already in the DESIRED
+/// state — nothing written", so it sets the gate to the desired flag rather than
+/// hardcoding it closed: a NoOp for a CHECKED row must leave the gate OPEN, else an
+/// already-connected source the user just confirmed loses its live agents.
 ///
-/// The `FailedOp` BRANCHES, because `Failed` covers all three: `apply_choices`
-/// maps an UNCHECKED row to a Disconnect, and `freeze_for_skip` makes that the
-/// common case — on a genuine first run every detected source freezes to `false`,
-/// so Esc issues a Disconnect for each one. Calling those "connect failed" named
-/// the wrong operation for a user who connected nothing. The third is the fold:
-/// `map_disconnect_outcome` tags an OTHERWISE SUCCESSFUL disconnect (the flag IS
-/// persisted false) with `HOOK_REMOVAL_FAILED_PREFIX`, so it words the residual
-/// instead of the operation. The sentences themselves belong to
-/// [`connection::format_failure`] — the panel's `t` toggle words its own failures
-/// through the same fn, so a retry on the row reads what the apply just said.
+/// The `FailedOp` branches because `Failed` covers all three operations: connect,
+/// disconnect (an UNCHECKED row, which `freeze_for_skip` makes the common case) and the
+/// `HOOK_REMOVAL_FAILED_PREFIX` fold — an otherwise SUCCESSFUL disconnect with a
+/// residual.
 ///
-/// The RETURN is the surfacing half. The warn-floor log is not a user surface —
-/// in TUI mode the alternate screen owns the terminal, and nothing in-session can
-/// read the line back (`doctor::scan_log_for_source` matches `pixtuoid::drift`
-/// breadcrumbs only, and `build_rows` computes its health verdict for CONNECTED
-/// rows, which a rolled-back one is not). Every sibling `Failed` presenter shows
-/// its message; the caller puts these on the Sources panel — see
-/// [`surface_onboarding_failures`].
+/// The RETURN is the surfacing half: in TUI mode the alternate screen owns the terminal,
+/// so the warn-floor log is not a user surface.
 fn reflect_onboarding_outcomes(
     connected: &crate::runtime::ConnectedSources,
     choices: &[(&'static str, bool)],
@@ -306,15 +243,10 @@ fn reflect_onboarding_outcomes(
     failures
 }
 
-/// Put an onboarding apply's failures where the user is actually looking: open
-/// the Sources panel ON the first failed row and seed its result line — the SAME
-/// surface and wording its own `t` toggle renders, so the retry is one keystroke
-/// away on the right source. (Without the explicit selection `open_connection`
-/// keeps the PREVIOUS index — 0 on a fresh `UiState` — so the offered `t` would
-/// act on whatever sorts first.) Nothing else can tell them: `warn_broken_installs`
-/// ran before the TUI, the footer nudge reads drift breadcrumbs only, and the
-/// rolled-back row's detail line reads the benign "press t to connect" with no
-/// reason attached.
+/// Open the Sources panel ON the first failed row and seed its result line, so the `t`
+/// retry is one keystroke away on the right source. The explicit selection is
+/// load-bearing: `open_connection` alone keeps the PREVIOUS index — 0 on a fresh
+/// `UiState` — so the offered `t` would act on whatever sorts first.
 fn surface_onboarding_failures(
     ui: &mut ui_state::UiState,
     connected: &crate::runtime::ConnectedSources,
@@ -343,9 +275,8 @@ fn is_quit_chord(code: KeyCode, mods: KeyModifiers) -> bool {
     )
 }
 
-/// Windows delivers Press AND Release events per keystroke; only Press may
-/// dispatch (Release/Repeat double-fire keys there — `p` would pause then
-/// instantly unpause). Unix only ever delivers Press, so this is a no-op there.
+/// Windows delivers Press AND Release per keystroke, so without this guard every key
+/// double-fires there — `p` would pause then instantly unpause. Inert on Unix.
 fn should_dispatch_key(kind: KeyEventKind) -> bool {
     kind == KeyEventKind::Press
 }
@@ -353,20 +284,15 @@ fn should_dispatch_key(kind: KeyEventKind) -> bool {
 /// What pressing `t` on a Sources-panel row does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToggleIntent {
-    /// Bound, OR connected-but-CLI-absent → arm the disconnect confirm.
     ArmConfirm,
-    /// Unbound present CLI → connect immediately.
     Connect,
-    /// Absent CLI that was never connected → inert "not detected" hint.
+    /// Absent CLI that was never connected — an inert "not detected" hint.
     Hint,
 }
 
-/// The Sources-panel toggle decision, factored OUT of the `run_tui` event loop
-/// (which is codecov-excluded and undriveable headlessly) so it is unit-testable —
-/// mirroring how `dispatch_key` factors key→action. The load-bearing arm is
-/// `NoCli { connected: true }` → `ArmConfirm`: a source whose CLI vanished is still
-/// disconnectable (its hooks live in the config, not the missing binary), while a
-/// never-connected absent CLI (`NoCli { connected: false }`) stays inert.
+/// The load-bearing arm is `NoCli { connected: true }` → `ArmConfirm`: a source whose
+/// CLI vanished is still disconnectable, since its hooks live in the config, not in the
+/// missing binary.
 fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
     match state {
         connection::ConnState::Connected | connection::ConnState::NoCli { connected: true } => {
@@ -379,16 +305,11 @@ fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
 
 /// The per-floor desk-capacity sweep, memoized on its own inputs.
 ///
-/// `floor_capacity` runs a FULL `Layout::compute_with_seed` — walkable-mask
-/// stamp + coarse BFS, quadratic in buffer area — and keeps only
-/// `home_desks.len()`; the event loop ran `MAX_FLOORS` of them every frame and
-/// discarded every byte. The result is a pure function of
-/// `(buf_w, buf_h, desk_cap)`, and the publish is a monotone `fetch_max`, so a
-/// repeat with identical inputs could only rewrite the same values — a steady
-/// frame skips the whole sweep.
-///
-/// Factored out of the `run_tui` loop (codecov-excluded, undriveable headlessly)
-/// so the memo is unit-testable, mirroring `toggle_intent` / `dispatch_key`.
+/// `floor_capacity` runs a FULL `Layout::compute_with_seed` — walkable-mask stamp plus
+/// coarse BFS, quadratic in buffer area — once per floor, and keeps only
+/// `home_desks.len()`. It is a pure function of `(buf_w, buf_h, desk_cap)` and the
+/// publish is a monotone `fetch_max`, so a repeat with identical inputs could only
+/// rewrite the same values.
 struct FloorCapacitySweep {
     last: Option<(u16, u16, Option<usize>)>,
 }
@@ -398,8 +319,7 @@ impl FloorCapacitySweep {
         Self { last: None }
     }
 
-    /// Publish each floor's auto-computed capacity into `caps`. Returns whether
-    /// it actually recomputed (`false` = served from the memo).
+    /// Returns whether it actually recomputed (`false` = served from the memo).
     fn publish(
         &mut self,
         buf_w: u16,
@@ -425,19 +345,15 @@ impl FloorCapacitySweep {
     }
 }
 
-/// Pure key-dispatch: resolve a key press to a `KeyAction` given the current
-/// modal + floor state. Modal precedence (highest first): onboarding > help >
-/// version popup > connection > dashboard > theme picker > normal scene (the
-/// same chain the `ModalState` doc above pins — the body's early-returns are its
-/// single source of truth).
+/// Modal precedence, highest first: onboarding > help > version popup > connection >
+/// dashboard > theme picker > normal scene. The body's early returns are that chain's
+/// single source of truth.
 fn dispatch_key(
     code: KeyCode,
     mods: KeyModifiers,
     modal: ModalState,
     floor: FloorNav,
 ) -> KeyAction {
-    // Onboarding is modal and the TOP of the precedence chain — it swallows every
-    // other key (no other overlay can open while it's up) except the quit chord.
     if modal.onboarding_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
@@ -467,8 +383,6 @@ fn dispatch_key(
         };
     }
     if modal.connection_open {
-        // Armed sub-tier: a uninstall is awaiting confirmation — only y/n/Esc
-        // (and the quit chord) act; nav/action keys are swallowed.
         if modal.connection_confirm {
             return match (code, mods) {
                 _ if is_quit_chord(code, mods) => KeyAction::Quit,
@@ -479,7 +393,6 @@ fn dispatch_key(
         }
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
-            // Bare `s` (the Sources panel's key) toggles it closed; Esc too.
             (KeyCode::Esc, _) | (KeyCode::Char('s'), _) => KeyAction::ConnectionClose,
             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::ConnectionUp,
             (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::ConnectionDown,
@@ -503,8 +416,8 @@ fn dispatch_key(
     }
     if let Some(idx) = modal.theme_picker {
         return match (code, mods) {
-            // The quit chord passes through like every other modal tier — the
-            // run_tui quit arm already reverts the previewed theme on break.
+            // Safe to quit mid-preview: the run_tui quit arm reverts the previewed
+            // theme before breaking.
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
             (KeyCode::Up | KeyCode::Char('k'), _) => KeyAction::ThemePreview(idx.saturating_sub(1)),
             (KeyCode::Down | KeyCode::Char('j'), _) => {
@@ -515,7 +428,6 @@ fn dispatch_key(
             _ => KeyAction::None,
         };
     }
-    // Normal scene.
     if is_quit_chord(code, mods) || code == KeyCode::Esc {
         return KeyAction::Quit;
     }
@@ -527,11 +439,7 @@ fn dispatch_key(
         KeyCode::Char('t') => KeyAction::OpenThemePicker,
         KeyCode::Char('?') => KeyAction::ToggleHelp,
         KeyCode::Tab => KeyAction::ToggleDashboard,
-        // `s` opens the Sources panel (connection + health + live). Renamed from
-        // `c`/"Connection" once the panel grew past bind/unbind into a per-source
-        // board; `Ctrl+C` stays the quit chord (handled above).
         KeyCode::Char('s') => KeyAction::ToggleConnection,
-        // Dev-only walkable/approach/route overlay — gated out of release builds.
         #[cfg(debug_assertions)]
         KeyCode::Char('w') => KeyAction::ToggleWalkableDebug,
         KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
@@ -552,17 +460,11 @@ fn dispatch_key(
     }
 }
 
-// --- Terminal lifecycle ---------------------------------------------------
-// Lives here (not renderer.rs) because raw mode + the alternate screen are
-// owned by the event loop, and this file is already excluded from headless
-// coverage — no test can exercise a real TTY (issue #103).
-
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 
 pub fn setup_terminal() -> Result<Term> {
-    // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console
-    // attribute 0 — the office renders black-on-black invisible. Gate, don't
-    // degrade (Windows Terminal is the supported terminal).
+    // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console attribute 0
+    // and the office renders black-on-black invisible. Gate, don't degrade.
     #[cfg(windows)]
     if !crossterm::ansi_support::supports_ansi() {
         anyhow::bail!(
@@ -572,17 +474,13 @@ pub fn setup_terminal() -> Result<Term> {
     }
     enable_raw_mode()?;
     let mut out = stdout();
-    // EnableMouseCapture turns on the terminal's mouse-event reporting.
-    // Modern terminals emit MouseEventKind::Moved on cursor motion (no
-    // button required), which is how we drive the hover tooltip.
+    // Mouse capture drives the hover tooltip: terminals emit MouseEventKind::Moved on
+    // cursor motion only while it is on.
     //
-    // Keep setup ATOMIC: if entering the alt screen / mouse capture — or building
-    // the Terminal (whose `.size()` query can fail) — errors after raw mode is on,
-    // roll the terminal all the way back before propagating. Otherwise the error
-    // path strands the user's shell in raw mode (no echo) and/or the alt screen.
+    // Keep setup ATOMIC — a failure after raw mode is on must roll the terminal all the
+    // way back, else the error path strands the user's shell in raw mode (no echo)
+    // and/or the alt screen. `Terminal::new`'s `.size()` query can fail too.
     if let Err(e) = execute!(out, EnterAlternateScreen, EnableMouseCapture) {
-        // Roll all the way back in case EnterAlternateScreen took effect before
-        // EnableMouseCapture failed.
         let _ = unwind_terminal_modes(&mut out, disable_raw_mode);
         return Err(e.into());
     }
@@ -593,23 +491,19 @@ pub fn setup_terminal() -> Result<Term> {
     })
 }
 
-/// THE terminal-mode unwind: the ONE definition of the order every exit path
-/// takes — `teardown_terminal`, both `setup_terminal` rollback arms, and the
-/// panic hook (`crash.rs`, a module of the BIN crate, which is why this is `pub`).
+/// THE terminal-mode unwind: the ONE definition of the order every exit path takes.
+/// `pub` for the panic hook in `crash.rs`, a module of the BIN crate.
 ///
-/// Over an injected writer + raw-mode disabler so the ORDER and its error
-/// policy are unit-testable without a real TTY. Every step runs even when an
-/// earlier one fails, and the FIRST error is returned: a `?` after the
-/// escape-sequence write would skip `disable_raw` exactly when it is needed
-/// most and strand the user's shell echo-less.
+/// Every step runs even when an earlier one fails, and the FIRST error is returned: a
+/// `?` after the escape-sequence write would skip `disable_raw` exactly when it is
+/// needed most and strand the user's shell echo-less.
 pub fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {
-    // DisableMouseCapture must run while raw mode is still ON: on Windows it
-    // restores the input mode snapshotted at Enable time (which was raw-era),
-    // so running it after disable_raw_mode re-raws the console and leaves
-    // the user's shell echo-less. Raw mode goes off LAST.
+    // DisableMouseCapture must run while raw mode is still ON: on Windows it restores
+    // the input mode snapshotted at Enable time (raw-era), so running it after
+    // disable_raw_mode re-raws the console and leaves the user's shell echo-less.
     let seq = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
     let raw = disable_raw();
     seq?;
@@ -626,12 +520,9 @@ pub fn teardown_terminal(term: &mut Term) -> Result<()> {
     Ok(())
 }
 
-/// Decide whether the version popup shows this boot, persisting the current
-/// version so the popup shows at most once per upgrade regardless of how the run
-/// exits. Re-loads the config post-altscreen for `last_seen_version` only — any
-/// config warning was already surfaced by `main`'s pre-altscreen pass.
-/// A corrupted/hand-edited `last_seen_version` is overwritten so the popup can't
-/// be silently disabled forever.
+/// Persists the current version so the popup shows at most once per upgrade regardless
+/// of how the run exits. Re-loads the config for `last_seen_version` only — any config
+/// warning was already surfaced by `main`'s pre-altscreen pass.
 fn resolve_version_popup(config_path: &std::path::Path) -> bool {
     let current_ver = env!("CARGO_PKG_VERSION");
     let cfg = crate::config::load(config_path, &mut Vec::new());
@@ -644,11 +535,6 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
     decision.should_show_popup
 }
 
-/// The bundled inputs to [`run_tui`] — the runtime (`driver.rs`) builds it once
-/// and hands it over. Grouping these into a named struct kills the positional-arg
-/// transposition hazard (it had grown to 11 args of mostly `Option`/`PathBuf`/
-/// `bool`, several interchangeable by type) and gives new features a named home
-/// instead of another positional argument.
 pub(crate) struct TuiSession {
     pub scene_rx: SceneRx,
     pub pack_dir: Option<std::path::PathBuf>,
@@ -659,26 +545,18 @@ pub(crate) struct TuiSession {
     pub pets: Vec<pet::Pet>,
     pub source_health:
         tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
-    /// The resolved hook socket (Unix) / named pipe (Windows) the daemon bound,
-    /// shown in the Sources panel's connection line.
+    /// The hook socket (Unix) / named pipe (Windows) the daemon bound.
     pub socket_path: std::path::PathBuf,
-    /// The live connected-source set — the Sources panel's mutation seam: a
-    /// toggle calls `connected.set(src, on)`, which the reducer task's reconciler
-    /// observes (gate + graceful evict). Shared `Arc<Mutex<…>>` with the reducer.
+    /// The Sources panel's mutation seam: a toggle calls `connected.set(src, on)`, which
+    /// the reducer task's reconciler observes (gate + graceful evict).
     pub connected: crate::runtime::ConnectedSources,
-    /// The warn-floor log path — throttle-scanned for decode-drift breadcrumbs to
-    /// drive the footer nudge (`main` owns the resolution; `None` = no surfacing).
+    /// The warn-floor log, throttle-scanned for decode-drift breadcrumbs to drive the
+    /// footer nudge. `None` = no surfacing.
     pub log_path: Option<std::path::PathBuf>,
-    /// The ambient-audio gateway (#633) — disabled while `[audio] muted`
-    /// The resolved `[audio]` settings — `run_tui` builds the `AudioController`
-    /// from these (it OWNS the device thread: boot-spawn iff `!muted`, then
-    /// Drop-teardown). `muted` seeds the m-toggle; `volume` the boot + lazy spawn.
+    /// `muted` seeds the m-toggle; `volume` the boot and the lazy spawn.
     pub audio_cfg: crate::config::AudioConfig,
-    /// Focus-jump pid point-query roots: (CC projects root, Codex sessions
-    /// root) — threaded from RunConfig so a sprite click can resolve a
-    /// transcript-family agent's pid at click time.
+    /// Focus-jump pid point-query roots: (CC projects root, Codex sessions root).
     pub focus_roots: (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
-    /// First launch ever → seed the one-time onboarding overlay open.
     pub first_run: bool,
 }
 
@@ -702,23 +580,15 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
-    // Audio persistence — mute/volume debounce, the `♩ N%` readout, exit-flush —
-    // is ONE owned `AudioController` now (was five loop locals + `run_audio_action`).
-    // The office boots exactly as the user left it. Debounce: `+`/`-` is a
-    // repeatable key, so the volume write lands ONCE when the flash window expires
-    // (and on quit), never per repeat event.
-    // The controller OWNS the audio device thread (boot-spawn iff unmuted,
-    // Drop-teardown). Built HERE, after the pack-load `?` above, so a bad
-    // --pack-dir never leaves a spawned thread un-joined; and `audio_ctl` is a
-    // run_tui local, so EVERY exit below (q / Ctrl-C / terminate / error) drops
-    // it → the device thread is joined before the process exits (the "music
-    // keeps playing after quit" fix, structural — no manual shutdown call).
+    // The controller OWNS the audio device thread. Built HERE, after the pack-load `?`
+    // above, so a bad --pack-dir never leaves a spawned thread un-joined; and it is a
+    // `run_tui` local, so EVERY exit below (q / Ctrl-C / terminate / error) drops it and
+    // joins the device thread before the process exits — no manual shutdown call.
     let mut audio_ctl =
         crate::audio::AudioController::new(audio_cfg.muted, audio_cfg.volume, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
-    // First-run onboarding "move-in" overlay (TOP of the modal precedence chain).
-    // The roster is built only on first run; if no agent CLIs are detected there's
-    // nothing to connect, so it stays closed and the office shows normally.
+    // With no agent CLIs detected there is nothing to connect, so the overlay stays
+    // closed and the office shows normally.
     let detected_clis = if first_run {
         crate::sources::detect()
     } else {
@@ -726,41 +596,29 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     };
     let onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
 
-    // The "what's new in vX" version popup yields to onboarding ONLY when the
-    // overlay actually takes the screen (a fresh install WITH detected CLIs): both
-    // are centered cards, and it's noise to a first-time user. Suppress + still
-    // STAMP `last_seen_version` (so it won't pop later — onboarding is the one
-    // welcome). Gating on the overlay SHOWING (not bare `first_run`) is load-bearing:
-    // a no-CLI first-run user gets the version popup normally, incl. on a later
-    // upgrade (otherwise `first_run` stays true forever and would mute it for good).
+    // The version popup yields to onboarding, but still STAMPS `last_seen_version` so
+    // it won't pop later. Gating on the overlay SHOWING rather than on bare `first_run`
+    // is load-bearing: `first_run` stays true forever for a no-CLI user, which would
+    // mute the popup for good.
     let version_popup = if !onboarding_ui.is_empty() {
         let _ = resolve_version_popup(&config_path);
         false
     } else {
         resolve_version_popup(&config_path)
     };
-    // The per-surface UI state — open/close transitions + the ModalState
-    // projection + the per-frame renderer mirrors all live on UiState; this
-    // loop keeps the terminal lifecycle and the renderer/config/install side
-    // effects (see ui_state.rs).
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
     let mut last_layout_sig: Option<(u16, u16)> = None;
     let mut cap_sweep = FloorCapacitySweep::new();
 
-    // Render/event-loop tick (~30fps).
     const FRAME_TICK_MS: u64 = 33;
     let tick = Duration::from_millis(FRAME_TICK_MS);
     let result: Result<()> = (async {
-        // External-signal teardown: raw mode delivers keyboard Ctrl-C as a key
-        // event (the quit chord), but an EXTERNAL SIGINT/SIGTERM (`kill <pid>`,
-        // logout) would hit the default disposition and kill the process
-        // mid-altscreen with mouse reporting on — the shell is left unusable
-        // until `reset`. Route both into the loop so the normal teardown path
-        // runs. Pinned ONCE outside the loop (same rationale as headless_loop:
-        // a per-iteration ctrl_c() drops the subscription mid-gap); boxed so a
-        // registration FAILURE can disarm the arm by swapping in a pending
-        // future — a resolved future must never be polled again, and quitting
-        // on Err would exit the TUI at boot.
+        // An EXTERNAL SIGINT/SIGTERM would otherwise hit the default disposition and
+        // kill the process mid-altscreen with mouse reporting on, leaving the shell
+        // unusable until `reset`. Pinned ONCE outside the loop — a per-iteration
+        // `ctrl_c()` drops the subscription mid-gap — and boxed so a registration
+        // FAILURE can disarm the arm by swapping in a pending future, since a resolved
+        // future must never be polled again.
         let mut ctrl_c: std::pin::Pin<
             Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>,
         > = Box::pin(tokio::signal::ctrl_c());
@@ -799,31 +657,18 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 renderer.cancel_transition();
                 last_layout_sig = Some(sig);
             }
-            // Capture the health snapshot ONCE this frame — both the footer
-            // warning and the Sources panel's per-source `dead` flag read it.
             let health = source_health.borrow_and_update().clone();
-            // Compute + push this frame's renderer mirrors (dashboard /
-            // connection / onboarding frames, theme-picker/version/help flags,
-            // the drift-scan-fed footer warning) — see UiState::build_frames.
             ui.build_frames(now, &snapshot, &health)
                 .apply_to(&mut renderer, now);
-            // transient +/- readout (~1s after a nudge, appended to the ♩ glyph)
-            // + the debounced volume persist when the window expires — both owned
-            // by the controller.
             let audio_now = std::time::Instant::now();
             audio_ctl.tick(audio_now);
             renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));
             renderer.render(&snapshot, &pack, now)?;
 
-            // Auto-compute per-floor desk capacity from the current
-            // terminal dimensions. Each floor uses its own layout seed, so
-            // different variants may have different desk counts. fetch_max
-            // ensures capacity only grows (monotone) to prevent shifting
-            // cumulative offsets that would remap agents on floor 1+ to
-            // wrong desk positions. On terminal shrink, agents beyond the
-            // layout's capacity become invisible but stay alive; they
-            // reappear when the terminal grows back. Memoized on its own
-            // inputs — see `FloorCapacitySweep`.
+            // The sweep's `fetch_max` keeps capacity monotone: a shrink would otherwise
+            // shift the cumulative offsets and remap floor-1+ agents onto the wrong
+            // desks. Agents past the current layout's capacity go invisible but stay
+            // alive, and reappear when the terminal grows back.
             if let Some(layout) = renderer.cached_layout() {
                 cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
             }
@@ -833,9 +678,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             let mut quit = false;
             while polled {
                 match event::read()? {
-                    // Windows delivers Press AND Release events per
-                    // keystroke; without this guard every key double-fires
-                    // there (e.g. `p` pauses then instantly unpauses).
                     Event::Key(k) if should_dispatch_key(k.kind) => {
                         let floor = FloorNav {
                             n_floors: pixtuoid_scene::floor::num_floors(&snapshot),
@@ -847,9 +689,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             KeyAction::Quit => quit = true,
                             KeyAction::TogglePause => {
                                 ui.toggle_pause();
-                                // pause holds the SOUND too (the frozen office
-                                // must not keep clacking); unpause restores the
-                                // user's own m-key state rather than clobbering it
+                                // Unpause restores the user's own m-key state rather
+                                // than clobbering it.
                                 audio_ctl.set_paused(ui.paused());
                             }
                             KeyAction::ToggleHelp => ui.toggle_help(),
@@ -917,8 +758,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 if ui.connection.open {
                                     ui.close_connection();
                                 } else {
-                                    // FS reads + the connected-set snapshot happen on open
-                                    // + after each toggle, never per frame (a brief stall, #603).
+                                    // FS reads happen on open and after each toggle,
+                                    // never per frame.
                                     let rows = connection::build_rows(
                                         &connected.snapshot(),
                                         &ui.read_conn_log(),
@@ -942,18 +783,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     });
                                 if let Some((state, source_id, name, hint)) = action {
                                     match toggle_intent(state) {
-                                        // Bound, or connected-but-CLI-absent → arm the
-                                        // disconnect confirm (it removes hooks + walks
-                                        // characters out). A connected NoCli row is still
-                                        // disconnectable: its hooks live in the config,
-                                        // not the missing binary.
                                         ToggleIntent::ArmConfirm => {
                                             ui.connection.confirm = Some(ui.connection.selected);
                                         }
-                                        // Unbound present CLI → connect immediately
-                                        // (additive, reversible: flag, live gate, install
-                                        // hooks). connect_source's flock+fsync+FS reads are
-                                        // a brief inline stall (#603).
                                         ToggleIntent::Connect => {
                                             ui.connection.last_result = Some(connect_source(
                                                 &config_path,
@@ -966,8 +798,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                                 &ui.read_conn_log(),
                                             );
                                         }
-                                        // Absent CLI, never connected → inert hint (the
-                                        // "panel refuses an absent CLI" rule is CONNECT-side).
                                         ToggleIntent::Hint => {
                                             ui.connection.last_result = Some(hint);
                                         }
@@ -982,8 +812,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                         .get(idx)
                                         .map(|r| (r.source_id, r.display_name));
                                     if let Some((source_id, name)) = action {
-                                        // disconnect_source takes a flock + fsync + FS
-                                        // reads — a brief inline stall (#603).
                                         ui.connection.last_result = Some(disconnect_source(
                                             &config_path,
                                             &connected,
@@ -1004,49 +832,34 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             KeyAction::OnboardingDown => ui.onboarding_ui.move_down(),
                             KeyAction::OnboardingToggle => ui.onboarding_ui.toggle_selected(),
                             KeyAction::OnboardingConfirm => {
-                                // Apply the roster: connect the checked, disconnect
-                                // the unchecked — SCOPED to the detected sources, so
-                                // an undetected source's flag is never written. The
-                                // ConfigLock I/O is a brief inline stall (#603).
+                                // SCOPED to the detected sources, so an undetected
+                                // source's flag is never written.
                                 let choices = ui.onboarding_ui.decisions();
                                 let outcomes =
                                     crate::sources::apply_choices(&config_path, &choices);
-                                // Reflect each into the LIVE connected-set off its
-                                // ACTUAL outcome (a failed connect must NOT go live;
-                                // a NoOp keeps the DESIRED state) — see the helper.
                                 let failed =
                                     reflect_onboarding_outcomes(&connected, &choices, &outcomes);
                                 ui.close_onboarding();
                                 surface_onboarding_failures(&mut ui, &connected, failed);
                             }
                             KeyAction::OnboardingSkip => {
-                                // Skip = mark onboarding done WITHOUT changing any
-                                // hooks. Freeze each detected source to its REAL
-                                // current state — connected in the live gate OR
-                                // already carrying installed hooks (a pre-0.12
-                                // upgrader: hooks present, no `[sources]` flag — the
-                                // population onboarding replays to re-connect). Apply
-                                // then re-installs the hooked/connected ones
-                                // idempotently (a SEMANTIC no-op → hooks survive) and
-                                // leaves the rest disconnected (uninstall of an absent
-                                // hook is a no-op), so `[sources]` becomes non-empty
-                                // (onboarding won't re-trigger) yet NO hooks are
-                                // added/removed. `skip_freeze` reads each target's
-                                // config (has_hooks) through the sources facade so the
-                                // event loop doesn't reach into install; a brief inline
-                                // stall, like apply_choices (#603).
+                                // Skip marks onboarding done WITHOUT changing any hooks:
+                                // freeze each detected source to its REAL current state
+                                // — live-gate connected OR already carrying installed
+                                // hooks (a pre-0.12 upgrader has hooks but no
+                                // `[sources]` flag). The apply below re-installs those
+                                // idempotently and leaves the rest disconnected, so
+                                // `[sources]` becomes non-empty — onboarding won't
+                                // re-trigger — yet NO hooks are added or removed.
                                 let snap = connected.snapshot();
                                 let ids: Vec<&'static str> =
                                     ui.onboarding_ui.rows.iter().map(|r| r.source_id).collect();
                                 let freeze = crate::sources::skip_freeze(ids, &snap);
                                 let outcomes = crate::sources::apply_choices(&config_path, &freeze);
-                                // Reflect the freeze into the LIVE gate, exactly
-                                // like the Confirm arm — skip PERSISTS connected=true
-                                // for a pre-0.12 upgrader's hooked sources, so the
-                                // in-process gate must open THIS session too, else
-                                // their office stays empty until the next restart
-                                // re-seeds the gate from the (now true) flags. Also
-                                // reports any persist failure (its Failed arm).
+                                // The freeze persists connected=true for a pre-0.12
+                                // upgrader's hooked sources, so the in-process gate must
+                                // open THIS session too — else their office stays empty
+                                // until the next restart re-seeds it from the flags.
                                 let failed =
                                     reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
                                 ui.close_onboarding();
@@ -1055,27 +868,22 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         }
                     }
                     Event::Mouse(_) if ui.onboarding_open() => {
-                        // Onboarding is modal for the mouse too — swallow every
-                        // event so nothing leaks to the scene behind the overlay
-                        // (it's keyboard-driven; there are no clickable targets).
+                        // Modal for the mouse too: swallow every event so nothing leaks
+                        // to the scene behind the overlay.
                     }
                     Event::Mouse(m) if ui.help_open() => {
-                        // The help overlay is modal for the mouse: a left
-                        // click dismisses it and every mouse event is
-                        // swallowed so nothing leaks to the scene behind it
-                        // (e.g. coffee-machine / branding clicks launching a
-                        // browser). Placed before the popup guard so help
-                        // wins even mid popup-dismiss animation.
+                        // Every mouse event is swallowed so nothing leaks to the scene
+                        // behind it (a coffee-machine / branding click launches a
+                        // browser). Placed before the popup guard so help wins even mid
+                        // popup-dismiss animation.
                         if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
                             ui.close_help();
                         }
                     }
                     Event::Mouse(m) if renderer.last_popup_scale() > 0.0 => {
-                        // While the popup is animating or fully visible, only
-                        // the URL link is clickable; all other clicks are
-                        // swallowed so they don't fall through to the scene.
-                        // Uses the painter's frame-scale (last_popup_scale) so
-                        // the click geometry matches what was actually painted.
+                        // Only the URL link is clickable while the popup is animating
+                        // or visible. The painter's own frame-scale is used so the click
+                        // geometry matches what was actually painted.
                         if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
                             if let Ok((cols, rows)) = crossterm::terminal::size() {
                                 let bounds = ratatui::layout::Rect {
@@ -1105,14 +913,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     Event::Mouse(_)
                         if ui.theme_picker.is_some() || ui.dashboard.open || ui.connection.open =>
                     {
-                        // The dashboard / Sources panel / theme picker are modal for
-                        // the mouse too: they paint centered over the scene, so swallow
-                        // every mouse event — a click on an exposed scene edge (the
-                        // top-left branding region, the coffee machine) must not fall
-                        // through to launch a browser or pin a hidden agent (the same
-                        // phantom-click class the help/version guards above prevent).
-                        // Inert by design: these modals have explicit close keys
-                        // (Tab / s / t / Esc), so a click does NOT dismiss them.
+                        // These paint centered over the scene, so a click on an exposed
+                        // edge must not fall through and launch a browser. Inert by
+                        // design: they have explicit close keys (Tab / s / t / Esc), so
+                        // a click does NOT dismiss them.
                     }
                     Event::Mouse(m) => match m.kind {
                         MouseEventKind::Moved | MouseEventKind::Drag(_) => {
@@ -1120,12 +924,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
                             renderer.set_mouse_pos(Some((m.column, m.row)));
-                            // Gate on cached_layout (the wall display only paints
-                            // with a layout) so a too-small frame / floor-slide
-                            // transition can't phantom-launch — mirrors the arms below.
-                            // The ★ CTA's click target is the PRECISE painted span
-                            // (`star_hit_rect`, derived from the same board geometry),
-                            // not the old loose top-left row (C9).
+                            // Gate on cached_layout — the wall display only paints with
+                            // one — so a too-small frame or a floor-slide transition
+                            // can't phantom-launch.
                             let on_star = renderer.cached_layout().is_some()
                                 && crossterm::terminal::size()
                                     .ok()
@@ -1153,11 +954,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 m.row,
                                 now,
                             ) {
-                                // The clicked agent takes focus — agent wins over the
-                                // coffee Easter egg and the pet, matching the hover
-                                // ladder (renderer.rs), where a hovered agent suppresses
-                                // coffee/pet/furniture. Also focuses an agent on a floor
-                                // with NO pet (the check was previously nested in the pet arm).
+                                // Empty on purpose: the click was consumed. An agent
+                                // wins over the coffee Easter egg and the pet, matching
+                                // the hover ladder in renderer.rs.
                             } else if renderer.cached_layout().is_some_and(|layout| {
                                 renderer::hit_test_coffee_machine(layout, m.column, m.row)
                             }) {
@@ -1190,15 +989,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 if ui.theme_picker.is_some() {
                     renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
                 }
-                // The debounced-volume flush + device stop both ride
-                // `AudioController::drop` (fires on ALL exits, not just `q`) —
-                // `audio_ctl` drops as this fn returns. See its Drop impl (#752).
                 break;
             }
-            // The frame-pacing sleep doubles as the signal-listen window (the
-            // crossterm poll above is synchronous; this is the loop's only
-            // await point). An external signal breaks to the SAME teardown
-            // below that `q` reaches.
+            // The frame-pacing sleep doubles as the signal-listen window: the crossterm
+            // poll above is synchronous, so this is the loop's only await point.
             let rem = tick.checked_sub(start.elapsed()).unwrap_or(Duration::ZERO);
             tokio::select! {
                 _ = tokio::time::sleep(rem) => {}
@@ -1222,10 +1016,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     .await;
 
     teardown_terminal(&mut renderer.terminal)?;
-    // `audio_ctl` (a local) drops as this fn returns → AudioController Drop joins
-    // the device thread, so its RodioSink Drop (the OS output close) completes
-    // before the process exits. Covers every path above — q / Ctrl-C / terminate
-    // / error / the `?` on teardown — because a local's Drop runs on all of them.
     result
 }
 
@@ -1239,8 +1029,7 @@ mod capacity_sweep_tests {
         std::array::from_fn(|_| AtomicUsize::new(0))
     }
 
-    // A 192x80 terminal (buf 192x158). One sweep is 10 full
-    // `Layout::compute_with_seed` runs, so a steady frame must not repeat it.
+    // A 192x80 terminal, i.e. a 192x158 buffer.
     const W: u16 = 192;
     const H: u16 = 158;
 
@@ -1302,8 +1091,6 @@ mod teardown_tests {
     use super::unwind_terminal_modes;
     use std::cell::Cell;
 
-    /// A writer whose every `write` fails — the "terminal went away mid-quit"
-    /// case (SIGHUP, closed pty) the teardown must still unwind through.
     struct FailingWriter;
     impl std::io::Write for FailingWriter {
         fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
@@ -1329,15 +1116,12 @@ mod teardown_tests {
         );
     }
 
-    /// Windows dispatches these sequences to the console API rather than the
-    /// writer whenever crossterm's ANSI support flag is false, and under
-    /// `windows-test` that flag IS false (piped stdout, no console, no `TERM`),
-    /// so no writer ever sees a byte to assert on.
+    /// Unix-only: with crossterm's ANSI flag false — as under `windows-test` (piped
+    /// stdout, no console, no `TERM`) — these sequences go to the console API and no
+    /// writer ever sees a byte to assert on.
     #[cfg(unix)]
     const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
 
-    /// That the unwind reaches the writer it was HANDED, not a stream of its
-    /// own choosing — the property the panic hook's stdout-vs-stderr fix rests on.
     #[cfg(unix)]
     #[test]
     fn the_unwind_writes_the_leave_sequence_into_the_writer_it_is_given() {
@@ -1380,8 +1164,6 @@ mod teardown_tests {
 
     #[test]
     fn the_escape_write_error_outranks_a_later_raw_mode_error() {
-        // Both steps fail: the FIRST error is the one reported, and the second
-        // step still ran (pinned by the test above).
         let err = unwind_terminal_modes(&mut FailingWriter, || {
             Err(std::io::Error::other("raw mode gone"))
         })
@@ -1395,9 +1177,8 @@ mod teardown_tests {
 
 #[cfg(test)]
 mod runtime_model {
-    // Pins WHY #603 removed the wraps — see the tui/CLAUDE.md `block_on` sharp
-    // edge for the full model. Deterministic: worker_threads(1) + a std channel
-    // happens-before, no sleeps.
+    // Pins why the `block_in_place` wraps were removed — see the tui/CLAUDE.md
+    // `block_on` sharp edge.
     #[test]
     fn block_in_place_is_inert_on_the_block_on_thread() {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -1406,19 +1187,16 @@ mod runtime_model {
             .build()
             .expect("multi-thread runtime");
         rt.block_on(async {
-            // A spawned task = the reducer/sources analog on its OWN worker thread.
             let (tx, rx) = std::sync::mpsc::channel::<u8>();
             tokio::spawn(async move {
                 tx.send(1).expect("send");
             });
-            // The block_on thread (= run_tui) blocks SYNCHRONOUSLY like an inline
-            // flock. WRAPPED in block_in_place: must not panic, returns the value.
             let got = tokio::task::block_in_place(|| rx.recv().expect("recv"));
             assert_eq!(
                 got, 1,
                 "the spawned worker progressed while the loop blocked"
             );
-            // WITHOUT the wrap — observably identical, so the wrap is a no-op.
+            // Without the wrap: observably identical, so the wrap was a no-op.
             let (tx2, rx2) = std::sync::mpsc::channel::<u8>();
             tokio::spawn(async move {
                 tx2.send(2).expect("send");
@@ -1439,7 +1217,6 @@ mod dispatch_tests {
     const NONE: KeyModifiers = KeyModifiers::NONE;
     const CTRL: KeyModifiers = KeyModifiers::CONTROL;
 
-    // Default: no overlay open, theme-picker count of 6.
     fn modal() -> ModalState {
         ModalState {
             onboarding_open: false,
@@ -1453,7 +1230,6 @@ mod dispatch_tests {
         }
     }
 
-    // Default: normal scene, mid-stack floor (1 of 3), no transition.
     fn nav() -> FloorNav {
         FloorNav {
             n_floors: 3,
@@ -1474,12 +1250,10 @@ mod dispatch_tests {
             toggle_intent(ConnState::Disconnected),
             ToggleIntent::Connect
         );
-        // The arc fix (#3): a connected-but-CLI-absent NoCli row stays disconnectable.
         assert_eq!(
             toggle_intent(ConnState::NoCli { connected: true }),
             ToggleIntent::ArmConfirm
         );
-        // A never-connected absent CLI is inert — the connect-side refusal only.
         assert_eq!(
             toggle_intent(ConnState::NoCli { connected: false }),
             ToggleIntent::Hint
@@ -1528,7 +1302,6 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('?'), NONE, modal(), nav()),
             KeyAction::ToggleHelp
         );
-        // `w` only maps in debug builds; in release it falls through to None.
         #[cfg(debug_assertions)]
         assert_eq!(
             dispatch_key(KeyCode::Char('w'), NONE, modal(), nav()),
@@ -1542,7 +1315,6 @@ mod dispatch_tests {
 
     #[test]
     fn floor_nav_guards() {
-        // Mid-stack: up and down both valid.
         for code in [KeyCode::PageUp, KeyCode::Up, KeyCode::Char('k')] {
             assert_eq!(
                 dispatch_key(code, NONE, modal(), nav()),
@@ -1555,7 +1327,6 @@ mod dispatch_tests {
                 KeyAction::NavigateFloor(0)
             );
         }
-        // Top floor: no up.
         let top = FloorNav {
             current_floor: 2,
             ..nav()
@@ -1564,7 +1335,6 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Up, NONE, modal(), top),
             KeyAction::None
         );
-        // Bottom floor: no down.
         let bottom = FloorNav {
             current_floor: 0,
             ..nav()
@@ -1573,7 +1343,6 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Down, NONE, modal(), bottom),
             KeyAction::None
         );
-        // A transition in flight blocks navigation in both directions.
         let mid_trans = FloorNav {
             in_transition: true,
             ..nav()
@@ -1590,7 +1359,6 @@ mod dispatch_tests {
 
     #[test]
     fn help_overlay_has_priority_and_dismisses() {
-        // help wins even when the version popup is also flagged.
         let c = ModalState {
             help_open: true,
             version_popup: true,
@@ -1617,14 +1385,11 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('c'), CTRL, c, nav()),
             KeyAction::Quit
         );
-        // Up does not leak to the floor-nav / picker handlers while help is open.
         assert_eq!(dispatch_key(KeyCode::Up, NONE, c, nav()), KeyAction::None);
     }
 
     #[test]
     fn onboarding_is_top_precedence_and_maps_its_keys() {
-        // Onboarding sits ABOVE every other overlay (help/version/connection all
-        // flagged) — the version-popup-lockstep precedence class.
         let on = ModalState {
             onboarding_open: true,
             help_open: true,
@@ -1660,8 +1425,6 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Esc, NONE, on, nav()),
             KeyAction::OnboardingSkip
         );
-        // The quit chord still escapes; every other key is SWALLOWED (it must not
-        // leak to the help / connection handlers flagged open underneath).
         assert_eq!(
             dispatch_key(KeyCode::Char('c'), CTRL, on, nav()),
             KeyAction::Quit
@@ -1699,14 +1462,12 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('c'), CTRL, c, nav()),
             KeyAction::Quit
         );
-        // A floor key while the popup is up is swallowed, not navigated.
         assert_eq!(dispatch_key(KeyCode::Up, NONE, c, nav()), KeyAction::None);
     }
 
-    /// The version popup is DISMISS-ONLY, which is why its overflowing notes band
-    /// is marked with `widgets::version_popup`'s own non-scrolling marker instead
-    /// of the shared `⋮ N more ▾` the pageable panels use. Giving this modal a
-    /// scroll key would make that marker the wrong choice — so it reds here first.
+    /// The popup is DISMISS-ONLY, which is why `widgets::version_popup` marks its
+    /// overflowing notes band with a non-scrolling marker instead of the shared
+    /// `⋮ N more ▾`. Binding a scroll key here would make that marker wrong.
     #[test]
     fn the_version_popup_binds_no_scroll_key() {
         let c = ModalState {
@@ -1759,9 +1520,6 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Esc, NONE, c, nav()),
             KeyAction::ThemeCancel
         );
-        // The quit chord passes through like EVERY other modal tier (the run_tui
-        // quit arm reverts the previewed theme before breaking) — the picker
-        // used to be the one tier that swallowed Ctrl+C entirely.
         assert_eq!(
             dispatch_key(KeyCode::Char('q'), NONE, c, nav()),
             KeyAction::Quit
@@ -1770,13 +1528,11 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('c'), CTRL, c, nav()),
             KeyAction::Quit
         );
-        // Non-chord keys are still swallowed (modal).
         assert_eq!(
             dispatch_key(KeyCode::Char('p'), NONE, c, nav()),
             KeyAction::None
         );
 
-        // Clamp at the ends.
         let lo = ModalState {
             theme_picker: Some(0),
             ..modal()
@@ -1901,7 +1657,6 @@ mod dispatch_tests {
 
     #[test]
     fn tab_swallowed_while_other_overlays_open() {
-        // help / version / theme-picker tiers precede the normal Tab binding.
         let h = ModalState {
             help_open: true,
             ..modal()
@@ -1925,7 +1680,6 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('s'), NONE, modal(), nav()),
             KeyAction::ToggleConnection
         );
-        // Bare `c` is now UNbound (the panel moved to `s`); Ctrl+C stays quit.
         assert_eq!(
             dispatch_key(KeyCode::Char('c'), NONE, modal(), nav()),
             KeyAction::None
@@ -1958,12 +1712,10 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('j'), NONE, s, nav()),
             KeyAction::ConnectionDown
         );
-        // `t` is the single connect/disconnect toggle (replaced i/u, then Enter).
         assert_eq!(
             dispatch_key(KeyCode::Char('t'), NONE, s, nav()),
             KeyAction::ConnectionToggle
         );
-        // The old install/uninstall keys + Enter are unbound in the panel now.
         assert_eq!(
             dispatch_key(KeyCode::Char('i'), NONE, s, nav()),
             KeyAction::None
@@ -1984,7 +1736,6 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Esc, NONE, s, nav()),
             KeyAction::ConnectionClose
         );
-        // Quit chord passes through; unarmed swallows y/n.
         assert_eq!(
             dispatch_key(KeyCode::Char('q'), NONE, s, nav()),
             KeyAction::Quit
@@ -2022,7 +1773,6 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Esc, NONE, s, nav()),
             KeyAction::ConnectionCancelConfirm
         );
-        // Armed swallows navigation + action keys.
         for k in [
             KeyCode::Char('j'),
             KeyCode::Char('k'),
@@ -2031,7 +1781,6 @@ mod dispatch_tests {
         ] {
             assert_eq!(dispatch_key(k, NONE, s, nav()), KeyAction::None);
         }
-        // Quit chord still quits even while armed.
         assert_eq!(
             dispatch_key(KeyCode::Char('c'), CTRL, s, nav()),
             KeyAction::Quit
@@ -2040,7 +1789,6 @@ mod dispatch_tests {
 
     #[test]
     fn connection_precedence_help_version_win_and_connection_swallows_tab() {
-        // help / version tiers precede the connection tier — bare `c` does nothing.
         let h = ModalState {
             help_open: true,
             ..modal()
@@ -2057,15 +1805,12 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('c'), NONE, v, nav()),
             KeyAction::None
         );
-        // connection precedes dashboard: with connection open, Tab is swallowed.
         let s = ModalState {
             connection_open: true,
             ..modal()
         };
         assert_eq!(dispatch_key(KeyCode::Tab, NONE, s, nav()), KeyAction::None);
     }
-
-    // --- connect/disconnect persist-or-abort (no-target Antigravity path) ------
 
     #[test]
     fn connect_source_persists_then_flips_the_gate() {
@@ -2104,8 +1849,8 @@ mod dispatch_tests {
     #[test]
     fn connect_source_aborts_without_flipping_the_gate_when_persist_fails() {
         let tmp = tempfile::TempDir::new().unwrap();
-        // A regular file used as a directory component → the config write's
-        // create-parent-dir fails → save_source_connected errs.
+        // A regular file used as a directory component makes the config write's
+        // create-parent-dir fail.
         let blocker = tmp.path().join("not-a-dir");
         std::fs::write(&blocker, "x").unwrap();
         let cfg = blocker.join("config.toml");
@@ -2119,18 +1864,9 @@ mod dispatch_tests {
         );
     }
 
-    // The install-failure rollback is now tested at the core
-    // (`sources::connect_target_rolls_the_flag_back_when_install_fails`) — the
-    // panel just delegates to `crate::sources::connect`.
-
-    // --- onboarding outcome → live-gate mapping --------------------------------
-
     #[test]
     fn onboarding_noop_outcome_keeps_the_desired_gate_state() {
         use crate::sources::ChangeOutcome;
-        // A NoOp for a CHECKED row means "already connected — nothing written":
-        // the live gate must stay OPEN, never be hardcoded closed (which would
-        // evict the source's live agents the user just confirmed).
         let connected = crate::runtime::ConnectedSources::new(
             std::iter::once("antigravity".to_string()).collect(),
         );
@@ -2170,11 +1906,6 @@ mod dispatch_tests {
         );
     }
 
-    /// A failed onboarding connect is the ONE `ChangeOutcome::Failed` presenter
-    /// that used to drop its message: the CLI prints the row and exits non-zero,
-    /// the Sources panel renders it in the result line, onboarding only
-    /// `tracing::warn!`d it into a file the alternate screen hides. Reflect must
-    /// hand the reason BACK so the loop can put it on a real surface.
     #[test]
     fn a_failed_onboarding_connect_reports_the_reason_to_the_caller() {
         use crate::sources::ChangeOutcome;
@@ -2220,12 +1951,6 @@ mod dispatch_tests {
         );
     }
 
-    /// `Failed` is NOT connect-only: `apply_choices` maps an unchecked row to a
-    /// Disconnect, and on a genuine first run `freeze_for_skip` makes that EVERY
-    /// detected source — so Esc, which connects nothing, was reporting
-    /// "connect failed". The third string is the fold: `map_disconnect_outcome`
-    /// turns a hook-removal failure on an OTHERWISE SUCCESSFUL disconnect into
-    /// `Failed`, which the panel words differently again.
     #[test]
     fn an_onboarding_failure_names_the_operation_that_actually_failed() {
         use crate::sources::ChangeOutcome;
@@ -2261,8 +1986,6 @@ mod dispatch_tests {
             "an unchecked row's failure is a DISCONNECT failure: {unchecked}"
         );
 
-        // The fold is a SUCCESSFUL disconnect with a residual, so it takes the
-        // formatter's third arm — never "disconnect failed".
         let openclaw_name = crate::install::target::by_source("openclaw")
             .expect("openclaw is a target-bearing source")
             .display_name;
@@ -2282,10 +2005,6 @@ mod dispatch_tests {
         );
     }
 
-    /// The failure line has to land on a surface the user is looking at: the
-    /// Sources panel, opened ON the failed row with the reason in its result
-    /// line (so the `t` retry is one keystroke away on the RIGHT source —
-    /// `open_connection` alone keeps the previous index, 0 on a fresh UiState).
     #[test]
     fn onboarding_failures_open_the_sources_panel_on_the_failed_row() {
         let connected = crate::runtime::ConnectedSources::default();
@@ -2332,16 +2051,8 @@ mod dispatch_tests {
     #[test]
     fn onboarding_skip_reflects_its_freeze_into_the_live_gate() {
         use crate::sources::ChangeOutcome;
-        // Regression: the SKIP arm must reflect its freeze into the live gate
-        // like Confirm. A pre-0.12 upgrader boots with an EMPTY gate; skip
-        // freezes their hooked source `true`, and apply_choices issues a Connect
-        // whose semantic-no-op re-install yields `Connected` — the outcome the
-        // skip path actually emits (apply_choices maps every want to
-        // Connect/Disconnect, never NoOp). Reflecting it must OPEN the gate this
-        // session, else their office stays empty until the next restart re-seeds
-        // from the (now true) flags. (The arm's one-line call to reflect lives
-        // in the codecov-excluded run_tui loop; this pins the reflect branch it
-        // drives, as the Confirm-arm tests do.)
+        // `apply_choices` maps every want to Connect/Disconnect, never NoOp, so the
+        // skip path's semantic-no-op re-install really does emit `Connected`.
         let connected = crate::runtime::ConnectedSources::default();
         assert!(!connected.is_connected("antigravity"), "gate starts empty");
         let freeze: Vec<(&'static str, bool)> = vec![("antigravity", true)];

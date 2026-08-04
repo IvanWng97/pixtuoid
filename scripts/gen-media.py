@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
 """Regenerate every committed office image from a release `snapshot` build.
 
-Single source of truth for BOTH surfaces' render media — replaces the old
-scripts/gen-docs-images.py (docs/images/) and site/scripts/gen-demos.sh
-(site/public/demos/). Every render job lives in scripts/media.json; this driver
-builds the binary once and runs each job, writing to docs/images/ and/or
-site/public/demos/ per the job's `targets`. Theme/weather lists are read from
-site/src/{themes,weather}.json (`@themes.json` / `@weather.json` refs) so they
-are never duplicated.
+Single source of truth for BOTH surfaces' render media. Every render job lives
+in scripts/media.json; this driver builds the binary once and runs each job,
+writing to docs/images/ and/or site/public/demos/ per the job's `targets`.
+Theme/weather lists are read from site/src/{themes,weather}.json (`@themes.json`
+/ `@weather.json` refs) so they are never duplicated.
 
   just gen-media           # regenerate everything
   just gen-media --only docs   # docs/images/ only
-  just gen-check           # → gen-media.py --check (drift gate; see below)
+  just gen-check           # → gen-media.py --check (drift gate)
 
 --check renders to a temp dir and pixel-diffs every committed PNG (threshold 0,
 via scripts/compare-screenshots.py); video clips (.mp4/.webm) and the animated
-demo.gif are presence-checked only (ffmpeg/gifsicle output is not byte-stable
-across versions, but the underlying renders are pixel-deterministic). Exits
-non-zero on any drift.
-
-kind:"proof" renders the §3 split-screen replay via snapshot --proof (posters
-pixel-gated, encodes presence-gated).
+demo.gif are presence-checked only, since ffmpeg/gifsicle output is not
+byte-stable across versions. Exits non-zero on any drift.
 
 Requires the .venv (Pillow) + ffmpeg + gifsicle. Run via `.venv/bin/python3`.
 """
@@ -46,13 +40,13 @@ TARGET_DIRS = {
     "docs": ROOT / "docs/images",
     "site": ROOT / "site/public/demos",
 }
-# --check writes pixel-diff overlays here (survives the run for CI artifact upload).
+# Outside the temp dir so --check's diff overlays survive for CI artifact upload.
 DIFF_DIR = ROOT / "target/gen-check-diff"
 # --check must REGENERATE the proof posters (pixel-gated stills) but skip the
 # video encodes (presence-gated, non-byte-stable) — handlers read this flag.
 CHECK_MODE = False
-# Committed files under docs/images/ that this pipeline does NOT generate
-# (a live-agent capture and a hand-made banner) — never compared in --check.
+# A live-agent capture and a hand-made banner: committed but not generated here,
+# so --check must never compare them.
 NOT_GENERATED = {"screenshot-real.png", "sprite-banner.png"}
 
 
@@ -64,7 +58,6 @@ def build_once():
 
 
 def expand_ref(ref):
-    """'@themes.json' -> the parsed site/src/themes.json list."""
     return json.loads((SITE_SRC / ref[1:]).read_text())
 
 
@@ -81,8 +74,6 @@ def snap(out_path, *, cols, rows, hour, day=None, theme=None, weather=None,
         cmd += ["--gif", "--gif-duration", str(gif["duration"]), "--gif-fps", str(gif["fps"])]
     cmd += list(extra)
     cmd += [str(out_path)]
-    # suppress the text preview on stdout; gif progress stays on stderr.
-    # Inherits the process env (TZ=UTC, pinned in main) so renders are deterministic.
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
 
 
@@ -90,15 +81,7 @@ def ffmpeg(*args):
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *args], check=True)
 
 
-# ── per-kind handlers ────────────────────────────────────────────────────────
-
-
 def run_render(job, out_dirs, work, intermediates):
-    # TZ=UTC is pinned process-wide in main() (snapshot reads --now-hour as a
-    # chrono::Local wall time, so every epoch-derived effect — the 10-min weather
-    # slot, the city-twinkle/lighting phase — must render under one fixed TZ or a
-    # dev box and the UTC CI runner produce different frames; the committed art is
-    # UTC too). The `reference` baselines are a multi-frame job; the rest single.
     if "frames" in job:
         for f in job["frames"]:
             for d in out_dirs:
@@ -123,15 +106,13 @@ def run_render(job, out_dirs, work, intermediates):
 
 
 def run_crop(job, out_dirs, work, intermediates):
-    # A crop reads the unscaled render of its `from` job. With --jobs you can
-    # filter that prerequisite out — fail with a useful hint, not a bare KeyError.
     src = intermediates.get(job["from"])
     if src is None:
         sys.exit(
             f"gen-media: crop job '{job['id']}' needs its source render '{job['from']}' "
             f"— include it, e.g. --jobs {job['from']},{job['id']}"
         )
-    if "quadrants" in job:  # docs: fractional quadrants → {id}-{key}.png, Pillow upscale
+    if "quadrants" in job:
         img = Image.open(src).convert("RGB")
         w, h = img.size
         scale = job.get("scale", 1)
@@ -140,7 +121,7 @@ def run_crop(job, out_dirs, work, intermediates):
             out = crop.resize((crop.width * scale, crop.height * scale), Image.NEAREST)
             for d in out_dirs:
                 out.save(d / f"{job['id']}-{name}.png")
-    else:  # site: ffmpeg pixel crops → {id}_{key}.png
+    else:
         for key, spec in job["crops"].items():
             for d in out_dirs:
                 ffmpeg("-i", str(src), "-vf", f"crop={spec}", str(d / f"{job['id']}_{key}.png"))
@@ -185,8 +166,7 @@ def run_gif(job, out_dirs, work, intermediates):
         dst = d / f"{job['id']}.gif"
         snap(dst, cols=job["cols"], rows=job["rows"], hour=job["hour"], day=job.get("day"),
              theme=job.get("theme"), gif={"duration": job["duration"], "fps": job["fps"]})
-        # Palette reduction (NOT --lossy: it breaks gifsicle's inter-frame diff and
-        # ships a bigger file). These gifsicle params are the established tuning.
+        # NOT --lossy: it breaks gifsicle's inter-frame diff and ships a bigger file.
         subprocess.run(
             ["gifsicle", "-b", "-O3", "--colors", str(job["colors"]), str(dst)], check=True
         )
@@ -202,8 +182,7 @@ def run_matrix(job, out_dirs, work, intermediates):
                  hour=job["hour"], **kwargs)
 
 
-# The even-dimensions scale filter both encoders need — H.264 and VP9 both
-# require even width/height. The ONE definition clip + proof jobs share.
+# H.264 and VP9 both require even width/height.
 SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 # VP9 constant-quality knob (with `-b:v 0`, no target bitrate).
 VP9_CRF = "36"
@@ -211,9 +190,7 @@ VP9_CRF = "36"
 
 def encode_mp4_webm(frames_glob, fps, vf, out_stem):
     """Encode an `f%04d.png` frame sequence at `fps`, through the `vf` filter, to
-    BOTH `{out_stem}.mp4` (H.264 +faststart yuv420p) and `{out_stem}.webm`
-    (VP9 crf/row-mt yuv420p). The two-container recipe clip + proof jobs share,
-    so a codec/quality retune touches one place."""
+    BOTH `{out_stem}.mp4` and `{out_stem}.webm`."""
     ffmpeg("-framerate", str(fps), "-i", frames_glob,
            "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-vf", vf,
            f"{out_stem}.mp4")
@@ -229,12 +206,9 @@ def run_clip(job, out_dirs, work, intermediates):
     fps = job["fps"]
     cid = job["id"]
     # Optional `crop` (ffmpeg "W:H:X:Y", in the unscaled render's px space) frames
-    # a close-up on a fixed region — e.g. the meetings clip onto its meeting room
-    # so the chitchat reads (a roaming subject like the pets cat uses a smaller
-    # cols/rows render instead, never a crop). Prepended to the even-dims scale.
-    # NB: this singular clip-level `crop` is unrelated to the separate
-    # kind:"crop" job (run_crop), which reads a plural `crops` dict off a `from`
-    # render — different mechanism, different key.
+    # a close-up on a fixed region. NB: this singular clip-level `crop` is
+    # unrelated to the separate kind:"crop" job (run_crop), which reads a plural
+    # `crops` dict off a `from` render — different mechanism, different key.
     crop = job.get("crop")
     vf = f"crop={crop},{SCALE_EVEN}" if crop else SCALE_EVEN
     poster_vf = ["-vf", f"crop={crop}"] if crop else []
@@ -245,34 +219,25 @@ def run_clip(job, out_dirs, work, intermediates):
         # delays otherwise confuse ffmpeg into a fast clip).
         ffmpeg("-i", str(gif), str(frames / "f%04d.png"))
         encode_mp4_webm(str(frames / "f%04d.png"), fps, vf, str(d / cid))
-        # poster frame: `poster` (seconds into the clip) lets a staged clip
-        # (e.g. meetings, whose opening seconds are pre-action) poster on the
-        # money shot instead of frame 0. Posters are presence-only in --check.
+        # `poster` (seconds into the clip) lets a staged clip whose opening
+        # seconds are pre-action poster on the money shot instead of frame 0.
         poster_seek = ["-ss", str(job["poster"])] if "poster" in job else []
         ffmpeg(*poster_seek, "-i", str(gif), *poster_vf, "-vframes", "1",
                str(d / f"{cid}-poster.png"))
 
 
 def run_wasm_still(job, out_dirs, work, intermediates):
-    # The live-office backdrop's poster (#425): a REAL frame of the pixtuoid-web
-    # Office — same seed-0 layout, same looped script, same 231x130 buffer a
-    # 16:9 viewport's canvas computes — so the poster→canvas crossfade
-    # dissolves in place instead of reframing (the old terminal-render poster
-    # was ~1.18:1; cover-cropping it dropped ~60% of its height on wide
-    # screens). Deterministic per (t0_ms, advance_ms) under the process TZ=UTC
-    # pin, so --check pixel-gates it like every other still.
+    # The live-office backdrop's poster: a REAL frame of the pixtuoid-web Office,
+    # in the same buffer geometry the live canvas computes, so the poster→canvas
+    # crossfade dissolves in place instead of reframing. Deterministic per
+    # (t0_ms, advance_ms) under the TZ=UTC pin, so --check pixel-gates it.
     subprocess.run(
         ["cargo", "build", "--release", "-p", "pixtuoid-web", "--example", "hero_still"],
         check=True,
         cwd=ROOT,
     )
-    # `t0_ms` (an exact epoch, e.g. hero-wide's committed poster) and `hour`
-    # (a 0-23 convenience — e.g. the VIBING poster's dusk shot) are mutually
-    # exclusive time pins, both forwarded to hero_still's own like-named
-    # flags; hero_still prefers `--t0-ms` if both are somehow given. `weather`
-    # forces a specific condition (e.g. "clear") instead of the natural
-    # weather clock. hero-wide's job only sets `t0_ms`, so its invocation is
-    # unchanged (byte-identical).
+    # `t0_ms` (an exact epoch) and `hour` (a 0-23 convenience) are mutually
+    # exclusive time pins; hero_still prefers `--t0-ms` if both are given.
     extra = []
     if "t0_ms" in job:
         extra += ["--t0-ms", str(job["t0_ms"])]
@@ -280,10 +245,8 @@ def run_wasm_still(job, out_dirs, work, intermediates):
         extra += ["--hour", str(job["hour"])]
     if "weather" in job:
         extra += ["--weather", str(job["weather"])]
-    # Layout seed: match the LIVE canvas this poster falls back for (the VIBING
-    # channel is seed 11), else the poster's office layout pops when the live
-    # canvas paints over it. hero-wide sets no seed, so hero_still defaults to
-    # the backdrop's seed 0 (byte-identical).
+    # Layout seed: must match the LIVE canvas this poster falls back for, else
+    # the poster's office layout pops when the live canvas paints over it.
     if "seed" in job:
         extra += ["--seed", str(job["seed"])]
     for d in out_dirs:
@@ -298,10 +261,9 @@ def run_wasm_still(job, out_dirs, work, intermediates):
 
 
 def run_proof(job, out_dirs, work, intermediates):
-    # §3 split-screen proof: ONE snapshot --proof pass renders BOTH compositions
-    # (wide + tall) from the same fixture-driven reducer replay; ffmpeg encodes
-    # each; the poster is a designated frame COPY, so it stays pixel-deterministic
-    # (and pixel-gated) while the encodes stay presence-only.
+    # ONE snapshot --proof pass renders BOTH compositions (wide + tall) from the
+    # same fixture-driven reducer replay; the poster is a designated frame COPY,
+    # so it stays pixel-gated while the encodes stay presence-only.
     fps = job["fps"]
     poster_idx = int(job["poster"] * fps) + 1
     # In --check only the poster frame matters: rendering a deterministic PREFIX
@@ -339,17 +301,12 @@ HANDLERS = {
 }
 
 
-# ── drift check ──────────────────────────────────────────────────────────────
-
-
 def _presence_only_names(manifest, target):
     """Filenames owned by clip/gif jobs for `target` — ffmpeg/gifsicle outputs
     whose bytes aren't stable cross-version, so they're presence-checked, never
-    pixel-gated (and --check skips regenerating them: vp9 encoding blew the CI
-    timeout for zero gating value). Derived from the MANIFEST, not a name-shape
-    rule: a `-poster.png` suffix rule silently exempted a deterministic render
-    still that merely kept a poster name (hero-poster.png, the og:image) when
-    its job flipped clip→render (#432 review)."""
+    pixel-gated. Derived from the MANIFEST, not a name-shape rule: a
+    `-poster.png` suffix rule silently exempted a deterministic render still that
+    merely kept a poster name when its job flipped clip→render."""
     return {
         name
         for job in manifest
@@ -359,9 +316,7 @@ def _presence_only_names(manifest, target):
 
 
 def _expected_presence_outputs(job):
-    """Committed filenames a presence-only (clip/gif) job owns — asserted to EXIST,
-    since --check skips regenerating them and walking the committed tree alone can't
-    notice one that's missing/renamed/never-generated."""
+    """Committed filenames a presence-only (clip/gif) job owns."""
     if job["kind"] == "gif":
         return [f"{job['id']}.gif"]
     if job["kind"] == "clip":
@@ -380,7 +335,7 @@ def run_check(out_base, work, manifest, only=None):
         if only and target != only:
             continue
         committed_dir = TARGET_DIRS[target]
-        produced = {p.name for p in tdir.iterdir() if p.is_file()}  # stills only
+        produced = {p.name for p in tdir.iterdir() if p.is_file()}
         presence_only = _presence_only_names(manifest, target)
 
         for c in sorted((p for p in committed_dir.iterdir() if p.is_file()), key=lambda p: p.name):
@@ -390,7 +345,6 @@ def run_check(out_base, work, manifest, only=None):
             if name in presence_only:
                 print(f"  present (not pixel-gated): {target}/{name}")
                 continue
-            # a rendered still — must have been regenerated AND pixel-match
             if name not in produced:
                 failures.append(f"NOT REGENERATED: {target}/{name}")
                 continue
@@ -401,14 +355,12 @@ def run_check(out_base, work, manifest, only=None):
             if rc != 0:
                 failures.append(f"PIXEL DRIFT: {target}/{name} (compare rc={rc})")
 
-        # a still rendered but not committed = a new/renamed output to commit
         for name in sorted(produced):
             if not (committed_dir / name).exists():
                 failures.append(f"NEW (uncommitted) output: {target}/{name}")
 
-    # Presence-only outputs (clips/gif) are skipped in --check, so the committed-dir
-    # walk above can't catch one that's MISSING. Assert them from the MANIFEST — the
-    # source of truth for what must exist — so a deleted/renamed/orphaned clip fails.
+    # Presence-only outputs are skipped in --check, so the committed-dir walk
+    # above can't catch one that's MISSING; assert them from the MANIFEST.
     for job in manifest:
         for t in job["targets"]:
             if only and t != only:
@@ -427,9 +379,6 @@ def run_check(out_base, work, manifest, only=None):
     return 0
 
 
-# ── driver ───────────────────────────────────────────────────────────────────
-
-
 def main():
     ap = argparse.ArgumentParser(description="Regenerate office media from scripts/media.json")
     ap.add_argument("--check", action="store_true",
@@ -442,23 +391,20 @@ def main():
 
     # run_check walks the FULL committed tree, so every still owned by a
     # filtered-out job would report "NOT REGENERATED" — spurious failures.
-    # Rejecting the combination is the honest contract (CI never passes --jobs).
     if args.check and args.jobs:
         ap.error("--check renders everything and walks the full committed tree; "
                  "--jobs cannot be combined with it (run --check without --jobs)")
 
-    # Pin TZ=UTC for EVERY render so the office's epoch-derived weather slot +
-    # lighting/twinkle phase (snapshot reads --now-hour as a chrono::Local wall
-    # time) are machine-independent — without this a dev box and the UTC CI runner
-    # render different frames and gen-check pixel-diffs them as drift. The committed
-    # art under docs/images/ + site/public/demos/ is generated UTC too. (Inherited
-    # by every snapshot/ffmpeg subprocess via os.environ.)
+    # Pin TZ=UTC for EVERY render (inherited by every subprocess) so the office's
+    # epoch-derived weather slot + lighting phase — snapshot reads --now-hour as a
+    # chrono::Local wall time — are machine-independent. Without it a dev box and
+    # the UTC CI runner render different frames and gen-check calls that drift.
     os.environ["TZ"] = "UTC"
 
     only_jobs = set(args.jobs.split(",")) if args.jobs else None
 
-    # Validate --jobs against the manifest BEFORE the release build: an unknown
-    # id used to be a silent no-op that still printed "wrote media → …".
+    # Validate --jobs BEFORE the release build: an unknown id would otherwise be
+    # a silent no-op that still prints "wrote media → …".
     manifest = json.loads(MANIFEST.read_text())
     if only_jobs:
         known = {j["id"] for j in manifest}
@@ -487,8 +433,8 @@ def main():
             targets = [t for t in job["targets"] if not args.only or t == args.only]
             if not targets:
                 continue
-            # --check pixel-gates stills only; clips/gif are presence-checked from
-            # the manifest, so don't waste minutes rendering + vp9-encoding them.
+            # Clips/gif are presence-checked from the manifest, so don't waste
+            # minutes rendering + vp9-encoding them under --check.
             if args.check and job["kind"] in ("gif", "clip"):
                 print(f"· {job['id']} ({job['kind']}) → presence-only, skipped in --check")
                 continue

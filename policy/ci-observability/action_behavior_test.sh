@@ -467,13 +467,12 @@ if PATH="$fake_bin:$PATH" \
     fail "Claude publisher accepted an unsafe finding path"
 fi
 
-# --- #799 fork refusal + #819 absence notice -------------------------------
-# Both are shell that GUARDS something, and the rego rules pin only that they
-# exist and where they sit. What they actually do is asserted here.
+# The rego rules pin only that these guards exist and where they sit; what they
+# actually do is asserted here.
 CLAUDE_TAG_WORKFLOW_FILE="${CLAUDE_TAG_WORKFLOW_FILE:-.github/workflows/claude.yml}"
 
-# These steps pass --jq and hit two different endpoints, neither of which the
-# resolver stub above models.
+# These steps pass --jq and hit two endpoints the resolver stub above models
+# neither of.
 cat >"$fake_bin/gh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -539,13 +538,11 @@ run_absence failure
 absence_body="$(<"$absence_capture")"
 [[ "$absence_body" == *"ABSENT, not clean"* ]] ||
     fail "absence notice did not say the review is absent rather than clean"
-# A prefix matcher on the published review's marker must not read this as a review.
 [[ "$absence_body" != *"<!-- claude-auto-review"* ]] ||
     fail "absence marker collides with the published review marker"
 [[ "$absence_body" == *"total_cost_usd"* ]] ||
     fail "a failed analysis did not name the field that identifies a spent quota"
 
-# The decline arm has no red job behind it; it must still say something.
 run_absence success
 [[ "$(<"$absence_capture")" == *"out of scope for the reviewer"* ]] ||
     fail "a declined review was reported as a failure"

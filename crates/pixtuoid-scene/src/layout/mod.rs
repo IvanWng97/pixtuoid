@@ -1,22 +1,9 @@
 //! Zone-based scene layout for the top-down office — primitive geometry
-//! only, no terminal deps. Computed once per (buf_w, buf_h, max_desks)
-//! triple; serializable / wire-shippable (no out-of-process consumer today).
+//! only, no terminal deps.
 //!
 //! Splits a buf-pixel rectangle into quadrants (meeting / pantry /
 //! cubicles / lounge), then computes per-agent home desks, named lounge
 //! waypoints, decor positions, and a per-pixel walkability mask.
-//!
-//! Submodules:
-//!   * `decor` — the furniture/decor vocabulary: the role enums
-//!     (`WaypointKind`/`PodDecor`/`PlantKind`/`WallDecor`) plus the unified
-//!     `Furniture` geometry table they map onto.
-//!   * `compute` — `compute_with_seed`: desk/decor/wall/waypoint placement.
-//!   * `placement` — the `Anchor` convention (where a box sits vs its `pos`).
-//!   * `mask` — `build_walkable_mask`: stamps obstacle footprints for routing.
-//!   * `approach` — `stand_point`/`approach_point`: where an agent stands to use a piece.
-//!   * `coarse` — the SHARED coarse routing-grid primitives (`cell_walkable`/`snap`/
-//!     `NEIGHBORS_8`/`COARSE_CELL_SIZE`) that BOTH `reach` and `crate::pathfind` ride.
-//!   * `reach` — `ReachSet`: coarse-cell BFS (over `coarse`) mirroring `crate::pathfind`'s A* grid.
 
 mod approach;
 mod coarse;
@@ -27,9 +14,8 @@ mod placement;
 mod reach;
 mod rooms;
 
-// Crate-internal: the deep interface is `SceneLayout::{stand_point,approach_point}`
-// (which supply the layout-internal mask/reach/counter); the free fns stay for the
-// scene crate's own synthetic-mask unit tests. No external caller.
+// The deep interface is `SceneLayout::{stand_point,approach_point}`; these free
+// fns stay for this crate's own synthetic-mask unit tests.
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
 pub use compute::PANTRY_COUNTER_LARGE_W;
 pub(crate) use decor::repels_plants;
@@ -41,25 +27,19 @@ pub use decor::{
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
-// Wall geometry half (`rooms::walls`): the thickness consts + `Doorway`, plus
-// the vertical-wall joint solver `stitch_vertical_wall` and its shared input
-// `crossing_h_rows` — the last two SHARED with the pixel painter's
-// `enqueue_room_walls_v`, so the blocked ground and the drawn glass meet the band
-// / crossing walls at the same joints AND over the same crossing-wall inputs
-// (cross-module, not cross-crate, hence pub(crate)). Kept as its own
-// comment-delimited group so rustfmt's import sort can't orphan this note.
+// Both SHARED with the pixel painter's `enqueue_room_walls_v`, so the blocked
+// ground and the drawn glass meet the band / crossing walls at the same joints
+// and over the same crossing-wall inputs.
 pub(crate) use rooms::walls::{crossing_h_rows, stitch_vertical_wall};
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
-// The shared coarse routing-grid primitives (crate-internal — no semver surface):
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{cell_walkable, snap, COARSE_CELL_SIZE, NEIGHBORS_8};
 
 use pixtuoid_core::state::FloorLocalDeskIndex;
 use pixtuoid_core::walkable::WalkableMask;
 
-/// Primitive rectangle. Same shape as `ratatui::layout::Rect` so the
-/// binary can convert with a one-line field-by-field copy without paying
-/// for the ratatui dep in core.
+/// Primitive rectangle — same shape as `ratatui::layout::Rect` so the binary
+/// converts field-by-field without core paying for the ratatui dep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Bounds {
     /// Left edge x, in buffer pixels.
@@ -82,8 +62,8 @@ pub struct Point {
     pub y: u16,
 }
 
-/// A width×height extent in pixels. Names the axes so a (w,h) tuple can't be
-/// silently transposed. Distinct from Point (a position).
+/// A width×height extent in pixels — named axes so a (w,h) tuple can't be
+/// silently transposed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Size {
     /// Width in pixels.
@@ -93,8 +73,7 @@ pub struct Size {
 }
 
 /// An interior room-wall segment — the two endpoints of a straight (horizontal
-/// or vertical) wall run. Names the endpoints of what was a `(Point, Point)`
-/// tuple.
+/// or vertical) wall run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WallSegment {
     /// One endpoint of the straight wall run (pixel-space).
@@ -103,8 +82,7 @@ pub struct WallSegment {
     pub end: Point,
 }
 
-/// A placed plant: its kind paired with its centre position. Names what was a
-/// `(PlantKind, Point)` tuple in `SceneLayout::plants`.
+/// A placed plant: its kind paired with its centre position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlantItem {
     /// Which plant species/sprite.
@@ -113,8 +91,7 @@ pub struct PlantItem {
     pub pos: Point,
 }
 
-/// A placed wall decoration: its kind paired with its position. Names what was a
-/// `(WallDecor, Point)` tuple in `SceneLayout::wall_decor`.
+/// A placed wall decoration: its kind paired with its position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WallDecorItem {
     /// Which wall decoration.
@@ -124,7 +101,6 @@ pub struct WallDecorItem {
 }
 
 /// A placed aisle/pod decoration: its kind paired with its centre position.
-/// Names what was a `(PodDecor, Point)` tuple in `SceneLayout::pod_decor`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PodDecorItem {
     /// Which aisle/pod decoration.
@@ -141,33 +117,29 @@ pub struct Waypoint {
     pub pos: Point,
     /// What kind of stop this is (seat, appliance, meeting slot, …).
     pub kind: WaypointKind,
-    /// Direction the occupant faces while at this waypoint. `South` for
-    /// all the legacy single-point waypoints (facing-neutral); set toward
-    /// the table for meeting-room slots.
+    /// Direction the occupant faces here — `South` for the facing-neutral
+    /// single-point waypoints, toward the table for meeting-room slots.
     pub facing: Facing,
-    /// Meeting-room id this slot belongs to (`Some(idx)` for
-    /// `MeetingSofa` / `MeetingChair`, `None` otherwise). Slots sharing a
-    /// `room_id` form one group-chitchat venue.
+    /// Meeting-room id this slot belongs to (`Some` for `MeetingSofa` /
+    /// `MeetingChair`). Slots sharing a `room_id` form one group-chitchat venue.
     pub room_id: Option<usize>,
 }
 
-/// Backwards-compat alias — existing call sites construct `Layout::compute()`
-/// (the pre-move façade name this crate re-exported `SceneLayout` under).
+/// Backwards-compat alias for [`SceneLayout`].
 pub type Layout = SceneLayout;
 
-/// The lounge vignette placed as one unit — the open-floor sibling of the
-/// enclosed [`MeetingRoom`]/[`PantryRoom`] aggregates. Couch + floor lamp +
-/// side table are all gated on `lounge_fits` (they live and die together, so
-/// they're non-optional here); the aquarium carries an EXTRA east-clearance
-/// gate against the elevator door, so it stays `Option`.
+/// The lounge vignette placed as one unit. Couch + floor lamp + side table
+/// share the one `lounge_fits` gate (hence non-optional here); the aquarium
+/// carries an EXTRA east-clearance gate against the elevator door, so it
+/// stays `Option`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lounge {
-    /// Centre of the 3-seat couch sprite — the couch is 3 seat waypoints; the
-    /// sprite + rug + side table paint once, centred here.
+    /// Centre of the 3-seat couch sprite — the sprite + rug + side table
+    /// paint once, centred here.
     pub couch_center: Point,
-    /// Floor lamp, just east of the couch (its halo bathes the seating area).
+    /// Floor lamp, just east of the couch.
     pub floor_lamp: Point,
-    /// Side table (7×4 wood + magazine) on the couch's opposite (west) flank.
+    /// Side table on the couch's opposite (west) flank.
     pub side_table: Point,
     /// Aquarium centre, east of the lamp against the north wall band — `None`
     /// when the elevator-door east clearance fails.
@@ -176,7 +148,7 @@ pub struct Lounge {
 
 /// The computed office geometry for one floor — quadrant bounds, per-agent
 /// desks, waypoints, decor, walls, and the walkability mask. Built once per
-/// `(buf_w, buf_h, max_desks)` via [`Self::compute`].
+/// `(buf_w, buf_h, max_desks)`.
 #[derive(Debug, Clone)]
 pub struct SceneLayout {
     /// Buffer width in pixels this layout was computed for.
@@ -185,11 +157,9 @@ pub struct SceneLayout {
     pub buf_h: u16,
     /// The desk-pod quadrant — the bounds enclosing the cubicle grid.
     pub cubicle_band: Bounds,
-    /// The cubicle-band-width horizontal aisle at the bottom of the desk pods
-    /// (x = the cubicle columns' extent). This is the appliance-placement region
-    /// (vending/printer). NOT the full-width `corridor` below — that one (widened
-    /// to the whole buffer) is the A\* router's preferred zone + the pet/mascot
-    /// path. Keep the two distinct: same y/height, different x-extent.
+    /// The cubicle-band-width horizontal aisle at the bottom of the desk pods —
+    /// the appliance-placement region (vending/printer). Keep it distinct from
+    /// `corridor`: same y/height, different x-extent.
     pub cubicle_aisle: Bounds,
     /// Per-agent home-desk anchor positions, indexed floor-locally (read via
     /// [`Self::home_desk`]).
@@ -200,27 +170,18 @@ pub struct SceneLayout {
     pub plants: Vec<PlantItem>,
     /// Decorations mounted on the walls (whiteboards, TVs, exit signs).
     pub wall_decor: Vec<WallDecorItem>,
-    /// Decor items placed in the aisles between 2×2 desk pods. Each
-    /// item paints its sprite centred on `pos` and marks it as an obstacle
-    /// in the walkable mask.
+    /// Decor items placed in the aisles between 2×2 desk pods.
     pub pod_decor: Vec<PodDecorItem>,
-    /// The lounge vignette as ONE unit — couch + floor lamp + side table are
-    /// placed together (all gated on `lounge_fits`), so they live and die
-    /// together; the aquarium keeps an EXTRA east-clearance gate. `None` when
-    /// the vignette doesn't fit. Read the individual pieces via the accessors
-    /// ([`Self::couch_sprite_center`], [`Self::floor_lamp`], …). Mirrors
-    /// [`MeetingRoom`]/[`PantryRoom`]: one aggregate per area, the co-presence
-    /// invariant typed instead of four parallel `Option<Point>`.
+    /// The lounge vignette as ONE unit — `None` when it doesn't fit. Read the
+    /// individual pieces via the accessors ([`Self::couch_sprite_center`],
+    /// [`Self::floor_lamp`], …).
     pub lounge: Option<Lounge>,
     /// The office entry-door position, or `None` if none fits.
     pub door: Option<Point>,
     /// The walkable cell just inside the door — the entry/exit waypoint.
     pub door_threshold: Option<Point>,
-    /// Meeting rooms in floor order — index IS the `room_id` every waypoint
-    /// and painter joins on (room 1 exists only on the dual-meeting Dense
-    /// floor). Each element carries the room's bounds AND its trio (see
-    /// [`MeetingRoom`] for why the two live in one element). Join through
-    /// [`Self::meeting_room_bounds`] or index directly.
+    /// Meeting rooms in floor order — the index IS the `room_id` every
+    /// waypoint and painter joins on.
     pub meeting_rooms: Vec<MeetingRoom>,
     /// The pantry aggregate (bounds + counter footprint + island) — `None`
     /// on floors without a pantry (Dense dual-meeting).
@@ -229,8 +190,7 @@ pub struct SceneLayout {
     pub room_walls: Vec<WallSegment>,
     /// The openings the wall resolver cut into `room_walls` — the painter
     /// draws door frames from these instead of re-inferring gaps from
-    /// segment adjacency (the resolver is the one place that knows every
-    /// door; see `rooms/walls.rs`).
+    /// segment adjacency.
     pub doorways: Vec<Doorway>,
     /// Top offset in px reserved above the floor for the north wall+window
     /// band (and its carpet apron).
@@ -242,115 +202,73 @@ pub struct SceneLayout {
     /// the surface routing runs over.
     pub walkable: WalkableMask,
     /// Coarse-cell reachable component (the walkable area an agent can A\*-route
-    /// to). Computed once from a known in-component seed; consumed by
-    /// `approach_point` to prefer a *reachable* approach side over a merely-
-    /// walkable-but-walled-off one. Mirrors `crate::pathfind`'s coarsening.
+    /// to) — consumed by `approach_point` to prefer a *reachable* approach side
+    /// over a merely-walkable-but-walled-off one.
     pub reachable: ReachSet,
 }
 
-/// Integer percentage of `v` (floor semantics — `pct(40, 65) == 26`); the
-/// layout code's one percent helper, shared by placement (`compute`) and the
-/// wall resolver so their arithmetic can't diverge. Computed in u32: a bare
+/// Integer percentage of `v`, floor semantics. Computed in u32: a bare
 /// `buf_h * 30` overflows u16 once `buf_h > 2184`.
 pub(crate) fn pct(v: u16, n: u16) -> u16 {
     ((v as u32 * n as u32) / 100) as u16
 }
 
-/// Padding (in pixels) added around every obstacle when building the
-/// walkable mask. Reserves a buffer zone so characters route AROUND
-/// furniture rather than scraping along its edge.
+/// Padding (px) around every obstacle in the walkable mask, so characters
+/// route AROUND furniture rather than scraping along its edge.
 pub const OBSTACLE_PAD_PX: u16 = 2;
 
 /// The SMALLER mask pad the waypoint (seat/appliance) stamp uses — a walkable
-/// seat/venue sits IN the open floor and only needs a 1px cushion, not the full
-/// `OBSTACLE_PAD_PX` routing buffer. THE single source for that pad, read by
-/// `mask.rs`'s waypoint stamp AND the #566 couch↔door clearance gate
-/// (`compute.rs`), so the gate can never assume a different pad than the mask
-/// actually stamps.
+/// seat sits IN the open floor and needs no routing buffer. THE single source,
+/// read by `mask.rs`'s waypoint stamp AND the #566 couch↔door clearance gate,
+/// so the gate can never assume a different pad than the mask actually stamps.
 pub(super) const WAYPOINT_STAMP_PAD_PX: u16 = 1;
 
 /// The north wall+window band's visual bottom sits this many px ABOVE
-/// `top_margin`; the rows in between (`[top_margin - this, top_margin)`) render
-/// as carpet apron, not wall. The mask therefore blocks only down to the band
-/// bottom (`top_margin - this`), NOT the full `top_margin`, so the walkable area
-/// hugs the visible wall base instead of eating a strip of carpet (invariant #6,
-/// the same ground-projection rule furniture footprints follow). The renderer
-/// derives `top_wall_h = top_margin - this` for the wall/window/trim paint, so
-/// the two MUST agree — one source here prevents the mask and the visual from
-/// drifting (the relationship was a `- 4` literal duplicated across both).
+/// `top_margin`; the rows in between render as carpet apron, not wall, so the
+/// mask blocks only down to the band bottom. The renderer derives
+/// `top_wall_h = top_margin - this`, so the mask and the visual MUST read this
+/// one source or they drift.
 pub const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
 
-/// How many pixels of the pantry counter actually sit on the floor. The
-/// counter is a 3/4-perspective sprite (10 px tall in the large variant)
-/// centered on its waypoint `pos`, but only the southern base contacts the
-/// ground — the receding cabinet tops + backsplash are elevation that
-/// overhangs (invariant #6). The mask blocks only this shallow strip,
-/// anchored to the sprite's SOUTH base, so the non-walkable area hugs the
-/// counter's foot instead of the full sprite height. A character routed
-/// behind (north of) the counter is occluded by the counter's own y-sorted
-/// sprite (the overhang paints over them), exactly like the couch — see
-/// `mask::build_walkable_mask`.
+/// How many pixels of the pantry counter actually sit on the floor: only the
+/// southern base contacts the ground, the receding cabinet tops + backsplash
+/// are overhang (invariant #6), so a character routed behind the counter is
+/// occluded by its own y-sorted sprite.
 pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 
-/// The desk BODY size in SLOT units — the grid-pitch pricing (pod stride,
-/// intra-pod gaps) counts `DESK_W`×`DESK_H`, and the sprite/visual is
-/// `DESK_W+4` wide × `DESK_H+2` tall. SLOT ≠ GROUND: the desk's blocked
-/// GROUND is the full `DESK_W+4`-px sprite width (`decor::DESK_GROUND_W`,
-/// side cabinets included) — the +4 overhang rides the aisle, so every
-/// band-EDGE clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow
-/// drift).
+/// The desk BODY size in SLOT units — the grid-pitch pricing. SLOT ≠ GROUND:
+/// the desk's blocked GROUND is the full sprite width (`decor::DESK_GROUND_W`,
+/// side cabinets included) and the overhang rides the aisle, so every band-EDGE
+/// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
 pub const DESK_W: u16 = 10;
-/// Desk body height in SLOT units — the N-S pod pitch. The sprite paints
-/// `DESK_H+2` tall; the blocked ground is only `DESK_FOOT_H` deep.
+/// Desk body height in SLOT units — the N-S pod pitch; the blocked ground is
+/// only `DESK_FOOT_H` deep.
 pub const DESK_H: u16 = 5;
 /// The desk's ground-CONTACT depth (rows) — only the front edge / legs touch
 /// the floor; the surface + monitor OVERHANG north (`ground_y: End`), so a
 /// walker passes BEHIND the monitor and is occluded by the desk's own y-sort
-/// (invariant #6, the plant-canopy pattern applied to the desk — owner
-/// taste-picked "h2" from the shallow-footprint renders). Distinct from
-/// `DESK_H` (the body/pitch height): `DESK_H` prices the slot, `DESK_FOOT_H`
-/// is the real blocked ground depth. The 5-px body still z-sorts by the full
-/// `visual.h`, so the monitor paints over the walker behind it.
-/// `pub(crate)`: no cross-crate consumer (unlike `DESK_W`/`DESK_H`, which the
-/// binary's hit-test reads) — least-privilege on the semver surface.
+/// (invariant #6). Distinct from `DESK_H`, which prices the slot.
 pub(crate) const DESK_FOOT_H: u16 = 2;
-/// Default character sprite width (px). The bundled pack is 8×12; this is the
-/// ONE authority every out-of-pixel_painter consumer centers/hit-tests on
-/// (anchors' LABEL fallback, `layout::decor::DESK_WALK_X_OFF`, the tui hit-test
-/// pin box, the floating label centering) — a bare `8` copied into those sites
-/// drifts from the painted sprite the moment the pack width changes. The sprite
-/// BLIT sites still pass the pack's REAL `frame.width` (a custom pack may be
-/// wider, e.g. the robot pack's 10); this const is the width-unknown fallback.
-/// Lives in `layout` (not `pixel_painter`) so `layout::decor` can read it
-/// without a module cycle. Pinned to the embedded pack by
-/// `character_sprite_w_matches_the_embedded_pack`.
+/// Default character sprite width (px) — the ONE authority every
+/// out-of-pixel_painter consumer centers/hit-tests on. Sprite BLIT sites still
+/// pass the pack's REAL `frame.width`; this is the width-unknown fallback.
+/// Lives in `layout` so `layout::decor` can read it without a module cycle.
 pub const CHARACTER_SPRITE_W: u16 = 8;
-/// Default character sprite height in terminal CELLS (the 12 px sprite is 6
-/// half-block rows). Used by the tui hit-test pin box (cell space); the pixel
-/// pose offsets (8/12/7 px) are a SEPARATE vertical-anchor concern, NOT this.
+/// Default character sprite height in terminal CELLS — used by the tui hit-test
+/// pin box; the pixel pose offsets are a SEPARATE vertical-anchor concern.
 pub const CHARACTER_SPRITE_H_CELLS: u16 = 6;
-/// Elevator-door sprite size in buffer px — the single source for the door's
-/// width (the layout slots the sprite into the back wall and the renderer skips
-/// the window glass it covers) and height (the z-sort anchor row). Both the
-/// layout (`compute`) and the renderer (`pixel_painter` / `background`) read
-/// these so the door footprint can't drift between them.
+/// Elevator-door sprite width in buffer px. Both the layout and the renderer
+/// read this, so the door footprint can't drift between them.
 pub const ELEVATOR_W: u16 = 16;
-/// Elevator-door sprite height in buffer px — the door's z-sort anchor row
-/// (paired with `ELEVATOR_W`; see it for the shared-source rationale).
+/// Elevator-door sprite height in buffer px — the door's z-sort anchor row.
 pub const ELEVATOR_H: u16 = 14;
-/// NOT a cap anymore — production layouts fill the buffer's physical space
-/// (`compute_with_seed(.., max_desks: None, ..)`), so desk count scales with
-/// the canvas. This is the historical 16-desk ceiling kept as a stable "one
-/// classic office worth of desks" reference, not a limit the layout enforces.
-/// It is a load-bearing PRODUCTION input too (the `snapshot` example that
-/// renders the docs/CI media baselines pins its scene to it), hence the
-/// production name; `TEST_DEFAULT_DESKS` below is the test-facing alias.
+/// NOT a cap — production layouts fill the buffer's physical space
+/// (`max_desks: None`). This is the stable "one classic office worth of desks"
+/// reference, and the `snapshot` example that renders the docs/CI media
+/// baselines pins its scene to it.
 pub const CLASSIC_OFFICE_DESKS: usize = 16;
-/// Test-facing alias for [`CLASSIC_OFFICE_DESKS`] — the NAMED DEFAULT
-/// deterministic tests/snapshots pass as `Some(TEST_DEFAULT_DESKS)`. Same
-/// value by definition; production consumers use the production name.
-/// (Published as `MAX_VISIBLE_DESKS` through 0.11.x; that deprecated alias was
-/// dropped at 0.12.0 exactly as its own comment scheduled — don't re-add it.)
+/// Test-facing alias for [`CLASSIC_OFFICE_DESKS`] — the named default
+/// deterministic tests/snapshots pass as `Some(TEST_DEFAULT_DESKS)`.
 pub const TEST_DEFAULT_DESKS: usize = CLASSIC_OFFICE_DESKS;
 /// Minimum horizontal gap (px) flanking the desk grid — sizes `MIN_LAYOUT_W`
 /// (`DESK_W` plus one gap on each side).
@@ -364,43 +282,34 @@ const MIN_DUAL_MEETING_H: u16 = 80;
 
 /// Number of desks per side in a pod (`POD_SIDE * POD_SIDE` total).
 pub const POD_SIDE: u16 = 2;
-/// Gap between two desks inside the same pod — big enough that each
-/// desk reads as its own workstation (chair + monitor + space), not
-/// a merged blob. 12 px ≈ a full desk width of empty floor between
-/// pod-mates.
+/// Gap between two desks inside the same pod — big enough that each desk
+/// reads as its own workstation, not a merged blob.
 pub const INTRA_POD_GAP_X: u16 = 12;
 /// N-S gap between the two desks stacked in one pod (vertical counterpart to
 /// [`INTRA_POD_GAP_X`]); sets the pod's inner height.
 pub const INTRA_POD_GAP_Y: u16 = 12;
-/// Horizontal (E-W) gap between adjacent pod COLUMNS — wider than the
-/// intra-pod gap so the pod boundary stays visually distinct, while hosting
-/// the rolling whiteboard's 10-px GROUND footprint (the 14-px board panel
-/// overhangs it, invariant #6) in the aisle. Deliberately > the N-S gap:
-/// screens are landscape, so spread wider horizontally (where there's room)
-/// and pack tighter vertically. 20 clears the 10-px board + pads. The
-/// walkable-connectivity + decor-overlap + approach tests guard routability.
+/// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
+/// pod boundary visually distinct AND to host the rolling whiteboard's GROUND
+/// footprint in the aisle. Deliberately > the N-S gap: screens are landscape,
+/// so spread wider horizontally and pack tighter vertically.
 pub const INTER_POD_AISLE_X: u16 = 20;
-/// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W
-/// gap (landscape screens — see `INTER_POD_AISLE_X`). The floor USED to be
-/// EXACTLY 20 (18 AND 19 broke `every_home_desk_has_a_reachable_north_approach`:
-/// the seat's north approach cell collided with the full-body desk in the row
-/// above). The walk-behind change RELAXED it — the desk's shallow
-/// `DESK_FOOT_H` footprint (`ground_y: End`) freed the monitor/north zone the
-/// approach lands in, dropping the floor to 16 (18/16 pass, 14 breaks). 18
-/// keeps a 2-px margin above the floor.
+/// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W gap
+/// (landscape screens — see `INTER_POD_AISLE_X`). Shrinking it breaks
+/// `every_home_desk_has_a_reachable_north_approach`: the seat's north approach
+/// cell collides with the desk in the row above.
 pub const INTER_POD_AISLE_Y: u16 = 18;
 
 impl SceneLayout {
-    /// Returns `None` if the buffer is too small for even one cubicle and the
-    /// fixed lounge area. Caller should paint a "terminal too small" message.
+    /// Returns `None` if the buffer is too small for even one cubicle plus the
+    /// fixed lounge area — the caller paints a "terminal too small" message.
     pub fn compute(buf_w: u16, buf_h: u16, max_desks: Option<usize>) -> Option<Self> {
         Self::compute_with_seed(buf_w, buf_h, max_desks, 0)
     }
 
     /// `max_desks` caps the desk count: `None` fills the office to the buffer's
-    /// physical capacity (production — the office scales to the canvas), while
-    /// `Some(n)` caps at `n` desks for deterministic tests/snapshots. The pod
-    /// grid geometry is always the room's true capacity regardless of the cap.
+    /// physical capacity, `Some(n)` caps at `n` for deterministic
+    /// tests/snapshots. The pod grid geometry is always the room's true
+    /// capacity regardless of the cap.
     pub fn compute_with_seed(
         buf_w: u16,
         buf_h: u16,
@@ -410,52 +319,43 @@ impl SceneLayout {
         compute::compute_with_seed(buf_w, buf_h, max_desks, floor_seed)
     }
 
-    /// Is buffer pixel `(x, y)` walkable? Delegates to this layout's `walkable`
-    /// mask.
+    /// Is buffer pixel `(x, y)` walkable?
     pub fn is_walkable(&self, x: u16, y: u16) -> bool {
         self.walkable.is_walkable(x, y)
     }
 
     /// Typed accessor for a floor's home-desk anchor. `home_desks` is a
-    /// FLOOR-LOCAL vector — index it through a `FloorLocalDeskIndex`
-    /// (from `SceneState::floor_local_desk`, or
-    /// `GlobalDeskIndex::single_floor_local` inside a single-floor
-    /// projected scene), never with an `AgentSlot.desk_index` directly.
-    /// Raw `home_desks[i]` with a loop/iteration `usize` stays fine.
+    /// FLOOR-LOCAL vector — index it through a `FloorLocalDeskIndex`, never
+    /// with an `AgentSlot.desk_index` directly.
     pub fn home_desk(&self, i: FloorLocalDeskIndex) -> Option<Point> {
         self.home_desks.get(i.0).copied()
     }
 
-    /// The visible top window-wall band height in px — the wall strip between the
-    /// buffer top and where the floor begins, `top_margin - WALL_BAND_TO_TOP_MARGIN`
-    /// (the same quantity `compute` names `top_wall_h` at construction; saturates
-    /// to 0 on a degenerate tiny margin). Post-construction render sites (wall sun
-    /// spot, window spill, weather) read it here so the derivation lives once.
+    /// The visible top window-wall band height in px (`compute` names the same
+    /// quantity `top_wall_h`). Post-construction render sites read it here so
+    /// the derivation lives once.
     pub fn wall_band_h(&self) -> u16 {
         self.top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
     }
 
-    /// The Bounds of meeting room `room_id` — a thin index into
-    /// [`Self::meeting_rooms`] (the id IS the Vec index), kept as the join
-    /// accessor so consumers don't hand-roll the lookup.
+    /// The bounds of meeting room `room_id` — the id IS the
+    /// [`Self::meeting_rooms`] index.
     pub fn meeting_room_bounds(&self, room_id: usize) -> Option<Bounds> {
         self.meeting_rooms.get(room_id).map(|r| r.bounds)
     }
 
     /// Couch sprite centre (middle of the 3 seats) — `Some` iff the lounge
-    /// vignette fits. The couch sprite + rug + side table paint once, here.
+    /// vignette fits.
     pub fn couch_sprite_center(&self) -> Option<Point> {
         self.lounge.as_ref().map(|l| l.couch_center)
     }
 
-    /// The lounge floor lamp — `Some` iff the vignette fits (co-present with
-    /// the couch + side table).
+    /// The lounge floor lamp — `Some` iff the vignette fits.
     pub fn floor_lamp(&self) -> Option<Point> {
         self.lounge.as_ref().map(|l| l.floor_lamp)
     }
 
-    /// The lounge side table — `Some` iff the vignette fits (co-present with
-    /// the couch + floor lamp).
+    /// The lounge side table — `Some` iff the vignette fits.
     pub fn lounge_side_table(&self) -> Option<Point> {
         self.lounge.as_ref().map(|l| l.side_table)
     }
@@ -467,10 +367,8 @@ impl SceneLayout {
     }
 
     /// The pantry counter's footprint, or the `rooms::pantry::COMPACT_COUNTER`
-    /// fallback when no pantry exists — the shape every consumer of the old
-    /// always-present `pantry_counter_size` field expects (the runtime-sized
-    /// counter must resolve to SOME size for `approach_point`'s signature
-    /// even on pantry-less floors, where it is never consulted).
+    /// fallback when no pantry exists — `approach_point`'s signature needs SOME
+    /// size even on pantry-less floors, where it is never consulted.
     pub fn pantry_counter_size(&self) -> Size {
         self.pantry
             .map_or(rooms::pantry::COMPACT_COUNTER, |p| p.counter_size)
@@ -478,10 +376,7 @@ impl SceneLayout {
 
     /// Where an agent's sprite RENDERS when it visits furniture `kind` at `pos`
     /// (the walk goal for an obstacle, the seat cell for a seat), on the side
-    /// nearest `origin` facing `facing`. This layout's `walkable`/`reachable`/
-    /// `pantry_counter_size` are supplied internally, so a caller passes only
-    /// the trip's own facts (not three mutually-consistent layout internals).
-    /// The deep interface over the free `stand_point`.
+    /// nearest `origin` facing `facing`.
     pub fn stand_point(
         &self,
         kind: WaypointKind,
@@ -501,10 +396,8 @@ impl SceneLayout {
     }
 
     /// A\*'s goal cell when an agent at `origin` visits furniture `kind` at
-    /// `pos` facing `facing` — this layout's `walkable`/`reachable`/
-    /// `pantry_counter_size` supplied internally (the deep interface over the
-    /// free `approach_point`). Callers MUST still honor its `== pos` "no valid
-    /// approach" sentinel (skip the furniture this cycle rather than route to it).
+    /// `pos` facing `facing`. Callers MUST honor its `== pos` "no valid
+    /// approach" sentinel — skip the furniture this cycle rather than route to it.
     pub fn approach_point(
         &self,
         kind: Furniture,

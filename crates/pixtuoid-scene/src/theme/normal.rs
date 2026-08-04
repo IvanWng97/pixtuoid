@@ -188,8 +188,6 @@ pub static NORMAL: Theme = Theme {
             g: 22,
             b: 38,
         },
-        // Matches the pre-Task-7 placeholder consts (visually approved) —
-        // pinned by task-7's brief so the already-verified look survives.
         sun_core: Rgb {
             r: 255,
             g: 240,
@@ -537,21 +535,21 @@ pub static NORMAL: Theme = Theme {
             r: 0x68,
             g: 0x58,
             b: 0xe0,
-        }, // Hermes/Nous indigo (brand-constant like openclaw marigold; clears reasonix-violet + cursor-slate + codex-blue on every theme, min Manhattan >=92)
+        }, // Hermes/Nous indigo (brand-constant)
         omp: Rgb {
             r: 0x8a,
             g: 0xc8,
             b: 0x32,
-        }, // omp lime (brand-constant; clears antigravity-green + codewhale-teal + claude-amber on every theme)
+        }, // omp lime (brand-constant)
         grok: Rgb {
             r: 0x30,
             g: 0xd0,
             b: 0xe8,
-        }, // grok cyan (brand-constant; nearest neighbor codewhale-teal at Manhattan 78 ≥ the 60 floor, and the SITE's chip transforms clear WCAG AA in both themes: ×0.55-on-day-chip 5.3:1, ×0.8+white-on-night-chip 11.6:1 — the silver e6e6e6 failed the day chip at 3.83:1, caught by the site e2e badge sweep)
+        }, // grok cyan (brand-constant; the tightest neighbour — the source-separation floor and the site's badge-contrast sweep both gate it)
         kimi: Rgb {
             r: 0xc4,
             g: 0x46,
             b: 0xfe,
-        }, // kimi electric violet (brand-constant like hermes/omp/grok; Kimi/Moonshot's purple, min Manhattan >=88 vs every source on every theme)
+        }, // kimi electric violet (brand-constant)
     },
 };

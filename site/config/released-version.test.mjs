@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { resolveDisplayedVersion } from './released-version.mjs';
 
 test('a release tag wins over the cargo version (the mid-cycle-bump gap)', () => {
-  // main bumped to 0.16.0 but the latest RELEASE is v0.15.0 — show 0.15.0
   assert.deepEqual(resolveDisplayedVersion('v0.15.0', '0.16.0'), {
     version: '0.15.0',
     source: 'tag',

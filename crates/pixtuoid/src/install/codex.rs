@@ -15,57 +15,34 @@ const CODEX_EVENTS: &[&str] = &[
     "SubagentStop",
     "Stop",
     "PermissionRequest",
-    // #710 drift: upstream added a SessionEnd hook (fires at graceful
-    // teardown only — shutdown signals, reason const "other"; stdin
-    // `{session_id, transcript_path, cwd, hook_event_name:"SessionEnd",
-    // reason}` — hooks/src/schema.rs SessionEndCommandInput). Decodes through
-    // the SHARED SessionEnd arm (decoder.rs) → an immediate clean exit walk;
-    // abrupt exits still ride the probe ladder + short-idle reap.
+    // Fires at GRACEFUL teardown only → an immediate clean exit walk; abrupt
+    // exits still ride the probe ladder + short-idle reap.
     "SessionEnd",
 ];
 
 pub(crate) fn default_config_path() -> Result<PathBuf> {
-    // Route through the SAME codex_home() the watcher uses, so the installed-hook
-    // config and the watched sessions root can't disagree (and honors CODEX_HOME).
-    // codex_home() always yields an absolute path (user_home falls back to the
-    // temp dir), so there's no unsafe `.`/CWD fallback like io::home_relative —
-    // infallible-Ok; the Result is the shared Target signature (the
-    // home-anchored targets genuinely err without a home dir).
+    // The SAME codex_home() the watcher uses, so the installed-hook config and the
+    // watched sessions root can't disagree. Infallibly `Ok` — the `Result` is the
+    // shared `Target` signature, which home-anchored targets genuinely need.
     Ok(pixtuoid_core::source::codex::codex_home().join("config.toml"))
 }
 
-/// The Codex hook `command`. Codex runs it under a shell — `/bin/sh -lc` on Unix,
-/// `cmd.exe /C` on Windows (verified in codex-rs `command_runner.rs`, which spawns
-/// `Command::new(cmd.exe).arg("/C").arg(command)`; codex runs the plain `command`
-/// field on every OS, so we write the OS-correct form here rather than a
-/// `commandWindows` override). We embed an ABSOLUTE path (robust regardless of
-/// PATH) and stamp the source for the shim. Err on non-UTF-8 (prevents the
-/// to_string_lossy dead-hook).
+/// The Codex hook `command`. Codex runs it under a shell (`/bin/sh -lc` on Unix,
+/// `cmd.exe /C` on Windows) and reads the plain `command` field on every OS, so
+/// the OS-correct form is written here rather than a `commandWindows` override.
 ///
-/// - **Unix**: env-prefix form `PIXTUOID_SOURCE=codex '<path>'` (single-quoted
-///   for spaces).
-/// - **Windows**: BARE exec form `<path> --source codex` — exactly codex's own
-///   documented `command_windows` style (unquoted). We must NOT quote the path:
+/// - **Unix**: env-prefix form `PIXTUOID_SOURCE=codex '<path>'`.
+/// - **Windows**: BARE exec form `<path> --source codex`. Do NOT quote the path:
 ///   codex passes the string through `Command::arg`, whose Windows quoting escapes
-///   any embedded `"` to `\"`, which `cmd.exe /C` then mangles (the path comes out
-///   corrupted and the hook silently never fires). The env-prefix form is also
-///   invalid under cmd.exe (it'd exec a program literally named
-///   `PIXTUOID_SOURCE=codex`), so the source rides as the shim's `--source` flag —
-///   codex injects no per-hook env we could set instead. A pixtuoid-hook.exe under
-///   a path containing a SPACE or cmd metacharacter (`& | < > ( ) ^ %`) can't be
-///   invoked unquoted (a space truncates; `&` splits the command), so
-///   `hook_cmd::windows::windows_bare_hook_command` substitutes the path's DOS 8.3 SHORT name
-///   (`C:\PROGRA~1\…`, space/metachar-free) and only REJECTS if 8.3 generation is
-///   disabled on the volume (#195). Ordinary install paths
-///   (`%USERPROFILE%\.cargo\bin`, npm prefix) skip 8.3 entirely.
+///   an embedded `"` to `\"`, which `cmd.exe /C` then mangles — the path comes out
+///   corrupted and the hook silently never fires. The env-prefix form is invalid
+///   under cmd.exe, so the source rides as the shim's `--source` flag. A path with
+///   a SPACE or cmd metacharacter (`& | < > ( ) ^ %`) is substituted by its DOS
+///   8.3 SHORT name, and REJECTED only if 8.3 generation is off on the volume (#195).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Codex always
     // embeds the absolute path, so the flag changes nothing here.
     let p = crate::install::merge::hook_path_str(resolved)?;
-    // One OS fork for the cmd.exe-shelling strategy lives in
-    // hook_cmd::shell_hook_command (Unix env-prefix form / Windows bare
-    // `<path> --source codex`), shared with Reasonix so the platform halves can't
-    // drift.
     crate::install::hook_cmd::shell_hook_command(p, "codex")
 }
 
@@ -78,10 +55,9 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 fn handler_is_managed(h: &toml::Value) -> bool {
-    // Sentinel-only: the `_pixtuoid_source` write and this installer shipped in
-    // the SAME first release (v0.5.0), so no released version ever wrote a
-    // sentinel-less entry — a basename fallback would only ever match entries a
-    // USER hand-wrote pointing at the shim, which uninstall must not touch.
+    // Sentinel-only, no basename fallback: no released version ever wrote a
+    // sentinel-less entry, so a basename match could only ever hit a USER
+    // hand-written entry pointing at the shim, which uninstall must not touch.
     h.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
 }
 
@@ -91,10 +67,8 @@ fn prune_managed_handlers(group: &mut toml::Value) {
     }
 }
 
-/// Install-schema verification (#309): every CODEX_EVENTS group still holds a
-/// sentinel-tagged handler, and the shim command (shell form,
-/// `PIXTUOID_SOURCE=codex '<abs>'` / `<abs> --source codex`) is read back for
-/// the on-disk check.
+/// Install-schema verification: every `CODEX_EVENTS` group still holds a
+/// sentinel-tagged handler, and the shim command is read back for the on-disk check.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
@@ -150,11 +124,9 @@ fn managed_group(hook_command: &str) -> toml::Value {
     );
     handler.insert(SENTINEL_KEY.into(), toml::Value::Boolean(true));
 
-    // No `matcher`: an omitted matcher means "match all" in Codex. We must NOT
-    // write `matcher = "*"` — Codex (verified on 0.135) rejects a bare `*` as an
-    // invalid regex and silently drops the ENTIRE group, so SessionStart/
-    // PreToolUse never fire. Matcher-less groups (the only ones that fired live)
-    // match every occurrence, which is exactly what a visualizer wants.
+    // No `matcher`: an omitted matcher means "match all" in Codex. Do NOT write
+    // `matcher = "*"` — codex rejects a bare `*` as an invalid regex and silently
+    // drops the ENTIRE group, so SessionStart/PreToolUse never fire.
     let mut group = Table::new();
     group.insert(
         "hooks".into(),
@@ -264,9 +236,6 @@ mod tests {
 
     #[test]
     fn install_writes_no_matcher() {
-        // Codex 0.135 fires matcher-bearing events inconsistently and `matcher
-        // = "*"` is a dubious regex; an omitted matcher means "match all". Verify
-        // no group carries a matcher.
         let out = merge_install("", "/x/pixtuoid-hook").unwrap();
         let v = parse(&out.content);
         let hooks = v["hooks"].as_table().unwrap();
@@ -282,8 +251,6 @@ mod tests {
 
     #[test]
     fn install_is_idempotent_across_different_paths() {
-        // Sentinel (not basename/path) drives replacement → re-install with a
-        // different resolved path replaces, never duplicates.
         let a = merge_install("", "/opt/a/pixtuoid-hook").unwrap();
         let b = merge_install(&a.content, "/opt/b/pixtuoid-hook").unwrap();
         let v = parse(&b.content);
@@ -296,8 +263,6 @@ mod tests {
         }
     }
 
-    // Re-install with the SAME command is a semantic no-op (changed=false) →
-    // orchestrator won't rewrite the file. Guards the F1/F3 byte-vs-semantic fix.
     #[test]
     fn install_same_command_reports_unchanged() {
         let first = merge_install("", "/opt/a/pixtuoid-hook").unwrap();
@@ -305,8 +270,6 @@ mod tests {
         assert!(!second.changed, "identical re-install is a no-op");
     }
 
-    // Uninstall on a config with user hooks but NO pixtuoid entries must be a
-    // no-op so the orchestrator never rewrites it or deletes the backup.
     #[test]
     fn uninstall_no_pixtuoid_hooks_reports_unchanged() {
         let cfg = "model = \"o1\"\n\n[[hooks.PreToolUse]]\nmatcher = \"*\"\n\n[[hooks.PreToolUse.hooks]]\ntype = \"command\"\ncommand = \"/usr/bin/mytool\"\n";
@@ -316,10 +279,8 @@ mod tests {
 
     #[test]
     fn uninstall_keeps_user_handler_in_mixed_group() {
-        // A group with one managed + one user handler: uninstall strips only ours.
         let installed = merge_install("", "/x/pixtuoid-hook").unwrap();
         let mut v = parse(&installed.content);
-        // inject a user handler into the PreToolUse group
         let group = &mut v["hooks"]["PreToolUse"].as_array_mut().unwrap()[0];
         group["hooks"]
             .as_array_mut()
@@ -354,9 +315,6 @@ mod tests {
 
     #[test]
     fn uninstall_leaves_a_hand_written_shim_entry_alone() {
-        // No released version ever wrote a sentinel-less entry (sentinel +
-        // installer shipped together in v0.5.0), so an unsentineled command
-        // pointing at the shim is USER-authored — uninstall must not eat it.
         let cfg = r#"
 [[hooks.PreToolUse]]
 matcher = "*"
@@ -374,12 +332,6 @@ command = "/hand/written/pixtuoid-hook"
         assert!(!cleaned.changed, "nothing managed to remove");
     }
 
-    // On Windows hook_command emits the BARE exec form `<path> --source codex`
-    // (codex runs it via cmd.exe /C; a quoted path can't survive cmd /C + codex's
-    // Command::arg escaping — see the fn doc). check-windows cross-lints the
-    // branch; the faithful cmd.exe round-trip is exercised by shim_pipe.rs's
-    // codex_cmd_c_invocation_of_hook_command_stamps_source. The Unix env-prefix
-    // form is pinned by hook_command_prefixes_source_for_valid_path below.
     #[test]
     #[cfg(windows)]
     fn hook_command_emits_bare_exec_form_with_source_flag_on_windows() {
@@ -387,22 +339,17 @@ command = "/hand/written/pixtuoid-hook"
         assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe --source codex");
     }
 
-    // #195 + security: a path with a space (truncates) OR a cmd metacharacter
-    // (`&` splits → relative-tail execution from CWD) is substituted by its 8.3
-    // short name when available, else rejected. These test paths don't exist on
-    // the runner, so GetShortPathNameW fails → the reject fallback fires (the
-    // 8.3-success path is covered by hook_cmd/windows.rs's injected resolve_windows_command
-    // tests). Either way an unsafe path is never written as a raw hook command.
+    // These paths don't exist on the runner, so GetShortPathNameW fails and the
+    // 8.3 substitution falls through to the reject arm (the 8.3-success path is
+    // covered in hook_cmd/windows.rs).
     #[test]
     #[cfg(windows)]
     fn hook_command_rejects_cmd_unsafe_path_on_windows() {
-        // space → truncation
         assert!(hook_command(
             std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe"),
             false
         )
         .is_err());
-        // `&` → command split / unintended relative-path execution
         let err = hook_command(
             std::path::Path::new(r"C:\Users\a&b\pixtuoid-hook.exe"),
             false,
@@ -413,7 +360,6 @@ command = "/hand/written/pixtuoid-hook"
             err.contains("cmd.exe") && err.contains("ordinary characters"),
             "must explain the cmd-unsafe path + workaround: {err}"
         );
-        // other separators/redirects are rejected too
         for bad in [
             r"C:\p|x\h.exe",
             r"C:\p>x\h.exe",
@@ -435,8 +381,6 @@ command = "/hand/written/pixtuoid-hook"
         assert!(hook_command(bad, false).is_err());
     }
 
-    // POSIX shell-string pins: unix-only — the Windows bare exec form is pinned
-    // by hook_command_emits_bare_exec_form_with_source_flag_on_windows above.
     #[cfg(unix)]
     #[test]
     fn hook_command_prefixes_source_for_valid_path() {
@@ -444,8 +388,6 @@ command = "/hand/written/pixtuoid-hook"
         assert_eq!(cmd, "PIXTUOID_SOURCE=codex '/opt/bin/pixtuoid-hook'");
     }
 
-    // F9: a hook path containing spaces must be single-quoted so the shell does
-    // not split it into multiple args (which would silently never find the hook).
     #[cfg(unix)]
     #[test]
     fn hook_command_quotes_path_with_spaces() {
@@ -460,8 +402,6 @@ command = "/hand/written/pixtuoid-hook"
         );
     }
 
-    // Defensive coercion (install side): a non-table `hooks` value is replaced
-    // with a fresh table, then re-emits a valid hooks table for all events.
     #[test]
     fn install_coerces_non_table_hooks_to_table() {
         let out = merge_install("hooks = 5", "/x/pixtuoid-hook").unwrap();
@@ -476,8 +416,6 @@ command = "/hand/written/pixtuoid-hook"
         }
     }
 
-    // Defensive coercion (install side): a non-array event value becomes a
-    // 1-element array carrying the managed group.
     #[test]
     fn install_coerces_non_array_event_to_array() {
         let out = merge_install("[hooks]\nPreToolUse = 5", "/x/pixtuoid-hook").unwrap();
@@ -487,28 +425,18 @@ command = "/hand/written/pixtuoid-hook"
         assert!(arr[0]["hooks"][0]["_pixtuoid"].as_bool().unwrap());
     }
 
-    // Uninstall early-return: a top-level non-table document is returned as-is.
     #[test]
     fn uninstall_non_table_doc_returns_unchanged() {
         let input = toml::Value::Integer(3);
         assert_eq!(toml_merge_uninstall(input.clone()), input);
     }
 
-    // Uninstall early-return: a document with no [hooks] table is unchanged.
     #[test]
     fn uninstall_doc_without_hooks_returns_unchanged() {
         let out = merge_uninstall("model = \"o1\"\n").unwrap();
         assert!(!out.changed, "no [hooks] → nothing to remove");
     }
 
-    // Internal-consistency guard: every hook event we REGISTER with Codex must
-    // have a decoder arm — otherwise it arrives at the shared socket and
-    // `decode_hook_payload` bails ("unsupported hook_event_name"), silently
-    // dropping it. This is exactly the class the SubagentStop bug fell into
-    // (registered but not decoded). The external drift-watch covers upstream
-    // renames; this covers our own registered-vs-decoded drift.
-    // default_config_path routes through codex_home(), so CODEX_HOME (when it
-    // points at an existing dir) redirects BOTH the watcher and the installer.
     #[test]
     fn default_config_path_honors_codex_home_env() {
         // std::env is process-global; serialize against other env-mutating tests.
@@ -525,13 +453,12 @@ command = "/hand/written/pixtuoid-hook"
             default_config_path().unwrap()
         );
 
-        // Set to an EXISTING dir → <dir>/config.toml.
         let custom = std::env::temp_dir().join("pixtuoid-codex-home-cfg-test");
         std::fs::create_dir_all(&custom).unwrap();
         std::env::set_var("CODEX_HOME", &custom);
         assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
 
-        // Set to a NON-existent dir → fall back (matches upstream codex's gate).
+        // A non-existent dir falls back, matching upstream codex's own gate.
         let missing = std::env::temp_dir().join("pixtuoid-codex-home-cfg-missing");
         let _ = std::fs::remove_dir_all(&missing);
         std::env::set_var("CODEX_HOME", &missing);
@@ -540,7 +467,6 @@ command = "/hand/written/pixtuoid-hook"
             "non-existent CODEX_HOME must fall back to .codex/config.toml"
         );
 
-        // Empty → fallback.
         std::env::set_var("CODEX_HOME", "");
         assert!(default_config_path().unwrap().ends_with(&fallback_suffix));
 

@@ -1,6 +1,3 @@
-// Unit tests for the CSP hash kernel — the edge cases the e2e watchdog can only
-// catch indirectly (and only on pages the smoke suite exercises). `node --test`
-// runs .mjs natively; wired into `npm run verify` (→ `just site-check`).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -19,8 +16,8 @@ test('a > inside a quoted attribute value does not truncate the content', () => 
 });
 
 test('parser-error end tags a browser still honors match (js/bad-tag-filter)', () => {
-  // A browser ends the script at each of these; if our regex didn't, the
-  // trailing content would ship unhashed → prod-only CSP block.
+  // A browser ends the script at each of these; content the regex misses would
+  // ship unhashed → prod-only CSP block.
   assert.ok(inlineScriptHashes('<script>doWork()</script >').has(sha('doWork()')));
   assert.ok(inlineScriptHashes('<script>doWork()</script\n>').has(sha('doWork()')));
   assert.ok(inlineScriptHashes('<script>doWork()</script foo="bar">').has(sha('doWork()')));

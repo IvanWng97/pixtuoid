@@ -1,12 +1,9 @@
-//! Live debug layer toggled by `w`: the walkable mask (red), each furniture's
-//! allowed approach sides (green) / on-furniture seat cells (magenta), and the
-//! live A* route polylines of walking agents (cyan), composited over the
-//! finished scene before the half-block flush.
+//! Live debug layer toggled by `w`: the walkable mask (red), allowed approach
+//! sides (green) / on-furniture seat cells (magenta), and the live A* route
+//! polylines of walking agents (cyan), composited over the finished scene.
 //!
-//! This is a debug VIEW over the SAME data the renderer + router already use —
-//! `layout.is_walkable` (the one walkable mask), `furniture_def(_).approach`
-//! (the one approach model, rotated by facing), and each agent's frozen
-//! `walk_path` — never a second source. Off by default; transient (not config).
+//! A VIEW over the SAME data the renderer + router already use — never a second
+//! source.
 
 use std::collections::HashMap;
 
@@ -23,22 +20,22 @@ const BLOCKED: Rgb = Rgb {
     r: 220,
     g: 60,
     b: 60,
-}; // walkable mask — blocked ground
+};
 const APPROACH: Rgb = Rgb {
     r: 70,
     g: 220,
     b: 110,
-}; // allowed approach cell (off a side)
+};
 const SEAT: Rgb = Rgb {
     r: 235,
     g: 80,
     b: 215,
-}; // occupies_pos cell (sprite sits ON it)
+};
 const ROUTE: Rgb = Rgb {
     r: 70,
     g: 210,
     b: 235,
-}; // live A* route polyline
+};
 
 /// N, S, E, W unit dirs (same axes `ApproachSides::allows` expects).
 const DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (1, 0), (-1, 0)];
@@ -65,7 +62,6 @@ fn tint(buf: &mut RgbBuffer, x: i32, y: i32, c: Rgb, t: f32) {
     blend_pixel(buf, x, y, c, t);
 }
 
-/// 3×3 marker centred on `(cx, cy)`.
 fn blob(buf: &mut RgbBuffer, cx: i32, cy: i32, c: Rgb, t: f32) {
     for dy in -1..=1 {
         for dx in -1..=1 {
@@ -84,11 +80,9 @@ fn paint_mask(buf: &mut RgbBuffer, layout: &Layout) {
     }
 }
 
-/// The seat-approach scan, borrowed from the sim's own authority
-/// (`layout::first_reachable_on_side`) rather than mirrored here — this overlay
-/// is a VIEW over the router's decisions, so a second copy of the ladder (or of
-/// its scan bound) could make the green dots disagree with where agents route.
-/// ONE scan for both the waypoint seats and the home desks below.
+/// The seat-approach scan, borrowed from the sim's own authority rather than
+/// mirrored here: a second copy of the ladder (or of its scan bound) could make
+/// the green dots disagree with where agents actually route.
 fn first_reachable_on_side(layout: &Layout, origin: Point, dx: i32, dy: i32) -> Option<Point> {
     crate::layout::first_reachable_on_side(&layout.walkable, &layout.reachable, origin, dx, dy)
 }
@@ -97,13 +91,10 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
     for wp in &layout.waypoints {
         let def = furniture_def(wp.kind.furniture());
         if def.occupies_pos {
-            // Seat / stand-on cell — the sprite SETTLES ON `pos` (magenta).
             blob(buf, wp.pos.x as i32, wp.pos.y as i32, SEAT, 0.7);
-            // ...but A* routes to an APPROACH POINT off an allowed side (green),
-            // then a post-A* settle bridges approach → seat. Mark the first
-            // walkable + reachable cell on each ALLOWED side (facing-rotated) so
-            // the approach point reads DISTINCT from the seat — the viewer can
-            // confirm the agent enters from its natural side, not the backrest.
+            // A* routes to an APPROACH POINT off an allowed side, distinct from
+            // the seat — so the viewer can confirm the agent enters from its
+            // natural side, not the backrest.
             for (dx, dy) in DIRS {
                 if !def.approach.allows(wp.facing, (dx, dy)) {
                     continue;
@@ -114,7 +105,6 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
             }
             continue;
         }
-        // Obstacle: mark the cell just off each ALLOWED side (facing-rotated).
         // Pantry's footprint is runtime-sized.
         let fp = if wp.kind == WaypointKind::Pantry {
             Some(layout.pantry_counter_size())
@@ -137,12 +127,9 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
             }
         }
     }
-    // Home desks: the chair (`desk_walk_anchor` == `seated_foot_cell(Desk)`) is
-    // the SEAT the sprite settles onto (magenta, inside the desk's blocked band),
-    // and A* now routes to an APPROACH POINT off an allowed N/E/W side (green) —
-    // the SAME split as the seats. Mirror `desk_approach_cell`'s per-side scan
-    // from the CHAIR (not the top-left corner) so every allowed+reachable side
-    // shows, including the east (the corner scan can't clear the 14px body).
+    // Home desks get the same seat/approach split. Scan from the CHAIR, not the
+    // desk's top-left corner, or the east side never shows — the corner scan
+    // can't clear the desk body.
     let desk_def = furniture_def(Furniture::Desk);
     for desk in &layout.home_desks {
         let chair = desk_walk_anchor(*desk);
@@ -210,9 +197,6 @@ mod tests {
         c.r > c.g && c.b > c.g
     }
 
-    /// The `w` overlay must show a seat's APPROACH POINT (green, where A* routes)
-    /// distinct from the SEAT cell (magenta, where the sprite settles) — so a
-    /// viewer can confirm the agent enters from its natural side, not the seat.
     #[test]
     fn overlay_marks_seat_approach_sides_distinct_from_the_seat_cell() {
         let l = SceneLayout::compute_with_seed(200, 130, Some(8), 0).unwrap();
@@ -244,13 +228,6 @@ mod tests {
         );
     }
 
-    /// The home desk joined the unified approach model: its chair
-    /// (`desk_walk_anchor` == `seated_foot_cell(Desk)`) is the SEAT (magenta,
-    /// inside the desk's blocked band — the `OBSTACLE_PAD_PX` routing pad, not
-    /// the shallow `DESK_FOOT_H` footprint) and A* routes to an APPROACH POINT off an
-    /// allowed N/E/W side (green). The `w` overlay must show them distinct — the
-    /// same split as the seats — so a viewer can confirm the entry walks AROUND
-    /// to a side, not through the desk front.
     #[test]
     fn overlay_marks_desk_approach_distinct_from_the_chair() {
         use crate::layout::{Facing, Furniture};
@@ -266,8 +243,7 @@ mod tests {
             buf.get(chair.x, chair.y)
         );
 
-        // Scan from the CHAIR (== production `desk_approach_cell`), not the desk
-        // corner — that is what makes every allowed side reachable.
+        // Scan from the CHAIR (== production `desk_approach_cell`), not the desk corner.
         let def = furniture_def(Furniture::Desk);
         let found_green_approach = DIRS.iter().any(|&(dx, dy)| {
             def.approach.allows(Facing::South, (dx, dy))
@@ -312,10 +288,6 @@ mod tests {
         }
     }
 
-    // paint_routes skips an agent absent from the motion map (187) and one whose
-    // MotionState has no frozen walk_path (190); it draws the route polyline for
-    // an agent with a frozen walk_path. A path endpoint at/past the buffer edge
-    // also exercises tint's out-of-bounds guard (63).
     #[test]
     fn paint_routes_draws_frozen_paths_and_skips_the_rest() {
         use crate::motion::{MotionState, WalkPathSnapshot};
@@ -336,8 +308,8 @@ mod tests {
             path: vec![Point { x: 5, y: 5 }, Point { x: 80, y: 80 }],
         });
         motion.insert(id_path, ms_path);
-        motion.insert(id_nopath, MotionState::new(id_nopath)); // walk_path: None
-                                                               // id_absent intentionally NOT inserted into the motion map.
+        motion.insert(id_nopath, MotionState::new(id_nopath));
+        // id_absent is intentionally NOT in the motion map.
 
         let bg = Rgb { r: 0, g: 0, b: 0 };
         let mut buf = RgbBuffer::filled(50, 50, bg);
@@ -348,8 +320,6 @@ mod tests {
         assert!(painted, "the frozen walk_path must draw a route polyline");
     }
 
-    // first_reachable_on_side breaks the moment the scan steps to a negative
-    // coordinate (cx < 0 || cy < 0), returning None — the line-101 break.
     #[test]
     fn first_reachable_on_side_breaks_on_negative_coords() {
         let l = SceneLayout::compute_with_seed(200, 130, Some(8), 0).unwrap();

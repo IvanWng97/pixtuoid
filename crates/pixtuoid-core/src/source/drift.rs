@@ -1,15 +1,8 @@
 //! Structured **decode-drift breadcrumbs** — the single source of truth for the
 //! source self-diagnosis layer. Every site where the upstream wire format
 //! surprises us emits ONE `tracing` event with a stable `target` + `kind` +
-//! `source`, so:
-//!   - the persistent warn-floor log captures it (read by `pixtuoid doctor`), and
-//!   - a future counting `tracing::Layer` can tally it for the live TUI footer,
-//!
-//! WITHOUT any decoder signature change — the emit is an ambient side effect, so
-//! the per-source `fn(&Value) -> Result<Vec<AgentEvent>>` seam (invariant #3)
-//! is untouched. This is layer 2 of the upstream-drift defense ("self-monitoring
-//! from the real stream", `pixtuoid-core/CLAUDE.md`) finally made VISIBLE instead
-//! of stranded in a log nobody reads — the gap the Task→Agent rename exposed.
+//! `source`, so the persistent warn-floor log (read by `pixtuoid doctor`)
+//! captures it without any decoder signature change.
 //!
 //! **The flood-safe axis rule (`unknown_event` has NO dedup — it warns per
 //! line).** A transcript decoder's tail may breadcrumb an unrecognized shape
@@ -19,52 +12,44 @@
 //! EVENT axis — a new value under a shape we already ignore dozens of per turn
 //! (codex's `EventMsg`/`ResponseItem` inners, copilot's `assistant.*_delta`,
 //! omp's `customType`) — because one warn per line there floods the warn-floor.
-//! Each decoder pins its axis in a `KNOWN_*` const whose COMPLETE set is verified
-//! against live upstream and (where the schema is fetchable) drift-watched by
-//! `check_upstream_drift.py`, so a new upstream shape is a CI review ping BEFORE
-//! it can flood. This is a per-decoder DOMAIN judgment (the axis lands in a
-//! different position each source — a match arm, a namespace projection, a
-//! two-tier dispatch), not a shared abstraction: the guard is 3 lines, the axis
-//! choice is irreducible, so the principle is codified HERE and applied inline.
+//! Each decoder pins its axis in a `KNOWN_*` const, drift-watched by
+//! `check_upstream_drift.py` where the schema is fetchable. The axis lands in a
+//! different position in each source, so the principle is codified HERE and
+//! applied inline rather than abstracted.
 //!
 //! `source` is a static registry source name (safe). The free-form values
 //! (`name`/`field`/`tool`/`detail`) are untrusted wire content, so they are made
-//! display-safe HERE, at emission — control-stripped and capped by
-//! `decoder::display_safe`. Per-consumer sanitizing was not
-//! enough: the non-TUI `tracing` stream writes to RAW stderr, which no cell
-//! buffer clips and no presenter sanitizes, and it is on by default at `warn`.
+//! display-safe HERE, at emission: the non-TUI `tracing` stream writes to RAW
+//! stderr, which no cell buffer clips and no presenter sanitizes, and it is on
+//! by default at `warn`.
 
-/// The `tracing` target every drift breadcrumb shares. Consumers (the log scan
-/// in `pixtuoid doctor`, the future counting Layer, the footer) key on it.
+/// The `tracing` target every drift breadcrumb shares; consumers key on it.
 pub const TARGET: &str = "pixtuoid::drift";
 
 use crate::source::decoder::display_safe;
 
-/// A hook event / transcript event we don't handle (and which isn't a registered
-/// custom event) — upstream likely added or renamed it. Emitted just before the
-/// shared decoder `bail!`s; for a renamed event WE depend on, this is the signal.
+/// A hook/transcript event we don't handle and that isn't a registered custom
+/// event — for a renamed event WE depend on, this is the signal.
 pub fn unknown_event(source: &str, name: &str) {
     tracing::warn!(target: TARGET, source = %source, kind = "unknown_event", name = %display_safe(name));
 }
 
-/// A REQUIRED field of an event we DO handle is absent — upstream likely renamed
-/// it. The decode degrades to a graceful default (no panic), but attribution is
-/// wrong; this is the most COMMON real drift and was previously silent.
-/// Call ONLY on events we've committed to decoding (not on type-discriminator
-/// reads, where a missing value just means "a line we ignore" — that would flood).
+/// A REQUIRED field of an event we DO handle is absent — the decode degrades to
+/// a graceful default, but attribution is wrong. Call ONLY on events we've
+/// committed to decoding: on a type-discriminator read a missing value just
+/// means "a line we ignore", and breadcrumbing those would flood.
 pub fn missing_field(source: &str, event: &str, field: &str) {
     tracing::warn!(target: TARGET, source = %source, kind = "missing_field", event = %display_safe(event), field = %display_safe(field));
 }
 
 /// The subagent-dispatch tool ran under a name we don't recognise — semantic
-/// `subagent_type` detection still handled it, but upstream renamed the tool
-/// (the Task→Agent class). Surfaces the new name so the known set / docs update.
+/// `subagent_type` detection still handled it, but upstream renamed the tool.
 pub fn unknown_dispatch(source: &str, tool: &str) {
     tracing::warn!(target: TARGET, source = %source, kind = "unknown_dispatch", tool = %display_safe(tool));
 }
 
 /// A consumed upstream data SHAPE drifted — a registry/transcript field that
-/// still parses but lost a key we read (#247). `detail` carries the specifics.
+/// still parses but lost a key we read. `detail` carries the specifics.
 pub fn shape_drift(source: &str, detail: &str) {
     tracing::warn!(target: TARGET, source = %source, kind = "shape_drift", detail = %display_safe(detail));
 }
@@ -74,18 +59,11 @@ mod tests {
     use super::*;
     use crate::test_capture::capture_logs as capture;
 
-    // Every breadcrumb must carry the stable `target` + `kind` + `source` + its
-    // distinctive value — that contract is what the log scan (`pixtuoid doctor`)
-    // and the future counting Layer key on. Loose `contains` so the field-quoting
-    // style of the fmt formatter can't make the test brittle.
     #[test]
     fn breadcrumb_values_are_display_safe_and_capped() {
-        // `pixtuoid run --headless` routes tracing to RAW stderr, so this IS a
-        // terminal sink and these values are pure untrusted wire content (a
-        // transcript's own top-level `type`, a tool name). Strip Cc AND the Cf
-        // bidi overrides — `char::is_control` is Cc-only, and Trojan Source
-        // (CVE-2021-42574) rode exactly that gap — and cap the length: a
-        // legitimate wire line can be ~1 MiB.
+        // Cf bidi overrides are checked alongside Cc because
+        // `char::is_control` is Cc-only, and Trojan Source (CVE-2021-42574)
+        // rode exactly that gap.
         let out = capture(|| {
             unknown_event("codex", "ev\u{1b}]0;PWNED\u{7}il\u{202e}Z");
             unknown_dispatch("claude-code", "De\u{1b}[31mlegateZ");
@@ -99,7 +77,7 @@ mod tests {
                 bad as u32
             );
         }
-        // Stays silent on the readable remainder — sanitizing is not dropping.
+        // Sanitizing is not dropping.
         for needle in ["ev]0;PWNEDilZ", "De[31mlegateZ", "toolZ", "nameZ"] {
             assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
         }
@@ -121,15 +99,15 @@ mod tests {
             TARGET,
             "unknown_event",
             "MysteryHookZ",
-            "codex", // source for unknown_event
+            "codex",
             "missing_field",
             "toolNameZ",
-            "copilot", // source for missing_field
+            "copilot",
             "unknown_dispatch",
             "DelegateZ",
             "shape_drift",
             "registry-missing-pidZ",
-            "claude-code", // source for unknown_dispatch + shape_drift
+            "claude-code",
         ] {
             assert!(
                 out.contains(needle),

@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Freeze the ratified composition's random realization into Rust const
-tables (audio/score.rs input). The Phase 0 rng draws (sparkle rng(5),
-keys rng(7), drums rng(3)) were the COMPOSER; the owner ratified one
-specific realization — this exports exactly the events that realization
-placed, so the Rust port is deterministic data, not a re-roll.
+"""Freeze the ratified composition's random realization into Rust const tables
+(audio/score.rs input), so the Rust port is deterministic data, not a re-roll.
 
-Mirrors the draw ORDER inside synth_audition.py's stem fns 1:1 — if those
+Mirrors the seeded draw ORDER inside synth_audition.py's stem fns 1:1 — if those
 fns change, re-run this AND re-audition (a new realization = a new take).
 """
 

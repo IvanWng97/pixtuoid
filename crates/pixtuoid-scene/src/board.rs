@@ -1,20 +1,11 @@
-//! Backend-agnostic neon wall-board model.
+//! Backend-agnostic neon wall-board model — the SINGLE source of truth for the
+//! office's "lit sign": brand + ★ CTA (L1), the mood pulse (L2), and the
+//! office-context row (L3: uptime · floor · gateway chip), rendered by the TUI,
+//! the floating window, and the wasm hero.
 //!
-//! The SINGLE source of truth for the office's "lit sign" — brand + ★ CTA (L1),
-//! the plain-English mood pulse echoing the shared `StateCounts` (L2), and the
-//! office-context row (L3: uptime · floor · gateway chip). Three painters render
-//! it: the TUI (ratatui `Paragraph`), the floating window (AA Monaspace Neon
-//! blitted into its surface), and the wasm hero (exported to a DOM overlay).
 //! `scene` has no terminal/window deps (invariant #1), so the model carries a
-//! backend-agnostic `BoardTone`; `tone_rgb` (here) is the ONE tone→theme-role map
-//! all three painters share — each only converts the resolved `Rgb` to its own
-//! surface color type (ratatui `Color` / packed XRGB / `#hex`), so the hues can't
-//! drift across surfaces.
-//!
-//! This module ALSO owns the shared per-scene activity tally (`StateCounts` +
-//! `scene_stats`/`per_floor_counts`/`gateway_rollup`) — pure, backend-free, and
-//! now reachable by every painter crate (the binary's footer AND `pixtuoid-web`),
-//! which is why it moved here out of the binary's tui widgets.
+//! backend-agnostic `BoardTone` and `tone_rgb` is the ONE tone→theme-role map all
+//! three painters share. Also owns the per-scene activity tally the footer reads.
 
 use std::time::SystemTime;
 
@@ -24,15 +15,10 @@ use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::theme::Theme;
 
-// --- Shared scene stats (footer + board agree) -------------------------------
-// ONE per-scene activity tally with ONE exiting-first bucketing policy, computed
-// once per frame and handed to BOTH the footer (authoritative integers) and the
-// wall board (plain-English echo) so the two surfaces can never disagree — the
-// historical footer(counts-all)-vs-board(counts-live) walkout drift.
-
-/// Per-scene tally of agent activity states. `total == active + waiting + idle +
-/// exiting` (debug-asserted). `exiting` is a first-class bucket, not folded into
-/// idle, so the footer can render an authoritative `n/total` incl. walkouts.
+/// Per-scene tally of agent activity states, computed once per frame and shared
+/// by the footer and the board so the two surfaces can't disagree. `exiting` is a
+/// first-class bucket, NOT folded into idle, so the footer's `n/total` counts
+/// walkouts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StateCounts {
     pub active: usize,
@@ -43,9 +29,7 @@ pub struct StateCounts {
 }
 
 /// Add one slot to `c` under the ONE exiting-first bucketing policy: an
-/// **exiting** agent (walking out) counts as `exiting` regardless of its last
-/// activity state. Shared by [`scene_stats`] and [`per_floor_counts`] so the
-/// policy can't drift between the office-wide and per-floor tallies.
+/// **exiting** agent counts as `exiting` regardless of its last activity state.
 fn bucket_slot(c: &mut StateCounts, slot: &AgentSlot) {
     c.total += 1;
     if slot.exiting_at.is_some() {
@@ -60,7 +44,7 @@ fn bucket_slot(c: &mut StateCounts, slot: &AgentSlot) {
 }
 
 /// Bucket every agent in `scene` — the office-wide (or current-projected-floor)
-/// tally the footer and board both read.
+/// tally.
 pub fn scene_stats(scene: &SceneState) -> StateCounts {
     let mut c = StateCounts::default();
     for slot in scene.agents.values() {
@@ -71,10 +55,8 @@ pub fn scene_stats(scene: &SceneState) -> StateCounts {
 }
 
 /// Per-floor [`StateCounts`], bucketed by `AgentSlot.floor_idx` (clamped to the
-/// last floor). The office-wide breakdown feeding the footer's cross-floor
-/// `▲F{n}` cue — computed from the FULL scene, deliberately distinct from the
-/// footer's per-state integers (`scene_stats` on the projected floor); don't
-/// derive one from the other.
+/// last floor). Computed from the FULL scene, deliberately distinct from
+/// `scene_stats` on the projected floor — don't derive one from the other.
 pub fn per_floor_counts(scene: &SceneState) -> [StateCounts; MAX_FLOORS] {
     let mut floors = [StateCounts::default(); MAX_FLOORS];
     for slot in scene.agents.values() {
@@ -85,8 +67,8 @@ pub fn per_floor_counts(scene: &SceneState) -> [StateCounts; MAX_FLOORS] {
 
 /// The worst-of daemon-liveness rollup for the gateway chip. `None` = no daemon
 /// configured (chip suppressed), distinct from `Some(DaemonState::Down)` (a
-/// daemon was seen, then died). `DaemonState` has no `Ord`, so severity is
-/// ranked explicitly: Idle < Busy < Degraded < Down.
+/// daemon was seen, then died). `DaemonState` has no `Ord`, hence the explicit
+/// severity rank.
 pub fn gateway_rollup<'a>(
     daemons: impl Iterator<Item = &'a DaemonPresence>,
 ) -> Option<DaemonState> {
@@ -104,9 +86,7 @@ pub fn gateway_rollup<'a>(
 }
 
 /// The oldest in-scene agent's age in seconds — every agent still in the scene
-/// (live or walking out; swept ones are gone). The board's uptime feeder,
-/// single-sourced beside `scene_stats`/`gateway_rollup` so the three painters
-/// (TUI/floating/web) can't drift.
+/// (live or walking out; swept ones are gone).
 pub fn scene_uptime_secs(scene: &SceneState, now: SystemTime) -> u64 {
     scene
         .agents
@@ -118,8 +98,7 @@ pub fn scene_uptime_secs(scene: &SceneState, now: SystemTime) -> u64 {
 }
 
 /// Format a duration in seconds as a compact `"{h}h{m}m"` / `"{m}m"` / `"<1m"`
-/// string (no prefix). The board's uptime badge prepends "↑". Bucket thresholds:
-/// ≥1h shows hours+minutes, ≥1m shows minutes.
+/// string (no prefix — the board's uptime badge prepends "↑").
 pub fn compact_hms(secs: u64) -> String {
     if secs >= 3600 {
         format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
@@ -130,10 +109,7 @@ pub fn compact_hms(secs: u64) -> String {
     }
 }
 
-// --- The board model ---------------------------------------------------------
-
-/// The board text's tone — backend-agnostic. Each painter maps it to its own
-/// color (ratatui `Color` in tui, `Rgb`/hex elsewhere). Deliberately NOT
+/// The board text's tone — backend-agnostic. Deliberately NOT
 /// `overlay::LabelTone`: the variant sets are disjoint (labels never show
 /// Brand/Star/Dim; the board never shows a per-agent Exiting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,10 +129,7 @@ pub enum BoardTone {
 }
 
 /// Resolve a `BoardTone` to its theme color role — the SINGLE authority the three
-/// board painters share (tui `board_tone_color`→`to_color`, floating→`pack_xrgb`,
-/// wasm `board_hex`→`#hex`), so a `theme.ui` role change lands in ONE place and the
-/// surfaces can't drift. The model carries the tone; only the output color TYPE
-/// differs per surface.
+/// board painters share, so a `theme.ui` role change lands in ONE place.
 pub fn tone_rgb(tone: BoardTone, theme: &Theme) -> Rgb {
     match tone {
         BoardTone::Brand => theme.ui.neon_brand,
@@ -168,8 +141,8 @@ pub fn tone_rgb(tone: BoardTone, theme: &Theme) -> Rgb {
     }
 }
 
-/// One tone-tagged text run of the board. Painters concatenate/position these;
-/// the model bakes in the inter-segment separators so no painter re-derives them.
+/// One tone-tagged text run of the board. The model bakes in the inter-segment
+/// separators so no painter re-derives them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoardSegment {
     pub text: String,
@@ -186,8 +159,8 @@ impl BoardSegment {
 }
 
 /// The whole board, as tone-tagged segments — L1 `brand` + `star`, L2 `mood`,
-/// L3 `context`. No baked padding between brand/star (that's each painter's own
-/// right-flush in its coordinate space); the mood + context separators ARE baked.
+/// L3 `context`. No baked padding between brand/star (each painter right-flushes
+/// in its own coordinate space); the mood + context separators ARE baked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoardModel {
     pub brand: BoardSegment,
@@ -197,8 +170,7 @@ pub struct BoardModel {
 }
 
 /// The board's brand line — `pixtuoid v{version}`. Every workspace crate shares
-/// one `version.workspace` value, so this is identical no matter which crate's
-/// `env!` evaluates it (the binary's footer, floating, and wasm all agree).
+/// one `version.workspace`, so this `env!` reads the same value in every painter.
 pub fn board_brand() -> String {
     format!("pixtuoid v{}", env!("CARGO_PKG_VERSION"))
 }
@@ -208,7 +180,7 @@ pub fn board_brand() -> String {
 pub const BOARD_STAR: &str = "\u{2605} Star";
 
 /// The gateway chip's GLYPH — one definition for the footer chip AND the board
-/// context row (`⬢gw ok`), so the two surfaces can't drift.
+/// context row (`⬢gw ok`).
 pub const GATEWAY_GLYPH: char = '\u{2b22}';
 
 /// The `⬢gw` chip's terse liveness word.
@@ -222,9 +194,8 @@ pub fn gateway_label(state: DaemonState) -> &'static str {
 }
 
 /// The gateway chip's tone — mirrors the footer's `FooterTone::Gateway` severity
-/// map (in `crate::footer`; Idle→Idle, Busy→Active, Degraded/Down→Waiting), but returns a plain
-/// `BoardTone` so `DaemonState` is only ever an INPUT to the model, never leaks
-/// a color out of `scene`.
+/// map, but returns a plain `BoardTone` so `DaemonState` is only ever an INPUT to
+/// the model and never leaks a color out of `scene`.
 pub fn gateway_tone(state: DaemonState) -> BoardTone {
     match state {
         DaemonState::Idle => BoardTone::Idle,
@@ -234,18 +205,11 @@ pub fn gateway_tone(state: DaemonState) -> BoardTone {
 }
 
 /// The board's plain-English "mood pulse" — one tone-tagged segment per non-zero
-/// present state, echoing the SHARED `StateCounts` the footer reads.
+/// present state. Exiting agents are absent by design: a walkout isn't the mood.
 ///
-/// The ▲ "needs-you" beacon LEADS (waiting first) — on the board, waiting is the
-/// amber attention flag. Counts are NUMERIC, never one-dot-per-agent; the words
-/// abbreviate (`wt`/`wk`/`id`) when the full form would overrun the fixed panel
-/// interior (`NEON_PANEL_INNER_W`). Exiting agents are absent by design — a
-/// walkout isn't the office mood. Empty office → the neutral `— office empty —`.
-///
-/// The mood vocabulary is all single-column (the geometric glyphs `▲●○` are
-/// East-Asian *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so a
-/// `chars().count()` width equals the terminal display width here — no
-/// `unicode-width` dep is pulled into `scene`.
+/// The vocabulary is all single-column (the geometric glyphs `▲●○` are East-Asian
+/// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so `chars().count()`
+/// equals the terminal display width — no `unicode-width` dep in `scene`.
 pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
     if counts.active + counts.waiting + counts.idle == 0 {
         return vec![BoardSegment::new(
@@ -253,8 +217,6 @@ pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
             BoardTone::Dim,
         )];
     }
-    // ▲ leads (waiting beacon), then ● work, ○ idle. Waiting borrows the alarm
-    // triangle, not the detail surfaces' ◐ — the board is the lit "needs-you" sign.
     let build = |words: [&str; 3]| -> Vec<BoardSegment> {
         let rows = [
             (counts.waiting, '\u{25b2}', words[0], BoardTone::Waiting),
@@ -282,11 +244,10 @@ pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
     }
 }
 
-/// Assemble the whole board model. `counts` is the SAME `scene_stats` the footer
-/// reads; `uptime_secs` is [`scene_uptime_secs`] (the oldest in-scene agent's age); `floor` is
-/// `(current, total_floors)` (a single-floor office passes `None`); `gateway` is
-/// the `gateway_rollup` (`None` suppresses the chip). The context separators
-/// (`"  "`) are baked into each following segment so painters just concatenate.
+/// Assemble the whole board model. `floor` is `(current, total_floors)` — a
+/// single-floor office passes `None`; `gateway` is the [`gateway_rollup`], where
+/// `None` suppresses the chip. The context separators (`"  "`) are baked into each
+/// following segment so painters just concatenate.
 pub fn build_board(
     counts: StateCounts,
     uptime_secs: u64,
@@ -330,8 +291,6 @@ mod tests {
 
     #[test]
     fn board_brand_carries_the_workspace_version() {
-        // The workspace pins one version; the board reads scene's env!, which is
-        // that same value the binary/wasm painters would compute.
         assert_eq!(
             board_brand(),
             format!("pixtuoid v{}", env!("CARGO_PKG_VERSION"))
@@ -376,7 +335,6 @@ mod tests {
         for s in [slot(40), slot(10)] {
             scene.agents.insert(s.agent_id, s);
         }
-        // Oldest agent created at 10s → 90s uptime; an empty scene → 0.
         assert_eq!(scene_uptime_secs(&scene, now), 90);
         assert_eq!(scene_uptime_secs(&SceneState::uniform(16), now), 0);
     }
@@ -396,11 +354,9 @@ mod tests {
         assert!(text.contains("\u{25cf}3 work"), "active: {text}");
         assert!(text.contains("\u{25cb}5 idle"), "idle: {text}");
         assert!(!text.contains("exit"), "no exiting on the mood: {text}");
-        // Beacon (waiting) leads active.
         let w = text.find('\u{25b2}').unwrap();
         let a = text.find('\u{25cf}').unwrap();
         assert!(w < a, "waiting leads active: {text}");
-        // Tones are tagged per state — the whole point of the model.
         let tone_of = |glyph: char| {
             segs.iter()
                 .find(|s| s.text.starts_with(glyph))
@@ -438,8 +394,6 @@ mod tests {
 
     #[test]
     fn mood_big_office_abbreviates_to_fit_the_panel_interior() {
-        // An extreme office must fit the fixed panel interior; the words shorten
-        // (wait/work/idle → wt/wk/id) rather than overflow.
         let c = StateCounts {
             active: 150,
             waiting: 150,
@@ -464,11 +418,6 @@ mod tests {
         assert_eq!(gateway_tone(DaemonState::Down), BoardTone::Waiting);
         assert_eq!(gateway_label(DaemonState::Idle), "ok");
         assert_eq!(gateway_label(DaemonState::Down), "down");
-        // Actually pin the name's promise: board and footer resolve the SAME
-        // color for every gateway state — board via BoardTone, footer via its
-        // own FooterTone::Gateway arm — so the (deliberately disjoint) tone
-        // vocabularies can't drift on the gateway severity policy. Was only
-        // half-pinned: the board mapping above, but nothing held the footer side.
         let theme = crate::theme::theme_by_name("normal").expect("normal theme");
         for st in [
             DaemonState::Idle,
@@ -493,7 +442,6 @@ mod tests {
             exiting: 0,
             total: 3,
         };
-        // No floor, no gateway → context is just uptime.
         let b = build_board(c, 3661, None, None);
         assert_eq!(b.brand.tone, BoardTone::Brand);
         assert!(b.brand.text.starts_with("pixtuoid v"));
@@ -503,8 +451,6 @@ mod tests {
         assert_eq!(b.context[0].text, "\u{2191}1h1m");
         assert_eq!(b.context[0].tone, BoardTone::Dim);
 
-        // With a floor + a busy gateway, the separators are baked in and the chip
-        // carries the gateway tone.
         let b2 = build_board(c, 30, Some((2, 3)), Some(DaemonState::Busy));
         let ctx: String = b2.context.iter().map(|s| s.text.clone()).collect();
         assert_eq!(ctx, "\u{2191}<1m  F2/3  \u{2b22}gw busy");

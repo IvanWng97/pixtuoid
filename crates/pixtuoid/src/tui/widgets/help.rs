@@ -1,5 +1,3 @@
-//! Keyboard-shortcut help overlay. Toggled by '?'; dismissed by Enter / Esc / '?'.
-
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -11,8 +9,6 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("q", "quit"),
     ("Ctrl+C", "quit"),
     ("p", "pause / resume"),
-    // Audio rows only exist on audio-capable builds (Linux prebuilts ship
-    // without the feature — advertising a dead key reads as broken).
     #[cfg(feature = "audio")]
     ("m", "sound on/off"),
     #[cfg(feature = "audio")]
@@ -20,7 +16,6 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("t", "themes"),
     ("Tab", "agent dashboard"),
     ("s", "sources (connect / health)"),
-    // Dev-only overlay — hidden from release-build help (see dispatch_key).
     #[cfg(debug_assertions)]
     ("w", "walkable / approach / route debug"),
     ("?", "toggle this overlay"),
@@ -31,13 +26,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("Enter / Esc", "dismiss popup"),
 ];
 
-/// Row indent, shared by the painted row and the width measure so the panel can
-/// never be sized narrower than the rows it frames.
 const ROW_INDENT: &str = "  ";
 
-/// The key column: the widest key plus a one-space gutter, so even a full-width
-/// key (`f (dashboard)`) keeps a gap before its description instead of running
-/// into it.
+/// The widest key plus a one-space gutter, so even a full-width key keeps a gap
+/// before its description instead of running into it.
 fn key_col_width() -> usize {
     SHORTCUTS
         .iter()
@@ -47,10 +39,9 @@ fn key_col_width() -> usize {
         + 1
 }
 
-/// Content width the panel reserves: indent + key column + the widest
-/// description. DERIVED from `SHORTCUTS`, never a literal — a hardcoded width
-/// goes stale the moment a shortcut is added and hard-clips every long row
-/// mid-word at ANY terminal size (the panel is centered, not edge-limited).
+/// DERIVED from `SHORTCUTS`, never a literal — a hardcoded width hard-clips
+/// every long row mid-word at ANY terminal size (the panel is centered, not
+/// edge-limited).
 fn content_width() -> u16 {
     let widest_desc = SHORTCUTS
         .iter()
@@ -62,8 +53,6 @@ fn content_width() -> u16 {
 
 pub(crate) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rect, theme: &Theme) {
     let key_col = key_col_width();
-    // A lead-blank then one row per shortcut. `paint_panel` adds the title + pad,
-    // auto-heights to the actual rows, and windows-with-cue on a short terminal.
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(SHORTCUTS.len() + 1);
     lines.push(Line::from(""));
     for (key, desc) in SHORTCUTS {
@@ -101,9 +90,6 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
-    // The overlay renders Clear + a Block; assert it never panics across the
-    // full size range, including narrow/short buffers reachable on small
-    // terminals (width clamp + bounds-origin centering must hold).
     fn render_at(w: u16, h: u16) {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| {
@@ -132,9 +118,6 @@ mod tests {
         out
     }
 
-    // The panel is CENTERED, so a content width narrower than the widest row
-    // clips every long shortcut mid-word at ANY terminal size — not just narrow
-    // ones. Render generously and demand every row survive intact, gutter and all.
     #[test]
     fn every_shortcut_row_renders_in_full() {
         let text = frame_text(140, 40);
@@ -150,8 +133,7 @@ mod tests {
 
     #[test]
     fn help_overlay_renders_without_panic_across_sizes() {
-        // (2,2): PanelGeometry::compute (via paint_panel) guards away below 4×3
-        // → nothing paints — must not panic on the degenerate sizes.
+        // `paint_panel` guards away below 4×3, so the last two sizes paint nothing.
         for (w, h) in [(200, 60), (40, 20), (24, 30), (10, 4), (4, 3), (2, 2)] {
             render_at(w, h);
         }

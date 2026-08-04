@@ -10,8 +10,7 @@ env:
 jobs:
   windows-test:
     name: windows-test
-    # Track windows-latest deliberately: this gate catches hosted-image changes,
-    # including platform-specific path, pipe, and shim behavior.
+    # Track windows-latest deliberately: this gate catches hosted-image changes.
     runs-on: windows-latest
     timeout-minutes: 30
     permissions:
@@ -37,8 +36,8 @@ jobs:
 
   macos-test:
     name: macos-test
-    # macOS is the primary user platform and diverges on BSD CLI, launchd, and
-    # config paths. macos-14 exercises the Apple Silicon build.
+    # macos-14 exercises the Apple Silicon build; macOS diverges on BSD CLI,
+    # launchd, and config paths.
     runs-on: macos-14
     timeout-minutes: 30
     permissions:
@@ -100,12 +99,11 @@ jobs:
           report_type: test_results
 
   # Platform coverage compiles code the Linux job cannot see: Windows pipes and
-  # atomic-write retries, plus macOS paths and launchd. These are now required,
-  # but stay separate from the faster uninstrumented test jobs.
+  # atomic-write retries, plus macOS paths and launchd.
   coverage-windows:
     name: coverage-windows
     runs-on: windows-latest
-    # Retightened after repeated cold runs; nextest owns per-test hang limits.
+    # nextest owns per-test hang limits.
     timeout-minutes: 20
     permissions:
       contents: read
@@ -135,7 +133,6 @@ jobs:
   coverage-macos:
     name: coverage-macos
     runs-on: macos-14
-    # Apple Silicon cold runs leave roughly 2x headroom under this bound.
     timeout-minutes: 15
     permissions:
       contents: read
@@ -179,16 +176,13 @@ jobs:
       - uses: ./.github/actions/setup-cargo-just
       - uses: taiki-e/install-action@cargo-nextest
       - uses: taiki-e/install-action@cargo-insta
-      # An uninstrumented run lets insta detect pending and orphan snapshots;
-      # plain cargo test and the coverage run cannot provide that hygiene.
+      # An uninstrumented run lets insta detect pending and orphan snapshots.
       - run: just snapshots
 
-  # Mutation testing remains in its separate on-demand mutants.yml workflow.
   smoke:
     name: smoke
     permissions:
       contents: read
-    # Independent of lint jobs: parallel execution lowers green-path latency.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -209,8 +203,6 @@ jobs:
           out=$(echo '{}' | ./target/release/pixtuoid-hook 2>&1)
           test -z "$out"
           echo "hook shim exited 0 silently (expected no-op with no socket)"
-      # Hook install/uninstall is no longer a CLI command; its registry-wide
-      # round-trip is covered by install_target_round_trips_every_registered_target.
       # gen-check needs Node, Pillow, and ffmpeg, but not gifsicle in check mode.
       - uses: actions/setup-node@v7
         with:
@@ -232,7 +224,6 @@ jobs:
           echo "ffmpeg install failed after 3 attempts" >&2
           exit 1
       - name: Cache pip downloads
-        # Recreate the cheap venv but cache wheels by the pinned dependency set.
         uses: actions/cache@v6
         with:
           path: ~/.cache/pip

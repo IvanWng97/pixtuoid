@@ -6,9 +6,6 @@ use crate::source::decoder::{first_present_str, generic_tool_display};
 use crate::source::AgentEvent;
 use crate::AgentId;
 
-// The runtime half (`AntigravitySource` + its watcher wiring) — ONE gate for
-// the whole `native` layer of this source; the re-export keeps the pre-split
-// `source::antigravity::AntigravitySource` path.
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
@@ -18,21 +15,10 @@ pub use native::AntigravitySource;
 pub const SOURCE_NAME: &str = "antigravity";
 
 /// Antigravity-cli writes BOTH `transcript.jsonl` (truncated) and
-/// `transcript_full.jsonl` (untruncated) per conversation in one
-/// `.../logs/` dir, carrying the SAME `step_index` stream — so walking both
-/// mints two path-keyed `AgentId`s and double-renders the conversation. Watch
-/// only the canonical `transcript.jsonl` (also the shorter one, so less likely
-/// to trip the >1 MiB oversized-skip); the decoder ignores content length, so
-/// dropping the untruncated copy loses nothing. Narrow by construction — it
-/// skips ONLY the known duplicate, never an unrelated `.jsonl`.
-///
-/// Accepted residual: a dir with ONLY `transcript_full.jsonl` (a brief
-/// write-order race before `transcript.jsonl` lands, or a future AG that drops
-/// the truncated file) renders nothing and — unlike a step-type rename, which
-/// trips `drift::unknown_event` — emits NO drift breadcrumb, because the
-/// `fn(&Path) -> bool` filter can't see the sibling to fall back on. It
-/// self-heals once `transcript.jsonl` appears, and is strictly better than the
-/// every-conversation double-render it replaces.
+/// `transcript_full.jsonl` (untruncated) per conversation, carrying the SAME
+/// `step_index` stream — so walking both mints two path-keyed `AgentId`s and
+/// double-renders the conversation. Watch only the canonical `transcript.jsonl`;
+/// the decoder ignores content length, so the untruncated copy loses nothing.
 pub(crate) fn skip_transcript_full(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()) != Some("transcript_full.jsonl")
 }
@@ -44,12 +30,9 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         return Ok(vec![]);
     };
 
-    // A present-but-non-integer OR negative `step_index` (format drift / a
-    // renamed field) must fail SAFE-AND-VISIBLE: skip the line rather than emit
-    // an unmatchable id. A negative would mint a start like `ag--5-0` that no
-    // end (the `> 0` branch) can ever pair, leaving the slot stuck Active until
-    // the reducer's debounce/stale-sweep; coercing to 0 would silently corrupt
-    // the `ag-{step}-{i}` tool_use_id pairing the same way.
+    // A present-but-non-integer OR negative `step_index` must skip the line: a
+    // negative would mint a start like `ag--5-0` that no end can ever pair,
+    // leaving the slot stuck Active until the reducer's stale-sweep.
     let Some(step_index) = obj
         .get("step_index")
         .and_then(|v| v.as_i64())
@@ -83,21 +66,17 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
             }
         }
     } else {
-        // Antigravity is a closed Google IDE with no fetchable transcript
-        // schema, so the CI upstream-drift watch (defense #4) can't cover it —
-        // defense #2 (in-code breadcrumbs) is the ONLY currency backstop. A step
-        // carrying `tool_calls` under a type that ISN'T `PLANNER_RESPONSE` is the
-        // signal that upstream RENAMED that step (the `missing_field` breadcrumb
-        // above sits inside the now-unreached arm, so a rename would otherwise
-        // go silent — sprites blank with no drift trace). Result/input steps
-        // carry no `tool_calls`, so this can't false-positive on them.
+        // Antigravity is a closed Google IDE with no fetchable schema, so
+        // in-code breadcrumbs are the ONLY currency backstop. A step carrying
+        // `tool_calls` under a type that ISN'T `PLANNER_RESPONSE` is the signal
+        // that upstream RENAMED that step. Result/input steps carry no
+        // `tool_calls`, so this can't false-positive on them.
         if matches!(obj.get("tool_calls"), Some(Value::Array(a)) if !a.is_empty()) {
             crate::source::drift::unknown_event(SOURCE_NAME, step_type);
         }
         if step_type != "USER_INPUT" && step_type != "CONVERSATION_HISTORY" && step_index > 0 {
-            // End the first tool from the previous step. Multi-tool steps have
-            // their remaining starts aged out by the reducer's pending_idle
-            // debounce, but the primary (i=0) start always gets a matching end.
+            // Only the primary (i=0) start gets a matching end; the reducer's
+            // pending_idle debounce ages out a multi-tool step's remaining starts.
             out.push(AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id: Some(format!("ag-{}-0", step_index - 1)),
@@ -109,11 +88,9 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
 }
 
 /// Decode one tool call within a `PLANNER_RESPONSE` step. A permission/question
-/// prompt becomes `Waiting`; anything else becomes an `ActivityStart` keyed
-/// `ag-{step_index}-{i}`. That id is load-bearing: the reducer ages out the
-/// non-primary (`i > 0`) starts via its pending_idle debounce, and the NEXT
-/// step ends the primary with `ag-{step_index-1}-0`, so the `i == 0` start must
-/// carry exactly this id to be matched.
+/// prompt becomes `Waiting`; anything else an `ActivityStart` keyed
+/// `ag-{step_index}-{i}`. That id is load-bearing: the NEXT step ends the
+/// primary with `ag-{step_index-1}-0`, so the `i == 0` start must carry it.
 fn decode_ag_tool_call(
     agent_id: AgentId,
     name: &str,
@@ -123,8 +100,7 @@ fn decode_ag_tool_call(
 ) -> AgentEvent {
     // `ask_permission`/`ask_question` are UNVERIFIED reverse-engineered tool
     // names — no capture confirms them (the real wire only ever showed
-    // `search_web`). Kept as the best-effort Waiting trigger; a real
-    // permission-prompt capture would pin the actual name.
+    // `search_web`). Kept as the best-effort Waiting trigger.
     if name == "ask_permission" || name == "ask_question" {
         return AgentEvent::Waiting {
             agent_id,
@@ -139,24 +115,12 @@ fn decode_ag_tool_call(
     }
 }
 
-/// The first present path/command field of an Antigravity tool call's
-/// `args`, quote-stripped — the `: target` half of the Generic display.
-/// AG tool names have no `describe_tool_target` arm (that dispatch is CC's), so
-/// AG extracts its own target and hands it to the shared `generic_tool_display`
-/// chokepoint for the caps. It stays OUTSIDE `decoder::generic_keyed_detail`
-/// (the concentrator the other non-CC sources route through) because of the
-/// quote-strip step below — that helper scans + caps but has no cleanup hook. (The
-/// former `normalize_ag_tool_input` re-KEYED the value into a
-/// `{command|pattern|file_path: …}` object for `make_tool_detail` to read —
-/// but nothing read AG-named tools' input there, so the keys were dead code
-/// and AG displays silently lost their targets.)
+/// The first present path/command field of an Antigravity tool call's `args`,
+/// quote-stripped — the `: target` half of the Generic display.
 fn ag_tool_target(args: Option<&Value>) -> Option<String> {
-    // AG's per-tool arg vocabulary (priority order); the shared scan skips a
-    // present-but-non-string key rather than giving up on it (the old
-    // `.or_else` chain `as_str`d only the first present key). Currency note:
-    // only `query` (the `search_web` arg) is capture-confirmed against real
-    // wire; the PascalCase keys are reverse-engineered from Windsurf/Cascade and
-    // UNVERIFIED — a real capture of a file/dir tool would confirm or correct them.
+    // Priority order. Only `query` (the `search_web` arg) is capture-confirmed
+    // against real wire; the PascalCase keys are reverse-engineered from
+    // Windsurf/Cascade and UNVERIFIED.
     const KEYS: &[&str] = &[
         "DirectoryPath",
         "AbsolutePath",
@@ -179,8 +143,6 @@ mod tests {
 
     #[test]
     fn negative_step_index_is_skipped_not_minted() {
-        // A negative step_index would mint an unmatchable `ag--1-0` start id,
-        // sticking the slot Active. It must be skipped like a non-integer.
         let v = serde_json::json!({
             "type": "PLANNER_RESPONSE",
             "step_index": -1,
@@ -192,7 +154,6 @@ mod tests {
             "negative step_index must emit nothing: {out:?}"
         );
 
-        // Control: a non-negative step_index still emits the tool start.
         let v = serde_json::json!({
             "type": "PLANNER_RESPONSE",
             "step_index": 0,
@@ -202,10 +163,6 @@ mod tests {
         assert_eq!(out.len(), 1, "step_index 0 still emits: {out:?}");
     }
 
-    /// The primary-tool End is scoped: USER_INPUT / CONVERSATION_HISTORY
-    /// steps are not tool completions (an `&&`→`||` flip would end a tool on
-    /// every user prompt), and step 0 has NO previous step to end — an End
-    /// there would mint the unmatchable `ag--1-0` (strict `step_index > 0`).
     #[test]
     fn only_a_real_follow_up_step_ends_the_previous_primary_tool() {
         for (ty, idx) in [
@@ -220,7 +177,6 @@ mod tests {
                 "{ty} at step {idx} must not end anything: {out:?}"
             );
         }
-        // Control: a real follow-up step ends the previous primary.
         let v = serde_json::json!({ "type": "EXECUTION_RESULT", "step_index": 2 });
         let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
         assert_eq!(out.len(), 1);
@@ -232,23 +188,15 @@ mod tests {
         }
     }
 
-    /// If upstream RENAMES `PLANNER_RESPONSE`, a step still carrying `tool_calls`
-    /// arrives under an unrecognized type. It must SAFE-DEGRADE: the tool starts
-    /// are NOT decoded (no spurious unmatched-start sticking the slot Active),
-    /// only the previous step's primary end fires — AND it must fire the
-    /// `drift::unknown_event` breadcrumb (defense #2, the sole currency backstop
-    /// for AG's schema-less format). Both halves are pinned: removing the
-    /// breadcrumb call OR changing the event output reddens this.
     #[test]
     fn renamed_planner_step_with_tool_calls_breadcrumbs_and_ends_only() {
         let renamed = serde_json::json!({
-            "type": "PLANNER_REPLY", // hypothetical upstream rename of PLANNER_RESPONSE
+            "type": "PLANNER_REPLY",
             "step_index": 2,
             "tool_calls": [ { "name": "read_file", "args": {} } ],
         });
         let logs = crate::test_capture::capture_logs(|| {
             let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, renamed).unwrap();
-            // No spurious start for the un-decoded tool; just the prev-step end.
             assert_eq!(out.len(), 1, "renamed step must mint no start: {out:?}");
             match &out[0] {
                 AgentEvent::ActivityEnd { tool_use_id, .. } => {
@@ -262,8 +210,6 @@ mod tests {
             "a tool-call step under a renamed type must fire the drift breadcrumb, got:\n{logs}"
         );
 
-        // Negative: a real result step (no tool_calls) must stay SILENT — the
-        // breadcrumb can't false-positive on the legit else-branch traffic.
         let result_step = serde_json::json!({ "type": "TOOL_RESULT", "step_index": 2 });
         let quiet = crate::test_capture::capture_logs(|| {
             decode_ag_line("/x/t.jsonl", SOURCE_NAME, result_step).unwrap();
@@ -274,10 +220,6 @@ mod tests {
         );
     }
 
-    /// The Generic display carries the tool's TARGET (quote-stripped), routed
-    /// through the shared `generic_tool_display` caps — the observable
-    /// contract of `ag_tool_target` (whose dead re-keying predecessor lost
-    /// the target entirely).
     #[test]
     fn tool_call_display_carries_the_quote_stripped_target() {
         use crate::source::ToolDetail;
@@ -303,40 +245,21 @@ mod tests {
             .collect();
         assert_eq!(
             displays,
-            [
-                "run_command: git status", // CommandLine, surrounding quotes stripped
-                "grep_search: /repo",      // SearchPath outranks query
-                "view_file",               // no recognized field → bare name
-            ]
+            ["run_command: git status", "grep_search: /repo", "view_file",]
         );
     }
 
     #[test]
     fn ag_tool_target_falls_through_a_present_non_string_key() {
-        // Regression pin for the `first_present_str` switch: a present but
-        // non-string HIGHER-priority key must not abort the scan (the old
-        // `.or_else` chain `as_str`'d only the first present key and returned
-        // None here) — it now falls through. `DirectoryPath` is a number →
-        // skipped → the string `AbsolutePath` wins.
         let args = serde_json::json!({ "DirectoryPath": 42, "AbsolutePath": "/repo/x" });
         assert_eq!(ag_tool_target(Some(&args)).as_deref(), Some("/repo/x"));
     }
 
-    // The label / session-ended / default-paths tests live with the runtime
-    // half in `native.rs`.
-
     #[test]
     fn skip_transcript_full_drops_only_the_duplicate() {
-        // The conversation's canonical transcript is walked; its untruncated
-        // twin is skipped so one conversation renders one sprite. Any OTHER
-        // `.jsonl` is admitted (the filter is narrow by construction).
         let dir = Path::new("/h/.gemini/antigravity-cli/brain/c1/.system_generated/logs");
         assert!(skip_transcript_full(&dir.join("transcript.jsonl")));
         assert!(!skip_transcript_full(&dir.join("transcript_full.jsonl")));
         assert!(skip_transcript_full(&dir.join("other.jsonl")));
     }
-
-    // The brain dir is the CLI's (`antigravity-cli`), home-rooted, on every OS —
-    // the suffix is separator-agnostic so this pins it on Unix AND Windows. The
-    // USERPROFILE-vs-HOME rooting itself is covered by platform::user_home tests.
 }

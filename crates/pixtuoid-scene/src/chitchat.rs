@@ -1,9 +1,7 @@
-//! Office chitchat — short speech-bubble conversations between agents who
-//! share a social venue. A venue is either a single social waypoint (pantry,
-//! couch, vending machine, printer) or a whole meeting room (all its sofa +
-//! standing slots), so a meeting room hosts one GROUP conversation rather than
-//! a pile of independent pairs. Conversations are N-way: each turn the current
-//! speaker rotates round-robin through whoever is present.
+//! Office chitchat — short speech-bubble conversations between agents who share
+//! a social venue: either a single social waypoint or a whole meeting room, so a
+//! room hosts one GROUP conversation rather than a pile of independent pairs.
+//! Conversations are N-way, the speaker rotating round-robin each turn.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -13,24 +11,16 @@ use pixtuoid_core::AgentId;
 use crate::layout::{Point, WaypointKind};
 
 /// Total duration of a single chitchat exchange — the speaking turns fill it
-/// exactly (`= TURNS × TURN_MS` = 6 s). There is NO separate trailing silent gap:
-/// `current_bubble`'s `turn >= TURNS` guard is a defensive bound that only bites
-/// if these constants are later changed to make `CHITCHAT_TOTAL_MS` exceed the
-/// speaking turns; at the current values the `elapsed >= CHITCHAT_TOTAL_MS` guard
-/// ends the exchange first.
+/// exactly, with no trailing silent gap.
 pub const CHITCHAT_TOTAL_MS: u64 = TURNS * TURN_MS;
 
-/// Each speaker gets 1.5 s per turn.
 const TURN_MS: u64 = 1_500;
 
-/// Number of speaking turns.
 const TURNS: u64 = 4;
 
-/// Pool of short speech-bubble quips — mostly dev humor, with a few
-/// office/watercooler lines that fit the social venues (pantry, couch, meeting
-/// room) where these conversations happen. Order doesn't matter: `current_bubble`
-/// indexes `% CHITCHAT_LINES.len()`, so the pool can grow freely. Keep each line
-/// short (≤ ~12 chars) so it fits the bubble at half-block scale.
+/// Pool of short speech-bubble quips. Order doesn't matter (`current_bubble`
+/// indexes `% CHITCHAT_LINES.len()`), but keep each line short (≤ ~12 chars) so
+/// it fits the bubble at half-block scale.
 pub const CHITCHAT_LINES: &[&str] = &[
     "git push -f",
     "// TODO",
@@ -77,7 +67,6 @@ pub const CHITCHAT_LINES: &[&str] = &[
     "rollback!",
     "vibe coding",
     "needs rebase",
-    // Watercooler — fit the pantry/couch/meeting venues.
     "more coffee?",
     "standup?",
     "lunch?",
@@ -85,8 +74,7 @@ pub const CHITCHAT_LINES: &[&str] = &[
 ];
 
 /// A social venue that hosts at most one conversation at a time. Meeting-room
-/// slots all map to the same `Room` so the room hosts a single group chat;
-/// every other social waypoint is its own `Waypoint` venue.
+/// slots all map to the same `Room`; every other social waypoint is its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VenueKey {
     /// A whole meeting room's group conversation (all its slots share one venue).
@@ -109,9 +97,7 @@ pub enum VenueKey {
 pub struct ActiveChitchat {
     /// The venue this conversation belongs to.
     pub venue: VenueKey,
-    /// Current attendees, sorted ascending by raw id for a stable speaker
-    /// rotation. Refreshed each frame so agents joining/leaving the venue are
-    /// folded into / out of the rotation.
+    /// Current attendees, sorted ascending by raw id for a stable rotation.
     pub participants: Vec<AgentId>,
     /// When the conversation began — the turn/expiry clock.
     pub started_at: SystemTime,
@@ -119,12 +105,10 @@ pub struct ActiveChitchat {
 }
 
 impl ActiveChitchat {
-    /// Starts a conversation at `venue` among `participants`, seeded from the
-    /// sorted attendee set plus the start time.
+    /// Starts a conversation at `venue` among `participants`.
     pub fn new(venue: VenueKey, participants: Vec<AgentId>, now: SystemTime) -> Self {
-        // Direct call to the model-layer `anim::elapsed_ms` (NOT the render-layer
-        // `pixel_painter::epoch_ms` forwarder — chitchat is a model module and
-        // must not depend on the render layer).
+        // NOT the render-layer `pixel_painter::epoch_ms` forwarder — chitchat is a
+        // model module and must not depend on the render layer.
         let ms = crate::anim::elapsed_ms(now, SystemTime::UNIX_EPOCH);
         let mut chat = Self {
             venue,
@@ -133,10 +117,9 @@ impl ActiveChitchat {
             seed: 0,
         };
         chat.set_participants(participants);
-        // Seed from the SORTED participant set (set_participants sorts) + start
-        // time, so the line choice is independent of the HashMap iteration order
-        // the `present` vec was built in — restarting the same group never flips
-        // the line just because agents were enumerated in a different order.
+        // Seed from the SORTED set so the line choice is independent of the
+        // HashMap iteration order `present` was built in — restarting the same
+        // group must never flip the line.
         chat.seed = chat
             .participants
             .iter()
@@ -146,8 +129,8 @@ impl ActiveChitchat {
         chat
     }
 
-    /// Replace the attendee set (sorted + de-duplicated) — called each frame so
-    /// the rotation tracks who is actually present.
+    /// Replace the attendee set (sorted + de-duplicated), tracking who is
+    /// actually present this frame.
     pub fn set_participants(&mut self, mut participants: Vec<AgentId>) {
         participants.sort_by_key(|a| a.raw());
         participants.dedup();
@@ -165,9 +148,8 @@ impl ActiveChitchat {
             .unwrap_or(CHITCHAT_TOTAL_MS)
     }
 
-    /// The agent speaking this turn and their line, or `None` in the silent
-    /// gap / once expired / if nobody is present. The speaker rotates
-    /// round-robin through `participants`.
+    /// The agent speaking this turn and their line, or `None` once expired / if
+    /// nobody is present. The speaker rotates round-robin through `participants`.
     pub fn current_bubble(&self, now: SystemTime) -> Option<(AgentId, &'static str)> {
         let elapsed = self.elapsed_ms(now);
         if elapsed >= CHITCHAT_TOTAL_MS {
@@ -185,11 +167,8 @@ impl ActiveChitchat {
 
 /// How a waypoint kind participates in chitchat — the ONE declared social fact
 /// both [`supports_chitchat`] and [`venue_wp_idx`] read. Matched EXHAUSTIVELY
-/// (no `_`), so a new [`WaypointKind`] must classify itself or the build fails,
-/// instead of silently defaulting to non-social + un-collapsed (the old
-/// `matches!` / `_ => wp_idx` gap). Pinned over `WaypointKind::ALL` by
-/// `every_waypoint_kind_declares_a_chitchat_venue`, the twin of
-/// `no_exclusive_waypoint_kind_ever_steps_aside`.
+/// (no `_`), so a new [`WaypointKind`] must classify itself or the build fails
+/// instead of silently defaulting to non-social + un-collapsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChitchatVenue {
     /// Not a social spot (phone booth, standing desk).
@@ -197,13 +176,13 @@ enum ChitchatVenue {
     /// Eligible; chats key to the agent's own waypoint slot.
     Solo,
     /// Eligible; every slot of this kind collapses to ONE venue, keyed to the
-    /// first-of-kind waypoint (couch seats, island stands — all chat together).
-    /// ORTHOGONAL to meeting-room group chat, which is keyed by `room_id`.
+    /// first-of-kind waypoint. ORTHOGONAL to meeting-room group chat, which is
+    /// keyed by `room_id`.
     Group,
 }
 
 /// The single social classification `supports_chitchat` + `venue_wp_idx` derive
-/// from — see [`ChitchatVenue`] for why the match is exhaustive.
+/// from.
 fn chitchat_venue(kind: WaypointKind) -> ChitchatVenue {
     match kind {
         WaypointKind::Couch | WaypointKind::Island => ChitchatVenue::Group,
@@ -218,13 +197,11 @@ fn chitchat_venue(kind: WaypointKind) -> ChitchatVenue {
 }
 
 /// The chitchat `wp_idx` a waypoint visitor groups under. Multi-slot venues
-/// (the 3 lounge-couch seats, the kitchen island's stands) collapse to ONE
-/// venue — the first waypoint OF THAT KIND — so each hosts a single group
-/// conversation like the meeting room, WITHOUT overloading the meeting-only
-/// `room_id` field (which indexes `meeting_rooms`). Every other waypoint
-/// keys on its own index. Takes the waypoint slice and finds the group
-/// anchor ITSELF — a caller-supplied index invites the bug that merged
-/// island standers into the couch's conversation.
+/// collapse to ONE venue — the first waypoint OF THAT KIND — so each hosts a
+/// single group conversation like the meeting room, WITHOUT overloading the
+/// meeting-only `room_id` field. Finds the group anchor ITSELF from the waypoint
+/// slice: a caller-supplied index invites the bug that merged island standers
+/// into the couch's conversation.
 pub fn venue_wp_idx(
     kind: WaypointKind,
     wp_idx: usize,
@@ -239,8 +216,7 @@ pub fn venue_wp_idx(
     }
 }
 
-/// Whether agents at this waypoint kind can start a chitchat — any venue but
-/// `ChitchatVenue::None`.
+/// Whether agents at this waypoint kind can start a chitchat.
 pub fn supports_chitchat(kind: WaypointKind) -> bool {
     chitchat_venue(kind) != ChitchatVenue::None
 }
@@ -253,10 +229,8 @@ pub struct ChitchatBubble {
     pub anchor: Point,
 }
 
-/// A chitchat-eligible agent present at a venue this frame. `room_id` is
-/// `Some` for meeting slots (they group by room) and `None` for single-point
-/// waypoints (which group by `wp_idx`). Named (not a tuple) so the producer
-/// and consumer can't transpose the two `usize`-ish fields.
+/// A chitchat-eligible agent present at a venue this frame. Named (not a tuple)
+/// so the producer and consumer can't transpose the two `usize`-ish fields.
 #[derive(Debug, Clone, Copy)]
 pub struct Visitor {
     /// The visitor's waypoint slot index.
@@ -277,10 +251,8 @@ pub fn update_and_collect(
     visitors: &[Visitor],
     now: SystemTime,
 ) -> Vec<ChitchatBubble> {
-    // Expire old conversations.
     state.retain(|_, chat| !chat.is_expired(now));
 
-    // Group visitors by venue (meeting slots → their room, others → the point).
     let mut by_venue: HashMap<VenueKey, Vec<(AgentId, Point)>> = HashMap::new();
     for v in visitors {
         let venue = match v.room_id {
@@ -314,7 +286,6 @@ pub fn update_and_collect(
         let chat = state
             .entry(*venue)
             .or_insert_with(|| ActiveChitchat::new(*venue, present.clone(), now));
-        // Refresh the rotation so joiners/leavers are tracked.
         chat.set_participants(present);
 
         if let Some((speaker_id, text)) = chat.current_bubble(now) {
@@ -362,11 +333,9 @@ mod tests {
         }
     }
 
-    // The bubble Vec is painted in order, so its order IS a z-order for the same
-    // world state. `by_venue` is a HashMap and std seeds a fresh `RandomState`
-    // per instance, so two calls in ONE process can iterate identical contents in
-    // different orders; 32 rounds makes a 3-venue permutation impossible to pass
-    // by luck.
+    // `by_venue` is a HashMap and std seeds a fresh `RandomState` per instance, so
+    // two calls in ONE process can iterate identical contents in different orders;
+    // 32 rounds makes a 3-venue permutation impossible to pass by luck.
     #[test]
     fn bubbles_are_emitted_in_a_deterministic_venue_order() {
         let now = base_time();
@@ -411,7 +380,6 @@ mod tests {
         let start = base_time();
         let (a, b) = (aid("/a"), aid("/b"));
         let chat = ActiveChitchat::new(vk(0), vec![a, b], start);
-        // Sorted ascending: participants[0] speaks turn 0, [1] turn 1, [0] 2...
         let p0 = chat.participants[0];
         let p1 = chat.participants[1];
         assert_eq!(chat.current_bubble(start).unwrap().0, p0);
@@ -434,7 +402,6 @@ mod tests {
         let start = base_time();
         let ids: Vec<AgentId> = (0..4).map(|i| aid(&format!("/g{i}"))).collect();
         let chat = ActiveChitchat::new(vk(0), ids.clone(), start);
-        // Four turns, four participants → every participant speaks exactly once.
         let mut speakers = std::collections::HashSet::new();
         for turn in 0..4u64 {
             let t = start + Duration::from_millis(turn * 1_500);
@@ -451,7 +418,6 @@ mod tests {
         let start = base_time();
         let chat = ActiveChitchat::new(vk(0), vec![aid("/x"), aid("/y"), aid("/z")], start);
         let p = chat.participants.clone();
-        // turns 0,1,2,3 → p0,p1,p2,p0
         let speaker = |turn: u64| {
             chat.current_bubble(start + Duration::from_millis(turn * 1_500))
                 .unwrap()
@@ -465,8 +431,6 @@ mod tests {
 
     #[test]
     fn empty_participants_yields_no_bubble() {
-        // The participants.is_empty() short-circuit in current_bubble: a venue
-        // with no attendees never speaks even at turn 0.
         let start = base_time();
         let chat = ActiveChitchat::new(vk(0), vec![], start);
         assert!(chat.current_bubble(start).is_none());
@@ -483,11 +447,8 @@ mod tests {
 
     #[test]
     fn current_bubble_line_advances_across_turns_not_frozen() {
-        // Teeth for the LINE selection (`line_idx = seed.wrapping_add(turn)`, the
-        // `.1` of the tuple): every round-robin test above asserts only the SPEAKER
-        // (`.0`), so dropping `turn` from the index — freezing every turn on one
-        // quip — goes uncaught. Assert each line is drawn from the pool AND that the
-        // line is not frozen across the exchange.
+        // Every round-robin test above asserts only the SPEAKER (`.0`), so dropping
+        // `turn` from `line_idx` — freezing every turn on one quip — goes uncaught.
         let start = base_time();
         let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
         let lines: Vec<&str> = (0..TURNS)
@@ -510,7 +471,6 @@ mod tests {
     fn meeting_slots_in_same_room_form_one_conversation() {
         let now = base_time();
         let mut state = HashMap::new();
-        // Two different meeting-room waypoints (wp 4 and 5) in room 0.
         let visitors: Vec<Visitor> = vec![vis(4, "/a", Some(0)), vis(5, "/b", Some(0))];
         let bubbles = update_and_collect(&mut state, 0, &visitors, now);
         assert_eq!(state.len(), 1, "one room conversation, not two");
@@ -523,8 +483,6 @@ mod tests {
 
     #[test]
     fn two_meeting_rooms_host_separate_conversations() {
-        // A dual-meeting-room floor: room 0 and room 1 each get a pair. They
-        // must NOT merge — `room_id` keys distinct venues.
         let now = base_time();
         let mut state = HashMap::new();
         let visitors: Vec<Visitor> = vec![
@@ -550,8 +508,6 @@ mod tests {
     fn distinct_waypoints_do_not_merge() {
         let now = base_time();
         let mut state = HashMap::new();
-        // Two agents at wp 0 and one agent each at wp 1 — only wp 0 (with 2)
-        // chats; wp 1's lone agent does not.
         let visitors: Vec<Visitor> =
             vec![vis(0, "/a", None), vis(0, "/b", None), vis(1, "/c", None)];
         let bubbles = update_and_collect(&mut state, 0, &visitors, now);
@@ -577,7 +533,6 @@ mod tests {
     fn participant_join_extends_rotation() {
         let now = base_time();
         let mut state = HashMap::new();
-        // Start with two agents in room 0.
         let v2: Vec<Visitor> = vec![vis(4, "/a", Some(0)), vis(5, "/b", Some(0))];
         update_and_collect(&mut state, 0, &v2, now);
         let key = VenueKey::Room {
@@ -586,7 +541,6 @@ mod tests {
         };
         assert_eq!(state.get(&key).unwrap().participants.len(), 2);
 
-        // A third joins mid-conversation → rotation now includes them.
         let v3: Vec<Visitor> = vec![
             vis(4, "/a", Some(0)),
             vis(5, "/b", Some(0)),
@@ -603,7 +557,8 @@ mod tests {
         let visitors: Vec<Visitor> = vec![vis(0, "/a", None), vis(0, "/b", None)];
         update_and_collect(&mut state, 0, &visitors, start);
         assert_eq!(state.len(), 1);
-        // Past expiry → reaped, then a fresh one created (both still present).
+        // Past expiry the old chat is reaped and a fresh one created — hence 1,
+        // not 0 and not 2.
         update_and_collect(
             &mut state,
             0,
@@ -615,11 +570,8 @@ mod tests {
 
     #[test]
     fn multi_slot_venues_collapse_to_first_of_their_own_kind() {
-        // The 3 couch seats collapse to the first COUCH index; the island's
-        // stands collapse to the first ISLAND index — each kind anchors on
-        // its OWN first waypoint (the old caller-computed group index passed
-        // the couch's index for every kind, which merged island standers
-        // into the couch conversation). Other waypoints keep their own index.
+        // Each kind must anchor on its OWN first waypoint: a single group index
+        // for every kind merges island standers into the couch conversation.
         use crate::layout::{Facing, Point, Waypoint};
         let wp = |kind, x| Waypoint {
             pos: Point { x, y: 10 },
@@ -638,14 +590,11 @@ mod tests {
         ];
         assert_eq!(venue_wp_idx(WaypointKind::Couch, 1, &wps), 1);
         assert_eq!(venue_wp_idx(WaypointKind::Couch, 3, &wps), 1);
-        // Island stands anchor on the ISLAND's first index, never the couch's.
         assert_eq!(venue_wp_idx(WaypointKind::Island, 5, &wps), 4);
         assert_eq!(venue_wp_idx(WaypointKind::Island, 4, &wps), 4);
-        // Non-collapsible kinds keep their own index.
         assert_eq!(venue_wp_idx(WaypointKind::Pantry, 0, &wps), 0);
         assert_eq!(venue_wp_idx(WaypointKind::SnackShelf, 6, &wps), 6);
         assert_eq!(venue_wp_idx(WaypointKind::MeetingSofa, 3, &wps), 3);
-        // Degenerate: no waypoint of the kind → falls back to self.
         assert_eq!(venue_wp_idx(WaypointKind::Couch, 5, &[]), 5);
     }
 
@@ -665,10 +614,8 @@ mod tests {
 
     #[test]
     fn every_waypoint_kind_declares_a_chitchat_venue() {
-        // The forcing twin of no_exclusive_waypoint_kind_ever_steps_aside:
-        // chitchat_venue is matched exhaustively, so a new WaypointKind fails to
-        // compile until classified; this pins the derivations to it over ALL so
-        // supports_chitchat / venue_wp_idx can never drift from the one fact.
+        // Pins the derivations to `chitchat_venue` over ALL, so supports_chitchat /
+        // venue_wp_idx can never drift from the one declared fact.
         let (mut social, mut group) = (0, 0);
         for &kind in WaypointKind::ALL {
             let venue = chitchat_venue(kind);

@@ -1,35 +1,26 @@
 ---
-// Self-hosted fonts (@fontsource): bundled into the build + served same-origin,
-// so no Google Fonts round-trip on load — faster LCP, a CSP with no external
-// font origins, no third-party tracking, and they actually load behind the GFW.
-// Family names ('Jersey 10' / 'Monaspace Neon' / 'Lora') match global.css as-is.
+// Self-hosted (@fontsource): a CSP with no external font origins, and they load
+// behind the GFW.
 import '@fontsource/jersey-10/400.css';
-// The hero/statement display face, preloaded (below): resolve the LATIN subset
-// woff2 through Vite (?url) so the <link> carries the same hashed asset URL the
-// @fontsource CSS resolves to — rebuild-proof, no hardcoded hash.
+// Resolve the LATIN subset woff2 through Vite (?url) so the preload <link> below
+// carries the same hashed asset URL the @fontsource CSS resolves to.
 import jerseyLatinWoff2 from '@fontsource/jersey-10/files/jersey-10-latin-400-normal.woff2?url';
 import monaspaceLatinWoff2 from '@fontsource/monaspace-neon/files/monaspace-neon-latin-400-normal.woff2?url';
 import loraLatinWoff2 from '@fontsource/lora/files/lora-latin-400-normal.woff2?url';
-// 600 (SemiBold), not 500: the run-in step titles / docs links / tools CLI-name
-// column declare `font-weight: 600` on Lora — with only 400/500 loaded the 600
-// silently painted as Medium (500 was the accidental fallback, referenced by
-// nothing else). Loading the real 600 gives those a genuine weight step.
+// Lora 600 (SemiBold) is loaded, not 500: with only 400/500 the `font-weight: 600`
+// call sites silently painted as Medium.
 import '../styles/fonts.css';
 import 'prismjs/themes/prism-tomorrow.css';
 import '../styles/global.css';
 import { asset, THEMES, THEME_BG, THEME_STORAGE_KEY, VALID_THEMES, SITE_ORIGIN } from '../consts';
 import sources from '../sources.json';
 
-// Splash single sources: the CLI count comes from the sources manifest's
-// length (the same file the tools board renders + the Rust bridge test pins).
 const CLI_COUNT = sources.length;
 
 interface Props {
   title?: string;
   description?: string;
   preloadImage?: string;
-  // schema.org JSON-LD for this page (e.g. the homepage's SoftwareApplication).
-  // Rendered verbatim as an `application/ld+json` block when present.
   jsonLd?: Record<string, unknown>;
 }
 
@@ -40,17 +31,15 @@ const {
   jsonLd,
 } = Astro.props;
 
-// Absolute URLs for crawlers (Astro.site is the deploy origin).
 const SITE = Astro.site ?? new URL(SITE_ORIGIN);
 const ogImage = new URL(asset('demos/hero-poster.png'), SITE).href;
-// Per-page canonical/og:url — Astro.url.pathname includes the configured base in
-// the static build, so /config no longer self-declares the homepage as canonical.
+// Astro.url.pathname includes the configured base in the static build, so /config
+// doesn't self-declare the homepage as canonical.
 const canonical = new URL(Astro.url.pathname, SITE).href;
-const version = __PIXTUOID_VERSION__; // the latest release TAG (Cargo.toml is only the tag-less fallback — config/released-version.mjs)
+const version = __PIXTUOID_VERSION__; // the latest release TAG, not Cargo.toml (config/released-version.mjs)
 
 // Escape `<` so no string value can break out of the <script> block (a `</script`
-// or `<!--` in serialized JSON would otherwise close it). Defense-in-depth: every
-// value is a build-time constant today, but the jsonLd prop is typed open.
+// or `<!--` in serialized JSON would otherwise close it).
 const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : null;
 ---
 
@@ -60,38 +49,27 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     {
-      /* CSP: injected here by Astro's built-in security.csp (astro.config.mjs)
-        — hash-based script-src (NO 'unsafe-inline'), each is:inline script
-        whitelisted by content hash via the cspInlineHashes() build hook.
-        Config + rationale live in astro.config.mjs; build/preview-only. */
+      /* CSP: injected here by Astro's built-in security.csp (astro.config.mjs) —
+        hash-based script-src (NO 'unsafe-inline'), each is:inline script
+        whitelisted by content hash via the cspInlineHashes() build hook. */
     }
     <title>{title}</title>
     <meta name="description" content={description} />
-    {
-      /* a little pixtuoid coworker as the tab / home-screen icon (PNG since it's
-        pixel art; mobile Safari also ignores SVG favicons) */
-    }
+    {/* PNG, not SVG: it's pixel art, and mobile Safari ignores SVG favicons */}
     <link id="favicon" rel="icon" type="image/png" sizes="32x32" href={asset('favicon-32.png')} />
     <link rel="icon" type="image/png" sizes="180x180" href={asset('apple-touch-icon.png')} />
     <link rel="apple-touch-icon" href={asset('apple-touch-icon.png')} />
     <link rel="canonical" href={canonical} />
-    {
-      /* default = day --bg (single-sourced with the JS theme map); the theme-init
-      script below updates it for night/dracula */
-    }
     <meta name="theme-color" content={THEME_BG.day} />
     {
-      /* The three above-fold faces: preload their regular latin subsets so
-        they can win first paint without a late swap. `crossorigin` is required
-        even same-origin — font requests are CORS-mode, and a mismatch
-        double-downloads. */
+      /* `crossorigin` is required even same-origin — font requests are
+        CORS-mode, and a mismatch double-downloads. */
     }
     <link rel="preload" as="font" type="font/woff2" href={jerseyLatinWoff2} crossorigin />
     <link rel="preload" as="font" type="font/woff2" href={monaspaceLatinWoff2} crossorigin />
     <link rel="preload" as="font" type="font/woff2" href={loraLatinWoff2} crossorigin />
     {preloadImage && <link rel="preload" as="image" href={preloadImage} fetchpriority="high" />}
 
-    <!-- Open Graph / Twitter -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content={canonical} />
     <meta property="og:title" content={title} />
@@ -99,16 +77,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     <meta property="og:image" content={ogImage} />
     <meta name="twitter:card" content="summary_large_image" />
 
-    {
-      /* schema.org structured data — the homepage passes a SoftwareApplication
-        so search engines can render a rich result for the tool. */
-    }
     {jsonLdSafe && <script type="application/ld+json" is:inline set:html={jsonLdSafe} />}
-
-    {
-      /* Fonts are self-hosted via @fontsource (imported in the frontmatter), so
-        there is no Google Fonts <link> to preconnect to or render-block on. */
-    }
 
     <!-- No-FOUC theme init: ?theme= override → saved choice → system → day -->
     <script
@@ -119,20 +88,13 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         themeBG: THEME_BG,
       }}
     >
-      // THE site clock boundary (7/19) — the one client-side source of truth,
-      // defined parse-first so every later consumer (this init, the Escape
-      // fallback below, the statusline clock) reads the SAME predicate and can't
-      // drift. An approximation of the engine's own dawn/dusk ramp (time_of_day.rs
-      // ramps ~5-8 and ~17-20); if this ever re-tunes, it re-tunes everywhere at
-      // once.
+      // THE site clock boundary (7/19) — one source of truth for this init, the
+      // Escape fallback and the statusline clock, approximating the engine's own
+      // dawn/dusk ramp (time_of_day.rs).
       window.__pixNight = function () {
         const h = new Date().getHours();
         return h >= 19 || h < 7;
       };
-      // Parse-first theme constants (seeded from consts.ts via define:vars): ONE
-      // storage key + valid set + BG map + clock→system fallback, so the init
-      // below, the Escape restore, the FX theme-color sync, and Nav's toggle all
-      // read the SAME source and can't drift (the __pixNight single-source idiom).
       window.__pixTheme = {
         KEY: themeKey,
         VALID: validThemes,
@@ -140,20 +102,14 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         ok: function (v) {
           return validThemes.indexOf(v) !== -1;
         },
-        // clock, then system — the ONE fallback both init and Escape restore use
         fallback: function () {
           return window.__pixNight() || window.matchMedia('(prefers-color-scheme: dark)').matches
             ? 'night'
             : 'day';
         },
       };
-      // Parse-first key helpers: the typing-surface guard (was copied 3×) and the
-      // WCAG 2.1.4 focus gate — only `t` (decorative retint) rides it; digits 1–6
-      // are document-global, gated by enabled()/typing() and the boot guard instead.
-      // A shortcut fires only when a NEUTRAL surface holds focus — the page body,
-      // a section a floor-jump parked focus on, or the statusline — never a real
-      // interactive control (link/button/field), so voice-control dictation or
-      // stray focus can't trigger floor/theme changes.
+      // shortcutContext gates a shortcut to a NEUTRAL surface — never a real
+      // interactive control, so dictation or stray focus can't fire it.
       window.__pixKeys = {
         typing: function (e) {
           const t = e && e.target;
@@ -169,11 +125,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           const sl = document.getElementById('statusline');
           return !!(sl && sl.contains(a));
         },
-        // WCAG 2.1.4 off-switch: the digit vocabulary is single-character
-        // and NOT focus-scoped, so it needs a documented turn-off. Persisted in
-        // localStorage('pix-keys') (default on); the statusline popover toggles
-        // it via setEnabled(), the document key handler below reads enabled() at
-        // each keydown. The flag string lives ONCE — here.
+        // WCAG 2.1.4 off-switch: the digit vocabulary is single-character and NOT
+        // focus-scoped, so it needs a documented turn-off.
         enabled: function () {
           try {
             return localStorage.getItem('pix-keys') !== 'off';
@@ -192,10 +145,9 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           const T = window.__pixTheme;
           const forced = new URLSearchParams(location.search).get('theme');
           const pick = T.ok(forced) ? forced : localStorage.getItem(T.KEY);
-          // The app's office lighting follows the wall clock; until the visitor
-          // chooses a theme, so does the site — arriving after dark means the
-          // night office. The clock only ever turns night ON: a dark-preference
-          // user keeps night at noon via the system fallback (see T.fallback).
+          // Until the visitor chooses a theme the site follows the wall clock,
+          // like the office lighting — but the clock only ever turns night ON, so
+          // a dark-preference user still keeps night at noon via T.fallback.
           const afterHours = window.__pixNight();
           const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
           const theme = T.ok(pick) ? pick : T.fallback();
@@ -203,7 +155,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           if (!T.ok(pick) && afterHours && !sysDark)
             document.documentElement.dataset.clockNight = '1';
           document.documentElement.dataset.theme = theme;
-          // keep the mobile browser-chrome tint in sync with the resolved theme
           const meta = document.querySelector('meta[name="theme-color"]');
           if (meta && T.BG[theme]) meta.setAttribute('content', T.BG[theme]);
         } catch (e) {
@@ -212,7 +163,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
       })();
     </script>
 
-    <!-- show the boot intro once per session (skip for reduced-motion) -->
     <script is:inline>
       try {
         if (
@@ -225,11 +175,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     </script>
 
     {
-      /* Progressive enhancement: .reveal starts opacity:0 and JS adds .in on
-        scroll. With JS disabled (or a script/CSP failure) every below-hero
-        section would stay invisible — a blank page under the hero. Reduced-motion
-        already shows them via a media query; this rescues the non-reduced no-JS
-        case too. (style-src keeps 'unsafe-inline', so no CSP hash needed.) */
+      /* .reveal starts opacity:0 and JS adds .in on scroll, so with JS disabled
+        (or a script/CSP failure) every below-hero section would stay invisible. */
     }
     <noscript>
       <style>
@@ -259,7 +206,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
 
     <slot />
 
-    <!-- reveal-on-scroll: one orchestrated entrance per section -->
     <script is:inline>
       (function () {
         function setup() {
@@ -286,29 +232,22 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
             io.observe(el);
           });
         }
-        // Wait for the boot overlay to clear (pix:revealed fires immediately when
-        // boot is skipped/reduced-motion) so above-fold sections don't run their
-        // 0.7s entrance hidden behind the opaque overlay (#119).
+        // Wait for the boot overlay to clear, or above-fold sections run their
+        // entrance hidden behind the opaque overlay (#119).
         document.addEventListener('pix:revealed', setup, { once: true });
       })();
     </script>
 
-    <!-- FX: CRT power-on + a `dracula` easter egg. (The pointer glow + 3D tilt
-         are gone on purpose: perspective transforms smear pixel art's crisp
-         edges, and both were generic-SaaS flair — the live office backdrop +
-         statusline replaced them with product-true chrome.) -->
+    <!-- FX: CRT power-on + a `dracula` easter egg. (No pointer glow / 3D tilt on
+         purpose: perspective transforms smear pixel art's crisp edges.) -->
     <script is:inline>
       (function () {
         const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
         const reduce = reduceMQ.matches;
 
-        // browser-chrome tint per theme comes from the parse-first single source
         const themeMeta = document.querySelector('meta[name="theme-color"]');
-        // …and the brand mark: the tab favicon AND the on-page nav/footer marks
-        // are the SAME asset pair (one brand source, no drift), so the little
-        // coworker turns the lights off after dark everywhere at once. Night ⇔
-        // any non-day theme (dracula included), matching the Nav toggle. Path is
-        // derived from the current href so the Pages base-path holds.
+        // The favicon and the on-page nav/footer marks are one asset pair; each
+        // path is derived from the current href so the Pages base-path holds.
         const fav = document.getElementById('favicon');
         const brandMarks = document.querySelectorAll('.js-brand-mark');
         function syncBrand() {
@@ -328,12 +267,11 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           if (themeMeta && window.__pixTheme.BG[t])
             themeMeta.setAttribute('content', window.__pixTheme.BG[t]);
           syncBrand();
-          // any explicit theme act ends the clock's authority (and its footer line)
           delete document.documentElement.dataset.clockNight;
         });
 
-        // defer the CRT power-on observer until after boot (same as reveal, #119)
-        // so the gallery terminal doesn't power on hidden behind the boot overlay
+        // defer until after boot so the CRT doesn't power on hidden behind the
+        // boot overlay (#119)
         document.addEventListener(
           'pix:revealed',
           function () {
@@ -363,19 +301,17 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           s.removeProperty('--amber');
         }
         let buf = '';
-        // set the theme AND notify the Nav toggle so its icon/aria-label stay in
-        // sync (otherwise Escape / the dracula egg leave the toggle inverted)
+        // notify the Nav toggle too, or Escape / the dracula egg leave its
+        // icon and aria-label inverted
         const setTheme = function (t) {
           document.documentElement.dataset.theme = t;
           document.dispatchEvent(new CustomEvent('pix:theme'));
         };
         document.addEventListener('keydown', function (e) {
-          // don't hijack typing: skip when a field is focused or a modifier is held
           if (e.ctrlKey || e.metaKey || e.altKey) return;
           if (window.__pixKeys.typing(e)) return;
-          // Escape "skips the boot" — during boot it must NOT also run setTheme
-          // (which clears clock-night + fires a spurious pix:theme). The digit
-          // and `t` handlers already bail while booting; match them.
+          // Escape "skips the boot" — during boot it must NOT also run setTheme,
+          // which would clear clock-night and fire a spurious pix:theme.
           if (document.documentElement.dataset.booting === '1') return;
           const T = window.__pixTheme;
           if (e.key === 'Escape') {
@@ -384,11 +320,9 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
             try {
               saved = localStorage.getItem(T.KEY);
             } catch (e2) {}
-            // validate like the no-FOUC init — a stale/garbage stored id must not
-            // land in data-theme — and restore through the SAME fallback chain
-            // the init uses (clock, then system), or an after-hours visitor with
-            // no saved choice would get snapped to day by the Escape that merely
-            // closed the Docs dropdown.
+            // Restore through the SAME validate + fallback chain the no-FOUC init
+            // uses, or an after-hours visitor with no saved choice gets snapped
+            // to day by the Escape that merely closed the Docs dropdown.
             setTheme(T.ok(saved) ? saved : T.fallback());
             return;
           }
@@ -403,10 +337,9 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
       })();
     </script>
 
-    <!-- the app's literal `t` key: retint the page through the same theme
-         palette list the THEMES channel uses (decorative hues only — the
-         AA-tuned --coral-deep is deliberately exempt, same as the gallery
-         chips). Esc restores; the chips' pressed state clears via pix:theme. -->
+    <!-- the app's literal `t` key: retint the page through the THEMES palette.
+         Decorative hues only — the AA-tuned --coral-deep is deliberately
+         exempt. -->
     <script is:inline define:vars={{ accents: THEMES.map((t) => ({ a: t.accent, b: t.accent2 })) }}>
       (function () {
         let i = -1;
@@ -415,8 +348,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           // "press any key to skip" the boot must not also retint (inert blocks
           // focus/clicks, not document-level keydown)
           if (document.documentElement.dataset.booting === '1') return;
-          // WCAG 2.1.4: fire only from a neutral focus context (never a focused
-          // control or text field), so dictation / stray focus can't retint.
+          // WCAG 2.1.4: neutral focus context only, so dictation can't retint
           if (window.__pixKeys.typing(e) || !window.__pixKeys.shortcutContext()) return;
           i = (i + 1) % accents.length;
           const s = document.documentElement.style;
@@ -427,28 +359,21 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
       })();
     </script>
 
-    <!-- The building's key vocabulary (Working Building §4): digits 1–6 ride to
-         [data-floor] sections from ANY scroll depth (the old focus-context gate
-         killed them after any content click — the audit's dead-keys bug).
-         Guards: never while typing (input/textarea/contenteditable), never
-         during the boot splash, never with a modifier held; the WCAG 2.1.4
-         off-switch (statusline toggle → __pixKeys.enabled()) disables the
-         document-global floor digits; a focused [data-keys-scope] region (the
-         CRT studio, wb-3) claims the digits locally instead — its scoped handler
-         is focus-gated, independently satisfying 2.1.4. `t` keeps its stricter
-         gate in the FX script above. -->
+    <!-- Digits 1–6 ride to [data-floor] sections from ANY scroll depth, so unlike
+         `t` they are deliberately NOT focus-gated: WCAG 2.1.4 is satisfied by the
+         __pixKeys.enabled() off-switch instead. -->
     <script is:inline>
       (function () {
         document.addEventListener('keydown', function (e) {
           if (e.ctrlKey || e.metaKey || e.altKey) return;
           if (document.documentElement.dataset.booting === '1') return;
           if (window.__pixKeys.typing(e)) return;
-          if (!window.__pixKeys.enabled()) return; // WCAG 2.1.4 turn-off
+          if (!window.__pixKeys.enabled()) return;
           if (!/^[1-6]$/.test(e.key)) return;
           const a = document.activeElement;
           if (a && a.closest && a.closest('[data-keys-scope]')) return;
           const sec = document.querySelector('[data-floor="' + e.key + 'F"]');
-          if (!sec) return; // docs/404 have no floors (until wb-5) — inert, not an error
+          if (!sec) return; // docs/404 have no floors — inert, not an error
           const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
           sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
           sec.setAttribute('tabindex', '-1');
@@ -457,14 +382,13 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
       })();
     </script>
 
-    <!-- boot intro sequence → dispatches `pix:revealed` (immediately if skipped/disabled) -->
     <script is:inline>
       (function () {
         const root = document.documentElement;
         const boot = document.getElementById('boot');
         function reveal() {
-          // Flag mirrors the one-shot event so a late-attaching listener (the
-          // office backdrop, if its script ran after this) still sees the reveal.
+          // Flag mirrors the one-shot event so a late-attaching listener still
+          // sees the reveal.
           window.__pixRevealed = true;
           performance.mark('pixtuoid-revealed');
           document.dispatchEvent(new Event('pix:revealed'));
@@ -473,8 +397,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           reveal();
           return;
         }
-        // make the page behind the opaque overlay inert + hidden from AT, so a
-        // keyboard / screen-reader user can't reach controls obscured under it
+        // inert + aria-hidden the page behind the opaque overlay, so a keyboard
+        // or screen-reader user can't reach controls obscured under it
         const bg = [];
         Array.prototype.forEach.call(document.body.children, function (el) {
           if (el !== boot) {
@@ -484,16 +408,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           }
         });
         const lines = boot.querySelectorAll('.boot__line');
-        // §1 budget: ~2.1s total on the deterministic (no live-engine-wait) path,
-        // matching production's felt pace (user decision 2026-07-06: the prior
-        // 450ms/line cadence measured ~2.5s end-to-end — noticeably slower —
-        // once the settle fade below is counted; readability of each line still
-        // outranks raw speed, so the dwell is trimmed, not cut to a blur; the
-        // splash stays skippable regardless). Four splash lines: version,
-        // booting, themes, CLI count. FIRST_MS + 4×LINE_MS + the 460ms settle
-        // fade (below) ≈ 100 + 4×390 + 460 = 2,120ms end-to-end.
-        // The live-office/index page's ACTUAL total additionally depends on
-        // window.__pixEngineReady — bounded separately by MAX_ENGINE_WAITS, not this budget.
+        // Tuned by eye: per-line readability outranks raw speed, and the splash
+        // stays skippable regardless.
         const LINE_MS = 390;
         const FIRST_MS = 100;
         let i = 0,
@@ -513,22 +429,15 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           boot.removeEventListener('click', skip);
           document.removeEventListener('keydown', onKey);
           reveal();
-          // leave focus at the document start (don't focus #main: it would scroll
-          // the page and skip keyboard users past the nav/skip-link). The bg is
-          // no longer inert, so Tab flows skip-link -> nav -> content as normal.
+          // Leave focus at the document start — focusing #main would scroll the
+          // page and skip keyboard users past the nav/skip-link.
         }
         function finish(force) {
           if (done) return;
           if (!force && document.getElementById('office-live')) {
-            // Level 2: log is done — now HOLD until the office engine is actually
-            // ready (window.__pixEngineReady, set by OfficeBackdrop on the first live
-            // frame, or on wasm failure/absence so we never hang), so the splash lifts
-            // STRAIGHT into the office reveal instead of onto a bg gap.
-            // GATED on the office being PRESENT: this splash lives in the shared
-            // Base layout, but OfficeBackdrop (#office-live) is index-only — it's
-            // the sole setter of __pixEngineReady. On docs/404 first visits nothing
-            // would ever set the flag, so without this guard the splash would hang
-            // the full cap with the page inert. No office → settle() directly.
+            // Hold for __pixEngineReady so the splash lifts STRAIGHT into the
+            // office reveal. GATED on #office-live: OfficeBackdrop is its sole
+            // setter and is index-only, so docs/404 would hang the full cap inert.
             waitForEngine(0);
           } else {
             done = true;
@@ -562,11 +471,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         }
         function skip() {
           for (let j = 0; j < lines.length; j++) lines[j].classList.add('in');
-          // A user gesture (click/keypress) always wins over the Level-2 engine
-          // hold — force finish() straight to settle() even mid-wait, or a tap
-          // during the hold left the page inert for up to MAX_ENGINE_WAITS more.
-          // The natural no-gesture path (step() -> finish(), no force arg) keeps
-          // holding for the engine exactly as before.
+          // A user gesture always wins over the engine hold, or a tap during the
+          // hold leaves the page inert for up to MAX_ENGINE_WAITS more.
           finish(true);
         }
         function onKey() {

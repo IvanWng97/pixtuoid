@@ -1,40 +1,20 @@
 //! grok (Grok Build) hook install target — a wholly-owned drop-in JSON file.
 //!
 //! grok discovers hooks from every `*.json` in `{grok_home}/hooks/` (global
-//! scope, ALWAYS trusted — no trust-store entry needed), so pixtuoid writes its
-//! OWN file `{grok_home}/hooks/pixtuoid.json` and never merges into a shared
-//! settings file. Same ownership model as the opencode plugin: `merge_install`
-//! renders the whole file, `merge_uninstall` replaces it with a sentinel-free
-//! empty stub (the write-only orchestrator can't delete; grok loads the stub to
-//! zero hooks). The top-level `_pixtuoid` key is the sentinel — grok's hook
-//! config structs carry no `deny_unknown_fields`, so unknown sibling keys are
-//! ignored (verified against xai-grok-hooks config.rs @ c68e39f6).
+//! scope, ALWAYS trusted), so pixtuoid writes its OWN file
+//! `{grok_home}/hooks/pixtuoid.json` and never merges into a shared settings
+//! file. `merge_uninstall` replaces it with a sentinel-free empty stub because
+//! the write-only orchestrator cannot delete.
 //!
 //! **Source attribution rides the handler `env` map** (`PIXTUOID_SOURCE:
 //! "grok"`), NOT a command argument: grok's runner injects handler env into the
-//! hook process on every platform, and an argument-less absolute path avoids
-//! grok's shell heuristic entirely in the common case (a command string with no
-//! space/metachar is DIRECT-exec'd — no `sh -c`, no PowerShell). A path that
-//! DOES carry a space or metachar takes the shell route, so `hook_command`
-//! quotes it per-platform: the shared POSIX single-quote for Unix `sh -c`; on
-//! Windows the DOS 8.3 short name first (metachar-free → back to direct exec,
-//! shell-agnostic — the #195 trick), falling back to the PowerShell
-//! call-operator `& '…'` only when 8.3 is disabled on the volume (then a
-//! Git-Bash-detected or `GROK_SHELL=cmd` setup is the accepted residual). A
-//! path containing `$` is REJECTED at install: grok env-expands command
-//! strings at LOAD time, before quoting can protect anything.
-//!
-//! grok dispatches hooks SEQUENTIALLY and AWAITED INLINE on the session actor,
-//! so every entry pins `timeout: 2` (seconds) — the shim's own bound is 200ms,
-//! and 2s keeps a wedged shim from stalling grok the default 5s per event.
+//! hook process on every platform, and an argument-less absolute path is
+//! DIRECT-exec'd, avoiding grok's shell heuristic entirely.
 //!
 //! Both `SubagentStop` AND `SubagentEnd` are registered: the docs name
 //! `SubagentStop`, but upstream's subagent-finish file-hook dispatch keys the
-//! `SubagentEnd` alias (updates.rs — file-registry lookup is exact-key, no
-//! canonicalization), so registering only the documented spelling would never
-//! fire. Drift-watched; the decoder claims both wire values.
-//! `PreCompact`/`PostCompact` are deliberately unregistered (not agent
-//! activity — the CC/Codex precedent).
+//! `SubagentEnd` alias by exact-key lookup, so registering only the documented
+//! spelling would never fire.
 
 use std::path::{Path, PathBuf};
 
@@ -44,26 +24,22 @@ use serde_json::{json, Value};
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 
-/// Top-level sentinel key + note. The KEY is the detection signal
-/// (`merge_uninstall` / `verify_schema` / `detect_config` key on it); the value
-/// is a human note for anyone opening the file.
+/// The KEY is the detection signal; the value is only a human note for anyone
+/// who opens the file.
 const SENTINEL_KEY: &str = "_pixtuoid";
 const SENTINEL_NOTE: &str =
     "managed by pixtuoid — disconnect grok in the Sources panel (s) to remove";
 
 /// Written on uninstall: a valid hooks file registering nothing, WITHOUT the
-/// sentinel, so a re-uninstall is a clean no-op. grok parses it to zero hooks.
+/// sentinel, so a re-uninstall is a clean no-op.
 const REMOVED_STUB: &str = "{\n  \"_note\": \"pixtuoid hooks removed by disconnecting grok in pixtuoid's Sources panel (press s).\",\n  \"hooks\": {}\n}\n";
 
-/// Per-entry timeout (SECONDS — grok's settings-file unit, converted to ms
-/// upstream). grok awaits hooks inline; the shim exits within its 200ms bound,
-/// so 2s is 10× margin while capping a wedged shim at 2s instead of the 5s
-/// default per event.
+/// SECONDS — grok's settings-file unit. grok awaits hooks INLINE on the session
+/// actor, so this caps a wedged shim at 2s instead of the 5s default per event.
 const HOOK_TIMEOUT_SECS: u64 = 2;
 
-/// Registration keys (grok accepts PascalCase; the wire `hookEventName` values
-/// are snake_case). Every entry here must decode —
-/// `every_registered_grok_event_decodes` pins it.
+/// Registration keys (PascalCase; the wire `hookEventName` values are snake_case).
+/// Every entry must decode — `every_registered_grok_event_decodes` pins it.
 pub(crate) const GROK_EVENTS: &[&str] = &[
     "SessionStart",
     "UserPromptSubmit",
@@ -80,14 +56,11 @@ pub(crate) const GROK_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-/// `{grok_home}/hooks/pixtuoid.json` — the SAME `grok_home()` resolution the
-/// watcher's sessions root and the liveness probe ride (GROK_HOME
-/// unconditional, else `~/.grok`), so the three can never disagree. HARD
-/// error when neither GROK_HOME nor a home dir resolves: grok's hook
-/// DISCOVERY gates on the fallible `user_grok_home()` (scans NOTHING in that
-/// environment — util/hooks.rs), so writing into `grok_home()`'s degenerate
-/// fallback would land hooks grok never reads (the home-anchored targets'
-/// rule: error with "pass --config" instead).
+/// `{grok_home}/hooks/pixtuoid.json`, via the SAME `grok_home()` resolution the
+/// watcher's sessions root and the liveness probe ride, so the three can never
+/// disagree. HARD error when neither GROK_HOME nor a home dir resolves: grok's
+/// hook discovery scans NOTHING in that environment, so writing into
+/// `grok_home()`'s degenerate fallback would land hooks grok never reads.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     if !home_resolvable(
         crate::install::io::nonempty_env("GROK_HOME").as_deref(),
@@ -103,17 +76,15 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
         .join("pixtuoid.json"))
 }
 
-/// Mirrors upstream `user_grok_home()`'s resolvability gate (`GROK_HOME` set
-/// OR a real home dir exists) — the condition under which grok's hook
-/// discovery actually scans `{grok_home}/hooks`.
+/// Mirrors upstream `user_grok_home()`'s resolvability gate — the condition under
+/// which grok's hook discovery actually scans `{grok_home}/hooks`.
 fn home_resolvable(grok_home_env: Option<&str>, home: Option<&str>) -> bool {
     grok_home_env.is_some() || home.is_some()
 }
 
-/// Presence probe for auto-detect: grok's OWN root (`grok_home()` — grok
-/// `create_dir_all`s it on first run) or its canonical binary path. NOT our
-/// hooks file — keying on our own artifact would chicken-and-egg auto-detection
-/// (the opencode/Reasonix rule).
+/// Presence probe for auto-detect: grok's OWN root or its canonical binary path,
+/// NOT our hooks file — keying on our own artifact would chicken-and-egg
+/// auto-detection.
 pub(crate) fn detect_installed() -> bool {
     let home = pixtuoid_core::source::grok::grok_home();
     home.join("bin").join(grok_binary_name()).exists() || home.join("sessions").exists()
@@ -127,9 +98,9 @@ fn grok_binary_name() -> &'static str {
     }
 }
 
-/// grok's own shell heuristic (runner/command.rs): a command containing any of
-/// these (or starting `~`) runs via `sh -c` / PowerShell; otherwise it is
-/// direct-exec'd. Mirrored so `hook_command` knows when quoting is needed.
+/// grok's own shell heuristic, mirrored so `hook_command` knows when quoting is
+/// needed: a command containing any of these (or starting `~`) runs via
+/// `sh -c` / PowerShell; otherwise it is direct-exec'd.
 fn needs_shell_route(cmd: &str) -> bool {
     cmd.starts_with('~')
         || cmd
@@ -137,17 +108,14 @@ fn needs_shell_route(cmd: &str) -> bool {
             .any(|c| matches!(c, ' ' | '|' | '&' | ';' | '>' | '<' | '$'))
 }
 
-/// The command string: the bare absolute shim path when it direct-execs
-/// (common case), else quoted for the shell grok will route it through. The
-/// `--source` argument is deliberately absent — attribution rides the handler
-/// `env` map, keeping the command argument-less (and therefore direct-exec'd)
-/// on every platform.
+/// The command string: the bare absolute shim path when it direct-execs, else
+/// quoted for the shell grok will route it through. The `--source` argument is
+/// deliberately absent — attribution rides the handler `env` map, keeping the
+/// command argument-less and therefore direct-exec'd on every platform.
 ///
 /// A path containing `$` is REJECTED outright: grok env-expands `$VAR`/`${VAR}`
-/// in the command string at LOAD time (before any quoting applies), so no
-/// quoting can protect it — the expansion mangles the path (or refuses the
-/// spawn) and the hooks silently never fire. Better a loud install error than
-/// an installed-but-no-sprite.
+/// in the command string at LOAD time, before any quoting applies, so the
+/// expansion mangles the path and the hooks silently never fire.
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let path = crate::install::merge::hook_path_str(resolved)?;
     if path.contains('$') {
@@ -163,32 +131,26 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     }
     #[cfg(unix)]
     {
-        // The sh -c route: POSIX single-quoting (the shared helper — one
-        // spelling of the escaping across all shell-quoting targets).
         Ok(crate::install::hook_cmd::unix::shell_single_quote(path))
     }
     #[cfg(windows)]
     {
-        // Prefer the DOS 8.3 short name: metachar-free by construction, so
-        // the command drops back to the argument-less direct-exec path — no
-        // shell at all, immune to grok's shell cascade (pwsh vs Git Bash vs
-        // GROK_SHELL=cmd all moot). The #195 trick Codex/Reasonix use.
+        // The 8.3 short name is metachar-free by construction, so the command
+        // drops back to the direct-exec path — immune to grok's shell cascade.
         if let Some(short) = crate::install::hook_cmd::windows_short_path(path) {
             if !needs_shell_route(&short) {
                 return Ok(short);
             }
         }
-        // 8.3 unavailable (disabled on the volume): PowerShell call-operator
-        // form — correct for grok's DEFAULT shells (pwsh → powershell.exe);
-        // a Git-Bash-detected or GROK_SHELL=cmd setup with a spacey shim
-        // path on an 8.3-less volume is the accepted residual (module doc).
+        // 8.3 disabled on the volume: the PowerShell call-operator form, correct
+        // for grok's DEFAULT shells. A Git-Bash or `GROK_SHELL=cmd` setup with a
+        // spacey shim path on an 8.3-less volume is the accepted residual.
         Ok(format!("& '{}'", path.replace('\'', "''")))
     }
 }
 
 /// Render the whole managed file (it is wholly ours). `changed` is a SEMANTIC
-/// diff — parse both sides — so a hand-reformatted but equivalent file is a
-/// no-op and never churns a backup.
+/// diff, so a hand-reformatted but equivalent file never churns a backup.
 pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     let rendered = render_hooks_file(hook_cmd);
     let existing: Value = serde_json::from_str(content.trim()).unwrap_or_else(|_| json!({}));
@@ -218,9 +180,8 @@ fn render_hooks_file(hook_cmd: &str) -> Value {
     let mut hooks = serde_json::Map::new();
     for event in GROK_EVENTS {
         // NO `matcher` key on ANY group: upstream rejects a matcher on a
-        // lifecycle event (SessionStart, SessionEnd, Stop, UserPromptSubmit)
-        // as a per-GROUP load error — that group's hooks silently never fire
-        // — and absent == match-all for the tool events.
+        // lifecycle event as a per-GROUP load error — that group's hooks then
+        // silently never fire — and absent == match-all for the tool events.
         hooks.insert(
             (*event).to_string(),
             json!([{
@@ -236,12 +197,9 @@ fn render_hooks_file(hook_cmd: &str) -> Value {
     json!({ SENTINEL_KEY: SENTINEL_NOTE, "hooks": hooks })
 }
 
-/// Install-schema verification (#309): sentinel present, EVERY registered
-/// event still carries a managed handler (catches an older install missing
-/// newly-registered events), the attribution env intact, no stray matcher (a
-/// hand-added matcher on a lifecycle event is rejected per-GROUP upstream —
-/// that event's hook silently never fires, the half-dead class), and the shim
-/// path extracted for the on-disk stat.
+/// Install-schema verification. Checking EVERY registered event catches the
+/// half-dead classes: an older install missing newly-registered events, and a
+/// hand-added matcher whose group upstream rejects.
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     let Ok(doc) = serde_json::from_str::<Value>(content.trim()) else {
         return SchemaParse::broken("~/.grok/hooks/pixtuoid.json does not parse as JSON");
@@ -350,7 +308,6 @@ mod tests {
         let a = merge_install("", "/opt/bin/pixtuoid-hook").unwrap();
         let b = merge_install(&a.content, "/opt/bin/pixtuoid-hook").unwrap();
         assert!(!b.changed, "same-path re-install is a semantic no-op");
-        // A hand-reformatted but EQUIVALENT file is also a no-op (parsed diff).
         let reformatted =
             serde_json::to_string(&serde_json::from_str::<Value>(&a.content).unwrap()).unwrap();
         assert!(
@@ -358,7 +315,6 @@ mod tests {
                 .unwrap()
                 .changed
         );
-        // A path change re-renders.
         let c = merge_install(&a.content, "/usr/local/bin/pixtuoid-hook").unwrap();
         assert!(c.changed);
     }
@@ -371,7 +327,6 @@ mod tests {
         let doc: Value = serde_json::from_str(&removed.content).unwrap();
         assert!(doc.get(SENTINEL_KEY).is_none(), "stub drops the sentinel");
         assert_eq!(doc["hooks"], json!({}), "stub registers zero hooks");
-        // Re-uninstall, a foreign file, and empty content are no-ops.
         assert!(!merge_uninstall(&removed.content).unwrap().changed);
         assert!(
             !merge_uninstall(r#"{"hooks":{"PreToolUse":[]}}"#)
@@ -383,20 +338,17 @@ mod tests {
 
     #[test]
     fn hook_command_is_bare_when_direct_execable_and_quoted_otherwise() {
-        // The common case: no space/metachar → bare path, direct exec.
         assert_eq!(
             hook_command(Path::new("/opt/bin/pixtuoid-hook"), false).unwrap(),
             "/opt/bin/pixtuoid-hook"
         );
-        // A spacey path takes the shell route → per-platform quoting. (On
-        // Windows the 8.3 short name is preferred first, but this fixture
-        // path doesn't exist → GetShortPathNameW fails → the `& '…'` form.)
+        // On Windows the 8.3 short name is preferred first, but this fixture path
+        // doesn't exist → GetShortPathNameW fails → the `& '…'` form.
         let spacey = hook_command(Path::new("/Users/Foo Bar/bin/pixtuoid-hook"), false).unwrap();
         #[cfg(unix)]
         assert_eq!(spacey, "'/Users/Foo Bar/bin/pixtuoid-hook'");
         #[cfg(windows)]
         assert_eq!(spacey, "& '/Users/Foo Bar/bin/pixtuoid-hook'");
-        // Round-trip: verify can extract the path back from every shape.
         for p in ["/opt/bin/pixtuoid-hook", "/Users/Foo Bar/bin/pixtuoid-hook"] {
             let cmd = hook_command(Path::new(p), false).unwrap();
             assert_eq!(extract_shim_path(&cmd), Some(PathBuf::from(p)), "{cmd}");
@@ -405,14 +357,11 @@ mod tests {
 
     #[test]
     fn hook_command_rejects_a_dollar_path_loudly() {
-        // grok env-expands $VAR in command strings at LOAD time — quoting
-        // can't protect a `$`-carrying path, so installing it would be the
-        // silent installed-but-no-sprite class. Loud install error instead.
         let err = hook_command(Path::new("/opt/$weird/pixtuoid-hook"), false)
             .expect_err("a $-carrying path must be refused");
         let msg = format!("{err:#}");
-        // The remedy must be one the user can actually take: `--hook-path` died
-        // with the install-hooks CLI (#284) and clap now rejects it outright.
+        // `--hook-path` no longer exists — clap rejects it, so the remedy the
+        // bail names must be one the user can actually take.
         assert!(
             !msg.contains("--hook-path"),
             "the bail names a flag the CLI rejects: {msg}"
@@ -425,9 +374,6 @@ mod tests {
 
     #[test]
     fn config_path_requires_a_resolvable_home_or_grok_home() {
-        // Mirrors upstream user_grok_home(): grok's hook discovery scans
-        // NOTHING when neither resolves — an install must error, not write a
-        // file grok never reads.
         assert!(home_resolvable(Some("/custom"), None));
         assert!(home_resolvable(None, Some("/home/u")));
         assert!(home_resolvable(Some("/custom"), Some("/home/u")));
@@ -444,13 +390,11 @@ mod tests {
             ShimRef::Absolute(PathBuf::from("/opt/bin/pixtuoid-hook"))
         );
 
-        // An OLDER install missing a newly-registered event is half-dead.
         let mut doc: Value = serde_json::from_str(&installed.content).unwrap();
         doc["hooks"].as_object_mut().unwrap().remove("SubagentEnd");
         let half_dead = verify_schema(&doc.to_string());
         assert!(half_dead.issues.iter().any(|i| i.contains("SubagentEnd")));
 
-        // A lost attribution env would mis-tag every event.
         let mut doc: Value = serde_json::from_str(&installed.content).unwrap();
         doc["hooks"]["Stop"][0]["hooks"][0]["env"] = json!({});
         assert!(verify_schema(&doc.to_string())
@@ -458,7 +402,6 @@ mod tests {
             .iter()
             .any(|i| i.contains("PIXTUOID_SOURCE")));
 
-        // A hand-added matcher would kill the whole file upstream.
         let mut doc: Value = serde_json::from_str(&installed.content).unwrap();
         doc["hooks"]["SessionStart"][0]["matcher"] = json!("*");
         assert!(verify_schema(&doc.to_string())
@@ -466,20 +409,14 @@ mod tests {
             .iter()
             .any(|i| i.contains("matcher")));
 
-        // Foreign / unparseable files are broken with the sentinel message.
         assert!(!verify_schema(r#"{"hooks":{}}"#).issues.is_empty());
         assert!(!verify_schema("not json").issues.is_empty());
     }
 
-    /// Internal-consistency guard (the CC/Codex/Reasonix/CodeWhale mirror):
-    /// every event we REGISTER must decode — a registered-but-undecoded event
-    /// is the original SubagentStop bug class. Wire values are the snake_case
-    /// serialization of the registration keys.
     #[test]
     fn every_registered_grok_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;
         for event in GROK_EVENTS {
-            // PascalCase registration key → snake_case wire value.
             let mut wire = String::new();
             for (i, c) in event.chars().enumerate() {
                 if c.is_uppercase() {

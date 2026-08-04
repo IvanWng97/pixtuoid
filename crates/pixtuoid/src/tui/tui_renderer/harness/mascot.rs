@@ -1,11 +1,7 @@
 use super::*;
 
-// ===================================================================
-// Gateway lobster mascot — presence-gated wandering creature
-// ===================================================================
-
-/// A scene carrying an OpenClaw gateway presence (and nothing else, so the only
-/// lobster-red pixels on the floor are the lobster's).
+/// A scene carrying an OpenClaw gateway presence and nothing else, so the only
+/// lobster-red pixels on the floor are the lobster's.
 fn gateway_scene(
     liveness: pixtuoid_core::state::DaemonLiveness,
     entered_at: SystemTime,
@@ -15,9 +11,8 @@ fn gateway_scene(
     gateway_scene_runs(liveness, entered_at, last_seen, sessions, &[])
 }
 
-/// As `gateway_scene`, with in-flight RUN keys (the busy bubble tell keys on
-/// runs, not sessions). Busy is DERIVED: pass `DaemonLiveness::UP` + ≥1 run
-/// (#460), not a stored Busy state.
+/// As `gateway_scene`, with in-flight RUN keys. Busy is DERIVED: pass
+/// `DaemonLiveness::UP` + ≥1 run, not a stored Busy state.
 fn gateway_scene_runs(
     liveness: pixtuoid_core::state::DaemonLiveness,
     entered_at: SystemTime,
@@ -46,14 +41,10 @@ fn gateway_scene_runs(
     s
 }
 
-/// The single gateway instance these harness scenes stage (OpenClaw's default
-/// port) — the mascot tests are about the CREATURE, not identity; the
-/// two-gateway render is pinned by `two_gateways_render_two_independent_mascots`.
 fn harness_gateway() -> pixtuoid_core::state::DaemonInstanceId {
     pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty")
 }
 
-/// Count the busy activity-bubble pixels (the `0xd6,0xf2,0xf8` rising stream).
 fn bubble_px(buf: &RgbBuffer) -> usize {
     let bubble = pixtuoid_core::sprite::Rgb {
         r: 0xd6,
@@ -71,15 +62,14 @@ fn bubble_px(buf: &RgbBuffer) -> usize {
     n
 }
 
-/// The lobster's EXCLUSIVE carapace palette keys — body / shade / highlight / claw /
-/// antenna. Each is used by the three `lobster_*.sprite` files and NOTHING else in
-/// the pack, which is what makes a hit on one proof the mascot is on screen.
+/// The lobster's EXCLUSIVE carapace palette keys. Each is used by the three
+/// `lobster_*.sprite` files and NOTHING else in the pack, which is what makes a
+/// hit on one proof the mascot is on screen.
 const LOBSTER_KEYS: [char; 5] = ['o', 'N', 'Q', 'A', 'a'];
 
 /// The carapace RGBs, resolved from the PACK the harness renders with rather than
-/// transcribed here. A hand-copied list silently weakens every assertion in this
-/// file the moment the sprite is re-tinted — and did: the copy omitted `Q`
-/// (`#f0895a`, 4 px of every lobster frame) while claiming to be the whole set.
+/// transcribed here: a hand-copied list silently weakens every assertion in this
+/// file the moment the sprite is re-tinted.
 fn lobster_reds() -> Vec<pixtuoid_core::sprite::Rgb> {
     let pack = pack();
     LOBSTER_KEYS
@@ -93,14 +83,12 @@ fn lobster_reds() -> Vec<pixtuoid_core::sprite::Rgb> {
         .collect()
 }
 
-/// Count the lobster's exclusive carapace reds in the buffer (the lobster sprite is
-/// not recolored, so its authored RGBs render exactly). An empty agents scene
-/// means no recolored shirts can collide.
+/// The lobster sprite is not recolored, so its authored RGBs render exactly; an
+/// empty agents scene means no recolored shirts can collide.
 fn lobster_px(buf: &RgbBuffer) -> usize {
     lobster_cells(buf).len()
 }
 
-/// A scene carrying one OpenClaw gateway presence per `ports` entry.
 fn gateway_scene_at(ports: &[&str], entered_at: SystemTime, last_seen: SystemTime) -> SceneState {
     let mut s = SceneState::uniform(16);
     for port in ports {
@@ -120,9 +108,6 @@ fn gateway_scene_at(ports: &[&str], entered_at: SystemTime, last_seen: SystemTim
     s
 }
 
-/// The lobster-red CELLS (not just a count) — so two mascots' positions can be
-/// compared exactly instead of inferred from a pixel total. Same authored carapace
-/// palette `lobster_px` counts, read from ONE place so the two can't drift.
 fn lobster_cells(buf: &RgbBuffer) -> std::collections::BTreeSet<(u16, u16)> {
     let reds = lobster_reds();
     let mut out = std::collections::BTreeSet::new();
@@ -138,12 +123,6 @@ fn lobster_cells(buf: &RgbBuffer) -> std::collections::BTreeSet<(u16, u16)> {
 
 #[test]
 fn two_gateways_render_two_independent_mascots() {
-    // THE multi-gateway payoff, at the pixels: two live gateways are two lobsters,
-    // and they must not sit on top of each other. Each gateway is rendered ALONE
-    // first: identical presences (same entered_at/state) differing ONLY in port
-    // must occupy DIFFERENT cells, which is exactly what folding the instance id
-    // into the wander seed buys — a source-only seed put both on the same cell, so
-    // two gateways read as one lobster.
     let (entered, seen) = (t0() - Duration::from_secs(20), t0());
     let cells_of = |ports: &[&str]| {
         let mut r = build(160, 80, vec![]);
@@ -161,7 +140,6 @@ fn two_gateways_render_two_independent_mascots() {
         a, b,
         "two gateways differing only in port must wander to DIFFERENT cells"
     );
-    // Together: both are on the floor — the union of what each draws alone.
     let both = cells_of(&["18789", "19789"]);
     assert!(
         both.len() > a.len() && both.len() > b.len(),
@@ -171,12 +149,8 @@ fn two_gateways_render_two_independent_mascots() {
         b.len()
     );
 
-    // …and there is NO arity assumption on this path: the roster is a map, so N
-    // gateways draw N lobsters. Each added instance must cover MORE floor than the
-    // set without it — a per-instance seed that collapsed two onto one cell (or a
-    // painter that drew only the first/last) would flatten this out. Consecutive
-    // ports on purpose: that is what a real multi-gateway host runs, and their
-    // folded seeds differ by 1.
+    // Consecutive ports on purpose: that is what a real multi-gateway host runs,
+    // and their folded wander seeds differ by 1.
     let mut prev = 0usize;
     for n in 1..=4 {
         let ports = &["18901", "18902", "18903", "18904"][..n];
@@ -193,11 +167,8 @@ fn two_gateways_render_two_independent_mascots() {
 
 #[test]
 fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
-    // The PAINTER owns this decision (`MascotFrame.instance`), and the only way to
-    // observe it is the hover text — so without this the gate could pass `Some`
-    // unconditionally and every single-gateway user's tooltip would silently grow a
-    // port. One gateway: the port is noise (the tooltip stays as it was before
-    // multi-gateway). Two: it is the whole point of hovering.
+    // The PAINTER owns this decision (`MascotFrame.instance`) and the only way to
+    // observe it is the hover text.
     let (entered, seen) = (t0() - Duration::from_secs(20), t0());
     let gateway_tooltips = |ports: &[&str]| -> Vec<String> {
         let scene = gateway_scene_at(ports, entered, seen);
@@ -206,8 +177,7 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
         let cells: Vec<_> = lobster_cells(r.buf()).into_iter().collect();
         assert!(!cells.is_empty(), "the gateways must paint lobsters");
         let mut out = Vec::new();
-        // Sample across the red cells rather than hovering every one: each lobster
-        // is dozens of cells, and the hitbox is 14px wide, so a stride still lands
+        // A stride, not every cell: the hitbox is 14px wide, so it still lands
         // inside BOTH mascots without paying a full render per pixel.
         for &(x, y) in cells.iter().step_by(5) {
             r.set_mouse_pos(Some((x, y / 2)));
@@ -237,12 +207,9 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
         "…including the second one: {pair:?}"
     );
 
-    // "Has a sibling" is per SOURCE, not roster-wide. A second daemon SOURCE draws
-    // no mascot of its own (`gateway_mascot_def` resolves only openclaw today) yet
-    // still occupies a roster row, so a roster-wide count would make openclaw's LONE
-    // gateway start naming its port the day a second daemon registers — the exact
-    // regression the halves above pin, arriving by a different route. Unreachable
-    // from the registry today, which is precisely why it needs staging by hand.
+    // "Has a sibling" is per SOURCE, not roster-wide: a second daemon SOURCE draws
+    // no mascot yet still occupies a roster row. Unreachable from the registry
+    // today, which is precisely why it needs staging by hand.
     let (entered, seen) = (t0() - Duration::from_secs(20), t0());
     let mut mixed = gateway_scene_at(&["18789"], entered, seen);
     mixed.insert_daemon(
@@ -277,8 +244,6 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
 
 #[test]
 fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
-    // Instance-local liveness, at the pixels: gateway A walks out while B keeps
-    // wandering. With the old source-keyed roster A's `gateway_stop` WAS B's.
     let (entered, seen) = (t0() - Duration::from_secs(20), t0());
     let mut scene = gateway_scene_at(&["18789", "19789"], entered, seen);
     let a = pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty");
@@ -305,7 +270,6 @@ fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
         Some(pixtuoid_core::state::DaemonState::Idle),
         "the sibling gateway is untouched"
     );
-    // Well past the walk-out: A is gone from the floor, B is still drawn.
     let mut r = build(160, 80, vec![]);
     r.render(&scene, &pack(), t0() + Duration::from_secs(5))
         .unwrap();
@@ -317,7 +281,6 @@ fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
 
 #[test]
 fn no_gateway_mascot_without_presence() {
-    // The ~99% who don't run a gateway see a normal office — no lobster.
     let scene = SceneState::uniform(16);
     let mut r = build(160, 80, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
@@ -343,13 +306,10 @@ fn gateway_mascot_present_when_up() {
 
 #[test]
 fn gateway_mascot_busy_bubbles_track_runs_not_sessions() {
-    // Busy (an in-flight RUN) renders the activity-bubble stream; a persistent
-    // session with NO run must NOT bubble (the run-vs-session intensity fix).
     let entered = t0() - Duration::from_secs(20);
 
-    // Idle with a live session (sessions=1, NO runs) ⇒ no bubbles.
+    // sessions=1 with NO runs; then the same session WITH two in-flight runs.
     let idle = gateway_scene(pixtuoid_core::state::DaemonLiveness::UP, entered, t0(), 1);
-    // Busy with two in-flight runs ⇒ bubbles (Busy derives from the runs, UP).
     let busy = gateway_scene_runs(
         pixtuoid_core::state::DaemonLiveness::UP,
         entered,
@@ -360,7 +320,7 @@ fn gateway_mascot_busy_bubbles_track_runs_not_sessions() {
 
     let mut r = build(160, 80, vec![]);
     // Bubbles animate by `now`; scan a few frames so we don't land on an
-    // all-off-screen phase, and assert the idle scene NEVER bubbles.
+    // all-off-screen phase.
     let mut busy_max = 0;
     let mut idle_max = 0;
     for k in 0..8u64 {
@@ -377,7 +337,6 @@ fn gateway_mascot_busy_bubbles_track_runs_not_sessions() {
 #[test]
 fn gateway_mascot_walks_out_then_is_gone() {
     let mut r = build(160, 80, vec![]);
-    // Just after going Down ⇒ still walking out, visible.
     let leaving = gateway_scene(
         pixtuoid_core::state::DaemonLiveness::Down,
         t0() - Duration::from_secs(20),
@@ -390,7 +349,6 @@ fn gateway_mascot_walks_out_then_is_gone() {
         "mid walk-out, the lobster is still visible"
     );
 
-    // Well past the walk-out window ⇒ gone (back to a normal office).
     let gone = gateway_scene(
         pixtuoid_core::state::DaemonLiveness::Down,
         t0() - Duration::from_secs(30),
@@ -407,8 +365,6 @@ fn gateway_mascot_walks_out_then_is_gone() {
 
 #[test]
 fn gateway_mascot_wanders_over_time() {
-    // Same scene rendered across a wander cycle ⇒ the lobster changes position
-    // (proves the motion is live, not a fixed sticker).
     let scene = gateway_scene(
         pixtuoid_core::state::DaemonLiveness::UP,
         t0() - Duration::from_secs(20),
@@ -420,8 +376,6 @@ fn gateway_mascot_wanders_over_time() {
     for k in 0..8u64 {
         let now = t0() + Duration::from_secs(k * 3);
         r.render(&scene, &pack(), now).unwrap();
-        // Signature: the topmost-leftmost lobster pixel.
-        // Signature = the first cell in (y, x) scan order, off the SAME red set.
         if let Some(top) = lobster_cells(r.buf())
             .into_iter()
             .min_by_key(|&(x, y)| (y, x))
@@ -436,9 +390,7 @@ fn gateway_mascot_wanders_over_time() {
     );
 }
 
-/// Bounding box (in PIXEL coords) of the lobster's carapace reds, or `None` if
-/// the lobster isn't on screen. Goes through `lobster_cells`, so all three read the
-/// one pack-resolved [`LOBSTER_KEYS`] set and can't drift.
+/// Bounding box in PIXEL coords, or `None` if the lobster isn't on screen.
 fn lobster_red_bbox(buf: &RgbBuffer) -> Option<(u16, u16, u16, u16)> {
     let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0u16, 0u16);
     let mut any = false;
@@ -454,7 +406,7 @@ fn lobster_red_bbox(buf: &RgbBuffer) -> Option<(u16, u16, u16, u16)> {
 
 #[test]
 fn gateway_mascot_tooltip_on_hover() {
-    // entered_at well in the past ⇒ steady wander (a stable lobster to aim at).
+    // entered_at well in the past ⇒ steady wander: a stable lobster to aim at.
     let scene = gateway_scene(
         pixtuoid_core::state::DaemonLiveness::UP,
         t0() - Duration::from_secs(20),
@@ -465,13 +417,11 @@ fn gateway_mascot_tooltip_on_hover() {
     let mut r = build(160, 80, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
 
-    // Before any hover, no gateway tooltip text is painted.
     assert!(
         !frame_text(r.frame_buffer()).contains("gateway"),
         "no hover ⇒ no mascot tooltip"
     );
 
-    // Center of the lobster's red bbox (pixel coords) → terminal cell.
     let (x0, y0, x1, y1) = lobster_red_bbox(r.buf()).expect("lobster on screen");
     let cx = (x0 + x1) / 2;
     let cy_px = (y0 + y1) / 2;
@@ -479,9 +429,8 @@ fn gateway_mascot_tooltip_on_hover() {
     r.set_mouse_pos(Some((cx, cy_px / 2)));
     r.render(&scene, &pack(), t0()).unwrap();
 
-    // The mascot tooltip reads " <name> gateway · idle " — the literal "gateway"
-    // is exclusive to the mascot arm (pet/coffee/furniture tooltips never say it),
-    // so this distinguishes the mascot branch from the other fallthroughs.
+    // The literal "gateway" is exclusive to the mascot arm — pet/coffee/furniture
+    // tooltips never say it — so it distinguishes the branch from the fallthroughs.
     assert!(
         frame_text(r.frame_buffer()).contains("gateway"),
         "hovering the lobster shows the gateway mascot tooltip"

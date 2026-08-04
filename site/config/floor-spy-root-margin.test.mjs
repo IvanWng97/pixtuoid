@@ -1,10 +1,3 @@
-// FLOOR_SPY_ROOT_MARGIN (consts.ts) is the ONE authority for the floor-spy
-// IntersectionObserver band — the Statusline's scrollspy and the
-// ElevatorShaft's current-floor LED/car observer must read the SAME band or
-// "the two readouts can never disagree" is only a comment, not a fact. This
-// pins both component sources to the const (via define:vars, since is:inline
-// scripts can't `import` at runtime) and bans a reintroduced literal '-45%'
-// copy — a one-sided retune fails this instead of shipping silent drift.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -27,9 +20,6 @@ for (const [label, rel] of [
   });
 }
 
-// Same single-authority contract for the bottom-clamp epsilon (bot finding,
-// PR #508): a re-declared local const in either consumer would let the shaft
-// LED and the statusline desync at page end.
 test('neither floor-spy consumer re-declares the bottom-clamp epsilon', () => {
   for (const f of ['../src/components/Statusline.astro', '../src/components/ElevatorShaft.astro']) {
     const src = readFileSync(new URL(f, import.meta.url), 'utf8');

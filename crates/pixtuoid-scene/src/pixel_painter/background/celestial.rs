@@ -1,9 +1,6 @@
 //! Celestial bodies + the night sky: the sun/moon disc (placement, per-theme
 //! core color, thick-cloud gating, the "real low window" arc) and the
-//! deterministic night star field. Extracted from `background/mod.rs` (#469) —
-//! a self-contained unit (own consts, own position/twinkle hash noise, no
-//! shared mutable state), consumed by the sky branch of
-//! `paint_floor_to_ceiling_window` in the parent module.
+//! deterministic night star field.
 
 use std::time::SystemTime;
 
@@ -15,12 +12,9 @@ use super::{window_columns, WINDOW_W};
 use crate::theme::Theme;
 
 /// One frame's celestial disc (sun by day, moon by night), arcing across the
-/// window wall. Computed ONCE per frame in `paint_floor_and_walls` — it needs
-/// only the emitter + atmosphere + buffer geometry, no per-window state — and
-/// passed BY VALUE (it's `Copy`) into every window. `cx` is an ABSOLUTE
-/// buffer x (not a per-window offset), so the same body paints only in
-/// whichever window it currently sits over — one disc across the whole wall,
-/// not one per window.
+/// window wall. `cx` is an ABSOLUTE buffer x, not a per-window offset, so the
+/// body paints only in whichever window it currently sits over — one disc
+/// across the whole wall, not one per window.
 #[derive(Clone, Copy)]
 pub(super) struct Disc {
     pub(super) cx: f32,
@@ -29,9 +23,8 @@ pub(super) struct Disc {
     pub(super) core: Rgb,
     pub(super) glow: Rgb,
     pub(super) vis: f32,
-    /// Illuminated fraction (0 new..1 full). `1.0` for the sun (always a full
-    /// disc); `sky::moon_phase(now)` for the moon, driving the elliptical
-    /// terminator in the disc-core render (see `paint_floor_to_ceiling_window`).
+    /// Illuminated fraction (0 new..1 full) — `1.0` for the sun; for the moon it
+    /// drives the elliptical terminator in the disc-core render.
     pub(super) lit_frac: f32,
 }
 
@@ -47,33 +40,19 @@ pub(super) const MOON_SHADOW: Rgb = Rgb {
     b: 52,
 };
 /// Left edge of the first window (mirrors the `x = 3` start of the window loop
-/// in `paint_floor_and_walls`). The disc's `azimuth` maps onto the span
-/// between the first PAINTED pane's left edge and the last PAINTED pane's
-/// right edge (derived in `compute_disc` from this SAME `x=3,
-/// stride=WINDOW_W+WINDOW_GAP` tiling), inset by `DISC_RADIUS_PX` at both
-/// ends — NOT a linear `buf_w - WINDOW_W` bound (only coincidentally lands
-/// inside a window at some widths) and NOT the pane CENTERS (which are
-/// bit-identical to the mullion columns, `dx == w/2`, so the old center-to-
-/// center span perfectly bisected the disc at its most visible low-altitude
-/// moments, and froze `cx` on that mullion whenever only one window is
-/// painted). The inset keeps the disc fully inside the glass at the arc
-/// extremes, its low-altitude ends landing near the outer frame edges rather
-/// than dead-centre on a mullion, and still lets a single-window buffer sweep.
+/// in `paint_floor_and_walls`).
 const FIRST_WINDOW_X: f32 = super::FIRST_WINDOW_X as f32;
-// "Real low window": the horizon sits low in the band, and the apex climbs
-// high enough to leave the glass entirely (clipped) rather than the disc
-// tracking the full window height.
+// "Real low window": the horizon sits low in the band and the apex climbs off
+// the glass entirely rather than tracking the full window height.
 const HORIZON_FRAC: f32 = 0.55; // horizon_y = top_wall_h * HORIZON_FRAC
 const ARC_RISE_FRAC: f32 = 0.80; // apex lifts top_wall_h * ARC_RISE_FRAC above horizon
-/// Below this atmo `disc` visibility, thick cloud swallows the disc entirely
-/// (no point painting a body no one can see through the murk).
+/// Below this atmo `disc` visibility, thick cloud swallows the disc entirely.
 pub(super) const MIN_DISC_VIS: f32 = 0.08;
 
-/// This frame's disc placement, or `None` under thick cloud (`atmo(weather).disc`
-/// below [`MIN_DISC_VIS`]). `cx`/`cy` are absolute buffer coordinates derived
+/// This frame's disc placement, or `None` under thick cloud. `cx`/`cy` derive
 /// from the SAME `sky::emitter` arc that drives `time_of_day_look`'s spill lean
-/// and `sun_on_wall`'s wall spot — so the disc's side, the floor-spill lean, and
-/// the wall sun-spot can never disagree (all three read one `azimuth`).
+/// and `sun_on_wall`'s wall spot, so all three read one `azimuth` and can never
+/// disagree on where the light comes from.
 pub(super) fn compute_disc(
     now: SystemTime,
     weather: Weather,
@@ -84,18 +63,14 @@ pub(super) fn compute_disc(
     let sky = sky::emitter(now);
     let vis = sky::atmo(weather).disc;
     if vis < MIN_DISC_VIS {
-        return None; // thick cloud swallows the disc
+        return None;
     }
-    // Sweep the disc across the windowed region [first pane, last pane], inset by
-    // the radius so it stays fully inside the glass at the extremes and its
-    // low-altitude arc ends land near the outer frame edges rather than pinned
-    // dead-centre on a mullion (which perfectly bisected the disc at its most
-    // visible moment; a single-window buffer also froze cx on that mullion).
-    // The last PAINTED window's right edge, taken from the SAME `window_columns`
-    // tiling the floor + spill passes ride (door-blind here — the disc span is
-    // pure geometry, for ANY buffer width; a linear `buf_w - WINDOW_W` bound only
-    // coincidentally works at buf_w=96). An empty buffer falls back to the first
-    // pane's nominal right edge, matching the old `k_max.max(0.0)` clamp.
+    // Sweep across [first pane, last pane] inset by the radius. NOT the pane
+    // CENTERS (bit-identical to the mullion columns, so the span bisected the
+    // disc at its most visible low-altitude moment and froze `cx` there on a
+    // single-window buffer) and NOT a linear `buf_w - WINDOW_W` bound (that only
+    // coincidentally lands inside a window). An empty buffer falls back to the
+    // first pane's nominal right edge.
     let last_window_right = window_columns(buf_w, None)
         .last()
         .map_or(FIRST_WINDOW_X + WINDOW_W as f32, |w| {
@@ -112,8 +87,6 @@ pub(super) fn compute_disc(
         sky::Body::Sun => (theme.lighting.sun_core, theme.lighting.sun_core),
         sky::Body::Moon => (theme.lighting.moon_core, theme.lighting.moon_core),
     };
-    // The sun is always a full disc; the moon's illuminated fraction drives
-    // the crescent/gibbous terminator in the disc-core render.
     let lit_frac = match sky.body {
         sky::Body::Sun => 1.0,
         sky::Body::Moon => sky::moon_phase(now),
@@ -132,8 +105,8 @@ pub(super) fn compute_disc(
 /// Roughly 1-in-`STAR_SPARSITY` sky pixels host a star — prime so the
 /// hash-modulo grid can't line up into a visible lattice.
 const STAR_SPARSITY: u64 = 47;
-/// Below this `star_strength` (darkness × clear-sky product), no star paints
-/// — keeps the field invisible by day and under thick cloud/fog.
+/// Below this `star_strength`, no star paints — the field stays invisible by
+/// day and under thick cloud/fog.
 pub(super) const STAR_MIN: f32 = 0.15;
 /// Stars stay in the top fraction of the glass, clear of any building
 /// silhouette: `paint_floor_to_ceiling_window`'s `max_bh` tops out at 50% of
@@ -144,22 +117,17 @@ pub(super) const STAR_COLOR: Rgb = Rgb {
     g: 255,
     b: 255,
 };
-/// Cap on the star blend alpha at maximal `star_strength` — a faint glimmer,
-/// not a bright dot (contrast the city windows' full-opacity `dot_color`).
+/// Cap on the star blend alpha — a faint glimmer, not a bright dot.
 pub(super) const STAR_ALPHA_MAX: f32 = 0.55;
-/// Per-star twinkle cycle length range (ms) — mirrors `city_dot_twinkle`'s
-/// per-dot cadence idiom (each star's own cycle length comes from a hash of
-/// its position), staggered per star so the field doesn't blink in unison.
+/// Per-star twinkle cycle length range (ms), hashed per position so the field
+/// doesn't blink in unison.
 const STAR_TWINKLE_CYCLE_BASE_MS: u64 = 2000;
 const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
 
-/// How brightly the star field shows this frame. Stars only appear once the sun
-/// is BELOW the horizon (night = the emitter is the moon): dawn/dusk twilight
-/// has a high `darkness` (the sun is up but low, so `interior` is small) yet the
-/// brightening/dimming sky washes stars out — gating on `darkness` alone wrongly
-/// paints a full starfield at ~7am. At night it's `darkness × clear-sky` (the
-/// same "can you see through the sky" signal the disc rides), so overcast/fog/
-/// storm (low `atmo.disc`) hide the stars a clear night shows.
+/// How brightly the star field shows this frame. Stars only appear once the
+/// emitter is the MOON: dawn/dusk twilight has a high `darkness` yet the
+/// brightening sky washes stars out, so gating on `darkness` alone paints a
+/// full starfield at ~7am.
 pub(super) fn night_star_strength(now: SystemTime, darkness: f32, weather: Weather) -> f32 {
     match sky::emitter(now).body {
         sky::Body::Moon => (darkness * sky::atmo(weather).disc).clamp(0.0, 1.0),
@@ -167,10 +135,8 @@ pub(super) fn night_star_strength(now: SystemTime, darkness: f32, weather: Weath
     }
 }
 
-/// Deterministic sparse star field: ~1-in-`STAR_SPARSITY` sky pixels host a
-/// star. Hashed on the ABSOLUTE buffer `(px, py)` (not window-relative) so
-/// the field is stable across frames and reads as one continuous sky rather
-/// than a per-window reseed.
+/// Deterministic sparse star field, hashed on the ABSOLUTE buffer `(px, py)`
+/// so it reads as one continuous sky rather than a per-window reseed.
 pub(super) fn star_exists(px: u16, py: u16) -> bool {
     let mut h = (px as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     h ^= (py as u64).wrapping_mul(0xc6a4_a793_5bd1_e995);
@@ -178,9 +144,7 @@ pub(super) fn star_exists(px: u16, py: u16) -> bool {
     h.is_multiple_of(STAR_SPARSITY)
 }
 
-/// Per-star twinkle: the same idiom as `city_dot_twinkle` (a hashed per-cell
-/// cycle length, rerolled on/off each cycle) but keyed on the absolute sky
-/// position instead of the window-relative building-dot grid.
+/// Per-star twinkle: a hashed per-star cycle length, rerolled on/off each cycle.
 pub(super) fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
     let now_ms = epoch_ms(now);
     let seed = (px as u64).wrapping_mul(131) ^ (py as u64).wrapping_mul(521);
@@ -191,12 +155,8 @@ pub(super) fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
 }
 
 /// Golden-hour blaze strength on the city silhouette — SUN-only: a low moon
-/// must never paint an orange cast, however warm/lit it computes (a real
-/// moon's own altitude/luminance are already too low to matter, but the gate
-/// is absolute, not incidental). Warmth peaks near the horizon, scaled by the
-/// emitter's own luminance (a dim sunrise/sunset blazes less than a bright
-/// one) and the atmosphere's disc visibility (clouds hide the source, so no
-/// blaze without a visible disc).
+/// must never paint an orange cast, however warm/lit it computes, so the gate
+/// is absolute rather than incidental.
 pub(super) fn golden_hour_blaze(sky: &sky::SkyState, a: &sky::Atmo) -> f32 {
     match sky.body {
         sky::Body::Sun => (sky.warmth * sky.emitter_lum * a.disc).clamp(0.0, 1.0),

@@ -1,50 +1,22 @@
 //! Real-corpus never-panic harness for a source's transcript LINE decoder.
 //!
-//! The thinnest of the four `harness::Drive` shells: bytes come from **stdin**
-//! and the verdict is **exit non-zero on any panic**. Everything between —
-//! parse, decode under `catch_unwind`, fold — is the shared pipeline, so this
-//! tool can no longer drift from what the fixture/corpus/render drivers run.
+//! The source is an ARGUMENT, never sniffed from line shape: inferring it
+//! silently MISROUTED sources whose shape didn't match a hard-coded predicate
+//! (grok's `method` envelope, omp's bare `type`) to `decode_cc_line`, reporting
+//! a false-green "0 panics" having exercised the WRONG decoder.
 //!
-//! The source is an ARGUMENT, not sniffed from line shape. The caller already
-//! knows which source a corpus is (one dir per invocation), and inferring it
-//! from `type`/field shape silently MISROUTED newer sources whose shape didn't
-//! match a hard-coded predicate (grok's `method` envelope, omp's bare `type`)
-//! to `decode_cc_line`, reporting a false-green "0 panics" having exercised the
-//! WRONG decoder. `Drive::transcript` resolves the decoder through the registry
-//! and REFUSES a source that has none, so coverage stays structural — a new
-//! source is reachable the moment it has a `SourceDescriptor` row.
-//!
-//! It is a TOOL, not a committed corpus: point it at any JSONL tree —
-//! ```
-//! just fuzz claude-code ~/.claude/projects        # your own CC sessions (newest formats)
-//! just fuzz codex ~/.codex/sessions               # your own Codex rollouts
-//! just fuzz grok ~/.grok/sessions                 # grok ACP transcripts
-//! just fuzz omp ~/.omp/agent/sessions             # omp sessions
-//! just fuzz copilot ~/.copilot/session-state      # your own Copilot CLI sessions
-//! git clone https://github.com/daaain/claude-code-log /tmp/cc \
-//!   && just fuzz claude-code /tmp/cc/test_data/real_projects   # a public real-world CC corpus
-//! ```
-//! Nothing is committed or redistributed, so there's no license / size /
-//! sanitization concern — the public sessions are a target, not a dependency.
-//!
-//! Memory: one invocation drives the WHOLE piped corpus as a single stream, and
-//! `Driven` retains every decoded event for it (~500k `AgentEvent`s over a
-//! mature CC tree). Bounded, and fine for an on-demand release-mode tool — the
-//! alternative is a fold-and-drop variant of `Drive::lines` that widens the
-//! shared seam for this one caller. Split the corpus if it ever bites.
+//! A TOOL, not a committed corpus — point it at any JSONL tree, e.g.
+//! `just fuzz claude-code ~/.claude/projects`. `Driven` retains every decoded
+//! event, so memory scales with the piped corpus; split a huge tree.
 //!
 //! Decode `Err` is allowed (the watcher logs + skips malformed lines); only a
-//! PANIC is a contract violation. Hook-only sources have no transcript line
-//! decoder; their never-panic contract is covered by the in-crate proptest
-//! `every_hook_and_presence_decoder_never_panics`.
+//! PANIC is a contract violation.
 
 use std::io::BufRead;
 
 use pixtuoid_core::harness::Drive;
 use pixtuoid_core::source::registry;
 
-/// Panic reports are capped: a systematically broken decoder panics on every
-/// line, and the point is the SHAPE, which repeats.
 const MAX_REPORTED_PANICS: usize = 10;
 
 fn main() {
@@ -58,9 +30,8 @@ fn main() {
         );
         std::process::exit(2);
     }
-    // A placeholder transcript path: each decoder folds it into an AgentId, but
-    // the never-panic contract is path-independent, so one stand-in is fine.
-    // Unseeded for the same reason — registration is not what is under test.
+    // A stand-in transcript path, unseeded: the never-panic contract is
+    // path-independent and registration is not under test.
     let Some(drive) = Drive::transcript(&source, "/fuzz/session.jsonl") else {
         eprintln!(
             "decoder_fuzz: source {source:?} has no transcript line decoder (hook-only or \
@@ -70,12 +41,10 @@ fn main() {
         std::process::exit(2);
     };
 
-    // Both error policies are wrong on their own, so split by KIND. A
-    // non-UTF-8 line must be SKIPPED — `read_line` already consumed it, and
-    // stopping there would fuzz the corpus PREFIX while still reporting
-    // "0 PANIC", the false-green this tool exists to avoid. Any other read
-    // error must STOP: it repeats without consuming, so skipping would spin
-    // forever (clippy::lines_filter_map_ok).
+    // Split by error KIND: a non-UTF-8 line is SKIPPED (`read_line` already
+    // consumed it; stopping would fuzz only the corpus PREFIX while still
+    // reporting "0 PANIC"), but any other read error repeats without consuming,
+    // so skipping it would spin forever.
     let lines = std::io::stdin().lock().lines().map_while(|r| match r {
         Ok(line) => Some(Some(line)),
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData => Some(None),

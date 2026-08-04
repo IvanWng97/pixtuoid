@@ -2,14 +2,12 @@
 //! live office (every agent across every connected CLI) without opening the TUI.
 //!
 //! A binary-only front-end on the shared engine: it boots the SAME
-//! `runtime::pipeline::spawn_pipeline` spine the TUI uses (source → reducer →
-//! SceneState; #714) — from `window::resumed` rather than [`run`], because the
-//! desk-capacity seed needs the REAL window size and `run` has only the LOGICAL
-//! `[floating]` config one (#803; see `PipelineBoot`) — but presents each frame
-//! as a full-resolution
-//! [`offscreen::OfficeRenderer`] `RgbBuffer` blitted into a `winit` +
-//! `softbuffer` window instead of half-block terminal cells. `pixtuoid-core` stays
-//! window-free (invariant #1) — all windowing lives here.
+//! `runtime::pipeline::spawn_pipeline` spine the TUI uses — from
+//! `window::resumed` rather than [`run`], because the desk-capacity seed needs
+//! the REAL window size (see `PipelineBoot`) — but presents each frame as a
+//! full-resolution [`offscreen::OfficeRenderer`] `RgbBuffer` blitted into a
+//! `winit` + `softbuffer` window instead of half-block terminal cells.
+//! `pixtuoid-core` stays window-free (invariant #1) — all windowing lives here.
 
 mod cadence;
 mod geometry;
@@ -53,13 +51,12 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         .enable_all()
         .build()
         .context("building the floating tokio runtime")?;
-    // Pipeline INPUTS only `run` can resolve; the pipeline itself boots in
-    // `resumed` (`PipelineBoot::spawn`), which enters the runtime explicitly —
-    // nothing left on this path spawns, so `run` holds no `rt.enter()` guard.
+    // The pipeline boots in `resumed` (`PipelineBoot::spawn`), which enters the
+    // runtime explicitly — nothing left on this path spawns, so `run` holds no
+    // `rt.enter()` guard.
     let connected = ConnectedSources::new(connected);
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
 
-    // --- the window event loop (main thread) ---
     let mut builder = EventLoop::<FloatingEvent>::with_user_event();
     #[cfg(target_os = "macos")]
     {
@@ -72,13 +69,11 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         .context("building the floating event loop")?;
     let proxy = event_loop.create_proxy();
 
-    // FloatingApp OWNS the audio device thread via its AudioController (boot-spawn
-    // iff unmuted, Drop-teardown). Constructed HERE, after every fallible `?` boot
-    // step (pack load, runtime + event-loop build), so a boot failure means no
-    // thread ever existed — and once `app` exists, its Drop joins the device
-    // thread on EVERY exit (run_app returning normally OR a window-creation
-    // failure), no manual shutdown call. This is what fixes the "music keeps
-    // playing after quit / killall coreaudiod" bug at the root, structurally.
+    // FloatingApp OWNS the audio device thread via its AudioController. Constructed
+    // HERE, after every fallible `?` boot step, so a boot failure means no thread
+    // ever existed — and once `app` exists, its Drop joins the device thread on
+    // EVERY exit (run_app returning normally OR a window-creation failure), with no
+    // manual shutdown call.
     let mut app = FloatingApp::new(
         floating_cfg,
         theme,
@@ -99,39 +94,31 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     event_loop
         .run_app(&mut app)
         .context("running the floating window event loop")
-    // `app` drops here → AudioController Drop → device thread joined before we
-    // return (and the process exits).
 }
 
 /// Everything the pipeline needs, held by [`FloatingApp`] until `resumed` can
 /// supply the one input `run` cannot: the REAL window size.
 ///
-/// The pipeline used to boot in `run`, seeded from the `[floating]` config size
-/// — which is LOGICAL by design, while the seed helper needs PHYSICAL px, so on
-/// any HiDPI display it described a window the redraw would never measure
-/// (#803). `run` genuinely cannot do better: winit 0.30 exposes `primary_monitor`
-/// only on `ActiveEventLoop`, which does not exist until `run_app` is already
+/// `run` genuinely cannot do better: winit 0.30 exposes `primary_monitor` only
+/// on `ActiveEventLoop`, which does not exist until `run_app` is already
 /// driving, and `office_scale` ROUNDS, so no conservative logical-side seed is
 /// sound either — the buffer for one logical size is NOT monotone in the scale
-/// factor (the measured table is the `measured` array in
-/// `the_boot_seed_tracks_the_physical_window_not_the_logical_config`).
+/// factor.
 ///
-/// The accepted cost: the hook socket now binds AFTER window + surface creation
-/// rather than before the event loop. That is single-digit-to-tens of ms on
-/// desktop (`resumed` fires right after `NewEvents(Init)`), and a hook landing
-/// inside it fails to connect and exits 0 silently — the shim's documented
-/// never-block contract. In exchange, a window-creation failure no longer leaves
-/// a bound socket and a live source set behind.
+/// The accepted cost: the hook socket binds AFTER window + surface creation
+/// rather than before the event loop. A hook landing inside that window fails to
+/// connect and exits 0 silently — the shim's documented never-block contract. In
+/// exchange, a window-creation failure no longer leaves a bound socket and a
+/// live source set behind.
 pub(crate) struct PipelineBoot {
     socket_path: std::path::PathBuf,
     projects_root: Option<std::path::PathBuf>,
     codex_sessions_root: Option<std::path::PathBuf>,
     connected: ConnectedSources,
     proxy: winit::event_loop::EventLoopProxy<FloatingEvent>,
-    /// The runtime lives in [`run`] for the whole call; this is a cheap handle
-    /// so `resumed` can `enter()` it explicitly instead of leaning on `run`'s
-    /// ambient guard surviving across `run_app` (it does — but a `tokio::spawn`
-    /// with no runtime PANICS, so the dependency belongs where the spawns are).
+    /// A cheap handle so `resumed` can `enter()` the runtime explicitly instead
+    /// of leaning on `run`'s ambient guard surviving across `run_app` (it does —
+    /// but a `tokio::spawn` with no runtime PANICS).
     rt: tokio::runtime::Handle,
 }
 
@@ -169,8 +156,6 @@ impl PipelineBoot {
             boot_caps,
         );
 
-        // Bridge: a new scene → a repaint. Breaks cleanly when the window closes
-        // (`send_event` → `EventLoopClosed`) or the reducer drops its sender — never unwraps.
         {
             let mut scene_rx = scene_rx.clone();
             let proxy = self.proxy;
@@ -182,13 +167,8 @@ impl PipelineBoot {
                 }
             });
         }
-        // Source deaths are LOGGED here (the office partially freezes). The floating
-        // footer exists now but doesn't thread this health channel yet — it passes
-        // `source_warning: None` (the seam is ready; see `offscreen::footer`).
-        // Deduped by count exactly like headless_loop's consumer of the
-        // SAME channel: the watch value is a grow-only Vec, so logging the whole
-        // borrow on every change re-warns all prior deaths (N deaths → N(N+1)/2
-        // lines, reading as repeated crashes in log forensics).
+        // Deduped by count: the watch value is a grow-only Vec, so logging the whole
+        // borrow on every change would re-warn all prior deaths.
         {
             let mut health_rx = health_rx;
             self.rt.spawn(async move {

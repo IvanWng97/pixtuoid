@@ -1,49 +1,34 @@
 [profile.default]
-# Cap a hung test at 3×60s so a deadlock fails THAT test (named) and the rest
-# still run, instead of the job-level timeout killing the whole run blind. Far
-# above every real test (incl. the 200ms shim watchdog tests). NOT a retry —
-# #161's no-retries stance is preserved (retries stays unset = 0). `ci` inherits.
+# Cap a hung test so a deadlock fails THAT test (named) and the rest still run,
+# instead of the job-level timeout killing the whole run blind. NOT a retry —
+# the no-retries stance is preserved (retries stays unset = 0).
 slow-timeout = { period = "60s", terminate-after = 3 }
 
-# Full failure set per CI run: don't stop at the first failing test — a red CI
-# run should report every failure at once (one round-trip, not fix-push-refail).
-# Local `just test` keeps the default fail-fast for fast iteration. Active on
-# every CI test job: `--profile ci` on coverage, `NEXTEST_PROFILE=ci` on
-# windows-test + macos-test (all three upload target/nextest/ci/junit.xml).
+# A red CI run should report every failure at once, not fix-push-refail. Local
+# `just test` keeps the default fail-fast for fast iteration.
 [profile.ci]
 fail-fast = false
 
 [profile.ci.junit]
 path = "junit.xml"
 
-# The shim latency tests assert wall-clock bounds on a CHILD PROCESS's
-# spawn+exit; under the fully-parallel suite on a loaded machine, exec/dyld
-# scheduling jitter alone can blow the bound (#161 — flaked at 1051/1052
-# during a `just bump` preflight, passed 3/3 in isolation). Give them the
-# machine to themselves; profiles inherit from default, so `ci` gets this
-# too. Covers the Unix test and its two Windows twins (shim_pipe.rs).
-# (Plain `cargo test` runs test binaries sequentially — never affected.)
+# These assert wall-clock bounds on a CHILD PROCESS's spawn+exit; under the
+# fully-parallel suite on a loaded machine, exec/dyld scheduling jitter alone
+# blows the bound, so give them the machine to themselves.
 [[profile.default.overrides]]
 filter = 'test(_exits_zero_without_blocking) | test(_within_watchdog_bound)'
 threads-required = "num-cpus"
 
-# The connection-gate pair spawns a real `run --headless` and polls a wall-clock
-# BUDGET for it to reach a state (a sprite rendered, or the gate's drop line).
-# Same load-sensitivity class as the shim bounds above, one level up: the budget
-# is generous and both arms normally break out inside a second, but under a
-# saturated machine the child is starved and the budget expires — observed, both
-# arms red at 20s while a quiet run finishes in 0.98s. Exclusivity is nearly free
-# here precisely BECAUSE they exit on a positive signal rather than waiting out a
-# fixed timeout; raising the budget instead would only lengthen the failure path.
+# Same load-sensitivity as the shim bounds above: this pair spawns a real
+# `run --headless` and polls a wall-clock budget for it to reach a state, and a
+# saturated machine starves the child until the budget expires. Raising the
+# budget instead would only lengthen the failure path — they exit on a positive
+# signal, so exclusivity is nearly free.
 [[profile.default.overrides]]
 filter = 'test(connected_codex_rollout_becomes_a_sprite) | test(disconnected_codex_rollout_is_dropped_by_the_gate)'
 threads-required = "num-cpus"
 
-# NO synth override any more. #736 read the synth tests' ~100s as IRREDUCIBLE
-# unique work and lifted `generated_beds_…`'s kill to 5×60s; #795 measured where
-# the time actually went and it was the `test` profile inheriting `dev`'s
-# opt-level 0, not the workload — the FFT butterflies and per-sample loops ran
-# unoptimized. `[profile.dev.package.pixtuoid-scene] opt-level = 2` (workspace
-# Cargo.toml) took the whole suite 87s -> 15s, so both synth tests now sit ~12-15s
-# against the default 60s SLOW marker and 180s kill. Restoring the default is the
-# point: a raised cap would keep hiding the next regression behind 5× headroom.
+# The synth tests deliberately have NO override. Their slowness was the `test`
+# profile inheriting `dev`'s opt-level 0, not irreducible work, and is fixed by
+# `[profile.dev.package.pixtuoid-scene] opt-level = 2` in the workspace
+# Cargo.toml. Don't re-raise their cap: headroom only hides the next regression.

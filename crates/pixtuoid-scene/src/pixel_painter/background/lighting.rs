@@ -1,5 +1,5 @@
-//! Lighting effects — ceiling pools, lamp halos, shadows, corridor
-//! runner texture, neon sign panel, and wall clock.
+//! Lighting effects — ceiling pools, lamp halos, shadows, corridor runner
+//! texture, neon sign panel, and wall clock.
 
 use std::time::SystemTime;
 
@@ -18,9 +18,8 @@ pub(in crate::pixel_painter) struct Ellipse {
     pub half_h: u16,
 }
 
-/// Float ellipse geometry for [`paint_radial_falloff`]: the paint bounds
-/// `[min..max)` per axis, plus the centre + per-axis normalizer — all `f32`, so a
-/// caller can centre on `(w-1)/2` (half-cell correct) as well as an integer cell.
+/// Float ellipse geometry for [`paint_radial_falloff`] — all `f32`, so a caller
+/// can centre on `(w-1)/2` (half-cell correct) as well as an integer cell.
 pub(in crate::pixel_painter) struct RadialFalloff {
     pub min_x: u16,
     pub max_x: u16,
@@ -34,9 +33,7 @@ pub(in crate::pixel_painter) struct RadialFalloff {
 
 /// Blend `color` over the region with a quadratic radial falloff from the centre
 /// (full `strength`) to the ellipse edge (`r² > 1` skipped), so it reads as a
-/// soft round patch rather than a stamped oval. THE one falloff-blend: the
-/// ceiling pool / furniture shadow (`paint_ellipse_blend`, integer centre) and
-/// the wall sun spot (`ambient::paint_sun_spot`, `(w-1)/2` float centre) share it.
+/// soft round patch rather than a stamped oval.
 pub(in crate::pixel_painter) fn paint_radial_falloff(
     buf: &mut RgbBuffer,
     g: RadialFalloff,
@@ -129,19 +126,16 @@ pub(in crate::pixel_painter) fn paint_floor_lamp_halo(
 
 /// Neon border breathing brightness (0.7..1.0) for the given wall-clock ms.
 ///
-/// `elapsed_ms` is the ABSOLUTE epoch ms (~1.7e12 today); the divide MUST stay
-/// in f64. `elapsed_ms as f32` first would round to the nearest representable
-/// f32 (ULP ~131 s at that magnitude), collapsing every frame within ~2 min to
-/// one value and freezing the pulse — the same reduce-before-cast rule the sim's
-/// other epoch-driven animations follow (`% CYCLE_MS` before the f32 cast).
+/// `elapsed_ms` is the ABSOLUTE epoch ms; the divide MUST stay in f64. Casting
+/// to f32 first rounds away the frame-to-frame delta at that magnitude,
+/// collapsing minutes of frames onto one value and freezing the pulse.
 fn neon_pulse(elapsed_ms: u64) -> f32 {
-    // Slow ~1.2s sine pulse.
     const NEON_PULSE_PERIOD_MS: f64 = 1200.0;
     (0.7 + 0.3 * ((elapsed_ms as f64 / NEON_PULSE_PERIOD_MS).sin() * 0.5 + 0.5)) as f32
 }
 
-/// Neon sign panel — dark background with colored glow border, painted in
-/// the wall band. The ratatui text widget renders on top with bright colors.
+/// Neon sign panel — dark background with a colored glow border, painted in the
+/// wall band. The ratatui text widget renders on top.
 pub(in crate::pixel_painter) fn paint_neon_panel(
     buf: &mut RgbBuffer,
     x: u16,
@@ -163,9 +157,8 @@ pub(in crate::pixel_painter) fn paint_neon_panel(
         b: clamp(base.b as f32 + 50.0 * pulse),
     };
 
-    // The frame thickness is the SAME const the board-text interior derives from
-    // (`NEON_PANEL_INNER_*`), so the cells this leaves dark == the cells the text
-    // is allowed to fill — they can't drift.
+    // The SAME const the board-text interior derives from (`NEON_PANEL_INNER_*`),
+    // so the cells left dark == the cells the text may fill; they can't drift.
     let b = crate::pixel_painter::NEON_PANEL_BORDER;
     for dy in 0..h {
         for dx in 0..w {
@@ -184,10 +177,8 @@ pub(in crate::pixel_painter) fn paint_neon_panel(
     }
 }
 
-/// Live wall clock — reads system local time and renders hour + minute hands.
-/// 7x7 clock face with a circular rim. Hands quantize to 8 cardinal/inter-
-/// cardinal directions and are drawn as multi-pixel rays from the center
-/// (hour 1 px, minute 2 px) so they read clearly at this size.
+/// Live wall clock — a 7x7 face whose hands quantize to 8 directions and are
+/// drawn as multi-pixel rays so they read clearly at this size.
 pub(in crate::pixel_painter) fn paint_clock(
     buf: &mut RgbBuffer,
     x: u16,
@@ -219,7 +210,6 @@ pub(in crate::pixel_painter) fn paint_clock(
         }
     }
 
-    // Decompose `now` into local hour + minute via chrono.
     let unix_now = now
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
@@ -240,17 +230,13 @@ pub(in crate::pixel_painter) fn paint_clock(
         }
     };
 
-    // Center pin (always painted).
     put(buf, 0, 0, hand_color);
 
-    // Hour hand: ray of length 1 from center.
     let (hdx, hdy) = octant_offset(hour_turns);
     put(buf, hdx, hdy, hand_color);
 
-    // Minute hand: ray of length 2 from center at cardinals, 1 at
-    // diagonals. The 7x7 disc has 3-px face at cardinals but only 1-px
-    // face at diagonals — a length-2 diagonal hand would overwrite the
-    // rim and leave a gap in the border.
+    // The 7x7 disc has 3-px face at cardinals but only 1-px face at diagonals, so
+    // a length-2 diagonal minute hand would overwrite the rim and gap the border.
     let (mdx, mdy) = octant_offset(min_turns);
     let max_step = if mdx != 0 && mdy != 0 { 1 } else { 2 };
     for step in 1..=max_step {
@@ -277,10 +263,9 @@ fn octant_offset(turn: f32) -> (i32, i32) {
     OCTANTS[oct as usize]
 }
 
-/// Office corridor runner — a darker wood strip with subtle lighter stripes,
-/// painted along the cubicle_aisle band so the eye traces a path connecting the
-/// door, meeting room, pantry, cubicles, and lounge. Just texture over the
-/// floor — walls and decor paint on top.
+/// Office corridor runner, painted along the cubicle_aisle band so the eye
+/// traces a path connecting the door, meeting room, pantry, cubicles and lounge.
+/// Just texture over the floor — walls and decor paint on top.
 pub(in crate::pixel_painter) fn paint_corridor_runner(
     buf: &mut RgbBuffer,
     rect: crate::layout::Bounds,
@@ -289,9 +274,8 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
     let runner_base = theme.office.runner_base;
     let runner_stripe = theme.office.runner_stripe;
     let runner_edge = theme.office.runner_edge;
-    // Taste pin (interior-decor mock round): a sparse lattice with border rows
-    // only. The earlier stride-6 + doubled inner-edge rows read as bathroom
-    // tiling rather than a woven runner at half-block scale.
+    // Taste pin: a tighter stride read as bathroom tiling rather than a woven
+    // runner at half-block scale.
     const RUNNER_LATTICE_STRIDE: i32 = 10;
     let max_x = (rect.x + rect.width).min(buf.width());
     let max_y = (rect.y + rect.height).min(buf.height());
@@ -314,11 +298,8 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
     }
 }
 
-/// Elliptical drop-shadow blended toward black at the floor level.
-/// Grounds floating sprites so they look like they're standing/sitting
-/// on the floor instead of hovering in mid-air. `strength` 0..1 controls
-/// the darken amount at the center; falls off quadratically to 0 at edge.
-/// Soft elliptical contact shadow under furniture / characters.
+/// Soft elliptical contact shadow under furniture / characters — grounds
+/// floating sprites so they read as standing on the floor, not hovering.
 pub(in crate::pixel_painter) fn paint_shadow(
     buf: &mut RgbBuffer,
     ellipse: Ellipse,
@@ -332,13 +313,10 @@ pub(in crate::pixel_painter) fn paint_shadow(
 mod tests {
     use super::*;
 
-    // Regression: the pulse must advance frame-to-frame at a WALL-CLOCK-scale
-    // timestamp (~1.7e12 ms), not just at small test epochs. The old
-    // `elapsed_ms as f32 / PERIOD` froze here (f32 ULP ~131 s at that magnitude),
-    // so two frames 33 ms apart yielded an identical pulse for ~2 min.
     #[test]
     fn neon_pulse_advances_at_wall_clock_scale() {
-        // 2026-scale epoch ms; two consecutive ~30fps frames.
+        // Must be a WALL-CLOCK-scale epoch, not a small test epoch: that is where
+        // the f32 cast froze the pulse. Two consecutive ~30fps frames.
         let t0: u64 = 1_767_000_000_000;
         let a = neon_pulse(t0);
         let b = neon_pulse(t0 + 33);
@@ -346,12 +324,9 @@ mod tests {
             a, b,
             "pulse must change across a 33ms frame at wall-clock ms"
         );
-        // Stays in the documented 0.7..=1.0 band.
         assert!((0.7..=1.0).contains(&a), "pulse {a} out of band");
     }
 
-    // A degenerate ellipse (half_w == 0) or zero strength must early-return and
-    // leave the buffer untouched — the guard at the top of paint_ellipse_blend.
     #[test]
     fn ellipse_blend_degenerate_is_a_noop() {
         let theme = &crate::theme::NORMAL;
@@ -360,7 +335,6 @@ mod tests {
             g: 30,
             b: 30,
         };
-        // half_w == 0.
         let mut buf = RgbBuffer::filled(20, 20, fill);
         paint_ellipse_blend(
             &mut buf,
@@ -378,7 +352,6 @@ mod tests {
                 assert_eq!(buf.get(x, y), fill, "half_w==0 must paint nothing");
             }
         }
-        // strength <= 0.
         let mut buf = RgbBuffer::filled(20, 20, fill);
         paint_ellipse_blend(
             &mut buf,
@@ -398,8 +371,8 @@ mod tests {
         }
     }
 
-    // A non-degenerate ellipse fully inside the buffer DOES paint, so the
-    // degenerate test above isn't passing vacuously.
+    // Negative control for `ellipse_blend_degenerate_is_a_noop`: without this a
+    // painter that never painted at all would pass it vacuously.
     #[test]
     fn ellipse_blend_paints_when_valid() {
         let theme = &crate::theme::NORMAL;
@@ -423,9 +396,8 @@ mod tests {
         assert_ne!(buf.get(10, 10), fill, "the ellipse centre must be tinted");
     }
 
-    // paint_neon_panel clamps per-pixel writes against the buffer edge — a panel
-    // positioned so its width runs off the right edge must hit the `continue`
-    // without panicking (RgbBuffer::put has no internal bounds guard).
+    // `RgbBuffer::put` has no internal bounds guard, so an off-edge panel must hit
+    // the painter's own `continue`.
     #[test]
     fn neon_panel_off_edge_does_not_panic() {
         let theme = &crate::theme::NORMAL;
@@ -433,7 +405,6 @@ mod tests {
         let mut buf = RgbBuffer::filled(10, 10, Rgb { r: 0, g: 0, b: 0 });
         // x=8, w=6 → px reaches 13 (>= width 10); y=8, h=5 → py reaches 12.
         paint_neon_panel(&mut buf, 8, 8, 6, 5, now, theme);
-        // In-bounds border pixel still painted (panel frame at the origin corner).
         assert_ne!(
             buf.get(8, 8),
             Rgb { r: 0, g: 0, b: 0 },

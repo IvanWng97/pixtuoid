@@ -1,18 +1,14 @@
 ---
-// §3 proof: ONE gen-media render (scripts/media.json job `proof`, via
-// `snapshot --proof` over the committed proof-session fixture) drives BOTH
-// sides — the typed session AND the real-renderer office — burned into a
-// single clip, so the halves can never desync. The tall clip is the SAME
-// render composed vertically (one Rust pass emits both frame sets).
-// Fallback ladder: reduced-motion & no-JS → the annotated poster still.
+// ONE gen-media render (scripts/media.json job `proof`) drives BOTH sides —
+// the typed session AND the real-renderer office — burned into a single clip,
+// so the halves can never desync. The tall clip is that same render composed
+// vertically.
 import { asset } from '../consts';
 ---
 
 {
   /* role="region": a bare div's implicit role (generic) PROHIBITS an
-  accessible name per WAI-ARIA 1.2, so the aria-label would be dropped —
-  region restores the landmark the brief's original <section> root carried
-  (the root became a div when the component moved inside section#amenities). */
+  accessible name per WAI-ARIA 1.2, so the aria-label would be dropped. */
 }
 <div class="proof" id="proof" role="region" aria-label="proof: a real session drives the office">
   <div class="proof__stage hw-panel">
@@ -47,15 +43,9 @@ import { asset } from '../consts';
 </div>
 
 <script is:inline>
-  // Variant pick + play policy. Mirrors Showcase's clip posture: deferred
-  // hydration (zero video bytes until in view), play only while in view and
-  // not paused; a pix:paused CONSUMER (never a dispatcher — #office-pause is
-  // the one control). Reduced-motion: never hydrate — the poster IS the
-  // spec's single annotated still, but the ACTIVE variant's poster is
-  // promoted from data-poster in sync() (not just hydrate()), since the
-  // reduced-motion arm returns before hydrate() ever runs. No-JS: this
-  // script never runs, the wide poster shows (the tall variant stays
-  // [hidden] from the markup).
+  // A pix:paused CONSUMER, never a dispatcher — #office-pause is the one
+  // control. Under reduced motion we never hydrate, so the active variant's
+  // poster must be promoted from data-poster in sync() rather than hydrate().
   (function () {
     const root = document.getElementById('proof');
     if (!root) return;
@@ -128,11 +118,9 @@ import { asset } from '../consts';
 </script>
 
 <style>
-  /* Width comes from the parent .container's content box — the stage, the
-     eyebrow above, and the coda share ONE left edge (user-caught: the old
-     self-centered min(1100px, 94vw) stage sat 48px right of the eyebrow and
-     overflowed the container's right edge, two alignment systems on one
-     floor). */
+  /* Width comes from the parent .container's content box so the stage, the
+     eyebrow above, and the coda share ONE left edge. Don't re-introduce a
+     self-centering min() here — that is a second alignment system. */
   .proof {
     position: relative;
     padding: clamp(3rem, 8vh, 6rem) 0;

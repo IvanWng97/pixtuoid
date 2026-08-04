@@ -2,8 +2,6 @@ use super::{paint_panel, to_color, Overflow};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
-/// The two colors that characterize a theme in the picker swatch: its
-/// accent (`neon_brand`) and its dominant office surface (`carpet_base`).
 fn theme_swatch(t: &pixtuoid_scene::theme::Theme) -> (Color, Color) {
     (to_color(t.ui.neon_brand), to_color(t.surface.carpet_base))
 }
@@ -32,9 +30,6 @@ pub(crate) fn paint_theme_picker(
             } else {
                 Style::default().fg(to_color(theme.ui.label_idle))
             };
-            // Each row previews the theme it would switch to via a 2-cell
-            // swatch (accent + office floor), so the picker reads visually
-            // rather than by name alone.
             let (brand, surface) = theme_swatch(t);
             Line::from(vec![
                 TSpan::styled(format!("{prefix}{:<12}", t.name), name_style),
@@ -66,9 +61,7 @@ pub(crate) fn paint_theme_picker(
 mod tests {
     use super::*;
 
-    // Regression: paint_theme_picker rendered Clear onto an unclamped
-    // 28-wide area; on a narrower buffer (reachable via the gate-less
-    // floor-transition paint path) Clear panics indexing past the buffer.
+    // 24 is narrower than THEME_W: an unclamped Clear panics indexing past the buffer.
     #[test]
     fn theme_picker_narrow_terminal_does_not_panic() {
         use ratatui::backend::TestBackend;
@@ -84,15 +77,11 @@ mod tests {
             );
         })
         .unwrap();
-        // Reaching here without a panic is the assertion.
     }
 
     #[test]
     fn theme_swatch_distinguishes_themes() {
         use pixtuoid_scene::theme;
-        // Each theme's (accent, surface) pair should reflect that theme's
-        // own palette, not the currently-active one — so the picker rows
-        // preview distinct colors.
         let cyber = theme_swatch(&theme::CYBERPUNK);
         let normal = theme_swatch(&theme::NORMAL);
         assert_ne!(

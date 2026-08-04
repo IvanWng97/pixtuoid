@@ -1,15 +1,8 @@
 //! Snapshot regression tests for `draw_scene`.
 //!
-//! Hashes the pixel buffer of a deterministic scene at a fixed `now` and
-//! asserts the hash matches when the same input is rendered twice. Also
-//! checks that the time-of-day system actually affects the render (so a
-//! refactor that accidentally bypasses the daylight cycle is caught).
-//!
-//! What this DOESN'T cover: full visual regressions against a golden
-//! pixel buffer. The daylight code reads chrono::Local, which makes a
-//! golden hash machine-dependent. The determinism check + time-sensitivity
-//! check together catch the most likely regressions (nondeterminism,
-//! broken time wiring) without needing per-machine goldens.
+//! No golden pixel buffer: the daylight code reads `chrono::Local`, which makes
+//! a golden hash machine-dependent. The determinism + time-sensitivity checks
+//! together catch the likely regressions without needing per-machine goldens.
 
 mod common;
 
@@ -100,9 +93,6 @@ fn render_pixel_hash(now: SystemTime) -> u64 {
 
 #[test]
 fn render_is_deterministic_for_same_now() {
-    // Anchor at a deterministic timestamp. Both runs use the same `now`,
-    // so any randomness, hashmap iteration leak, or unstable Vec ordering
-    // would show up as a hash mismatch here.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
     let hash_a = render_pixel_hash(now);
     let hash_b = render_pixel_hash(now);
@@ -114,9 +104,6 @@ fn render_is_deterministic_for_same_now() {
 
 #[test]
 fn render_changes_when_time_advances_by_hours() {
-    // Cross-check: the time-of-day system actually drives the output.
-    // A refactor that accidentally hardcoded the daylight constants or
-    // bypassed `now` in a paint pass would make these hashes identical.
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
     let later = base + Duration::from_secs(8 * 3600);
     let hash_a = render_pixel_hash(base);
@@ -127,9 +114,6 @@ fn render_changes_when_time_advances_by_hours() {
     );
 }
 
-/// Catches "render bypassed entirely" / "all black" / "stuck on one color"
-/// regressions. Hash equality checks compare to themselves; this check
-/// asserts the absolute pixel range looks like a real rendered scene.
 #[test]
 fn render_produces_distinct_wall_band_and_floor_regions() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
@@ -141,8 +125,6 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx).expect("render");
     let buf = &*draw_ctx.buf;
 
-    // Non-trivial color diversity — guards against an "all black" render or
-    // a paint pass that collapsed every pixel to one color.
     let mut colors = std::collections::HashSet::new();
     for px in buf.as_slice() {
         colors.insert((px.r, px.g, px.b));
@@ -153,10 +135,7 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
         colors.len()
     );
 
-    // Region check: the upper quarter (wall band) and lower half (floor) of
-    // the buffer should have distinctly different average colors. Avoids
-    // a regression where the wall band paint pass is skipped, leaving the
-    // wall band painted in floor colors (or vice versa).
+    // The upper quarter of the buffer is the wall band, the lower half the floor.
     let w = buf.width() as usize;
     let h = buf.height() as usize;
     let wall_h = h / 4;
@@ -193,8 +172,6 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
 
 #[test]
 fn render_changes_when_an_agent_state_changes() {
-    // Active vs all-idle should produce different pixels (screen glow,
-    // active monitor scanline, skin tint differ).
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
     let mut scene_idle = fixture_scene(now);
     for slot in scene_idle.agents.values_mut() {

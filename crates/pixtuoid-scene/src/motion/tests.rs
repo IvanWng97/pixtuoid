@@ -6,8 +6,6 @@ fn id() -> AgentId {
     AgentId::from_parts("test", "motion-test-agent")
 }
 
-// --- MotionState::new -------------------------------------------------
-
 #[test]
 fn motion_state_new_default_fields() {
     let ms = MotionState::new(id());
@@ -18,13 +16,10 @@ fn motion_state_new_default_fields() {
     assert_eq!(ms.wander.phase, WanderPhase::Seated);
     assert_eq!(ms.wander.phase_started_at, SystemTime::UNIX_EPOCH);
     assert_eq!(ms.wander.last_advanced_at, SystemTime::UNIX_EPOCH);
-    // No separate profile field now — a fresh state is Seated (no walk leg).
     assert!(matches!(ms.wander.phase, WanderPhase::Seated));
     assert!(matches!(ms.wander.target.kind, WanderKind::Aimless));
     assert!(ms.walk_path.is_none());
 }
-
-// --- octile_path_len --------------------------------------------------
 
 #[test]
 fn path_len_empty_is_zero() {
@@ -62,10 +57,6 @@ fn path_len_multi_segment_sums() {
     assert_eq!(octile_path_len(&[a, b, c]), 70);
 }
 
-// =========================================================================
-// advance_wander tests
-// =========================================================================
-
 use crate::layout::Layout;
 use crate::pathfind::Router;
 use crate::pose::{
@@ -77,11 +68,6 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// -----------------------------------------------------------------------
-// Stub routers
-// -----------------------------------------------------------------------
-
-/// Straight-line stub: always returns `[from, to]`.
 struct Straight;
 impl Router for Straight {
     fn route(
@@ -96,8 +82,8 @@ impl Router for Straight {
     fn invalidate(&mut self) {}
 }
 
-/// Recording stub: captures every `(from, to)` route request, returning the
-/// straight line. Pins WHICH goal the profile snapshots route to.
+/// Captures every `(from, to)` route request — pins WHICH goal the profile
+/// snapshots route to.
 struct Recording {
     calls: Vec<(Point, Point)>,
 }
@@ -115,9 +101,8 @@ impl Router for Recording {
     fn invalidate(&mut self) {}
 }
 
-/// Fixed-octile-length stub: synthesises a horizontal path of the requested
-/// octile length starting at `from`, ignoring `to`. Used to test phase
-/// transitions with predictable walk durations.
+/// Synthesises a horizontal path of the requested octile length starting at
+/// `from`, IGNORING `to` — gives phase-transition tests a predictable walk.
 struct FixedLen {
     octile_len: u32,
 }
@@ -129,8 +114,7 @@ impl Router for FixedLen {
         from: Point,
         _to: Point,
     ) -> Vec<Point> {
-        // Horizontal path: each step is 10 octile units (1 px orthogonal).
-        // octile_len / 10 px ≈ requested length.
+        // Each orthogonal 1 px step is 10 octile units.
         let steps = (self.octile_len / 10) as u16;
         let mid = Point {
             x: from.x + steps / 2,
@@ -184,7 +168,6 @@ fn layout() -> Layout {
     Layout::compute(120, 96, Some(4)).expect("fits")
 }
 
-/// Find an agent whose cycle_n=0 is a trip cycle, using the given path prefix.
 fn trip_agent(prefix: &str) -> AgentId {
     (0u64..500)
         .map(|i| AgentId::from_transcript_path(&format!("/p/{prefix}_{i}.jsonl")))
@@ -192,9 +175,8 @@ fn trip_agent(prefix: &str) -> AgentId {
         .expect("should find a trip agent quickly")
 }
 
-/// The dwell the machine will apply at the agent's current wander destination
-/// (per-spot for a named waypoint, the estimate for an aimless trip). Read
-/// after the agent has picked a destination (WalkingOut onward).
+/// The dwell the machine will apply at the agent's current wander destination.
+/// Only valid once a destination is picked (WalkingOut onward).
 fn current_dwell_dur(motion: &HashMap<AgentId, MotionState>, id: AgentId) -> u64 {
     match motion.get(&id).map(|ms| ms.wander.target.kind) {
         Some(WanderKind::Named { kind, .. }) => dwell_ms(kind, id),
@@ -202,12 +184,9 @@ fn current_dwell_dur(motion: &HashMap<AgentId, MotionState>, id: AgentId) -> u64
     }
 }
 
-/// The variant KIND of a `WanderPhase`, ignoring the carried `WalkProfile` —
-/// `advance_until_leaves` polls until the phase's KIND changes, and the per-leg
-/// profile payload is not what these transition tests key on (they assert a
-/// walk began/ended, not which frozen profile it froze). Since the walk
-/// variants now carry a non-`Eq` `WalkProfile`, this is the phase's identity for
-/// the "has the agent left this phase?" question.
+/// The variant KIND of a `WanderPhase`. The walk variants carry a non-`Eq`
+/// `WalkProfile`, so this is the phase's identity for "has the agent left this
+/// phase?" — the transition tests never key on which profile got frozen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PhaseKind {
     Seated,
@@ -225,11 +204,10 @@ fn phase_kind(phase: WanderPhase) -> PhaseKind {
     }
 }
 
-/// Poll `advance_wander` in ~1 s steps (well under the `stale_resume_gap_ms`
-/// stale-resume trigger, so a long seated/dwell beat is crossed exactly as
-/// real per-frame rendering would, never looking like an off-screen gap)
-/// until the agent's phase KIND is no longer `from_phase`. Returns the new
-/// `now`. Panics if the transition doesn't happen within `timeout_ms`.
+/// Poll `advance_wander` until the agent's phase KIND is no longer `from_phase`,
+/// returning the new `now`. The ~1 s step stays well under the
+/// `stale_resume_gap_ms` trigger, so a long seated/dwell beat is crossed exactly
+/// as real per-frame rendering would, never looking like an off-screen gap.
 #[allow(clippy::too_many_arguments)]
 fn advance_until_leaves(
     slot: &AgentSlot,
@@ -262,9 +240,6 @@ fn advance_until_leaves(
     now
 }
 
-// -----------------------------------------------------------------------
-// T1: Fresh idle agent initialises into Seated phase
-// -----------------------------------------------------------------------
 #[test]
 fn fresh_idle_inits_to_seated_phase() {
     let now = t0();
@@ -285,10 +260,6 @@ fn fresh_idle_inits_to_seated_phase() {
     assert_eq!(ms.wander.cycle_n, 0);
 }
 
-// -----------------------------------------------------------------------
-// T2: Seated phase transitions to WalkingOut after the seated dwell elapses
-//     on a trip cycle.
-// -----------------------------------------------------------------------
 #[test]
 fn seated_transitions_to_walking_out_on_trip_cycle() {
     let trip_id = trip_agent("trip");
@@ -323,9 +294,6 @@ fn seated_transitions_to_walking_out_on_trip_cycle() {
     );
 }
 
-// -----------------------------------------------------------------------
-// T3: Non-trip cycle stays Seated even after the seated dwell elapses
-// -----------------------------------------------------------------------
 #[test]
 fn non_trip_cycle_stays_seated() {
     let stay_id = (0u64..500)
@@ -345,8 +313,7 @@ fn non_trip_cycle_stays_seated() {
     let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
 
     advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    // Poll well past the longest seated dwell (30 s) — a non-trip cycle must
-    // never leave Seated (it bumps cycle_n in place instead).
+    // Poll well past the longest seated dwell (30 s).
     let mut t = now;
     for _ in 0..40 {
         t += Duration::from_millis(1_000);
@@ -361,9 +328,6 @@ fn non_trip_cycle_stays_seated() {
     }
 }
 
-// -----------------------------------------------------------------------
-// T4: WalkingOut transitions to AtWaypoint when walk_arrived fires
-// -----------------------------------------------------------------------
 #[test]
 fn walking_out_transitions_to_at_waypoint_on_arrival() {
     let trip_id = trip_agent("wp");
@@ -382,7 +346,6 @@ fn walking_out_transitions_to_at_waypoint_on_arrival() {
     let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
 
     advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    // → WalkingOut
     let t1 = advance_until_leaves(
         &slot,
         &l,
@@ -397,7 +360,6 @@ fn walking_out_transitions_to_at_waypoint_on_arrival() {
         motion.get(&trip_id).unwrap().wander.phase,
         WanderPhase::WalkingOut(_)
     ));
-    // → AtWaypoint (short walk, arrives within a couple of 1 s steps)
     advance_until_leaves(
         &slot,
         &l,
@@ -417,9 +379,6 @@ fn walking_out_transitions_to_at_waypoint_on_arrival() {
     );
 }
 
-// -----------------------------------------------------------------------
-// T5: AtWaypoint dwell transitions to WalkingBack after the per-spot dwell
-// -----------------------------------------------------------------------
 #[test]
 fn at_waypoint_transitions_to_walking_back_after_dwell() {
     let trip_id = trip_agent("dwell");
@@ -462,7 +421,6 @@ fn at_waypoint_transitions_to_walking_back_after_dwell() {
         motion.get(&trip_id).unwrap().wander.phase,
         WanderPhase::AtWaypoint(_)
     ));
-    // Cross the (long) per-spot dwell.
     advance_until_leaves(
         &slot,
         &l,
@@ -482,9 +440,6 @@ fn at_waypoint_transitions_to_walking_back_after_dwell() {
     );
 }
 
-// -----------------------------------------------------------------------
-// T6: WalkingBack arrival increments cycle_n and resets to Seated
-// -----------------------------------------------------------------------
 #[test]
 fn walking_back_arrival_increments_cycle_n_and_resets_to_seated() {
     let trip_id = trip_agent("cyc");
@@ -553,9 +508,6 @@ fn walking_back_arrival_increments_cycle_n_and_resets_to_seated() {
     assert_eq!(ms.wander.cycle_n, 1, "cycle_n must increment once");
 }
 
-// -----------------------------------------------------------------------
-// T7: Dwell time is independent of path length (it is per-spot, not per-walk)
-// -----------------------------------------------------------------------
 #[test]
 fn dwell_time_independent_of_path_length() {
     let trip_id = trip_agent("dwell2");
@@ -612,9 +564,7 @@ fn dwell_time_independent_of_path_length() {
         measured.push(dwell);
     }
 
-    // Same destination both runs (same agent, same cycle_n) → the dwell is the
-    // same regardless of how long the walk leg was. Allow one 1 s poll step of
-    // slack.
+    // The slack is one 1 s poll step.
     let diff = measured[0].abs_diff(measured[1]);
     assert!(
         diff <= 1_000,
@@ -622,17 +572,14 @@ fn dwell_time_independent_of_path_length() {
     );
 }
 
-// -----------------------------------------------------------------------
-// T8: Far waypoint full-cycle wall-time longer than near
-// -----------------------------------------------------------------------
 #[test]
 fn far_waypoint_full_cycle_is_longer() {
     use crate::physics::{walk_profile, WalkIntent};
 
     let trip_id = trip_agent("far");
     let seated_dur = seated_dwell_ms(trip_id);
-    // Dwell is per-spot but constant across path lengths, so it cancels out of
-    // the near-vs-far comparison — use the estimate as a fixed stand-in.
+    // Dwell is constant across path lengths, so it cancels out of the
+    // near-vs-far comparison — the estimate is a fine stand-in.
     let dwell_dur = WANDER_DWELL_EST_MS;
 
     let cycle_wall_ms = |path_len: u32| -> u64 {
@@ -659,10 +606,6 @@ fn far_waypoint_full_cycle_is_longer() {
     );
 }
 
-// -----------------------------------------------------------------------
-// snapshot_leg_profile: the one-shot route→measure→freeze composition the
-// five entry/exit/snap-back/wander legs share
-// -----------------------------------------------------------------------
 #[test]
 fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
     use crate::physics::{walk_profile, WalkIntent};
@@ -674,9 +617,8 @@ fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
     let to = Point { x: 40, y: 8 };
     let seat = Point { x: 42, y: 10 };
 
-    // The straight-line router returns `[from, to]` and route_jittered restores
-    // the endpoint, so the composer must equal the manual route→measure→freeze it
-    // replaced — pinning that measurement runs on the ROUTED polyline + settles.
+    // Pins that measurement runs on the ROUTED polyline plus the settles, not
+    // on the raw `from`→`to` line.
     let got = snapshot_leg_profile(
         &mut Straight,
         &mask,
@@ -697,8 +639,6 @@ fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
     assert_eq!(got.path_len_octile, expect.path_len_octile);
     assert_eq!(got.duration_ms, expect.duration_ms);
 
-    // The end-settle glide onto the seat must LENGTHEN the measured leg vs no
-    // settle — pins the settle segments are folded in, not dropped.
     let no_settle = snapshot_leg_profile(
         &mut Straight,
         &mask,
@@ -716,9 +656,6 @@ fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
     );
 }
 
-// -----------------------------------------------------------------------
-// T9: Arrival pause holds WalkingOut phase during [T, T+pause)
-// -----------------------------------------------------------------------
 #[test]
 fn arrival_pause_holds_walking_out_phase() {
     use crate::physics::{walk_arrived, walk_profile, WalkIntent};
@@ -757,15 +694,13 @@ fn arrival_pause_holds_walking_out_phase() {
         60_000,
     );
     let out_started = motion.get(&trip_id).unwrap().wander.phase_started_at;
-    // The out-leg profile now rides the WalkingOut variant (no separate field).
     let actual_profile = match motion.get(&trip_id).unwrap().wander.phase {
         WanderPhase::WalkingOut(p) => p,
         other => panic!("expected WalkingOut, got {other:?}"),
     };
     let actual_mid_elapsed = actual_profile.duration_ms + actual_profile.pause_ms / 2;
 
-    // Mid-pause: still WalkingOut (walk_arrived returns false). This sample is
-    // within ~1 s of t1, far below the stale trigger.
+    // This sample is within ~1 s of t1, far below the stale trigger.
     let _ = t1;
     let mid = out_started + Duration::from_millis(actual_mid_elapsed);
     advance_wander(&slot, mid, &l, &mut router, &overlay, &mut motion);
@@ -778,9 +713,6 @@ fn arrival_pause_holds_walking_out_phase() {
     );
 }
 
-// -----------------------------------------------------------------------
-// T10: Idempotency — advance_wander twice same `now` leaves state unchanged
-// -----------------------------------------------------------------------
 #[test]
 fn idempotent_same_now_does_not_mutate_state() {
     let trip_id = trip_agent("idem");
@@ -812,7 +744,6 @@ fn idempotent_same_now_does_not_mutate_state() {
         (ms.wander.phase, ms.wander.cycle_n)
     };
 
-    // Call again with the SAME `now` (t1) — must NOT mutate.
     advance_wander(&slot, t1, &l, &mut router, &overlay, &mut motion);
 
     let ms = motion.get(&trip_id).unwrap();
@@ -826,11 +757,6 @@ fn idempotent_same_now_does_not_mutate_state() {
     );
 }
 
-// -----------------------------------------------------------------------
-// T11: Bootstrap — agent idle for N cycles before first render. cycle_n is
-//      fast-forwarded by the ESTIMATED cycle (matches idle_pose), not the
-//      stale-resume sentinel stale_resume_gap_ms.
-// -----------------------------------------------------------------------
 #[test]
 fn bootstrap_fast_forwards_cycle_n() {
     let id = AgentId::from_transcript_path("/p/bootstrap.jsonl");
@@ -855,11 +781,6 @@ fn bootstrap_fast_forwards_cycle_n() {
     );
 }
 
-// -----------------------------------------------------------------------
-// T12: Stale resume — a floor off-screen (motion frozen) must resync
-//      analytically on return instead of replaying the backlog one phase per
-//      frame. Trigger: gap > stale_resume_gap_ms; fast-forward divides by est cycle.
-// -----------------------------------------------------------------------
 #[test]
 fn stale_resume_resyncs_without_replay() {
     let trip_id = trip_agent("stale");
@@ -876,7 +797,6 @@ fn stale_resume_resyncs_without_replay() {
     let mut router = Straight;
     let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
 
-    // Init, then poll into a walk leg so the pre-gap phase is mid-cycle.
     advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
     let t1 = advance_until_leaves(
         &slot,
@@ -896,8 +816,8 @@ fn stale_resume_resyncs_without_replay() {
         "precondition: agent should be WalkingOut before the gap"
     );
 
-    // Floor goes off-screen for ~20 cycles; advance_wander is NOT called.
-    // The gap dwarfs the stale trigger; a SINGLE call on return must resync.
+    // Floor goes off-screen for ~20 cycles: advance_wander is NOT called, and a
+    // SINGLE call on return must resync.
     assert!(20 * est_cycle > stale_resume_gap_ms(trip_id));
     let resume = t1 + Duration::from_millis(20 * est_cycle);
     advance_wander(&slot, resume, &l, &mut router, &overlay, &mut motion);
@@ -915,11 +835,6 @@ fn stale_resume_resyncs_without_replay() {
     );
 }
 
-// -----------------------------------------------------------------------
-// T13: A long on-screen dwell (sampled every ~33 ms) never trips the
-//      stale-resume resync — the guard against making the trigger a dwell
-//      detector. The agent stays AtWaypoint until the dwell genuinely ends.
-// -----------------------------------------------------------------------
 #[test]
 fn long_dwell_never_trips_stale_resume_on_screen() {
     let trip_id = trip_agent("longdwell");
@@ -963,12 +878,9 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
         WanderPhase::AtWaypoint(_)
     ));
 
-    // Sample every 33 ms across (almost) the full dwell window. Even for a 40 s
-    // sofa lounge the per-frame gap stays ~33 ms, so the stale-resume (gap >
-    // stale_resume_gap_ms) must never fire — the agent must NOT snap to Seated.
-    // Base the window on the ACTUAL AtWaypoint phase start (the poll-observed
-    // `t2` can lag the real transition by up to one 1 s step), leaving a 2 s
-    // margin so we stop before the dwell genuinely ends.
+    // Base the window on the ACTUAL AtWaypoint phase start — the poll-observed
+    // `t2` can lag the real transition by up to one 1 s step — and leave a 2 s
+    // margin so the loop stops before the dwell genuinely ends.
     let at_wp_start = motion.get(&trip_id).unwrap().wander.phase_started_at;
     let dwell_dur = current_dwell_dur(&motion, trip_id);
     let mut t = t2;
@@ -992,14 +904,6 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
         "agent should still be AtWaypoint just before the dwell ends"
     );
 }
-
-// -----------------------------------------------------------------------
-// Jitter lockstep: the profile snapshots must route to the SAME jittered
-// goal the render's walk-path freeze uses (route_walking_pose →
-// jitter_dest). A raw-dest route measures a differently-shaped polyline
-// than the one rendered (wrong walk speed) AND mints a second router-cache
-// key per leg (2x the PATH_CACHE_CAP sizing note).
-// -----------------------------------------------------------------------
 
 use crate::pose::jitter_dest;
 
@@ -1072,12 +976,6 @@ fn back_profile_routes_to_the_jittered_desk_goal_the_render_uses() {
     );
 }
 
-// -----------------------------------------------------------------------
-// Dest mirror: the motion walk destination for a furniture waypoint must
-// equal layout::stand_point computed with the agent's HOME DESK as
-// origin — the same call pose::pure::idle_pose and both render anchors make.
-// Guards the load-bearing core↔tui dest mirror against a future origin drift.
-// -----------------------------------------------------------------------
 #[test]
 fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
     let l = layout();
@@ -1086,7 +984,6 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
         .iter()
         .position(|w| w.kind == WaypointKind::Pantry)
         .expect("standard floor has a pantry");
-    // Find an agent whose cycle-0 trip is a non-aimless pantry visit.
     let (path, _id) = (0u64..8000)
         .find_map(|i| {
             let p = format!("/p/mirror_{i}.jsonl");
@@ -1141,28 +1038,18 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
     );
 }
 
-// -----------------------------------------------------------------------
-// pick_wander_dest aimless fallback: when approach_point returns the blocked
-// `wp.pos` "no valid approach" sentinel (no allowed+reachable side), the
-// directed-waypoint branch falls back to an aimless dest (kind None). Recipe:
-// take a real layout, block the ENTIRE walkable mask so NO approach side is
-// reachable for any waypoint, rebuild `reachable`, and drive a NON-aimless
-// cycle. `pick_wander_dest` (private; sibling has access) must return kind None.
-// -----------------------------------------------------------------------
 #[test]
 fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
     use crate::layout::ReachSet;
 
     let mut l = layout();
     assert!(!l.waypoints.is_empty(), "layout must have waypoints");
-    // Box EVERY waypoint in: block the whole mask so approach_point finds no
-    // allowed+reachable side for any waypoint and returns the `pos` sentinel.
+    // Box EVERY waypoint in, so approach_point finds no allowed+reachable side
+    // and returns its blocked-`pos` sentinel.
     l.walkable
         .mark_blocked(0, 0, l.walkable.width(), l.walkable.height(), 0);
     l.reachable = ReachSet::from_mask(&l.walkable, Point { x: 0, y: 0 });
 
-    // Find an agent whose cycle 0 is a directed (non-aimless) trip so we reach
-    // the `else` branch where approach_point is consulted.
     let id = (0u64..2000)
         .map(|i| AgentId::from_transcript_path(&format!("/p/boxed_{i}.jsonl")))
         .find(|id| takes_trip(*id, 0) && !is_aimless_cycle(*id, 0))
@@ -1178,20 +1065,13 @@ fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
     );
 }
 
-/// Continuity guard for the WanderTarget reshape (the flat
-/// `dest`/`dest_kind`/`dest_wp_idx`/`seat` -> `WanderKind::Named{wp_idx,kind,seat}
-/// | Aimless` collapse): a `Named` destination's `seat` is `Some` IFF the
-/// waypoint is one the agent sits ON (`occupies_pos`), `None` for an obstacle it
-/// stands AT — the invariant `seated_foot_cell` enforces. Pins the
-/// `Named{seat:None}`-vs-seat boundary across the resolver so a future
-/// `WanderKind` edit can't silently drop or forge the settle cell (a mid-walk
-/// pop / wrong render anchor).
+/// Dropping or forging the settle cell shows up as a mid-walk pop / wrong
+/// render anchor, so pin the `Named{seat:None}`-vs-seat boundary directly.
 #[test]
 fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
     use crate::layout::furniture_def;
-    // A full-size floor so BOTH obstacle (pantry/vending/printer) AND seat
-    // (couch / meeting sofa) waypoints exist to cover both sides of the boundary
-    // — the tiny 120x96 `layout()` fixture has no seat waypoints.
+    // A full-size floor, because the tiny 120x96 `layout()` fixture has no seat
+    // waypoints — only the obstacle side of the boundary.
     let l = Layout::compute(240, 160, None).expect("fits");
     let origin = l.home_desks[0];
     let (mut saw_obstacle, mut saw_seat) = (false, false);
@@ -1225,9 +1105,6 @@ fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
     );
 }
 
-// --- spot_claims: who actually holds an exclusive spot ----------------
-
-/// Build a motion state parked mid-trip at `wp_idx` of `kind`.
 fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> MotionState {
     let mut ms = MotionState::new(id);
     ms.wander.phase =
@@ -1250,15 +1127,9 @@ fn spot_claims_holds_only_exclusive_spots_of_other_agents_out_on_a_trip() {
     let caller = AgentId::from_transcript_path("/p/claims-caller.jsonl");
     let stander = AgentId::from_transcript_path("/p/claims-stander.jsonl");
     let mut motion = HashMap::new();
-    // Another agent sitting on a seat: claimed.
     motion.insert(sitter, tripping_at(sitter, 3, WaypointKind::MeetingChair));
-    // Another agent in a phone booth — occupies_pos FALSE but EXCLUSIVE, so it
-    // is claimed too (the whole point of the exclusive/occupies_pos split).
     motion.insert(caller, tripping_at(caller, 9, WaypointKind::PhoneBooth));
-    // Another agent at a SHAREABLE queue obstacle: never claimed — the painter's
-    // ±9 step-aside is the intended affordance there.
     motion.insert(stander, tripping_at(stander, 7, WaypointKind::Printer));
-    // This agent's OWN spot must not block its own re-pick.
     motion.insert(me, tripping_at(me, 5, WaypointKind::Couch));
 
     let claims = spot_claims(&motion, me);
@@ -1274,11 +1145,9 @@ fn spot_claims_holds_only_exclusive_spots_of_other_agents_out_on_a_trip() {
     );
 }
 
-/// The `phase != Seated` gate. `target.kind` is reset to `Aimless` on the normal
-/// walk-back arrival, but the bootstrap / stale-resume path re-seats an agent at
-/// its desk WITHOUT touching its target — so a stale `Named` spot would linger
-/// and block it for everyone. The phase, not the kind, is the honest "is this
-/// agent actually out at the spot" signal.
+/// The bootstrap / stale-resume path re-seats an agent at its desk WITHOUT
+/// touching its target, so a stale `Named` spot would linger and block it for
+/// everyone — the phase, not the kind, is the honest "out at the spot" signal.
 #[test]
 fn spot_claims_ignores_a_seated_agents_stale_target() {
     let me = AgentId::from_transcript_path("/p/claims-me.jsonl");
@@ -1294,17 +1163,14 @@ fn spot_claims_ignores_a_seated_agents_stale_target() {
     );
 }
 
-/// The probe: a claimed seat is not a dead end. A venue's seats are CONTIGUOUS
-/// in `layout.waypoints` (`compute_waypoints` pushes a sofa's 3 / a table's 2 in
-/// one run), so probing forward from the hashed index lands on a neighbouring
-/// seat of the SAME venue — "that chair's taken, I'll take the next one" —
-/// instead of ambling away and leaving the room empty. Pins BOTH halves: the
-/// claimed seat is refused, and the replacement is still a seat in that venue.
+/// The probe works because a venue's seats are CONTIGUOUS in `layout.waypoints`
+/// (`compute_waypoints` pushes a sofa's 3 / a table's 2 in one run), so probing
+/// forward from the hashed index lands on a neighbouring seat of the SAME venue.
 #[test]
 fn a_claimed_seat_sends_the_agent_to_the_next_seat_of_the_same_venue() {
     let l = Layout::compute(240, 160, None).expect("fits");
     let origin = l.home_desks[0];
-    // An agent whose cycle-0 pick is a MEETING seat, so the venue has siblings.
+    // A cycle-0 pick that is a MEETING seat, so the venue has siblings.
     let (id, taken) = (0u64..5000)
         .map(|i| AgentId::from_transcript_path(&format!("/p/probe_{i}.jsonl")))
         .find_map(|id| {

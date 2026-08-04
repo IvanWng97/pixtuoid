@@ -1,8 +1,6 @@
-//! The agent dashboard: a modal popup overviewing every agent across every
-//! floor as a foldable parent→subagent tree. This module is the PURE model —
-//! no ratatui. It turns a `SceneState` into a flat, navigable row list and
-//! owns the fold + selection logic. The ratatui painter lives in
-//! `tui::widgets::dashboard`; the event-loop wiring lives in `tui::mod`.
+//! The agent dashboard model: a `SceneState` flattened into a navigable
+//! parent→subagent row list, plus the fold + selection logic. PURE — no
+//! ratatui (the painter lives in `tui::widgets::dashboard`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -10,19 +8,14 @@ use std::sync::Arc;
 use pixtuoid_core::state::{ActivityState, AgentSlot, SceneState};
 use pixtuoid_core::AgentId;
 
-/// Roots with more than this many direct subagents render collapsed by
-/// default, so a large CC workflow (≈20 subagents) doesn't flood the board.
+/// Roots with more than this many direct subagents render collapsed by default,
+/// so a large workflow doesn't flood the board.
 pub const AUTO_COLLAPSE_THRESHOLD: usize = 5;
 
-/// Inner visible-row count of the dashboard popup. Shared by `clamp_scroll`
-/// (event loop) and the painter so the scroll math and the painted window
-/// can't disagree.
+/// Inner visible-row count, shared by `clamp_scroll` and the painter so the
+/// scroll math and the painted window can't disagree.
 pub const DASHBOARD_VIEWPORT_ROWS: usize = 16;
 
-/// The per-tick dashboard render frame the event loop hands the renderer via
-/// `set_dashboard_frame` — one snapshot (always built, set, and read as a unit),
-/// so it rides as a struct rather than four parallel `dashboard_*` fields/params
-/// through `TuiRenderer` → `DrawCtx` → `paint_overlays`. Mirrors `OnboardingFrame`.
 #[derive(Debug, Clone, Default)]
 pub struct DashboardFrame {
     pub open: bool,
@@ -31,37 +24,29 @@ pub struct DashboardFrame {
     pub scroll: usize,
 }
 
-/// The activity shown on a row, distilled from `ActivityState`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowState {
-    /// Active, carrying the live tool detail when the slot had one.
     Active(Option<Arc<str>>),
-    /// Waiting on a permission/decision, carrying the reason.
     Waiting(Arc<str>),
     Idle,
 }
 
-/// One visible row in the dashboard list.
 #[derive(Debug, Clone)]
 pub struct DashboardRow {
     pub agent_id: AgentId,
-    /// `None` for a root (main) agent; the parent's id for a subagent. Carried
-    /// so the event loop can collapse a child's parent without re-querying.
+    /// Carried so the event loop can collapse a child's parent without re-querying.
     pub parent_id: Option<AgentId>,
-    /// 0 = root, 1 = subagent (the tree is two levels in practice).
+    /// 0 = root, 1 = subagent.
     pub depth: u8,
     pub label: Arc<str>,
     pub source: Arc<str>,
     pub floor_idx: usize,
     pub state: RowState,
-    /// Direct-subagent count (0 for non-roots). Drives the `(N)` fold badge.
     pub child_count: usize,
-    /// True when this is a collapsed root (its subtree is hidden below it).
     pub collapsed: bool,
 }
 
-/// Per-session fold state for root agents. Persists across open/close while
-/// the app runs. Grown in later steps with the auto-collapse + toggle logic.
+/// Per-session fold state for root agents; persists across open/close.
 #[derive(Debug, Default)]
 pub struct DashboardFolds {
     collapsed: HashSet<AgentId>,
@@ -69,10 +54,6 @@ pub struct DashboardFolds {
 }
 
 impl DashboardFolds {
-    /// Whether root `root_id` (with `child_count` direct subagents) renders
-    /// collapsed. A root the user has explicitly toggled honors that choice;
-    /// otherwise it auto-collapses once it exceeds `AUTO_COLLAPSE_THRESHOLD`,
-    /// so a workflow that balloons past the threshold mid-session folds itself.
     fn is_collapsed(&self, root_id: AgentId, child_count: usize) -> bool {
         if self.user_toggled.contains(&root_id) {
             self.collapsed.contains(&root_id)
@@ -81,8 +62,8 @@ impl DashboardFolds {
         }
     }
 
-    /// Collapse every given root and pin it (a deliberate bulk op; roots that
-    /// appear later still auto-evaluate, since they aren't pinned).
+    /// Collapse every given root and pin it; roots that appear later are not
+    /// pinned, so they still auto-evaluate.
     pub fn fold_all(&mut self, roots: impl IntoIterator<Item = AgentId>) {
         for root in roots {
             self.user_toggled.insert(root);
@@ -90,7 +71,6 @@ impl DashboardFolds {
         }
     }
 
-    /// Expand every given root and pin it.
     pub fn unfold_all(&mut self, roots: impl IntoIterator<Item = AgentId>) {
         for root in roots {
             self.user_toggled.insert(root);
@@ -100,13 +80,11 @@ impl DashboardFolds {
 }
 
 /// Flatten the scene into a tree-ordered row list: roots sorted by
-/// `desk_index`, each immediately followed by its visible subagents. A root
-/// with no parent — OR whose `parent_id` points at an agent absent from the
-/// scene (an orphan) — anchors a subtree; collapsing a root hides its whole
-/// subtree. Deeper nesting than two levels is walked too, so nothing is ever
-/// silently dropped.
+/// `desk_index`, each immediately followed by its visible subagents. An agent
+/// whose `parent_id` is absent from the scene (an orphan) anchors its own
+/// subtree, and nesting deeper than two levels is walked too, so nothing is
+/// ever silently dropped.
 pub fn build_dashboard_rows(scene: &SceneState, folds: &DashboardFolds) -> Vec<DashboardRow> {
-    // parent_id -> direct children, only for parents present in the scene.
     let mut children: HashMap<AgentId, Vec<AgentId>> = HashMap::new();
     for (id, slot) in &scene.agents {
         if let Some(parent) = slot.parent_id {
@@ -116,7 +94,6 @@ pub fn build_dashboard_rows(scene: &SceneState, folds: &DashboardFolds) -> Vec<D
         }
     }
 
-    // Roots: no parent, or a parent that isn't in the scene (orphan-as-root).
     let mut roots: Vec<AgentId> = scene
         .agents
         .iter()
@@ -132,8 +109,6 @@ pub fn build_dashboard_rows(scene: &SceneState, folds: &DashboardFolds) -> Vec<D
     rows
 }
 
-/// Depth-first emit `node` then (unless collapsed) its children, in
-/// `desk_index` order. Only roots (`depth == 0`) are collapsible in v1.
 fn push_subtree(
     scene: &SceneState,
     children: &HashMap<AgentId, Vec<AgentId>>,
@@ -195,8 +170,7 @@ fn row_state(state: &ActivityState) -> RowState {
 }
 
 /// Move the selection one visible row up (`dir = -1`) or down (`dir = +1`),
-/// clamped at the ends. With nothing selected — or a selection that has since
-/// vanished/hidden — it re-anchors to the first row. `None` only when empty.
+/// clamped at the ends.
 pub fn move_selection(
     rows: &[DashboardRow],
     current: Option<AgentId>,
@@ -207,13 +181,11 @@ pub fn move_selection(
     }
     let new_idx = match current.and_then(|c| rows.iter().position(|r| r.agent_id == c)) {
         Some(i) => (i as i32 + dir).clamp(0, rows.len() as i32 - 1) as usize,
-        None => 0, // nothing selected, or it vanished — re-anchor to the first row
+        None => 0,
     };
     Some(rows[new_idx].agent_id)
 }
 
-/// Each-frame re-anchor: keep `current` if it's still a visible row, else fall
-/// back to the first row (the selected agent exited or was hidden by a fold).
 pub fn reanchor_selection(rows: &[DashboardRow], current: Option<AgentId>) -> Option<AgentId> {
     match current {
         Some(c) if rows.iter().any(|r| r.agent_id == c) => Some(c),
@@ -221,23 +193,20 @@ pub fn reanchor_selection(rows: &[DashboardRow], current: Option<AgentId>) -> Op
     }
 }
 
-/// The floor the selected agent sits on, for the jump. `None` if not present.
 pub fn resolve_floor(rows: &[DashboardRow], selected: AgentId) -> Option<usize> {
     rows.iter()
         .find(|r| r.agent_id == selected)
         .map(|r| r.floor_idx)
 }
 
-/// Adjust `scroll` so the selected row stays within a `visible_height`-row
-/// viewport: scroll up if it sits above the window, down if below, else leave it.
 pub fn clamp_scroll(
     rows: &[DashboardRow],
     selected: Option<AgentId>,
     scroll: usize,
     visible_height: usize,
 ) -> usize {
-    // No selection → top (dashboard's rule); a selection no longer in `rows` keeps
-    // the current scroll; otherwise the shared index-core slides the window.
+    // A `None` selection resets to the top HERE, unlike `clamp_scroll_idx`,
+    // which keeps `scroll`.
     let Some(sel) = selected else {
         return 0;
     };
@@ -247,10 +216,8 @@ pub fn clamp_scroll(
     }
 }
 
-/// The pure index core the `AgentId`-keyed [`clamp_scroll`] and the panel's
-/// `window_range` both use, so every list panel slides its viewport identically:
-/// scroll up if `selected` sits above the window, down if below, else leave it.
-/// `None` selection → keep `scroll`.
+/// The pure index core [`clamp_scroll`] and the panel's `window_range` both
+/// use, so every list panel slides its viewport identically.
 pub(crate) fn clamp_scroll_idx(
     selected: Option<usize>,
     scroll: usize,
@@ -268,8 +235,8 @@ pub(crate) fn clamp_scroll_idx(
     }
 }
 
-/// Session-persistent dashboard UI state, owned by the event loop. Only `open`
-/// flips on close, so folds + selection survive close/reopen for the session.
+/// Only `open` flips on close, so folds + selection survive close/reopen for
+/// the session.
 #[derive(Debug, Default)]
 pub struct DashboardUi {
     pub open: bool,

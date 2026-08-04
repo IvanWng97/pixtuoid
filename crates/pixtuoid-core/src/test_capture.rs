@@ -1,14 +1,9 @@
 //! Test-only tracing capture: one buffer writer + the two capture shapes the
-//! unit-test mods share (previously duplicated verbatim in `source/drift.rs`,
-//! `source/decoder.rs`, `source/claude_code.rs`, and `source/hook/mod.rs`).
-//! Homed like [`crate::TEST_ENV_LOCK`]: a `#[cfg(test)] pub(crate)` crate-level
-//! utility — integration tests (`tests/`) can't reach it, which is fine: all
-//! four consumers are in-crate `#[cfg(test)]` mods.
+//! in-crate unit-test mods share. `pub(crate)`, so integration tests (`tests/`)
+//! can't reach it.
 
 use std::sync::{Arc, Mutex};
 
-/// `MakeWriter` that appends formatted log lines to a shared buffer so tests
-/// can assert on a breadcrumb's presence/absence.
 #[derive(Clone, Default)]
 pub(crate) struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
 
@@ -49,16 +44,14 @@ fn subscriber(
         .finish()
 }
 
-/// Synchronous capture: run `f` under a TRACE-floor fmt subscriber scoped to
-/// the closure, and return everything it logged.
 pub(crate) fn capture_logs(f: impl FnOnce()) -> String {
     let buf = CaptureWriter::default();
     tracing::subscriber::with_default(subscriber(buf.clone(), tracing::Level::TRACE), f);
     buf.contents()
 }
 
-/// Guard-based capture at the WARN floor for async tests (a closure-scoped
-/// `with_default` can't span `.await` points): the subscriber stays installed
+/// Guard-based capture at the WARN floor for async tests: a closure-scoped
+/// `with_default` can't span `.await` points, so the subscriber stays installed
 /// while the returned guard lives.
 pub(crate) fn capture_warns() -> (CaptureWriter, tracing::subscriber::DefaultGuard) {
     let logs = CaptureWriter::default();

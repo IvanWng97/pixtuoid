@@ -19,19 +19,12 @@ permissions:
 
 jobs:
   claude:
-    # Gate to repo-write actors. claude-code-action enforces this internally, but
-    # this is the only contents:write job — fail CLOSED at the yaml layer too,
-    # independent of the floating action tag. Each of the four event shapes needs
-    # its OWN author_association field, or the owner's own trigger gets blocked.
-    # The two pull_request_review* arms need a SECOND guard: those events set
-    # GITHUB_REF to refs/pull/<n>/merge, so the ref-less checkout below lands
+    # Gate to repo-write actors: this is the only contents:write job, so fail
+    # CLOSED at the yaml layer too, independent of the floating action tag. Each
+    # event shape needs its OWN author_association field. The pull_request_review*
+    # arms also need the same-repo guard: refs/pull/<n>/merge would stage
     # fork-authored files — including a repo-root CLAUDE.md the agent auto-loads
-    # as instructions — in the workspace of the one job holding contents:write
-    # and the OAuth token. issue_comment reaches that same tree by a different
-    # route — the action's own setupBranch checks the PR head out for every open
-    # PR — which no `if:` here can express, since that payload carries no
-    # pull_request object; the "Refuse fork pull requests" step below closes it
-    # (#799). `issues` is unaffected: the action hardcodes isPR false there.
+    # as instructions — in the job holding contents:write and the OAuth token (#799).
     if: >
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
@@ -43,8 +36,8 @@ jobs:
       group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      # First, so it precedes BOTH checkouts: ours, and the one the action does
-      # for itself. Resolving the PR is the only way to see fork-ness here.
+      # Must precede BOTH checkouts (ours and the action's own). Resolving the PR
+      # is the only way to see fork-ness for an issue_comment payload.
       - name: Refuse fork pull requests
         if: github.event_name == 'issue_comment' && github.event.issue.pull_request
         env:

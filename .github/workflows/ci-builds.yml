@@ -8,9 +8,9 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # `just hack` checks the host graph only. This job catches target-gated deps
-  # and native calls that escape the core `native` boundary. It intentionally
-  # does not byte-compare wasm output because latest-stable builds can drift.
+  # `just hack` checks the host graph only; this job catches target-gated deps
+  # and native calls escaping the core `native` boundary. It deliberately does
+  # not byte-compare wasm output — latest-stable builds drift.
   wasm-check:
     name: wasm-check
     runs-on: ubuntu-latest
@@ -24,8 +24,7 @@ jobs:
           targets: wasm32-unknown-unknown
       # gen-wasm uses this same build recipe, preventing local/CI command drift.
       - run: just wasm-build
-      # The committed artifact size cap is deterministic even when rebuild bytes
-      # are not, so it remains safe to gate in CI.
+      # The size cap IS deterministic even when the rebuilt bytes are not.
       - run: just gen-wasm-check
 
   hack:
@@ -58,21 +57,19 @@ jobs:
 
   packaging-linux:
     name: packaging-build (ubuntu-latest)
-    # This is the only clean `cargo install --locked`, default-features build on
-    # both Homebrew bottle platforms. It catches stale lockfiles and new system
-    # dependencies before an external autobump does. The known ALSA formula gap
-    # remains tracked in #731; installing its headers here proves the source
-    # build while release handling owns the formula dependency.
+    # The only clean `cargo install --locked`, default-features build on both
+    # Homebrew bottle platforms: it catches stale lockfiles and new system
+    # dependencies before an external autobump does.
     runs-on: ubuntu-latest
-    # Two cold release installs use cargo-install target dirs, so the shared
-    # cache can only partially reduce this job.
+    # Two cold release installs use cargo-install target dirs, which the shared
+    # cache only partially covers.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Packaging does not invoke just, so keep its setup narrower than the
-      # shared Rust+just action while retaining the same cache namespace.
+      # Packaging does not invoke just, so its setup is narrower than the shared
+      # Rust+just action while keeping the same cache namespace.
       - uses: ./.github/actions/packaging-build
 
   packaging-macos:

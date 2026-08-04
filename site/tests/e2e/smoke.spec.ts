@@ -1,30 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import sourcesData from '../../src/sources.json' with { type: 'json' };
 
-// read the manifest directly (same idiom as floors.spec.ts's features.json
-// import) so the hero-badge bridge test below can't drift from a hand-copied
-// expected count.
 type SourceRow = { badge: string; badge_color: string; name: string; status: string };
 const supportedSources = (sourcesData as SourceRow[]).filter((s) => s.status === 'supported');
 
-// The smoke suite: one assertion per cross-component CONTRACT of the OPEN
-// FLOOR page — the seams that only exist at runtime (window globals, custom
-// events, data-attribute wiring) where tsc/eslint/knip/astro-build are blind.
-// The first seven tests are regression pins for bug classes a human review
-// actually caught on this site:
-//   - the missed one-shot `pix:onair` event (statusline read STATIC forever)
-//   - the `is:inline` parse-position trap (scrollspy frozen on floor 6)
-//   - the floating-nav variant leaking onto the docs pages
-//   - a wasm/glue ABI mismatch throwing at runtime under the hero
-// Runs against the PRODUCTION build (see playwright.config.ts).
-
-/**
- * WCAG 2.1 relative luminance + contrast ratio (per the spec's definitions),
- * plus the alpha-compositing every contrast pin here needs: nothing on this
- * page sits on a flat colour — a scrim over a dimmer over the live office, a
- * `--screen` chip over that office, an `opacity` group over a plate.
- * {@link paintedContrast} is the one place that walk lives.
- */
 function relLuminance([r, g, b]: [number, number, number]): number {
   const lin = (c: number) => {
     const s = c / 255;
@@ -51,9 +30,7 @@ function parseRgb(css: string): [number, number, number, number] {
     return [r, g, b, a ?? 1];
   }
   // Chromium resolves a color-mix() result to the `color(srgb r g b [/ a])`
-  // functional form (0–1 components), not rgb() — the hero badge-code hue
-  // (color-mix toward white/black) hits this path; every other caller still
-  // sees plain rgb()/rgba() and takes the branch above.
+  // form (0-1 components), not rgb() — the hero badge-code hue takes this path.
   const srgb = css.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/);
   if (srgb) {
     const [r, g, b, a] = srgb.slice(1, 5).map((s) => (s === undefined ? undefined : parseFloat(s)));
@@ -62,21 +39,11 @@ function parseRgb(css: string): [number, number, number, number] {
   throw new Error(`unparseable color: ${css}`);
 }
 
-// Settle window after scrolling a selector on screen: the dimmer controller is
-// IntersectionObserver-driven, so its target opacity lands a frame or two after
-// the scroll (the canvas itself is under the dimmer, so any painted frame is a
-// valid sample).
+// The dimmer controller is IntersectionObserver-driven: its target opacity
+// lands a frame or two after the scroll.
 const SCROLL_SETTLE_MS = 300;
 
-/**
- * Put every reveal-on-scroll section in its RESTED state before grading.
- *
- * `.reveal` starts at `opacity: 0` and the IntersectionObserver adds `.in` once
- * (then unobserves — Base.astro), so `.in` IS the settled state, not a shortcut.
- * It matters because {@link paintedContrast} folds ancestor opacity into the
- * ink: an unrevealed section would grade at alpha 0 and a mid-entrance one at
- * some transient alpha, neither of which is what a visitor reads.
- */
+/** The observer adds `.in` once, then unobserves — `.in` IS the settled state. */
 async function settleReveals(page: Page): Promise<void> {
   await page.evaluate(() =>
     document.querySelectorAll('.reveal').forEach((el) => el.classList.add('in'))
@@ -89,20 +56,15 @@ async function settleReveals(page: Page): Promise<void> {
 }
 
 /**
- * The office grounds under an element's box — the canvas's BRIGHTEST and
- * DARKEST pixel there, each composited with the live dimmer. `null` on a route
- * with no live office (the doc pages), where the ground is pure DOM.
+ * The office canvas's brightest and darkest pixel under an element's box, each
+ * composited with the live dimmer. `null` where there is no live office.
  *
- * Day's dimmer LIGHTENS the composite toward `--paper` and night's DARKENS it
- * toward `--bg`, so the true worst case is either extreme depending on theme —
- * hence both, never an average.
+ * Both extremes, never an average: day's dimmer lightens the composite toward
+ * `--paper` and night's darkens it toward `--bg`.
  *
- * SHARP EDGE this both scrolls for and then GUARDS: the canvas is a
- * viewport-fixed backdrop with a tiny buffer, so an element's canvas
- * coordinates are only real once it is on screen. An unscrolled below-fold
- * selector indexes past the buffer and `getImageData` hands back ZEROED pixels
- * — a silent "dimmer over black" grade instead of the office. The assertion
- * below turns that into a loud failure instead of a wrong number.
+ * The scroll is load-bearing — the canvas is a viewport-fixed backdrop, so an
+ * off-screen box indexes past its buffer and `getImageData` hands back ZEROED
+ * pixels, a silent "dimmer over black" grade the assertion below turns loud.
  */
 async function officeGrounds(
   page: Page,
@@ -182,14 +144,12 @@ async function officeGrounds(
 
 /**
  * The worst contrast ratio the element's text ACTUALLY renders at: every
- * ancestor background composited down (translucent chips included), every
- * ancestor `opacity` folded into the ink, over the office composite where a
- * live office is the ground and over the page's own opaque plate where it is
- * not.
+ * ancestor background composited down, every ancestor `opacity` folded into the
+ * ink, over the office composite where a live office is the ground and the
+ * page's own opaque plate where it is not.
  *
  * Folding `opacity` is the difference between graded and rendered: a group at
- * `opacity: .7` shows 30% of its ground through the glyph, so grading the raw
- * `getComputedStyle().color` reports a ratio the visitor never sees.
+ * `opacity: .7` shows 30% of its ground through the glyph.
  */
 async function paintedContrast(page: Page, selector: string, nth = 0): Promise<number> {
   const { ink, chain } = await page.evaluate(
@@ -231,11 +191,6 @@ async function paintedContrast(page: Page, selector: string, nth = 0): Promise<n
   }
   return worst;
 }
-/**
- * Fail the calling test if the page logs an uncaught error or console.error.
- * Attached once per DISTINCT code path (index live boot, copy/hire, docs
- * shell, reduced-motion) rather than every test — keeps failures pointed.
- */
 function watchErrors(page: Page): () => string[] {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
@@ -246,15 +201,9 @@ function watchErrors(page: Page): () => string[] {
 }
 
 /**
- * Scroll a section to viewport center and expect its head to reveal (`in`).
- * The scroll is INSIDE the retry: a one-shot scrollIntoView races the two
- * things that keep moving the page under a slow (CI-throttled) load —
- * Chromium's async scroll restoration after reload() (clamped retries while
- * the document grows) and late layout settling — either can park the viewport
- * where the head never intersects the 0.12 observer threshold. Re-scrolling
- * per retry pins the geometry the assert depends on. (Reproduced identically
- * on the Astro 6 build under 10x CPU throttle — a test-timing hazard, not a
- * product one: the observer fires whenever the head actually intersects.)
+ * The scroll is INSIDE the retry: Chromium's async scroll restoration after
+ * reload() and late layout settling both keep moving the page under a slow
+ * load, parking the viewport where the head never intersects the threshold.
  */
 async function expectSectionReveal(page: Page, sectionId: string): Promise<void> {
   await expect(async () => {
@@ -268,24 +217,18 @@ async function expectSectionReveal(page: Page, sectionId: string): Promise<void>
   }).toPass({ timeout: 10_000 });
 }
 
-/** Load the landing page with the boot intro pre-skipped and the office live. */
 async function gotoLive(page: Page): Promise<void> {
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
-  // The wasm office must come up: poster → live canvas. 15s is generous — a
-  // timeout here is the ABI-mismatch / loader-regression signal.
+  // A timeout here is the ABI-mismatch / loader-regression signal.
   await expect(page.locator('.backdrop.is-live')).toBeAttached({ timeout: 15_000 });
 }
 
 test('the office goes live and the statusline truth-light agrees', async ({ page }) => {
   const errors = watchErrors(page);
   await gotoLive(page);
-  // The on-air readout must say LIVE — covers BOTH orderings of the one-shot
-  // pix:onair event vs the statusline's listener (the seed-from-class fix).
   await expect(page.locator('[data-sl-onair]')).toHaveText('● LIVE', { timeout: 10_000 });
-  // Resize re-aspects the render buffer (rAF-throttled sizeBuffer): the buffer
-  // height is fixed at 130, so width = min(640, max(64, round(w/h · 130))) —
-  // 231 at the 1280×720 default, 72 at a 500×900 portrait.
+  // Buffer height is fixed at 130: width = min(640, max(64, round(w/h · 130))).
   const bufW = () =>
     page.evaluate(() => (document.getElementById('office-live') as HTMLCanvasElement).width);
   expect(await bufW()).toBe(231);
@@ -296,18 +239,12 @@ test('the office goes live and the statusline truth-light agrees', async ({ page
 
 test('the cross-component window contracts exist', async ({ page }) => {
   await gotoLive(page);
-  // The runtime seams every component wires against (documented in
-  // site/README.md "Cross-component seams") — a rename breaks consumers
-  // silently, so pin their existence + shapes here.
   await expect
     .poll(async () =>
       page.evaluate(() => ({
         night: typeof window.__pixNight === 'function' && typeof window.__pixNight() === 'boolean',
         hire: typeof window.__pixHire === 'function',
         lights: typeof window.__pixLights,
-        // the office-reveal boot handshake (PR #462): Base publishes __pixRevealed
-        // (splash lifted) to release the roll; OfficeBackdrop publishes
-        // __pixEngineReady (engine resolved) to release the Level-2 splash gate.
         revealed: window.__pixRevealed === true,
         engineReady: window.__pixEngineReady === true,
       }))
@@ -317,9 +254,6 @@ test('the cross-component window contracts exist', async ({ page }) => {
 
 test('digit keys ride between floors (scrollspy round-trip)', async ({ page }) => {
   await gotoLive(page);
-  // Key "3" → the machine-room floor. Covers the is:inline parse-position
-  // trap (an observer wired before <main> parses sees zero [data-floor]
-  // sections and the readout freezes on 6F).
   await page.keyboard.press('3');
   await expect(page.locator('[data-lift-digit]')).toHaveText('3F', { timeout: 10_000 });
   await page.keyboard.press('1');
@@ -329,12 +263,6 @@ test('digit keys ride between floors (scrollspy round-trip)', async ({ page }) =
 test('scrolled to the true page bottom, the statusline clamps to the last floor', async ({
   page,
 }) => {
-  // 1F (install) + the footer rarely fill the observer's -45%/-45% middle
-  // band, so without a bottom clamp the readout can freeze one floor short
-  // while the visitor reads the very end of the page. Force actual max scroll
-  // (not a fixed pixel guess — page height varies by content/viewport); retry
-  // a few times since late layout settling can still grow the page after the
-  // first scrollTo lands.
   await gotoLive(page);
   await expect(async () => {
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -346,19 +274,15 @@ test('the dimmer darkens statements and releases in office gaps', async ({ page 
   await gotoLive(page);
   const dim = () =>
     page.evaluate(() => parseFloat(document.getElementById('dimmer')!.style.opacity || '0'));
-  // A statement at viewport center pulls the darkness in…
   await page.evaluate(() =>
     document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
   await expect.poll(dim).toBeGreaterThan(0.5);
-  // …and the first observation gap releases it (the office IS the content).
   await page.evaluate(() =>
     document.querySelector('.office-gap')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
   await expect.poll(dim).toBeLessThan(0.15);
-  // The hero is a data-lit="fade" block: while a statement owns the viewport
-  // center it parks at 0.001 (the invisible-headline class), and rises back
-  // when the office scrolls up again.
+  // The hero parks at 0.001 while a statement owns the viewport center.
   const heroOp = () =>
     page.evaluate(() =>
       parseFloat((document.querySelector('.hero__copy') as HTMLElement).style.opacity || '1')
@@ -371,30 +295,13 @@ test('the dimmer darkens statements and releases in office gaps', async ({ page 
   await expect.poll(heroOp).toBeGreaterThan(0.5);
 });
 
-// Regression pin for a real (if brief) dimmer glitch found while investigating
-// a reported "dimmer jumps/strobes near the floating-window gap" bug: a
-// Showcase channel swap changes content height ABOVE the viewport (every live
-// channel renders a different height — measured ~8224px to ~8306px across the
-// 7 channels), and the browser's OWN scroll anchoring adjusts window.scrollY
-// to compensate *in the same task* as the swap — before OfficeBackdrop's
-// ResizeObserver-triggered re-measure ever runs. The gap-2 image itself turned
-// out NOT to be the cause (its box is pinned by `aspect-ratio: 16/10`
-// regardless of load state — see the sibling test below); the real mechanism
-// is this content-reflow-above-the-viewport race, and gap-2 sits directly
-// downstream of Showcase so it's exactly where a visitor would see it.
-// OfficeBackdrop.astro's recompute() now runs synchronously from the
-// ResizeObserver callback (no extra rAF hop) so the corrected opacity lands
-// in the same task as the reflow, before paint.
 test('the dimmer tracks live geometry across a Showcase channel swap', async ({ page }) => {
   await gotoLive(page);
-  // Straddle the gap-2 observation hold (between Features and HowItWorks) —
-  // the reported bug's location.
+  // Straddle the gap-2 observation hold — the reported bug's location.
   await page.evaluate(() => window.scrollTo({ top: 3763, behavior: 'instant' }));
 
-  // Ground truth: replicate the dimmer's own ease()/cap/best-block formula
-  // against LIVE getBoundingClientRect() rects and the LIVE (possibly
-  // scroll-anchor-adjusted) scrollY — independent of whatever the controller
-  // has cached.
+  // Ground truth: the dimmer's own formula recomputed from LIVE rects and the
+  // LIVE (possibly scroll-anchor-adjusted) scrollY, not from anything cached.
   const liveTruth = () =>
     page.evaluate(() => {
       const y = window.scrollY;
@@ -420,9 +327,6 @@ test('the dimmer tracks live geometry across a Showcase channel swap', async ({ 
   const pageOp = () =>
     page.evaluate(() => parseFloat(document.getElementById('dimmer')!.style.opacity || '0'));
 
-  // Cycle through every live channel (each a genuine reflow above the
-  // viewport) and confirm the dimmer converges to the live ground truth —
-  // not a value cached from before the swap.
   const channels = ['agents', 'openclaw', 'dashboard', 'meetings', 'pets', 'spaces', 'vibing'];
   for (const ch of channels) {
     await page.evaluate(
@@ -438,13 +342,10 @@ test('the dimmer tracks live geometry across a Showcase channel swap', async ({ 
 });
 
 test('the hero pause switch freezes the office and resumes it seamlessly', async ({ page }) => {
-  // WCAG 2.2.2: the auto-playing office backdrop can be paused. Pause must
-  // STOP the rAF loop dead (a frozen canvas, byte-identical snapshots — not
-  // merely a hidden button), and resume must paint new frames again.
   const errors = watchErrors(page);
   await gotoLive(page);
   const btn = page.locator('#office-pause');
-  await expect(btn).toBeVisible(); // shown at init for any non-reduced-motion visitor (syncPauseBtn), independent of the office going live
+  await expect(btn).toBeVisible();
   await expect(btn).toHaveAttribute('aria-pressed', 'false');
   const shot = () =>
     page.evaluate(() => (document.getElementById('office-live') as HTMLCanvasElement).toDataURL());
@@ -454,40 +355,33 @@ test('the hero pause switch freezes the office and resumes it seamlessly', async
   await expect(btn).toHaveAttribute('aria-pressed', 'true');
   const frozen = await shot();
   await page.waitForTimeout(400); // >10 would-be frames at the 33ms cap
-  expect(await shot()).toBe(frozen); // not one new frame painted
-  // Pause-unify (WCAG 2.2.2 covers the whole page): the statusline reflects the
-  // paused office — PAUSED, not '● LIVE'.
+  expect(await shot()).toBe(frozen);
   await expect(page.locator('[data-sl-onair]')).toHaveText('❚❚ PAUSED');
-  // Resize while paused: sizeBuffer() wipes the bitmap and no rAF will repaint
-  // it, so the resize handler must re-render the ONE frozen frame — a blank
-  // var(--bg) void here is the exact regression this branch prevents.
+  // sizeBuffer() wipes the bitmap and no rAF will repaint it, so the resize
+  // handler must re-render the ONE frozen frame — else a blank var(--bg) void.
   await page.setViewportSize({ width: 500, height: 900 });
-  await expect.poll(bufW).toBe(72); // re-aspected
-  expect(await btn.getAttribute('aria-pressed')).toBe('true'); // still paused
+  await expect.poll(bufW).toBe(72);
+  expect(await btn.getAttribute('aria-pressed')).toBe('true');
   const painted = await page.evaluate(() => {
     const c = document.getElementById('office-live') as HTMLCanvasElement;
     const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
     return d.some((v) => v !== 0);
   });
-  expect(painted).toBe(true); // the frozen frame, not a void
-  const frozen2 = await shot(); // frozen at the new aspect
+  expect(painted).toBe(true);
+  const frozen2 = await shot();
   await page.waitForTimeout(400);
-  expect(await shot()).toBe(frozen2); // pause survives the resize
-  // Keyboard operability: the switch is a real button — Enter resumes.
+  expect(await shot()).toBe(frozen2);
   await btn.focus();
   await page.keyboard.press('Enter');
   await expect(btn).toHaveAttribute('aria-pressed', 'false');
-  await expect.poll(shot, { timeout: 10_000 }).not.toBe(frozen2); // animating again
-  await expect(page.locator('[data-sl-onair]')).toHaveText('● LIVE'); // back to live
+  await expect.poll(shot, { timeout: 10_000 }).not.toBe(frozen2);
+  await expect(page.locator('[data-sl-onair]')).toHaveText('● LIVE');
   expect(errors()).toEqual([]);
 });
 
 test('the hero ♩ sound toggle: muted by default, gesture-gated, no AudioContext until clicked', async ({
   page,
 }) => {
-  // #633 web-audio. Muted-by-default + browser autoplay policy: NO AudioContext
-  // may be constructed before a user gesture. Instrument the constructor (the
-  // only observable proof) before the page's own script runs.
   await page.addInitScript(() => {
     (window as unknown as { __acCount: number }).__acCount = 0;
     const Real =
@@ -506,21 +400,14 @@ test('the hero ♩ sound toggle: muted by default, gesture-gated, no AudioContex
   await gotoLive(page);
   const btn = page.locator('#office-audio');
   const acCount = () => page.evaluate(() => (window as unknown as { __acCount: number }).__acCount);
-  // un-hidden only once a live office exists to sound
   await expect(btn).toBeVisible({ timeout: 15_000 });
-  // default: muted + ZERO AudioContexts — the autoplay-policy contract (no
-  // sound machinery may spin up before a user gesture).
   await expect(btn).toHaveAttribute('aria-pressed', 'false');
   expect(await acCount()).toBe(0);
-  // one click = one gesture = exactly one AudioContext constructed. Then wait
-  // through the warmup + several ticks: on a real audio device it plays; in
-  // headless (no backend) createBuffer throws and the ♩ degrades GRACEFULLY
-  // (audioDisable → hidden), never an uncaught page error. Either way: no throw.
+  // In headless (no audio backend) createBuffer throws and the ♩ degrades to
+  // hidden; either way, no throw and never a second AudioContext.
   await btn.click();
   await expect.poll(acCount).toBe(1);
-  await page.waitForTimeout(3000); // beds synth (~1-2s) + live ticks
-  // playing (audio available) OR gracefully hidden (no backend) — never a
-  // second context, never a crash.
+  await page.waitForTimeout(3000); // beds synth + live ticks
   expect(await acCount()).toBe(1);
   expect(errors()).toEqual([]);
 });
@@ -528,10 +415,6 @@ test('the hero ♩ sound toggle: muted by default, gesture-gated, no AudioContex
 test('background playback: a hidden tab keeps ticking, reduced-motion stops it cold', async ({
   page,
 }) => {
-  // #707 background playback + the review-caught invariant: with the tab
-  // hidden and music on, a 1Hz full-frame timer keeps sim+audio going —
-  // but reduced-motion engaging while hidden must stop it (the poster-
-  // still office must NOT be re-livened by a stray background paint).
   const errors = watchErrors(page);
   await page.addInitScript(() => {
     const w = window as unknown as { __onairLive: number };
@@ -543,7 +426,7 @@ test('background playback: a hidden tab keeps ticking, reduced-motion stops it c
   await gotoLive(page);
   const btn = page.locator('#office-audio');
   await expect(btn).toBeVisible({ timeout: 15_000 });
-  await btn.click(); // the one gesture; headless may degrade gracefully
+  await btn.click();
   await page.waitForTimeout(3000); // warmup + a few ticks
   const liveFires = () =>
     page.evaluate(() => (window as unknown as { __onairLive: number }).__onairLive);
@@ -558,19 +441,15 @@ test('background playback: a hidden tab keeps ticking, reduced-motion stops it c
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await page.waitForTimeout(2500); // ≥2 background ticks
-  // now reduced-motion engages WHILE hidden: the mq listener de-lives the
-  // office; the background timer must not re-live it on its next tick
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.waitForTimeout(2500);
-  expect(await liveFires()).toBe(baseline); // no pix:onair(live:true) re-fire
+  expect(await liveFires()).toBe(baseline);
   expect(errors()).toEqual([]);
 });
 
 test('audio prewarm: the idle worker hands the take over and the ♩ click is upload-only', async ({
   page,
 }) => {
-  // #705: at page idle a module worker synthesizes the whole take off-thread
-  // and the main thread adopts the buffers, so the ♩ click skips synthesis.
   const errors = watchErrors(page);
   await gotoLive(page);
   // worker spawn (idle) + off-thread synthesis + adoption; generous for CI
@@ -589,9 +468,8 @@ test('audio prewarm: the idle worker hands the take over and the ♩ click is up
   const readyAt = await page.evaluate(
     () => (window as unknown as { __pixAudioReadyAt: number }).__pixAudioReadyAt
   );
-  // upload-only is tens-to-hundreds of ms even on a throttled runner; the
-  // synthesis path this replaces measures SECONDS — the threshold
-  // discriminates with wide margin in both directions
+  // upload-only is tens-to-hundreds of ms; the synthesis path it replaces
+  // measures SECONDS.
   expect(readyAt - t0).toBeLessThan(2_500);
   expect(errors()).toEqual([]);
 });
@@ -599,8 +477,6 @@ test('audio prewarm: the idle worker hands the take over and the ♩ click is up
 test('audio prewarm fallback: a dead worker leaves the click-time chunked warmup intact', async ({
   page,
 }) => {
-  // the worker is an accelerator, never a dependency: kill its script and
-  // the ♩ click must still reach ready through the chunked main-thread pump
   const errors = watchErrors(page);
   await page.route('**/audio-worker.js', (route) => route.abort());
   await gotoLive(page);
@@ -621,23 +497,18 @@ test('audio prewarm fallback: a dead worker leaves the click-time chunked warmup
 test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode does not mute the opt-in', async ({
   page,
 }) => {
-  // #664: a deliberate ♩ tap is explicit consent to hear sound. iOS Safari routes
-  // default WebAudio to the ambient channel (the hardware Ring/Silent switch mutes
-  // it), so the opt-in would produce silence → reads as broken. We set
-  // navigator.audioSession.type='playback' (media channel, ignores the switch).
-  // The API is Safari-only, so mock it here to verify the WIRING in Chromium; the
-  // real iOS silent-switch behavior is device-verified.
+  // iOS Safari routes default WebAudio to the ambient channel (the hardware
+  // Ring/Silent switch mutes it), so the ♩ opt-in sets audioSession.type to
+  // 'playback'. The API is Safari-only — mocked here to verify the WIRING.
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'audioSession', {
       value: { type: 'auto' },
       configurable: true,
       writable: true,
     });
-    // Capture the category AT AudioContext construction. The load-bearing order is
-    // that 'playback' is set BEFORE the context is built (a context inherits its
-    // routing at construction on real iOS; setting it after would leave it on the
-    // ambient channel = silent, yet still END as 'playback'). A bare end-state
-    // check would pass a broken reorder — this wrapper pins the ordering.
+    // Capture the category AT construction: a context inherits its routing then,
+    // so setting 'playback' afterwards ends AS 'playback' yet still plays on the
+    // ambient channel — a bare end-state check would pass that broken reorder.
     const w = window as unknown as { __acTypeAtCtor: string | null };
     w.__acTypeAtCtor = null;
     const Real =
@@ -660,30 +531,22 @@ test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode doe
   await expect(btn).toBeVisible({ timeout: 15_000 });
   const atCtor = () =>
     page.evaluate(() => (window as unknown as { __acTypeAtCtor: string | null }).__acTypeAtCtor);
-  // before any gesture: category untouched AND no AudioContext yet (muted-by-default)
   expect(
     await page.evaluate(
       () => (navigator as unknown as { audioSession: { type: string } }).audioSession.type
     )
   ).toBe('auto');
   expect(await atCtor()).toBeNull();
-  // the gesture spins up the audio path (audioStart), which sets the category
-  // BEFORE constructing the AudioContext — assert the value captured AT
-  // construction, the property that's load-bearing on real iOS.
   await btn.click();
   await expect.poll(atCtor).toBe('playback');
   expect(errors()).toEqual([]);
 });
 
 test('a remembered ♩ choice never inverts a direct first click on the button', async ({ page }) => {
-  // Review HIGH: the remembered-"on" restore installs capture-phase
-  // pointerdown/keydown listeners; if the visitor's FIRST gesture is a direct
-  // click on ♩, a naive restore fires (→on) then the button's own click toggles
-  // (→off), silently muting despite the click. The restore must ignore a gesture
-  // ON the button and let its click own the toggle. The bug's signature is the
-  // button left VISIBLE-AND-MUTED after a direct click; the fix leaves it
-  // playing (aria-pressed true) — or, where WebAudio has no backend (headless),
-  // gracefully hidden. What must NEVER happen: visible + aria-pressed false.
+  // If the visitor's FIRST gesture is a direct click on ♩, the remembered-"on"
+  // restore must not fire (→on) and let the button's own click toggle it back
+  // (→off). Pass = playing, or gracefully hidden where WebAudio has no backend;
+  // what must NEVER happen is visible + aria-pressed false.
   const errors = watchErrors(page);
   await gotoLive(page);
   await page.evaluate(() => localStorage.setItem('pix:audio', '1'));
@@ -699,7 +562,6 @@ test('a remembered ♩ choice never inverts a direct first click on the button',
       return (pressed === 'true' && !hidden) || (hidden && pressed === 'false');
     })
     .toBe(true);
-  // the inversion bug's exact signature — visible AND muted after the click:
   const invertedBug =
     (await btn.getAttribute('aria-pressed')) === 'false' &&
     !(await btn.evaluate((el) => (el as HTMLElement).hidden));
@@ -708,25 +570,16 @@ test('a remembered ♩ choice never inverts a direct first click on the button',
 });
 
 test('crisp AA captions overlay the live office (name badges + neon board)', async ({ page }) => {
-  // The office canvas is a ~130px buffer CSS-upscaled with image-rendering:
-  // pixelated, so text baked into it pixelates. Instead the engine exports the
-  // name badges + neon wall-board (Office.overlay_json) and OfficeBackdrop lays
-  // crisp Monaspace Neon DOM spans over the canvas at display resolution. Pin
-  // that the layer comes up, carries real text, and is actually the mono face.
   const errors = watchErrors(page);
   await gotoLive(page);
-  // The caption layer fades in only AFTER the reveal roll settles (labels track
-  // the FINAL sprite positions), so wait on is-on — not merely is-live.
+  // The caption layer fades in only AFTER the reveal roll settles, so wait on
+  // is-on, not merely is-live.
   await expect(page.locator('#office-overlay.is-on')).toBeAttached({ timeout: 10_000 });
-  // At least one name badge, laid over a seated/walking-in agent, non-empty and
-  // in Monaspace Neon (10s covers the cast's staggered walk-in at loop start).
+  // 10s covers the cast's staggered walk-in at loop start.
   const label = page.locator('#office-overlay .ov-label').first();
   await expect(label).toHaveText(/\S/, { timeout: 10_000 });
   const labelFont = await label.evaluate((el) => getComputedStyle(el).fontFamily);
   expect(labelFont).toContain('Monaspace Neon');
-  // The label splits into ●-dot/name child spans — the dot carries the
-  // activity tone, the name the CLI's badge hue (#657): the same per-CLI
-  // color the app's dashboard uses.
   const parts = await label.evaluate((el) =>
     Array.from(el.children).map((c) => ({
       text: c.textContent,
@@ -737,7 +590,6 @@ test('crisp AA captions overlay the live office (name badges + neon board)', asy
   expect(parts[0].text).toBe('●');
   expect(parts[1].text).toMatch(/^[a-z]{2}·/);
   expect(parts[1].color).not.toEqual('');
-  // The neon wall board renders its brand row (● / ★) from the same model.
   const brand = page.locator('#office-overlay .ov-board .ov-brow--top span').first();
   await expect(brand).toHaveText(/\S/, { timeout: 10_000 });
   const brandFont = await brand.evaluate((el) => getComputedStyle(el).fontFamily);
@@ -748,8 +600,6 @@ test('crisp AA captions overlay the live office (name badges + neon board)', asy
 test('reduced motion hides the caption overlay (still poster, no captions)', async ({
   browser,
 }) => {
-  // Reduced motion is the still-poster design: no live office, so no captions.
-  // The overlay is display:none there — assert it never becomes visible.
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
@@ -769,8 +619,8 @@ test('the install Copy click hires without breaking the page', async ({ page, co
   );
   const copy = page.locator('.install__panel.is-active .install__copy');
   await copy.click();
-  // The copy flash proves the click handler ran to completion — i.e. the
-  // post-copy pix:install-copy dispatch (OfficeBackdrop's hire listener) didn't throw.
+  // The copy flash proves the click handler ran to completion — the post-copy
+  // pix:install-copy dispatch didn't throw.
   await expect(copy).toHaveText(/Copied|Select & copy/);
   expect(errors()).toEqual([]);
 });
@@ -779,18 +629,11 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
   page,
   context,
 }) => {
-  // The engine's own bool return is now the ONE admission signal (see
-  // `Office::hire`'s contract, pixtuoid-web/src/lib.rs) — no JS-side mirror of
-  // `VisitorHires::MAX_LIVE` to drift out of lockstep. This test pins BOTH
-  // halves: the cap VALUE (3, via the receipts) and the keep-attempting
-  // BEHAVIOR (the clipboard/copy path must never look broken even once the
-  // engine has quietly refused a hire past its cap — the 4th call still runs,
-  // it just returns false). Drives the REAL Install-section copy control
-  // (wb-2: the statusline chip that used to drive this is now a plain jump
-  // link — Install.astro's own tabs are the surviving install-copy surface).
+  // The engine's own bool return is the ONE admission signal — no JS-side
+  // mirror of `VisitorHires::MAX_LIVE` to drift out of lockstep.
   await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
-  await gotoLive(page); // hire needs the LIVE office (__pixHire exists)
+  await gotoLive(page);
   await page.evaluate(() =>
     document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
@@ -801,9 +644,8 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
         (e as CustomEvent<{ name: string }>).detail.name
       )
     );
-    // Instrument the REAL Office.hire() call BEFORE firing any copies — must
-    // forward its bool return, or the admission signal the listener gates
-    // pix:hired on goes missing.
+    // Instrument the REAL Office.hire() BEFORE any copy fires — it must forward
+    // its bool return, or the admission signal gating pix:hired goes missing.
     const real = window.__pixHire!;
     (window as unknown as { __hireResults: boolean[] }).__hireResults = [];
     window.__pixHire = function () {
@@ -815,8 +657,8 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
   const copy = page.locator('.install__panel.is-active .install__copy');
   for (let i = 0; i < 4; i++) {
     await copy.click();
-    // wait for THIS click's hire() result to land before firing the next —
-    // each click's clipboard-write → pix:install-copy → hire() chain is async.
+    // wait for THIS click's hire() result before firing the next — the
+    // clipboard-write → pix:install-copy → hire() chain is async.
     await expect
       .poll(() =>
         page.evaluate(
@@ -827,23 +669,16 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
   }
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __hired: string[] }).__hired))
-    .toEqual(['cc·yours', 'cc·yours', 'cc·yours']); // receipt caps at MAX_LIVE (3), not 4
+    .toEqual(['cc·yours', 'cc·yours', 'cc·yours']);
   expect(
     await page.evaluate(() => (window as unknown as { __hireResults: boolean[] }).__hireResults)
-  ).toEqual([true, true, true, false]); // hire() runs every time; only the 4th is refused
+  ).toEqual([true, true, true, false]);
   expect(errors()).toEqual([]);
 });
 
 test('reduced motion: an install copy writes the clipboard but hires nobody', async ({
   browser,
 }) => {
-  // The no-wasm strand of the same finding: under reduced motion the wasm
-  // fetch never runs, so window.__pixHire is never published. Install.astro's
-  // own copy button (the surviving install-copy control — the statusline
-  // chip is a plain jump link) must still succeed writing the clipboard (that
-  // path is independent of the office) and OfficeBackdrop's
-  // `if (!window.__pixHire) return;` guard must make the hire side a true
-  // no-op — no throw, no pix:hired receipt.
   const context = await browser.newContext({
     reducedMotion: 'reduce',
     permissions: ['clipboard-read', 'clipboard-write'],
@@ -877,10 +712,6 @@ test('reduced motion: an install copy writes the clipboard but hires nobody', as
 });
 
 test('docs pages keep the sticky nav with section links', async ({ page }) => {
-  // The floating-nav treatment is index-ONLY; the docs pages have no office
-  // backdrop (they DO mount the statusline since wb-5), so they keep the sticky bar (the #426-review
-  // regression: `nav--floating` leaked here — absolute, transparent, links
-  // hidden — and every scroll offset went stale).
   const errors = watchErrors(page);
   await page.goto('./config');
   const nav = page.locator('.nav');
@@ -889,15 +720,10 @@ test('docs pages keep the sticky nav with section links', async ({ page }) => {
     .poll(() => page.evaluate(() => getComputedStyle(document.querySelector('.nav')!).position))
     .toBe('sticky');
   await expect(page.locator('.nav__section-link').first()).toBeVisible();
-  // The docs shell has its own script surface (sidebar scrollspy, pager,
-  // inline mermaid SVG) the index tests never visit — keep it error-free too.
   expect(errors()).toEqual([]);
 });
 
 test('reduced motion stays on the still poster without errors', async ({ browser }) => {
-  // A complete parallel design: no wasm fetch, the poster is the office, the
-  // dimmer holds a constant CSS level. Must be error-free — reduced-motion
-  // visitors see this forever.
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
   const errors = watchErrors(page);
@@ -908,21 +734,17 @@ test('reduced motion stays on the still poster without errors', async ({ browser
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   await expect(page.locator('.backdrop__poster')).toBeVisible();
-  // Deterministic (no fixed wait): by network-idle a would-be boot would have
-  // fetched the wasm glue and published __pixHire — assert neither happened.
+  // By network-idle a would-be boot would have fetched the wasm glue and
+  // published __pixHire — assert neither happened.
   await page.waitForLoadState('networkidle');
   expect(wasmRequests).toEqual([]);
   await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
-  // Reduced motion is the ONLY path that hides the pause switch: nothing
-  // auto-animates here (the wasm-fail poster keeps it visible — ticker/dust/clips
-  // still run there, see the wasm-failure test).
+  // Reduced motion is the ONLY path that hides the pause switch — nothing
+  // auto-animates here.
   await expect(page.locator('#office-pause')).toBeHidden();
-  // Reduced motion also strips the showcase clip's autoplay: native controls
-  // appear and the video stays paused (WCAG 2.2.2).
   const video = page.locator('[data-stage="agents"] video');
   await expect(video).toHaveAttribute('controls', '');
   await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
-  // The proof clip never hydrates under reduced motion: poster only (§3).
   const proofVid = page.locator('.proof__video--wide');
   expect(await proofVid.evaluate((v) => v.querySelectorAll('source').length)).toBe(0);
   await expect(proofVid).toHaveAttribute('poster', /proof-poster/);
@@ -932,11 +754,9 @@ test('reduced motion stays on the still poster without errors', async ({ browser
 });
 
 test('wasm fetch failure keeps the still poster without an uncaught error', async ({ browser }) => {
-  // The third documented boot path (live / reduced-motion / FAILURE): abort every
-  // wasm request so the dynamic import rejects — the empty .catch must keep the
-  // poster (graceful degradation) and never throw. The pause control stays present
-  // though: it governs the wasm-independent ambient motion (ticker/dust/clips), so
-  // a failed office must NOT strand that motion uncontrollable (#456).
+  // The pause control must stay present even so: it governs the wasm-independent
+  // ambient motion (ticker/dust/clips), which a dead office must not strand
+  // uncontrollable (#456).
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = watchErrors(page);
@@ -953,10 +773,6 @@ test('wasm fetch failure keeps the still poster without an uncaught error', asyn
   await expect(page.locator('.backdrop__poster')).toBeVisible();
   await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
   await expect(page.locator('[data-sl-onair]')).toHaveText('○ STATIC');
-  // #456: the office canvas never went live, but the statusline ticker / hero dust
-  // / showcase clips still auto-animate — so the pause control must be VISIBLE and
-  // actually govern them (WCAG 2.2.2), not hidden as if nothing were animating.
-  // Clicking it fires the page-wide pix:paused even with no live office.
   const pauseBtn = page.locator('#office-pause');
   await expect(pauseBtn).toBeVisible();
   const paused = page.evaluate(
@@ -970,8 +786,6 @@ test('wasm fetch failure keeps the still poster without an uncaught error', asyn
   await pauseBtn.click();
   expect(await paused).toBe(true);
   await expect(pauseBtn).toHaveAttribute('aria-pressed', 'true');
-  // the aborted request logs a resource error; the import rejection must stay
-  // handled — no uncaught pageerror / console.error beyond that one line.
   expect(errors().filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
   await context.close();
 });
@@ -979,12 +793,9 @@ test('wasm fetch failure keeps the still poster without an uncaught error', asyn
 test('a transient wasm-fetch drop self-heals: the office still goes live via retry', async ({
   browser,
 }) => {
-  // The boot path memoizes ONE shared init promise on window.__pixWasm; before
-  // the bounded retry (OfficeBackdrop.boot / Showcase.bootCanvas), a single
-  // dropped wasm fetch rejected that promise and stranded the office on the
-  // poster until a manual reload. Abort ONLY the FIRST pixtuoid_web_bg.wasm
-  // request (the big binary — the likeliest drop) and let every retry through:
-  // the office MUST recover and go live without a reload.
+  // Abort ONLY the FIRST pixtuoid_web_bg.wasm request (the big binary — the
+  // likeliest drop) and let every retry through: one dropped fetch used to
+  // reject the shared __pixWasm promise and strand the office until a reload.
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = watchErrors(page);
@@ -1000,15 +811,10 @@ test('a transient wasm-fetch drop self-heals: the office still goes live via ret
   });
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
-  // Retry recovers: poster → live canvas comes up despite the first-fetch abort.
   await expect(page.locator('.backdrop.is-live')).toBeAttached({ timeout: 20_000 });
   await expect(page.locator('[data-sl-onair]')).toHaveText('● LIVE', { timeout: 10_000 });
-  // Prove the recovery went through the retry, not a lucky single fetch: the
-  // first request was aborted and at least one re-fetch followed.
   expect(abortedFirst).toBe(true);
   expect(wasmHits).toBeGreaterThan(1);
-  // The one aborted request logs a resource error; the retried rejection must
-  // stay handled — nothing uncaught beyond that line.
   expect(errors().filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
   await context.close();
 });
@@ -1016,12 +822,8 @@ test('a transient wasm-fetch drop self-heals: the office still goes live via ret
 test('#671 cross-trigger recovery: after the hero exhausts its retries, a later VIBING boot re-attempts and comes up', async ({
   page,
 }) => {
-  // Before #671 the hero's exhausted (rejected) __pixWasm stayed memoized on
-  // window, so a LATER-booting consumer (the Showcase VIBING office, scrolled in
-  // after the network recovered) inherited the rejection and never retried. Now
-  // the hero nulls __pixWasm on final exhaustion, so VIBING's boot re-creates a
-  // fresh shared promise and comes up. Fail the hero's 3 attempts (initial + 2
-  // retries), then let the network recover before VIBING boots.
+  // Fail the hero's 3 attempts (initial + 2 retries) — VIBING is below the fold,
+  // so it only boots after the network recovers, off the nulled shared promise.
   const errors = watchErrors(page);
   let wasmHits = 0;
   await page.route('**/pixtuoid_web_bg.wasm', (route) => {
@@ -1031,15 +833,10 @@ test('#671 cross-trigger recovery: after the hero exhausts its retries, a later 
   });
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
-  // The hero exhausts its retries and NULLS the shared promise (never goes live) —
-  // VIBING hasn't booted yet (studio is below the fold), so only the hero spent
-  // the 3 aborted fetches.
   await expect
     .poll(() => page.evaluate(() => window.__pixWasm === null), { timeout: 15_000 })
     .toBe(true);
   await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
-  // Now VIBING scrolls into view with the network recovered: it must re-attempt
-  // off the nulled promise (not inherit the dead one) and paint a frame.
   await page.evaluate(() =>
     document.getElementById('studio')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
@@ -1055,7 +852,6 @@ test('#671 cross-trigger recovery: after the hero exhausts its retries, a later 
       { timeout: 15_000 }
     )
     .toBe(true);
-  // The shared promise was re-created (no longer null) and the recovery re-fetched.
   expect(await page.evaluate(() => window.__pixWasm !== null)).toBe(true);
   expect(wasmHits).toBeGreaterThan(3);
   expect(errors().filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
@@ -1067,12 +863,9 @@ test('key vocabulary: digits ride globally, typing surfaces stay guarded, t keep
   await gotoLive(page);
   await page.keyboard.press('3');
   await expect(page.locator('[data-lift-digit]')).toHaveText('3F', { timeout: 10_000 });
-  // The audit's dead-digit-keys bug, pinned FIXED (§4): focus parked on a real
-  // control no longer kills the floor keys — digits are document-global now.
   await page.locator('#office-pause').focus();
   await page.keyboard.press('1');
   await expect(page.locator('[data-lift-digit]')).toHaveText('1F', { timeout: 10_000 });
-  // …but a typing surface still swallows them (no teleport mid-input).
   await page.evaluate(() => {
     const inp = document.createElement('input');
     inp.id = 'e2e-typing-probe';
@@ -1080,9 +873,8 @@ test('key vocabulary: digits ride globally, typing surfaces stay guarded, t keep
     inp.focus();
   });
   await page.keyboard.press('3');
-  await expect(page.locator('[data-lift-digit]')).toHaveText('1F'); // unchanged
+  await expect(page.locator('[data-lift-digit]')).toHaveText('1F');
   await page.evaluate(() => document.getElementById('e2e-typing-probe')!.remove());
-  // `t` (decorative retint) KEEPS the old WCAG 2.1.4 focus gate.
   await page.locator('#office-pause').focus();
   await page.evaluate(() => document.documentElement.style.removeProperty('--coral'));
   await page.keyboard.press('t');
@@ -1101,7 +893,6 @@ test('statusline install chip is a link that jumps to Install (href, scroll, key
   await expect(link).toHaveAttribute('href', '#install');
   await expect(link).toHaveAttribute('aria-label', 'Jump to the install section');
   await expect(page.locator('#sl-install .sl__copy-label')).toHaveText('install');
-  // the ★ star count is unaffected by wb-2 (still the chip's sibling)
   await expect(page.locator('#sl-install .sl__stars')).toBeVisible();
 
   await link.click();
@@ -1114,7 +905,6 @@ test('statusline install chip is a link that jumps to Install (href, scroll, key
     'install'
   );
 
-  // keyboard activation: a real <a> answers Enter without any extra wiring
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   await link.focus();
   await page.keyboard.press('Enter');
@@ -1148,12 +938,6 @@ test('statusline install chip on mobile: label stays readable at rest, flash swa
   page,
   context,
 }) => {
-  // ≤760px KEEPS the one-word 'install' label (a bare arrow means nothing to
-  // a first-time visitor — user-caught regression); only the hire-receipt
-  // flash swaps to the ✓ glyph + pulse, because the receipt TEXT is too long
-  // for the narrow bar. Post-wb-2 the chip no longer copies anything itself
-  // (it's a jump link) — the hire fires from the Install section's OWN copy
-  // control.
   await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
   await page.addInitScript(() => {
@@ -1164,14 +948,13 @@ test('statusline install chip on mobile: label stays readable at rest, flash swa
       }
     });
   });
-  await gotoLive(page); // live office → the Install copy also hires → the receipt
+  await gotoLive(page);
   await page.setViewportSize({ width: 375, height: 800 });
   const chip = page.locator('#sl-install .sl__copy');
   const label = page.locator('#sl-install .sl__copy-label');
   const flashIcon = page.locator('#sl-install .sl__copy-icon-flash');
   await expect(chip).not.toHaveClass(/is-flash/);
   await expect(flashIcon).toBeHidden();
-  // the rest state must READ on mobile: arrow + the word, not a bare glyph
   await expect(label).toBeVisible();
   await expect(label).toHaveText('install');
 
@@ -1182,15 +965,13 @@ test('statusline install chip on mobile: label stays readable at rest, flash swa
 
   await expect(chip).toHaveClass(/is-flash/);
   await expect(flashIcon).toBeVisible();
-  await expect(label).toBeHidden(); // the long receipt text never overflows the narrow bar
-  // …and once the hire-receipt sequence settles, it reverts
+  await expect(label).toBeHidden();
   await expect(page.locator('#sl-install .sl__copy-label')).toHaveText('install', {
     timeout: 8_000,
   });
   await expect(chip).not.toHaveClass(/is-flash/);
   await expect(flashIcon).toBeHidden();
-  // ONE start: only the hire-receipt flash fires now (there's no more
-  // separate copy flash on the chip itself to queue behind).
+  // ONE pulse: only the hire-receipt flash fires (the chip has no copy flash).
   expect(
     await page.evaluate(() => (window as unknown as { __chipPulses: number }).__chipPulses)
   ).toBe(1);
@@ -1200,16 +981,11 @@ test('statusline install chip on mobile: label stays readable at rest, flash swa
 test('statusline install chip: the ★ star segment renders the overridden count, never a literal null/undefined', async ({
   page,
 }) => {
-  // __GH_STARS__ is a build-time GitHub API fetch (astro.config.mjs calls
-  // fetchStarCount()); `just site-e2e` / CI's site.yml e2e build both set
-  // GH_STARS_OVERRIDE=842 (config/gh-stars.mjs) so this suite's single shared
-  // webServer/dist gets a deterministic count instead of racing an
-  // unauthenticated, rate-limited GitHub API call. A dev running bare
-  // `npx playwright test` against a stale build made WITHOUT that override may
-  // see this fail (chip absent or a different count) — rebuild with the env
-  // var set first. The shape guard stays broad so a regression to the
-  // stringified-null/undefined defect class (`★null`/`★undefined`) still fails
-  // even if the override value above ever changes.
+  // __GH_STARS__ is a build-time GitHub fetch; `just site-e2e` and CI both set
+  // GH_STARS_OVERRIDE (config/gh-stars.mjs) so this suite's shared build is
+  // deterministic — a build made without it fails here. The shape guard stays
+  // broad so the stringified-null/undefined defect class still fails even if
+  // the override value changes.
   await gotoLive(page);
   const stars = page.locator('#sl-install .sl__stars');
   await expect(stars).toBeVisible();
@@ -1221,20 +997,15 @@ test('WCAG 2.1.4: the statusline keys toggle turns the digit shortcuts off, then
   page,
 }) => {
   await gotoLive(page);
-  // digits ride by default
   await page.keyboard.press('2');
   await expect(page.locator('[data-lift-digit]')).toHaveText('2F', { timeout: 10_000 });
-  // open the floor popover and flip the shortcuts OFF
   await page.locator('[data-floor-toggle]').click();
   const keysToggle = page.locator('[data-keys-toggle]');
   await keysToggle.click();
   await expect(keysToggle).toHaveAttribute('aria-checked', 'false');
-  // OFF: a floor digit is inert — the lift readout does not move
   await page.keyboard.press('3');
   await expect(page.locator('[data-lift-digit]')).toHaveText('2F');
-  // …and the choice is persisted (single-char shortcuts have a real off-switch)
   expect(await page.evaluate(() => localStorage.getItem('pix-keys'))).toBe('off');
-  // flip it back ON — the digit rides again
   await keysToggle.click();
   await expect(keysToggle).toHaveAttribute('aria-checked', 'true');
   await page.keyboard.press('3');
@@ -1242,8 +1013,6 @@ test('WCAG 2.1.4: the statusline keys toggle turns the digit shortcuts off, then
 });
 
 test('the clock forces night after hours and clears on an explicit theme act', async ({ page }) => {
-  // The only theme-init path every other test routes around. Playwright's clock
-  // makes it deterministic (fixes Date; timers/rAF stay real).
   await page.clock.setFixedTime(new Date('2026-01-01T23:00:00'));
   await page.emulateMedia({ colorScheme: 'light' }); // the clock must win over a light OS
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
@@ -1252,25 +1021,17 @@ test('the clock forces night after hours and clears on an explicit theme act', a
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
   await expect(page.locator('html')).toHaveAttribute('data-clock-night', '1');
-  // an explicit theme act ends the clock's authority (and its footer explainer)
   await page.locator('#theme-toggle').click();
   await expect(page.locator('html')).not.toHaveAttribute('data-clock-night', '1');
-  // …and the clock NEVER forces day: noon + a light OS lands day, not night.
   await page.clock.setFixedTime(new Date('2026-01-01T12:00:00'));
   await page.evaluate(() => localStorage.removeItem('pix-theme'));
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'day');
 });
 
-// ---------------------------------------------------------------------------
-// The tests below came out of the sitewide interaction audit (91 catalogued
-// listeners/globals/observers → these six): every runtime contract with
-// med+ user impact and low flake risk that the tests above didn't already pin.
-
 test('first visit: boot intro auto-runs, reveals the page, seeds the gate', async ({ page }) => {
   await page.goto('./'); // NO pix-booted seed — the real first visit
   await expect(page.locator('#boot')).toBeVisible();
-  // Splash log displays 4 lines (~1.7s) then holds for engine (~4s MAX_ENGINE_WAITS) + settle fade (460ms) ≈ 6.3s.
   await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 10_000 });
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pix-booted'))).toBe('1');
   expect(
@@ -1279,11 +1040,8 @@ test('first visit: boot intro auto-runs, reveals the page, seeds the gate', asyn
   expect(await page.evaluate(() => document.getElementById('main')!.hasAttribute('inert'))).toBe(
     false
   );
-  // finish() dispatched pix:revealed, arming the reveal-on-scroll observer —
-  // opacity:0 still counts as "visible" to Playwright, so assert the CLASS.
+  // opacity:0 still counts as "visible" to Playwright — assert the CLASS.
   await expectSectionReveal(page, 'install');
-  // Gate round-trip: a seeded session skips the overlay, and the IMMEDIATE
-  // pix:revealed path must arm the reveal observer just the same.
   await page.reload();
   await expect(page.locator('#boot')).not.toBeVisible();
   await expectSectionReveal(page, 'install');
@@ -1292,23 +1050,16 @@ test('first visit: boot intro auto-runs, reveals the page, seeds the gate', asyn
 test('the reveal roll survives a main-thread stall instead of snapping past it', async ({
   page,
 }) => {
-  // Safari blocks the page's main thread for ~1.3-1.5s right after a first
-  // visit settles, inside its OWN tab-snapshot IPC: WebPage::TakeSnapshot ->
-  // RemoteImageBufferProxy::flushDrawingContext -> IPC::Semaphore::waitFor ->
-  // semaphore_timedwait_trap, while the GPU process sits blocked in
-  // CA::CG::ContextDelegate::operation_'s dispatch_sync (profiled with `sample`
-  // on Safari 27; neither process is doing work — it is a lock wait, which is
-  // why the duration is near-constant). Nothing here can stop that stall. What
-  // it MUST NOT do is eat the reveal: a wall-clock ramp keeps advancing while
-  // nothing paints, so the roll froze on a half-drawn frame and then snapped to
-  // the settled office — the animation never played (the reported bug).
-  // The roll is therefore driven by PAINTED frames, not by the clock.
+  // Safari blocks the main thread for ~1.3-1.5s right after a first visit
+  // settles, inside its own tab-snapshot IPC lock. A wall-clock ramp keeps
+  // advancing while nothing paints, so the roll froze on a half-drawn frame and
+  // then snapped to the settled office — hence a roll driven by PAINTED frames.
   const errors = watchErrors(page);
   await page.goto('./'); // real first visit — the boot path is the only one that rolls
   await expect(page.locator('.backdrop')).toHaveClass(/\bis-live\b/, { timeout: 15_000 });
   const settled = () =>
     page.evaluate(() => !!document.getElementById('office-overlay')?.classList.contains('is-on'));
-  expect(await settled()).toBe(false); // the roll is running
+  expect(await settled()).toBe(false);
   // Block the main thread for a full REVEAL_MS the way the snapshot IPC does.
   await page.evaluate(() => {
     const until = performance.now() + 1600;
@@ -1316,11 +1067,9 @@ test('the reveal roll survives a main-thread stall instead of snapping past it',
       /* synchronous stall — no frames can paint */
     }
   });
-  // A clock-driven ramp is now past REVEAL_MS: it would already have snapped to
-  // the settled office and switched the captions on. A frame-driven one has
-  // barely advanced, so the reveal still has its animation left to play.
+  // A clock-driven ramp is now past REVEAL_MS and would have snapped to the
+  // settled office; a frame-driven one has barely advanced.
   expect(await settled()).toBe(false);
-  // ...and it must still finish on its own rather than hanging mid-roll.
   await expect.poll(settled, { timeout: 10_000 }).toBe(true);
   expect(errors()).toEqual([]);
 });
@@ -1328,13 +1077,8 @@ test('the reveal roll survives a main-thread stall instead of snapping past it',
 test('un-reducing motion mid-session rolls the office in again, it does not snap', async ({
   page,
 }) => {
-  // The reduced-motion arm sets `live = false`; its un-reduce arm re-covers and
-  // boots "so the office rolls back in". The roll's progress must rewind with
-  // it — frame-accumulated progress that SURVIVES the de-live leaves rt >= 1, so
-  // the office blits its settled frame and SNAPS: the exact failure the
-  // frame-driven roll exists to prevent, reintroduced on the neighbouring path.
-  // Nothing else in this suite un-reduces (every other test only reduces), so
-  // this is the sole guard on that direction.
+  // Frame-accumulated progress that SURVIVES the de-live leaves rt >= 1, so the
+  // office blits its settled frame and SNAPS. Nothing else here un-reduces.
   const errors = watchErrors(page);
   const captionsOn = () =>
     page.evaluate(() => !!document.getElementById('office-overlay')?.classList.contains('is-on'));
@@ -1346,26 +1090,21 @@ test('un-reducing motion mid-session rolls the office in again, it does not snap
   await expect(page.locator('.backdrop')).not.toHaveClass(/\bis-live\b/, { timeout: 5_000 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect(page.locator('.backdrop')).toHaveClass(/\bis-live\b/, { timeout: 15_000 });
-  // Live again — so the reveal must be REPLAYING, i.e. captions still off. A
-  // stale accumulator settles on the first frame and turns them straight on.
   expect(await captionsOn()).toBe(false);
-  await expect.poll(captionsOn, { timeout: 15_000 }).toBe(true); // ...and it completes
+  await expect.poll(captionsOn, { timeout: 15_000 }).toBe(true);
   expect(errors()).toEqual([]);
 });
 
 test('the office still goes live on a device that never meets the frame budget', async ({
   page,
 }) => {
-  // The roll waits for a few on-budget frames so a main-thread stall lands on
-  // the flat bg cover rather than a half-drawn frame. That wait is a COURTESY,
-  // never a precondition: a machine that cannot sustain the budget at all would
-  // otherwise sit on the cover forever and never get an office. Every frame
-  // here is deliberately pushed over budget, and the office must still come up.
+  // The roll's wait for a few on-budget frames is a COURTESY, never a
+  // precondition: a machine that can never meet the budget must still get an
+  // office rather than sit on the cover forever.
   const errors = watchErrors(page);
   await page.addInitScript(() => {
-    // Push every frame past REVEAL_MAX_STEP_MS, but only ONCE the engine is up —
-    // starving the wasm boot itself would test a different thing (and never get
-    // as far as the readiness gate this pins).
+    // Only ONCE the engine is up — starving the wasm boot itself would test a
+    // different thing and never reach the readiness gate this pins.
     const raf = window.requestAnimationFrame.bind(window);
     window.requestAnimationFrame = (cb) =>
       raf((t) => {
@@ -1386,26 +1125,16 @@ test('the office still goes live on a device that never meets the frame budget',
 test('a keypress during the Level-2 engine hold force-settles the splash immediately', async ({
   page,
 }) => {
-  // Regression pin: skip() used to just call finish() — on the index page
-  // (#office-live present) that re-enters the SAME waitForEngine() hold an
-  // unforced finish() would, so a user gesture mid-hold did NOTHING but relight
-  // already-lit log lines; the page stayed inert up to the ~4s MAX_ENGINE_WAITS
-  // cap regardless of the keypress. A user gesture must always win over the
-  // engine hold.
   const errors = watchErrors(page);
-  // Hang the wasm fetch forever (never fulfilled/aborted): window.__pixEngineReady
-  // then never resolves via the office's own first-frame path, so an unforced
-  // finish() would hold the full MAX_ENGINE_WAITS cap.
+  // Hang the wasm fetch forever (never fulfilled/aborted) so __pixEngineReady
+  // never resolves and an unforced finish() would hold the full cap.
   await page.route('**/wasm/**', () => {});
   await page.goto('./'); // real first visit — no pix-booted seed
   await expect(page.locator('#boot')).toBeVisible();
-  // Wait for the log to finish (last line lit) — the exact moment finish()
-  // runs and, since #office-live exists and the engine will never resolve,
-  // enters the waitForEngine hold. Bounded generously above the ~1.7s nominal
-  // log time for CI slack.
+  // Last line lit = the moment finish() runs and enters the waitForEngine hold.
   await expect(page.locator('.boot__line').last()).toHaveClass(/\bin\b/, { timeout: 5_000 });
   await page.keyboard.press('Space');
-  // Must clear almost immediately — nowhere near the ~4s MAX_ENGINE_WAITS cap.
+  // Must clear almost immediately — nowhere near the MAX_ENGINE_WAITS cap.
   await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 700 });
   expect(await page.evaluate(() => document.getElementById('main')!.hasAttribute('inert'))).toBe(
     false
@@ -1416,15 +1145,13 @@ test('a keypress during the Level-2 engine hold force-settles the splash immedia
 test('first visit on an office-less page lifts the splash promptly (no engine-gate hang)', async ({
   page,
 }) => {
-  // The Level-2 boot gate holds the splash for window.__pixEngineReady, set ONLY by
-  // OfficeBackdrop — which is index-only. Docs/404 share Base.astro's splash but
-  // have NO office, so the gate MUST fall back to the flat delay there; else the page
-  // stays inert the full ~4s cap. Regression pin for PR #462's docs-page hang.
+  // window.__pixEngineReady is set ONLY by OfficeBackdrop (index-only), so on
+  // an office-less page the Level-2 gate must fall back to the flat delay.
   const errors = watchErrors(page);
   await page.goto('./architecture/'); // real first visit (no pix-booted), no OfficeBackdrop
   await expect(page.locator('#boot')).toBeVisible();
-  await expect(page.locator('#office-live')).toHaveCount(0); // confirm: no office on this page
-  // Splash clears data-booting in ~1.7s (4×390ms line dwell) + 460ms fade ≈ 2.1s; the unguarded gate hangs to ~5.9s. 3s separates.
+  await expect(page.locator('#office-live')).toHaveCount(0);
+  // ~2.1s nominal vs the unguarded gate's hang past 5s — 3s separates them.
   await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 3_000 });
   expect(errors()).toEqual([]);
 });
@@ -1434,22 +1161,16 @@ test('first visit: splash displays 4-line log with per-line dwell (~390ms)', asy
   // Test on docs page (no office, no engine wait) for pure splash-timing measurement.
   await page.goto('./config/'); // NO pix-booted seed — the real first visit
   await expect(page.locator('#boot')).toBeVisible();
-  // The splash displays 4 log lines: version, booting, themes, CLI count.
   await expect(page.locator('#boot .boot__log')).toContainText('pixtuoid');
   await expect(page.locator('#boot .boot__log')).toContainText('booting office');
   await expect(page.locator('#boot .boot__log')).toContainText('loading themes');
-  // Count derived from the SAME manifest Base.astro's CLI_COUNT reads, so a
-  // new source can't drift this literal (the PR-520 lesson).
   await expect(page.locator('#boot .boot__log')).toContainText(
     `${sourcesData.length} CLIs connected`
   );
-  // Splash clears data-booting in ~1.7s (4×390ms line dwell) + 460ms fade ≈ 2.1s — the
-  // §1 budget (user decision 2026-07-06: retimed from ~450ms/line, which measured
-  // ~2.5s end-to-end here — noticeably slower than production's felt pace).
+  // ~2.1s nominal: 4 lines at the 390ms dwell, plus the 460ms fade.
   await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', {
     timeout: 3_000,
   });
-  // Whole-viewport skip still seeds the session gate.
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pix-booted'))).toBe('1');
   expect(errors()).toEqual([]);
 });
@@ -1458,33 +1179,25 @@ test('theme chain: saved choice, URL override, toggle persist, Escape restore, s
   page,
 }) => {
   // Only the boot gate goes in addInitScript — an init-script THEME seed would
-  // re-run on every navigation and clobber the later steps' seeds; theme
-  // choices are planted via localStorage + reload instead.
+  // re-run on every navigation and clobber the later steps' seeds.
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   await page.evaluate(() => localStorage.setItem('pix-theme', 'dracula'));
-  await page.reload(); // the saved-choice branch — never consults the clock
+  await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dracula');
-  // The theme-color meta syncs from the same init read (mobile chrome tint).
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#282a36');
-  // A ?theme= URL override outranks the saved choice.
   await page.goto('./?theme=night');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
-  // Toggle round-trip (seed 'day' so the flip lands 'night' — wall-clock-proof):
-  // flip + persist + the pix:theme dispatch → listener → sync() icon/aria chain.
+  // Seed 'day' so the flip lands 'night' regardless of the wall clock.
   await page.evaluate(() => localStorage.setItem('pix-theme', 'day'));
   await page.goto('./');
-  // the brand mark (nav + footer) IS the tab favicon asset, swapped by the same
-  // theme sync — day shows the lit mark, the toggle flips it to the night mark.
   await expect(page.locator('.nav__mark')).toHaveAttribute('src', /favicon-32\.png$/);
   await page.locator('#theme-toggle').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
   await expect(page.locator('.nav__mark')).toHaveAttribute('src', /favicon-32-night\.png$/);
   await expect(page.locator('.footer__mark')).toHaveAttribute('src', /favicon-32-night\.png$/);
-  // the swap must also run in reverse — toggle back to day and the marks return
-  // to the lit favicon (the night filename only appears if syncBrand ran, so this
-  // proves the day path with teeth, not just the authored default), then restore
-  // night for the persistence checks below.
+  // Back to day proves the swap with teeth (the night filename only appears if
+  // syncBrand ran), then back to night for the persistence checks below.
   await page.locator('#theme-toggle').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'day');
   await expect(page.locator('.nav__mark')).toHaveAttribute('src', /favicon-32\.png$/);
@@ -1494,11 +1207,9 @@ test('theme chain: saved choice, URL override, toggle persist, Escape restore, s
   expect(await page.evaluate(() => localStorage.getItem('pix-theme'))).toBe('night');
   await expect(page.locator('#theme-toggle .nav__toggle-icon')).toHaveText('☀️');
   await expect(page.locator('#theme-toggle')).toHaveAttribute('aria-label', 'Switch to day');
-  await page.reload(); // persistence read-back + the parse-time sync() seed
+  await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
   await expect(page.locator('#theme-toggle .nav__toggle-icon')).toHaveText('☀️');
-  // Escape restore: t retints inline, Escape clears it and restores the SAVED
-  // theme (validated read — never the clock).
   await page.evaluate(() => localStorage.setItem('pix-theme', 'dracula'));
   await page.reload();
   await page.keyboard.press('t');
@@ -1510,8 +1221,8 @@ test('theme chain: saved choice, URL override, toggle persist, Escape restore, s
   await expect
     .poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--coral')))
     .toBe('');
-  // System-dark fallback: no saved pick + a dark scheme lands 'night' — and
-  // after-hours wall clocks ALSO land night, so this is TZ-proof.
+  // No saved pick + a dark scheme lands 'night'; after-hours clocks land night
+  // too, so this is TZ-proof.
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.evaluate(() => localStorage.removeItem('pix-theme'));
   await page.reload();
@@ -1528,17 +1239,14 @@ test('install: tabs swap panels and both clipboard branches deliver', async ({ p
     'true'
   );
   await expect(page.locator('#install-panel-cargo')).toBeVisible();
-  await expect(page.locator('#install-panel-brew')).toBeHidden(); // really swapped out
-  // The happy path SPECIFICALLY (the hire test's regex tolerates the fallback):
-  // the flash label AND the clipboard payload round-trip.
+  await expect(page.locator('#install-panel-brew')).toBeHidden();
   const copy = page.locator('.install__panel.is-active .install__copy');
   await copy.click();
   await expect(copy).toHaveText('Copied ✓');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     await copy.getAttribute('data-copy')
   );
-  // Force the manual branch on a fresh load (brew is the default active panel):
-  // no Clipboard API → the <code> contents get SELECTED for a manual ⌘C.
+  // Force the manual branch on a fresh load (brew is the default active panel).
   await page.addInitScript(() =>
     Object.defineProperty(navigator, 'clipboard', { value: undefined })
   );
@@ -1554,23 +1262,20 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
 }) => {
   const errors = watchErrors(page);
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
-  await page.goto('./#showcase-spaces'); // the canonical deep link (the legacy #themes map was dropped in 0.12.0)
+  await page.goto('./#showcase-spaces');
   await expect(page.locator('[data-stage="spaces"]')).toBeVisible();
   await expect(page.locator('button.mon[data-ch="spaces"]')).toHaveAttribute(
     'aria-pressed',
     'true'
   );
-  // First tune hydrated the stage: data-src promoted to a real src.
   await expect(page.locator('[data-stage="spaces"] img.terminal__screen')).toHaveAttribute(
     'src',
     /space_/
   );
-  // An in-page hashchange re-tunes.
   await page.evaluate(() => {
     location.hash = '#showcase-dashboard';
   });
   await expect(page.locator('[data-stage="dashboard"]')).toBeVisible();
-  // Dial click: exactly-one-visible-stage swap + aria radio + URL tracking.
   await page.locator('button.mon[data-ch="spaces"]').click();
   await expect(page.locator('[data-stage="spaces"]')).toBeVisible();
   await expect(page.locator('[data-stage="dashboard"]')).toBeHidden();
@@ -1579,7 +1284,6 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
     'true'
   );
   await expect(page).toHaveURL(/#showcase-spaces$/);
-  // OSD chip: variant swap inside the stage.
   const chip = page.locator('[data-stage="spaces"] .osd__chip', { hasText: 'Pantry' });
   await chip.click();
   await expect(chip).toHaveAttribute('aria-pressed', 'true');
@@ -1587,8 +1291,7 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
     'src',
     /space_pantry\.png/
   );
-  // Play policy: back on the default channel with #studio in view, the clip
-  // plays inline (muted autoplay is gesture-free in chromium) — no controls.
+  // Muted autoplay is gesture-free in chromium, so the clip plays inline.
   await page.locator('button.mon[data-ch="agents"]').click();
   await page.evaluate(() =>
     document.getElementById('studio')!.scrollIntoView({ block: 'center', behavior: 'instant' })
@@ -1600,9 +1303,6 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
         .evaluate((v) => !(v as HTMLVideoElement).paused && !v.hasAttribute('controls'))
     )
     .toBe(true);
-  // WCAG 2.2.2: the page pause governs the clip too (it has no controls of its
-  // own in normal motion). Drive the same pix:paused signal #office-pause fires
-  // and assert the clip stops, then resumes.
   const clipPaused = () =>
     page.locator('[data-stage="agents"] video').evaluate((v) => (v as HTMLVideoElement).paused);
   await page.evaluate(() =>
@@ -1623,8 +1323,8 @@ test('VIBING channel: live office paints, is pause-gated, chips drive it', async
   const stage = page.locator('[data-stage="vibing"]');
   await expect(stage).toBeVisible();
   await expect(page.locator('[data-vibing-canvas]')).toBeAttached();
-  // The VIBING office is a SECOND wasm Office, whose rAF loop is gated on the
-  // studio actually scrolling into view (IntersectionObserver) — bring it in.
+  // The VIBING office is a SECOND wasm Office whose rAF loop is gated on the
+  // studio scrolling into view.
   await page.evaluate(() =>
     document.getElementById('studio')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
@@ -1638,21 +1338,17 @@ test('VIBING channel: live office paints, is pause-gated, chips drive it', async
       const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
       return d.some((v) => v !== 0);
     });
-  // Paints: the second Office actually rendered a frame (wasm cold-boot budget).
   await expect.poll(vibingPainted, { timeout: 15_000 }).toBe(true);
 
-  // Weather chip: click storm — the office keeps live-painting through it.
   const beforeWeather = await vibingShot();
   const stormChip = page.locator('[data-stage="vibing"] .osd__chip[data-weather="storm"]');
   await stormChip.click();
-  // Deterministic teeth: the click handler ran + moved the active state (a
-  // frame-changed poll alone passes on ambient sprite motion regardless).
+  // Deterministic teeth: a frame-changed poll alone passes on ambient sprite
+  // motion regardless.
   await expect(stormChip).toHaveClass(/is-active/);
   await expect(stormChip).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(beforeWeather);
 
-  // Theme chip: cyberpunk activates + retints the page, and does NOT touch
-  // the weather group's own active chip (the per-group-retint guard).
   const coralBefore = await page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue('--coral')
   );
@@ -1667,10 +1363,6 @@ test('VIBING channel: live office paints, is pause-gated, chips drive it', async
     .not.toBe(coralBefore);
   await expect(stormChip).toHaveClass(/is-active/); // weather group untouched by the theme retint
 
-  // Slider: scrubbing the time updates the readout + aria-valuetext, flips the
-  // sun/moon `data-phase` via the ENGINE's `Office.is_day` boundary (the [5,20)
-  // sun window), and repaints the office. Exercises BOTH the day and the night
-  // branch — the drift-fix payload the sky-scrubber added.
   const timeInput = stage.locator('[data-vibing-time]');
   const timeWrap = stage.locator('.vibing__time');
   const setHour = (h: number) =>
@@ -1681,7 +1373,7 @@ test('VIBING channel: live office paints, is pause-gated, chips drive it', async
   const beforeSlider = await vibingShot();
   await setHour(6); // 06:00 — inside the engine's [5,20) sun window → day
   await expect(stage.locator('[data-vibing-time-label]')).toHaveText('06:00');
-  await expect(timeInput).toHaveAttribute('aria-valuetext', '06:00'); // SR hears "06:00", not "6"
+  await expect(timeInput).toHaveAttribute('aria-valuetext', '06:00');
   await expect(timeWrap).toHaveAttribute('data-phase', 'day');
   await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(beforeSlider);
   await setHour(22); // 22:00 — past sunset (≥ 20) → the moon branch
@@ -1689,18 +1381,15 @@ test('VIBING channel: live office paints, is pause-gated, chips drive it', async
   await expect(timeInput).toHaveAttribute('aria-valuetext', '22:00');
   await expect(timeWrap).toHaveAttribute('data-phase', 'night');
 
-  // Pause gate (WCAG 2.2.2, page-scoped): #office-pause freezes this SECOND
-  // office too — a frozen canvas, byte-identical snapshots — and unpausing
-  // repaints it.
   const pauseBtn = page.locator('#office-pause');
   await pauseBtn.click();
   await expect(pauseBtn).toHaveAttribute('aria-pressed', 'true');
   const frozen = await vibingShot();
-  await page.waitForTimeout(400); // >12 would-be frames at the 33ms cap (CI-throttle margin, matches the hero-pause test)
-  expect(await vibingShot()).toBe(frozen); // not one new frame painted
+  await page.waitForTimeout(400); // >12 would-be frames at the 33ms cap
+  expect(await vibingShot()).toBe(frozen);
   await pauseBtn.click();
   await expect(pauseBtn).toHaveAttribute('aria-pressed', 'false');
-  await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(frozen); // animating again
+  await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(frozen);
   expect(errors()).toEqual([]);
 });
 
@@ -1711,7 +1400,6 @@ test('nav menus + docs: dropdown, TOC scrollspy, 404, mobile burger', async ({ p
     'aria-current',
     'location'
   );
-  // The Docs dropdown is the ONLY route to the five doc pages.
   const btn = page.locator('#docs-btn');
   await btn.click();
   await expect(page.locator('#docs-menu')).toHaveClass(/is-open/);
@@ -1720,7 +1408,7 @@ test('nav menus + docs: dropdown, TOC scrollspy, 404, mobile burger', async ({ p
   await page.keyboard.press('Escape');
   await expect(page.locator('#docs-menu')).not.toHaveClass(/is-open/);
   await expect(btn).toBeFocused();
-  // TOC click sync + the anchored heading clears the 60px sticky nav.
+  // The anchored heading must clear the 60px sticky nav.
   await page.locator('[data-toc-link="custom-sprite-packs"]').click();
   await expect(page.locator('[data-toc-link="custom-sprite-packs"]')).toHaveAttribute(
     'aria-current',
@@ -1733,8 +1421,7 @@ test('nav menus + docs: dropdown, TOC scrollspy, 404, mobile burger', async ({ p
       )
     )
     .toBeGreaterThan(60);
-  // Scrollspy proper: park a heading at 20% viewport — inside the -15%/-75%
-  // reading band — and the rail follows.
+  // Park a heading at 20% viewport — inside the -15%/-75% reading band.
   await page.evaluate(() => {
     const h = document.getElementById('themes')!;
     window.scrollTo({
@@ -1746,9 +1433,6 @@ test('nav menus + docs: dropdown, TOC scrollspy, 404, mobile burger', async ({ p
     'aria-current',
     'location'
   );
-  // Unknown routes land on the office at 3 a.m. with a way home. The document
-  // request itself logs a resource-404 console error — filter that one line;
-  // everything else must stay clean.
   await page.goto('./no-such-desk');
   await expect(page.locator('.lost h1')).toContainText('Session not');
   await expect
@@ -1760,9 +1444,6 @@ test('nav menus + docs: dropdown, TOC scrollspy, 404, mobile burger', async ({ p
     .toBeGreaterThan(0);
   await expect(page.locator('.lost__cta .btn-primary')).toHaveAttribute('href', '/');
   expect(errors().filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
-  // Mobile burger: below 760px the link panel is display:none until .is-open —
-  // a dead burger means no navigation at all on phones. Same Esc-focus-return
-  // contract as the Docs dropdown (WCAG 2.4.3).
   const ctx = await browser.newContext({ viewport: { width: 480, height: 800 } });
   const m = await ctx.newPage();
   await m.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
@@ -1786,12 +1467,8 @@ test('landing fixed chrome: floating nav, statusline readouts, floor popover', a
   expect(
     await page.evaluate(() => getComputedStyle(document.querySelector('.nav')!).backdropFilter)
   ).toBe('none');
-  // The statusline consumes the globals (the 250ms poll shows the 0.55
-  // fallback pre-wasm, so no live wait is needed); clock is format-only — TZ-agnostic.
   await expect(page.locator('[data-sl-lights]')).toHaveText(/lights \d+%/);
   await expect(page.locator('[data-sl-clock]')).toHaveText(/^\d{2}:\d{2} (day|night)$/);
-  // Floor popover: toggle → Esc closes → reopen → a floor jump closes AND
-  // rides the lift (the same scrollspy round-trip as the digit-keys test).
   const toggle = page.locator('[data-floor-toggle]');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -1806,31 +1483,21 @@ test('landing fixed chrome: floating nav, statusline readouts, floor popover', a
 
 test('no horizontal overflow at phone widths (mobile pan guard)', async ({ browser }) => {
   // `body { overflow-x: hidden }` masks the desktop scrollbar, so a full-width
-  // block whose ::before glow (or any child) pokes past the viewport is
-  // INVISIBLE on desktop yet PANS the visual viewport on mobile — the
-  // [data-lit]::before -8% overflow class (fixed by overflow-x: clip). A
-  // pseudo-element dodges every querySelectorAll('*') element scan, so only a
-  // documentElement scrollWidth<=clientWidth guard catches it. This whole class
-  // slipped the #453 whole-site audit (desktop-eyeballed, no such assertion);
-  // pin index + a docs page at real phone widths so it can't silently regress.
-  // #503: the missed coverage was the ROUTE MATRIX — /parallel-delivery (the
-  // one page with a wide ASCII pre + long unbreakable links) was never in the
-  // list, and the old scrollW<=clientW assertion catches its overflow fine
-  // once it is (measured pre-fix: scrollW 526 vs clientW 320 → red 206px).
-  // The innerWidth assertion below is a second, DIFFERENT tripwire: under
-  // mobile emulation window.innerWidth expands with over-wide content (526 at
-  // a 375 device — review-measured) while documentElement.clientWidth stays
-  // pinned to the device width, so it trips even if a future layout mode
-  // absorbs the overflow out of scrollWidth's view.
+  // block whose ::before glow pokes past the viewport is INVISIBLE on desktop
+  // yet PANS the visual viewport on mobile — and a pseudo-element dodges every
+  // querySelectorAll('*') scan, so only a documentElement scrollWidth <=
+  // clientWidth guard catches it. The innerWidth assertion is a second,
+  // DIFFERENT tripwire: under mobile emulation innerWidth expands with
+  // over-wide content while clientWidth stays pinned to the device width.
   for (const [path, width] of [
     ['./', 320], // iPhone SE — the narrowest supported
-    ['./', 360], // Android
-    ['./', 390], // iPhone 12–14
-    ['./', 430], // iPhone Pro Max
-    ['./', 768], // tablet
-    ['./config', 390], // docs shell: code blocks / mermaid can overflow too
+    ['./', 360],
+    ['./', 390],
+    ['./', 430],
+    ['./', 768],
+    ['./config', 390],
     ['./config', 768],
-    ['./architecture', 375], // build-time mermaid SVG
+    ['./architecture', 375],
     ['./contributing', 375],
     ['./knowledge-base', 375],
     ['./parallel-delivery', 320], // the #503 repro: wide ASCII pre + long links
@@ -1845,8 +1512,8 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
     const page = await context.newPage();
     await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
     await page.goto(path);
-    // The reported symptom is a left-right drag at the BOTTOM — measure there,
-    // after any late layout settles.
+    // The reported symptom is a drag at the BOTTOM — measure there, after any
+    // late layout settles.
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     const { scrollW, clientW, innerW } = await page.evaluate(() => ({
       scrollW: document.documentElement.scrollWidth,
@@ -1868,17 +1535,11 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
 test('the hero copy clears the floating nav at phone viewports (vertical overlap guard)', async ({
   browser,
 }) => {
-  // The hero is min-height:100svh with the copy BOTTOM-anchored (flex-end), so
-  // when the copy outgrows the viewport (narrow phones; iOS text metrics), its
-  // TOP is what gives way — with no top reservation the eyebrow slid to page
-  // y=0, straight under the index's floating (absolute) nav logo (measured
-  // pre-fix: eyebrow.top 0 vs nav bottom 60 at 402×700; a 1206×2622 iPhone
-  // field report). The fix reserves --nav-h + a breath as .hero padding-top.
-  // The pan guard above is width-only — this is the VERTICAL twin. 402×700 ≈
-  // iOS Safari's visible viewport on a 874pt phone; 360×640 = small Android.
-  // reducedMotion pins the copy's `rise` entry animation (translateY 22px →
-  // none) to its SETTLED position — the steady-state clearance is only ~12px,
-  // so a mid-animation read could mask a partial regression (false green).
+  // The hero is min-height:100svh with the copy BOTTOM-anchored, so when the
+  // copy outgrows the viewport its TOP is what gives way and the eyebrow slides
+  // under the index's floating (absolute) nav. reducedMotion pins the copy's
+  // `rise` entry to its SETTLED position — the steady-state clearance is small
+  // enough that a mid-animation read could mask a partial regression.
   for (const [width, height] of [
     [402, 700],
     [360, 640],
@@ -1908,10 +1569,8 @@ test('the hero copy clears the floating nav at phone viewports (vertical overlap
 test('docs-table code cells render single-line (column-collapse guard)', async ({ browser }) => {
   // `.prose :not(pre) > code`'s overflow-wrap:anywhere feeds its soft-wrap
   // opportunities into MIN-CONTENT intrinsic sizing (unlike break-word), so
-  // table auto-layout crushed the /config Key column to ~1ch and wrapped
-  // `theme` letter-by-letter. The pan guard above is blind to it — a column
-  // collapse never widens the page — so pin the `.prose table th/td code`
-  // exemption directly: every table code token renders as ONE line box.
+  // table auto-layout crushed the /config Key column to ~1ch. The pan guard
+  // above is blind to it — a column collapse never widens the page.
   const context = await browser.newContext({
     viewport: { width: 390, height: 820 },
     isMobile: true,
@@ -1937,13 +1596,8 @@ test('docs-table code cells render single-line (column-collapse guard)', async (
 
 test('text over the live office carries its own scrim (.text-scrim)', async ({ page }) => {
   await gotoLive(page);
-  // wb-2 C9: the hero copy (eyebrow/subcopy/CTA/platform-line) is now BARE,
-  // tools-table style — legibility comes from --office-ink/--office-ink-accent
-  // tokens tuned against the real office composite, not a plate (see the WCAG
-  // test below + global.css's doc comment). The install note still carries an
-  // actual scrim/plate; the standalone Features ledger was retired — its rows
-  // now live inside the merged 5F studio band as the roster, which carries
-  // the same local-scrim legibility guarantee the old ledger rows had.
+  // The hero copy is deliberately BARE (no plate): legibility comes from the
+  // --office-ink tokens, graded by the WCAG test below.
   const heroBg = await page.evaluate(
     () => getComputedStyle(document.querySelector('.hero .statement-sub')!).backgroundColor
   );
@@ -1953,16 +1607,11 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
   );
   expect(ghostBg).toBe('rgba(0, 0, 0, 0)');
 
-  // The install note ("Also on crates.io...") floated unplated over the
-  // skyline — give it the same crisp plate (it's NOT hero, so the install
-  // card idiom applies, unlike the hero's bare treatment above).
   expect(await page.locator('.install__note.text-scrim').count()).toBe(1);
-  // The roster rows are BARE over the section's DIM_MAX backing (user verdict,
-  // same rule as the hero + tools table) — the plate must never come back.
+  // The roster rows stay BARE (user verdict) — the plate must never come back.
   expect(await page.locator('#showcase .roster__row.text-scrim').count()).toBe(0);
-  // …and INSIDE the card the plate's visible edge aligns with the tabs/command
-  // column: text-scrim's negative office-margin is zeroed there (user-caught —
-  // the plate hung ~11px left of its siblings).
+  // Inside the card, text-scrim's negative office-margin is zeroed so the
+  // plate's visible edge aligns with the tabs/command column.
   const [noteX, tabsX] = await page.evaluate(() => [
     document.querySelector('.install__note')!.getBoundingClientRect().x,
     document.querySelector('.install__tabs')!.getBoundingClientRect().x,
@@ -1973,17 +1622,9 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
 test('bare hero text clears WCAG AA at the real office composite (day + night)', async ({
   page,
 }) => {
-  // wb-2 C6/C9: the hero eyebrow/subcopy/platform-line read directly over the
-  // live office (no plate — the SupportedTools-table look). The 4F Features
-  // intro paragraph this test also covered was retired along with the
-  // standalone floor (its rows are now scrimmed roster entries in the merged
-  // 5F band — see the .text-scrim test above — so the bare-ink-token
-  // legibility path no longer applies to them). Legibility now depends
-  // entirely on the ink token clearing contrast against whatever the office
-  // ACTUALLY renders behind it, so this grades through `paintedContrast` — the
-  // REAL canvas pixels under the box (not a --screen proxy: with no opaque
-  // plate the underlying office pixel is no longer "immaterial"), both
-  // luminance extremes, composited with the live dimmer.
+  // The hero copy has no plate, so legibility rests entirely on the ink token
+  // clearing contrast against what the office ACTUALLY renders behind it —
+  // hence `paintedContrast` over real canvas pixels, not a --screen proxy.
   for (const theme of ['day', 'night'] as const) {
     await page.addInitScript((t) => {
       sessionStorage.setItem('pix-booted', '1');
@@ -1993,9 +1634,6 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     await settleReveals(page);
 
-    // Every BARE muted-text surface over the office, not just the hero's
-    // (lens B measured #showcase's lead + roster body at 3.79-3.96:1 day —
-    // the sibling sweep adds the other sections' leads and eyebrows too):
     for (const selector of [
       '.hero .eyebrow',
       '.hero .statement-sub',
@@ -2003,14 +1641,10 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
       '#showcase .section-head .lead',
       '#showcase .eyebrow',
       '.roster__body',
-      // the channel dial: rest labels + the always-shown accordion desc are bare
-      // over the office too (were --fg-muted, sub-AA — audit finding A1).
       ".dial__ch:not([aria-pressed='true'])",
       '.dial__desc',
-      // …and so are the dial's two LED accents. The `:not()` above deliberately
-      // scoped the rest row, but the PRESSED row overrides its number's colour
-      // and `live` is the only marker for the one interactive demo — both were
-      // bare `--led`, an on-`--screen` hardware hue with no screen under it.
+      // the PRESSED row overrides its number's colour, so the `:not()` above
+      // misses it; `live` is the only marker for the one interactive demo.
       ".dial__ch[aria-pressed='true'] .dial__num",
       '.dial__live',
       '#how .eyebrow',
@@ -2031,20 +1665,11 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
 test('plate and chip text clears WCAG AA in every theme (day + night + dracula)', async ({
   page,
 }) => {
-  // The sweep above grades BARE text over the office canvas. This one grades
-  // the two DOM-plate populations: the page's OPAQUE plates — the terminal
-  // chrome bar (--surface-2), the stage OSD chips / caption / sky ticks and the
-  // docs pager (--surface), the inline code chip inside a prose link — and the
-  // TRANSLUCENT --screen chips, which are neither bare nor opaque: the footer
-  // line and the nav's version tag composite --chip-bg over the LIVE office, so
-  // their ground is the office pixel seen through the chip. `paintedContrast`
-  // grades all three the same way; only the populations differ.
-  // DRACULA is the point: it is visitor-reachable (`?theme=dracula`, validated
-  // by VALID_THEMES, plus Base.astro's keydown egg) but it is the one theme
-  // NOTHING measured — the office sweep runs day+night by design (dracula's
-  // --bg darkens the same way night's does) and Lighthouse only ever scores the
-  // pinned theme, so dracula's own --fg-muted/--coral had never been checked
-  // against dracula's own plates.
+  // Two DOM-plate populations: the page's OPAQUE plates, and the TRANSLUCENT
+  // --screen chips whose ground is the office pixel seen through the chip.
+  // DRACULA is the point — visitor-reachable via `?theme=dracula`, yet the
+  // office sweep runs day+night and Lighthouse only scores the pinned theme,
+  // so its own --fg-muted/--coral had never been checked against its plates.
   const PLATE_SURFACES: Record<string, string[]> = {
     './': [
       '.terminal__title',
@@ -2089,29 +1714,19 @@ test('plate and chip text clears WCAG AA in every theme (day + night + dracula)'
 test('hero badge row: one chip per registered source, matching the tools-table row count', async ({
   page,
 }) => {
-  // One manifest (sources.json), two consumers (Hero's chip row, the tools
-  // table on #tools) — a bridge, not two independently-maintained counts, so
-  // adding/removing a source can't silently desync them.
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
-  // Source chips exclude the trailing count-link cell (chrome, not a CLI).
   const chips = page.locator('.hero__badges .hero__badge:not(.hero__badge--more)');
   await expect(chips).toHaveCount(supportedSources.length);
-  // Collapsed rest state: the two-letter code is the visible face; the full
-  // name rides aria-label (AT) and the hover expansion (tested separately).
   await expect(chips.first().locator('.hero__badge-code')).toHaveText(
     supportedSources[0].badge.replace('·', '')
   );
   await expect(chips.first()).toHaveAttribute('aria-label', supportedSources[0].name);
-  // The count-link is bridged to the SAME manifest length and points at #tools.
   const more = page.locator('.hero__badge--more a');
   await expect(more).toHaveText(`${supportedSources.length} CLIs →`);
   await expect(more).toHaveAttribute('href', '#tools');
-  // Cursor affordances: label chips arrow, the link pointer. Pins the I-beam
-  // shimmer fix (chips are not copy text — an inherited/UA regression here
-  // re-introduces the per-glyph arrow↔I-beam flicker) AND the count-link's
-  // explicit pointer (cursor inherits; only a UA special case would otherwise
-  // restore it).
+  // Chips are not copy text: a UA/inherit regression here re-introduces the
+  // per-glyph arrow↔I-beam flicker.
   await expect(chips.first()).toHaveCSS('cursor', 'default');
   await expect(more).toHaveCSS('cursor', 'pointer');
 
@@ -2120,22 +1735,18 @@ test('hero badge row: one chip per registered source, matching the tools-table r
 });
 
 test('hero badge hover expands the full CLI name in place', async ({ page }) => {
-  // The strip is codes-only at rest; hovering a chip opens its 0fr name track
-  // (Hero.astro .hero__badge-name). Raw mouse.move, NOT page.hover(): the
-  // page's html { scroll-behavior: smooth } lets hover()'s actionability pass
-  // queue a smooth CDP scroll that slides the page out from under the pointer
-  // (probed during the mock round) — a real pointer has no such machinery.
+  // Raw mouse.move, NOT page.hover(): the page's html { scroll-behavior: smooth }
+  // lets hover()'s actionability pass queue a smooth CDP scroll that slides the
+  // page out from under the pointer.
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
-  // Let the hero's `rise` entrance (translateY, 0.7s) settle before capturing
-  // the box — a one-shot mouse.move to a mid-animation center can land off
-  // the chip once it settles (the sibling hero tests' networkidle idiom).
+  // Let the hero's `rise` entrance settle before capturing the box — a one-shot
+  // mouse.move to a mid-animation center can land off the chip once it settles.
   await page.waitForLoadState('networkidle');
   const chip = page.locator('.hero__badges .hero__badge:not(.hero__badge--more)').nth(6);
   const restBox = (await chip.boundingBox())!;
   await page.mouse.move(restBox.x + restBox.width / 2, restBox.y + restBox.height / 2);
-  // The chip grows RIGHTWARD past its collapsed width and the name becomes
-  // visible; its own left edge must not move (jitter-free hover contract).
+  // The chip grows RIGHTWARD; its own left edge must not move (jitter-free).
   await expect
     .poll(async () => (await chip.boundingBox())!.width)
     .toBeGreaterThan(restBox.width + 20);
@@ -2146,14 +1757,9 @@ test('hero badge hover expands the full CLI name in place', async ({ page }) => 
 
 test('reduced motion: the badge hover-expand is instant but still works', async ({ browser }) => {
   // Under RM the name track's transition is zeroed by global.css's UNIVERSAL
-  // clamp (`* { transition-duration: 0.001ms !important }`) — Hero.astro
-  // deliberately carries NO per-component arm (it would be dead code under
-  // that !important). Pins BOTH halves: the clamp actually reaches the track
-  // (sub-millisecond duration — deleting the global block reds this) AND the
-  // expansion still functions (motion removed ≠ feature removed — the hover
-  // rule still flips the 0fr track, instantly). Mirrors the repo's
-  // every-new-animated-element RM pattern (rise-entry, caption-overlay,
-  // ding-pulse pins).
+  // clamp — Hero.astro deliberately carries NO per-component arm (it would be
+  // dead code under that !important). Motion removed ≠ feature removed: the
+  // hover rule still flips the 0fr track, instantly.
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
@@ -2175,15 +1781,9 @@ test('reduced motion: the badge hover-expand is instant but still works', async 
 test('hero badge hues clear WCAG AA against their theme-aware chip surface (day + night)', async ({
   page,
 }) => {
-  // The badge-code hue is a cross-boundary copy of the app's per-source color
-  // (pinned to theme::NORMAL.source by the Rust bridge test), painted on a
-  // cell TINTED with the same hue per theme (Hero.astro's tint formulas:
-  // day darkens the code toward black on a 14% tint, night lightens it
-  // toward white on a 34% tint — same-hue text on same-hue ground is exactly
-  // where contrast silently dies) — so this sweeps every rendered hue in both
-  // themes rather than trusting one spot check. It sweeps BOTH text pairs per
-  // cell: the always-visible code AND the hover-expanded name (state-sweep,
-  // not spot-check — the #455 rendered-runtime lesson).
+  // Same-hue text on same-hue ground is exactly where contrast silently dies:
+  // the cell is TINTED with the badge's own hue per theme, so sweep every
+  // rendered hue in both themes, and both text pairs (code + expanded name).
   for (const theme of ['day', 'night'] as const) {
     await page.addInitScript((t) => {
       sessionStorage.setItem('pix-booted', '1');
@@ -2216,9 +1816,8 @@ test('hero badge hues clear WCAG AA against their theme-aware chip surface (day 
       }
     }
 
-    // The count-link cell (neutral tint), REST ink only — its hover ink is
-    // --coral, the same transient-hover-dips-below-AA exception .hero__ghost
-    // documents (rest is the AA case, hover is the accepted exception).
+    // REST ink only — the count-link's hover ink is --coral, the same
+    // transient-hover-dips-below-AA exception .hero__ghost documents.
     const moreColor = await page.evaluate(() => {
       const a = document.querySelector('.hero__badge--more a')!;
       return {
@@ -2240,11 +1839,8 @@ test('hero badge hues clear WCAG AA against their theme-aware chip surface (day 
 test('tenant board text (badges, legend, planned rows, soon marks, star plaque) clears WCAG AA against the dark board ground (day + night)', async ({
   page,
 }) => {
-  // The tenant board (#tools) is a .hw-panel — its --screen ground is a
-  // THEME-INDEPENDENT literal (global.css never redefines --screen per
-  // theme), unlike the hero's day/night chip split. This sweep runs both
-  // page themes anyway as a defense-in-depth pin, not because the ratio is
-  // expected to move.
+  // The board's --screen ground is a THEME-INDEPENDENT literal, so sweeping
+  // both themes is defense-in-depth, not an expected-to-move ratio.
   for (const theme of ['day', 'night'] as const) {
     await page.addInitScript((t) => {
       sessionStorage.setItem('pix-booted', '1');
@@ -2280,16 +1876,14 @@ test('tenant board text (badges, legend, planned rows, soon marks, star plaque) 
     );
     for (const { codeColor, label } of badges) assertAA(codeColor, `badge ${label}`);
 
-    // the legend is the sole decode key for the LED marks — always renders,
-    // since the current manifest always has both 'yes' and 'experimental'
-    // states on screen.
+    // the legend always renders: the manifest always has both 'yes' and
+    // 'experimental' states on screen.
     const legendColor = await page.evaluate(
       () => getComputedStyle(document.querySelector('.tools__legend')!).color
     );
     assertAA(legendColor, 'legend');
 
-    // the star plaque is its OWN .hw-panel beside the board (same --screen
-    // ground); assert its own bg rather than reuse boardBg, so a future
+    // the plaque is its OWN .hw-panel — assert its own bg, so a future
     // divergence between the two panels' grounds can't go unnoticed.
     const plaqueBg = await page.evaluate(
       () => getComputedStyle(document.querySelector('.tools__plaque')!).backgroundColor
@@ -2311,15 +1905,10 @@ test('tenant board text (badges, legend, planned rows, soon marks, star plaque) 
     assertPlaqueAA(plaqueColors.engraving, 'plaque engraving');
     assertPlaqueAA(plaqueColors.link, 'plaque link');
 
-    // sources.json currently has zero "planned" rows, so the planned tbody
-    // and its "soon" mark never render on the live page. Probe the SAME
-    // markup SupportedTools.astro's template emits for a planned row
-    // (MARK('planned')), injected into the real table so it picks up the
-    // live cascade — pins the rule even with an empty planned set.
-    // PAIRED-COPY PIN: MARK() is inline in SupportedTools.astro (unexported —
-    // Playwright can't call Astro frontmatter), so this literal MUST track
-    // MARK's 'planned'/'soon' markup by hand; edit both or the probe asserts
-    // stale markup. (The matching note sits on MARK() itself.)
+    // sources.json currently has zero "planned" rows, so probe the same markup
+    // SupportedTools.astro emits, injected into the real table to pick up the
+    // live cascade. PAIRED-COPY PIN: MARK() is inline and unexported, so this
+    // literal MUST track its 'planned'/'soon' markup by hand.
     const planned = await page.evaluate(() => {
       const table = document.querySelector('.tools__board table')!;
       const tbody = document.createElement('tbody');
@@ -2343,12 +1932,8 @@ test('tenant board text (badges, legend, planned rows, soon marks, star plaque) 
 test('pantry chitchat bubble text clears WCAG AA against its own dark ground (day + night)', async ({
   page,
 }) => {
-  // Same pattern as the tenant-board sweep above: .pantry__bubble paints its
-  // OWN opaque --screen background (not a shared board), so read fg/bg off
-  // the bubble element directly rather than a separate panel ancestor. Both
-  // tokens are THEME-INDEPENDENT (global.css never redefines --screen/
-  // --chip-bright per theme, same reasoning as the board/plaque), so this
-  // sweep is defense-in-depth, not an expected-to-move ratio.
+  // .pantry__bubble paints its OWN opaque --screen background, so read fg/bg
+  // off the bubble element directly rather than off a panel ancestor.
   for (const theme of ['day', 'night'] as const) {
     await page.addInitScript((t) => {
       sessionStorage.setItem('pix-booted', '1');
@@ -2381,21 +1966,14 @@ test('pantry chitchat bubble text clears WCAG AA against its own dark ground (da
 test('docs callout body copy clears WCAG AA against the callout screen (day + night + dracula)', async ({
   page,
 }) => {
-  // A markdown callout is a terminal window on the theme-independent --screen,
-  // so ALL of its ink must come from the chip palette. `.prose p`/`.prose li`
-  // match the callout's own <p>/<li> DIRECTLY, and a direct match always beats
-  // the --chip-ink the .callout__body blockquote hands DOWN — the sibling `a`
-  // and `code` overrides exist for exactly that reason. This sweeps every
-  // text-bearing tag markdown can put in the window (not just the two that
-  // were noticed), across every doc route and every theme, so the next
-  // .prose rule to land can't silently re-darken the body copy.
+  // `.prose p`/`.prose li` match the callout's own <p>/<li> DIRECTLY, and a
+  // direct match always beats the --chip-ink the .callout__body hands DOWN —
+  // hence the sibling `a`/`code` overrides, and hence sweeping every tag.
   const TEXT_TAGS = 'p, li, strong, em, a, code';
   for (const theme of ['day', 'night', 'dracula'] as const) {
     await page.addInitScript((t) => localStorage.setItem('pix-theme', t), theme);
     await page.goto('./config');
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-    // the doc routes come off the rendered sidebar (itself stamped from the one
-    // DOCS manifest) so a new/renamed doc joins the sweep without an edit here
     const routes = await page.evaluate(() =>
       [...document.querySelectorAll('.docs__sidebar .docs__list:not(.docs__list--building) a')].map(
         (a) => (a as HTMLAnchorElement).getAttribute('href')!
@@ -2444,18 +2022,13 @@ test('docs callout body copy clears WCAG AA against the callout screen (day + ni
 test('the statusline feed ellipsizes on the wrapping text span, not the flex row', async ({
   page,
 }) => {
-  // A flex container's own overflow/text-overflow never applies to its
-  // children (the badge `<b>` and the raw " · {what}" run are separate
-  // anonymous flex items) — regression pin for the mid-glyph clip: ellipsis
-  // must live on `.sl__text`, and it must actually be clipping SOMETHING
-  // (i.e. the item's content is wider than its box) for this pin to mean
-  // anything at a viewport wide enough to show the feed at all.
+  // A flex container's own overflow/text-overflow never applies to its children
+  // (the badge `<b>` and the " · {what}" run are separate anonymous flex items),
+  // so the ellipsis must live on `.sl__text` — and must actually be clipping.
   await page.setViewportSize({ width: 1280, height: 720 });
   await gotoLive(page);
-  // The feed's real content is a build-time GH API fetch (real PR titles) —
-  // length varies build to build, so don't rely on live content happening to
-  // overflow. Force it deterministically instead: the CSS behavior under test
-  // is on `.sl__text` itself, independent of what text it holds.
+  // The feed's real content is a build-time GH API fetch, so its length varies
+  // build to build — force the overflow deterministically instead.
   const info = await page.evaluate(() => {
     const text = document.querySelector('.sl__item .sl__text') as HTMLElement;
     text.textContent =
@@ -2478,9 +2051,8 @@ test('the statusline feed ellipsizes on the wrapping text span, not the flex row
 test('the feed hides itself, rather than show an unreadably short fragment, at a squeezed width', async ({
   page,
 }) => {
-  // 768-860px: .sl__text's available width drops to a sliver ("cc·pixtuoid ·
-  // mer…") even with a clean ellipsis — hiding reads better than a fragment
-  // too short to convey anything. Above/below that band it should show.
+  // 768-860px: .sl__text's width drops to a sliver even with a clean ellipsis —
+  // hiding reads better than a fragment too short to convey anything.
   await page.setViewportSize({ width: 800, height: 720 });
   await gotoLive(page);
   await expect(page.locator('.sl__feed')).toBeHidden();
@@ -2491,11 +2063,9 @@ test('the feed hides itself, rather than show an unreadably short fragment, at a
 test('the feed pauses while the tab is hidden — no ghosted double-exposure on refocus', async ({
   page,
 }) => {
-  // A hidden tab freezes CSS transitions but NOT setInterval/setTimeout. If the
-  // crossfading feed kept rotating while hidden, its queued out→in `is-on` class
-  // swaps would replay their opacity fades AT ONCE on refocus — two lines
-  // double-exposed (the ghosting bug). The rotation must stop while hidden and
-  // resync on return; at every point exactly one item is lit.
+  // A hidden tab freezes CSS transitions but NOT setInterval: a feed that kept
+  // rotating would replay its queued `is-on` fades AT ONCE on refocus (the
+  // ghosting bug).
   await page.setViewportSize({ width: 1280, height: 720 });
   await gotoLive(page);
   await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
@@ -2507,11 +2077,9 @@ test('the feed pauses while the tab is hidden — no ghosted double-exposure on 
       )
     );
 
-  // Force the tab "hidden" (the handler reads document.hidden) AND read the lit
-  // line in the SAME synchronous evaluate: dispatching visibilitychange runs
-  // stopFeed → showOnlyFeed, so exactly one item is lit and no rotation timer is
-  // pending. Reading here (not before the stop) is deterministic — it can't land
-  // in the fade gap (findIndex → -1) or race a free-running 6s tick.
+  // Force "hidden" AND read the lit line in the SAME synchronous evaluate:
+  // visibilitychange runs stopFeed → showOnlyFeed, so the read can't land in the
+  // fade gap (findIndex → -1) or race a free-running 6s tick.
   const before = await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
     document.dispatchEvent(new Event('visibilitychange'));
@@ -2521,26 +2089,22 @@ test('the feed pauses while the tab is hidden — no ghosted double-exposure on 
   });
   expect(before).toBeGreaterThanOrEqual(0);
 
-  // A pix:paused{false} can fire WHILE hidden (OfficeBackdrop dispatches it on a
-  // reduced-motion toggle) — startFeed's document.hidden guard must refuse to
-  // re-arm the rotation behind a hidden tab. Then wait past one 6s rotation:
-  // with the fix nothing advances; with the bug the interval keeps ticking.
+  // A pix:paused{false} can fire WHILE hidden, and startFeed's document.hidden
+  // guard must refuse to re-arm the rotation; then wait past one 6s rotation.
   await page.evaluate(() =>
     document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: false } }))
   );
   await page.waitForTimeout(6500);
   await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
-  expect(await litIndex()).toBe(before); // rotation truly paused while hidden
+  expect(await litIndex()).toBe(before);
 
-  // Refocus: still exactly one lit, no double-exposure.
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
 
-  // stopFeed collapses any accidental multi-lit state to exactly one line: force
-  // an illegal 2+-lit state, then a stop (user pause) must snap it back to one.
+  // stopFeed must collapse an illegal 2+-lit state back to exactly one line.
   await page.evaluate(() => {
     document.querySelectorAll('.sl__item').forEach((el) => el.classList.add('is-on'));
     document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }));
@@ -2549,10 +2113,8 @@ test('the feed pauses while the tab is hidden — no ghosted double-exposure on 
 });
 
 test('footer separators never strand alone at a wrap boundary', async ({ page }) => {
-  // Each "·" is grouped with the item it introduces into ONE flex item
-  // (.footer__grp), so flex-wrap can only break BETWEEN groups. Pin the
-  // structure directly rather than pixel-measuring a wrap (viewport-fragile):
-  // every .footer__sep's parent must be a .footer__grp.
+  // Each "·" is grouped with the item it introduces into ONE flex item, so
+  // flex-wrap can only break BETWEEN groups; pin the structure, not a pixel wrap.
   await gotoLive(page);
   const seps = await page.locator('.footer .footer__sep').all();
   expect(seps.length).toBeGreaterThan(0);
@@ -2562,15 +2124,9 @@ test('footer separators never strand alone at a wrap boundary', async ({ page })
 });
 
 test('no footer line begins or ends with a separator dot once the row wraps', async ({ page }) => {
-  // R3 (wb-3 matrix sweep): the sibling test above only proves a "·" can't be
-  // stranded ALONE mid-row — but each dot introduces its FOLLOWING item
-  // (.footer__grp), so a group that itself wraps to a new line still leads
-  // that line with its own dot (#768-day-08: "· built in Rust" opening
-  // line 2). Below the width where the row visibly wraps, Footer.astro now
-  // hides the dots entirely and lets the row's flex gap carry the
-  // separation. Check actual RENDERED rows (grouped by top position), not
-  // raw textContent — a display:none dot still shows up in textContent even
-  // though nothing paints, which would false-positive this check.
+  // Each dot introduces its FOLLOWING item, so a group that itself wraps still
+  // leads the new line with its own dot. Check RENDERED rows (grouped by top
+  // position): a display:none dot still shows up in textContent.
   await gotoLive(page);
   await page.setViewportSize({ width: 768, height: 900 });
   await page.evaluate(() =>
@@ -2606,25 +2162,18 @@ test('no footer line begins or ends with a separator dot once the row wraps', as
 test('the pause control never overlaps a footer link across the mobile wrap range', async ({
   page,
 }) => {
-  // C8 clamped the pause button's ≤960px clearance with a flat +84px, sized
-  // for an assumed 2-line footer wrap — but the wrap count is non-monotonic
-  // across viewport widths (measured 3 lines in the 360-460px band on real
-  // device sizes: iPhone 12/13/14/15, Pixel 7), so a flat offset either
-  // overlaps a taller wrap or overshoots a shorter one. Sweep the whole range
-  // (the --footer-h fix) instead of spot-checking one breakpoint.
+  // The footer's wrap count is non-monotonic across viewport widths (3 lines in
+  // the 360-460px band), so a flat clearance offset either overlaps a taller
+  // wrap or overshoots a shorter one — sweep the whole range.
   await gotoLive(page);
   const widths = [360, 375, 390, 393, 412, 460, 480, 768, 960];
   for (const width of widths) {
     await page.setViewportSize({ width, height: 844 });
     // expect.poll tolerates the async ResizeObserver round-trip that updates
-    // --footer-h after the reflow, and re-settles scroll-bottom on each retry
-    // (a resize can change the page's total scroll height via the footer).
-    // behavior:'instant' is load-bearing: global.css sets scroll-behavior:
-    // smooth, so the 2-arg scrollTo(x, y) form (equivalent to behavior:'auto',
-    // which DEFERS to that CSS) would still be animating when the rect read
-    // below runs — landing this poll's first read on a pre-scroll snapshot
-    // (footer off-screen, trivially zero overlap) and passing for the wrong
-    // reason regardless of the real bottom-of-page geometry.
+    // --footer-h, and re-settles scroll-bottom on each retry. behavior:'instant'
+    // is load-bearing: global.css sets scroll-behavior:smooth, so the 2-arg
+    // scrollTo(x, y) form would still be animating when the rect below is read,
+    // passing on a pre-scroll snapshot with the footer off-screen.
     await expect
       .poll(() =>
         page.evaluate((w) => {
@@ -2654,20 +2203,11 @@ test('the pause control never overlaps a footer link across the mobile wrap rang
 });
 
 test('the pause control never occludes in-page copy at mobile widths', async ({ page }) => {
-  // R1 (wb-3 matrix sweep): .office-ctl is position:fixed, so its on-screen
-  // band is CONSTANT across the whole scroll — every section's copy passes
-  // under that same band at some scroll offset, not just the footer's (the
-  // sibling test above only ever guarded the footer). OfficeBackdrop.astro
-  // now widens .container's end-padding and caps the two office-gap
-  // captions' width (they render outside .container) by the button's own
-  // footprint at ≤760px. Prove it at the four convicted spots: for each,
-  // scroll the page so the copy's OWN midpoint lands on the button's fixed
-  // band midpoint (the worst-case alignment a visitor could ever scroll
-  // to — the band is viewport-relative and constant, so this position
-  // always exists short of the document's scroll ends), then check the two
-  // rects don't intersect. A plain scrollIntoView({block:'center'}) does NOT
-  // reproduce this — it centers the copy in the *viewport*, not in the
-  // button's band near the bottom, so it can miss the real collision.
+  // .office-ctl is position:fixed, so its on-screen band is CONSTANT across the
+  // whole scroll — every section's copy passes under it at some offset, not just
+  // the footer's. For each spot, scroll so the copy's OWN midpoint lands on the
+  // band's midpoint (the worst-case alignment); scrollIntoView({block:'center'})
+  // centers in the VIEWPORT instead and can miss the real collision.
   await gotoLive(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
@@ -2676,8 +2216,6 @@ test('the pause control never occludes in-page copy at mobile widths', async ({ 
       const el = document.querySelector(sel) as HTMLElement | null;
       const btn = document.getElementById('office-pause') as HTMLElement | null;
       if (!el || !btn || btn.hidden) return { found: !!el, overlap: false };
-      // Align the copy's midpoint with the button's fixed-band midpoint —
-      // the worst-case scroll position for this exact pair.
       const b = btn.getBoundingClientRect();
       const r = el.getBoundingClientRect();
       const elAbsMid = (r.top + r.bottom) / 2 + window.scrollY;
@@ -2697,20 +2235,15 @@ test('the pause control never occludes in-page copy at mobile widths', async ({ 
     expect(overlap.overlap, `${selector} overlaps #office-pause's fixed band`).toBe(false);
   }
 
-  await assertClearOfPause('.hero__ghost[href="#showcase-vibing"]'); // hero CTA ("▸ play with it live")
-  await assertClearOfPause('.office-gap:not(.office-gap--closer) .gap-caption'); // gap-1 caption
-  await assertClearOfPause('.how__step:first-child .how__detail p'); // HowItWorks step 01 body
-  await assertClearOfPause('[data-vibing-time-label]'); // Showcase VIBING clock readout
+  await assertClearOfPause('.hero__ghost[href="#showcase-vibing"]');
+  await assertClearOfPause('.office-gap:not(.office-gap--closer) .gap-caption');
+  await assertClearOfPause('.how__step:first-child .how__detail p');
+  await assertClearOfPause('[data-vibing-time-label]');
 });
 
 test('the elevator shaft never overlaps the studio panel copy at 390 or 768', async ({ page }) => {
-  // R2a (wb-3 matrix sweep): .shaft is position:fixed at every width (only
-  // its rail width shrinks ≤760px, via --shaft-w) — the roster's feature-row
-  // text ran under it at BOTH 390 (14px dot-rail) and 768 (24px full rail),
-  // since .container never reserved a gutter for it (unlike the statusline's
-  // own body-padding reservation for ITS fixed bar). Horizontal position
-  // doesn't depend on scroll, so this checks pure geometry, no scrolling
-  // needed: every roster row's right edge must clear the shaft's left edge.
+  // .shaft is position:fixed at every width and .container reserves no gutter
+  // for it. Horizontal position doesn't depend on scroll — pure geometry.
   await gotoLive(page);
   for (const width of [390, 768]) {
     await page.setViewportSize({ width, height: 844 });
@@ -2733,10 +2266,6 @@ test('an install copy from the Install section hires a coworker: pix:install-cop
   page,
   context,
 }) => {
-  // wb-2: the closer's own copy row is gone (redundant right after Install)
-  // and the statusline chip is now a plain jump link — Install.astro's tabs
-  // are the surviving install-copy surface, so the hire chain is driven from
-  // there.
   await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
   await page.addInitScript(() => {
@@ -2754,7 +2283,6 @@ test('an install copy from the Install section hires a coworker: pix:install-cop
     document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
   await page.locator('.install__panel.is-active .install__copy').click();
-  // pix:install-copy → Office.hire() → pix:hired {name}.
   await expect
     .poll(() => page.evaluate(() => (window as { __hired?: boolean }).__hired), {
       timeout: 10_000,
@@ -2769,11 +2297,9 @@ test('proof split: replay clip plays in view and obeys the page pause', async ({
   await page.evaluate(() =>
     document.getElementById('proof')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
-  // Desktop viewport → the wide variant is the active one; it hydrates + plays.
   const vid = page.locator('.proof__video--wide');
   await expect(page.locator('.proof__video--tall')).toBeHidden();
   await expect.poll(() => vid.evaluate((v) => !(v as HTMLVideoElement).paused)).toBe(true);
-  // WCAG 2.2.2: #office-pause's pix:paused signal governs the proof clip too.
   const paused = () => vid.evaluate((v) => (v as HTMLVideoElement).paused);
   await page.evaluate(() =>
     document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }))
@@ -2783,7 +2309,6 @@ test('proof split: replay clip plays in view and obeys the page pause', async ({
     document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: false } }))
   );
   await expect.poll(paused).toBe(false);
-  // The floating-window coda survives the slot swap.
   await expect(page.locator('.proof__coda')).toContainText('pixtuoid floating');
   expect(errors()).toEqual([]);
 });
@@ -2810,9 +2335,8 @@ test('proof split: narrow viewport swaps to the tall stack of the SAME render', 
 test('proof split: narrow + reduced motion shows the tall poster, not a blank box', async ({
   browser,
 }) => {
-  // The active variant (tall, at this width) must promote its poster even
-  // though the reduced-motion arm returns before hydrate() ever runs —
-  // hydrate() is the only other place data-poster gets promoted.
+  // The reduced-motion arm returns before hydrate() ever runs, and hydrate() is
+  // the only other place data-poster gets promoted.
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
@@ -2836,11 +2360,6 @@ test('proof split: narrow + reduced motion shows the tall poster, not a blank bo
   await context.close();
 });
 
-// ── Correctness-audit regressions ──────────────────────────────────────────
-// Each pins a fix from the whole-site correctness audit; all were UNTESTED and
-// several were dead-declaration cascade traps (a later/higher-specificity rule
-// silently swallowing an intended one). See the audit-fix PR body for C-ids.
-
 async function resolvedCoral(page: Page): Promise<string> {
   return page.evaluate(() => {
     const probe = document.createElement('span');
@@ -2861,10 +2380,8 @@ test('audit C1: night theme does not repaint chrome anchors coral (a:not(.btn) i
   });
   await page.goto('./');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
-  // Pre-fix the global `:root[data-theme='night'] a:not(.btn)` rule (0,3,1)
-  // outranked these anchors' own (0,2,0) colours → all rendered coral AT REST,
-  // breaking Hero's documented AA-at-rest-over-office invariant. Each must keep
-  // its own colour (hero ghost/nav logo = --fg; plaque = --chip-bright).
+  // The global `:root[data-theme='night'] a:not(.btn)` rule (0,3,1) outranks
+  // these anchors' own (0,2,0) colours unless it stays :where()-scoped.
   const coral = await resolvedCoral(page);
   for (const sel of ['.hero__ghost', '.nav__logo', '.tools__plaque-link']) {
     const color = await page
@@ -2907,8 +2424,8 @@ test('audit C9: pausing the office before the pantry reveals keeps the FAQ visib
   page,
 }) => {
   await gotoLive(page);
-  // pause while the pantry is off-screen, THEN reveal it — the pre-fix inline
-  // animationPlayState froze the pop at its opacity:0 backwards-fill → blank FAQ.
+  // Pause while the pantry is off-screen, THEN reveal it — that order is the
+  // repro: the pre-fix inline animationPlayState froze the pop at opacity:0.
   await page.evaluate(() =>
     document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }))
   );
@@ -2929,8 +2446,6 @@ test('audit C7: the doc-page install chip links cross-page, not a dead same-page
 }) => {
   await page.goto('/config/');
   const href = await page.locator('[data-sl-install-link]').first().getAttribute('href');
-  // on a doc page there is no local #install — the chip must carry a cross-page
-  // href to the index install section, not the inert same-page '#install'.
   expect(href).not.toBe('#install');
   expect(href).toContain('#install');
 });
@@ -2939,10 +2454,7 @@ test('audit C5: ♩ hides and never persists a silent "playing" when the AudioCo
   page,
 }) => {
   // WebAudio disabled (Tor / hardened Firefox / enterprise) → `new AudioContext()`
-  // THROWS. Headless Chromium's ctor SUCCEEDS (only createBuffer throws, which the
-  // existing ♩ test covers), so force the ctor-throw path directly. Pre-fix the
-  // ctor-catch only set a flag, leaving the ♩ visible for the click to flip to a
-  // silent "playing" state and persist pix:audio=1 — stuck-silent every visit.
+  // THROWS, but headless Chromium's ctor SUCCEEDS — force the throw path here.
   const errors = watchErrors(page);
   await page.addInitScript(() => {
     const Throwing = function () {
@@ -2956,10 +2468,8 @@ test('audit C5: ♩ hides and never persists a silent "playing" when the AudioCo
   const btn = page.locator('#office-audio');
   await expect(btn).toBeVisible({ timeout: 15_000 });
   await btn.click();
-  // audioDisable(): hides the button, stays not-pressed, and the choice is NEVER
-  // persisted as playing (so a later visit's restore path can't re-flip it silent-on).
   await expect(btn).toBeHidden();
   await expect(btn).toHaveAttribute('aria-pressed', 'false');
   expect(await page.evaluate(() => localStorage.getItem('pix:audio'))).not.toBe('1');
-  expect(errors()).toEqual([]); // caught, not an uncaught page error
+  expect(errors()).toEqual([]);
 });

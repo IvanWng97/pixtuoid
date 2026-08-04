@@ -1,25 +1,17 @@
 //! Liveness for HOOK-ONLY sources whose shim can supply the agent CLI's pid.
 //!
-//! A hook-only source (CodeWhale, and the same gap exists for Reasonix) has no
-//! tailable transcript and therefore none of the JSONL watcher's liveness ladder
-//! (the FD/registry probe, the negative vouch, the instant exit). Its ONLY exit
-//! signal is the best-effort `session_end` hook on a CLEAN quit — an abrupt exit
-//! (kill/crash/terminal-close) fires nothing, so the sprite ghosts until the
-//! 10–30 min stale-sweep.
+//! A hook-only source has no tailable transcript and therefore none of the JSONL
+//! watcher's liveness ladder; its ONLY exit signal is the best-effort
+//! `session_end` hook on a CLEAN quit, so an abrupt exit ghosts the sprite until
+//! the 10–30 min stale-sweep. When the shim can stamp the CLI's pid (`_pid` —
+//! CodeWhale's Unix hooks run under `sh -c`, which EXEC's the command, so the
+//! shim's `getppid()` IS the CLI), [`ExitWatch`] emits a `SessionEnd` the moment
+//! that pid dies. Fed ONLY from the hook decode path, so it is inert for sources
+//! whose payloads carry no `_pid`.
 //!
-//! When the shim can stamp the CLI's pid (`_pid` — CodeWhale's Unix hooks run
-//! under `sh -c`, which EXEC's the command, so the shim's `getppid()` IS the CLI;
-//! see `pixtuoid-hook`), this watch closes that gap WITHOUT touching the
-//! JSONL-bound ladder: it reuses the standalone [`ExitWatch`] (kqueue
-//! `NOTE_EXIT` / Linux `pidfd`) to emit a `SessionEnd` for every agent bound to a
-//! pid the moment that pid dies — clean OR abrupt. It is fed ONLY from the hook
-//! decode path (`handle_conn`), so it is inert for sources whose payloads carry
-//! no `_pid`.
-//!
-//! Self-healing, mirroring the negative vouch: if the supplied pid is ever wrong
-//! (a shell that forks instead of exec's, so `_pid` is the shell not the CLI),
-//! the false `SessionEnd` just walks the sprite out and the CLI's next hook event
-//! walks it back in (the `message_submit`→`SessionStart` resurrect path).
+//! Self-healing: if the supplied pid is ever wrong (a shell that forks instead of
+//! exec's), the false `SessionEnd` just walks the sprite out and the CLI's next
+//! hook event walks it back in.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -29,23 +21,18 @@ use crate::source::{AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
 /// Cloneable handle (one per hook connection task) over a shared pid→agents
-/// registry + the process-exit watcher. `None` from [`HookPidWatch::spawn`] on
-/// platforms without an exit-watch backend (Windows, pre-5.3 Linux) — the source
-/// then falls back to `session_end` + the stale-sweep.
+/// registry + the process-exit watcher.
 #[derive(Clone)]
 pub(crate) struct HookPidWatch {
     exit: Arc<ExitWatch>,
-    /// pid → the agents to end when it dies. Self-cleans: the pid dies either way
-    /// (clean or abrupt) → the entry is removed on the death event, so it never
-    /// accumulates across CLI launches.
     pids: Arc<Mutex<HashMap<i32, HashSet<AgentId>>>>,
 }
 
 impl HookPidWatch {
     /// Spawn the exit watcher + the drain task that turns a dead pid into a
-    /// `SessionEnd` for each agent bound to it. `tx` is the reducer's event
-    /// channel (the synthesized end is Hook-tagged, like the source's own
-    /// events). `None` if no exit-watch backend exists on this platform.
+    /// `SessionEnd` for each agent bound to it. `None` if no exit-watch backend
+    /// exists on this platform (Windows, pre-5.3 Linux) — the source then falls
+    /// back to `session_end` + the stale-sweep.
     pub(crate) fn spawn(tx: TaggedSender) -> Option<Self> {
         let (exit_tx, mut exit_rx) = tokio::sync::mpsc::unbounded_channel::<i32>();
         let exit = Arc::new(ExitWatch::spawn(exit_tx)?);
@@ -54,10 +41,8 @@ impl HookPidWatch {
         let drain = this.clone();
         tokio::spawn(async move {
             while let Some(dead) = exit_rx.recv().await {
-                // Take the entry (the pid is gone — clean or abrupt) and end each
-                // agent it carried. A SessionEnd for an already-ended agent (the
-                // clean-quit case, where `session_end` ended it first) is a
-                // reducer no-op, so the redundant end is harmless.
+                // A SessionEnd for an already-ended agent (the clean-quit case,
+                // where `session_end` ended it first) is a reducer no-op.
                 for agent_id in drain.take(dead) {
                     if tx
                         .send((
@@ -78,17 +63,12 @@ impl HookPidWatch {
         Some(this)
     }
 
-    /// Bind `agent_id` to `pid` and start watching the pid (idempotent). Called
-    /// from the hook decode path for every registration carrier whose payload
-    /// carried a `_pid` — `SessionStart` AND `Identity` (`pid_bind_target`), the
-    /// latter being the only carrier for a mid-attached session whose
-    /// `SessionStart` predates the daemon.
+    /// Bind `agent_id` to `pid` and start watching the pid (idempotent).
     pub(crate) fn note(&self, pid: i32, agent_id: AgentId) {
         note_pid(&self.pids, pid, agent_id);
         self.exit.watch(pid);
     }
 
-    /// Remove `pid`'s entry and return the agents bound to it.
     fn take(&self, pid: i32) -> Vec<AgentId> {
         take_pid(&self.pids, pid)
     }
@@ -106,9 +86,8 @@ fn note_pid(pids: &PidMap, pid: i32, agent_id: AgentId) {
         .insert(agent_id);
 }
 
-/// Remove `pid`'s entry and return the agents bound to it (empty if none). The
-/// removal keeps the map from accumulating across CLI launches — the pid dies
-/// (clean or abrupt) exactly once, taking its entry with it.
+/// Remove `pid`'s entry and return the agents bound to it. The removal keeps the
+/// map from accumulating across CLI launches.
 fn take_pid(pids: &PidMap, pid: i32) -> Vec<AgentId> {
     pids.lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -122,10 +101,6 @@ fn take_pid(pids: &PidMap, pid: i32) -> Vec<AgentId> {
 mod tests {
     use super::*;
 
-    /// The exit-watch backend EXISTS on the first-class platforms (macOS
-    /// kqueue / Linux pidfd) — `spawn` returning `None` there would silently
-    /// disable every hook-only source's abrupt-exit rung, and the behavioral
-    /// sibling tests skip-when-None, so only a direct pin catches it.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[tokio::test]
     async fn spawn_returns_a_watch_on_first_class_platforms() {
@@ -151,12 +126,10 @@ mod tests {
             "both agents bound to the pid are ended on its death"
         );
 
-        // Self-cleaning: a second death of the same (recycled) pid carries nothing.
         assert!(
             take_pid(&pids, 4242).is_empty(),
             "the entry is removed on the first take"
         );
-        // An unrelated pid is untouched.
         assert_eq!(take_pid(&pids, 99).len(), 1);
     }
 
@@ -165,7 +138,7 @@ mod tests {
         let pids: PidMap = Mutex::new(HashMap::new());
         let a = AgentId::from_parts("codewhale", "/ws");
         note_pid(&pids, 7, a);
-        note_pid(&pids, 7, a); // message_submit re-fires every prompt → same (pid, agent)
+        note_pid(&pids, 7, a);
         assert_eq!(
             take_pid(&pids, 7).len(),
             1,
@@ -173,10 +146,6 @@ mod tests {
         );
     }
 
-    // End-to-end through the REAL exit watcher: a watched process dying emits a
-    // SessionEnd for its bound agent. Gated on the platform backend (kqueue on
-    // macOS / pidfd on Linux — `spawn` returns None on Windows / pre-5.3 Linux,
-    // where the test is a no-op). Mirrors the JSONL path's instant-exit test.
     #[tokio::test]
     async fn killing_a_watched_pid_emits_session_end_for_its_agent() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);

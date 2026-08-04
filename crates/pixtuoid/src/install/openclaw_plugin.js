@@ -1,53 +1,37 @@
 // @pixtuoid-openclaw-plugin
 //
 // Forwards OpenClaw gateway daemon-presence signals to pixtuoid's `pixtuoid-hook`
-// shim, which relays them to the running pixtuoid office (the wandering lobster
-// gateway mascot).
+// shim, which relays them to the running pixtuoid office.
 //
 // PRIVACY (load-bearing): build the shim payload from an explicit ALLOWLIST of
 // timing/id fields ONLY — NEVER message content, prompts, or file paths. The
 // `allowConversationAccess` grant only un-gates `before_agent_run`/`agent_end`
 // firing; it does NOT sanitize the payload — this allowlist is the sanitizer.
 //
-// NEVER BLOCK THE GATEWAY (pixtuoid invariant #5). `before_agent_run` is an
-// AWAITED, FAIL-CLOSED decision gate on the user's own turn (upstream registers
-// it `fail-closed`, and a throw or a >15s hang discards their prompt), so three
-// rules hold here:
+// NEVER BLOCK THE GATEWAY. `before_agent_run` is an AWAITED, FAIL-CLOSED decision
+// gate on the user's own turn — a throw or a >15s hang discards their prompt — so
+// three rules hold here:
 //   1. the shim is spawned DETACHED + unref'd and NOTHING is awaited;
 //   2. every handler is try/catch'd and can never throw;
 //   3. the decision hook returns an EXPLICIT `{ outcome: "pass" }`.
-// Rule 3 is deliberate. `undefined` also passes today (upstream filters it out
-// before its merge policy runs, and `void` is in the declared handler type), but
-// that merge policy still CONTAINS a written `undefined → block` arm which only
-// the filter keeps unreachable. An explicit pass is the shape the contract is
-// designed around — "only pass and block outcomes are supported" — so it cannot
-// be inverted by that one guard changing. Any EXTRA key is rejected as a
-// malformed decision and fails closed: keep this object exactly one key.
+// Rule 3 is deliberate: `undefined` passes only because a filter keeps upstream's
+// written `undefined → block` arm unreachable. Any EXTRA key is rejected as a
+// malformed decision and fails closed, so keep that object at exactly one key.
 //
 // GATEWAY IDENTITY (`gatewayPort`): OpenClaw supports several isolated gateways
 // per host, each on its own base port, so the port is the runtime identity
-// pixtuoid keys a mascot on. `gateway_start` hands us the REAL bound port
-// (`event.port`, mirrored on the gateway hook ctx) and that is the only
-// authoritative source — a `--port` override stays a local inside OpenClaw's
-// gateway CLI and reaches NEITHER `api.config.gateway.port` NOR
-// `OPENCLAW_GATEWAY_PORT`. So the port is adopted from any hook that carries one
-// and remembered; the registration-time resolution below (upstream's own
-// env → config → default order) is only the fallback for a plugin hot reload,
-// which re-runs `register` WITHOUT replaying `gateway_start`. Accepted residual,
-// and note the DIRECTION: after a plugins-only hot reload of a `--port`-overridden
-// gateway, the re-registered module falls back to the config/default port, so from
-// then on every forwarded event carries the WRONG port. It is the real-port mascot
-// that goes silent and gets TTL-swept, while the wrong-port one is refreshed for the
-// gateway's whole life — i.e. the hover permanently misidentifies which gateway it
-// is, not a transient second lobster. Whether a fix is even possible depends on
-// something not measured here: whether OpenClaw re-imports the module cache-busted
-// on reload (a fresh module cannot remember a learned port; a reused one could).
+// pixtuoid keys a mascot on. `gateway_start`'s REAL bound port is the only
+// authoritative source — a `--port` override reaches NEITHER
+// `api.config.gateway.port` NOR `OPENCLAW_GATEWAY_PORT` — so it is adopted from
+// any hook that carries one. The registration-time resolution below is only the
+// fallback for a plugin hot reload, which re-runs `register` WITHOUT replaying
+// `gateway_start`; after one of those on a `--port`-overridden gateway the hover
+// permanently misidentifies which gateway it is. Accepted residual.
 //
 // Deliberately NO `import { resolveGatewayPort } from "openclaw/plugin-sdk/core"`:
 // this file is dropped into OpenClaw's state dir, whose path chain contains no
 // `node_modules/openclaw` for a globally installed CLI, so a bare-specifier
-// import would fail module resolution and take the WHOLE plugin down (no
-// lobster). The resolution order is mirrored instead — see DEFAULT_GATEWAY_PORT.
+// import would fail module resolution and take the WHOLE plugin down.
 
 import { spawn } from "node:child_process";
 
@@ -55,32 +39,27 @@ const HOOK_PATH = "{{HOOK_PATH_JSON}}";
 
 // The ONLY fields forwarded. `messages` / `prompt` / `sessionFile` / `systemPrompt`
 // are deliberately ABSENT — the daemon fixture needs the run pairing key + ids,
-// never content. `success` is the agent_end run pass/fail BOOLEAN (#317: false =
-// the model backend broke → the lobster renders Degraded); the `error` STRING that
-// rides alongside it is deliberately NOT forwarded (it can embed content).
+// never content. The `error` STRING riding alongside `success` is likewise NOT
+// forwarded: it can embed content.
 const ALLOW = ["runId", "sessionId", "sessionKey", "reason", "messageCount", "success"];
 
-// OpenClaw's own default gateway port (its `DEFAULT_GATEWAY_PORT`, config/paths).
-// Un-importable from here (see the module note), so it is named ONCE and carried
-// by pixtuoid's upstream-drift watch instead of copied inline.
+// OpenClaw's own `DEFAULT_GATEWAY_PORT`, un-importable from here (see the module
+// note), so it is named ONCE and carried by pixtuoid's upstream-drift watch.
 const DEFAULT_GATEWAY_PORT = 18789;
 
-// The gateway's resolved port — the mascot's identity. Seeded at registration
-// from the same env → config → default order OpenClaw's own `resolveGatewayPort`
-// uses, then UPGRADED in place the first time a hook hands us the real bound port.
+// The gateway's resolved port — the mascot's identity. Seeded at registration,
+// then UPGRADED in place the first time a hook hands us the real bound port.
 let gatewayPort = DEFAULT_GATEWAY_PORT;
 
 function validPort(n) {
   return Number.isInteger(n) && n > 0 && n <= 65535;
 }
 
-// Mirrors upstream's `parseGatewayPortEnvValue` (config/paths) form-for-form:
-// bare digits, bracketed IPv6 `[host]:port`, or a single-colon `host:port`;
-// anything else is NOT a port and must fall through to config/default. A plain
-// `Number.parseInt` is NOT a valid shortcut here — it stops at the first
-// non-digit, so `OPENCLAW_GATEWAY_PORT=127.0.0.1:18902` parsed to `127` where
-// upstream binds 18902. Since this port IS the mascot's identity, that
-// silently keyed the lobster to a gateway that does not exist.
+// Mirrors upstream's `parseGatewayPortEnvValue` form-for-form: bare digits,
+// bracketed IPv6 `[host]:port`, or a single-colon `host:port`. A plain
+// `Number.parseInt` is NOT a valid shortcut — it stops at the first non-digit, so
+// `OPENCLAW_GATEWAY_PORT=127.0.0.1:18902` parsed to `127`, silently keying the
+// mascot to a gateway that does not exist.
 function portFromEnvValue(raw) {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return null;
@@ -105,9 +84,8 @@ function resolvePort(config) {
   return DEFAULT_GATEWAY_PORT;
 }
 
-// Adopt the authoritative port whenever a hook carries one (`gateway_start`'s
-// event + the gateway hook ctx). Within one process the bound port never changes,
-// so this only ever corrects the registration-time fallback.
+// Within one process the bound port never changes, so this only ever corrects
+// the registration-time fallback.
 function notePort(ev, ctx) {
   const observed = [ev && ev.port, ctx && ctx.port];
   for (const p of observed) {
@@ -125,23 +103,18 @@ function forward(type, ev, ctx) {
       const v = ctx && ctx[k] !== undefined ? ctx[k] : ev && ev[k];
       if (v !== undefined) payload[k] = v;
     }
-    // WHICH gateway sent this. pixtuoid keys one mascot per port, so a host
-    // running two gateways renders two independent lobsters instead of one
-    // collapsed presence where either gateway's stop takes the other down.
+    // pixtuoid keys one mascot per port, so a host running two gateways renders
+    // two independent lobsters rather than one collapsed presence.
     payload.gatewayPort = gatewayPort;
-    // pixtuoid arms its instant abrupt-down (ExitWatch) on the gateway pid. Stamp
-    // it on EVERY event (not just gateway_start) so a MID-ATTACH or reconnect —
-    // where pixtuoid never observed gateway_start — can still adopt the live pid
-    // (#318). The plugin runs IN the gateway process, so process.pid is the
-    // gateway's pid for every hook.
+    // Stamped on EVERY event, not just gateway_start, so a MID-ATTACH or reconnect
+    // — where pixtuoid never observed gateway_start — can still adopt the live pid
+    // for its abrupt-down watch. The plugin runs IN the gateway process.
     payload._pid = process.pid;
-    // WHY `success: false` alone is not enough to call a gateway degraded: upstream
-    // builds it as `!aborted && !promptError` (verified in the shipped 2026.7.1
-    // bundle at BOTH construction sites — `run-attempt-*.js` and `selection-*.js`),
-    // so a user CANCELLING a turn is indistinguishable from the provider being down.
-    // Only a prompt error carries `error`, so its mere PRESENCE is the discriminator
-    // — forwarded as a bare boolean because the error STRING can embed prompt
-    // content and is deliberately excluded from ALLOW.
+    // `success: false` alone cannot call a gateway degraded: upstream builds it as
+    // `!aborted && !promptError`, so a user CANCELLING a turn is indistinguishable
+    // from the provider being down. Only a prompt error carries `error`, so its
+    // mere PRESENCE is the discriminator — forwarded as a bare boolean because the
+    // error STRING can embed prompt content.
     if (type === "agent_end" && payload.success === false) {
       payload.errored =
         (ev && ev.error !== undefined) || (ctx && ctx.error !== undefined);
@@ -173,17 +146,12 @@ const HOOKS = [
 // The ONE awaited DECISION hook among them (see the never-block note above).
 const DECISION_HOOK = "before_agent_run";
 
-// A FRESH object per decision, never one shared module-level literal: the gateway
-// receives this value and any key it (or a future merge policy) stamps onto it
-// would otherwise persist into every LATER turn's decision — and an extra key is
-// rejected as malformed, i.e. fail-closed forever after one mutation. Whether
-// upstream mutates it today is NOT established, so this is cheap insurance (one
-// object per turn), not a fix for an observed bug.
-// Deliberately NOT `Object.freeze` on a shared literal, the tempting
-// zero-allocation form: this module is an ES module and therefore strict-mode, so
-// a consumer's stamp would THROW inside UPSTREAM's code — outside the try/catch
-// that wraps only our own handler, i.e. exactly the never-block rule we cannot
-// break. The factory sidesteps the question entirely.
+// A FRESH object per decision, never one shared module-level literal: any key the
+// gateway stamps onto it would otherwise persist into every LATER turn, and an
+// extra key is rejected as malformed — fail-closed forever after one mutation.
+// Deliberately NOT `Object.freeze` on a shared literal: this is an ES module and
+// therefore strict-mode, so a consumer's stamp would THROW inside UPSTREAM's code,
+// outside the try/catch that wraps only our own handler.
 function pass() {
   return { outcome: "pass" };
 }
@@ -197,7 +165,6 @@ export default {
       try {
         api.on(h, (ev, ctx) => {
           forward(h, ev, ctx);
-          // The decision hook passes EXPLICITLY; the observers are void hooks.
           // NEVER derived from the detached spawn.
           return h === DECISION_HOOK ? pass() : undefined;
         });

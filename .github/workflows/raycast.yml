@@ -1,12 +1,9 @@
 name: raycast
 
 on:
-  # PR-only gate for the self-contained Raycast extension (integrations/raycast/).
-  # Runs the toolchain checks that work on a Linux runner — tsc + ESLint. The full
-  # `ray build`/`ray lint` (manifest + icon validation, the Prettier pass) needs the
-  # macOS Raycast app and is run locally before publishing to the store, so it isn't
-  # gated here. The CLI --json contract this consumes is pinned on the Rust side by
-  # `crates/pixtuoid/src/sources.rs::source_status_json_shape`.
+  # PR-only gate for the self-contained Raycast extension. The full `ray build`/
+  # `ray lint` needs the macOS Raycast app, so it runs locally before publishing
+  # rather than here.
   pull_request:
     paths: ['integrations/raycast/**', '.github/workflows/raycast.yml']
 
@@ -35,14 +32,11 @@ jobs:
           cache: npm
           cache-dependency-path: integrations/raycast/package-lock.json
       - run: npm ci
-      # `npm ci` prints its advisory count and no step read it, so the adjudicated
-      # backlog and a brand-new advisory looked identical. This passes only while the
-      # live set EQUALS the set adjudicated in scripts/audit-adjudicated.mjs.
+      # Passes only while the live advisory set EQUALS the set adjudicated in
+      # scripts/audit-adjudicated.mjs.
       - run: npm run audit
-      # The --json contract types are GENERATED from the committed JSON Schemas, so
-      # a producer change (a regenerated schema) that wasn't propagated to the TS
-      # types fails here — drift can't slip through. (Each schema's own freshness vs
-      # its Rust struct is gated by the `*_schema_matches_the_committed_contract` tests in ci-tests.yml.)
+      # Each schema's own freshness vs its Rust struct is gated separately, by the
+      # `*_schema_matches_the_committed_contract` tests in ci-tests.yml.
       - name: contract types match the committed schemas
         run: npm run gen:contract && git diff --exit-code src/contract.ts src/contract-outcome.ts
       - run: npx tsc --noEmit

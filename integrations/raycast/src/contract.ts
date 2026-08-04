@@ -6,10 +6,9 @@
  */
 
 /**
- * A serializable status row for `pixtuoid sources --json` — the STABLE wire
- * contract the Raycast extension parses (pinned by `source_status_json_shape`).
- * Deliberately a flat DTO, NOT the internal `ConnectionRow` (whose shape is a
- * UI concern free to change).
+ * The STABLE `pixtuoid sources --json` wire contract the Raycast extension
+ * parses. Deliberately a flat DTO, NOT the internal `ConnectionRow` (whose
+ * shape is a UI concern free to change).
  */
 export interface SourceStatus {
   id: string;

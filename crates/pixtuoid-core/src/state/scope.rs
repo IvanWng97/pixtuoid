@@ -1,27 +1,14 @@
-//! The agent **scope** layer (Layer B) — the parent↔subagent tree and the
-//! lifecycle rules that propagate along it.
-//!
-//! The reducer runs two stacked state machines: the per-agent FSM (Layer A —
-//! `Idle / Active / Waiting` plus the exit + debounce lifecycle, in
-//! [`super::reducer`]) and this **scope** layer over `AgentSlot.parent_id`. The
-//! scope encodes one invariant — *a subagent's lifetime is contained in its
-//! parent's* (structured concurrency / an OTP-style supervision tree) — and
-//! expresses it as a few directional operations the reducer delegates to.
-//!
-//! Housing them here gives the containment invariant a single home: a new
-//! lifecycle concern becomes a function in this module rather than yet another
-//! bespoke `parent_id` walk bolted onto the reducer (which is exactly how this
-//! logic accreted before — cascade, then liveness, then readiness, then
-//! completion, each a separate reactive scan).
+//! The agent **scope** layer (Layer B) — the parent↔subagent tree over
+//! `AgentSlot.parent_id`, and the lifecycle rules that propagate along it. It
+//! encodes one invariant — *a subagent's lifetime is contained in its parent's*
+//! — as directional operations the reducer delegates to:
 //!
 //! - **exit flows DOWN** — [`cascade_exit`]: a node leaving takes its whole
-//!   subtree. Used by `SessionEnd`, the stale-sweep, `reconcile_connected`
-//!   (Sources-panel disconnect), and subagent-completion — see its `StampRoot`
-//!   doc for the per-caller root-stamp intent.
+//!   subtree.
 //! - **liveness flows UP** — [`refresh_lineage`]: a working descendant keeps its
 //!   ancestors alive, so a blocked-but-delegating parent isn't stale-swept.
 //! - **readiness, queried UP** — [`has_waiting_ancestor`]: a node blocked under a
-//!   `Waiting` ancestor is "not ready", not dead (liveness vs readiness, k8s-style).
+//!   `Waiting` ancestor is "not ready", not dead.
 
 use std::collections::{BTreeMap, HashSet};
 use std::time::SystemTime;
@@ -29,36 +16,25 @@ use std::time::SystemTime;
 use crate::state::{fsm, ActivityState, AgentSlot, SceneState};
 use crate::AgentId;
 
-/// Whether [`cascade_exit`] also marks the `root` seed itself exiting.
-///
-/// Makes each call site's intent EXPLICIT — replacing the old implicit "did the
-/// caller stamp `root.exiting_at` before calling?" convention, which had no
-/// assertion to catch a caller that forgot (a caller meaning "the whole tree
-/// leaves" but neglecting to stamp `root` would silently leave the root running
-/// while exiting its entire subtree).
+/// Whether [`cascade_exit`] also marks the `root` seed itself exiting — EXPLICIT
+/// at each call site, replacing the old implicit "did the caller stamp
+/// `root.exiting_at` before calling?" convention that had no assertion to catch
+/// a caller that forgot.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum StampRoot {
-    /// The whole tree leaves together — `root` is marked exiting too. Used by the
-    /// `SessionEnd` arm, `sweep_stale`, and `reconcile_connected`.
+    /// The whole tree leaves together — `root` is marked exiting too.
     Yes,
-    /// Only the subtree leaves; `root` keeps running. Used by the b1
-    /// subagent-completion cascade (the parent stays alive as its finished
-    /// children walk out).
+    /// Only the subtree leaves; `root` keeps running (the subagent-completion
+    /// cascade: the parent stays alive as its finished children walk out).
     No,
 }
 
 /// Mark every not-yet-exiting descendant of `root` exiting, BFS over `parent_id`
-/// links (exit flows DOWN) — and, when `stamp_root` is [`StampRoot::Yes`], mark
-/// `root` itself exiting first (via [`fsm::mark_exiting`], so the earliest
-/// `exiting_at` wins). Idempotent through that write-once stamp, NOT by pruning
-/// the walk: an already-exiting node keeps its original `exiting_at` but is
-/// still traversed, so a descendant registered under it after it started exiting
-/// is reached. A leaf or a partly-exiting subtree is a safe no-op.
-///
-/// The four callers: `SessionEnd`, `sweep_stale`, and `reconcile_connected` pass
-/// [`StampRoot::Yes`] (the whole tree leaves together); the b1
-/// subagent-completion cascade passes [`StampRoot::No`] (only the finished
-/// subtree leaves, the delegating parent keeps running).
+/// links — and, when `stamp_root` is [`StampRoot::Yes`], mark `root` itself
+/// exiting first (via [`fsm::mark_exiting`], so the earliest `exiting_at` wins).
+/// Idempotent through that write-once stamp, NOT by pruning the walk: an
+/// already-exiting node keeps its original `exiting_at` but is still traversed,
+/// so a descendant registered under it after it started exiting is reached.
 pub(crate) fn cascade_exit(
     scene: &mut SceneState,
     root: AgentId,
@@ -74,8 +50,6 @@ pub(crate) fn cascade_exit(
     visited.insert(root);
     let mut frontier = vec![root];
     while let Some(parent) = frontier.pop() {
-        // Unfiltered by design (see the fn doc): the write-once `mark_exiting` stops
-        // an ancestor cascade RE-stamping an exiting node's walkout + GC clock.
         let children: Vec<AgentId> = scene
             .agents
             .values()
@@ -93,16 +67,12 @@ pub(crate) fn cascade_exit(
     }
 }
 
-/// Refresh `last_event_at` for `id` and every ancestor (liveness flows UP), so a
-/// parent (and grandparent) isn't stale-swept while a descendant is still
-/// emitting events — even if the parent's own hooks dropped or a subagent's hook
-/// was misattributed to it. The mirror of [`cascade_exit`]. Cycle-guarded;
-/// `last_event_at` only gates the stale-sweep, so this never alters an ancestor's
-/// visible state/pose. The `None => break` arm tolerates a DANGLING `parent_id`
-/// (a JSONL-first orphan whose parent slot was never created, or a parent already
-/// swept from `scene.agents` — `sweep_exited` removes a parent without nulling its
-/// children's `parent_id`, by design): the walk stops at the missing link, a safe
-/// no-op rather than a crash. Intentional, not a bug.
+/// Refresh `last_event_at` for `id` and every ancestor, so a parent isn't
+/// stale-swept while a descendant is still emitting events. `last_event_at` only
+/// gates the stale-sweep, so this never alters an ancestor's visible state/pose.
+/// The `None => break` arm deliberately tolerates a DANGLING `parent_id` — a
+/// JSONL-first orphan, or a parent `sweep_exited` removed without nulling its
+/// children's `parent_id`.
 pub(crate) fn refresh_lineage(scene: &mut SceneState, id: AgentId, now: SystemTime) {
     let mut visited: HashSet<AgentId> = HashSet::new();
     let mut cur = Some(id);
@@ -121,24 +91,19 @@ pub(crate) fn refresh_lineage(scene: &mut SceneState, id: AgentId, now: SystemTi
 }
 
 /// True if any ancestor of `id` (walking `parent_id`, the node itself excluded)
-/// satisfies `pred`. The ONE cycle-guarded ancestor walk behind the readiness
-/// queries — [`has_waiting_ancestor`] and `sweep_stale`'s vouched-delegating-
-/// ancestor exemption express their predicates through it so the walk (cycle
-/// guard, dangling-parent tolerance) can't fork. Takes `&BTreeMap` rather than
-/// `&SceneState` so it can be called inside `sweep_stale`'s pass-1 closure
-/// while `&scene.agents` is already borrowed immutably — `&SceneState` would
-/// conflict with that live borrow. The chain is shallow in practice; the
-/// `None => break` arm tolerates a dangling `parent_id` (same contract as
-/// [`refresh_lineage`]).
+/// satisfies `pred` — the ONE ancestor walk behind the readiness queries, so the
+/// cycle guard and dangling-parent tolerance can't fork. Takes `&BTreeMap`
+/// rather than `&SceneState` so it can be called inside `sweep_stale`'s pass-1
+/// closure while `&scene.agents` is already borrowed immutably.
 pub(crate) fn has_ancestor_where(
     agents: &BTreeMap<AgentId, AgentSlot>,
     id: AgentId,
     pred: impl Fn(&AgentSlot) -> bool,
 ) -> bool {
-    // Seeded with the start node: in a parent cycle the walk returns to `id`
-    // and would otherwise run `pred` on it before the cycle guard breaks —
-    // violating "the node itself excluded" (a Waiting cycle member counting
-    // as its own Waiting ancestor self-exempts from sweep_stale forever).
+    // Seeded with the start node: in a parent cycle the walk returns to `id` and
+    // would otherwise run `pred` on it before the guard breaks — a Waiting cycle
+    // member counting as its own Waiting ancestor self-exempts from sweep_stale
+    // forever.
     let mut visited: HashSet<AgentId> = HashSet::from([id]);
     let mut cur = agents.get(&id).and_then(|s| s.parent_id);
     while let Some(pid) = cur {
@@ -155,14 +120,11 @@ pub(crate) fn has_ancestor_where(
 }
 
 /// True if linking `child.parent_id = proposed_parent` would close a
-/// `parent_id` cycle — i.e. `proposed_parent`'s ancestor chain (itself
-/// included) reaches `child`. The reducer calls this at every seam that sets
-/// or enriches `parent_id` and REFUSES the link (degrading to parentless), so
-/// a cycle can never EXIST and the walks above need their cycle guards only
-/// for termination, never for correctness: a 2-cycle whose members are BOTH
-/// `Waiting` would mutually satisfy [`has_waiting_ancestor`] and exempt each
-/// other from the stale sweep forever — an immortal pair (#238). Bounded by
-/// the same visited-set + dangling-parent tolerance as every walk here.
+/// `parent_id` cycle. The reducer calls this at every seam that sets or enriches
+/// `parent_id` and REFUSES the link (degrading to parentless), so a cycle can
+/// never EXIST: a 2-cycle whose members are BOTH `Waiting` would mutually
+/// satisfy [`has_waiting_ancestor`] and exempt each other from the stale sweep
+/// forever — an immortal pair (#238).
 pub(crate) fn would_create_cycle(
     agents: &BTreeMap<AgentId, AgentSlot>,
     child: AgentId,
@@ -186,11 +148,10 @@ pub(crate) fn would_create_cycle(
 }
 
 /// True if any ancestor of `id` is in `Waiting` state. A subagent's permission
-/// `Notification` is attributed to the PARENT (the hook `transcript_path` is
-/// the parent's), so the parent goes `Waiting` while the blocked subagent stays
-/// `Active`. Such a subagent is paused on a human gate the ancestor holds —
-/// "not ready", not dead — so `sweep_stale` exempts it from the aggressive
-/// Active timer (liveness vs readiness).
+/// `Notification` is attributed to the PARENT (the hook `transcript_path` is the
+/// parent's), so the parent goes `Waiting` while the blocked subagent stays
+/// `Active` — paused on a human gate, not dead, so `sweep_stale` exempts it from
+/// the aggressive Active timer.
 pub(crate) fn has_waiting_ancestor(agents: &BTreeMap<AgentId, AgentSlot>, id: AgentId) -> bool {
     has_ancestor_where(agents, id, |p| {
         matches!(p.state, ActivityState::Waiting { .. })
@@ -237,9 +198,6 @@ mod tests {
         }
     }
 
-    // --- Dangling-parent guard: a child whose `parent_id` points to a slot that
-    // does not exist in `scene.agents` (the `None => break` arms). -------------
-
     #[test]
     fn refresh_lineage_tolerates_dangling_parent_id() {
         let child = AgentId::from_transcript_path("/p/child.jsonl");
@@ -250,7 +208,6 @@ mod tests {
             .insert(child, slot(child, Some(missing), ActivityState::Idle));
 
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000);
-        // Must not panic walking into the missing parent; stamps only the child.
         refresh_lineage(&mut scene, child, now);
 
         assert_eq!(scene.agents.get(&child).unwrap().last_event_at, now);
@@ -275,10 +232,6 @@ mod tests {
         );
     }
 
-    // --- Cycle guard: a `parent_id` cycle A->B->A (two SessionStarts each naming
-    // the other) must terminate via `visited` (the `!visited.insert(_) { break }`
-    // arms), not hang. ----------------------------------------------------------
-
     fn cycle_scene(
         a_state: ActivityState,
         b_state: ActivityState,
@@ -296,8 +249,6 @@ mod tests {
         let (mut scene, a, b) = cycle_scene(ActivityState::Idle, ActivityState::Idle);
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000);
 
-        // Walks a -> b -> a; the revisit of `a` hits `!visited.insert` -> break.
-        // Reaching this assertion at all proves no infinite loop.
         refresh_lineage(&mut scene, a, now);
 
         assert_eq!(scene.agents.get(&a).unwrap().last_event_at, now);
@@ -310,8 +261,6 @@ mod tests {
 
     #[test]
     fn has_waiting_ancestor_breaks_on_cycle_with_no_waiting_node() {
-        // Neither node Waiting: the walk a -> b -> (a revisited) hits the cycle
-        // break and returns false instead of looping forever.
         let (scene, a, _b) = cycle_scene(ActivityState::Idle, ActivityState::Idle);
         assert!(
             !has_waiting_ancestor(&scene.agents, a),
@@ -321,30 +270,18 @@ mod tests {
 
     #[test]
     fn has_waiting_ancestor_true_via_cyclic_ancestor() {
-        // B is Waiting and is A's parent: the very first hop short-circuits true,
-        // before the cycle break — confirms the cycle setup doesn't mask a real
-        // Waiting ancestor.
         let (scene, a, _b) = cycle_scene(ActivityState::Idle, waiting());
         assert!(has_waiting_ancestor(&scene.agents, a));
     }
 
     #[test]
     fn has_waiting_ancestor_excludes_self_reached_via_cycle() {
-        // The queried node is the cycle's ONLY Waiting member: the walk
-        // b -> a -> (b again) must break BEFORE the predicate runs on the
-        // start node — "the node itself excluded" — or a Waiting cycle member
-        // counts as its own Waiting ancestor and self-exempts from
-        // `sweep_stale` forever (an immortal slot).
         let (scene, _a, b) = cycle_scene(ActivityState::Idle, waiting());
         assert!(
             !has_waiting_ancestor(&scene.agents, b),
             "a node must never count as its own Waiting ancestor through a parent cycle"
         );
     }
-
-    // --- would_create_cycle: the link-seam guard that keeps cycles from ever
-    // existing (the tests above harden the walks' TERMINATION on a crafted
-    // cycle; this guard removes the input class at the source). ---------------
 
     #[test]
     fn would_create_cycle_rejects_self_parent() {
@@ -355,7 +292,6 @@ mod tests {
 
     #[test]
     fn would_create_cycle_rejects_two_node_closure() {
-        // A already parented to B; B proposing parent A closes the 2-cycle.
         let a = AgentId::from_transcript_path("/p/a.jsonl");
         let b = AgentId::from_transcript_path("/p/b.jsonl");
         let mut scene = SceneState::uniform(4);
@@ -368,7 +304,6 @@ mod tests {
 
     #[test]
     fn would_create_cycle_rejects_deep_chain_closure() {
-        // C → B → A; A proposing parent C closes the 3-cycle through the chain.
         let a = AgentId::from_transcript_path("/p/a.jsonl");
         let b = AgentId::from_transcript_path("/p/b.jsonl");
         let c = AgentId::from_transcript_path("/p/c.jsonl");
@@ -390,18 +325,12 @@ mod tests {
         let ghost = AgentId::from_transcript_path("/p/never-created.jsonl");
         let mut scene = SceneState::uniform(4);
         scene.agents.insert(b, slot(b, None, ActivityState::Idle));
-        // A fresh child under an existing root: fine.
         assert!(!would_create_cycle(&scene.agents, a, b));
-        // A parent that has no slot yet (the hook can outrun the JSONL
-        // registration): dangling is tolerated, same as the walks.
         assert!(!would_create_cycle(&scene.agents, a, ghost));
     }
 
     #[test]
     fn would_create_cycle_terminates_on_preexisting_cycle_elsewhere() {
-        // A pre-existing A⇄B cycle (crafted state) must not hang the walk when
-        // an unrelated child proposes a parent inside it — and the proposal is
-        // legitimately allowed (the chain never reaches the child).
         let (mut scene, a, _b) = cycle_scene(ActivityState::Idle, ActivityState::Idle);
         let child = AgentId::from_transcript_path("/p/child.jsonl");
         scene
@@ -412,8 +341,6 @@ mod tests {
 
     #[test]
     fn cascade_exit_reaches_a_descendant_added_under_an_already_exiting_node() {
-        // Pruning the walk at an already-exiting node would strand this
-        // grandchild past every later cascade (see `cascade_exit`).
         let root = AgentId::from_transcript_path("/p/root.jsonl");
         let mid = AgentId::from_transcript_path("/p/mid.jsonl");
         let leaf = AgentId::from_transcript_path("/p/leaf.jsonl");
@@ -428,7 +355,6 @@ mod tests {
             .agents
             .insert(leaf, slot(leaf, Some(mid), ActivityState::Idle));
 
-        // `mid` ends on its own (its SubagentStop) before `leaf` exists.
         let t_mid = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000);
         fsm::mark_exiting(scene.agents.get_mut(&mid).unwrap(), t_mid);
 
@@ -451,8 +377,6 @@ mod tests {
 
     #[test]
     fn has_waiting_ancestor_excludes_self_parented_node() {
-        // The degenerate one-node cycle: a slot naming ITSELF as parent must
-        // not satisfy the predicate through its own state.
         let x = AgentId::from_transcript_path("/p/self.jsonl");
         let mut scene = SceneState::uniform(4);
         scene.agents.insert(x, slot(x, Some(x), waiting()));

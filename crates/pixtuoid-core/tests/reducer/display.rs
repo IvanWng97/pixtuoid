@@ -10,7 +10,6 @@ use crate::{act_start, sess_end, start};
 
 #[test]
 fn session_start_with_cwd_derives_label_from_basename() {
-    // No more "cc#1" when the cwd tells us what project this is.
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let id = AgentId::from_transcript_path("/p/a.jsonl");
@@ -51,19 +50,11 @@ fn session_start_without_cwd_falls_back_to_cc_label() {
 
 #[test]
 fn session_start_label_caps_a_pathologically_long_cwd_basename() {
-    // `register_slot` is the SOLE label-mint site for hook-only sources, and
-    // the SessionStart cwd is hook/transcript CONTENT — a crafted slashless
-    // value makes the whole string the basename. The label must route through
-    // the same decode-boundary cap the duplicate-SessionStart backfill upgrade
-    // applies (`cwd_basename_label` / MAX_DECODED_FIELD_CHARS), pinned here by
-    // PARITY: both mint sites must produce the IDENTICAL capped label for the
-    // same cwd, so the two copies of the cap policy can't drift.
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let long_cwd = PathBuf::from(format!("/tmp/{}", "x".repeat(300)));
     let t0 = SystemTime::now();
 
-    // Direct registration: register_slot mints the label from the cwd.
     let direct = AgentId::from_transcript_path("/p/direct.jsonl");
     r.apply(
         &mut scene,
@@ -78,8 +69,6 @@ fn session_start_label_caps_a_pathologically_long_cwd_basename() {
         Transport::Hook,
     );
 
-    // The sibling mint site: a blank hook-synthesized slot whose fallback
-    // label the duplicate-SessionStart backfill upgrades (explicitly capped).
     let upgraded = AgentId::from_transcript_path("/p/upgraded.jsonl");
     act_start(
         &mut r,
@@ -117,8 +106,6 @@ fn session_start_label_caps_a_pathologically_long_cwd_basename() {
 
 #[test]
 fn ghost_label_counter_is_contiguous_after_named_sessions() {
-    // A named-cwd session must NOT consume a ghost ordinal: the first
-    // unknown-cwd ghost is cc#1 even when named sessions preceded it.
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let named = AgentId::from_transcript_path("/p/named.jsonl");
@@ -153,19 +140,14 @@ fn ghost_label_counter_is_contiguous_after_named_sessions() {
 
 #[test]
 fn capacity_dropped_unknown_cwd_session_consumes_no_ghost_ordinal() {
-    // The all-desks-occupied drop returns BEFORE the unknown-cwd ghost-ordinal
-    // increment, so a dropped unknown-cwd session must consume NO ordinal — the
-    // next ghost is still cc#1. Guards against hoisting the increment above the
-    // capacity gate.
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use pixtuoid_core::state::MAX_FLOORS;
     let mut caps = [0usize; MAX_FLOORS];
-    caps[0] = 1; // exactly one desk in the whole scene
+    caps[0] = 1;
     let mut scene = SceneState::new(caps);
     let mut r = Reducer::new();
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    // Fill the single desk with a named session.
     let occupant = AgentId::from_transcript_path("/p/occupant.jsonl");
     r.apply(
         &mut scene,
@@ -180,7 +162,6 @@ fn capacity_dropped_unknown_cwd_session_consumes_no_ghost_ordinal() {
         Transport::Hook,
     );
 
-    // An unknown-cwd session now has no free desk → dropped (not inserted).
     let dropped = AgentId::from_transcript_path("/p/dropped.jsonl");
     r.apply(
         &mut scene,
@@ -199,8 +180,6 @@ fn capacity_dropped_unknown_cwd_session_consumes_no_ghost_ordinal() {
         "no free desk → the session is dropped, not seated"
     );
 
-    // Free the desk, then a NEW unknown-cwd session is the FIRST ghost: cc#1,
-    // not cc#2 — the dropped one consumed no ordinal.
     sess_end(&mut r, &mut scene, occupant, false, t0, Transport::Hook);
     r.tick(&mut scene, t0 + EXIT_GRACE_WINDOW + Duration::from_secs(1));
     assert!(!scene.agents.contains_key(&occupant), "occupant reaped");
@@ -227,8 +206,6 @@ fn capacity_dropped_unknown_cwd_session_consumes_no_ghost_ordinal() {
 
 #[test]
 fn session_start_codex_source_gets_cx_label() {
-    // Codex arrives via the shared hook socket (no JSONL Rename), so the cx·
-    // prefix must come from the reducer at SessionStart.
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let id = AgentId::from_parts("codex", "sess-1");

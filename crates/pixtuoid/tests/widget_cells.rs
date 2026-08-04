@@ -1,8 +1,4 @@
-//! Widget cell assertion tests.
-//!
-//! After `draw_scene` renders into a `TestBackend`, inspect the ratatui buffer
-//! cells to verify that footer, elevator indicator, and wall-display branding
-//! widgets wrote the expected text at the expected positions.
+//! Widget cell assertion tests: inspect the ratatui buffer after `draw_scene`.
 
 mod common;
 
@@ -19,7 +15,6 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 
-/// Deterministic timestamp shared by all tests.
 const NOW_SECS: u64 = 1_716_286_800;
 
 fn now() -> SystemTime {
@@ -82,7 +77,6 @@ fn fixture_scene(now: SystemTime) -> SceneState {
     s
 }
 
-/// Render a scene and return the `TestBackend` buffer plus dimensions.
 fn render_and_get_buffer(
     now: SystemTime,
     floor_info: Option<pixtuoid::tui::renderer::FloorInfo>,
@@ -99,14 +93,9 @@ fn render_and_get_buffer(
     (buffer, w, h)
 }
 
-/// Extract a single row from the buffer as a String.
 fn row_text(buf: &Buffer, y: u16, w: u16) -> String {
     (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect()
 }
-
-// ---------------------------------------------------------------------------
-// Footer tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn footer_contains_quit_hint() {
@@ -129,10 +118,6 @@ fn footer_shows_agent_count() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Elevator indicator test
-// ---------------------------------------------------------------------------
-
 #[test]
 fn elevator_indicator_visible() {
     // Pass floor_info so the elevator door is placed and the indicator paints.
@@ -144,7 +129,6 @@ fn elevator_indicator_visible() {
             total_agents: 0,
         }),
     );
-    // Scan all rows for "F1" -- the elevator indicator renders " ▲ F1 ▼ ".
     let mut found = false;
     for y in 0..h {
         let row = row_text(&buf, y, w);
@@ -156,15 +140,9 @@ fn elevator_indicator_visible() {
     assert!(found, "elevator indicator with 'F1' not found in any row");
 }
 
-// ---------------------------------------------------------------------------
-// Wall display branding test
-// ---------------------------------------------------------------------------
-
 #[test]
 fn branding_visible_in_wall_display() {
     let (buf, w, h) = render_and_get_buffer(now(), None);
-    // The wall display branding "pixtuoid" is painted in the top rows
-    // by paint_wall_display. Scan the upper quarter for the text.
     let upper_quarter = h / 4;
     let mut found = false;
     for y in 0..upper_quarter {
@@ -179,10 +157,6 @@ fn branding_visible_in_wall_display() {
         "branding 'pixtuoid' not found in the upper quarter of the display"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Chitchat bubble test
-// ---------------------------------------------------------------------------
 
 #[test]
 fn chitchat_bubble_text_appears_in_buffer() {

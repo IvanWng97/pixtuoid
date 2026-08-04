@@ -1,8 +1,6 @@
 //! The agent-dashboard popup painter (ratatui). Pure presentation over the
-//! pre-built row list from `tui::dashboard`; all model / fold / selection
-//! logic lives there. Mirrors the other popups: a centered, cleared, BORDERLESS
-//! panel (via `panel::borderless_panel`) painted over the scene in both the
-//! normal and floor-transition draw paths.
+//! pre-built row list from `tui::dashboard`; all model / fold / selection logic
+//! lives there.
 
 use std::time::SystemTime;
 
@@ -16,11 +14,8 @@ use super::{marquee_or_truncate, paint_panel, source_badge_span, to_color, Overf
 use crate::tui::dashboard::{DashboardRow, RowState, DASHBOARD_VIEWPORT_ROWS};
 use pixtuoid_scene::theme::Theme;
 
-/// Char budget for the tree-prefix + label column (name only — source is in the badge now).
 const LABEL_W: usize = 32;
-/// Char budget for the activity/detail column.
 const STATE_W: usize = 28;
-/// Popup content width (clamped to the terminal by the panel geometry).
 const POPUP_W: u16 = 76;
 
 pub(crate) fn paint_dashboard(
@@ -53,16 +48,13 @@ pub(crate) fn paint_dashboard(
         return;
     }
 
-    // Hint in the title (borderless — it's the panel's first inner row).
     let title = format!(
         " Agents ({})  [\u{2191}\u{2193} \u{2190}\u{2192} z \u{23ce} esc] ",
         rows.len()
     );
-    // Build EVERY row (styled per selection); `paint_panel` sizes to the 16-row
-    // cap, windows the list at the real inner height, follows the selection, and
-    // appends the `⋮ N more ▾` cue. Selection resolves to an index at the seam:
-    // None (unselected OR exited) keeps the persisted scroll, exactly as the old
-    // `AgentId`-keyed `clamp_scroll` did (which `ui_state` still uses to persist).
+    // Build EVERY row; `paint_panel` windows the list at the real inner height,
+    // follows the selection, and appends the `⋮ N more ▾` cue. A `None` selection
+    // (unselected OR exited) keeps the persisted scroll.
     let selected_idx = selected.and_then(|s| rows.iter().position(|r| r.agent_id == s));
     let list: Vec<Line<'static>> = rows
         .iter()
@@ -92,8 +84,6 @@ fn dashboard_line(
     now: SystemTime,
     theme: &Theme,
 ) -> Line<'static> {
-    // Tree prefix: a root with children gets a fold chevron; a childless root
-    // gets blank space; a subagent is indented under its parent.
     let prefix = match (row.depth, row.collapsed, row.child_count) {
         (0, _, 0) => "  ".to_string(),
         (0, true, _) => "▸ ".to_string(),
@@ -167,7 +157,6 @@ mod tests {
     fn dashboard_line_badge_uses_source_color_and_is_never_reversed() {
         let row = make_row("codex", RowState::Active(None), "cxagent");
         let line = dashboard_line(&row, true, SystemTime::UNIX_EPOCH, &NORMAL);
-        // spans[0] = badge
         let badge = &line.spans[0];
         assert_eq!(
             badge.style.fg,
@@ -182,7 +171,6 @@ mod tests {
 
     #[test]
     fn dashboard_line_name_tinted_by_state() {
-        // Active → label_active
         let row = make_row("cc", RowState::Active(None), "agent");
         let line = dashboard_line(&row, false, SystemTime::UNIX_EPOCH, &NORMAL);
         assert_eq!(
@@ -191,7 +179,6 @@ mod tests {
             "active: name must be tinted label_active"
         );
 
-        // Waiting → label_waiting
         let row = make_row("cc", RowState::Waiting(Arc::from("permission")), "agent");
         let line = dashboard_line(&row, false, SystemTime::UNIX_EPOCH, &NORMAL);
         assert_eq!(
@@ -200,7 +187,6 @@ mod tests {
             "waiting: name must be tinted label_waiting"
         );
 
-        // Idle → label_idle
         let row = make_row("cc", RowState::Idle, "agent");
         let line = dashboard_line(&row, false, SystemTime::UNIX_EPOCH, &NORMAL);
         assert_eq!(
@@ -214,7 +200,6 @@ mod tests {
     fn dashboard_line_selected_reverses_name_and_state_not_badge() {
         let row = make_row("cc", RowState::Active(None), "agent");
         let line = dashboard_line(&row, true, SystemTime::UNIX_EPOCH, &NORMAL);
-        // spans[0]=badge, [1]=space, [2]=name, [3]=floor, [4]=state
         assert!(
             !line.spans[0]
                 .style
@@ -260,14 +245,12 @@ mod tests {
         let long = "a-very-long-agent-name-that-far-exceeds-the-label-budget-here";
         let detail = "Edit: some/very/long/path/to/a/file/that/overflows.rs";
         let row = make_row("cc", RowState::Active(Some(Arc::from(detail))), long);
-        // Unselected: static `…`-truncated name (spans[2]).
         let unsel = dashboard_line(&row, false, SystemTime::UNIX_EPOCH, &NORMAL);
         let name_unsel = unsel.spans[2].content.to_string();
         assert!(
             name_unsel.contains('\u{2026}'),
             "unselected long name must ellipsize: {name_unsel:?}"
         );
-        // Selected: scrolling window — no ellipsis, and it animates across time.
         let t0 = SystemTime::UNIX_EPOCH;
         let t1 = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(3000);
         let sel0 = dashboard_line(&row, true, t0, &NORMAL);
@@ -281,7 +264,6 @@ mod tests {
             "selected scrolling name must not ellipsize: {n0:?}"
         );
         assert_ne!(n0, n1, "selected name must animate across time");
-        // The state cell (spans[4]) likewise scrolls when selected.
         let (s0, s1) = (
             sel0.spans[4].content.to_string(),
             sel1.spans[4].content.to_string(),
@@ -289,11 +271,6 @@ mod tests {
         assert_ne!(s0, s1, "selected state must animate across time");
     }
 
-    // Registry-bridge pin: every registered source must get a real badge color,
-    // not the idle fallback. A new source added to REGISTRY without a matching
-    // arm in dashboard_line would silently render in the idle color — this turns
-    // that drift into a loud failure (same spirit as the registry's
-    // every_descriptor_has_two_char_label_prefix pin).
     #[test]
     fn every_registry_source_has_a_non_fallback_badge_color() {
         use pixtuoid_core::source::registry::REGISTRY;
