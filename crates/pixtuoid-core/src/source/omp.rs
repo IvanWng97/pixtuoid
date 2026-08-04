@@ -144,12 +144,14 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
 const KNOWN_ENTRY_TYPES: &[&str] = &[
     "branch_summary",
     "compaction",
+    "credential_pin",
     "custom",
     "custom_message",
     "label",
     "message",
     "mode_change",
     "model_change",
+    "reset_boundary",
     "service_tier_change",
     "session",
     "session_init",
@@ -782,6 +784,8 @@ mod tests {
             r#"{"type":"compaction","id":"x","parentId":null,"timestamp":"t","summary":"…"}"#,
             r#"{"type":"custom","id":"x","parentId":null,"timestamp":"t","customType":"memory_write","data":{}}"#,
             r#"{"type":"thinking_level_change","id":"x","parentId":null,"timestamp":"t"}"#,
+            r#"{"type":"credential_pin","id":"x","parentId":null,"timestamp":"t","provider":"anthropic","hash":"h"}"#,
+            r#"{"type":"reset_boundary","id":"x","parentId":null,"timestamp":"t"}"#,
         ] {
             let quiet = crate::test_capture::capture_logs(|| {
                 assert!(decode(line).is_empty());
