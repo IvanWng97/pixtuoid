@@ -167,7 +167,7 @@ pub(super) async fn probe_admits(
     let live = ctx.live.lock().await;
     // Through `walk::id_path`, never raw: the producer side folds every path
     // before deriving, so an unfolded id here would query a different id-space.
-    !live.is_empty() && live.contains(&(decoders.id_derive)(&super::walk::id_path(path)))
+    !live.is_empty() && live.contains(&decoders.id_derive.id_for(path))
 }
 
 /// The probe is ONGOING liveness, not just admission: emit a `ProofOfLife` per
@@ -364,7 +364,7 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
             // raw key derives into a different id-space, the filter matches
             // nothing, and the `seen` entry never releases — so a later append
             // can never re-register the session.
-            .filter(|p| (decoders.id_derive)(&super::walk::id_path(p)) == id)
+            .filter(|p| decoders.id_derive.id_for(p) == id)
             .cloned()
             .collect()
     };

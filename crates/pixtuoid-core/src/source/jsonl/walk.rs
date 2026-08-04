@@ -255,7 +255,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             // A span that itself ENDED stays unregistered and unscanned — a
             // SessionStart or a seeded Task after the SessionEnd just sent
             // would resurrect/animate a ghost.
-            let id = AgentId::from_parts(source, &(decoders.id_derive)(&id_path(path)));
+            let id = AgentId::from_parts(source, &decoders.id_derive.id_for(path));
             let _ = tx
                 .send((
                     Transport::Jsonl,
@@ -355,7 +355,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         emit_first_sight(path, source, decoders, seen, tx, first_sight_cwd).await;
     }
 
-    let path_agent_id = AgentId::from_parts(source, &(decoders.id_derive)(&id_path(path)));
+    let path_agent_id = AgentId::from_parts(source, &decoders.id_derive.id_for(path));
     let mut session_ended = false;
     for line in new_bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
@@ -445,7 +445,7 @@ async fn emit_first_sight(
     // transport's slots carry the bare session UUID and `backfill_identity`
     // never heals a non-empty session_id, so a raw file-stem here would leave a
     // JSONL-created slot permanently disagreeing with its hook-created twin.
-    let session_id = (decoders.id_derive)(&id_path(path));
+    let session_id = decoders.id_derive.id_for(path);
     let id = AgentId::from_parts(source, &session_id);
     // Content-derived cwd wins; the PATH deriver is the fallback for sources
     // whose content carries none — an empty cwd would put the slot on the

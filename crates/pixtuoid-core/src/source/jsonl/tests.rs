@@ -393,7 +393,7 @@ async fn walk_once_with_recency(
         derive_label: t_label,
         check_ended,
         activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -431,7 +431,7 @@ async fn first_sight_cwd_falls_back_to_the_path_deriver_when_content_has_none() 
             derive_label: t_label,
             check_ended: t_ended,
             activity_recency: super::no_activity_recency,
-            id_derive: default_id_from_path,
+            id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
             path_filter: accept_all_paths,
             cwd_derive: derived_cwd,
         };
@@ -482,7 +482,7 @@ async fn walk_once_live(
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: crate::source::claude_code::cc_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(crate::source::claude_code::cc_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -753,7 +753,7 @@ async fn walk_jsonl_honors_the_path_filter() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: skip_full,
         cwd_derive: no_cwd_from_path,
     };
@@ -979,7 +979,7 @@ async fn session_exit_drains_pending_bytes_so_a_straggler_walk_cannot_resurrect(
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1055,7 +1055,7 @@ async fn session_exit_purges_live_so_a_probe_failure_pass_cannot_revouch() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1110,7 +1110,7 @@ fn t_decoders() -> SourceDecoders {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     }
@@ -1308,7 +1308,7 @@ async fn decoded_terminator_release_is_not_revouched_into_a_full_replay() {
         derive_label: t_label,
         check_ended: never_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1553,7 +1553,7 @@ async fn known_oversized_tail_emits_session_end_if_the_skipped_span_ended() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1819,7 +1819,7 @@ async fn scan_pass_re_vouches_a_transiently_gated_live_file() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: crate::source::claude_code::cc_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(crate::source::claude_code::cc_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -1929,7 +1929,7 @@ async fn revouch_does_not_replay_a_probe_vouched_ended_transcript() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: crate::source::claude_code::cc_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(crate::source::claude_code::cc_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
@@ -2978,7 +2978,7 @@ async fn revouch_pass_prunes_deleted_files_from_cursors() {
         derive_label: t_label,
         check_ended: t_ended,
         activity_recency: super::no_activity_recency,
-        id_derive: default_id_from_path,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
     };
