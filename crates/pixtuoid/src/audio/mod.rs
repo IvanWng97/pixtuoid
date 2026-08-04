@@ -121,8 +121,10 @@ impl AudioController {
     }
 
     /// [`new`] with the boot-spawn injected, so a test can pin the boot decision
-    /// without opening an output device.
-    fn new_with(
+    /// without opening an output device. `pub(crate)` for the same reason it
+    /// exists: `tui`'s key-action tests need an UNMUTED controller, and an
+    /// unmuted `new` boot-spawns the real device.
+    pub(crate) fn new_with(
         muted: bool,
         volume: f32,
         config_path: std::path::PathBuf,

@@ -34,7 +34,9 @@ tui/
 ├── mod.rs          crossterm event loop + terminal lifecycle (raw mode / alternate screen) + key
 │                   dispatch (the `w` debug-overlay toggle — dev-only, debug builds; `t` theme picker, `Tab` dashboard, `s`
 │                   Sources panel, floor nav, version popup, quit chord) + connect_source/disconnect_source.
-│                   run_tui is the EVENT LOOP + side effects only — the per-surface UI state lives in ui_state.rs
+│                   run_tui is the EVENT LOOP only — each KeyAction's side effects are applied by
+│                   apply_key_action(action, &mut KeyCtx) -> quit, which IS unit-tested (the loop is not);
+│                   the per-surface UI state lives in ui_state.rs
 ├── ui_state.rs     UiState — run_tui's per-surface UI state as ONE struct (onboarding/version/help/
 │                   pause/theme-picker/dashboard/connection + DriftScan): owns the open/close
 │                   transitions, projects the dispatch-facing ModalState (`UiState::modal` — the one
