@@ -393,7 +393,20 @@ pub(crate) const DENSITY_VARIANT_SEP: char = '@';
 
 /// The animation name for `base` drawn at `density`x.
 pub fn density_variant_name(base: &str, density: u16) -> String {
-    format!("{base}{DENSITY_VARIANT_SEP}{density}x")
+    let mut out = String::with_capacity(base.len() + 4);
+    density_variant_name_into(&mut out, base, density);
+    out
+}
+
+/// [`density_variant_name`] into a caller-owned buffer.
+///
+/// The lookup happens per divisor, per piece, per frame, and the key is only
+/// borrowed for a map probe — so the hot path reuses one buffer rather than
+/// allocating a `String` it immediately drops.
+pub fn density_variant_name_into(out: &mut String, base: &str, density: u16) {
+    use std::fmt::Write;
+    // Writing to a String is infallible.
+    let _ = write!(out, "{base}{DENSITY_VARIANT_SEP}{density}x");
 }
 
 /// The largest density a variant name may claim.
@@ -489,6 +502,14 @@ const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
 ///
 /// Worse than an absent variant: a renderer picking it up by name draws the
 /// piece at the wrong size, so `validate_pack_animations` calls it an error.
+///
+/// `claimed != found` is what makes an instance mean anything, and it is held
+/// by CONSTRUCTION: the one producer (`validate_pack_animations`) pushes only
+/// inside that comparison, and nothing else in the workspace builds one. The
+/// fields stay `pub` because the `validate-pack` presenter reads all three to
+/// print them. Encoding the invariant in the type would mean a private
+/// constructor plus three accessors for a struct with one producer and one
+/// consumer — cost with no reachable failure to prevent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DensityMismatch {
     /// The variant's animation name, e.g. `desk@4x`.

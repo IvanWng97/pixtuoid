@@ -11,7 +11,7 @@
 //! disagree about the office — the invariant the brief spends its §9 on.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
-use pixtuoid_core::sprite::format::{density_variant_name, Pack};
+use pixtuoid_core::sprite::format::{density_variant_name_into, Pack};
 use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::cutaway::order::{depth_sort, Span};
@@ -365,7 +365,6 @@ fn paint_wall_seg(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let s = scale.get();
     let glass = Ramp::from_base(
         theme.office.room_wall_trim_light,
         RAMP_TINT_PCT,
@@ -373,9 +372,24 @@ fn paint_wall_seg(
     );
     let (x, y) = (scale.to_buffer(at.x), scale.to_buffer(at.y));
     if w > h {
-        slab(buf, x, y, w * s, h * s, &glass, scale);
+        slab(
+            buf,
+            x,
+            y,
+            scale.to_buffer(w),
+            scale.to_buffer(h),
+            &glass,
+            scale,
+        );
     } else {
-        fill(buf, x, y, w * s, h * s, glass.base);
+        fill(
+            buf,
+            x,
+            y,
+            scale.to_buffer(w),
+            scale.to_buffer(h),
+            glass.base,
+        );
     }
 }
 
@@ -484,7 +498,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
     let s = scale.get();
     let w = scale.to_buffer(layout.buf_w);
     let wall = Ramp::from_base(theme.surface.wall, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-    slab(buf, 0, 0, w, band_h * s, &wall, scale);
+    slab(buf, 0, 0, w, scale.to_buffer(band_h), &wall, scale);
 
     // One glass run inset inside the band, with a lit sill under it — the sill
     // is what sells the light as coming THROUGH rather than being painted on.
@@ -492,15 +506,30 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
     let glass_h = band_h.saturating_sub(inset * 2);
     if glass_h > 0 {
         let glass = Ramp::from_base(theme.lighting.night_sky_a, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-        slab(buf, 0, inset * s, w, glass_h * s, &glass, scale);
+        slab(
+            buf,
+            0,
+            scale.to_buffer(inset),
+            w,
+            scale.to_buffer(glass_h),
+            &glass,
+            scale,
+        );
         paint_skyline(layout, theme, scale, inset, glass_h, buf);
-        fill(buf, 0, (inset + glass_h) * s, w, s, theme.surface.wall_trim);
+        fill(
+            buf,
+            0,
+            scale.to_buffer(inset + glass_h),
+            w,
+            s,
+            theme.surface.wall_trim,
+        );
     }
     // The wall's own contact line with the floor.
     fill(
         buf,
         0,
-        band_h * s,
+        scale.to_buffer(band_h),
         w,
         s,
         Ramp::from_base(theme.surface.carpet_dark, 0, RAMP_SHADE_PCT).shade,
@@ -545,7 +574,14 @@ fn paint_skyline(
             theme.office.building_light
         };
         let top = sill.saturating_sub(bh);
-        fill(buf, scale.to_buffer(x), top * s, bw * s, bh * s, tone);
+        fill(
+            buf,
+            scale.to_buffer(x),
+            scale.to_buffer(top),
+            scale.to_buffer(bw),
+            scale.to_buffer(bh),
+            tone,
+        );
         // Lit windows — the thing that says "night", not just "dark".
         let mut wy = top + 1;
         while wy + 1 < sill {
@@ -555,7 +591,7 @@ fn paint_skyline(
                     fill(
                         buf,
                         scale.to_buffer(wx),
-                        wy * s,
+                        scale.to_buffer(wy),
                         s,
                         s,
                         theme.lighting.twilight_a,
@@ -700,13 +736,21 @@ fn paint_desk(
     let drawn_h = art.height() * blit_at.get();
     let base_y = top_y + drawn_h;
     let w = drawn_w;
-    slab(buf, x, base_y, w, desk_front_h() * s, &ramp, scale);
+    slab(
+        buf,
+        x,
+        base_y,
+        w,
+        scale.to_buffer(desk_front_h()),
+        &ramp,
+        scale,
+    );
 
     // Contact occlusion hugs the front face; a wide pool reads as a stain.
     fill(
         buf,
         x,
-        base_y + desk_front_h() * s,
+        base_y + scale.to_buffer(desk_front_h()),
         w,
         s,
         Ramp::from_base(theme.surface.carpet_dark, 0, RAMP_SHADE_PCT).shade,
@@ -905,14 +949,17 @@ fn densest_art<'a>(
 ) -> Option<(&'a pixtuoid_core::sprite::Frame, std::num::NonZeroU16)> {
     let base = pack.animation(name).and_then(|a| a.frames.first())?;
     let s = scale.get();
+    // ONE buffer, reused: the lookup key is `<name>@<N>x` and this loop runs
+    // per divisor, per piece, per frame — a fresh `String` each time is an
+    // allocation for a HashMap probe that borrows it and drops it.
+    let mut key = String::with_capacity(name.len() + 4);
     for density in (2..=s).rev() {
         if !s.is_multiple_of(density) {
             continue;
         }
-        let Some(art) = pack
-            .animation(&density_variant_name(name, density))
-            .and_then(|a| a.frames.first())
-        else {
+        key.clear();
+        density_variant_name_into(&mut key, name, density);
+        let Some(art) = pack.animation(&key).and_then(|a| a.frames.first()) else {
             continue;
         };
         // Saturating for the same reason the validator's twin is: the density
@@ -959,7 +1006,6 @@ fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
 /// procedurally too and there is no sprite to reuse.
 fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
     let ramp = Ramp::from_base(theme.furniture.wood_top, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-    let s = scale.get();
     let (w, h) = (TABLE_W, TABLE_H);
     let x = at.x.saturating_sub(w / 2);
     let y = at.y.saturating_sub(h / 2);
@@ -967,8 +1013,8 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         buf,
         scale.to_buffer(x),
         scale.to_buffer(y),
-        w * s,
-        h * s,
+        scale.to_buffer(w),
+        scale.to_buffer(h),
         &ramp,
         scale,
     );
@@ -977,10 +1023,24 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         buf,
         scale.to_buffer(x),
         scale.to_buffer(y + h),
-        w * s,
-        desk_front_h() * s,
+        scale.to_buffer(w),
+        scale.to_buffer(desk_front_h()),
         &Ramp::from_base(theme.furniture.wood_trim, RAMP_TINT_PCT, RAMP_SHADE_PCT),
         scale,
+    );
+    // ...and the ground contact every OTHER solid gets. Without it the table
+    // was the one piece in the room with no weight, floating over the carpet
+    // while the sofas either side of it sat on theirs.
+    contact_shadow(
+        crate::layout::Point {
+            x,
+            y: y + desk_front_h(),
+        },
+        w,
+        h,
+        theme,
+        scale,
+        buf,
     );
 }
 
@@ -1004,7 +1064,6 @@ fn paint_appliance(
         K::Printer => (theme.appliance.printer_body, theme.appliance.printer_glass),
         _ => (theme.appliance.vending_body, theme.appliance.vending_panel),
     };
-    let s = scale.get();
     let (w, h) = (def.visual.w, def.visual.h);
     let x = at.x.saturating_sub(w / 2);
     let y = at.y.saturating_sub(h / 2);
@@ -1012,8 +1071,8 @@ fn paint_appliance(
         buf,
         scale.to_buffer(x),
         scale.to_buffer(y),
-        w * s,
-        h * s,
+        scale.to_buffer(w),
+        scale.to_buffer(h),
         &Ramp::from_base(body, RAMP_TINT_PCT, RAMP_SHADE_PCT),
         scale,
     );
@@ -1024,8 +1083,8 @@ fn paint_appliance(
             buf,
             scale.to_buffer(x + 1),
             scale.to_buffer(y + 1),
-            (w - 2) * s,
-            (h / 2).max(1) * s,
+            scale.to_buffer(w.saturating_sub(2)),
+            scale.to_buffer((h / 2).max(1)),
             panel,
         );
     }
@@ -1095,7 +1154,7 @@ fn contact_shadow(
         buf,
         scale.to_buffer(at.x),
         scale.to_buffer(at.y + sprite_h),
-        sprite_w * s,
+        scale.to_buffer(sprite_w),
         s,
         shade,
     );
@@ -1114,15 +1173,14 @@ fn paint_chair(
     buf: &mut RgbBuffer,
 ) {
     let ramp = Ramp::from_base(theme.furniture.chair_trim, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-    let s = scale.get();
     // Just below the body, one pixel proud on each side — a seat back peeking
     // out, not a panel over the occupant.
     slab(
         buf,
         scale.to_buffer(at.x.saturating_sub(1)),
         scale.to_buffer(at.y + sprite_h),
-        (sprite_w + 2) * s,
-        CHAIR_BACK_H * s,
+        scale.to_buffer(sprite_w + 2),
+        scale.to_buffer(CHAIR_BACK_H),
         &ramp,
         scale,
     );
@@ -1429,7 +1487,7 @@ mod tests {
             let (art, blit_at) = densest_art(&pack, "desk", scale).expect("desk is in the pack");
             assert_eq!(
                 (art.width() * blit_at.get(), art.height() * blit_at.get()),
-                (bw * s, bh * s),
+                (scale.to_buffer(bw), scale.to_buffer(bh)),
                 "scale {s} drew a different size than the base art implies"
             );
         }

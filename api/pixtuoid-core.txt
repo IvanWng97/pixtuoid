@@ -784,6 +784,7 @@ pub const pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::RECOLOR_KEYS: [char; 4]
 pub const pixtuoid_core::sprite::format::REQUIRED_CHARACTER_ANIMATIONS: &[&str]
 pub fn pixtuoid_core::sprite::format::density_variant_name(&str, u16) -> alloc::string::String
+pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::string::String, &str, u16)
 pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::parse_sprite_file(&str, &pixtuoid_core::sprite::Palette) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::sprite::Frame>>
