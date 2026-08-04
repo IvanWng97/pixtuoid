@@ -165,9 +165,7 @@ fn build_run_config(
     // config). A missing file warns nothing ⇒ first run.
     let first_run = setup::is_first_run(&cfg, &cfg_path, !cfg_warnings.is_empty());
     let theme = config::resolve_theme(&cfg, cli_theme, &mut cfg_warnings)?;
-    // Eager `.or` argument on purpose: the config max-desks = 0 warning must fire
-    // even when the CLI flag overrides.
-    let desk_cap = cli_max_desks.or(config::resolve_max_desks(&cfg, &mut cfg_warnings));
+    let desk_cap = config::resolve_desk_cap(&cfg, cli_max_desks, &mut cfg_warnings);
     let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
     let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
     let connected = config::resolve_connected(&cfg);

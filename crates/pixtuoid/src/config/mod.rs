@@ -357,6 +357,22 @@ pub fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) -> Opti
     }
 }
 
+/// Resolve CLI + config into the desk cap the runtime uses (CLI > config).
+///
+/// The config lookup is EAGER — `.or`, never `.or_else` — so the
+/// `max-desks = 0` warning fires even when the CLI flag wins. It lives here
+/// rather than at the `main.rs` call site because that file is in the
+/// intersection of `codecov.yml`'s `ignore` and `.cargo/mutants.toml`'s
+/// `exclude_globs`: a decision spelled there is measured by nothing, and
+/// `.or_else` would compile clean while silently dropping the warning (#836).
+pub fn resolve_desk_cap(
+    config: &AppConfig,
+    cli_max_desks: Option<usize>,
+    warnings: &mut Vec<String>,
+) -> Option<usize> {
+    cli_max_desks.or(resolve_max_desks(config, warnings))
+}
+
 /// Resolve CLI + config into the one `&'static Theme` the runtime uses
 /// (CLI > config > `NORMAL`). The asymmetry is deliberate: a `--theme` typo is
 /// explicit user intent and hard-errors (listing valid names), while a config

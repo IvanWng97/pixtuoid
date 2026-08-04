@@ -443,9 +443,8 @@ fn max_desks_config_set_no_cli() {
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "max-desks = 8\n").unwrap();
     let cfg = load(&path, &mut Vec::new());
-    let cli_max_desks: Option<usize> = None;
     let mut w = Vec::new();
-    let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut w));
+    let desk_cap = resolve_desk_cap(&cfg, None, &mut w);
     assert_eq!(desk_cap, Some(8));
     assert!(w.is_empty(), "a valid cap collects no warning: {w:?}");
 }
@@ -456,24 +455,40 @@ fn max_desks_cli_overrides_config() {
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "max-desks = 8\n").unwrap();
     let cfg = load(&path, &mut Vec::new());
-    let cli_max_desks: Option<usize> = Some(4);
-    let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut Vec::new()));
+    let desk_cap = resolve_desk_cap(&cfg, Some(4), &mut Vec::new());
     assert_eq!(desk_cap, Some(4));
+}
+
+/// The eager-`.or` regression: swapping `resolve_desk_cap`'s `.or` for
+/// `.or_else(||` compiles clean and silently drops the `max-desks = 0` warning
+/// on exactly this input — the CLI flag wins, so a lazy argument is never
+/// evaluated. Asserting the RETURN alone cannot catch it; assert the warning.
+#[test]
+fn max_desks_zero_in_config_still_warns_when_the_cli_flag_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "max-desks = 0\n").unwrap();
+    let cfg = load(&path, &mut Vec::new());
+    let mut w = Vec::new();
+    let desk_cap = resolve_desk_cap(&cfg, Some(4), &mut w);
+    assert_eq!(desk_cap, Some(4), "the CLI flag still wins");
+    assert!(
+        w.iter().any(|m| m.contains("max-desks = 0")),
+        "the config-level 0 must still warn even though the CLI overrode it: {w:?}"
+    );
 }
 
 #[test]
 fn max_desks_neither_set() {
     let cfg = AppConfig::default();
-    let cli_max_desks: Option<usize> = None;
-    let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut Vec::new()));
+    let desk_cap = resolve_desk_cap(&cfg, None, &mut Vec::new());
     assert_eq!(desk_cap, None);
 }
 
 #[test]
 fn max_desks_no_config_file() {
     let cfg = load(Path::new("/nonexistent/path/config.toml"), &mut Vec::new());
-    let cli_max_desks: Option<usize> = None;
-    let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut Vec::new()));
+    let desk_cap = resolve_desk_cap(&cfg, None, &mut Vec::new());
     assert_eq!(desk_cap, None);
 }
 
