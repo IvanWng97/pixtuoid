@@ -286,6 +286,7 @@ question:
 - How does the per-agent state machine work?
 - Why is the subagent's sprite the right one and not the parent?
 - How does multi-source decoding work?
+- Why don't old idle sessions show on startup?
 
 ## Keeping the decode mapping current (upstream drift)
 

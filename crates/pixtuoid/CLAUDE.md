@@ -518,6 +518,10 @@ pays for the entry it needs instead of all of them. Grep it for the
 question:
 
 - How do hooks get installed?
+- How does the default character pack get into the binary?
+- How do custom sprite packs work?
+- How does the crash log work?
+- Where do runtime errors / config warnings surface?
 - How does config persistence work?
 - How do multi-floor offices work?
 

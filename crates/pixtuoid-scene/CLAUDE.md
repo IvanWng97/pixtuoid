@@ -422,6 +422,7 @@ question:
 - How does the coffee run work?
 - How do atmosphere / ambient effects work?
 - How does the theme system work?
+- How does weather work?
 - How does the sun/moon sky-light work?
 - Where do the lounge aquarium / soft-goods mats live?
 - How does the meeting room come alive (sitting + group talk)?
