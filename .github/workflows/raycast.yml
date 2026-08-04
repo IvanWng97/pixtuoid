@@ -32,12 +32,12 @@ jobs:
           cache: npm
           cache-dependency-path: integrations/raycast/package-lock.json
       - run: npm ci
-      # Passes only while the live advisory set EQUALS the set adjudicated in
-      # scripts/audit-adjudicated.mjs.
-      - run: npm run audit
       # Each schema's own freshness vs its Rust struct is gated separately, by the
       # `*_schema_matches_the_committed_contract` tests in ci-tests.yml.
       - name: contract types match the committed schemas
         run: npm run gen:contract && git diff --exit-code src/contract.ts src/contract-outcome.ts
       - run: npx tsc --noEmit
       - run: npx eslint .
+      # LAST: it resolves advisories live, so at step one someone else's publish
+      # skips every check below it (#846/#848).
+      - run: npm run audit
