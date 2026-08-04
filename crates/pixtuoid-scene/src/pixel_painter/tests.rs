@@ -2154,7 +2154,6 @@ fn paint_frame_is_pure_and_byte_identical() {
                 pack: &pack,
                 now,
                 buf,
-                scale: crate::render_scale::RenderScale::ONE,
                 cache: &mut cache,
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
@@ -2495,7 +2494,6 @@ fn busy_printer_ejects_a_page_and_idle_printer_stays_still() {
                 cache: &mut cache,
                 now,
                 theme,
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         buf
@@ -2533,7 +2531,6 @@ fn busy_vending_machine_drops_a_can_and_idle_stays_stocked() {
                 cache: &mut cache,
                 now,
                 theme,
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         buf
@@ -3128,7 +3125,6 @@ fn paint_empty_office(buf_w: u16, buf_h: u16) -> (RgbBuffer, Layout, &'static cr
             layout: &layout,
             pack: &pack,
             now,
-            scale: crate::render_scale::RenderScale::ONE,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             theme,
@@ -3189,7 +3185,6 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 layout: &layout,
                 pack: &pack,
                 now,
-                scale: crate::render_scale::RenderScale::ONE,
                 buf: &mut buf,
                 cache: &mut cache,
                 theme,

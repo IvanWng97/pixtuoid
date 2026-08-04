@@ -73,55 +73,6 @@ pub const pixtuoid_scene::chitchat::CHITCHAT_TOTAL_MS: u64
 pub fn pixtuoid_scene::chitchat::supports_chitchat(pixtuoid_scene::layout::WaypointKind) -> bool
 pub fn pixtuoid_scene::chitchat::update_and_collect(&mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, usize, &[pixtuoid_scene::chitchat::Visitor], std::time::SystemTime) -> alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
 pub fn pixtuoid_scene::chitchat::venue_wp_idx(pixtuoid_scene::layout::WaypointKind, usize, &[pixtuoid_scene::layout::Waypoint]) -> usize
-pub mod pixtuoid_scene::cutaway
-pub mod pixtuoid_scene::cutaway::paint
-pub struct pixtuoid_scene::cutaway::paint::CutawayLabel
-pub pixtuoid_scene::cutaway::paint::CutawayLabel::agent_idx: usize
-pub pixtuoid_scene::cutaway::paint::CutawayLabel::anchor_px: pixtuoid_scene::layout::Point
-impl core::clone::Clone for pixtuoid_scene::cutaway::paint::CutawayLabel
-pub fn pixtuoid_scene::cutaway::paint::CutawayLabel::clone(&self) -> pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::cmp::Eq for pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::cmp::PartialEq for pixtuoid_scene::cutaway::paint::CutawayLabel
-pub fn pixtuoid_scene::cutaway::paint::CutawayLabel::eq(&self, &pixtuoid_scene::cutaway::paint::CutawayLabel) -> bool
-impl core::fmt::Debug for pixtuoid_scene::cutaway::paint::CutawayLabel
-pub fn pixtuoid_scene::cutaway::paint::CutawayLabel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::marker::StructuralPartialEq for pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::marker::Freeze for pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::marker::Send for pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::marker::Sync for pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::marker::Unpin for pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::marker::UnsafeUnpin for pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::cutaway::paint::CutawayLabel
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::cutaway::paint::CutawayLabel
-pub fn pixtuoid_scene::cutaway::paint::render_cutaway(&pixtuoid_scene::pixel_painter::SimFrame, &pixtuoid_scene::layout::Layout, &pixtuoid_core::sprite::format::Pack, &pixtuoid_scene::theme::Theme, pixtuoid_scene::render_scale::RenderScale, &mut pixtuoid_core::sprite::RgbBuffer) -> alloc::vec::Vec<pixtuoid_scene::cutaway::paint::CutawayLabel>
-pub mod pixtuoid_scene::cutaway::shade
-pub struct pixtuoid_scene::cutaway::shade::Ramp
-pub pixtuoid_scene::cutaway::shade::Ramp::base: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::cutaway::shade::Ramp::lit: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::cutaway::shade::Ramp::shade: pixtuoid_core::sprite::Rgb
-impl pixtuoid_scene::cutaway::shade::Ramp
-pub fn pixtuoid_scene::cutaway::shade::Ramp::flat(pixtuoid_core::sprite::Rgb) -> Self
-pub fn pixtuoid_scene::cutaway::shade::Ramp::from_base(pixtuoid_core::sprite::Rgb, u8, u8) -> Self
-impl core::clone::Clone for pixtuoid_scene::cutaway::shade::Ramp
-pub fn pixtuoid_scene::cutaway::shade::Ramp::clone(&self) -> pixtuoid_scene::cutaway::shade::Ramp
-impl core::cmp::Eq for pixtuoid_scene::cutaway::shade::Ramp
-impl core::cmp::PartialEq for pixtuoid_scene::cutaway::shade::Ramp
-pub fn pixtuoid_scene::cutaway::shade::Ramp::eq(&self, &pixtuoid_scene::cutaway::shade::Ramp) -> bool
-impl core::fmt::Debug for pixtuoid_scene::cutaway::shade::Ramp
-pub fn pixtuoid_scene::cutaway::shade::Ramp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::cutaway::shade::Ramp
-impl core::marker::StructuralPartialEq for pixtuoid_scene::cutaway::shade::Ramp
-impl core::marker::Freeze for pixtuoid_scene::cutaway::shade::Ramp
-impl core::marker::Send for pixtuoid_scene::cutaway::shade::Ramp
-impl core::marker::Sync for pixtuoid_scene::cutaway::shade::Ramp
-impl core::marker::Unpin for pixtuoid_scene::cutaway::shade::Ramp
-impl core::marker::UnsafeUnpin for pixtuoid_scene::cutaway::shade::Ramp
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::cutaway::shade::Ramp
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::cutaway::shade::Ramp
-pub fn pixtuoid_scene::cutaway::shade::dither_band(&mut pixtuoid_core::sprite::RgbBuffer, u16, u16, pixtuoid_core::sprite::Rgb, pixtuoid_core::sprite::Rgb)
-pub fn pixtuoid_scene::cutaway::shade::fill(&mut pixtuoid_core::sprite::RgbBuffer, u16, u16, u16, u16, pixtuoid_core::sprite::Rgb)
-pub fn pixtuoid_scene::cutaway::shade::slab(&mut pixtuoid_core::sprite::RgbBuffer, u16, u16, u16, u16, &pixtuoid_scene::cutaway::shade::Ramp)
 pub mod pixtuoid_scene::embedded_pack
 pub fn pixtuoid_scene::embedded_pack::load_sprite_pack(core::option::Option<std::path::PathBuf>) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub mod pixtuoid_scene::floor
@@ -257,7 +208,6 @@ pub pixtuoid_scene::floor::FrameInputs::floor_meta: pixtuoid_scene::floor::Floor
 pub pixtuoid_scene::floor::FrameInputs::floor_pet: core::option::Option<&'a pixtuoid_scene::pet::Pet>
 pub pixtuoid_scene::floor::FrameInputs::now: std::time::SystemTime
 pub pixtuoid_scene::floor::FrameInputs::pack: &'a pixtuoid_core::sprite::format::Pack
-pub pixtuoid_scene::floor::FrameInputs::scale: pixtuoid_scene::render_scale::RenderScale
 pub pixtuoid_scene::floor::FrameInputs::scene: &'a pixtuoid_core::state::SceneState
 pub pixtuoid_scene::floor::FrameInputs::size: pixtuoid_scene::layout::Size
 pub pixtuoid_scene::floor::FrameInputs::theme: &'static pixtuoid_scene::theme::Theme
@@ -331,7 +281,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::ProjectedSl
 pub const pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER: u64
 pub fn pixtuoid_scene::floor::build_floor_scene(&pixtuoid_core::state::SceneState, usize) -> alloc::vec::Vec<pixtuoid_scene::floor::ProjectedSlot>
 pub fn pixtuoid_scene::floor::floor_capacity(u16, u16, u64) -> usize
-pub fn pixtuoid_scene::floor::floor_capacity_scaled(u16, u16, pixtuoid_scene::render_scale::RenderScale, u64) -> usize
 pub fn pixtuoid_scene::floor::floor_seed(usize) -> u64
 pub fn pixtuoid_scene::floor::frame_epilogue(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, impl core::iter::traits::collect::IntoIterator<Item = pixtuoid_core::id::AgentId>, std::time::SystemTime)
 pub fn pixtuoid_scene::floor::num_floors(&pixtuoid_core::state::SceneState) -> usize
@@ -1392,7 +1341,6 @@ pub pixtuoid_scene::pixel_painter::PixelCtx::floor_pet: core::option::Option<&'a
 pub pixtuoid_scene::pixel_painter::PixelCtx::layout: &'a pixtuoid_scene::layout::Layout
 pub pixtuoid_scene::pixel_painter::PixelCtx::now: std::time::SystemTime
 pub pixtuoid_scene::pixel_painter::PixelCtx::pack: &'a pixtuoid_core::sprite::format::Pack
-pub pixtuoid_scene::pixel_painter::PixelCtx::scale: pixtuoid_scene::render_scale::RenderScale
 pub pixtuoid_scene::pixel_painter::PixelCtx::scene: &'a pixtuoid_core::state::SceneState
 pub pixtuoid_scene::pixel_painter::PixelCtx::store: &'a mut pixtuoid_scene::floor::FloorCtx
 pub pixtuoid_scene::pixel_painter::PixelCtx::theme: &'a pixtuoid_scene::theme::Theme

@@ -69,7 +69,6 @@ impl OfficeRenderer {
             theme,
             now,
             size: Size { w: buf_w, h: buf_h },
-            scale: pixtuoid_scene::render_scale::RenderScale::ONE,
             floor_meta,
             active_pet: None,
             floor_pet,

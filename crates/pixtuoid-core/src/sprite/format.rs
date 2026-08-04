@@ -389,7 +389,7 @@ pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &["walking_coffee", "side_sea
 /// only "denser" cannot express a pack shipping BOTH a 2x and a 4x variant of
 /// one piece, and leaves the file's meaning dependent on whichever render
 /// scale happens to measure it.
-pub const DENSITY_VARIANT_SEP: char = '@';
+pub(crate) const DENSITY_VARIANT_SEP: char = '@';
 
 /// The animation name for `base` drawn at `density`x.
 pub fn density_variant_name(base: &str, density: u16) -> String {
@@ -400,7 +400,7 @@ pub fn density_variant_name(base: &str, density: u16) -> String {
 ///
 /// `1x` is deliberately NOT a variant: it would be a second name for the base
 /// piece, and one thing with two names is how a pack ends up shipping both.
-pub fn split_density_variant(name: &str) -> Option<(&str, u16)> {
+pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
     let (base, density) = name.rsplit_once(DENSITY_VARIANT_SEP)?;
     let digits = density.strip_suffix('x')?;
     // Digits only. `u16::from_str` accepts a leading `+`, which would give one
@@ -422,7 +422,7 @@ pub fn split_density_variant(name: &str) -> Option<(&str, u16)> {
 /// its least visible direction: the variant loads for the bundled pack but
 /// `Pack::merge_from` never inherits it, so a `--pack-dir` user silently drops
 /// back to the upscale.
-pub fn is_optional_furniture_animation(name: &str) -> bool {
+pub(crate) fn is_optional_furniture_animation(name: &str) -> bool {
     let base = split_density_variant(name).map_or(name, |(base, _)| base);
     OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
 }

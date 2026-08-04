@@ -51,7 +51,14 @@ pub fn floor_capacity(buf_w: u16, buf_h: u16, floor_seed: u64) -> usize {
 /// functions rather than one defaulted parameter because every existing caller
 /// means "buffer pixels are layout units" and must keep meaning it; a painter
 /// that adopts a scale opts in at its own call site.
-pub fn floor_capacity_scaled(
+///
+/// `#[cfg(test)]` because no painter has opted in yet: this is the vehicle for
+/// `render_scale`'s scale-invariance proof, not shipped behaviour. Un-gate it
+/// the day a painter passes a scale — the proof is what makes that safe, and
+/// leaving it compiled-but-uncalled would have been the same unreached-surface
+/// claim the seam itself was flagged for.
+#[cfg(test)]
+pub(crate) fn floor_capacity_scaled(
     buf_w: u16,
     buf_h: u16,
     scale: crate::render_scale::RenderScale,
@@ -313,7 +320,6 @@ pub struct FrameInputs<'a> {
     /// ambiguous once the two spaces differ, so every painter states which it
     /// means. `RenderScale::ONE` is the classic path and keeps `size` the
     /// office's extent exactly as before.
-    pub scale: crate::render_scale::RenderScale,
     /// This floor's index, altitude, and layout seed.
     pub floor_meta: FloorMeta,
     /// The pet's live interaction state, if a pet is present.
@@ -355,22 +361,16 @@ pub fn render_floor(
         active_pet,
         floor_pet,
         debug_walkable,
-        scale,
     } = inputs;
     // The two spaces part here: the buffer is sized in PIXELS, the office is
     // laid out in LOGICAL units. At `RenderScale::ONE` they coincide and this
     // is byte-identical to the pre-seam behaviour.
     buf.resize_fill(size.w, size.h, theme.surface.bg_fallback);
-    let layout = fctx.frame_layout(
-        scale.logical(size.w),
-        scale.logical(size.h),
-        floor_meta.floor_seed,
-    )?;
+    let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
     let result = render_to_rgb_buffer(&mut PixelCtx {
         // Reborrow: `frame_epilogue` uses `fctx` after this render.
         store: &mut *fctx,
         buf,
-        scale,
         scene,
         layout: &layout,
         pack,

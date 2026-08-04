@@ -7,7 +7,7 @@
 
 use std::time::SystemTime;
 
-use pixtuoid_core::sprite::blit::{blit_frame, blit_frame_scaled};
+use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
@@ -225,37 +225,24 @@ fn paint_mascot_bubbles(buf: &mut RgbBuffer, pos: Point, frame_h: u16, runs: u32
 }
 
 /// Blit `frame` CENTRED on `pos` (origin = `pos − size/2`, saturating).
-fn blit_centered(
-    frame: &Frame,
-    pos: Point,
-    scale: crate::render_scale::RenderScale,
-    buf: &mut RgbBuffer,
-) {
-    // Centre in LOGICAL space, THEN convert. Centring in buffer space would
-    // halve a scaled sprite's width, drifting odd-width art half a logical unit
-    // off the footprint its mask stamped.
+///
+/// Layout units ARE buffer pixels in this pass, so the centring is plain
+/// integer arithmetic. If a scaled classic painter is ever built, halve the
+/// sprite in LOGICAL space and convert AFTERWARDS — halving an already-scaled
+/// width drifts odd-width art half a logical unit off the footprint its mask
+/// stamped, and no scale-1 test can see it (`pixtuoid-scene/CLAUDE.md`, the
+/// render-scale sharp edge).
+fn blit_centered(frame: &Frame, pos: Point, buf: &mut RgbBuffer) {
     let px = pos.x.saturating_sub(frame.width() / 2);
     let py = pos.y.saturating_sub(frame.height() / 2);
-    blit_frame_scaled(
-        frame,
-        scale.to_buffer(px),
-        scale.to_buffer(py),
-        scale.factor(),
-        buf,
-    );
+    blit_frame(frame, px, py, buf);
 }
 
 /// Look up `anim_name`, take its FIRST frame, and [`blit_centered`] it on `pos`
 /// — a no-op if the pack lacks the animation.
-fn blit_centered_first_frame(
-    pack: &Pack,
-    anim_name: &str,
-    pos: Point,
-    scale: crate::render_scale::RenderScale,
-    buf: &mut RgbBuffer,
-) {
+fn blit_centered_first_frame(pack: &Pack, anim_name: &str, pos: Point, buf: &mut RgbBuffer) {
     if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
-        blit_centered(f, pos, scale, buf);
+        blit_centered(f, pos, buf);
     }
 }
 
@@ -272,14 +259,13 @@ pub(super) struct DrawableCtx<'a> {
     pub cache: &'a mut FrameCache,
     pub now: SystemTime,
     pub theme: &'a crate::theme::Theme,
-    pub scale: crate::render_scale::RenderScale,
 }
 
 pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
     // Re-bound to the original names so the arms below are untouched.
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
-    let (pack, now, theme, scale) = (c.pack, c.now, c.theme, c.scale);
+    let (pack, now, theme) = (c.pack, c.now, c.theme);
     match &d.kind {
         DrawableKind::DeskCubicle {
             desk,
@@ -355,7 +341,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             // A character behind the counter is occluded by the counter's own
             // sprite (it y-sorts at the south base, and the mask south-anchors a
             // shallow strip there) — no synthetic cap needed.
-            blit_centered_first_frame(pack, anim_name, *pos, scale, buf);
+            blit_centered_first_frame(pack, anim_name, *pos, buf);
             let steam_dx: i16 = if *use_large {
                 PANTRY_STEAM_DX_LARGE
             } else {
@@ -380,9 +366,9 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 // Mirrored (south sofa / lounge couch): back faces NORTH toward
                 // the windows.
                 if *mirrored {
-                    blit_centered(&f.mirror_vertical(), *pos, scale, buf);
+                    blit_centered(&f.mirror_vertical(), *pos, buf);
                 } else {
-                    blit_centered(f, *pos, scale, buf);
+                    blit_centered(f, *pos, buf);
                 }
             }
         }
@@ -403,19 +389,19 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             paint_kitchen_island(buf, pos.x, pos.y, theme);
         }
         DrawableKind::SnackShelf { pos } => {
-            blit_centered_first_frame(pack, "snack_shelf", *pos, scale, buf);
+            blit_centered_first_frame(pack, "snack_shelf", *pos, buf);
         }
         DrawableKind::Plant { kind, pos } => {
             // Occlusion is the sprite's own job: the foliage overhangs north of
             // the mask's shallow south-anchored pot strip, so it hides a walker
             // parked behind it. No synthetic back-cap.
-            blit_centered_first_frame(pack, kind.sprite_name(), *pos, scale, buf);
+            blit_centered_first_frame(pack, kind.sprite_name(), *pos, buf);
         }
         DrawableKind::PodDecorItem { kind, pos } => {
-            blit_centered_first_frame(pack, kind.sprite_name(), *pos, scale, buf);
+            blit_centered_first_frame(pack, kind.sprite_name(), *pos, buf);
         }
         DrawableKind::FloorLamp { pos } => {
-            blit_centered_first_frame(pack, "floor_lamp", *pos, scale, buf);
+            blit_centered_first_frame(pack, "floor_lamp", *pos, buf);
         }
         DrawableKind::Door { pos, frame_idx } => {
             if let Some(f) = pack.animation("door").and_then(|a| frame_at(a, *frame_idx)) {
@@ -456,7 +442,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             } else {
                 frame
             };
-            blit_centered(final_frame, *pos, scale, buf);
+            blit_centered(final_frame, *pos, buf);
             if let Some(elapsed) = pet_elapsed_ms {
                 paint_pet_hearts(buf, *pos, *elapsed);
             } else if *anim_name == kind.sleep_anim() {
@@ -477,9 +463,9 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 return;
             };
             if *degraded {
-                blit_centered(&super::palette::degraded_frame(frame), *pos, scale, buf);
+                blit_centered(&super::palette::degraded_frame(frame), *pos, buf);
             } else {
-                blit_centered(frame, *pos, scale, buf);
+                blit_centered(frame, *pos, buf);
             }
             // The busy tell keys on in-flight RUNS, not the (persistent,
             // single-user) session count, which sticks at 1 at rest.
@@ -707,7 +693,6 @@ mod tests {
                 cache: &mut cache,
                 now: SystemTime::UNIX_EPOCH,
                 theme: th,
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         assert_eq!(paper_pixel_count(&buf, th), 0);
@@ -724,7 +709,6 @@ mod tests {
                 cache: &mut cache,
                 now: SystemTime::UNIX_EPOCH,
                 theme: th,
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         assert_eq!(paper_pixel_count(&buf, th), 0);
@@ -749,7 +733,6 @@ mod tests {
                     cache: &mut cache,
                     now: SystemTime::UNIX_EPOCH,
                     theme: th,
-                    scale: crate::render_scale::RenderScale::ONE,
                 },
             );
             counts.push(paper_pixel_count(&buf, th));
@@ -779,7 +762,6 @@ mod tests {
                 cache: &mut cache,
                 now: SystemTime::UNIX_EPOCH,
                 theme: th,
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         let t3_top = base_y - (3 * STACK_PX_PER_TIER - 1);
@@ -808,7 +790,6 @@ mod tests {
                 cache: &mut cache,
                 now: SystemTime::UNIX_EPOCH,
                 theme: th,
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         let sy = stack_top - (crate::token_meter::SHEET_FALL_PX - 2);
@@ -824,7 +805,6 @@ mod tests {
                 cache: &mut cache,
                 now: SystemTime::UNIX_EPOCH,
                 theme: th,
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         for y in 0..stack_top {
@@ -881,7 +861,6 @@ mod tests {
                 cache: &mut cache,
                 now,
                 theme: theme(),
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         // Cabinet lands at desk.x - cab.width - 1 .. ; sample a pixel inside it.
@@ -933,7 +912,6 @@ mod tests {
                     cache: &mut cache,
                     now,
                     theme: theme(),
-                    scale: crate::render_scale::RenderScale::ONE,
                 },
             );
             buf
@@ -977,7 +955,6 @@ mod tests {
                 cache: &mut cache,
                 now,
                 theme: theme(),
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         for y in 0..buf.height() {
@@ -1014,7 +991,6 @@ mod tests {
                     cache: &mut cache,
                     now,
                     theme: theme(),
-                    scale: crate::render_scale::RenderScale::ONE,
                 },
             );
             buf
@@ -1059,7 +1035,6 @@ mod tests {
                 cache: &mut cache,
                 now,
                 theme: th,
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         let vx = pos.x - VENDING_BODY.w / 2;
@@ -1113,7 +1088,6 @@ mod tests {
                 cache: &mut cache,
                 now,
                 theme: th,
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         let px0 = pos.x - PRINTER_BODY.w / 2;
@@ -1154,42 +1128,11 @@ mod tests {
         let marker = Rgb { r: 9, g: 8, b: 7 };
         let frame = Frame::from_pixels(3, 2, vec![Some(marker); 6]);
         let mut buf = RgbBuffer::filled(20, 20, bg);
-        blit_centered(
-            &frame,
-            Point { x: 10, y: 10 },
-            crate::render_scale::RenderScale::ONE,
-            &mut buf,
-        );
+        blit_centered(&frame, Point { x: 10, y: 10 }, &mut buf);
         assert_eq!(buf.get(9, 9), marker, "top-left lands at pos − size/2");
         assert_eq!(buf.get(11, 10), marker, "bottom-right at (9+2, 9+1)");
         assert_eq!(buf.get(8, 9), bg, "one column west of the frame stays bg");
         assert_eq!(buf.get(9, 8), bg, "one row north of the frame stays bg");
-    }
-
-    /// The sibling of the test above, at scale. Centring must happen in
-    /// LOGICAL space and convert ONCE: centring in buffer space would halve
-    /// the already-scaled width, drifting the sprite off the footprint its
-    /// mask stamped — a drift no single-scale test can see.
-    #[test]
-    fn a_centred_blit_scales_both_its_position_and_its_art() {
-        let bg = Rgb { r: 0, g: 0, b: 0 };
-        let marker = Rgb { r: 9, g: 8, b: 7 };
-        let two = crate::render_scale::RenderScale::new(2).expect("2 is nonzero");
-        // Same 3x2 odd-width frame, so the floor division is pinned here too:
-        // logical top-left (9, 9) -> buffer (18, 18), art 3x2 -> 6x4 pixels.
-        let frame = Frame::from_pixels(3, 2, vec![Some(marker); 6]);
-        let mut buf = RgbBuffer::filled(40, 40, bg);
-        blit_centered(&frame, Point { x: 10, y: 10 }, two, &mut buf);
-
-        assert_eq!(buf.get(18, 18), marker, "top-left at scale.to_buffer(9)");
-        assert_eq!(buf.get(23, 21), marker, "bottom-right at (18+5, 18+3)");
-        assert_eq!(buf.get(17, 18), bg, "one column west stays bg");
-        assert_eq!(
-            buf.get(24, 18),
-            bg,
-            "one column east of the 6px span stays bg"
-        );
-        assert_eq!(buf.get(18, 17), bg, "one row north stays bg");
     }
 
     #[test]
@@ -1217,7 +1160,6 @@ mod tests {
                 cache: &mut cache,
                 now,
                 theme: theme(),
-                scale: crate::render_scale::RenderScale::ONE,
             },
         );
         for y in 0..buf.height() {
@@ -1257,7 +1199,6 @@ mod tests {
                     cache: &mut cache,
                     now,
                     theme: theme(),
-                    scale: crate::render_scale::RenderScale::ONE,
                 },
             );
             buf

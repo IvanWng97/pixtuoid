@@ -36,6 +36,7 @@ pub mod board;
 pub mod burn;
 pub mod chitchat;
 pub(crate) mod creatures;
+#[doc(hidden)]
 pub mod cutaway;
 pub mod embedded_pack;
 pub mod floor;

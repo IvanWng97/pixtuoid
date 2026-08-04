@@ -253,7 +253,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         buf: &mut *ctx.buf,
         // The half-block flush is the classic profile: buffer pixels ARE
         // layout units, so the terminal painter stays at ONE.
-        scale: pixtuoid_scene::render_scale::RenderScale::ONE,
         scene,
         layout: &layout,
         pack,

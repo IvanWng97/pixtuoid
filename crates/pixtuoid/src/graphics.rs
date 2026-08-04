@@ -16,7 +16,7 @@ use pixtuoid_scene::render_scale::RenderScale;
 
 /// A terminal cell's size in real pixels, as the terminal reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CellSize {
+pub(crate) struct CellSize {
     /// Cell width in pixels.
     pub w: u16,
     /// Cell height in pixels.
@@ -24,7 +24,10 @@ pub struct CellSize {
 }
 
 /// What the user asked for on the command line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// The one `pub` item here, re-exported from the crate root: it is a field of
+/// the `pub` [`crate::cli::Cmd`] and `main.rs` is a separate crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum GraphicsMode {
     /// Use terminal graphics when the terminal supports them.
     #[default]
@@ -33,33 +36,18 @@ pub enum GraphicsMode {
     Off,
 }
 
-/// Which profile a run will actually paint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Profile {
-    /// The half-block office. One buffer pixel per cell.
-    Classic,
-    /// The orthographic cutaway, drawn at `scale` real pixels per logical unit
-    /// and handed to the terminal as an image.
-    Cutaway {
-        /// Real pixels per logical office unit.
-        scale: RenderScale,
-    },
-}
-
-/// Why a run is painting `Classic` — the honest answer to "why is it not the
+/// Why a run is painting classic — the honest answer to "why is it not the
 /// pretty one?", which a user is entitled to and `doctor` prints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClassicReason {
+pub(crate) enum ClassicReason {
     /// `--graphics off`.
     Disabled,
     /// The terminal was never asked — output is not a terminal, so the query
     /// would have gone into a pipe and nothing could answer it.
     ///
     /// SEPARATE from [`Self::NoProtocol`] because collapsing them makes the
-    /// report assert something it never established. It reads as a verdict on
-    /// the terminal when the real cause is the pipe, and the first person it
-    /// misled was its author, running `doctor | grep graphics:` and believing
-    /// the answer.
+    /// report assert something it never established: it reads as a verdict on
+    /// the terminal when the real cause is the pipe.
     NotQueried,
     /// The terminal answered, and it has no graphics protocol.
     NoProtocol,
@@ -71,18 +59,32 @@ pub enum ClassicReason {
     CellTooSmall(CellSize),
 }
 
-/// The resolved decision plus, when it went the boring way, the reason.
+/// The resolved decision: what to paint, and — when it went the boring way —
+/// why.
+///
+/// One type rather than a profile beside an `Option<reason>`, because "which
+/// profile" and "why not the pretty one" are one answer: a cutaway plan has
+/// nothing to explain and a classic plan always does. As two fields the pair
+/// was constructible in both contradictory shapes, and the diagnostic carried
+/// an "unknown" arm for a state no producer ever emitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Plan {
-    /// What to paint.
-    pub profile: Profile,
-    /// Set exactly when `profile` is [`Profile::Classic`].
-    pub reason: Option<ClassicReason>,
+pub(crate) enum Plan {
+    /// The orthographic cutaway, drawn at `scale` real pixels per logical unit
+    /// and handed to the terminal as an image.
+    Cutaway {
+        /// Real pixels per logical office unit.
+        scale: RenderScale,
+    },
+    /// The half-block office. One buffer pixel per cell.
+    Classic {
+        /// Why this run is not painting the cutaway.
+        reason: ClassicReason,
+    },
 }
 
 /// What the terminal said when asked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Detected {
+pub(crate) struct Detected {
     /// True when the terminal speaks a graphics protocol we can drive.
     pub has_protocol: bool,
     /// The cell size it reports.
@@ -112,46 +114,44 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 /// [`RenderScale::fit`] in the engine, so the window and canvas painters get
 /// the same rule without re-deriving it — this function is only the terminal's
 /// contribution to it.
-pub fn render_scale_for_cell(cell: CellSize, max_density: u16) -> Option<RenderScale> {
+pub(crate) fn render_scale_for_cell(cell: CellSize, max_density: u16) -> Option<RenderScale> {
     RenderScale::fit(raw_scale_for_cell(cell), max_density)
 }
 
 /// Decide what to paint. Pure — [`detect`] supplies the argument.
 ///
 /// `detected` is `None` when the query could not run at all (not a tty, or the
-/// terminal never answered). Same PROFILE as "no protocol", different FACT —
-/// hence [`ClassicReason::NotQueried`] rather than one merged arm. The profile
-/// is all the renderer needs, but the reason is what the user reads, and a
-/// report that says the terminal answered when it was never asked sends them
-/// to fix the wrong thing.
-pub fn resolve(mode: GraphicsMode, detected: Option<Detected>, max_density: u16) -> Plan {
-    let classic = |reason| Plan {
-        profile: Profile::Classic,
-        reason: Some(reason),
-    };
+/// terminal never answered) — the same profile as "no protocol" but a different
+/// FACT, hence [`ClassicReason::NotQueried`] rather than one merged arm.
+pub(crate) fn resolve(mode: GraphicsMode, detected: Option<Detected>, max_density: u16) -> Plan {
     if mode == GraphicsMode::Off {
-        return classic(ClassicReason::Disabled);
+        return Plan::Classic {
+            reason: ClassicReason::Disabled,
+        };
     }
     let Some(d) = detected else {
-        return classic(ClassicReason::NotQueried);
+        return Plan::Classic {
+            reason: ClassicReason::NotQueried,
+        };
     };
     if !d.has_protocol {
-        return classic(ClassicReason::NoProtocol);
+        return Plan::Classic {
+            reason: ClassicReason::NoProtocol,
+        };
     }
     match render_scale_for_cell(d.cell, max_density) {
         // Scale 1 IS the classic density: an encode per frame that draws the
         // identical picture.
-        Some(scale) if scale.get() > 1 => Plan {
-            profile: Profile::Cutaway { scale },
-            reason: None,
+        Some(scale) if scale.get() > 1 => Plan::Cutaway { scale },
+        _ => Plan::Classic {
+            reason: ClassicReason::CellTooSmall(d.cell),
         },
-        _ => classic(ClassicReason::CellTooSmall(d.cell)),
     }
 }
 
 impl ClassicReason {
     /// One line for `doctor` / the boot log, explaining the fallback.
-    pub fn describe(self) -> String {
+    pub(crate) fn describe(self) -> String {
         match self {
             Self::Disabled => "disabled by --graphics off".to_string(),
             Self::NotQueried => "output is not a terminal, so nothing could answer the capability \
@@ -170,33 +170,36 @@ impl ClassicReason {
     }
 }
 
-/// The `graphics:` line for `doctor` — what a `run` in THIS terminal would
-/// paint, and why.
+/// The `graphics:` line for `doctor` — the profile this terminal is CAPABLE of,
+/// and why it falls back when it is not.
+///
+/// Capability, not a prediction: `run` paints classic unconditionally today, so
+/// a row phrased as "what a run would paint" promised a cutaway the binary
+/// never delivers. This row says what the profile WILL pick up once it is wired
+/// to a painter.
 ///
 /// Pure, so the wording is unit-tested; `doctor` supplies the probe result the
 /// same way it does for the truecolor row beside it.
-pub fn graphics_diagnostic_row(
+pub(crate) fn graphics_diagnostic_row(
     mode: GraphicsMode,
     detected: Option<Detected>,
     max_density: u16,
 ) -> String {
-    let plan = resolve(mode, detected, max_density);
-    match plan.profile {
-        Profile::Cutaway { scale } => {
+    match resolve(mode, detected, max_density) {
+        Plan::Cutaway { scale } => {
             let cell = detected.map_or_else(
                 || String::from("unknown cell"),
                 |d| format!("{}x{} cell", d.cell.w, d.cell.h),
             );
             format!(
-                "graphics: cutaway at {}x ({cell}) — terminal graphics available",
+                "graphics: terminal graphics available ({cell}) — the cutaway profile \
+                 would render at {}x (not yet wired to `run`)",
                 scale.get()
             )
         }
-        Profile::Classic => format!(
-            "graphics: classic half-blocks — {}",
-            plan.reason
-                .map_or_else(|| "unknown".to_string(), ClassicReason::describe)
-        ),
+        Plan::Classic { reason } => {
+            format!("graphics: classic half-blocks — {}", reason.describe())
+        }
     }
 }
 
@@ -212,15 +215,16 @@ pub fn graphics_diagnostic_row(
 /// visualiser that refuses to start because it could not ask a question would
 /// be worse than one that draws the plain office.
 ///
-/// **Costs up to 2s on a terminal that never answers** (upstream's
-/// `STDIN_READ_TIMEOUT_MILLIS`, not configurable through `from_query_stdio`) —
-/// 20x this repo's own 100ms [`crate::term::TRUECOLOR_PROBE_TIMEOUT`]. Fine for
-/// `doctor`, which is a diagnostic the user waits on deliberately. NOT fine on
-/// the `run` boot path, where it would be a two-second stall before the office
-/// appears on exactly the terminals that get the plain office anyway — so
-/// wiring `run` needs the query off the critical path (a first-frame-classic
-/// then upgrade, or a cached answer), not a call in the same place.
-pub fn detect() -> Option<Detected> {
+/// **Costs up to 2s on a terminal that never answers** — 20x this repo's own
+/// 100ms [`crate::term::TRUECOLOR_PROBE_TIMEOUT`]. That is upstream's DEFAULT,
+/// not a fixed cost: `STDIN_READ_TIMEOUT_MILLIS` is only what
+/// `QueryStdioOptions::default()` puts in its `timeout` field, and
+/// `Picker::from_query_stdio_with_options` takes any `Duration`. `doctor` keeps
+/// the generous default because it is a diagnostic the user waits on
+/// deliberately, and a slow terminal answering late is the answer it wants; a
+/// future `run` wiring should pass [`crate::term::TRUECOLOR_PROBE_TIMEOUT`]
+/// instead of designing the query off the boot path.
+pub(crate) fn detect() -> Option<Detected> {
     use ratatui_image::picker::{Picker, ProtocolType};
 
     let picker = Picker::from_query_stdio().ok()?;
@@ -291,19 +295,21 @@ mod tests {
     fn off_beats_a_capable_terminal() {
         // The flag is the user's, not a hint — a capable terminal must not
         // override it.
-        let plan = resolve(GraphicsMode::Off, capable(CELL_8X16), 1);
-        assert_eq!(plan.profile, Profile::Classic);
-        assert_eq!(plan.reason, Some(ClassicReason::Disabled));
+        assert_eq!(
+            resolve(GraphicsMode::Off, capable(CELL_8X16), 1),
+            Plan::Classic {
+                reason: ClassicReason::Disabled
+            }
+        );
     }
 
     #[test]
     fn auto_takes_the_cutaway_on_a_capable_terminal() {
         let plan = resolve(GraphicsMode::Auto, capable(CELL_8X16), 1);
-        let Profile::Cutaway { scale } = plan.profile else {
-            panic!("expected the cutaway, got {:?}", plan.profile);
+        let Plan::Cutaway { scale } = plan else {
+            panic!("expected the cutaway, got {plan:?}");
         };
         assert_eq!(scale.get(), 8);
-        assert_eq!(plan.reason, None, "a cutaway run has nothing to explain");
     }
 
     /// The fallback is the common path — most terminals have no protocol —
@@ -312,8 +318,6 @@ mod tests {
     #[test]
     fn every_way_of_lacking_graphics_falls_back_with_a_reason() {
         let cases = [
-            // Never-asked vs asked-and-told-no are different facts — collapsing
-            // them made a piped `doctor | grep` read as a verdict on the terminal.
             (None, ClassicReason::NotQueried),
             (
                 Some(Detected {
@@ -332,18 +336,24 @@ mod tests {
             ),
         ];
         for (detected, want) in cases {
-            let plan = resolve(GraphicsMode::Auto, detected, 1);
-            assert_eq!(plan.profile, Profile::Classic, "for {detected:?}");
-            assert_eq!(plan.reason, Some(want), "for {detected:?}");
-            assert!(!plan.reason.expect("set").describe().is_empty());
+            assert_eq!(
+                resolve(GraphicsMode::Auto, detected, 1),
+                Plan::Classic { reason: want },
+                "for {detected:?}"
+            );
+            assert!(!want.describe().is_empty());
         }
     }
 
     #[test]
     fn the_doctor_row_names_the_profile_and_never_leaves_a_fallback_unexplained() {
         let row = graphics_diagnostic_row(GraphicsMode::Auto, capable(CELL_8X16), 1);
-        assert!(row.starts_with("graphics: cutaway at 8x"), "{row}");
         assert!(row.contains("8x16 cell"), "{row}");
+        assert!(row.contains("would render at 8x"), "{row}");
+        // The row reports a CAPABILITY. Until the profile reaches a painter it
+        // must not read as a prediction about `run`, which paints classic
+        // whatever this says.
+        assert!(row.contains("not yet wired to `run`"), "{row}");
 
         // The fallback is the COMMON path, so every classic row must carry its
         // reason — a bare "classic" reads as a verdict on the office.
@@ -380,13 +390,16 @@ mod tests {
     /// pinned from BOTH sides so a future `>=` typo cannot slip through.
     #[test]
     fn the_cutoff_is_where_the_image_path_starts_buying_something() {
-        let plan = resolve(GraphicsMode::Auto, capable(CellSize { w: 1, h: 2 }), 1);
-        assert_eq!(plan.profile, Profile::Classic, "1px per unit buys nothing");
-
-        let plan = resolve(GraphicsMode::Auto, capable(CellSize { w: 2, h: 4 }), 1);
         assert_eq!(
-            plan.profile,
-            Profile::Cutaway {
+            resolve(GraphicsMode::Auto, capable(CellSize { w: 1, h: 2 }), 1),
+            Plan::Classic {
+                reason: ClassicReason::CellTooSmall(CellSize { w: 1, h: 2 })
+            },
+            "1px per unit buys nothing"
+        );
+        assert_eq!(
+            resolve(GraphicsMode::Auto, capable(CellSize { w: 2, h: 4 }), 1),
+            Plan::Cutaway {
                 scale: RenderScale::new(2).expect("nonzero"),
             },
             "2px per unit is the first density worth an encode"

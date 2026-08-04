@@ -778,17 +778,14 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::ValidationReport
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::ValidationReport
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::ValidationReport
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::ValidationReport
-pub const pixtuoid_core::sprite::format::DENSITY_VARIANT_SEP: char
 pub const pixtuoid_core::sprite::format::OPTIONAL_CHARACTER_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::RECOLOR_KEYS: [char; 4]
 pub const pixtuoid_core::sprite::format::REQUIRED_CHARACTER_ANIMATIONS: &[&str]
 pub fn pixtuoid_core::sprite::format::density_variant_name(&str, u16) -> alloc::string::String
-pub fn pixtuoid_core::sprite::format::is_optional_furniture_animation(&str) -> bool
 pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::parse_sprite_file(&str, &pixtuoid_core::sprite::Palette) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::sprite::Frame>>
-pub fn pixtuoid_core::sprite::format::split_density_variant(&str) -> core::option::Option<(&str, u16)>
 pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub struct pixtuoid_core::sprite::Frame(_)
 impl pixtuoid_core::sprite::Frame

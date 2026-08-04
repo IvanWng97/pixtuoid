@@ -18,7 +18,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 /// Every surface in the profile carries one. Uniformity is the point: the room
 /// reads as lit from one direction only because nothing opts out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ramp {
+pub(crate) struct Ramp {
     /// The face turned toward the key light — the mass's north edge.
     pub lit: Rgb,
     /// The material's own colour, covering its body.
@@ -32,7 +32,8 @@ impl Ramp {
     ///
     /// For genuinely self-lit surfaces (a screen, an LED) where a key-light
     /// gradient would be wrong, not for skipping the shading pass.
-    pub fn flat(c: Rgb) -> Self {
+    #[cfg(test)]
+    pub(crate) fn flat(c: Rgb) -> Self {
         Self {
             lit: c,
             base: c,
@@ -52,7 +53,7 @@ impl Ramp {
     /// Proportional rather than a flat per-channel add: moving a fraction of
     /// the distance to the endpoint keeps the hue, where `saturating_add` on an
     /// already-bright channel clips and skews it.
-    pub fn from_base(base: Rgb, tint_pct: u8, shade_pct: u8) -> Self {
+    pub(crate) fn from_base(base: Rgb, tint_pct: u8, shade_pct: u8) -> Self {
         Self {
             lit: toward(base, 255, tint_pct),
             base,
@@ -85,7 +86,7 @@ fn toward(c: Rgb, target: u8, pct: u8) -> Rgb {
 /// A mass shorter than two rows is painted `base` only — at one row the top and
 /// bottom edges are the same pixels, and picking either tone would make a 1px
 /// detail read as a highlight or a shadow rather than as the material.
-pub fn slab(buf: &mut RgbBuffer, x: u16, y: u16, w: u16, h: u16, ramp: &Ramp) {
+pub(crate) fn slab(buf: &mut RgbBuffer, x: u16, y: u16, w: u16, h: u16, ramp: &Ramp) {
     if w == 0 || h == 0 {
         return;
     }
@@ -97,7 +98,7 @@ pub fn slab(buf: &mut RgbBuffer, x: u16, y: u16, w: u16, h: u16, ramp: &Ramp) {
 }
 
 /// Paint a solid rect, clipped to the buffer.
-pub fn fill(buf: &mut RgbBuffer, x: u16, y: u16, w: u16, h: u16, c: Rgb) {
+pub(crate) fn fill(buf: &mut RgbBuffer, x: u16, y: u16, w: u16, h: u16, c: Rgb) {
     for dy in 0..h {
         let py = y.saturating_add(dy);
         if py >= buf.height() {
@@ -124,7 +125,7 @@ const BAYER_4X4: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [
 ///
 /// The transition an indexed palette cannot express as a blend. `y1` is
 /// exclusive; a band with no height paints nothing.
-pub fn dither_band(buf: &mut RgbBuffer, y0: u16, y1: u16, dark: Rgb, light: Rgb) {
+pub(crate) fn dither_band(buf: &mut RgbBuffer, y0: u16, y1: u16, dark: Rgb, light: Rgb) {
     if y1 <= y0 {
         return;
     }
