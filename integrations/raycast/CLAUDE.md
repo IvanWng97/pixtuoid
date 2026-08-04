@@ -96,7 +96,11 @@ green PR does not prove the manifest is publishable. See the
 [README](README.md) for `npm run {build,dev,lint}`.
 
 - **`npm run audit` is plain `npm audit --audit-level=low`, same as site's.** It
-  was a per-advisory allow-list script until its one entry cleared upstream;
+  was a per-advisory allow-list script until its one entry, GHSA-mh99-v99m-4gvg,
+  cleared — upstream BACKPORTED that fix to **2.1.3**, so the pinned 2.x copy
+  took it in-range at 2.1.4 and the chain never had to move (the deleted entry's
+  "first patched 5.0.8, so 2.x is unfixable" is the stale reading, and it has
+  already misled one reviewer);
   `npm audit` has no per-advisory ignore, so if an unfixable advisory recurs
   here, restore that script from history rather than lowering `--audit-level`,
   which blinds a whole severity band to hide one id. Unfixable is realistic:
