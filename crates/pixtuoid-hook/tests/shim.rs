@@ -11,13 +11,41 @@ const BIN: &str = env!("CARGO_BIN_EXE_pixtuoid-hook");
 
 /// A short, unique socket path under /tmp — a deep tempdir would blow the
 /// ~104-byte `sun_path` limit.
-fn sock_path(tag: &str) -> std::path::PathBuf {
+/// A test socket path that removes itself on drop. Cleanup used to be one
+/// `remove_file` per test to remember, and 3 of 7 didn't — so every run leaked
+/// a `/tmp` socket, forever.
+struct SockPath(std::path::PathBuf);
+
+impl std::ops::Deref for SockPath {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for SockPath {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl AsRef<std::ffi::OsStr> for SockPath {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+impl Drop for SockPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn sock_path(tag: &str) -> SockPath {
     let p = std::path::PathBuf::from(format!(
         "/tmp/pixtuoid-hook-it-{}-{tag}.sock",
         std::process::id()
     ));
+    // Also up-front: a previous run that was KILLED never dropped its guard.
     let _ = std::fs::remove_file(&p);
-    p
+    SockPath(p)
 }
 
 /// Generic over the arg type so the non-UTF-8-argv test can pass raw `OsStr`
@@ -112,8 +140,6 @@ fn delivers_one_json_line_to_listener_and_exits_zero() {
     assert_eq!(v["session_id"], "abc", "original payload preserved");
     assert_eq!(v["_pixtuoid_source"], "codex", "shim stamps the CLI source");
     assert!(v.get("_shim_ts_ms").is_some(), "shim stamps a timestamp");
-
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -135,8 +161,6 @@ fn argv_source_flag_stamps_source_without_env() {
         "the --source flag must stamp the CLI source with no env set"
     );
     assert_eq!(v["session_id"], "abc", "original payload preserved");
-
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -192,8 +216,6 @@ fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
     assert_eq!(v["tool_args"], r#"{"command":"ls -la"}"#);
     assert_eq!(v["_pixtuoid_source"], "codewhale", "source stamped");
     assert!(v.get("_shim_ts_ms").is_some(), "timestamp stamped");
-
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -231,7 +253,7 @@ fn stalled_listener_shim_exits_zero_within_watchdog_bound() {
     // each parks to hold its connection — or its blocked connect — open.
     let fillers: Vec<_> = (0..160)
         .map(|_| {
-            let p = path.clone();
+            let p = path.to_path_buf();
             std::thread::spawn(move || {
                 let _conn = std::os::unix::net::UnixStream::connect(&p);
                 std::thread::park();
@@ -255,7 +277,6 @@ fn stalled_listener_shim_exits_zero_within_watchdog_bound() {
 
     drop(listener);
     drop(fillers);
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
