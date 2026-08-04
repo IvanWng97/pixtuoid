@@ -1143,3 +1143,55 @@ fn save_version_preserves_theme() {
     assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
     assert_eq!(cfg.last_seen_version.as_deref(), Some("0.4.0"));
 }
+
+/// The degraded bit must come from `load` itself, not from reading the shared
+/// warnings Vec back at the call site. That Vec is also written by every
+/// `resolve_*` below it, so `!warnings.is_empty()` only meant "degraded" on the
+/// one line directly after `load` — and a resolver reordered above that line
+/// flipped a genuine first run into "previously configured", suppressing
+/// onboarding permanently.
+#[test]
+fn load_status_is_not_contaminated_by_a_later_resolver_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    // Parses fine, but `max-desks = 0` makes a LATER resolver warn.
+    std::fs::write(&path, "max-desks = 0\n").unwrap();
+
+    // PRE-POPULATED on purpose: the collector is shared, so a caller may have
+    // warned before ever reaching `load`. `!warnings.is_empty()` would call
+    // that a degraded load; only a DELTA over the call is correct.
+    let mut w = vec!["an earlier, unrelated warning".to_string()];
+    let (cfg, degraded) = load_with_status(&path, &mut w);
+    assert!(
+        !degraded,
+        "a well-formed file is not a degraded load, whatever the Vec already held"
+    );
+    assert_eq!(w.len(), 1, "load itself warns nothing here: {w:?}");
+
+    // The resolver now pushes into the SAME Vec. The captured bit must not move.
+    let _ = resolve_desk_cap(&cfg, None, &mut w);
+    assert!(!w.is_empty(), "precondition: max-desks = 0 warns");
+    assert!(
+        !degraded,
+        "the degraded bit is captured AT load — a later resolver's warning \
+         must not retroactively make the load look malformed"
+    );
+}
+
+/// The other half: a genuinely malformed file must still report degraded.
+#[test]
+fn load_status_reports_degraded_for_a_malformed_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "this is not = = toml\n").unwrap();
+    let (_cfg, degraded) = load_with_status(&path, &mut Vec::new());
+    assert!(degraded, "a malformed file must report a degraded load");
+}
+
+/// A missing file returns defaults WITHOUT warning, so it stays a first run.
+#[test]
+fn load_status_is_clean_for_a_missing_file() {
+    let (_cfg, degraded) =
+        load_with_status(Path::new("/nonexistent/x/config.toml"), &mut Vec::new());
+    assert!(!degraded, "a missing file is not a degraded load");
+}

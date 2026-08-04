@@ -177,6 +177,21 @@ fn warn_user(warnings: &mut Vec<String>, line: String) {
 /// defaults. Fallbacks go onto `warnings` (as well as the log) so `main` can
 /// print them to stderr BEFORE the alternate screen swallows them; callers with
 /// no user to warn pass a throwaway Vec.
+/// [`load`] plus the DEGRADED bit: the file exists but did not parse cleanly.
+///
+/// Captured here rather than read back off `warnings` at the call site. The
+/// caller's Vec is shared with every `resolve_*` below it, so
+/// `!warnings.is_empty()` only means "degraded" on the one line directly after
+/// `load` — a temporal invariant nothing enforced, and reordering a resolver
+/// above it silently flipped a first run into "previously configured",
+/// suppressing onboarding forever (#836 review).
+pub fn load_with_status(path: &Path, warnings: &mut Vec<String>) -> (AppConfig, bool) {
+    let before = warnings.len();
+    let cfg = load(path, warnings);
+    let degraded = warnings.len() > before;
+    (cfg, degraded)
+}
+
 pub fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -342,7 +357,7 @@ pub fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String
 /// unset with a warning: the cap clamps every floor via `min`, so an accepted 0
 /// would permanently zero every floor and silently drop every SessionStart. The
 /// `--max-desks` CLI flag rejects 0 at the clap seam; this is its config twin.
-pub fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) -> Option<usize> {
+pub(crate) fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) -> Option<usize> {
     match config.max_desks {
         Some(0) => {
             warn_user(
@@ -360,11 +375,9 @@ pub fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) -> Opti
 /// Resolve CLI + config into the desk cap the runtime uses (CLI > config).
 ///
 /// The config lookup is EAGER — `.or`, never `.or_else` — so the
-/// `max-desks = 0` warning fires even when the CLI flag wins. It lives here
-/// rather than at the `main.rs` call site because that file is in the
-/// intersection of `codecov.yml`'s `ignore` and `.cargo/mutants.toml`'s
-/// `exclude_globs`: a decision spelled there is measured by nothing, and
-/// `.or_else` would compile clean while silently dropping the warning (#836).
+/// `max-desks = 0` warning still fires when the CLI flag wins (#836). Don't
+/// inline this back into `build_run_config`: that call site reads the real
+/// `config_path()`, so nothing there can assert the warning.
 pub fn resolve_desk_cap(
     config: &AppConfig,
     cli_max_desks: Option<usize>,

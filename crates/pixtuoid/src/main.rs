@@ -158,12 +158,12 @@ fn build_run_config(
     } = source;
     let cfg_path = config::config_path();
     let mut cfg_warnings = Vec::new();
-    let cfg = config::load(&cfg_path, &mut cfg_warnings);
-    // Right after load(), a non-empty warnings Vec means the file EXISTS but is
-    // malformed — "previously configured", never a first run (the onboarding
-    // apply couldn't succeed anyway: update_config refuses to rewrite a malformed
-    // config). A missing file warns nothing ⇒ first run.
-    let first_run = setup::is_first_run(&cfg, &cfg_path, !cfg_warnings.is_empty());
+    let (cfg, load_degraded) = config::load_with_status(&cfg_path, &mut cfg_warnings);
+    // A degraded load means the file EXISTS but is malformed — "previously
+    // configured", never a first run (the onboarding apply couldn't succeed
+    // anyway: update_config refuses to rewrite a malformed config). A missing
+    // file warns nothing ⇒ first run.
+    let first_run = setup::is_first_run(&cfg, &cfg_path, load_degraded);
     let theme = config::resolve_theme(&cfg, cli_theme, &mut cfg_warnings)?;
     let desk_cap = config::resolve_desk_cap(&cfg, cli_max_desks, &mut cfg_warnings);
     let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
