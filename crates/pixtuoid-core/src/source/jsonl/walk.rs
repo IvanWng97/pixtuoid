@@ -150,10 +150,24 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         return;
     }
     if meta.is_dir() {
-        if let Ok(mut read) = tokio::fs::read_dir(path).await {
-            while let Ok(Some(entry)) = read.next_entry().await {
-                Box::pin(walk_jsonl(&entry.path(), decoders, ctx)).await;
-            }
+        match tokio::fs::read_dir(path).await {
+            Ok(mut read) => loop {
+                match read.next_entry().await {
+                    Ok(Some(entry)) => Box::pin(walk_jsonl(&entry.path(), decoders, ctx)).await,
+                    Ok(None) => break,
+                    Err(e) => {
+                        // Distinguished from `Ok(None)`: a mid-iteration error
+                        // otherwise ends the listing as if the directory were
+                        // exhausted, hiding every transcript after it.
+                        debug!("listing of {} truncated: {e}", path.display());
+                        break;
+                    }
+                }
+            },
+            // `debug!`, not the latched `warn!` `scan_root` gives the ROOT: a
+            // subdirectory is re-walked every 250ms rescan, and there is one
+            // root but unboundedly many subdirs, so a warn here floods.
+            Err(e) => debug!("skipping unreadable directory {}: {e}", path.display()),
         }
         return;
     }

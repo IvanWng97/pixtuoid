@@ -58,9 +58,12 @@ fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 fn copilot_child_key<'a>(v: &'a Value, data: Option<&'a Value>) -> Option<&'a str> {
+    // BOTH branches filter empty: an empty `toolCallId` would otherwise mint a
+    // child `AgentId` keyed on "", colliding every such child onto one slot.
     str_at(v, "agentId")
         .filter(|s| !s.is_empty())
         .or_else(|| data.and_then(|d| str_at(d, "toolCallId")))
+        .filter(|s| !s.is_empty())
 }
 
 /// First-sight cwd extractor for the walker's head scan. Without it a copilot
@@ -610,6 +613,24 @@ mod tests {
                 assert!(*as_child, "a subagent failure is a child end");
             }
             other => panic!("expected child SessionEnd, got {other:?}"),
+        }
+    }
+
+    /// BOTH `copilot_child_key` branches must reject an empty string. The
+    /// primary (`agentId`) always did; the `data.toolCallId` fallback did not,
+    /// so an empty id minted a child `AgentId` keyed on "" — every such child
+    /// colliding onto one slot.
+    #[test]
+    fn an_empty_child_key_is_rejected_on_both_branches() {
+        for line in [
+            r#"{"type":"subagent.completed","agentId":"","data":{"toolCallId":""}}"#,
+            r#"{"type":"subagent.completed","data":{"toolCallId":""}}"#,
+            r#"{"type":"subagent.failed","agentId":"","data":{"toolCallId":""}}"#,
+        ] {
+            assert!(
+                decode(line).is_empty(),
+                "an empty child key must emit nothing, not a \"\"-keyed child: {line}"
+            );
         }
     }
 

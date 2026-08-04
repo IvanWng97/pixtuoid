@@ -19,7 +19,7 @@ pub const SOURCE_NAME: &str = "antigravity";
 /// `step_index` stream — so walking both mints two path-keyed `AgentId`s and
 /// double-renders the conversation. Watch only the canonical `transcript.jsonl`;
 /// the decoder ignores content length, so the untruncated copy loses nothing.
-pub(crate) fn skip_transcript_full(path: &Path) -> bool {
+pub(crate) fn accept_except_transcript_full(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()) != Some("transcript_full.jsonl")
 }
 
@@ -256,10 +256,12 @@ mod tests {
     }
 
     #[test]
-    fn skip_transcript_full_drops_only_the_duplicate() {
+    fn accept_except_transcript_full_drops_only_the_duplicate() {
         let dir = Path::new("/h/.gemini/antigravity-cli/brain/c1/.system_generated/logs");
-        assert!(skip_transcript_full(&dir.join("transcript.jsonl")));
-        assert!(!skip_transcript_full(&dir.join("transcript_full.jsonl")));
-        assert!(skip_transcript_full(&dir.join("other.jsonl")));
+        assert!(accept_except_transcript_full(&dir.join("transcript.jsonl")));
+        assert!(!accept_except_transcript_full(
+            &dir.join("transcript_full.jsonl")
+        ));
+        assert!(accept_except_transcript_full(&dir.join("other.jsonl")));
     }
 }

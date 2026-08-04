@@ -361,7 +361,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
             id_from_path: claude_code::cc_id_from_path,
             // The workflow orchestrator's foreign-schema `journal.jsonl` lives
             // in the SAME projects tree.
-            path_filter: claude_code::skip_workflow_journal,
+            path_filter: claude_code::accept_except_workflow_journal,
             cwd_extractor: extract_top_level_cwd,
         }),
         hook: Some(HookDecoding {
@@ -428,7 +428,7 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
             // Path-keyed: its hook keys on `transcript_path` too, so the
             // default coalesces the two transports.
             id_from_path: default_id_from_path,
-            path_filter: antigravity::skip_transcript_full,
+            path_filter: antigravity::accept_except_transcript_full,
             // AG step lines carry no cwd field at all — the shared shape never
             // matches and the label falls back to the bare `ag` prefix.
             cwd_extractor: extract_top_level_cwd,

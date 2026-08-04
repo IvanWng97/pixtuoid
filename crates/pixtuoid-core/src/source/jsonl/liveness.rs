@@ -165,7 +165,9 @@ pub(super) async fn probe_admits(
     ctx: &WatchCtx<'_>,
 ) -> bool {
     let live = ctx.live.lock().await;
-    !live.is_empty() && live.contains(&(decoders.id_derive)(path))
+    // Through `walk::id_path`, never raw: the producer side folds every path
+    // before deriving, so an unfolded id here would query a different id-space.
+    !live.is_empty() && live.contains(&(decoders.id_derive)(&super::walk::id_path(path)))
 }
 
 /// The probe is ONGOING liveness, not just admission: emit a `ProofOfLife` per
