@@ -17,6 +17,7 @@
 //! no cross-crate caller at all and a `pub` item on a published crate is the
 //! one thing a follow-up cannot quietly undo.
 
+pub(crate) mod order;
 #[doc(hidden)]
 pub mod paint;
 pub(crate) mod shade;
