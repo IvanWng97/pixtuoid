@@ -451,9 +451,12 @@ pub fn cc_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
         .and_then(|n| n.to_str())
         .and_then(|proj| proj.rsplit('-').find(|s| !s.is_empty()))
     {
-        // Same decode-boundary cap the `cwd_basename_label` branch above
-        // applies: this label persists in `AgentSlot.label`, and the project
-        // dir is untrusted path content that BYPASSES that chokepoint.
+        // Same cap as the `cwd_basename_label` branch, for the reason that
+        // chokepoint exists: an uncapped `AgentSlot.label` reaches the painter
+        // and the headless summary. This branch bypasses it — CC encodes the
+        // whole cwd into ONE project-dir component ('/'→'-'), so a deep path
+        // yields an arbitrarily long segment even though, unlike `cwd`, nothing
+        // here is wire content.
         return format!(
             "{prefix}·{}",
             crate::source::decoder::ellipsize(
