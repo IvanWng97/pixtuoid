@@ -343,6 +343,15 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   units, and multiplying twice puts the front face a whole desk below the
 │                   surface it belongs to (pinned by
 │                   `the_drawn_size_is_the_same_whichever_density_the_art_came_from`).
+│                   VARIANT ART IS EMBEDDED FOR EVERY TARGET, INCLUDING WASM, WHERE NOTHING
+│                   CAN SELECT IT — `pixtuoid-web` paints at `RenderScale::ONE` by design (the
+│                   chunky look), and only `densest_art` reads variants. `desk@4x` is ~4 KB of
+│                   the ~46 KB left under `gen-wasm-check`'s 1 MiB cap, so ONE variant is
+│                   affordable and the remaining ~27 pieces are NOT: budget the art phase
+│                   against that headroom, or gate the embed first. Gating is not a one-liner —
+│                   `pack.toml` declares the variant, so dropping the `include_str!` alone makes
+│                   `build_pack` fail on a missing frame; the LOADER has to skip variant
+│                   animations too.
 │                   The bundled `desk@4x` also records two ART decisions made against the
 │                   RENDERED OFFICE rather than the sprite: grain runs ALONG the boards (random
 │                   dots read as dirt) and screen chrome is the monitor-frame grey, NOT a bright
