@@ -16,9 +16,9 @@
 //! - [`check_order`] turns every pairwise fact into an assertion. A sort key
 //!   silently mis-orders whatever it cannot express; a constraint that is
 //!   CHECKED tells you the day something stops fitting.
-//! - It is the shape the next two features need. Elevation (a mezzanine, a
-//!   walkway over the corridor) makes depth stop being a function of screen y,
-//!   and at that point the "behind" relation genuinely can cycle.
+//! - The relation is pairwise, so it still holds if depth ever stops being a
+//!   function of screen y (elevation would do that), where a single key cannot
+//!   express it.
 //!
 //! ## The one thing a graph cannot fix
 //!
