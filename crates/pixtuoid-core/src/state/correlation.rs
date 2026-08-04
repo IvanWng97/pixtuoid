@@ -171,6 +171,17 @@ pub(super) fn elapsed_past(now: SystemTime, ts: SystemTime, ttl: Duration) -> bo
 }
 
 impl Correlation {
+    /// An arbitrary in-flight Task tuid for `id`, as the `Arc<str>` the FSM
+    /// takes. The CHOICE among several is deliberately unspecified —
+    /// `fsm::enter_delegating` only needs proof that *some* delegation is live,
+    /// and `active_tasks` is a `HashSet` with no ordering to promise.
+    pub(super) fn any_active_task(&self, id: &AgentId) -> Option<Arc<str>> {
+        self.active_tasks
+            .get(id)
+            .and_then(|s| s.iter().next())
+            .map(|t| Arc::<str>::from(t.as_str()))
+    }
+
     /// Whether a hook `SessionEnd` for `id` (which had no slot) is still inside
     /// its [`HOOK_SESSION_END_TOMBSTONE_TTL`]: a trailing hook event delivered
     /// reordered after the end must not re-register the dead session.

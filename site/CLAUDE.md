@@ -253,7 +253,7 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   busy/idle, text = identity. An unregistered prefix omits `badge` and the
   label stays tone-only. SHARP EDGE:
   the engine re-derives the prefix by splitting the label on its FIRST `·` —
-  a cross-crate echo of core's `source_label_prefix` + `·` join, pinned by
+  a cross-crate echo of core's `decoder::label_prefix_for` + `·` join, pinned by
   the web `labels == badges` test, not a shared const.
   `OfficeBackdrop.astro` lays pooled Monaspace Neon (`var(--font-mono)`)
   DOM `<span>`s over the canvas at DISPLAY resolution, positioned by the canvas's
@@ -586,3 +586,14 @@ The version-qualified `chrome-launcher@^0.13.4` override upgrades only LHCI's
 old CommonJS launcher line to 0.15.2 (removing its deprecated
 `rimraf → glob → inflight` chain); do not widen it to 1.x, which is ESM-only
 while LHCI 0.15.1 still calls `require('chrome-launcher')`.
+
+**Nothing gates a STALE `overrides` entry**, so retiring one is a manual
+audit: copy `package.json` to a scratch dir (never the working tree, whose
+lockfile is the artifact under test), `npm install --package-lock-only` with
+and without the entry, and diff the generated `packages` maps — identical
+means inert. The `yaml-language-server` → `yaml 2.8.3` pin was retired this
+way once `@astrojs/check` 0.9.10 pulled a language-server whose
+`yaml-language-server` declares an exact `yaml 2.8.3` of its own. **`npm
+audit` alone cannot clear an entry**: `chrome-launcher`'s guards a deprecated
+chain no advisory covers, so audit reads clean while
+`rimraf@3`/`glob@7`/`inflight` come back.
