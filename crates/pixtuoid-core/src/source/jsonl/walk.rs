@@ -95,8 +95,25 @@ pub(super) async fn scan_root(
             if root_health.on_success() {
                 tracing::info!("watched root {} is readable again", root.display());
             }
-            while let Ok(Some(entry)) = read.next_entry().await {
-                walk_jsonl(&entry.path(), decoders, ctx).await;
+            loop {
+                match read.next_entry().await {
+                    Ok(Some(entry)) => walk_jsonl(&entry.path(), decoders, ctx).await,
+                    Ok(None) => break,
+                    Err(e) => {
+                        // The ROOT's twin of the subdirectory arm below, but
+                        // through the latch: truncation here hides every
+                        // remaining PROJECT, not one project's transcripts, and
+                        // there is exactly one root, so this cannot flood.
+                        if root_health.on_failure() {
+                            warn!(
+                                "listing of watched root {} truncated ({e}); some \
+                                 sessions will not be discovered this pass",
+                                root.display()
+                            );
+                        }
+                        break;
+                    }
+                }
             }
         }
         Err(e) => {
@@ -156,9 +173,10 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
                     Ok(Some(entry)) => Box::pin(walk_jsonl(&entry.path(), decoders, ctx)).await,
                     Ok(None) => break,
                     Err(e) => {
-                        // Distinguished from `Ok(None)`: a mid-iteration error
-                        // otherwise ends the listing as if the directory were
-                        // exhausted, hiding every transcript after it.
+                        // Split from `Ok(None)` for the LOG only — the listing
+                        // still stops here, so every later transcript in this
+                        // dir waits for the next rescan. `break` not `continue`:
+                        // a sticky error that never advances would spin.
                         debug!("listing of {} truncated: {e}", path.display());
                         break;
                     }

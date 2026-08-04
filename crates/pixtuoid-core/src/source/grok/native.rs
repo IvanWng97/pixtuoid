@@ -44,14 +44,23 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     }) {
         Some(snap) => Some(snap),
         None => {
+            // A read that hit the cap parses as garbage too, so say which it
+            // was — a truncation reported as upstream drift sends the reader
+            // hunting a format change that never happened.
+            let truncated = bytes.len() as u64 == MAX_SESSION_REGISTRY_BYTES;
             static SHAPE_DRIFT_WARNED: std::sync::Once = std::sync::Once::new();
             SHAPE_DRIFT_WARNED.call_once(|| {
+                let cause = if truncated {
+                    "was TRUNCATED at the read cap, so it cannot parse"
+                } else {
+                    "does not parse as the expected [{session_id,pid,cwd,opened_at}] \
+                     array — the registry shape changed upstream"
+                };
                 crate::source::drift::shape_drift(
                     SOURCE_NAME,
                     &format!(
-                        "active_sessions.json at {} does not parse as the expected \
-                         [{{session_id,pid,cwd,opened_at}}] array — the registry shape \
-                         changed upstream; liveness degraded to mtime gating",
+                        "active_sessions.json at {} {cause}; liveness degraded to \
+                         mtime gating",
                         path.display()
                     ),
                 );

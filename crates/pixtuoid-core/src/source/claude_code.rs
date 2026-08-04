@@ -347,7 +347,7 @@ const ACTIVITY_TYPES: &[&str] = &[
 /// A denylist, not an allowlist: the real subagent transcripts (including the
 /// ones nested under `workflows/wf_*/`) stay admitted, because misfiltering one
 /// costs a vanished sprite while a future foreign sidecar merely breadcrumbs.
-pub(crate) fn accept_except_workflow_journal(path: &Path) -> bool {
+pub(crate) fn admits_transcript(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()) != Some("journal.jsonl")
 }
 
@@ -1104,14 +1104,14 @@ mod cc_id_tests {
     }
 
     #[test]
-    fn accept_except_workflow_journal_drops_only_the_orchestrator_journal() {
+    fn admits_every_transcript_except_the_orchestrator_journal() {
         let wf = Path::new("/h/.claude/projects/proj/uuid/subagents/workflows/wf_abc");
-        assert!(!accept_except_workflow_journal(&wf.join("journal.jsonl")));
-        assert!(accept_except_workflow_journal(&wf.join("agent-xyz.jsonl")));
-        assert!(accept_except_workflow_journal(Path::new(
+        assert!(!admits_transcript(&wf.join("journal.jsonl")));
+        assert!(admits_transcript(&wf.join("agent-xyz.jsonl")));
+        assert!(admits_transcript(Path::new(
             "/h/.claude/projects/proj/uuid.jsonl"
         )));
-        assert!(accept_except_workflow_journal(Path::new(
+        assert!(admits_transcript(Path::new(
             "/h/.claude/projects/proj/uuid/subagents/agent-xyz.jsonl"
         )));
     }

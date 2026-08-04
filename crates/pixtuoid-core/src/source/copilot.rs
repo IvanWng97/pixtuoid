@@ -632,6 +632,16 @@ mod tests {
                 "an empty child key must emit nothing, not a \"\"-keyed child: {line}"
             );
         }
+        // The FIRST filter's whole job, and nothing else pins it: an empty
+        // envelope `agentId` must FALL THROUGH to `data.toolCallId` rather than
+        // short-circuit the `or_else` into `None`. Delete it and the assertions
+        // above still pass, while every real child silently stops registering.
+        let line = r#"{"type":"subagent.completed","agentId":"","data":{"toolCallId":"call_1"}}"#;
+        assert_eq!(
+            decode(line).len(),
+            1,
+            "an empty agentId must fall back to toolCallId, not drop the child"
+        );
     }
 
     #[test]
