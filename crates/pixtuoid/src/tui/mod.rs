@@ -2173,6 +2173,27 @@ mod apply_key_action_tests {
             }
         }
 
+        /// Register `n` agents so the dashboard has rows to move through.
+        fn seed_agents(&mut self, n: usize) {
+            use pixtuoid_core::source::{AgentEvent, Transport};
+            let mut r = pixtuoid_core::Reducer::new();
+            for i in 0..n {
+                let path = format!("/p/agent-{i}.jsonl");
+                r.apply(
+                    &mut self.snapshot,
+                    AgentEvent::SessionStart {
+                        agent_id: pixtuoid_core::AgentId::from_transcript_path(&path),
+                        source: "claude-code".into(),
+                        session_id: path.clone(),
+                        cwd: std::path::PathBuf::from("/repo"),
+                        parent_id: None,
+                    },
+                    SystemTime::UNIX_EPOCH,
+                    Transport::Jsonl,
+                );
+            }
+        }
+
         fn apply(&mut self, action: KeyAction) -> bool {
             apply_key_action(
                 action,
@@ -2260,6 +2281,115 @@ mod apply_key_action_tests {
         );
         h.apply(KeyAction::ToggleWalkableDebug);
         assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
+    }
+
+    /// The click predicates were made pure so they COULD be tested; these are
+    /// that. Both were previously unreachable — they called
+    /// `crossterm::terminal::size()` internally, which under `cargo test` has no
+    /// tty and returned `Err` -> `false` unconditionally.
+    ///
+    /// Deliberately NOT asserted: the scene-rect-vs-full-bounds asymmetry
+    /// between the two. `star_hit_rect` places the star at `scene.y + 1` height
+    /// 1 and `scene_rect` shrinks only HEIGHT, so both framings yield an
+    /// identical star rect on any terminal taller than two rows — an assertion
+    /// there would be near-unfalsifiable.
+    #[test]
+    fn star_clicked_hits_only_the_star_span() {
+        use crate::tui::widgets::star_hit_rect;
+        let term = (120u16, 44u16);
+        let scene = super::renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
+        let star = star_hit_rect(scene).expect("the star fits at 120x44");
+
+        assert!(
+            super::star_clicked(star.x, star.y, term),
+            "a click on the star's first column must hit"
+        );
+        assert!(
+            super::star_clicked(star.x + star.width - 1, star.y, term),
+            "a click on the star's last column must hit"
+        );
+        assert!(
+            !super::star_clicked(star.x - 1, star.y, term),
+            "one column LEFT of the star must miss"
+        );
+        assert!(
+            !super::star_clicked(star.x, star.y + 1, term),
+            "one row BELOW the star must miss — the rect is height 1"
+        );
+        // Too narrow to paint any of the star ⇒ no click target, no phantom
+        // browser launch.
+        assert!(
+            !super::star_clicked(1, 1, (10, 44)),
+            "a terminal too narrow for the star must never register a hit"
+        );
+    }
+
+    /// The popup URL is clickable only while the popup is actually painted —
+    /// `version_popup_url_rect` returns `None` below the clickable scale, and a
+    /// predicate that ignored `scale` would launch a browser on a click landing
+    /// where the popup merely USED to be.
+    #[test]
+    fn version_popup_url_clicked_respects_the_rect_and_the_scale() {
+        use crate::tui::widgets::version_popup_url_rect;
+        let term = (120u16, 44u16);
+        let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
+        let notes = crate::version::release_notes(env!("CARGO_PKG_VERSION")).unwrap_or(&[]);
+        let Some(rect) = version_popup_url_rect(notes, bounds, 1.0) else {
+            // The shipped notes must produce a link rect at full scale; if this
+            // ever changes the assertions below would pass vacuously.
+            panic!("the shipped release notes must yield a URL rect at scale 1.0");
+        };
+
+        assert!(
+            super::version_popup_url_clicked(rect.x, rect.y, 1.0, term),
+            "a click inside the URL rect at full scale must hit"
+        );
+        assert!(
+            !super::version_popup_url_clicked(rect.x, rect.y.saturating_sub(1), 1.0, term),
+            "a click one row above the URL must miss"
+        );
+        assert!(
+            !super::version_popup_url_clicked(rect.x, rect.y, 0.5, term),
+            "mid-animation (below the clickable scale) there is no rect, so no hit"
+        );
+    }
+
+    /// `delete -` on either `-1` makes Up behave as Down. The panels are
+    /// independent, so both pairs need pinning — and each needs at least two
+    /// rows, or the move is a no-op in both directions and the assertion is
+    /// vacuous.
+    #[test]
+    fn dashboard_and_connection_up_move_opposite_to_down() {
+        let mut h = Harness::new();
+        h.seed_agents(3);
+
+        h.apply(KeyAction::ToggleDashboard);
+        let start = h.ui.dashboard.selected;
+        h.apply(KeyAction::DashboardDown);
+        let after_down = h.ui.dashboard.selected;
+        assert_ne!(after_down, start, "precondition: Down actually moves");
+        h.apply(KeyAction::DashboardUp);
+        // Must return to `start`, not merely DIFFER from `after_down` — with the
+        // `-1` deleted, Up moves further DOWN, which also differs.
+        assert_eq!(
+            h.ui.dashboard.selected, start,
+            "DashboardUp must undo DashboardDown, not advance further"
+        );
+
+        h.apply(KeyAction::ToggleConnection);
+        assert!(
+            h.ui.connection.rows.len() > 1,
+            "precondition: the Sources panel lists the registry, so it has rows"
+        );
+        let start = h.ui.connection.selected;
+        h.apply(KeyAction::ConnectionDown);
+        let after_down = h.ui.connection.selected;
+        assert_ne!(after_down, start, "precondition: Down actually moves");
+        h.apply(KeyAction::ConnectionUp);
+        assert_eq!(
+            h.ui.connection.selected, start,
+            "ConnectionUp must undo ConnectionDown, not advance further"
+        );
     }
 
     /// `ThemeCommit` persists; `ThemeCancel` restores the last COMMITTED theme,
