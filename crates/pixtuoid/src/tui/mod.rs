@@ -560,52 +560,37 @@ pub(crate) struct TuiSession {
     pub first_run: bool,
 }
 
-/// Whether a left-click at `(col, row)` landed on the wall's star/repo link.
+/// Whether a left-click at `(col, row)` landed on the wall's star/repo link,
+/// given the terminal's `(cols, rows)`.
 ///
-/// The caller gates on `renderer.cached_layout().is_some()` FIRST — the wall
-/// display only paints with a layout — so a too-small frame or a floor-slide
-/// transition can't phantom-launch a browser. Split out of `run_tui`'s mouse
-/// arm alongside [`version_popup_url_clicked`], its structural twin (#830).
-fn star_clicked(col: u16, row: u16) -> bool {
-    let Ok((cols, rows)) = crossterm::terminal::size() else {
-        return false;
-    };
-    let scene = renderer::scene_rect(ratatui::layout::Rect {
-        x: 0,
-        y: 0,
-        width: cols,
-        height: rows,
-    });
+/// Callers MUST gate this on `renderer.cached_layout().is_some()` — the wall
+/// display only paints with a layout, so an ungated hit phantom-launches a
+/// browser on a too-small frame or mid floor-slide.
+///
+/// Note the asymmetry with [`version_popup_url_clicked`]: this hit-tests the
+/// SCENE rect (footer excluded), that one the full terminal bounds.
+fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
+    let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
     widgets::star_hit_rect(scene)
         .is_some_and(|s| s.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
-/// Whether a left-click at `(col, row)` landed on the version popup's URL.
+/// Whether a left-click at `(col, row)` landed on the version popup's URL,
+/// given the terminal's `(cols, rows)`.
 ///
 /// `scale` is the PAINTER's own last frame-scale, so the hit geometry matches
 /// what was actually painted rather than the popup's resting size — the popup
-/// is clickable mid-animation. Split out of `run_tui`'s mouse arm, which put
-/// this at nesting depth 10 (#830); the bounds test now reuses ratatui's
-/// `Rect::contains` like the sibling star-hit path, instead of re-spelling the
-/// same four comparisons.
-fn version_popup_url_clicked(col: u16, row: u16, scale: f32) -> bool {
-    let Ok((cols, rows)) = crossterm::terminal::size() else {
-        return false;
-    };
-    let bounds = ratatui::layout::Rect {
-        x: 0,
-        y: 0,
-        width: cols,
-        height: rows,
-    };
+/// is clickable mid-animation.
+fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
+    let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
     let notes = crate::version::release_notes(env!("CARGO_PKG_VERSION")).unwrap_or(&[]);
     widgets::version_popup_url_rect(notes, bounds, scale)
         .is_some_and(|rect| rect.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
-/// Everything an applied [`KeyAction`] may touch. Bundled rather than passed as
-/// bare parameters because the arms mutate four independent pieces of state,
-/// and the borrow checker needs them split at the call site, not inside.
+/// Everything an applied [`KeyAction`] may touch: three `&mut` surfaces plus
+/// the read-only context. A parameter object, not an abstraction — it exists so
+/// the arm list takes one argument instead of nine.
 struct KeyCtx<'a, B: ratatui::backend::Backend<Error: Send + Sync + 'static>> {
     ui: &'a mut ui_state::UiState,
     renderer: &'a mut TuiRenderer<B>,
@@ -615,14 +600,18 @@ struct KeyCtx<'a, B: ratatui::backend::Backend<Error: Send + Sync + 'static>> {
     snapshot: &'a pixtuoid_core::state::SceneState,
     focus_roots: &'a (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     now: SystemTime,
+    /// Injected for the same reason `AudioController::apply` takes it: the real
+    /// one opens an output device, so a test firing an audio arm would grab the
+    /// machine's sound hardware.
+    respawn: fn(&crate::audio::AudioHandle, f32),
 }
 
 /// Apply one decoded [`KeyAction`], returning whether it asked to QUIT — the
 /// single piece of control flow the caller's event loop keeps.
 ///
-/// Lifted whole out of `run_tui`'s `select!` → `loop` → `while polled` →
-/// `match event::read()` stack, which had these arms sitting at nesting depth
-/// 11, the deepest in the workspace (#830). Move-only.
+/// Paired with [`dispatch_key`], which decodes; this applies. Splitting them
+/// is what makes the arms reachable from a test at all — `run_tui` needs a
+/// real terminal.
 fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     action: KeyAction,
     cx: &mut KeyCtx<'_, B>,
@@ -663,7 +652,7 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
                 crate::audio::AudioAction::ToggleMute,
                 cx.ui.paused(),
                 Instant::now(),
-                crate::audio::respawn,
+                cx.respawn,
             );
         }
         KeyAction::AdjustVolume(up) => {
@@ -671,7 +660,7 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
                 crate::audio::AudioAction::Volume(up),
                 cx.ui.paused(),
                 Instant::now(),
-                crate::audio::respawn,
+                cx.respawn,
             );
         }
         KeyAction::ToggleWalkableDebug => {
@@ -950,6 +939,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 snapshot: &snapshot,
                                 focus_roots: &focus_roots,
                                 now,
+                                respawn: crate::audio::respawn,
                             },
                         );
                     }
@@ -971,11 +961,14 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         // or visible. The painter's own frame-scale is used so the click
                         // geometry matches what was actually painted.
                         if matches!(m.kind, MouseEventKind::Down(MouseButton::Left))
-                            && version_popup_url_clicked(
-                                m.column,
-                                m.row,
-                                renderer.last_popup_scale(),
-                            )
+                            && crossterm::terminal::size().is_ok_and(|t| {
+                                version_popup_url_clicked(
+                                    m.column,
+                                    m.row,
+                                    renderer.last_popup_scale(),
+                                    t,
+                                )
+                            })
                         {
                             let _ = open::that(widgets::VERSION_POPUP_URL);
                         }
@@ -994,8 +987,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
                             renderer.set_mouse_pos(Some((m.column, m.row)));
-                            let on_star =
-                                renderer.cached_layout().is_some() && star_clicked(m.column, m.row);
+                            let on_star = renderer.cached_layout().is_some()
+                                && crossterm::terminal::size()
+                                    .is_ok_and(|t| star_clicked(m.column, m.row, t));
                             if on_star {
                                 let _ = open::that(widgets::REPO_URL);
                             } else if focus_clicked_agent(
@@ -2113,6 +2107,180 @@ mod dispatch_tests {
         assert!(
             connected.is_connected("antigravity"),
             "skip must open the live gate for a frozen-connected source"
+        );
+    }
+}
+
+/// Tests for the APPLIER half of the key path. `dispatch_key` (the decoder) is
+/// covered by `dispatch_tests` above; before the #830 split these arms lived
+/// inside `run_tui`, which needs a real terminal, so nothing could reach them.
+#[cfg(test)]
+mod apply_key_action_tests {
+    use super::{apply_key_action, KeyAction, KeyCtx};
+    use crate::tui::tui_renderer::TuiRenderer;
+    use pixtuoid_scene::theme;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::collections::HashSet;
+    use std::time::SystemTime;
+
+    /// Stands in for `crate::audio::respawn`, which opens a real output device.
+    fn no_respawn(_: &crate::audio::AudioHandle, _: f32) {}
+
+    struct Harness {
+        ui: super::ui_state::UiState,
+        renderer: TuiRenderer<TestBackend>,
+        audio_ctl: crate::audio::AudioController,
+        connected: crate::runtime::ConnectedSources,
+        snapshot: pixtuoid_core::state::SceneState,
+        focus_roots: (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+        _tmp: tempfile::TempDir,
+        config_path: std::path::PathBuf,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let config_path = tmp.path().join("config.toml");
+            Self {
+                ui: super::ui_state::UiState::new(
+                    &theme::NORMAL,
+                    super::welcome::WelcomeUi::from_detected(&[]),
+                    false,
+                    tmp.path().join("sock"),
+                    None,
+                ),
+                renderer: TuiRenderer::new(
+                    Terminal::new(TestBackend::new(80, 24)).expect("test backend"),
+                    &theme::NORMAL,
+                    Vec::new(),
+                ),
+                // UNMUTED via `new_with` + a no-op spawn: an unmuted `new`
+                // would open the machine's real output device, and a MUTED
+                // controller makes pause unobservable (`set_paused` ORs the
+                // mute flag in, so the handle stays muted either way).
+                audio_ctl: crate::audio::AudioController::new_with(
+                    false,
+                    1.0,
+                    config_path.clone(),
+                    no_respawn,
+                ),
+                connected: crate::runtime::ConnectedSources::new(HashSet::new()),
+                snapshot: pixtuoid_core::state::SceneState::uniform(4),
+                focus_roots: (None, None),
+                _tmp: tmp,
+                config_path,
+            }
+        }
+
+        fn apply(&mut self, action: KeyAction) -> bool {
+            apply_key_action(
+                action,
+                &mut KeyCtx {
+                    ui: &mut self.ui,
+                    renderer: &mut self.renderer,
+                    audio_ctl: &mut self.audio_ctl,
+                    config_path: &self.config_path,
+                    connected: &self.connected,
+                    snapshot: &self.snapshot,
+                    focus_roots: &self.focus_roots,
+                    now: SystemTime::UNIX_EPOCH,
+                    respawn: no_respawn,
+                },
+            )
+        }
+    }
+
+    /// The highest-blast-radius pair: `Quit` must be the ONLY action that ends
+    /// the loop. A mutant returning a constant makes every keypress quit (or
+    /// makes `q` inert), and nothing else in the suite would notice.
+    #[test]
+    fn only_quit_returns_true() {
+        let mut h = Harness::new();
+        assert!(h.apply(KeyAction::Quit), "Quit must end the loop");
+        for action in [
+            KeyAction::None,
+            KeyAction::TogglePause,
+            KeyAction::ToggleHelp,
+            KeyAction::CloseHelp,
+            KeyAction::DismissVersionPopup,
+            KeyAction::OpenThemePicker,
+            KeyAction::ToggleWalkableDebug,
+            KeyAction::ToggleDashboard,
+            KeyAction::DashboardClose,
+            KeyAction::ConnectionClose,
+        ] {
+            assert!(
+                !h.apply(action),
+                "only Quit may end the loop, but {action:?} did"
+            );
+        }
+    }
+
+    /// `set_paused` must read `paused()` AFTER the toggle. Asserting only
+    /// `ui.paused()` is NOT enough — that survives swapping the two statements,
+    /// because the UI flag flips either way. The audio handle is what goes out
+    /// of sync, so assert THAT: pausing must mute, unpausing must unmute.
+    #[test]
+    fn toggle_pause_drives_the_audio_handle_in_step_with_the_ui() {
+        let mut h = Harness::new();
+        assert!(!h.ui.paused());
+        assert!(
+            !h.audio_ctl.handle().is_muted(),
+            "harness precondition: the controller starts unmuted"
+        );
+
+        h.apply(KeyAction::TogglePause);
+        assert!(h.ui.paused(), "p must pause the UI");
+        assert!(
+            h.audio_ctl.handle().is_muted(),
+            "p must mute audio in the SAME apply — a set_paused read before the \
+             toggle leaves the handle a step behind"
+        );
+
+        h.apply(KeyAction::TogglePause);
+        assert!(!h.ui.paused(), "p again must unpause the UI");
+        assert!(
+            !h.audio_ctl.handle().is_muted(),
+            "unpause must unmute in the same apply"
+        );
+    }
+
+    /// Pins the `!` the mutation run flagged: dropping it makes the toggle a
+    /// no-op that always writes the value already there.
+    #[test]
+    fn toggle_walkable_debug_flips_rather_than_sets() {
+        let mut h = Harness::new();
+        let before = h.renderer.debug_walkable();
+        h.apply(KeyAction::ToggleWalkableDebug);
+        assert_eq!(
+            h.renderer.debug_walkable(),
+            !before,
+            "w must FLIP the overlay, not assign a constant"
+        );
+        h.apply(KeyAction::ToggleWalkableDebug);
+        assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
+    }
+
+    /// `ThemeCommit` persists; `ThemeCancel` restores the last COMMITTED theme,
+    /// not merely the previewed one.
+    #[test]
+    fn theme_commit_persists_and_cancel_restores_the_saved_theme() {
+        let mut h = Harness::new();
+        h.apply(KeyAction::OpenThemePicker);
+        h.apply(KeyAction::ThemeCommit(1));
+        let saved = std::fs::read_to_string(&h.config_path).expect("config written");
+        assert!(
+            saved.contains(theme::ALL_THEMES[1].name),
+            "commit must persist the theme: {saved:?}"
+        );
+
+        h.apply(KeyAction::OpenThemePicker);
+        h.apply(KeyAction::ThemePreview(3));
+        h.apply(KeyAction::ThemeCancel);
+        assert_eq!(
+            h.ui.saved_theme_idx, 1,
+            "cancel must restore the COMMITTED theme, not the preview"
         );
     }
 }
