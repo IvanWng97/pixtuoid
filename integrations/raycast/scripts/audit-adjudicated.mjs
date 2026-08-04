@@ -5,19 +5,7 @@ import { spawnSync } from "node:child_process";
 
 // Verify before adjudicating: `npm audit`, `npm view <pkg>@<v> dependencies`, and
 // `gh api /advisories/<GHSA>` are the three commands behind every entry here.
-const ADJUDICATED = new Map([
-  [
-    "GHSA-mh99-v99m-4gvg",
-    "brace-expansion DoS. Every 1.x-4.x line is unpatched (first patched: 5.0.8), so " +
-      "the only fix for the filelist/node_modules/brace-expansion 2.x copy is a major " +
-      "jump — and 5.x turned the export from a function into an object while minimatch " +
-      "5.1.9 calls it as `expand(pattern)`, so an override makes `npm audit` green over " +
-      "code that throws 'expand is not a function' (tried, #792). The chain is pinned " +
-      "from the top and we own no link in it: @oclif/core -> ejs ^3 -> jake ^10 -> " +
-      "filelist ^1 -> minimatch ^5. jake 12 and filelist 2 already sit on minimatch ^10 " +
-      "-> brace-expansion 5.0.8, so this clears when @oclif/core moves off ejs ^3.",
-  ],
-]);
+const ADJUDICATED = new Map();
 
 const audit = spawnSync("npm", ["audit", "--json"], { encoding: "utf8" });
 if (audit.error) throw audit.error;

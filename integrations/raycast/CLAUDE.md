@@ -95,17 +95,22 @@ Raycast app** and only run before a store publish — they are NOT in CI, so a
 green PR does not prove the manifest is publishable. See the
 [README](README.md) for `npm run {build,dev,lint}`.
 
-- **`npm ci` reports HIGH advisories here, and the "don't fix" call is CHECKED
-  rather than asserted.** `npm run audit` (`scripts/audit-adjudicated.mjs`)
-  passes only while the live advisory set EQUALS the adjudicated set in that
-  file — so a new advisory reds CI, and one that clears upstream reds it too,
-  which keeps a refusal from outliving its reason. It is a script because
-  `npm audit` has no per-advisory ignore flag (only `--audit-level`). Today's
-  one entry is the brace-expansion DoS **GHSA-mh99-v99m-4gvg**, reached solely
-  through `@oclif/core → ejs ^3 → jake ^10 → filelist ^1 → minimatch ^5`; the
-  entry carries why the override is refused (5.x made the export an object,
-  so `npm audit` goes green over code that throws) and the one upstream move
-  that clears it.
+- **When `npm ci` reports an advisory, the "don't fix" call is CHECKED rather
+  than asserted.** `npm run audit` (`scripts/audit-adjudicated.mjs`) passes
+  only while the live advisory set EQUALS the adjudicated set in that file — so
+  a new advisory reds CI, and one that clears upstream reds it too, which keeps
+  a refusal from outliving its reason. It is a script because `npm audit` has
+  no per-advisory ignore flag (only `--audit-level`). **The set is currently
+  EMPTY** — that is the passing state, not a disabled gate. Its one-time entry,
+  the brace-expansion DoS **GHSA-mh99-v99m-4gvg** reached through
+  `@oclif/core → ejs ^3 → jake ^10 → filelist ^1 → minimatch ^5`, refused an
+  override because the only patch was then 5.0.8 and 5.x turned the export from
+  a function into an object that `minimatch@5.1.9` calls as `expand(pattern)`
+  (#792). Upstream later backported to **2.1.3**, so the 2.x copy took the fix
+  in-range with no override and no major jump — and the STALE arm is what
+  surfaced it, on an unrelated PR, rather than the entry quietly persisting.
+  So before adding an entry, re-check `gh api /advisories/<GHSA>` for a
+  backport to the line you are actually pinned to.
 - **A chord Raycast RESERVES is swallowed, so its Action is unreachable — and
   `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
   it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension
