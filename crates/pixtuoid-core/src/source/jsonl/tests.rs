@@ -3142,3 +3142,45 @@ fn uuid_like() -> String {
         .as_nanos();
     format!("{nanos}-{:p}", &nanos)
 }
+
+/// Pins that `id_for` derives from `id_path(path)` rather than the raw path.
+///
+/// This arm CANNOT fail on Unix — the fold is identity there, so a
+/// pass-through `id_for` returns the same string. It pins the shape; the
+/// discriminating assertion is the `cfg(windows)` twin below, which runs in the
+/// `windows-test` job (the same split as
+/// `claude_code::detect_parent_id_handles_backslash_paths`).
+#[test]
+fn folded_deriver_applies_the_id_path_fold() {
+    fn echo(p: &std::path::Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+    let d = super::folded::FoldedDeriver::new(echo);
+    for raw in [
+        "/Users/me/.claude/projects/repo/abc.jsonl",
+        r"C:\Users\Me\.claude\Projects\Repo\ABC.jsonl",
+    ] {
+        assert_eq!(
+            d.id_for(std::path::Path::new(raw)),
+            crate::id::normalize_path_key(raw),
+            "id_for must derive from the FOLDED path, not the raw one"
+        );
+    }
+}
+
+/// The discriminating half: on Windows the fold is not identity, so a
+/// pass-through `id_for` would return the raw backslash/mixed-case form. Mirrors
+/// `claude_code::detect_parent_id_handles_backslash_paths`.
+#[cfg(windows)]
+#[test]
+fn folded_deriver_folds_separators_and_case_on_windows() {
+    fn echo(p: &std::path::Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+    let d = super::folded::FoldedDeriver::new(echo);
+    let id = d.id_for(std::path::Path::new(r"C:\Users\Me\Repo\ABC.jsonl"));
+    assert!(
+        !id.contains('\\') && id == id.to_lowercase(),
+        "the Windows fold must normalize separators AND case, got {id:?}"
+    );
+}
