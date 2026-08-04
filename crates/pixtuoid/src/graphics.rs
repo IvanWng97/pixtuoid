@@ -224,6 +224,7 @@ pub(crate) fn graphics_diagnostic_row(
 /// deliberately, and a slow terminal answering late is the answer it wants; a
 /// future `run` wiring should pass [`crate::term::TRUECOLOR_PROBE_TIMEOUT`]
 /// instead of designing the query off the boot path.
+#[cfg(feature = "graphics")]
 pub(crate) fn detect() -> Option<Detected> {
     use ratatui_image::picker::{Picker, ProtocolType};
 
@@ -236,6 +237,16 @@ pub(crate) fn detect() -> Option<Detected> {
         has_protocol: picker.protocol_type() != ProtocolType::Halfblocks,
         cell: CellSize { w, h },
     })
+}
+
+/// Built without the `graphics` feature: there is no query to run.
+///
+/// `None` is the SAME answer a non-tty gets, and `ClassicReason::NotQueried`
+/// already words it as "nothing could answer", so the report stays honest
+/// without a fourth reason for "this build cannot ask".
+#[cfg(not(feature = "graphics"))]
+pub(crate) fn detect() -> Option<Detected> {
+    None
 }
 
 #[cfg(test)]

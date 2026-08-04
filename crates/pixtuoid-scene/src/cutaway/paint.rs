@@ -254,11 +254,8 @@ pub fn render_cutaway(
             PieceKind::Character { idx: i },
         ));
     }
-    // The rooms' walls join the SAME list rather than painting as a backdrop.
-    // As a backdrop a room's near wall could never occlude anything inside it,
-    // so an agent who wandered into a meeting room stood in front of the wall
-    // between them and the viewer. A run is split into segments first — see
-    // `wall_segments`.
+    // Sorted, not a backdrop: a backdrop wall cannot occlude what is inside
+    // the room. Split into segments first — see `wall_segments`.
     wall_segments(layout, &mut order);
     push_pantry_counter(layout, pack, &mut order);
 
@@ -651,12 +648,9 @@ fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut Rgb
     let w = scale.to_buffer(layout.buf_w);
     fill(buf, 0, 0, w, h, base);
 
-    // The falloff is measured from where the FLOOR starts, not from buffer row
-    // 0. The wall band occupies everything above `top_margin`, so anchoring at
-    // the top put the whole lit zone and most of the dither behind it —
-    // measured at 6% of the visible floor carrying any light at all, with the
-    // south dark falloff four times larger. The room read base-to-dark, the
-    // exact inverse of "the falloff says where the light comes from".
+    // Anchored to where the FLOOR starts, not buffer row 0: the wall band
+    // covers everything above `top_margin`, so measuring from the top hides
+    // the lit zone behind it.
     let floor_top = scale.to_buffer(layout.top_margin);
     let floor_h = h.saturating_sub(floor_top);
 

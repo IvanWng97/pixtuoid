@@ -35,7 +35,7 @@ ratatui            = { workspace = true }
 # libchafa.so and needs it at RUNTIME too — that would break the musl/cross
 # Linux prebuilds exactly the way ALSA already does (see the `audio` feature).
 # Its sixel backend is `icy_sixel`, pure Rust, so the trimmed set has no C dep.
-ratatui-image      = { version = "11", default-features = false, features = ["crossterm"] }
+ratatui-image      = { version = "11", default-features = false, features = ["crossterm"], optional = true }
 crossterm          = { workspace = true }
 unicode-width      = { workspace = true }
 clap               = { workspace = true }
@@ -76,9 +76,18 @@ clap_mangen = "0.3.0"
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "tracing"], optional = true }
 
 [features]
-default = ["audio"]
+default = ["audio", "graphics"]
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
+# Terminal image-protocol detection. Gates the DEPENDENCY, not a runtime switch:
+# `ratatui-image` pulls icy_sixel -> quantette -> rayon unconditionally (no
+# feature of its own drops the sixel backend), so a work-stealing thread pool
+# enters a tokio binary, and on Windows a SECOND binding family (`windows 0.58`
+# beside the existing 0.62) with its proc-macro crates. 27 transitive crates in
+# total, and every one of them reaches `cargo install` and homebrew-core's
+# from-source build. Off is a build whose `doctor` reports the capability as
+# unqueryable, which is what every non-graphics terminal already gets.
+graphics = ["dep:ratatui-image"]
 
 # termios/poll for the truecolor preflight's DECRQSS terminal query (term.rs).
 # Same 0.2 as pixtuoid-core/hook — no second build.
@@ -142,3 +151,9 @@ assets = [
     ["target/release/pixtuoid", "usr/bin/", "755"],
 ]
 extended-description = "Terminal-native, multi-agent pixel-art visualizer for AI coding agents. Each running Claude Code session appears as an animated sprite in a top-down ASCII office."
+
+# The spike drives `ratatui-image` directly, so it only builds when the
+# dependency is in the graph.
+[[example]]
+name              = "graphics_spike"
+required-features = ["graphics"]
