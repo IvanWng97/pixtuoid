@@ -6,28 +6,31 @@ use super::*;
 
 use super::anchors::{back_couch_anchor, waypoint_anchor};
 
-/// Paint a character at an arbitrary anchor with per-agent recolor. `glow_tint`
-/// carries the tool-derived monitor color when the character is at a lit screen,
-/// tinting the skin so the eye reads "the monitor is lighting their face."
+/// The per-agent RECOLORED sprite for one character, from the cache.
+///
+/// Split out of [`paint_character_at`] so a second profile gets the identical
+/// palette without a second copy of the rule. Only the BLIT differs between
+/// profiles — the classic pass writes 1:1, the cutaway writes at its render
+/// scale — and a per-agent palette is exactly the thing that must NOT differ:
+/// hair, skin and the cwd-keyed outfit are how a viewer tells two agents apart,
+/// so an agent who is auburn in one profile and default-brown in the other is
+/// two different people to the eye.
+///
+/// Returns the burn tier alongside, because the caller owns the flame crown
+/// (it is painted at the caller's own coordinates).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn paint_character_at(
-    buf: &mut RgbBuffer,
+pub(crate) fn character_frame<'c>(
     anim_name: &'static str,
     frame_idx: usize,
-    anchor: Point,
     agent: &AgentSlot,
     pack: &Pack,
     flip_x: bool,
     glow_tint: Option<Rgb>,
-    cache: &mut FrameCache,
+    cache: &'c mut FrameCache,
     now: SystemTime,
-) {
-    let Some(anim) = pack.animation(anim_name) else {
-        return;
-    };
-    let Some(frame) = frame_at(anim, frame_idx) else {
-        return;
-    };
+) -> Option<(&'c Frame, crate::burn::BurnTier)> {
+    let anim = pack.animation(anim_name)?;
+    let frame = frame_at(anim, frame_idx)?;
     // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the
     // change so the cache drops the agent's stale recolors before the lookup.
     cache.note_outfit_seed(agent.agent_id, outfit_seed_for(agent));
@@ -45,12 +48,37 @@ pub(super) fn paint_character_at(
             let pal = agent_palette(&pack.palette, agent, glow_tint, burn);
             let recolored = recolor_frame(frame, &pal, &pack.palette);
             if flip_x {
+                // HORIZONTAL: `flip_x` is which way the character FACES.
                 recolored.mirror_horizontal()
             } else {
                 recolored
             }
         },
     );
+    Some((cached, burn))
+}
+
+/// Paint a character at an arbitrary anchor with per-agent recolor. `glow_tint`
+/// carries the tool-derived monitor color when the character is at a lit screen,
+/// tinting the skin so the eye reads "the monitor is lighting their face."
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_character_at(
+    buf: &mut RgbBuffer,
+    anim_name: &'static str,
+    frame_idx: usize,
+    anchor: Point,
+    agent: &AgentSlot,
+    pack: &Pack,
+    flip_x: bool,
+    glow_tint: Option<Rgb>,
+    cache: &mut FrameCache,
+    now: SystemTime,
+) {
+    let Some((cached, burn)) = character_frame(
+        anim_name, frame_idx, agent, pack, flip_x, glow_tint, cache, now,
+    ) else {
+        return;
+    };
     let sprite_w = cached.width();
     blit_frame(cached, anchor.x, anchor.y, buf);
     if burn == crate::burn::BurnTier::Top {

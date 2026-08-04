@@ -35,6 +35,11 @@ const DEFAULT_LOGICAL: (u16, u16) = (160, 96);
 /// smallest Monaspace Neon stays legible at.
 const LABEL_PX_PER_SCALE: f32 = 2.6;
 
+/// Working directories the fixture cycles through. Fewer than the desk count on
+/// purpose: two agents sharing a repo share an outfit, which is the grouping
+/// Team Palette exists to show.
+const REPOS: &[&str] = &["/w/pixtuoid", "/w/site", "/w/raycast", "/w/notes"];
+
 fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
     let seated = now.checked_sub(Duration::from_secs(120)).unwrap_or(now);
     let recent = now.checked_sub(Duration::from_secs(3)).unwrap_or(now);
@@ -57,7 +62,11 @@ fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
                 agent_id: id,
                 source: Arc::from("claude-code"),
                 session_id: Arc::from(format!("cut-{i:04x}").as_str()),
-                cwd: Arc::from(PathBuf::from("/cutaway").as_path()),
+                // VARIED cwds, like the classic `snapshot` example's fixture:
+                // the outfit is cwd-keyed (Team Palette), so one cwd for
+                // everyone renders the whole office in a single shirt and hides
+                // exactly the grouping the recolor exists to show.
+                cwd: Arc::from(PathBuf::from(REPOS[i % REPOS.len()]).as_path()),
                 label: "cc".into(),
                 state,
                 state_started_at: seated,
@@ -133,7 +142,13 @@ fn main() -> Result<()> {
 
     let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
     let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
-    let labels = render_cutaway(&frame, &layout, &pack, theme, scale, &mut buf);
+    // The recolor cache the classic painter uses — the cutaway blits the SAME
+    // per-agent sprites, so it needs the same cache rather than recoloring
+    // twelve characters afresh every frame.
+    let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
+    let labels = render_cutaway(
+        &frame, &layout, &pack, theme, scale, now, &mut cache, &mut buf,
+    );
 
     // Name badges: the engine reports WHERE, the binary owns the font. Drawn
     // straight into the RGB buffer here (the real painters blend post-upscale

@@ -99,12 +99,15 @@ pub struct CutawayLabel {
 /// The classic painter is untouched — this is its sibling, not its successor.
 ///
 /// Returns where each visible agent's badge belongs; see [`CutawayLabel`].
+#[allow(clippy::too_many_arguments)]
 pub fn render_cutaway(
     frame: &SimFrame,
     layout: &Layout,
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
+    now: std::time::SystemTime,
+    cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) -> Vec<CutawayLabel> {
     paint_floor(layout, theme, scale, buf);
@@ -266,7 +269,7 @@ pub fn render_cutaway(
         match *kind {
             PieceKind::Desk { at, lit } => paint_desk(at.x, at.y, lit, pack, theme, scale, buf),
             PieceKind::Character { idx } => {
-                if let Some(l) = paint_character(frame, idx, pack, theme, scale, buf) {
+                if let Some(l) = paint_character(frame, idx, pack, theme, scale, now, cache, buf) {
                     labels.push(l);
                 }
             }
@@ -792,29 +795,54 @@ fn cutaway_seat_anchor(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_character(
     frame: &SimFrame,
     idx: usize,
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
+    now: std::time::SystemTime,
+    cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) -> Option<CutawayLabel> {
     let c = frame.characters.get(idx)?;
-    let anim = pack.animation(c.anim_name)?;
-    let f = anim.frames.get(c.frame_idx)?;
-    let art = if c.flip_x {
-        f.mirror_vertical()
-    } else {
-        f.clone()
-    };
+    let agent = frame.agents.get(c.agent_idx)?;
     // Re-project a desk-seated pose; everyone else keeps the sim's anchor.
     let at = cutaway_anchor(c);
+
+    // The SAME recolored sprite the classic painter blits — per-agent hair,
+    // skin and cwd-keyed outfit, through the same cache. This profile used to
+    // blit the pack's raw frame, so every agent rendered in the placeholder
+    // palette and the office read as one person copied twelve times, which is
+    // the opposite of what it exists to show. It also hand-rolled the facing
+    // flip as `mirror_vertical` — rows, not columns — so a west-facing
+    // character would have rendered UPSIDE DOWN.
+    let glow_tint = crate::pixel_painter::character_glow_tint(c.glow, agent, theme);
+    let (art, _burn) = crate::pixel_painter::seat::character_frame(
+        c.anim_name,
+        c.frame_idx,
+        agent,
+        pack,
+        c.flip_x,
+        glow_tint,
+        cache,
+        now,
+    )?;
+    let (art_w, art_h) = (art.width(), art.height());
+
     // Ground contact BEFORE the body, so the sprite sits on its own shadow
     // rather than the shadow being stamped over their feet.
-    contact_shadow(at, art.width(), art.height(), theme, scale, buf);
+    //
+    // Only for someone STANDING on the floor. A seated occupant's chair back
+    // starts at exactly the same row and is three rows deep, so the shadow was
+    // drawn and then completely covered — dead pixels, and the chair is already
+    // this figure's ground contact.
+    if c.seat_desk.is_none() {
+        contact_shadow(at, art_w, art_h, theme, scale, buf);
+    }
     blit_frame_scaled(
-        &art,
+        art,
         scale.to_buffer(at.x),
         scale.to_buffer(at.y),
         scale.factor(),
@@ -826,11 +854,11 @@ fn paint_character(
     // occlude a DIFFERENT agent walking past — acceptable while the profile has
     // no walkers rendered at a desk, and the fix is a Piece::Chair when it does.
     if c.seat_desk.is_some() {
-        paint_chair(at, art.width(), art.height(), theme, scale, buf);
+        paint_chair(at, art_w, art_h, theme, scale, buf);
     }
     Some(CutawayLabel {
         agent_idx: c.agent_idx,
-        anchor_px: label_anchor(at, art.width(), scale),
+        anchor_px: label_anchor(at, art_w, scale),
     })
 }
 
