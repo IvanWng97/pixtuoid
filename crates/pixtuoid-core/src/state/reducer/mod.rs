@@ -163,8 +163,9 @@ enum Preprocessed {
 
 struct TaskTracking {
     /// An `ActivityEnd` drained a tracked Task: the general ActivityEnd arm
-    /// must be skipped, or it would arm `pending_idle_at` while tasks are
-    /// still in flight.
+    /// must be skipped, or it would re-apply a transition the drain already
+    /// made — restarting Delegating, and with it `state_started_at`, whenever
+    /// parallel Tasks remain.
     handled_by_task_tracking: bool,
     /// An `ActivityStart` dispatched a Task (already applied as
     /// Active(Delegating) by the pre-pass): the general arm must be skipped.
@@ -517,9 +518,9 @@ impl Reducer {
     }
 
     /// The `ActivityEnd` arm. Skipped entirely when the pre-pass tracker
-    /// already drained a tracked Task with this event — arming
-    /// `pending_idle_at` while tasks are still in flight would settle a
-    /// delegating parent to Idle.
+    /// already drained a tracked Task with this event: the drain applied the
+    /// transition itself, so re-running here would restart Delegating —
+    /// resetting `state_started_at` — whenever parallel Tasks remain.
     fn apply_activity_end(
         &mut self,
         scene: &mut SceneState,
