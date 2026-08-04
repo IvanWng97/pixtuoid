@@ -73,9 +73,9 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // `match` brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.17.0" => Some(&[
-            "Sprite packs can ship higher-density art — a `desk@4x` sprite is drawn at 4x detail wherever the surface has the pixels for it, and a pack without one renders exactly as before",
-            "`pixtuoid doctor` reports whether this terminal can paint the richer office, and says WHY when it can't rather than leaving you guessing",
-            "`validate-pack` now rejects a density variant whose size doesn't match the density its own name claims",
+            "`validate-pack` now rejects a density variant whose size doesn't match the density its own name claims, and says so at load time too",
+            "Sprite packs may now DECLARE higher-density art — a `desk@4x` alongside `desk`. Nothing paints it yet: this release defines the contract so packs can be authored ahead of the renderer that will use it",
+            "`pixtuoid doctor` gained a `graphics:` row reporting what this terminal COULD paint, and `--graphics off` to skip the query",
             "Otherwise groundwork: the office looks the same, but its SIZE and its RESOLUTION are now separate — so a later release can draw the same room in more detail instead of more desks",
         ]),
         "0.16.0" => Some(&[
