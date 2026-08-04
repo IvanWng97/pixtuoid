@@ -1032,17 +1032,31 @@ mod tests {
 
     #[test]
     fn a_known_or_empty_method_never_breadcrumbs_as_unknown() {
+        // Every line MUST carry a `sessionUpdate` tag or the decode bails
+        // before the method match and the assertion below proves nothing.
+        let line = |method: &str| {
+            json!({"timestamp": 1721131200u64, "method": method,
+                   "params": {"sessionId": "0197fa30-sess",
+                              "update": {"sessionUpdate": "plan"}}})
+        };
         for method in ["session/update", "_x.ai/session/update", ""] {
             let logs = crate::test_capture::capture_logs(|| {
-                let v = json!({"timestamp": 1721131200u64, "method": method,
-                               "params": {"sessionId": "0197fa30-sess", "update": {}}});
-                let _ = decode_grok_line(TRANSCRIPT, SOURCE_NAME, v);
+                let _ = decode_grok_line(TRANSCRIPT, SOURCE_NAME, line(method));
             });
             assert!(
                 !logs.contains("unknown_event"),
                 "method {method:?} must stay silent, got:\n{logs}"
             );
         }
+        // Positive control: the arm DOES fire for a genuinely new namespace, so
+        // the silence asserted above is a decision and not an early return.
+        let logs = crate::test_capture::capture_logs(|| {
+            let _ = decode_grok_line(TRANSCRIPT, SOURCE_NAME, line("_x.ai/teleport"));
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("_x.ai/teleport"),
+            "an unknown method must breadcrumb, got:\n{logs}"
+        );
     }
 
     #[test]

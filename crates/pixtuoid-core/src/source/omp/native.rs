@@ -121,6 +121,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn probe_root_accepts_the_dot_omp_agent_layout_and_nothing_that_merely_resembles_it() {
+        let home = tempfile::tempdir().unwrap();
+        // A resolved agent dir that is NOT the standard layout, so each case
+        // below is decided by the `.omp/agent` check alone.
+        let elsewhere = home.path().join("pi-coding-agent");
+
+        let standard = home.path().join(".omp").join("agent").join("sessions");
+        std::fs::create_dir_all(&standard).unwrap();
+        assert_eq!(
+            omp_probe_root_resolved(&standard, &elsewhere),
+            Some(standard.clone()),
+            "the first-party `.omp/agent/sessions` layout attaches the probe"
+        );
+
+        // Parent named `agent` but the GRANDPARENT is not `.omp` — the halves
+        // of the layout check must both hold, or a `~/work/agent/sessions`
+        // replay would be vouched for by any running bun process.
+        let impostor = home.path().join("work").join("agent").join("sessions");
+        std::fs::create_dir_all(&impostor).unwrap();
+        assert_eq!(omp_probe_root_resolved(&impostor, &elsewhere), None);
+
+        // Grandparent `.omp` but the parent is not `agent`.
+        let wrong_parent = home.path().join(".omp").join("other").join("sessions");
+        std::fs::create_dir_all(&wrong_parent).unwrap();
+        assert_eq!(omp_probe_root_resolved(&wrong_parent, &elsewhere), None);
+
+        // The PI_CODING_AGENT_DIR case still attaches on the resolved dir.
+        let resolved = elsewhere.join("sessions");
+        std::fs::create_dir_all(&resolved).unwrap();
+        assert_eq!(
+            omp_probe_root_resolved(&resolved, &elsewhere),
+            Some(resolved)
+        );
+        assert_eq!(
+            omp_probe_root_resolved(Path::new("/tmp/fixture"), &elsewhere),
+            None
+        );
+    }
+
+    #[test]
     fn session_ended_marker_is_anchored_on_the_structural_fields() {
         assert!(omp_session_ended(
             br#"{"type":"custom","id":"a","parentId":null,"timestamp":"t","customType":"session_exit","data":{"reason":"exit command","kind":"normal","recordedAt":"t"}}"#
