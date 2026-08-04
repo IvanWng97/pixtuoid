@@ -16,7 +16,7 @@ path = "junit.xml"
 # fully-parallel suite on a loaded machine, exec/dyld scheduling jitter alone
 # blows the bound, so give them the machine to themselves.
 [[profile.default.overrides]]
-filter = 'test(_exits_zero_without_blocking) | test(_within_watchdog_bound)'
+filter = 'test(_exits_zero_without_blocking) | test(_within_watchdog_bound) | test(_and_ignores_stdin)'
 threads-required = "num-cpus"
 
 # Same load-sensitivity as the shim bounds above: this pair spawns a real
