@@ -3,8 +3,11 @@
 // refusal cannot outlive the condition it was written for.
 import { spawnSync } from "node:child_process";
 
-// Verify before adjudicating: `npm audit`, `npm view <pkg>@<v> dependencies`, and
-// `gh api /advisories/<GHSA>` are the three commands behind every entry here.
+// Verify before adjudicating with `npm audit`, `npm view <pkg>@<v> dependencies`,
+// and `gh api /advisories/<GHSA>` — that last one for a backport to the line you
+// are actually pinned to, NOT just the lowest `first_patched_version` (#792 read
+// "patched: 5.0.8" as "the 2.x line is unfixable" and refused a fix that landed
+// in 2.1.3).
 const ADJUDICATED = new Map();
 
 const audit = spawnSync("npm", ["audit", "--json"], { encoding: "utf8" });

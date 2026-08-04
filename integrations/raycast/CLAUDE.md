@@ -107,10 +107,9 @@ green PR does not prove the manifest is publishable. See the
   override because the only patch was then 5.0.8 and 5.x turned the export from
   a function into an object that `minimatch@5.1.9` calls as `expand(pattern)`
   (#792). Upstream later backported to **2.1.3**, so the 2.x copy took the fix
-  in-range with no override and no major jump — and the STALE arm is what
-  surfaced it, on an unrelated PR, rather than the entry quietly persisting.
-  So before adding an entry, re-check `gh api /advisories/<GHSA>` for a
-  backport to the line you are actually pinned to.
+  in-range with no override and no major jump. The check that would have caught
+  that earlier now sits on the `ADJUDICATED` declaration itself, where you are
+  standing when you add a row.
 - **A chord Raycast RESERVES is swallowed, so its Action is unreachable — and
   `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
   it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension

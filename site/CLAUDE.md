@@ -593,8 +593,8 @@ has no "this pin stopped doing anything" check, so retiring one is a manual
 audit. The test is a FRESH resolve: `package.json` alone, no lockfile, with
 and without the entry — identical trees mean it is inert. **`npm audit` is
 the WRONG test**, and confidently so: drop `chrome-launcher` and audit still
-reads clean while 14 packages change and `inflight`/`glob@7`/`mkdirp@0.5`
-come back, because what it guards is a deprecated chain no advisory covers.
+reads clean while `rimraf@3`/`glob@7`/`inflight`/`mkdirp@0.5` come back,
+because what it guards is a deprecated chain no advisory covers.
 The `yaml-language-server` → `yaml 2.8.3` pin was retired exactly this way,
 once `@astrojs/check` 0.9.10 pulled a language-server whose
 `yaml-language-server` resolves the patched 2.8.3 on its own.
