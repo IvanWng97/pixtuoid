@@ -443,9 +443,8 @@ fn max_desks_config_set_no_cli() {
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "max-desks = 8\n").unwrap();
     let cfg = load(&path, &mut Vec::new());
-    let cli_max_desks: Option<usize> = None;
     let mut w = Vec::new();
-    let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut w));
+    let desk_cap = resolve_desk_cap(&cfg, None, &mut w);
     assert_eq!(desk_cap, Some(8));
     assert!(w.is_empty(), "a valid cap collects no warning: {w:?}");
 }
@@ -456,24 +455,40 @@ fn max_desks_cli_overrides_config() {
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "max-desks = 8\n").unwrap();
     let cfg = load(&path, &mut Vec::new());
-    let cli_max_desks: Option<usize> = Some(4);
-    let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut Vec::new()));
+    let desk_cap = resolve_desk_cap(&cfg, Some(4), &mut Vec::new());
     assert_eq!(desk_cap, Some(4));
+}
+
+/// The eager-`.or` regression: swapping `resolve_desk_cap`'s `.or` for
+/// `.or_else(||` compiles clean and silently drops the `max-desks = 0` warning
+/// on exactly this input — the CLI flag wins, so a lazy argument is never
+/// evaluated. Asserting the RETURN alone cannot catch it; assert the warning.
+#[test]
+fn max_desks_zero_in_config_still_warns_when_the_cli_flag_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "max-desks = 0\n").unwrap();
+    let cfg = load(&path, &mut Vec::new());
+    let mut w = Vec::new();
+    let desk_cap = resolve_desk_cap(&cfg, Some(4), &mut w);
+    assert_eq!(desk_cap, Some(4), "the CLI flag still wins");
+    assert!(
+        w.iter().any(|m| m.contains("max-desks = 0")),
+        "the config-level 0 must still warn even though the CLI overrode it: {w:?}"
+    );
 }
 
 #[test]
 fn max_desks_neither_set() {
     let cfg = AppConfig::default();
-    let cli_max_desks: Option<usize> = None;
-    let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut Vec::new()));
+    let desk_cap = resolve_desk_cap(&cfg, None, &mut Vec::new());
     assert_eq!(desk_cap, None);
 }
 
 #[test]
 fn max_desks_no_config_file() {
     let cfg = load(Path::new("/nonexistent/path/config.toml"), &mut Vec::new());
-    let cli_max_desks: Option<usize> = None;
-    let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut Vec::new()));
+    let desk_cap = resolve_desk_cap(&cfg, None, &mut Vec::new());
     assert_eq!(desk_cap, None);
 }
 
@@ -1127,4 +1142,56 @@ fn save_version_preserves_theme() {
     let cfg = load(&path, &mut Vec::new());
     assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
     assert_eq!(cfg.last_seen_version.as_deref(), Some("0.4.0"));
+}
+
+/// The degraded bit must come from `load` itself, not from reading the shared
+/// warnings Vec back at the call site. That Vec is also written by every
+/// `resolve_*` below it, so `!warnings.is_empty()` only meant "degraded" on the
+/// one line directly after `load` — and a resolver reordered above that line
+/// flipped a genuine first run into "previously configured", suppressing
+/// onboarding permanently.
+#[test]
+fn load_status_is_not_contaminated_by_a_later_resolver_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    // Parses fine, but `max-desks = 0` makes a LATER resolver warn.
+    std::fs::write(&path, "max-desks = 0\n").unwrap();
+
+    // PRE-POPULATED on purpose: the collector is shared, so a caller may have
+    // warned before ever reaching `load`. `!warnings.is_empty()` would call
+    // that a degraded load; only a DELTA over the call is correct.
+    let mut w = vec!["an earlier, unrelated warning".to_string()];
+    let (cfg, degraded) = load_with_status(&path, &mut w);
+    assert!(
+        !degraded,
+        "a well-formed file is not a degraded load, whatever the Vec already held"
+    );
+    assert_eq!(w.len(), 1, "load itself warns nothing here: {w:?}");
+
+    // The resolver now pushes into the SAME Vec. The captured bit must not move.
+    let _ = resolve_desk_cap(&cfg, None, &mut w);
+    assert!(!w.is_empty(), "precondition: max-desks = 0 warns");
+    assert!(
+        !degraded,
+        "the degraded bit is captured AT load — a later resolver's warning \
+         must not retroactively make the load look malformed"
+    );
+}
+
+/// The other half: a genuinely malformed file must still report degraded.
+#[test]
+fn load_status_reports_degraded_for_a_malformed_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "this is not = = toml\n").unwrap();
+    let (_cfg, degraded) = load_with_status(&path, &mut Vec::new());
+    assert!(degraded, "a malformed file must report a degraded load");
+}
+
+/// A missing file returns defaults WITHOUT warning, so it stays a first run.
+#[test]
+fn load_status_is_clean_for_a_missing_file() {
+    let (_cfg, degraded) =
+        load_with_status(Path::new("/nonexistent/x/config.toml"), &mut Vec::new());
+    assert!(!degraded, "a missing file is not a degraded load");
 }
