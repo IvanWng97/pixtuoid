@@ -275,9 +275,14 @@ mod tests {
         assert!(open_vnode_paths(999_999_999).is_empty());
     }
 
-    /// Load-bearing beyond hygiene: `grok::native::leader_socket_owner` asks
-    /// THIS fn whether a pid holds `leader.sock`, which is exactly the question
-    /// a vnode-only probe cannot answer — it is inert for that reason (#826).
+    /// The macOS/Linux parity pin: macOS filtered `PROX_FDTYPE_VNODE` while
+    /// Linux returned every `/proc/<pid>/fd` link, `socket:[inode]` included.
+    /// A caller needing a socket's OWNER needs a socket-aware probe instead
+    /// (macOS `PROC_PIDFDSOCKETINFO`; on Linux a `/proc/net/unix` inode join —
+    /// NOT `stat`'s `st_ino`, the path's filesystem inode rather than the
+    /// sockfs inode `socket:[N]` names). grok's #638 leader vouch was this
+    /// crate's only such caller and was deleted rather than repaired (#826);
+    /// don't add a socket arm here on spec.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn open_vnode_paths_never_reports_a_unix_socket() {

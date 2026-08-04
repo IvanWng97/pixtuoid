@@ -35,8 +35,9 @@ pub(super) fn id_path(path: &Path) -> std::path::PathBuf {
 ///
 /// `probe_live` (the liveness vouch) exempts only the RECENCY half — a
 /// structural end marker is the source's own first-hand report that no vouch
-/// outranks (grok's leader vouch is mtime-derived and outlives its session;
-/// omp's fd vouch fires for any bun tool merely READING an old transcript).
+/// outranks: a vouch answers "is the owning process alive", never "is this
+/// session over" (omp's fd vouch fires for a bun tool merely READING an old
+/// transcript).
 async fn should_seed_at_eof(
     meta: &std::fs::Metadata,
     window: Duration,

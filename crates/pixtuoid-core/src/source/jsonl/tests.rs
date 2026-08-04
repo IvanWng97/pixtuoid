@@ -1864,9 +1864,9 @@ async fn scan_pass_re_vouches_a_transiently_gated_live_file() {
 }
 
 /// The probe bypass exempts only the RECENCY half of the first-sight gate: a
-/// liveness vouch is a PROXY for "the owning process is alive" — grok's leader
-/// vouch outlives the session it vouches for, and omp's fd vouch fires for any
-/// bun tool merely READING an old transcript.
+/// liveness vouch is a PROXY for "the owning process is alive", never for "this
+/// session is over" — omp's fd vouch fires for any bun tool merely READING an
+/// old transcript.
 #[tokio::test]
 async fn probe_live_ended_first_sight_stays_unregistered() {
     let dir = tempfile::tempdir().unwrap();
