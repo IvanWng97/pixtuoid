@@ -58,10 +58,7 @@
     "chrome-launcher@^0.13.4": "0.15.2",
     "esbuild": "0.28.1",
     "tmp": "^0.2.7",
-    "uuid": "^11.1.1",
-    "yaml-language-server": {
-      "yaml": "2.8.3"
-    }
+    "uuid": "^11.1.1"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,

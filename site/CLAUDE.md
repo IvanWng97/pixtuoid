@@ -586,3 +586,15 @@ The version-qualified `chrome-launcher@^0.13.4` override upgrades only LHCI's
 old CommonJS launcher line to 0.15.2 (removing its deprecated
 `rimraf → glob → inflight` chain); do not widen it to 1.x, which is ESM-only
 while LHCI 0.15.1 still calls `require('chrome-launcher')`.
+
+**Nothing gates a STALE `overrides` entry** — unlike `deny.toml`'s
+`unused-ignored-advisory = "deny"` or raycast's `audit-adjudicated.mjs`, npm
+has no "this pin stopped doing anything" check, so retiring one is a manual
+audit. The test is a FRESH resolve: `package.json` alone, no lockfile, with
+and without the entry — identical trees mean it is inert. **`npm audit` is
+the WRONG test**, and confidently so: drop `chrome-launcher` and audit still
+reads clean while 14 packages change and `inflight`/`glob@7`/`mkdirp@0.5`
+come back, because what it guards is a deprecated chain no advisory covers.
+The `yaml-language-server` → `yaml 2.8.3` pin was retired exactly this way,
+once `@astrojs/check` 0.9.10 pulled a language-server whose
+`yaml-language-server` resolves the patched 2.8.3 on its own.
