@@ -316,6 +316,20 @@ pub mod antigravity;
 // of a wasm (`--no-default-features`) build; the per-source modules below stay
 // compiled because their pure DECODERS feed the registry, with each one's
 // runtime half in a `source/<cli>/native.rs` sub-module.
+/// Read a first-party file, bounded to `cap` bytes — the ONE spelling for every
+/// probe/registry read in `source/`. These files are re-read on every probe
+/// refresh, so an unbounded read lets a junk or runaway file balloon a per-scan
+/// allocation; truncated bytes just fail the caller's parse. The CAP stays at
+/// the call site, where its sizing rationale lives.
+#[cfg(all(unix, feature = "native"))]
+pub(crate) fn read_bounded_bytes(path: &std::path::Path, cap: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(cap).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 #[cfg(feature = "native")]
 pub(crate) mod cc_probe;
 /// Claude Code transcript source: line/hook decoders + the `Source` adapter.

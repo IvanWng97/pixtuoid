@@ -360,7 +360,11 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
     let claimed: Vec<PathBuf> = {
         let seen = ctx.seen.lock().await;
         seen.keys()
-            .filter(|p| (decoders.id_derive)(p) == id)
+            // Folded via `walk::id_path` like every other derivation seam: a
+            // raw key derives into a different id-space, the filter matches
+            // nothing, and the `seen` entry never releases — so a later append
+            // can never re-register the session.
+            .filter(|p| (decoders.id_derive)(&super::walk::id_path(p)) == id)
             .cloned()
             .collect()
     };

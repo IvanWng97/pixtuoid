@@ -10,22 +10,12 @@ use super::{decode_grok_line, grok_cwd_from_path, grok_home, grok_session_ended,
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
-/// Byte-capped read of the session registry, matching what both sibling
-/// first-party-file readers already do (`cc_probe::read_registry_entry_bounded`,
-/// `grok::read_bounded`): this file is re-read on EVERY probe refresh, so an
-/// unbounded `fs::read` would let a junk or runaway `active_sessions.json`
-/// balloon a per-scan allocation. Truncated bytes just fail the JSON parse and
-/// take the shape-drift path.
+/// Sized for the whole registry, not one entry: grok writes EVERY live TUI
+/// session into this single file, where `cc_probe`'s 64 KiB bounds one
+/// per-session file. Truncated bytes fail the JSON parse and take the
+/// shape-drift path.
 #[cfg(unix)]
-fn read_registry_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
-    const MAX_SESSION_REGISTRY_BYTES: u64 = 1024 * 1024;
-    let file = std::fs::File::open(path)?;
-    let mut bytes = Vec::new();
-    file.take(MAX_SESSION_REGISTRY_BYTES)
-        .read_to_end(&mut bytes)?;
-    Ok(bytes)
-}
+const MAX_SESSION_REGISTRY_BYTES: u64 = 1024 * 1024;
 
 /// grok's liveness probe: the session ids of every entry in
 /// `{grok_home}/active_sessions.json` whose pid is alive, plus the owning pid
@@ -43,7 +33,7 @@ fn read_registry_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
 #[cfg(unix)]
 pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     let path = grok_root.join("active_sessions.json");
-    let bytes = match read_registry_bounded(&path) {
+    let bytes = match crate::source::read_bounded_bytes(&path, MAX_SESSION_REGISTRY_BYTES) {
         Ok(b) => b,
         // Absent registry = healthy "no TUI clients".
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(ProbeSnapshot::default()),
