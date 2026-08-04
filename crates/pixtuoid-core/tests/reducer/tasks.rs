@@ -1600,3 +1600,65 @@ fn desk_exhausted_task_dispatch_leaves_no_ghost_slot() {
     );
     assert_eq!(scene.agents.len(), 1, "the seated agent is untouched");
 }
+
+/// The `handled_by_task_tracking` guard's REMOVAL was invisible to all 36 test
+/// binaries: every existing test drains the LAST task, where the drain path and
+/// the general arm happen to agree. With parallel Tasks in flight they diverge —
+/// without the guard the general arm re-runs `enter_delegating`, resetting
+/// `state_started_at` on a parent that never left Delegating.
+///
+/// Asserting the resulting STATE alone would reproduce the gap (it is Delegating
+/// either way); the clock is what pins the guard.
+#[test]
+fn ending_one_of_two_parallel_tasks_does_not_restart_the_parents_delegating_clock() {
+    let mut r = Reducer::new();
+    let mut scene = SceneState::uniform(4);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+    let parent = AgentId::from_transcript_path("/p/parallel.jsonl");
+    start(&mut r, &mut scene, parent);
+
+    // TWO Task dispatches in flight — the case no existing test covers.
+    act_start(
+        &mut r,
+        &mut scene,
+        parent,
+        Some("task-a"),
+        Some("Agent"),
+        t0,
+        Transport::Hook,
+    );
+    // The SECOND dispatch must ride JSONL: on the hook transport a parallel
+    // Task is suppressed as a subagent leak, so a hook copy would never reach
+    // `active_tasks` and the parallel state under test would not exist.
+    act_start(
+        &mut r,
+        &mut scene,
+        parent,
+        Some("task-b"),
+        Some("Agent"),
+        t0,
+        Transport::Jsonl,
+    );
+    let armed_at = scene.agents[&parent].state_started_at;
+
+    // Drain ONE. The other is still live, so the parent stays Delegating.
+    act_end(
+        &mut r,
+        &mut scene,
+        parent,
+        Some("task-a"),
+        t0 + Duration::from_secs(30),
+        Transport::Hook,
+    );
+
+    let slot = &scene.agents[&parent];
+    assert!(
+        matches!(slot.state, ActivityState::Active { .. }),
+        "one of two parallel Tasks ending must leave the parent Delegating"
+    );
+    assert_eq!(
+        slot.state_started_at, armed_at,
+        "the drain already applied this event; the general arm must be SKIPPED, \
+         or it re-enters Delegating and restarts the clock mid-delegation"
+    );
+}

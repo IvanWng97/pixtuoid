@@ -113,6 +113,15 @@ fn classify_rename(label: &str, source: &str) -> crate::state::SlotLabel {
     }
 }
 
+/// The two RAW wire strings a `ModelInfo` carries, bundled so the two
+/// `Option<&str>`s (positionally interchangeable) can't be silently swapped at
+/// the call site — the same hazard [`IdentityCtx`] exists to prevent.
+#[derive(Clone, Copy)]
+struct ModelObservation<'a> {
+    model: Option<&'a str>,
+    effort: Option<&'a str>,
+}
+
 /// Borrowed identity context threaded into slot registration/back-fill, bundled
 /// so the two `&str`s (`source`/`session_id`, positionally interchangeable)
 /// can't be silently swapped at a call site.
@@ -337,7 +346,15 @@ impl Reducer {
                 agent_id,
                 model,
                 effort,
-            } => Self::apply_model_info(scene, agent_id, model.as_deref(), effort.as_deref(), now),
+            } => Self::apply_model_info(
+                scene,
+                agent_id,
+                ModelObservation {
+                    model: model.as_deref(),
+                    effort: effort.as_deref(),
+                },
+                now,
+            ),
             AgentEvent::Usage {
                 agent_id,
                 fresh_tokens,
@@ -350,8 +367,7 @@ impl Reducer {
     /// hook-wins dedup, task tracking, and the deferred b1 cascade.
     ///
     /// ORDER IS LOAD-BEARING throughout; the WHY of each step is at its own
-    /// site below. Lifted whole out of [`Reducer::apply`] so the match stays a
-    /// dispatch — move-only.
+    /// site below. Lifted out of [`Reducer::apply`] so the match stays a dispatch.
     fn preprocess(
         &mut self,
         scene: &mut SceneState,
@@ -553,7 +569,6 @@ impl Reducer {
         }
     }
 
-    /// The `Waiting` arm.
     fn apply_waiting(
         &mut self,
         scene: &mut SceneState,
@@ -579,7 +594,6 @@ impl Reducer {
         }
     }
 
-    /// The `Rename` arm.
     fn apply_rename(scene: &mut SceneState, agent_id: AgentId, label: &str, now: SystemTime) {
         if let Some(slot) = scene.agents.get_mut(&agent_id) {
             let label = classify_rename(label, &slot.source);
@@ -587,7 +601,6 @@ impl Reducer {
         }
     }
 
-    /// The `SessionEnd` arm.
     fn apply_session_end(
         &mut self,
         scene: &mut SceneState,
@@ -678,17 +691,16 @@ impl Reducer {
     fn apply_model_info(
         scene: &mut SceneState,
         agent_id: AgentId,
-        model: Option<&str>,
-        effort: Option<&str>,
+        obs: ModelObservation<'_>,
         now: SystemTime,
     ) {
         if let Some(slot) = scene.agents.get_mut(&agent_id) {
-            if let Some(m) = model {
+            if let Some(m) = obs.model {
                 if slot.model.as_deref() != Some(m) {
                     slot.model = Some(Arc::from(m));
                 }
             }
-            if let Some(e) = effort {
+            if let Some(e) = obs.effort {
                 slot.effort = Some(crate::state::EffortObservation::new(Arc::from(e), now));
             }
         }
@@ -867,7 +879,7 @@ impl Reducer {
         }
     }
 
-    /// Pre-pass 0 of [`Reducer::apply`] (hook transport only): synthesize a
+    /// Pre-pass 0 of [`Reducer::preprocess`] (hook transport only): synthesize a
     /// registration for a tool/permission event whose id has no slot, so a
     /// session whose transcript was gated at first sight becomes visible the
     /// moment it fires a hook. Only `ActivityStart`/`ActivityEnd`/`Waiting`
@@ -1005,7 +1017,7 @@ impl Reducer {
         true
     }
 
-    /// Pre-pass 1 of [`Reducer::apply`] — subagent-leak suppression (hook
+    /// Pre-pass 1 of [`Reducer::preprocess`] — subagent-leak suppression (hook
     /// transport only): if this AgentId has any Task tool in flight, hook
     /// ActivityStart/End events for it are almost certainly subagent work
     /// misattributed to the parent. Drop them and defer to JSONL, which targets
@@ -1059,7 +1071,7 @@ impl Reducer {
         suppress
     }
 
-    /// Last pre-pass of [`Reducer::apply`] — track active Task tool_use_ids
+    /// Last pre-pass of [`Reducer::preprocess`] — track active Task tool_use_ids
     /// from either transport, marking a parent that gains a Task
     /// Active("Delegating") so it doesn't look asleep while its subagents do
     /// the visible work.
