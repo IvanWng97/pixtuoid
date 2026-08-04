@@ -203,9 +203,13 @@ impl Pack {
     /// lands at a scale its density divides — so the scale has to be chosen
     /// knowing this. A Retina cell 17px wide makes 17 the natural scale, 17 is
     /// prime, and every variant in the pack would sit unused.
+    /// Only furniture variants count: `<base>@<N>x` parses for ANY base, so a
+    /// stray key in a user's pack.toml is a well-formed variant name for a
+    /// piece no painter asks for.
     pub fn max_density_variant(&self) -> u16 {
         self.animations
             .keys()
+            .filter(|n| is_optional_furniture_animation(n))
             .filter_map(|n| split_density_variant(n).map(|(_, d)| d))
             .max()
             .unwrap_or(1)
@@ -813,6 +817,22 @@ mod validation_floor_tests {
         )
         .expect("pack builds");
         assert_eq!(bundled.max_density_variant(), 4);
+
+        // A key nothing can ever draw must not raise the number. `<base>@<N>x`
+        // parses for ANY base, so a typo'd or stray entry in a user's pack.toml
+        // is a well-formed variant name for a piece no painter asks for — it is
+        // reported only as `unknown`, and rounding the scale to it would round
+        // to art that does not exist.
+        let stray = pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"typo@64x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        );
+        assert_eq!(
+            stray.max_density_variant(),
+            2,
+            "a variant of a non-furniture base must not inflate the pack's density"
+        );
     }
 
     /// The name is a CLAIM and the size is the proof. Without this check the
