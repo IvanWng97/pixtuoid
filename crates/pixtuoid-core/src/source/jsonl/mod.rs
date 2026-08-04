@@ -75,9 +75,36 @@ struct SourceDecoders {
     derive_label: LabelDeriver,
     check_ended: SessionEndChecker,
     activity_recency: ActivityRecency,
-    id_derive: IdDeriver,
+    id_derive: folded::FoldedDeriver,
     path_filter: PathFilter,
     cwd_derive: CwdDeriver,
+}
+
+/// The `IdDeriver` behind its only legal caller.
+///
+/// Every id in the watcher must be derived from a path folded through
+/// [`walk::id_path`], or the consumer computes it in a different id-space than
+/// the producer. That invariant used to be a comment, and 3 of 7 call sites
+/// drifted un-folded under it (#832, #861) — two of them fixed and a third
+/// missed in the same PR. The fn pointer now lives in a module the sibling
+/// `walk`/`liveness`/`unclaim` modules are not inside, so an un-folded
+/// derivation is a compile error rather than a review catch.
+mod folded {
+    use std::path::Path;
+
+    #[derive(Clone, Copy)]
+    pub(super) struct FoldedDeriver(super::IdDeriver);
+
+    impl FoldedDeriver {
+        pub(super) fn new(f: super::IdDeriver) -> Self {
+            Self(f)
+        }
+
+        /// The id for `path`, folded. THE only way to reach the deriver.
+        pub(super) fn id_for(&self, path: &Path) -> String {
+            (self.0)(&super::walk::id_path(path))
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -133,7 +160,7 @@ pub struct JsonlWatcher {
     derive_label: LabelDeriver,
     check_session_ended: SessionEndChecker,
     activity_recency: ActivityRecency,
-    id_derive: IdDeriver,
+    id_derive: folded::FoldedDeriver,
     path_filter: PathFilter,
     cwd_derive: CwdDeriver,
     liveness_probe: Option<LivenessProbe>,
@@ -171,7 +198,7 @@ impl JsonlWatcher {
         check_session_ended: SessionEndChecker,
     ) -> Self {
         Self {
-            id_derive: crate::source::registry::id_deriver_for(&source),
+            id_derive: folded::FoldedDeriver::new(crate::source::registry::id_deriver_for(&source)),
             path_filter: crate::source::registry::path_filter_for(&source),
             root,
             initial_window: DEFAULT_INITIAL_WINDOW,
@@ -225,7 +252,7 @@ impl JsonlWatcher {
     /// overriding it here would re-open the drift the row closed. It exists for
     /// a watcher over a source with no row (a test harness naming its own).
     pub fn with_id_deriver(mut self, id_derive: IdDeriver) -> Self {
-        self.id_derive = id_derive;
+        self.id_derive = folded::FoldedDeriver::new(id_derive);
         self
     }
 

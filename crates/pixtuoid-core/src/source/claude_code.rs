@@ -347,7 +347,7 @@ const ACTIVITY_TYPES: &[&str] = &[
 /// A denylist, not an allowlist: the real subagent transcripts (including the
 /// ones nested under `workflows/wf_*/`) stay admitted, because misfiltering one
 /// costs a vanished sprite while a future foreign sidecar merely breadcrumbs.
-pub(crate) fn skip_workflow_journal(path: &Path) -> bool {
+pub(crate) fn admits_transcript(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()) != Some("journal.jsonl")
 }
 
@@ -451,7 +451,19 @@ pub fn cc_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
         .and_then(|n| n.to_str())
         .and_then(|proj| proj.rsplit('-').find(|s| !s.is_empty()))
     {
-        return format!("{prefix}·{base}");
+        // Same cap as the `cwd_basename_label` branch, for the reason that
+        // chokepoint exists: an uncapped `AgentSlot.label` reaches the painter
+        // and the headless summary. This branch bypasses it — CC encodes the
+        // whole cwd into ONE project-dir component ('/'→'-'), so a deep path
+        // yields an arbitrarily long segment even though, unlike `cwd`, nothing
+        // here is wire content.
+        return format!(
+            "{prefix}·{}",
+            crate::source::decoder::ellipsize(
+                base,
+                crate::source::decoder::MAX_DECODED_FIELD_CHARS
+            )
+        );
     }
     prefix.to_string()
 }
@@ -728,6 +740,31 @@ mod tests {
             cc_derive_label(path, "claude-code", Path::new("")),
             "cc·dotfiles"
         );
+    }
+
+    /// The project-dir fallback BYPASSES the `cwd_basename_label` chokepoint,
+    /// so it needs the cap applied at its own site — an uncapped label persists
+    /// in `AgentSlot.label` and reaches the painter.
+    #[test]
+    fn label_project_dir_fallback_is_capped_like_the_cwd_branch() {
+        let long = "z".repeat(MAX_DECODED_FIELD_CHARS * 2);
+        let path = PathBuf::from(format!("/Users/me/.claude/projects/-{long}/abc.jsonl"));
+        let label = cc_derive_label(&path, "claude-code", Path::new(""));
+        assert!(
+            label.chars().count() < long.chars().count(),
+            "project-dir fallback label must be capped, got {} chars: {label:?}",
+            label.chars().count()
+        );
+        // The binding assertion: exact parity with the sibling branch, which
+        // caps via the `cwd_basename_label` chokepoint. Comparing to the
+        // sibling rather than to a hand-computed width keeps this honest if
+        // `ellipsize`'s accounting ever changes.
+        let via_cwd = cc_derive_label(
+            Path::new("/x/.claude/projects/-p/abc.jsonl"),
+            "claude-code",
+            &PathBuf::from(format!("/{long}")),
+        );
+        assert_eq!(label, via_cwd, "both label branches must cap identically");
     }
 
     #[test]
@@ -1070,14 +1107,14 @@ mod cc_id_tests {
     }
 
     #[test]
-    fn skip_workflow_journal_drops_only_the_orchestrator_journal() {
+    fn admits_every_transcript_except_the_orchestrator_journal() {
         let wf = Path::new("/h/.claude/projects/proj/uuid/subagents/workflows/wf_abc");
-        assert!(!skip_workflow_journal(&wf.join("journal.jsonl")));
-        assert!(skip_workflow_journal(&wf.join("agent-xyz.jsonl")));
-        assert!(skip_workflow_journal(Path::new(
+        assert!(!admits_transcript(&wf.join("journal.jsonl")));
+        assert!(admits_transcript(&wf.join("agent-xyz.jsonl")));
+        assert!(admits_transcript(Path::new(
             "/h/.claude/projects/proj/uuid.jsonl"
         )));
-        assert!(skip_workflow_journal(Path::new(
+        assert!(admits_transcript(Path::new(
             "/h/.claude/projects/proj/uuid/subagents/agent-xyz.jsonl"
         )));
     }
