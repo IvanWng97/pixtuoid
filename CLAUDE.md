@@ -41,11 +41,11 @@ section in each nested file (indexed below) explains why.
 
 **Two things about how these files load.** Each nested guide keeps its
 "how does X work?" answers in a sibling `WHERE-TO-LOOK.md`, indexed by question
-in the guide itself — so a session pays for the one answer it needs, not all
-24. And a nested `CLAUDE.md` is re-read only when you next touch a file in its
-tree: unlike this root file, it is **not** re-injected after a `/compact`, so
-on a long arc re-open one file from the crate before trusting your memory of
-its sharp edges.
+in the guide itself — so a session pays for the one answer it needs instead of
+every answer the crate has. And a nested `CLAUDE.md` is re-read only when you
+next touch a file in its tree: unlike this root file, it is **not** re-injected
+after a `/compact`, so on a long arc re-open one file from the crate before
+trusting your memory of its sharp edges.
 
 ## What this is
 
