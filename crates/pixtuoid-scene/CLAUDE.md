@@ -300,13 +300,23 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   dither is NOT a workaround: an indexed palette cannot blend, so a gradient IS
 │                   a dither — and it costs TWO palette slots instead of a dozen, which is what
 │                   keeps theme recolour an index swap and SIXEL free of a quantisation pass.
-│                   paint.rs = `render_cutaway(&SimFrame, layout, pack, theme, scale, buf)` —
-│                   floor + desks + cast, DELIBERATELY partial (walls/rooms/effects change no
-│                   answer yet). Two decisions worth not re-deriving: (1) a desk sorts on its TOP
-│                   SURFACE's south edge, a deliberate DIVERGENCE from classic (which sorts on the
-│                   desk's visual base so the monitor hides the occupant) — the reference draws the
-│                   head OVER the surface, because in a cutaway the occupant sits at the near side;
-│                   (2) the desk BLITS the pack's `desk` sprite at classic's exact anchor
+│                   paint.rs = `render_cutaway(frame, layout, pack, theme, scale, now, cache, buf)`
+│                   -> `Vec<CutawayLabel>` (badge anchors; the engine cannot draw text, so the
+│                   painter renders them). Floor + wall band + rooms + desks + furniture + cast;
+│                   DELIBERATELY partial in EFFECTS only (weather/glow/steam/pet stay classic's).
+│                   order.rs = the draw ORDER: a dependency graph over `Span::behind` + a
+│                   topological sort, NOT a sort key. With today's predicate the two are
+│                   EQUIVALENT (the relation is derived from a total order on base rows, so it
+│                   cannot cycle) — the graph earns its place as `check_order`, which turns every
+│                   pairwise geometric fact into an assertion, and as the shape ELEVATION will
+│                   need. The one thing it cannot fix: a LONG object has no meaningful base row,
+│                   so wall runs are SPLIT into `WALL_SEG_H` segments (no predicate substitutes
+│                   for splitting). Decisions worth not re-deriving: (1) every piece's sort row
+│                   comes from `layout::anchored_top_left` — the SAME anchoring the walkable mask
+│                   and the classic painter use — so the box a piece sorts by cannot drift from
+│                   the box it blits into; the desk needs NO divergence for the occupant to read
+│                   over its surface, that falls out once both are measured at their true base
+│                   rows; (2) the desk BLITS the pack's `desk` sprite at classic's exact anchor
 │                   (`desk.y - 1`, its monitor-bezel raise) and derives the cutaway's front face by
 │                   SAMPLING the sprite's own base row. The desk's brown lives in the PACK
 │                   (`"D" = #8b5a2b`), NOT the theme — `furniture.wood_top` is a different material

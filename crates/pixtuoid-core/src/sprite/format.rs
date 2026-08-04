@@ -723,7 +723,7 @@ mod validation_floor_tests {
 
     /// THE failure this derivation exists to prevent, and it is invisible
     /// from inside the bundled pack: a `--pack-dir` pack that ships its own
-    /// `desk` but no `_hi` variant must still inherit the default's, or the
+    /// `desk` but no density variant must still inherit the default's, or the
     /// custom pack silently renders block-upscaled while the bundled one
     /// does not.
     #[test]

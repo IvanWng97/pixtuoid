@@ -362,9 +362,6 @@ pub fn render_floor(
         floor_pet,
         debug_walkable,
     } = inputs;
-    // The two spaces part here: the buffer is sized in PIXELS, the office is
-    // laid out in LOGICAL units. At `RenderScale::ONE` they coincide and this
-    // is byte-identical to the pre-seam behaviour.
     buf.resize_fill(size.w, size.h, theme.surface.bg_fallback);
     let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
     let result = render_to_rgb_buffer(&mut PixelCtx {

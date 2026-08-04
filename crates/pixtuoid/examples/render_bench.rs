@@ -109,7 +109,7 @@ fn main() -> Result<()> {
         let p50 = samples[samples.len() / 2];
         let px = w as f64 * h as f64;
         // The office the layout DERIVES at this buffer size — the confound the
-        // spec's §19.1 names: buffer pixels ARE layout units today, so a bigger
+        // spec names: buffer pixels ARE layout units today, so a bigger
         // buffer builds a BIGGER office rather than a sharper one.
         let seed = pixtuoid_scene::floor::floor_seed(0);
         let capacity = pixtuoid_scene::floor::floor_capacity(w, h, seed);
@@ -127,7 +127,7 @@ fn main() -> Result<()> {
 
     // Does frame cost track the AGENTS or the static room? If cost is flat in
     // agent count the room dominates, which makes caching the static layers the
-    // one high-leverage optimization (§13 lists it only as a "candidate").
+    // one high-leverage optimization (the spec lists it only as a "candidate").
     println!("\ncost vs agent count at 768x640 (is the room or the cast dominant?):");
     for n in [0usize, 4, 12, 30, 60] {
         let mut scene = SceneState::uniform(64);

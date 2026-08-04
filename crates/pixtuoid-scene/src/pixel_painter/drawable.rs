@@ -246,9 +246,6 @@ fn blit_centered_first_frame(pack: &Pack, anim_name: &str, pos: Point, buf: &mut
     }
 }
 
-/// Dispatch one Drawable's paint; character-attached effects paint inline so
-/// they ride along with the character in z-order.
-///
 /// The paint-time context one [`Drawable`] arm needs — the subset of `PaintCtx`
 /// they touch. Bundled rather than passed flat: this was six positional
 /// parameters and the render scale would have made seven, the growth
@@ -261,6 +258,8 @@ pub(super) struct DrawableCtx<'a> {
     pub theme: &'a crate::theme::Theme,
 }
 
+/// Dispatch one Drawable's paint; character-attached effects paint inline so
+/// they ride along with the character in z-order.
 pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
     // Re-bound to the original names so the arms below are untouched.
     let buf = &mut *c.buf;

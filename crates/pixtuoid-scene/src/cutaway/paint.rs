@@ -1,14 +1,14 @@
 //! The cutaway profile's paint pass — the second reader of `SimFrame`.
 //!
-//! Deliberately partial. It draws the floor, the desks and the cast, which is
-//! the smallest set that answers the question the whole profile exists to
-//! answer: does an orthographic cutaway of THIS office, at THIS density, read
-//! better than the classic top-down? Walls, rooms, plants and effects are not
-//! here yet because none of them changes that answer.
+//! Deliberately partial. Floor, wall band, rooms, desks, furniture and the
+//! cast are here; EFFECTS are not — weather, glow, steam and the pet all
+//! belong to the classic pass and change no part of the question this profile
+//! exists to answer: does an orthographic cutaway of THIS office, at THIS
+//! density, read better than the classic top-down?
 //!
 //! It reads `SimFrame` and never advances anything: the sim already ran, and a
 //! second renderer that could move the world would make the two profiles
-//! disagree about the office — the invariant the brief spends its §9 on.
+//! disagree about the office.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::{density_variant_name_into, Pack};
@@ -476,7 +476,8 @@ fn desk_front_h() -> u16 {
     (DESK_H * DESK_FRONT_NUMER / DESK_FRONT_DENOM).max(1)
 }
 
-/// Rows of the wall band that are glass rather than wall.
+/// The wall rows inset above and below the glass run, as a fraction of the
+/// band. A 1/4 inset therefore leaves the middle HALF of the band as glass.
 ///
 /// The windows are the cutaway's only light SOURCE on screen, so the band has to
 /// read as glass and not as a stripe — it is what makes the north-to-south floor
@@ -485,9 +486,11 @@ const WINDOW_INSET_NUMER: u16 = 1;
 /// Denominator of [`WINDOW_INSET_NUMER`].
 const WINDOW_INSET_DENOM: u16 = 4;
 
-/// The layout's own derivation, not a re-guess: the wall band ends
-/// `WALL_BAND_TO_TOP_MARGIN` above `top_margin`, and the rows between are
-/// floor the agents walk on.
+/// Paint the north wall band: wall, glass, skyline and sill.
+///
+/// Its height is the layout's own derivation, not a re-guess — the band ends
+/// `WALL_BAND_TO_TOP_MARGIN` above `top_margin`, and the rows between are floor
+/// the agents walk on, so a band drawn to `top_margin` would paint over them.
 fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
     let band_h = layout
         .top_margin
@@ -729,7 +732,7 @@ fn paint_desk(
     }
 
     let ramp = Ramp::from_base(material, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-    // Sized off what was ACTUALLY drawn, not off the base sprite: hi art blits
+    // Sized off what was ACTUALLY drawn, not off the base sprite: variant art blits
     // 1:1 and is already in buffer units, so multiplying again would put the
     // front face a whole desk below the surface it belongs to.
     let drawn_w = art.width() * blit_at.get();
@@ -1137,9 +1140,8 @@ fn paint_prop(
 
 /// A tight dark band where a figure meets the floor.
 ///
-/// Two rows, not an ellipse: a wide soft pool reads as a stain on a dark carpet
-/// (the visual mock proved that twice), while a band the width of the sprite
-/// reads as weight.
+/// One row, not an ellipse: a wide soft pool reads as a stain on a dark carpet,
+/// while a band the width of the sprite reads as weight.
 fn contact_shadow(
     at: crate::layout::Point,
     sprite_w: u16,
@@ -1472,7 +1474,7 @@ mod tests {
         }
     }
 
-    /// THE property the whole mixed-density contract rests on: a `_hi`
+    /// THE property the whole mixed-density contract rests on: a density
     /// variant must change how a piece is DRAWN, never how big it is. The two
     /// branches return different (frame, factor) pairs whose PRODUCT has to
     /// agree, and getting that wrong is silent — the desk still renders, just
@@ -1498,7 +1500,7 @@ mod tests {
     /// discarded for not matching exactly, and must LOSE at 3x — 4 does not
     /// divide 3, so blitting it would draw a desk a third too wide.
     #[test]
-    fn the_hi_variant_is_taken_only_at_the_density_it_was_authored_for() {
+    fn a_density_variant_is_taken_only_at_the_density_it_was_authored_for() {
         let pack = pack();
         let (bw, bh) = base_size(&pack, "desk");
         let (hi_w, hi_h) = base_size(&pack, "desk@4x");
@@ -1509,7 +1511,7 @@ mod tests {
         assert_eq!(
             (art.width(), blit_at.get()),
             (hi_w, 1),
-            "at its own density the hi art blits 1:1"
+            "at its own density the variant art blits 1:1"
         );
 
         let (art, blit_at) =
@@ -1531,9 +1533,9 @@ mod tests {
 
     /// The other half of "the asset work lands one piece at a time": every
     /// piece the pack has NOT redrawn must be untouched by the lookup, or
-    /// adding one `_hi` sprite would be a flag day for all of them.
+    /// adding one `@Nx` sprite would be a flag day for all of them.
     #[test]
-    fn a_piece_with_no_hi_variant_renders_exactly_as_it_did_before() {
+    fn a_piece_with_no_density_variant_renders_exactly_as_it_did_before() {
         let pack = pack();
         assert!(
             pack.animation("plant@4x").is_none(),

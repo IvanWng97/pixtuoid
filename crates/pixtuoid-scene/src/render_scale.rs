@@ -2,9 +2,10 @@
 //!
 //! Every layout coordinate is a buffer pixel today, so the office's SIZE and
 //! its RESOLUTION are one axis: doubling the buffer does not draw the same room
-//! sharper, it builds a room with four times the desks. Measured on the real
-//! layout — 25 desks at 192x160, 1554 at 1536x1280 — which is why "render the
-//! same office with more detail" is currently unexpressible.
+//! sharper, it builds a room with several times the desks, which is why "render
+//! the same office with more detail" is currently unexpressible. Pinned by
+//! `floor_capacity_is_invariant_under_render_scale` and its negative control
+//! `without_the_seam_a_bigger_buffer_builds_a_bigger_office`.
 //!
 //! [`RenderScale`] splits the axis. Layout keeps computing in logical units, so
 //! a floor's capacity, desk assignment and walkable mask are untouched; the
@@ -105,9 +106,6 @@ mod tests {
     /// divide the scale or it is simply never drawn.
     #[test]
     fn a_scale_rounds_down_so_the_packs_densest_art_can_land_on_it() {
-        // The case that motivated it: a Retina Ghostty's 17px cell. 17 is
-        // PRIME, so at the natural scale every 4x sprite would sit unused while
-        // the base art block-scales 17x.
         assert_eq!(RenderScale::fit(17, 4).map(|s| s.get()), Some(16));
         // A pack with no variants must be untouched — this rule may only ever
         // COST office area when there is richer art to spend it on.
